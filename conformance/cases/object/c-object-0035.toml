@@ -1,9 +1,9 @@
 [case]
-id = "c-object-0020"
+id = "c-object-0035"
 schema_version = 1
-title = "response-content-disposition carrying a CRLF is refused, not quietly dropped"
+title = "response-expires carrying a CRLF is refused for carrying it, not for failing to be a date"
 rationale = """
-The response overrides are the one place in this operation where a caller writes a response header value directly, and a presigned URL puts that power in the hands of whoever holds the link. A value carrying CR or LF that is copied into the head splits the response and lets the link's holder mint headers, a body, or a second response entirely. Dropping the header and answering 200 with the object is not the answer: the caller asked for a representation the service cannot describe, got a different one, and nothing on the wire records that the request was hostile. The case therefore asserts the refusal itself — 400 InvalidArgument naming this parameter's member — and that the object bytes never left, because a 400 that still shipped the body would have run the handler on a request that was never valid. One case per parameter: the six do not share a decoder line, and a case covering the group cannot say which one regressed."""
+This parameter was already answered 400 before the rule existed, and for a reason that has nothing to do with injection: its value is modelled as an HTTP date, and a string with a CRLF in it is not one. That accident is the trap this case exists to close. A corpus row that asserted only the status and the code would have been green on an implementation with no header-safety check anywhere, so the assertion names the refusal's own sentence — the one no date parser produces. It is also the reason the other five parameters get cases of their own: the one that looked safe was safe by coincidence, and the coincidence does not generalise."""
 polarity = "negative"
 operation = "GetObject"
 tags = ["security", "presigned", "error-shape"]
@@ -34,14 +34,14 @@ body = { utf8 = "hello world" }
 
 [request]
 method = "GET"
-target = "/conf-object/overrides/inject.bin?response-content-disposition=inline%0d%0ax-injected%3A%20yes"
+target = "/conf-object/overrides/inject.bin?response-expires=Thu%2C%2001%20Jan%201970%2000%3A00%3A00%20GMT%0d%0ax-injected%3A%20yes"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]
 kind = "response"
 status = 400
 connection_after = "open"
-headers_absent = ["x-injected", "content-disposition", "etag"]
+headers_absent = ["x-injected", "expires", "etag"]
 
 [expect.error]
 code = "InvalidArgument"
@@ -52,6 +52,6 @@ redact = ["RequestId", "HostId"]
 contains_utf8 = [
   "<Code>InvalidArgument</Code>",
   "response-* override carries a value the response header cannot hold",
-  "<Resource>ResponseContentDisposition</Resource>",
+  "<Resource>ResponseExpires</Resource>",
 ]
 not_contains_utf8 = ["x-injected", "hello world"]

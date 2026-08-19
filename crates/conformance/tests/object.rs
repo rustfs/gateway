@@ -62,7 +62,7 @@ const OWNED_ELSEWHERE: &[(&str, &str)] = &[
 ///
 /// A floor rather than a count of the corpus, so that adding a case cannot silently be paid for by
 /// letting an existing one go red: the two would cancel in a total. Raise it when a case is fixed.
-const MINIMUM_GREEN: usize = 28;
+const MINIMUM_GREEN: usize = 33;
 
 fn run_object_domain() -> Report {
     let root = Corpus::discover_root().expect("a corpus sits next to this crate");

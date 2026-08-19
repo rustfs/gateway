@@ -1,9 +1,9 @@
 [case]
-id = "c-object-0020"
+id = "c-object-0032"
 schema_version = 1
-title = "response-content-disposition carrying a CRLF is refused, not quietly dropped"
+title = "response-content-encoding carrying a bare carriage return is refused, not quietly dropped"
 rationale = """
-The response overrides are the one place in this operation where a caller writes a response header value directly, and a presigned URL puts that power in the hands of whoever holds the link. A value carrying CR or LF that is copied into the head splits the response and lets the link's holder mint headers, a body, or a second response entirely. Dropping the header and answering 200 with the object is not the answer: the caller asked for a representation the service cannot describe, got a different one, and nothing on the wire records that the request was hostile. The case therefore asserts the refusal itself — 400 InvalidArgument naming this parameter's member — and that the object bytes never left, because a 400 that still shipped the body would have run the handler on a request that was never valid. One case per parameter: the six do not share a decoder line, and a case covering the group cannot say which one regressed."""
+A lone CR is the half of the pair that a check written as a substring search for the two bytes together will miss, and it is enough on its own for a parser that treats CR as a line terminator. Asserted on this parameter separately from the other five, because each override is read by its own line and a shared proof cannot name which reading lost the check. A Content-Encoding the caller controls is the worst of the six to leak: it tells the client how to decode everything that follows."""
 polarity = "negative"
 operation = "GetObject"
 tags = ["security", "presigned", "error-shape"]
@@ -34,14 +34,14 @@ body = { utf8 = "hello world" }
 
 [request]
 method = "GET"
-target = "/conf-object/overrides/inject.bin?response-content-disposition=inline%0d%0ax-injected%3A%20yes"
+target = "/conf-object/overrides/inject.bin?response-content-encoding=identity%0dx-injected%3A%20yes"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]
 kind = "response"
 status = 400
 connection_after = "open"
-headers_absent = ["x-injected", "content-disposition", "etag"]
+headers_absent = ["x-injected", "content-encoding", "etag"]
 
 [expect.error]
 code = "InvalidArgument"
@@ -52,6 +52,6 @@ redact = ["RequestId", "HostId"]
 contains_utf8 = [
   "<Code>InvalidArgument</Code>",
   "response-* override carries a value the response header cannot hold",
-  "<Resource>ResponseContentDisposition</Resource>",
+  "<Resource>ResponseContentEncoding</Resource>",
 ]
 not_contains_utf8 = ["x-injected", "hello world"]

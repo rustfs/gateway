@@ -128,6 +128,10 @@ impl EncodedResponse {
     /// that has no override parameters passes an empty table and this is a no-op. Applying it as a
     /// final pass rather than inside each field's binding is what makes "the override wins"
     /// true by construction instead of true by field ordering.
+    /// The value it writes is the one [`override_header_value`] accepts, and a request carrying any
+    /// other value was refused by [`crate::codec::value::verify_response_overrides`] before a
+    /// handler ran — so the skip below is unreachable through a decoded request rather than a
+    /// second, quieter policy about the same bytes.
     pub fn apply_response_overrides(&mut self, request: &MetaView<'_>, table: &[ResponseOverride]) {
         for entry in table {
             let Some(value) = request.query(entry.query) else {
@@ -136,7 +140,7 @@ impl EncodedResponse {
             let Ok(name) = HeaderName::from_bytes(entry.header.as_bytes()) else {
                 continue;
             };
-            let Ok(value) = HeaderValue::from_str(value.as_ref()) else {
+            let Some(value) = override_header_value(value.as_ref()) else {
                 continue;
             };
             self.headers.insert(name, value);
@@ -223,22 +227,45 @@ pub fn response_framing_allowed(_method: &Method, status: StatusCode) -> bool {
 
 /// One `response-<x>` query parameter and the response header it overwrites.
 ///
-/// The pair is IR data: the query key is the input field's wire name, and the header is that name
-/// with the `response-` prefix removed. Nothing here decides which parameters exist.
+/// The triple is IR data: the query key is the input field's wire name, the header is that name
+/// with the `response-` prefix removed, and the member is the model member the field binds.
+/// Nothing here decides which parameters exist.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResponseOverride {
     /// The query parameter, as it appears on the wire.
     pub query: &'static str,
     /// The response header it overwrites, lowercase.
     pub header: &'static str,
+    /// The model member the parameter binds, for the refusal to name.
+    pub member: &'static str,
 }
 
 impl ResponseOverride {
     /// One entry of the table.
     #[must_use]
-    pub const fn new(query: &'static str, header: &'static str) -> Self {
-        Self { query, header }
+    pub const fn new(query: &'static str, header: &'static str, member: &'static str) -> Self {
+        Self { query, header, member }
     }
+}
+
+/// The one reading of "this value fits in a response header", shared by the refusal and the write.
+///
+/// The value comes from the request — a `response-*` parameter is client input that ends up in the
+/// response head — so a CR or an LF in it is an attempt to terminate the header block early and
+/// append headers, or a whole second response, of the caller's choosing. What the grammar excludes
+/// is wider than that pair (`HeaderValue` refuses every C0 control except tab, and DEL) and the
+/// whole class is refused, because a decoder that forwarded a NUL would only have moved the
+/// question to whatever parses the response next.
+///
+/// Returning the parsed value rather than a `bool` is what keeps the two halves from drifting:
+/// the decoder refuses a request exactly when this answers `None`, and the encoder writes exactly
+/// what it answers, so there is no second predicate that could disagree with this one.
+///
+/// Not a `HeaderName` question: the name is a compile-time constant from the IR and never a value
+/// the request chose.
+#[must_use]
+pub fn override_header_value(value: &str) -> Option<HeaderValue> {
+    HeaderValue::from_str(value).ok()
 }
 
 /// Turns a status the IR carries into an [`http::StatusCode`].

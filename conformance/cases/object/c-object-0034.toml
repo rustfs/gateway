@@ -1,0 +1,57 @@
+[case]
+id = "c-object-0034"
+schema_version = 1
+title = "response-content-type carrying a CRLF and a whole second header is refused"
+rationale = """
+This is the shape the attack is actually written in: a presigned read link whose content type is followed by the pair and a Set-Cookie of the attacker's choosing, delivered from the bucket's own origin so the browser accepts it. The parameter matters — Content-Type is the one override a caller reaches for legitimately, so it is the one most likely to be wired first and checked last — and the injected header is a cookie rather than a placeholder because the assertion has to be that no such header appears at all, under the name the attacker chose."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["security", "presigned", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-response-0023"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The documented read response is the authority for the headers a read returns and the query overrides it honours."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-5.5"
+summary = "A field value carries no bare CR or LF, so a value that does cannot be emitted as one."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "overrides/inject.bin"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[request]
+method = "GET"
+target = "/conf-object/overrides/inject.bin?response-content-type=text%2Fplain%0d%0aset-cookie%3A%20session%3Dhijacked"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["set-cookie", "etag"]
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = [
+  "<Code>InvalidArgument</Code>",
+  "response-* override carries a value the response header cannot hold",
+  "<Resource>ResponseContentType</Resource>",
+]
+not_contains_utf8 = ["set-cookie", "hijacked", "hello world"]

@@ -1,0 +1,57 @@
+[case]
+id = "c-object-0033"
+schema_version = 1
+title = "response-content-language carrying a NUL is refused, not quietly dropped"
+rationale = """
+NUL is not a line terminator and does not split a response by itself, which is exactly why it is asserted: a guard written for the injection pair alone lets it through, and it then terminates the value early in every C-string consumer downstream of this gateway — a proxy, a log pipeline, a WAF — so the header two components read stops being the same header. The rule the six overrides are held to is the header grammar, not a blocklist of the two bytes that make the attack famous, and this case is what makes the difference observable."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["security", "presigned", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-response-0023"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The documented read response is the authority for the headers a read returns and the query overrides it honours."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-5.5"
+summary = "The field-value grammar admits visible characters, space and tab, so every other control byte is outside it."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "overrides/inject.bin"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[request]
+method = "GET"
+target = "/conf-object/overrides/inject.bin?response-content-language=fr-CA%00en-US"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["content-language", "etag"]
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = [
+  "<Code>InvalidArgument</Code>",
+  "response-* override carries a value the response header cannot hold",
+  "<Resource>ResponseContentLanguage</Resource>",
+]
+not_contains_utf8 = ["hello world"]
