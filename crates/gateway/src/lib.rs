@@ -202,6 +202,9 @@ pub use rustfs_gateway_core::ops::shared::precondition::{
     RequestKind, completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_target_uses_source_validators,
     evaluate, evaluate_range,
 };
+// The other half of the range contract. `evaluate_range` stops at a part *selector* because the
+// part table is a fact only the handler has; this is what a backend resolves it with.
+pub use rustfs_gateway_core::ops::shared::part_table::{PartWindow, resolve_part};
 pub use rustfs_gateway_core::{copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds};
 
 // The copy-source contract. A backend receives `CopySourceResources` through `Req::resources`

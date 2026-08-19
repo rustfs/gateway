@@ -1,7 +1,8 @@
 # c-range-0007 — the part-number read.
 #
-# Schema dimensions exercised: setup.multipart_uploads as a fixture, header-set assertion on the
-# part count.
+# Schema dimensions exercised: setup.multipart_uploads as a fixture, an upload id and two part
+# entity tags captured and read back into a completion body, multi-exchange form, a before/after
+# control pair, header-set assertions on the window and on the part count.
 
 [case]
 id = "c-range-0007"
@@ -12,11 +13,15 @@ Reading by part number is how a client parallelises a download without knowing t
 boundaries, and the part count is the only way it learns how many requests to issue. An \
 implementation that serves the part but omits the count leaves the client guessing, and one that \
 answers 200 tells it the object is one part long. Both failures produce a download that is missing \
-everything after the first part, with no error to explain it."""
+everything after the first part, with no error to explain it. An upload that was never completed is \
+the wrong witness for any of it — there is no object to read a part of — so the upload is completed \
+through a real exchange first, and the part is read twice: part 2 must begin where part 1 ended, \
+because a server that answered the first sixteen bytes of part 1 would return the right number of \
+bytes and the wrong ones."""
 polarity = "positive"
 operation = "GetObject"
 tags = ["range", "multipart", "read"]
-timeout_ms = 10000
+timeout_ms = 15000
 quirks = []
 
 [[case.evidence]]
@@ -27,8 +32,15 @@ summary = "Documents the part-number parameter as returning one part with a head
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
 summary = "Describes part-level reads as the unit a multipart object's checksums are defined over."
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "An upload becomes a readable object only at completion, which is also where its part boundaries are fixed."
+
 [clock]
 fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
 
 [[setup.buckets]]
 name = "conf-range"
@@ -36,29 +48,131 @@ name = "conf-range"
 [[setup.multipart_uploads]]
 bucket = "conf-range"
 key = "parted"
+capture_upload_id_as = "upload_id"
 
 [[setup.multipart_uploads.parts]]
 part_number = 1
-body = { size = 5242880 }
+body = { size = 5242880, fill = "00" }
+capture_etag_as = "part1_etag"
 
 [[setup.multipart_uploads.parts]]
 part_number = 2
-body = { size = 16 }
+body = { size = 16, fill = "ff" }
+capture_etag_as = "part2_etag"
 
-[request]
+# 1 — the control. While the upload is only created there is no object, so a part read has nothing
+# to answer from. A server that resolved `partNumber` out of the in-progress upload would answer
+# here, and every assertion below would then be true of an upload rather than of an object.
+[[exchanges]]
+name = "a part of an upload that was never completed is not an object"
+
+[exchanges.request]
 method = "GET"
 target = "/conf-range/parted?partNumber=2"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
-[expect]
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+message_present = true
+
+# 2 — the completion. This is what turns the upload into an object, and it is the moment the part
+# boundaries every assertion below depends on are fixed.
+[[exchanges]]
+name = "complete the upload"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-range/parted?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag></Part><Part><PartNumber>2</PartNumber><ETag>${capture.part2_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+redact = ["Location", "UploadId"]
+contains_utf8 = ["<CompleteMultipartUploadResult", "-2&quot;</ETag>"]
+not_contains_utf8 = ["<Error>"]
+
+# 3 — the assertion the case exists for. Part 2 is sixteen bytes that start at 5242880, and the
+# object is 5242896 bytes long: the `Content-Range` names all three numbers, so a window resolved
+# from the wrong offset cannot agree with it.
+[[exchanges]]
+name = "the second part is a 206 that names its window and the part count"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-range/parted?partNumber=2"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
 kind = "response"
 status = 206
 connection_after = "open"
 
-[expect.headers_present]
+[exchanges.expect.headers_present]
 "x-amz-mp-parts-count" = "2"
 "content-length" = "16"
-"content-range" = "*"
+"content-range" = "bytes 5242880-5242895/5242896"
 
-[expect.timing]
-terminate_within_ms = 5000
+[exchanges.expect.body]
+size = 16
+
+# 4 — the control for exchange 3. Two parts of different lengths at different offsets, read through
+# the same code: a server that answered a fixed window, or the whole object, or always the first
+# part would satisfy one of these two exchanges and not both. The part count is asserted again
+# because it must describe the object rather than the part that was asked for.
+[[exchanges]]
+name = "the first part is a different window of the same object"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-range/parted?partNumber=1"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 206
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-mp-parts-count" = "2"
+"content-length" = "5242880"
+"content-range" = "bytes 0-5242879/5242896"
+
+[exchanges.expect.body]
+size = 5242880
+
+# 5 — a whole read of the same object carries no part count at all. Without this, a server that
+# put `x-amz-mp-parts-count` on every response to a multipart object would be green above: the
+# header is asserted present twice and nowhere asserted absent.
+[[exchanges]]
+name = "a whole read of the same object publishes no part count"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-range/parted"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_absent = ["x-amz-mp-parts-count", "content-range"]
+
+[exchanges.expect.headers_present]
+"content-length" = "5242896"
+
+[exchanges.expect.timing]
+terminate_within_ms = 10000

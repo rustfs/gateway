@@ -40,6 +40,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/registration.rs` | Registration rejection matrix. | Handler registration changes. |
 | `tests/static_dispatch.rs` | Static dispatch order and identity mismatch. | Change the monomorphic core boundary. |
 | `tests/precondition_range.rs` | Conditional/range behavior matrix. | Precondition logic changes. |
+| `tests/range_part_table.rs` | Part-number window resolution and its refusals. | A `partNumber` read serves the wrong bytes or the wrong count. |
 | `tests/error_resolution.rs` | P1-04 contextual error outcome matrix. | Change error masking, status, extras or body suppression. |
 | `tests/purity_guard.rs` | Source-shape guards for pre-auth code. | Add public/core routing code. |
 | `tests/golden/route-table.txt` | Protected ordered route table. | Never edit without the Breaking Change process. |

@@ -68,6 +68,9 @@ mod precondition_range;
 #[path = "purity_guard.rs"]
 mod purity_guard;
 
+#[path = "range_part_table.rs"]
+mod range_part_table;
+
 #[path = "registration.rs"]
 mod registration;
 
