@@ -125,19 +125,22 @@ body = source[match.end() : cursor - 1]
 if re.search(r"#\s*\[\s*cfg(?:_attr)?\b", body):
     raise SystemExit("check_timeout_layer_ownership: c-lim-0061 evidence is conditionally disabled")
 required = (
-    # The write-progress layer, and a keep-alive gap far enough away that it cannot be the layer
-    # that retired the readers in its place.
-    "config.write_progress_timeout = Duration::from_secs(3);",
-    "config.keep_alive_idle = Duration::from_secs(60);",
-    # Both directions of the latency observation: one reading without the load and one under it.
-    "let unloaded = probe_p99(",
-    "let loaded = probe_p99(",
-    "loaded <= ceiling,",
+    # Two listeners built the same way, so that the parked readers are the only difference between
+    # the loaded one and the control its latency is measured against.
+    "let (loaded_runtime, loaded) = server_on_own_runtime(",
+    "let (control_runtime, control) = server_on_own_runtime(",
+    # Both directions of the latency observation, sampled in lock-step rather than one taken
+    # several seconds of unrelated host activity away from the other.
+    "paired_probe_p99(control.local_addr, loaded.local_addr, PROBES, PROBE_CEILING)",
+    "loaded_probes.p99 <= ceiling,",
+    # A host that cannot answer the idle control listener is skipped with its reason, not passed on
+    # two saturated percentiles that compare equal because both were charged the ceiling.
+    "if control_probes.stalled > 0 {",
     # Resident memory while the wave is parked, and again across a second identical wave.
     "parked_growth <= parked_budget,",
     "second_growth <= reuse_ceiling,",
-    "let first_closure = retire_slow_readers(first_wave, &metrics).await;",
-    "let second_closure = retire_slow_readers(second_wave, &metrics).await;",
+    "let first_closure = retire_slow_readers(first_wave, &loaded.metrics).await;",
+    "let second_closure = retire_slow_readers(second_wave, &loaded.metrics).await;",
 )
 missing = [fragment for fragment in required if fragment not in body]
 if missing:
@@ -145,7 +148,44 @@ if missing:
         "check_timeout_layer_ownership: c-lim-0061 does not prove closure, latency and memory together: "
         + ", ".join(missing)
     )
+
+# The two deadline settings live in the configuration both listeners share, so they are pinned
+# where they are written and then followed back into the builder the case actually calls: a shared
+# configuration proves nothing while nothing checks that the listeners are built out of it.
+config = re.search(r"fn slow_reader_config\(\) -> ServerConfig \{(.*?)\n\}\n", source, re.S)
+if config is None:
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0061 shared listener configuration is missing")
+deadlines = (
+    # The write-progress layer, and a keep-alive gap far enough away that it cannot be the layer
+    # that retired the readers in its place.
+    "config.write_progress_timeout = Duration::from_secs(3);",
+    "config.keep_alive_idle = Duration::from_secs(60);",
+)
+missing = [fragment for fragment in deadlines if fragment not in config.group(1)]
+if missing:
+    raise SystemExit(
+        "check_timeout_layer_ownership: c-lim-0061 does not pin the write-progress layer as the only "
+        "one that can retire a parked reader: " + ", ".join(missing)
+    )
+
+builder = re.search(
+    r"fn server_on_own_runtime\(.*?\) -> \(tokio::runtime::Runtime, RunningServer\) \{(.*?)\n\}\n",
+    source,
+    re.S,
+)
+if builder is None:
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0061 listener builder is missing")
+if "Server::new(slow_reader_config(), service)" not in builder.group(1):
+    raise SystemExit(
+        "check_timeout_layer_ownership: c-lim-0061 builds its listeners from some configuration other "
+        "than the one its deadlines are pinned in"
+    )
+if "new_multi_thread()" not in builder.group(1):
+    raise SystemExit(
+        "check_timeout_layer_ownership: c-lim-0061 no longer starts each listener on a worker pool of "
+        "its own, so whatever starved the loaded listener would starve the control beside it"
+    )
 PY
 
 printf 'OK: 3/6 timeout layers owned by rustfs-gateway-server; connection lifetime is an extra safety valve\n'
-printf 'OK: c-lim-0061 observes write-progress closure, healthy p99 and resident memory under a thousand slow readers\n'
+printf 'OK: c-lim-0061 observes write-progress closure, healthy p99 against a concurrently sampled control, and resident memory under a thousand slow readers\n'
