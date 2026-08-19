@@ -192,7 +192,14 @@ async fn pinhole_connect(addr: SocketAddr) -> TcpStream {
     socket.connect(addr).await.expect("slow reader connects")
 }
 
-/// Returns the 99th-percentile sample, which is the worst of a hundred and not the average of them.
+/// Returns the 99th-percentile sample by nearest rank: the worst of the samples that remain once
+/// the top one percent is discarded.
+///
+/// The one percent has to be worth discarding for that sentence to be true. Over a hundred
+/// samples this function returns `samples[99]`, which is the *maximum* — a "p99" that any single
+/// scheduler hiccup anywhere in the run decides on its own. Callers that assert on the result
+/// therefore pass several hundred samples, so that the rank lands below the tail and a systemic
+/// slowdown, which moves every sample, is still caught while a lone stall is not mistaken for one.
 fn p99(mut samples: Vec<Duration>) -> Duration {
     samples.sort_unstable();
     let index = samples.len().saturating_mul(99) / 100;
@@ -200,9 +207,20 @@ fn p99(mut samples: Vec<Duration>) -> Duration {
     samples[index.min(last)]
 }
 
+/// One listener's probe result: its 99th percentile, and how many probes it never answered.
+///
+/// The stall count is carried separately because a stalled probe is charged the full ceiling, and
+/// a percentile built out of ceilings is a number that cannot go up. Two saturated listeners
+/// compare equal, which is a pass for the wrong reason unless somebody counts the saturation.
+#[derive(Clone, Copy, Debug)]
+struct ProbeSet {
+    p99: Duration,
+    stalled: usize,
+}
+
 /// Times one complete request/response on its own connection, charging a stalled probe the full
-/// ceiling rather than hanging the test on it.
-async fn healthy_probe(addr: SocketAddr, ceiling: Duration) -> Duration {
+/// ceiling rather than hanging the test on it, and reporting which of the two happened.
+async fn healthy_probe(addr: SocketAddr, ceiling: Duration) -> (Duration, bool) {
     let started = std::time::Instant::now();
     let probe = async {
         let mut stream = TcpStream::connect(addr).await.expect("probe connects");
@@ -217,19 +235,62 @@ async fn healthy_probe(addr: SocketAddr, ceiling: Duration) -> Duration {
     match tokio::time::timeout(ceiling, probe).await {
         Ok(response) => {
             assert!(response.starts_with(b"HTTP/1.1 200"), "the healthy probe was answered");
-            started.elapsed()
+            (started.elapsed(), false)
         }
-        Err(_) => ceiling,
+        Err(_) => (ceiling, true),
     }
 }
 
-/// Collects `count` sequential probe latencies and returns their 99th percentile.
-async fn probe_p99(addr: SocketAddr, count: usize, ceiling: Duration) -> Duration {
-    let mut samples = Vec::with_capacity(count);
+/// Runs `count` probes against `addr` and throws the samples away.
+///
+/// A listener's first request pays for whatever the connection path allocates once. Both
+/// listeners below are compared against each other, so both have to have already paid it.
+async fn warm_up(addr: SocketAddr, count: usize, ceiling: Duration) {
     for _ in 0..count {
-        samples.push(healthy_probe(addr, ceiling).await);
+        let _ = healthy_probe(addr, ceiling).await;
     }
-    p99(samples)
+}
+
+/// Samples `control` and `loaded` in lock-step and returns a 99th percentile for each.
+///
+/// Lock-step is the point. The two probes of a round are issued microseconds apart, so a host
+/// that stalls for a scheduler quantum stalls whichever of them it lands on, and over `count`
+/// rounds that weather is charged to both listeners in equal measure; what survives the
+/// comparison is the part only the parked readers can explain. A baseline measured *before* the
+/// readers were parked cannot do that — several seconds of unrelated host activity sit between it
+/// and the measurement it is the denominator of, and on a busy machine those seconds are the
+/// larger term.
+///
+/// The order within a round alternates so that neither listener permanently owns the position
+/// that follows an idle gap.
+async fn paired_probe_p99(control: SocketAddr, loaded: SocketAddr, count: usize, ceiling: Duration) -> (ProbeSet, ProbeSet) {
+    let mut control_samples = Vec::with_capacity(count);
+    let mut loaded_samples = Vec::with_capacity(count);
+    let mut control_stalls = 0;
+    let mut loaded_stalls = 0;
+    for round in 0..count {
+        let (control_sample, loaded_sample) = if round % 2 == 0 {
+            let control_sample = healthy_probe(control, ceiling).await;
+            (control_sample, healthy_probe(loaded, ceiling).await)
+        } else {
+            let loaded_sample = healthy_probe(loaded, ceiling).await;
+            (healthy_probe(control, ceiling).await, loaded_sample)
+        };
+        control_samples.push(control_sample.0);
+        control_stalls += usize::from(control_sample.1);
+        loaded_samples.push(loaded_sample.0);
+        loaded_stalls += usize::from(loaded_sample.1);
+    }
+    (
+        ProbeSet {
+            p99: p99(control_samples),
+            stalled: control_stalls,
+        },
+        ProbeSet {
+            p99: p99(loaded_samples),
+            stalled: loaded_stalls,
+        },
+    )
 }
 
 /// Opens `count` connections and returns once the listener reports every one of them as active.
@@ -298,6 +359,63 @@ async fn retire_slow_readers(readers: Vec<TcpStream>, metrics: &rustfs_gateway_s
     closed_after
 }
 
+/// The listener configuration both of this case's servers run under.
+///
+/// One function for both of them on purpose: the control is only a control while the parked
+/// readers are the single difference between the two listeners, and two configuration literals
+/// side by side is how that stops being true without anybody noticing.
+fn slow_reader_config() -> ServerConfig {
+    let mut config = plaintext_config();
+    config.header_read_timeout = Duration::from_secs(30);
+    config.max_connections_per_ip = None;
+    config.so_sndbuf = Some(4 * 1024);
+    // Sixty seconds is not a timeout this test can reach; it is here so that the only layer that
+    // can retire a parked reader inside the waits below is the write-progress deadline.
+    config.keep_alive_idle = Duration::from_secs(60);
+    config.write_progress_timeout = Duration::from_secs(3);
+    config
+}
+
+/// Starts one listener on a runtime of its own, answering `/healthy` instantly and everything
+/// else with a body no loopback peer can absorb.
+///
+/// The runtime is not shared, and that is the load-bearing part. A control only controls for host
+/// weather if the thing it is measured against cannot slow it down: a control sharing worker
+/// threads with the loaded listener would be starved by the very starvation this case exists to
+/// detect, report the same inflated latency, and hand back a ratio of one — green, on the failure
+/// it was written to catch. With a runtime each, and the test's own runtime left to the probes and
+/// the parked sockets, the only thing the two listeners still share is the machine, which is
+/// exactly the term that has to cancel.
+fn server_on_own_runtime(stalling_body: Bytes) -> (tokio::runtime::Runtime, RunningServer) {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .expect("a dedicated runtime is available");
+    let guard = runtime.enter();
+    let service = service_fn(move |request: Request<hyper::body::Incoming>| {
+        let body = if request.uri().path() == "/healthy" {
+            Bytes::from_static(b"ok")
+        } else {
+            stalling_body.clone()
+        };
+        async move { Ok::<_, Infallible>(Response::new(Full::new(body))) }
+    });
+    let server = Server::new(slow_reader_config(), service).serve().expect("server starts");
+    drop(guard);
+    (runtime, server)
+}
+
+/// Drains one listener and disposes of the runtime that drove it.
+///
+/// `shutdown_background` and not a drop: dropping a runtime from inside another runtime's worker
+/// thread panics, and every caller here is an async test body.
+async fn shut_down(server: RunningServer, runtime: tokio::runtime::Runtime, which: &str) {
+    let _ = server.shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(server.task.await.expect("server task joins").is_ok(), "{which} shut down cleanly");
+    runtime.shutdown_background();
+}
+
 /// c-lim-0061 / a-srv-0026. Negative — a thousand slow readers, each of which takes one byte and
 /// then stops, are all closed by the write-progress deadline; a healthy connection's p99 does not
 /// degrade while they are parked; resident memory while they are parked stays inside the
@@ -307,6 +425,14 @@ async fn retire_slow_readers(readers: Vec<TcpStream>, metrics: &rustfs_gateway_s
 /// the parked connections cost the connections beside them, and neither says anything about the
 /// memory — the task asks for all of it, and each is measured here rather than inferred from the
 /// others.
+///
+/// The latency observation is a comparison against a **concurrently sampled control**: a second,
+/// identically configured listener with no slow reader on it at all, probed in lock-step with the
+/// loaded one. A baseline taken before the wave was parked measures a different moment of the
+/// host, and on a machine running other work those two moments differ by more than the effect
+/// under test — which made this case red for reasons that had nothing to do with the listener.
+/// Probing both listeners round by round charges host weather to both of them and leaves the
+/// parked readers as the only asymmetry the ratio can express.
 ///
 /// The last one is a *reuse* measurement and not a return-to-baseline one, deliberately. A freed
 /// allocation is not a shrinking resident set: the allocator is free to keep the pages, and on
@@ -318,7 +444,15 @@ async fn retire_slow_readers(readers: Vec<TcpStream>, metrics: &rustfs_gateway_s
 async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic() {
     const TEST_NAME: &str = "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic";
     const SLOW_READERS: usize = 1_000;
-    const PROBES: usize = 100;
+    /// Samples per listener. Enough of them that the 99th percentile is the fifth-worst of five
+    /// hundred rather than, as it was at a hundred samples, the single worst — a "p99" that one
+    /// stalled scheduler quantum anywhere in the run decided on its own. A slowdown the parked
+    /// readers caused moves the whole distribution and survives the discarded tail; a lone host
+    /// hiccup does not, and never should have.
+    const PROBES: usize = 500;
+    /// Discarded probes, paying up front for whatever each listener's first connection allocates
+    /// once, so that neither listener carries that cost into the comparison.
+    const WARMUP_PROBES: usize = 20;
     /// Larger than any socket buffer a loopback peer will auto-tune to, so the response really
     /// does stall. One allocation is shared by every reader: what this case measures is what a
     /// *connection* costs while it is parked, and a private body per reader would bury that under
@@ -331,38 +465,19 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
     if !run_isolated(TEST_NAME) {
         return;
     }
-    let mut config = plaintext_config();
-    config.header_read_timeout = Duration::from_secs(30);
-    config.max_connections_per_ip = None;
-    config.so_sndbuf = Some(4 * 1024);
-    // Sixty seconds is not a timeout this test can reach; it is here so that the only layer that
-    // can retire a parked reader inside the waits below is the write-progress deadline.
-    config.keep_alive_idle = Duration::from_secs(60);
-    config.write_progress_timeout = Duration::from_secs(3);
     let stalling_body = Bytes::from(vec![b'x'; RESPONSE_LEN]);
-    let service = service_fn(move |request: Request<hyper::body::Incoming>| {
-        let body = if request.uri().path() == "/healthy" {
-            Bytes::from_static(b"ok")
-        } else {
-            stalling_body.clone()
-        };
-        async move { Ok::<_, Infallible>(Response::new(Full::new(body))) }
-    });
-    let RunningServer {
-        local_addr,
-        metrics,
-        task,
-        shutdown,
-    } = Server::new(config, service).serve().expect("server starts");
+    let (loaded_runtime, loaded) = server_on_own_runtime(stalling_body.clone());
+    let (control_runtime, control) = server_on_own_runtime(stalling_body);
+    warm_up(control.local_addr, WARMUP_PROBES, PROBE_CEILING).await;
+    warm_up(loaded.local_addr, WARMUP_PROBES, PROBE_CEILING).await;
     let Some(before) = rss_bytes() else {
         eprintln!("SKIP c-lim-0061 / a-srv-0026: this runner cannot report RSS through ps");
-        let _ = shutdown.trigger(Duration::from_secs(1)).await;
-        let _ = task.await;
+        shut_down(control, control_runtime, "the control listener").await;
+        shut_down(loaded, loaded_runtime, "the loaded listener").await;
         return;
     };
 
-    let unloaded = probe_p99(local_addr, PROBES, PROBE_CEILING).await;
-    let mut first_wave = park_slow_readers(local_addr, &metrics, SLOW_READERS).await;
+    let mut first_wave = park_slow_readers(loaded.local_addr, &loaded.metrics, SLOW_READERS).await;
     stall_slow_readers(&mut first_wave).await;
 
     let parked = rss_bytes().expect("RSS remains readable");
@@ -374,21 +489,38 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
         "{SLOW_READERS} parked slow readers grew the resident set by {parked_growth} bytes, past the {parked_budget}-byte per-connection budget"
     );
 
-    let loaded = probe_p99(local_addr, PROBES, PROBE_CEILING).await;
-    let ceiling = unloaded.saturating_mul(8) + Duration::from_millis(100);
-    eprintln!("c-lim-0061 p99: unloaded={unloaded:?} loaded={loaded:?} ceiling={ceiling:?}");
-    assert!(
-        loaded <= ceiling,
-        "a healthy connection's p99 went from {unloaded:?} to {loaded:?} while {SLOW_READERS} slow readers were parked, past the {ceiling:?} ceiling"
+    let (control_probes, loaded_probes) = paired_probe_p99(control.local_addr, loaded.local_addr, PROBES, PROBE_CEILING).await;
+    eprintln!(
+        "c-lim-0061 p99: control={:?} (stalled {}/{PROBES}) loaded={:?} (stalled {}/{PROBES})",
+        control_probes.p99, control_probes.stalled, loaded_probes.p99, loaded_probes.stalled
     );
+    if control_probes.stalled > 0 {
+        // Not a pass. The control listener is holding nothing open at all, so a probe it failed to
+        // answer inside the ceiling is a statement about the host, and every stalled probe is
+        // charged the ceiling — comparing two saturated percentiles would return a ratio of one on
+        // a machine where no latency claim is measurable at all.
+        eprintln!(
+            "SKIP c-lim-0061 / a-srv-0026 latency: {} of {PROBES} probes against the control listener, which has no slow reader on it, went unanswered inside {PROBE_CEILING:?}; this host cannot hold a latency baseline still, so no difference measured against it would be attributable to the parked readers",
+            control_probes.stalled
+        );
+    } else {
+        let ceiling = control_probes.p99.saturating_mul(8) + Duration::from_millis(100);
+        eprintln!("c-lim-0061 p99 ceiling: {ceiling:?}");
+        assert!(
+            loaded_probes.p99 <= ceiling,
+            "a healthy connection's p99 was {:?} on the listener holding {SLOW_READERS} parked slow readers against {:?} on an idle control listener probed in lock-step with it, past the {ceiling:?} ceiling",
+            loaded_probes.p99,
+            control_probes.p99
+        );
+    }
 
-    let first_closure = retire_slow_readers(first_wave, &metrics).await;
+    let first_closure = retire_slow_readers(first_wave, &loaded.metrics).await;
     let after_first = rss_bytes().expect("RSS remains readable");
     let first_growth = after_first.saturating_sub(before);
 
-    let mut second_wave = park_slow_readers(local_addr, &metrics, SLOW_READERS).await;
+    let mut second_wave = park_slow_readers(loaded.local_addr, &loaded.metrics, SLOW_READERS).await;
     stall_slow_readers(&mut second_wave).await;
-    let second_closure = retire_slow_readers(second_wave, &metrics).await;
+    let second_closure = retire_slow_readers(second_wave, &loaded.metrics).await;
     let after_second = rss_bytes().expect("RSS remains readable");
     let second_growth = after_second.saturating_sub(after_first);
     let reuse_ceiling = REUSE_SLACK;
@@ -399,6 +531,6 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
         "a second wave of {SLOW_READERS} slow readers added {second_growth} bytes against a {reuse_ceiling}-byte ceiling: the memory a retired slow reader owned is accumulating, not being reused"
     );
 
-    let _ = shutdown.trigger(Duration::from_secs(1)).await;
-    assert!(task.await.expect("server task joins").is_ok());
+    shut_down(control, control_runtime, "the control listener").await;
+    shut_down(loaded, loaded_runtime, "the loaded listener").await;
 }

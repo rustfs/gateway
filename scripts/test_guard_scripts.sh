@@ -6111,15 +6111,53 @@ from pathlib import Path
 
 path = Path("crates/server/tests/server_load.rs")
 text = path.read_text()
-subject = "    let unloaded = probe_p99(local_addr, PROBES, PROBE_CEILING).await;\n"
+subject = (
+    "    let (control_probes, loaded_probes) = "
+    "paired_probe_p99(control.local_addr, loaded.local_addr, PROBES, PROBE_CEILING).await;\n"
+)
 if text.count(subject) != 1:
-    raise SystemExit("c-lim-0061 unloaded latency baseline is not unique")
-replacement = "    let unloaded = Duration::from_millis(500);\n"
+    raise SystemExit("c-lim-0061 paired latency reading is not unique")
+replacement = (
+    "    let loaded_probes = probe_p99(loaded.local_addr, PROBES, PROBE_CEILING).await;\n"
+    "    let control_probes = ProbeSet { p99: Duration::from_millis(500), stalled: 0 };\n"
+)
 path.write_text(text.replace(subject, replacement, 1))
 PYEOF
 }
 expect_fail check_timeout_layer_ownership.sh \
-    'c-lim-0061 replacing its unloaded latency reading with a constant' mut_server_c_lim_0061_baseline_removed
+    'c-lim-0061 replacing its concurrently sampled control with a constant' mut_server_c_lim_0061_baseline_removed
+
+mut_server_c_lim_0061_saturation_skip_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "    if control_probes.stalled > 0 {\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 saturation skip is not unique")
+path.write_text(text.replace(subject, "    if false {\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 comparing two saturated percentiles instead of skipping with the reason' \
+    mut_server_c_lim_0061_saturation_skip_removed
+
+mut_server_c_lim_0061_control_shares_the_runtime() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "    let runtime = tokio::runtime::Builder::new_multi_thread()\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 per-listener runtime is not unique")
+path.write_text(text.replace(subject, "    let runtime = tokio::runtime::Builder::new_current_thread()\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 losing the worker pool that keeps its control off the loaded listener' \
+    mut_server_c_lim_0061_control_shares_the_runtime
 
 mut_server_c_lim_0061_reuse_removed() {
     python3 - <<'PYEOF'
