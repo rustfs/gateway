@@ -65,7 +65,8 @@
 //! What no member can hold is the call to [`evaluate`]. An `impl Operation` is a static
 //! [`crate::registry::OperationSpec`] and a security floor, both settled before a request is read,
 //! while a precondition needs the representation the *handler* resolved. So the call site is the
-//! backend's, and the facade re-exports [`evaluate`], [`evaluate_range`] and [`resolve_part`] for
+//! backend's, and the facade re-exports [`evaluate`], [`evaluate_range`] and
+//! [`super::part_table::resolve_part`] for
 //! exactly that reason: a backend outside this workspace runs these rules rather than a mirror of
 //! them. The conformance fixture is the worked example — it holds no conditional or range
 //! arithmetic of its own, and the mirror that once disagreed with this file on six outcomes is
@@ -472,8 +473,10 @@ pub enum RangeDecision {
     /// storage holds, and inventing one here is how a `206` acquires a `Content-Range` nobody
     /// measured.
     ///
-    /// The other half is [`resolve_part`], which the backend calls with that table: it answers a
-    /// [`PartWindow`] whose [`PartWindow::as_decision`] is an ordinary [`RangeDecision::Partial`],
+    /// The other half is [`super::part_table::resolve_part`], which the backend calls with that
+    /// table: it answers a
+    /// [`super::part_table::PartWindow`] whose
+    /// [`super::part_table::PartWindow::as_decision`] is an ordinary [`RangeDecision::Partial`],
     /// so `Content-Range` and `Content-Length` are rendered by the code that already renders them
     /// for a byte range. This variant keeps [`RangeDecision::status`] and
     /// [`RangeDecision::part_count_header`], the two answers that are policy rather than

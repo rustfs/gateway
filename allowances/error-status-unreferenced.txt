@@ -22,7 +22,6 @@ IncorrectNumberOfFilesInPostRequest|browser POST upload; no POST object-upload f
 InlineDataTooLarge|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
 InvalidBucketState|bucket-state conflict the storage side detects, not the protocol layer
 InvalidEncryptionAlgorithmError|SSE configuration family; no encryption-configuration operation is served yet
-InvalidPartNumber|multipart part addressing; the part-number refusal is not implemented yet
 InvalidPayer|requester-pays; no payer model exists in this gateway
 InvalidRetentionPeriod|object-lock family; retention validation is not implemented yet
 InvalidSOAPRequest|SOAP; deliberately never served, kept so the vocabulary is complete

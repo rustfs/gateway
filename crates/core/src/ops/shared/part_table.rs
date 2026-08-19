@@ -65,7 +65,7 @@ impl PartWindow {
 /// Resolves a `partNumber` selection against the lengths of the parts the object was completed
 /// from, in part order.
 ///
-/// [`evaluate_range`] cannot do this: it is given the object's total length and nothing about
+/// [`super::precondition::evaluate_range`] cannot do this: it is given the object's total length and nothing about
 /// where its parts begin, so [`RangeDecision::Part`] leaves it as a selector. The part table is
 /// storage's to produce and this is the only place that reads one, which is what stops two
 /// backends from disagreeing about which bytes part 2 is — the disagreement is invisible, because
