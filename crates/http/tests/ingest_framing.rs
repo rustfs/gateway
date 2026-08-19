@@ -49,7 +49,7 @@ fn signed_streaming_derives_a_signed_framing() {
 
 /// Positive: unsigned streaming with a trailer is framed but unsigned.
 #[test]
-fn unsigned_streaming_with_a_trailer_is_framed_but_unsigned() {
+fn c_ing_0002_unsigned_streaming_with_a_trailer_is_framed_but_unsigned() {
     let framing = ChunkFraming::derive(&FramingFixture::streaming_unsigned_trailer()).expect("a consistent source");
     assert!(framing.is_framed());
     assert!(!framing.has_chunk_signatures());
@@ -66,7 +66,7 @@ fn a_non_streaming_source_is_not_framed() {
 
 /// Positive: a decoded length that fits inside the wire length with room for framing is accepted.
 #[test]
-fn a_decoded_length_that_fits_inside_the_wire_length_is_accepted() {
+fn c_ing_0006_a_decoded_length_that_fits_inside_the_wire_length_is_accepted() {
     let framing = ChunkFraming::derive(&FramingFixture::streaming_signed()).expect("a consistent source");
     assert_eq!(decoded_of(&framing, Some("1024"), 4096), Ok(Some(1024)));
 }
@@ -83,7 +83,7 @@ fn an_empty_framed_body_is_accepted() {
 /// Negative: the header is forbidden, not ignored, outside a framed mode. Two answers to "how
 /// long is this body" is what a smuggler needs; ignoring one of them leaves both on the wire.
 #[test]
-fn a_decoded_length_on_a_non_framed_body_is_refused() {
+fn c_ing_0040_a_decoded_length_on_a_non_framed_body_is_refused() {
     let framing = ChunkFraming::derive(&FramingFixture::unsigned_payload()).expect("a consistent source");
     assert_eq!(
         decoded_of(&framing, Some("1024"), 4096),
@@ -93,7 +93,7 @@ fn a_decoded_length_on_a_non_framed_body_is_refused() {
 
 /// Negative: the other half of the same rule — a framed body without the header.
 #[test]
-fn a_framed_body_without_a_decoded_length_is_refused() {
+fn c_ing_0041_a_framed_body_without_a_decoded_length_is_refused() {
     let framing = ChunkFraming::derive(&FramingFixture::streaming_signed()).expect("a consistent source");
     assert_eq!(
         decoded_of(&framing, None, 4096),
@@ -126,7 +126,7 @@ fn a_decoded_length_that_overflows_is_refused() {
 
 /// Negative: more decoded bytes than the wire can carry.
 #[test]
-fn a_decoded_length_larger_than_the_wire_length_is_refused() {
+fn c_ing_0042_a_decoded_length_larger_than_the_wire_length_is_refused() {
     let framing = ChunkFraming::derive(&FramingFixture::streaming_signed()).expect("a consistent source");
     assert_eq!(
         decoded_of(&framing, Some("4096"), 1024),
@@ -221,7 +221,7 @@ fn signatures_or_trailers_without_framing_are_refused() {
 /// constructed for a body the signature did not declare framed. `Content-Encoding: aws-chunked`
 /// has no route into this decision — there is no method on the source that could carry it.
 #[test]
-fn a_pipeline_cannot_be_built_for_a_body_the_signature_did_not_frame() {
+fn c_ing_0020_a_pipeline_cannot_be_built_for_a_body_the_signature_did_not_frame() {
     let framing = ChunkFraming::derive(&FramingFixture::unsigned_payload()).expect("a consistent source");
     let built = IngestPipeline::new(
         ScriptReader::new(b"anything".to_vec(), 8),

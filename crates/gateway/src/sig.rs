@@ -41,8 +41,8 @@ pub use rustfs_gateway_sig::{
     CredentialScope, CtBytes, CustomAuthRequest, CustomAuthScheme, CustomSchemeRegistry, Identity, MAX_PRESIGNED_EXPIRY_SECONDS,
     PayloadMode, PresignedParams, RegionSet, RequestClock, RequestNow, SecretBytes, SecurityFloor, SessionBinding,
     SessionBindingError, SessionToken, SigFamily, SigIdentity, SigLocation, SigService, SigV4Authorization, SigV4Signer,
-    Signature, SignatureMatch, SignatureVerifier, SignedRequest, SignerError, SigningCredentials, SigningRequest, SigningScope,
-    SkewWindow, SystemClock, TRAILER_ALGORITHM, Tamper, TamperComponent, TrailerSet, Verdict,
+    Signature, SignatureMatch, SignatureVerifier, SignedRequest, SignerError, SigningCredentials, SigningKey, SigningRequest,
+    SigningScope, SkewWindow, SystemClock, TRAILER_ALGORITHM, Tamper, TamperComponent, TrailerSet, Verdict,
 };
 #[cfg(feature = "dangerous-replace-signature-verifier")]
 pub use rustfs_gateway_sig::{AwsSignatureVerifier, DangerAck, SealedAws};

@@ -8187,6 +8187,71 @@ PYEOF
 expect_fail check_wire_case_coverage.sh \
     'a commented-out assertion and a string of it standing in for wire evidence' mut_wire_case_assertion_is_a_decoy
 
+# P3-03 ingest case coverage (rustfs/backlog#1691). Four failure modes, one mutation each: a
+# mapping can be deleted, it can point at a function nobody wrote, the assertion it points at can
+# be replaced by something that reads like an assertion and cannot fail, and a row that proves half
+# a case can quietly stop naming who owns the other half.
+mut_ingest_case_mapping_deleted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_ingest_case_coverage.sh")
+text = path.read_text()
+line = next((line for line in text.splitlines(True) if line.lstrip().startswith("'c-ing-0021|")), None)
+if line is None:
+    raise SystemExit("missing ingest mapping mutation subject")
+path.write_text(text.replace(line, "", 1))
+PYEOF
+}
+expect_fail_self_mutation check_ingest_case_coverage.sh \
+    'one of the 40 ingest acceptance mappings being deleted' mut_ingest_case_mapping_deleted
+
+mut_ingest_case_function_missing() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_ingest_case_coverage.sh")
+text = path.read_text()
+old = "c_ing_0021_a_four_gigabyte_chunk_is_refused_at_the_header_without_reading_a_data_byte"
+if old not in text:
+    raise SystemExit("missing ingest function mutation subject")
+path.write_text(text.replace(old, "c_ing_0021_a_function_nobody_wrote", 1))
+PYEOF
+}
+expect_fail_self_mutation check_ingest_case_coverage.sh \
+    'an ingest mapping naming a function that does not exist' mut_ingest_case_function_missing
+
+mut_ingest_partial_owner_dropped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_ingest_case_coverage.sh")
+text = path.read_text()
+old = "@@rustfs/backlog#1692::"
+if old not in text:
+    raise SystemExit("missing ingest partial-owner mutation subject")
+path.write_text(text.replace(old, "@@nobody::", 1))
+PYEOF
+}
+expect_fail_self_mutation check_ingest_case_coverage.sh \
+    'a partially proved ingest case losing the issue that owns the rest' mut_ingest_partial_owner_dropped
+
+mut_ingest_case_assertion_is_a_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/ingest_perf_gates.rs")
+text = path.read_text()
+old = '    assert!(pipeline.window_bytes() <= 64 * 1024, "a 16 MiB ceiling must not mean a 16 MiB allocation");\n'
+new = (
+    '    // assert!(pipeline.window_bytes() <= 64 * 1024, "a 16 MiB ceiling ...");\n'
+    '    let decoy = "assert!(pipeline.window_bytes() <= 64 * 1024);";\n'
+    "    let _ = (pipeline, decoy);\n"
+)
+if text.count(old) != 1:
+    raise SystemExit("missing or ambiguous ingest decoy mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_ingest_case_coverage.sh \
+    'a commented-out assertion and a string of it standing in for ingest evidence' mut_ingest_case_assertion_is_a_decoy
+
 mut_sig_compile_char_decoy() {
     python3 - <<'PYEOF'
 from pathlib import Path
