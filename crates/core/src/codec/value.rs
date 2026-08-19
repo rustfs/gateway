@@ -30,9 +30,10 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+use md5::{Digest as _, Md5};
 use rustfs_gateway_types::{
-    BucketName, ChecksumSpec, ETag, ErrorCode, EtagRender, ObjectKey, OpaqueString, RangeSpec, Timestamp, TimestampFormat,
-    is_xml_representable,
+    BucketName, ChecksumError, ChecksumSpec, ContentMd5, ETag, ErrorCode, EtagRender, ObjectKey, OpaqueString, RangeSpec,
+    Timestamp, TimestampFormat, is_xml_representable,
 };
 
 use crate::codec::error::CodecError;
@@ -630,6 +631,41 @@ pub fn require_integrity(request: &MetaView<'_>) -> Result<(), CodecError> {
     Err(CodecError::invalid_request(
         "this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header",
     ))
+}
+
+/// Verifies a buffered request body against the `Content-MD5` the request declared.
+///
+/// Generated into every decoder at the point the body is buffered, and at no other point. The
+/// header is optional; a request that sends none is not checked, because `Content-MD5` is a claim
+/// the client chooses to make and its absence is answered by [`require_integrity`] where an
+/// operation demands one.
+///
+/// The split between the two codes is the one clients branch on. A value that is not base64 of
+/// sixteen bytes is `InvalidDigest`: the client's claim is unreadable, and no body could satisfy
+/// it. A readable value that does not match is `BadDigest`: the claim was well formed and the
+/// bytes are not the bytes it names. Collapsing them would tell an uploader with a broken SDK the
+/// same thing as an uploader with a corrupted wire.
+///
+/// # What this does not cover
+///
+/// A **streaming** body. `PutObject` and `UploadPart` hand their payload to the backend without
+/// aggregating it, so nothing here ever sees their bytes and their `Content-MD5` stays unverified;
+/// that check belongs to the stream layer and needs the digest computed as the body is consumed,
+/// not after. Every buffered body — every XML configuration write in the surface — is covered.
+///
+/// # Errors
+///
+/// [`CodecError`] carrying `InvalidDigest` or `BadDigest`.
+pub fn verify_body_digest(request: &MetaView<'_>, body: &[u8]) -> Result<(), CodecError> {
+    let Some(declared) = request.header(CONTENT_MD5) else {
+        return Ok(());
+    };
+    let refuse = |error: ChecksumError| CodecError::new(error.error_code(), error.message());
+    let expected = ContentMd5::parse(declared.as_ref()).map_err(refuse)?;
+    let mut hasher = Md5::new();
+    hasher.update(body);
+    let actual: [u8; 16] = hasher.finalize().into();
+    expected.verify(&actual).map_err(refuse)
 }
 
 /// Renders a checksum back into its `x-amz-checksum-<algorithm>` header name and value.

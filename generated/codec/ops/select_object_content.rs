@@ -55,6 +55,7 @@ impl OperationCodec for dto::SelectObjectContent {
         }
         // The XML request body, rooted at `SelectObjectContentRequest`.
         let raw_body = body.into_buffered()?;
+        value::verify_body_digest(request, raw_body.as_ref())?;
         if matches!(
             crate::contracts::SELECT_ROOT_NAMESPACE_POLICY,
             crate::contracts::SelectRootNamespacePolicy::QualifiedName

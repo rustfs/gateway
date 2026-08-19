@@ -42,6 +42,7 @@ impl OperationCodec for dto::PutObjectLegalHold {
         input.key = request.require_key()?;
         // LegalHold — the XML request body, rooted at `LegalHold`.
         let raw_body = body.into_buffered()?;
+        value::verify_body_digest(request, raw_body.as_ref())?;
         let root = rustfs_gateway_xml::parse(raw_body.as_ref())
             .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
         if !["LegalHold"].contains(&root.name.as_str()) {

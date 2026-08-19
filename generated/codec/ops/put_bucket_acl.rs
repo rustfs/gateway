@@ -43,6 +43,7 @@ impl OperationCodec for dto::PutBucketAcl {
         }
         // AccessControlPolicy — the XML request body, rooted at `AccessControlPolicy`.
         let raw_body = body.into_buffered()?;
+        value::verify_body_digest(request, raw_body.as_ref())?;
         if raw_body.as_ref().is_empty() {
             input.access_control_policy = None;
         } else {
@@ -159,7 +160,10 @@ fn read_grantee(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Grantee, Code
     if let Some(raw) = node.child_text("URI") {
         shape.uri = Some(raw.to_owned());
     }
-    // Type — carried by the `xsi:type` attribute, which the reader does not expose.
+    // Type — the `xsi:type` attribute, not a child element.
+    if let Some(raw) = node.attribute_ns("http://www.w3.org/2001/XMLSchema-instance", "type") {
+        shape.r#type = Some(dto::Type::custom(raw.to_owned()));
+    }
     value::exit(shape.check_required())?;
     Ok(shape)
 }

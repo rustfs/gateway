@@ -114,15 +114,16 @@ use rustfs_gateway::{
     CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, EventSequence, GranteeType, Handler, HandlerError,
     HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE,
     PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req,
-    RequestKind, ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp, collect,
-    completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_source_guards_before_target_write,
-    copy_source_if_match_miss_proceeds, copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate,
-    evaluate_range, format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag,
-    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_grantee_type, resolve_input as resolve_acl_input,
-    resolve_location_constraint, select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate, validate_cors,
-    validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
-    validate_notification, validate_policy, validate_public_access_block, validate_replication, validate_request_payment,
-    validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
+    RequestKind, ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp,
+    canonicalize_grantee, collect, completion_failure_retains_upload, conditional_write_guards_before_mutation,
+    copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, copy_target_uses_source_validators,
+    encryption_delete_absent_succeeds, evaluate, evaluate_range, format_optional_restore_status,
+    object_lock_requires_enabled_bucket, parse_conditional_etag, parse_tagging_header, permanent_redirect_for,
+    resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint, select_scan_bytes,
+    select_uses_event_stream, stats_document, validate_accelerate, validate_cors, validate_encryption, validate_legal_hold,
+    validate_lifecycle, validate_lock_configuration, validate_logging, validate_notification, validate_policy,
+    validate_public_access_block, validate_replication, validate_request_payment, validate_restore, validate_retention,
+    validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
 mod handlers_bucket;
@@ -1159,7 +1160,7 @@ fn hex_digit(value: u8) -> char {
 /// Hand-written here for the same reason the digests are: a foreign implementation running this
 /// suite inherits the corpus and nothing else, so the fixture may not reach for a workspace crate
 /// the facade does not export.
-fn encode_base64(bytes: &[u8]) -> String {
+pub(crate) fn encode_base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
@@ -3536,12 +3537,12 @@ impl Stub {
     /// because the model declares no delete for this subresource.
     ///
     /// `<TargetGrants>` reaches the ACL family's `Grantee` through this document, which makes this
-    /// the second producer of that element in the tree and puts it under the same rule: the
-    /// `xsi:type` discriminator is an XML **attribute**, this project's reader exposes none, so a
-    /// decoded grantee arrives with `Type` unset and a read that echoed it verbatim would answer a
-    /// `<Grantee>` no SDK can classify. The type is derived from the identifying member the
-    /// grantee does carry, by the ACL family's own `resolve_grantee_type` and not by a second
-    /// derivation of this family's invention (`q-acl-0004`).
+    /// the second producer of that element in the tree and puts it under the same rule. It goes
+    /// through the ACL family's own `canonicalize_grantee` and not through a second check of this
+    /// family's invention: that one function both refuses an `xsi:type` outside the closed set and
+    /// derives the stored discriminator from the identifying member, and a copy here that did only
+    /// the second would echo back a `<Grantee>` whose type this side never validated
+    /// (`q-acl-0003`, `q-acl-0004`).
     fn put_bucket_logging(&self, input: &dto::PutBucketLoggingInput) -> HandlerResult<dto::PutBucketLogging> {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
@@ -3550,8 +3551,7 @@ impl Stub {
         if let Some(enabled) = configuration.logging_enabled.as_mut() {
             for grant in &mut enabled.target_grants {
                 if let Some(grantee) = grant.grantee.as_mut() {
-                    let kind = resolve_grantee_type(grantee).map_err(refused_acl)?;
-                    grantee.r#type = Some(kind.as_dto());
+                    canonicalize_grantee(grantee).map_err(refused_acl)?;
                 }
             }
         }

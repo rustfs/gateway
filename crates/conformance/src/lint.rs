@@ -23,7 +23,7 @@
 //! NOT responsible for: schema validation (`crate::schema`) or execution (`crate::runner`).
 //! Upstream: `crate::corpus`, `crate::interpolate`. Downstream: `crate::runner`.
 
-use crate::corpus::{Case, Corpus};
+use crate::corpus::{Case, Corpus, Exchange};
 use crate::diagnostic::Diagnostic;
 use crate::interpolate;
 use crate::schema::SCHEMA_VERSION;
@@ -107,6 +107,7 @@ pub fn lint(corpus: &mut Corpus) {
         check_tags(case, &mut found);
         check_assertion_strength(case, &mut found);
         check_hand_computed_values(case, &mut found);
+        check_stale_digests(case, &mut found);
         case.diagnostics.extend(found);
     }
 }
@@ -400,6 +401,85 @@ fn check_assertion_strength(case: &Case, out: &mut Vec<Diagnostic>) {
             ));
         }
     }
+}
+
+/// Refuses a case whose `Content-MD5` is not the digest of the body it is written beside.
+///
+/// [`check_hand_computed_values`] says a hand-written digest is one nobody recomputes when the body
+/// changes. This is the half of that statement that can be enforced today: the value cannot be
+/// *computed* from the case, but it can be *checked* against it, and a stale one is now a broken
+/// case rather than a warning. The gateway verifies the header against the body it received, so a
+/// case carrying a stale digest no longer tests what its title says — it tests `BadDigest`.
+///
+/// Three restrictions, each of which skips rather than guesses:
+///
+/// * only a literal `utf8` or `hex` payload. A `file` or a generated `size`/`fill` body is not
+///   reconstructible here, and a body carrying a `${capture}` is not known until the case runs.
+/// * only `content-md5`. `x-amz-content-sha256` takes the signing sentinels (`UNSIGNED-PAYLOAD`
+///   and the streaming spellings) as often as it takes a hash, and the checksum headers cover
+///   several algorithms; neither is one comparison.
+/// * a case that *expects* `BadDigest` or `InvalidDigest` is stating the disagreement on purpose,
+///   and is left alone. `c-mpu-0044` is the one that was already doing this.
+fn check_stale_digests(case: &Case, out: &mut Vec<Diagnostic>) {
+    for exchange in case.exchanges() {
+        let Some(request) = exchange.request else { continue };
+        let Some(Value::Table(headers)) = request.read("requestSpec.headers") else { continue };
+        let Some(declared) = headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-md5"))
+            .and_then(|(_, value)| value.as_str())
+        else {
+            continue;
+        };
+        if deliberate_digest_failure(&exchange) {
+            continue;
+        }
+        let Some(body) = literal_body(request) else { continue };
+        let actual = crate::fixture::encode_base64(&crate::md5::digest(&body));
+        if declared == actual {
+            continue;
+        }
+        out.push(Diagnostic::deny(
+            "lint/stale-digest",
+            &format!("{}/request/headers/content-md5", exchange.pointer),
+            format!(
+                "`content-md5` is not the digest of this exchange's body, so the request under \
+                 test is refused as `BadDigest` before it reaches what the case is about. The \
+                 digest of the body as written is `{actual}`"
+            ),
+        ));
+    }
+}
+
+/// The body of one request, when it is written out literally and holds no interpolation.
+fn literal_body(request: &Value) -> Option<Vec<u8>> {
+    let payload = request.read("requestSpec.body")?;
+    if let Some(text) = payload.read("payload.utf8").and_then(Value::as_str) {
+        return (!text.contains("${")).then(|| text.as_bytes().to_vec());
+    }
+    let hex = payload.read("payload.hex").and_then(Value::as_str)?;
+    if hex.contains("${") || !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    hex.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = char::from(*pair.first()?).to_digit(16)?;
+            let low = char::from(*pair.get(1)?).to_digit(16)?;
+            u8::try_from(high * 16 + low).ok()
+        })
+        .collect()
+}
+
+/// Whether this exchange expects the digest refusal, which is how a case says the mismatch is the
+/// point rather than an accident.
+fn deliberate_digest_failure(exchange: &Exchange<'_>) -> bool {
+    exchange
+        .expect
+        .and_then(|expect| expect.read("expectation.error"))
+        .and_then(|error| error.read("errorExpectation.code"))
+        .and_then(Value::as_str)
+        .is_some_and(|code| code == "BadDigest" || code == "InvalidDigest")
 }
 
 fn check_hand_computed_values(case: &Case, out: &mut Vec<Diagnostic>) {

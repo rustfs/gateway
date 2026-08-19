@@ -11,7 +11,7 @@ name and every ordering is supplied by the caller, from IR data.
 |---|---|---|
 | `src/lib.rs` | Module wiring and the re-export list. | First stop. |
 | `src/write.rs` | `XmlWriter`: the declaration, elements, attributes, escaping, and the paired empty-element form. No formatting options, because both S3 shapes are byte-observable. Plus `strip_declaration`, the inverse of the one declaration this crate writes. | A response body byte is wrong, you need a new element form, or a body is carrying two declarations. |
-| `src/read.rs` | `parse` and `parse_with_limits` into a bounded `XmlNode` tree, with body-byte, `DOCTYPE`, entity, depth, element and attribute refusals. Namespace prefixes are dropped, so a prefixed body and a bare one decode identically. | A request body is refused, or you are changing a ceiling. |
+| `src/read.rs` | `parse` and `parse_with_limits` into a bounded `XmlNode` tree, with body-byte, `DOCTYPE`, entity, depth, element and attribute refusals. Element prefixes are dropped, so a prefixed body and a bare one decode identically; attribute prefixes are *resolved*, so `XmlNode::attribute_ns` answers by namespace. | A request body is refused, an attribute is not reaching a decoder, or you are changing a ceiling. |
 | `src/error.rs` | `XmlError`, one variant per refusal. No variant carries a fragment of the input. | You are mapping a refusal onto an S3 error code. |
 | `src/tests.rs` | Writer byte-shape controls and a negative-majority reader matrix, including the P3-05 XML limit cases. | Before changing either half. |
 
@@ -25,6 +25,12 @@ name and every ordering is supplied by the caller, from IR data.
   refused. Nothing else decides what `&xxe;` means.
 - **Depth and element count are bounded separately from body bytes.** A cap on bytes does not bound
   the tree a body can describe.
+- **An attribute is keyed by its namespace, never by its prefix, and a `xmlns:` declaration is not
+  an attribute.** A prefix is a document-local alias: `xsi:type` and `xs:type` are the same
+  attribute when both prefixes are bound to the XMLSchema-instance namespace, and `xsi:type` in a
+  document that never bound `xsi` is not that attribute at all — it is dropped rather than stored
+  in no namespace, because storing it there would make it indistinguishable from an unprefixed
+  `type=`. `<Grantee>` is the one element in the S3 surface this matters for.
 - **An empty element is written `<X></X>`, never self-closing, and there is no whitespace between
   elements.** Both are what S3 does and both are visible to a byte-exact conformance case, so
   neither is an option a caller can set the other way.

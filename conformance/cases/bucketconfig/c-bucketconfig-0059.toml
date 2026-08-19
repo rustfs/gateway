@@ -1,0 +1,59 @@
+[case]
+id = "c-bucketconfig-0059"
+schema_version = 1
+title = "A logging write whose Content-MD5 disagrees with its body is a 400 BadDigest and stores nothing"
+rationale = """
+The digest check is a property of a buffered request body and not of any one operation family, and this is the case that says so outside the ACL family that first needed it: c-acl-0036 asserts the same refusal on PutObjectAcl, and a gateway that verified the digest in one family's handler rather than at the point every decoder buffers its body would pass one of the two. c-bucketconfig-0008 is the accepted form of this same write with the digest its body actually has; c-bucketconfig-0037 is the refusal when no integrity claim is made at all. The read-back is what asserts the destination was not installed — a store that refused after writing would answer this 400 and log to conf-log-target anyway."""
+polarity = "negative"
+operation = "PutBucketLogging"
+tags = ["bucketconfig", "checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-log-0004"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLogging.html"
+summary = "The write reference documents Content-MD5 as required for this operation, which is the header this case gets wrong on purpose."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error list gives BadDigest for a Content-MD5 that did not match what was received."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+
+[[exchanges]]
+name = "write-with-a-digest-of-other-bytes"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?logging"
+headers = { "content-md5" = "+xvBbW1L+PMHXW9kJJcYXg==", "content-type" = "application/xml" }
+body = { utf8 = '<BucketLoggingStatus><LoggingEnabled><TargetBucket>conf-log-target</TargetBucket><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "BadDigest"
+message_present = true
+
+[[exchanges]]
+name = "read-back-shows-no-destination-was-installed"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bucketconfig?logging"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-bucketconfig-0059.xml"

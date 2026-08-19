@@ -41,6 +41,7 @@ impl OperationCodec for dto::DeleteObjects {
         input.bucket = request.require_bucket()?;
         // Delete — the XML request body, rooted at `Delete`.
         let raw_body = body.into_buffered()?;
+        value::verify_body_digest(request, raw_body.as_ref())?;
         let root = rustfs_gateway_xml::parse(raw_body.as_ref())
             .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
         if !["Delete"].contains(&root.name.as_str()) {

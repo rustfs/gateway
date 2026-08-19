@@ -27,7 +27,7 @@ body = { utf8 = "2" }
 [request]
 method = "POST"
 target = "/authz-delete?delete"
-headers = { "content-type" = "application/xml", "content-md5" = "VK4ubZ8WQf0Vu81FdbnLGw==" }
+headers = { "content-type" = "application/xml", "content-md5" = "tH2y1HDadGbkCeHmdoFWrQ==" }
 body = { utf8 = "<Delete><Object><Key>one</Key></Object><Object><Key>two</Key></Object><Object><Key>absent</Key></Object></Delete>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

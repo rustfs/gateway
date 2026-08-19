@@ -38,20 +38,32 @@
 //! trailing comma the other refuses, one lower-cases the key and the other does not — and the two
 //! channels then disagree about what the client asked for while both answer `200`.
 //!
-//! # Why the `xsi:type` discriminator is derived rather than read
+//! # What the `xsi:type` discriminator is read for, and what still decides it
 //!
 //! AWS discriminates `<Grantee>` with an XML **attribute**: `xsi:type="CanonicalUser"`, `"Group"`
-//! or `"AmazonCustomerByEmail"`. The frozen IR reserves `xml.attributes` for exactly this and the
-//! generated encoder writes it, so a read answers the bytes `aws-java-sdk` expects. The **read**
-//! side cannot: `rustfs_gateway_xml::XmlNode` carries an element's name, text and children and no
-//! attributes at all, and widening that type is outside this task's fence. So a decoded grantee
-//! arrives with its discriminator unset, and [`resolve_grantee_type`] derives it from the
-//! identifying member the grantee does carry — `<ID>`, `<URI>` or `<EmailAddress>` — refusing a
-//! grantee that carries none or more than one. For every document AWS itself would accept the
-//! derivation and the attribute agree, because the attribute names the member that is present;
-//! the divergence is a document whose attribute contradicts its members, which this decoder reads
-//! by the members. That is `q-acl-0004`, and it is recorded as a quirk rather than hidden because
-//! it is a real difference from AWS, not an implementation detail.
+//! or `"AmazonCustomerByEmail"`. The frozen IR reserves `xml.attributes` for exactly this, the
+//! generated encoder writes it, and the reader now hands it back: `rustfs_gateway_xml::XmlNode`
+//! resolves the prefix against the `xmlns:xsi` declaration AWS puts on that same element, so a
+//! decoded grantee arrives carrying whatever the document said.
+//!
+//! Two different questions follow from that, and they have different answers.
+//!
+//! **Is the attribute a value this union has?** That one the attribute answers by itself. The set
+//! is closed at three, exactly as `Permission` is closed at five, and a fourth spelling is refused
+//! ([`AclRejection::GranteeTypeUnknown`]). This is the check the reader made possible: before it,
+//! `Grantee.Type` was unconditionally `None` and a document could name any type it liked, because
+//! nothing on this side could see what it named.
+//!
+//! **Which grantee is it?** That one is still answered by the identifying member —
+//! [`resolve_grantee_type`] over `<ID>`, `<URI>` or `<EmailAddress>` — refusing a grantee that
+//! carries none or more than one. For every document AWS itself would accept the derivation and
+//! the attribute agree, because the attribute names the member that is present; the divergence is
+//! a document whose attribute contradicts its members, which this decoder resolves by the members
+//! rather than by the attribute. That is `q-acl-0014`, whose contract value is unchanged here: a
+//! `Group` that carries only an `<ID>` names no group, and trusting the attribute would store a
+//! grant against a URI the document never wrote. Which of the two *should* win is a protocol
+//! question with its own evidence bar and its own `BREAKING` process, and it is not settled by
+//! this side becoming able to see the attribute.
 //!
 //! # The refusal reasons never repeat a grantee
 //!
@@ -174,6 +186,14 @@ impl GranteeType {
     }
 }
 
+/// Every value the `xsi:type` discriminator may name. The set is closed, and AWS's own `Grantee`
+/// reference enumerates exactly these three, each paired with the member that identifies it.
+pub const GRANTEE_TYPES: &[GranteeType] = &[
+    GranteeType::CanonicalUser,
+    GranteeType::AmazonCustomerByEmail,
+    GranteeType::Group,
+];
+
 /// Why an ACL request was refused, with the code AWS answers.
 ///
 /// Carried as data rather than as a rendered error so that a backend outside this workspace can
@@ -210,6 +230,8 @@ pub enum AclRejection {
     GrantWithoutGrantee,
     /// A `<Permission>` outside [`PERMISSIONS`], or a `<Grant>` with none.
     PermissionUnknown,
+    /// A `<Grantee>` whose `xsi:type` attribute names a value outside [`GRANTEE_TYPES`].
+    GranteeTypeUnknown,
 }
 
 impl AclRejection {
@@ -237,7 +259,8 @@ impl AclRejection {
             | AclRejection::GranteeUnidentified
             | AclRejection::GranteeAmbiguous
             | AclRejection::GrantWithoutGrantee
-            | AclRejection::PermissionUnknown => ErrorCode::MALFORMED_XML,
+            | AclRejection::PermissionUnknown
+            | AclRejection::GranteeTypeUnknown => ErrorCode::MALFORMED_XML,
         }
     }
 
@@ -285,6 +308,7 @@ impl AclRejection {
             AclRejection::PermissionUnknown => {
                 "A Grant must specify one of the permissions FULL_CONTROL, WRITE, WRITE_ACP, READ or READ_ACP"
             }
+            AclRejection::GranteeTypeUnknown => "A Grantee's xsi:type must be CanonicalUser, AmazonCustomerByEmail or Group",
         }
     }
 
@@ -571,6 +595,52 @@ pub fn resolve_grantee_type(grantee: &Grantee) -> Result<GranteeType, AclRejecti
     found.ok_or(AclRejection::GranteeUnidentified)
 }
 
+/// Refuses a `<Grantee>` whose `xsi:type` attribute names a value this union does not have.
+///
+/// The attribute reaches here only because the XML reader resolves it; before it did, this
+/// function had nothing to look at and every spelling was accepted in silence. An unknown
+/// discriminator is refused rather than ignored for the reason the whole family refuses unknown
+/// values: a document nothing on this side understood, stored and echoed back, is a grant whose
+/// meaning no two implementations would agree on.
+///
+/// A grantee that carries no attribute at all is **not** refused. AWS's own SDKs omit it on the
+/// way in and the identifying member is what decides the type anyway; demanding it would refuse
+/// requests that are well formed.
+///
+/// # Errors
+///
+/// [`AclRejection::GranteeTypeUnknown`].
+pub fn check_grantee_type(grantee: &Grantee) -> Result<(), AclRejection> {
+    let Some(declared) = grantee.r#type.as_ref() else {
+        return Ok(());
+    };
+    if GRANTEE_TYPES.iter().any(|kind| kind.as_str() == declared.as_str()) {
+        return Ok(());
+    }
+    Err(AclRejection::GranteeTypeUnknown)
+}
+
+/// Checks and canonicalizes one decoded `<Grantee>`.
+///
+/// The single entry point for both producers of this element — the `<AccessControlPolicy>` of the
+/// ACL family and the `<TargetGrants>` of a logging document. Two call sites doing the check and
+/// the derivation in their own order is how one of them ends up doing only one of the two.
+///
+/// # Errors
+///
+/// [`AclRejection`] naming what the grantee got wrong.
+pub fn canonicalize_grantee(grantee: &mut Grantee) -> Result<(), AclRejection> {
+    check_grantee_type(grantee)?;
+    match ACL_GRANTEE_DISCRIMINATOR_POLICY {
+        GranteeDiscriminatorPolicy::IdentifyingMember => {
+            let kind = resolve_grantee_type(grantee)?;
+            grantee.r#type = Some(kind.as_dto());
+        }
+        GranteeDiscriminatorPolicy::LeaveUnset => {}
+    }
+    Ok(())
+}
+
 /// Fills in every grantee's `xsi:type` and refuses a grant the wire cannot describe.
 ///
 /// Called once, on the way in, so that what a backend stores is what a read writes back byte for
@@ -588,13 +658,7 @@ pub fn canonicalize_policy(policy: &mut AccessControlPolicy) -> Result<(), AclRe
         let Some(grantee) = grant.grantee.as_mut() else {
             return Err(AclRejection::GrantWithoutGrantee);
         };
-        match ACL_GRANTEE_DISCRIMINATOR_POLICY {
-            GranteeDiscriminatorPolicy::IdentifyingMember => {
-                let kind = resolve_grantee_type(grantee)?;
-                grantee.r#type = Some(kind.as_dto());
-            }
-            GranteeDiscriminatorPolicy::LeaveUnset => {}
-        }
+        canonicalize_grantee(grantee)?;
         match grant.permission.as_ref() {
             Some(permission) if PERMISSIONS.contains(&permission.as_str()) => {}
             _ => return Err(AclRejection::PermissionUnknown),

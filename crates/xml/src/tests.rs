@@ -302,3 +302,125 @@ fn resolves_only_the_five_predefined_entities() {
     let root = parse(b"<Key>&amp;&lt;&gt;&quot;&apos;</Key>").expect("the predefines resolve");
     assert_eq!(root.text, "&<>\"'");
 }
+
+// ---------------------------------------------------------------------------------------------
+// Attribute reading, for the one member of the S3 surface that is written as an attribute
+// ---------------------------------------------------------------------------------------------
+
+/// The XML Schema instance namespace, which is the only namespace an S3 request body binds.
+const XSI: &str = "http://www.w3.org/2001/XMLSchema-instance";
+
+/// The `<Grantee>` element as AWS writes it, with the declaration on the element that uses it.
+const GRANTEE: &[u8] =
+    br#"<Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group"><URI>g</URI></Grantee>"#;
+
+/// Positive — the attribute AWS discriminates a grantee with reaches the caller, resolved to the
+/// namespace its prefix was bound to on that same element.
+#[test]
+fn reads_the_grantee_discriminator_from_the_element_that_declares_its_prefix() {
+    let root = parse(GRANTEE).expect("the grantee parses");
+    assert_eq!(root.attribute_ns(XSI, "type"), Some("Group"));
+    assert_eq!(root.child_text("URI"), Some("g"));
+}
+
+/// Positive — a prefix is a document-local alias, so the same namespace spelled with a different
+/// prefix is the same attribute. A reader keyed on the literal `xsi:type` would answer `None`.
+#[test]
+fn reads_the_same_attribute_under_a_different_prefix() {
+    let body = br#"<Grantee xmlns:q="http://www.w3.org/2001/XMLSchema-instance" q:type="CanonicalUser"><ID>i</ID></Grantee>"#;
+    let root = parse(body).expect("the grantee parses");
+    assert_eq!(root.attribute_ns(XSI, "type"), Some("CanonicalUser"));
+}
+
+/// Positive — a prefix bound by an ancestor is in scope for a descendant, and the innermost
+/// binding of a prefix wins over an outer one.
+#[test]
+fn resolves_a_prefix_bound_by_an_ancestor_and_prefers_the_innermost_binding() {
+    let body = br#"<A xmlns:p="urn:outer"><B p:k="outer"/><C xmlns:p="urn:inner"><D p:k="inner"/></C></A>"#;
+    let root = parse(body).expect("the document parses");
+    let b = root.child("B").expect("B is present");
+    assert_eq!(b.attribute_ns("urn:outer", "k"), Some("outer"));
+    let d = root.child("C").and_then(|c| c.child("D")).expect("D is present");
+    assert_eq!(d.attribute_ns("urn:inner", "k"), Some("inner"));
+    assert_eq!(d.attribute_ns("urn:outer", "k"), None);
+}
+
+/// Negative — a prefix goes out of scope when the element that bound it closes. Without the pop,
+/// the second `<B>` would resolve against a binding no longer in force.
+#[test]
+fn n_a_binding_does_not_outlive_the_element_that_declared_it() {
+    let body = br#"<A><C xmlns:p="urn:inner"><B p:k="in"/></C><B p:k="out"/></A>"#;
+    let root = parse(body).expect("the document parses");
+    let inner = root.child("C").and_then(|c| c.child("B")).expect("the inner B");
+    assert_eq!(inner.attribute_ns("urn:inner", "k"), Some("in"));
+    let outer = root.children_named("B").next().expect("the outer B");
+    assert_eq!(outer.attribute_ns("urn:inner", "k"), None);
+    assert_eq!(outer.attribute("k"), None);
+}
+
+/// Negative — a prefix nothing ever bound resolves to no namespace, so the namespaced lookup does
+/// not answer it. `xsi:type` without `xmlns:xsi` is not the attribute AWS sends.
+#[test]
+fn n_an_unbound_prefix_is_not_the_namespaced_attribute() {
+    let root = parse(br#"<Grantee xsi:type="Group"><URI>g</URI></Grantee>"#).expect("the grantee parses");
+    assert_eq!(root.attribute_ns(XSI, "type"), None);
+    assert_eq!(root.attribute("type"), None);
+}
+
+/// Negative — an unprefixed attribute is in no namespace, and a namespaced one is not answered to
+/// a caller that asked for the bare name. The two lookups do not leak into each other.
+#[test]
+fn n_the_bare_and_the_namespaced_lookups_do_not_answer_each_other() {
+    let bare = parse(br#"<Grantee type="Group"></Grantee>"#).expect("parses");
+    assert_eq!(bare.attribute("type"), Some("Group"));
+    assert_eq!(bare.attribute_ns(XSI, "type"), None);
+
+    let namespaced = parse(GRANTEE).expect("parses");
+    assert_eq!(namespaced.attribute("type"), None);
+}
+
+/// Negative — a namespace declaration is a declaration, not data. It must not surface as an
+/// attribute of the element it appears on, or a decoder that reflects attributes back would write
+/// `xmlns:xsi` twice.
+#[test]
+fn n_a_namespace_declaration_is_not_an_attribute() {
+    let root = parse(GRANTEE).expect("parses");
+    assert_eq!(root.attributes.len(), 1);
+    assert_eq!(root.attributes[0].name, "type");
+    let defaulted = parse(br#"<A xmlns="urn:d" k="v"></A>"#).expect("parses");
+    assert_eq!(defaulted.attributes.len(), 1);
+    assert_eq!(defaulted.attribute("k"), Some("v"));
+}
+
+/// Positive — an attribute value is unescaped, and the five predefines are the whole set.
+#[test]
+fn unescapes_an_attribute_value_and_refuses_a_sixth_entity() {
+    let root = parse(br#"<A k="&amp;&lt;&gt;&quot;&apos;"></A>"#).expect("the predefines resolve");
+    assert_eq!(root.attribute("k"), Some("&<>\"'"));
+    assert_eq!(parse(br#"<A k="&xxe;"></A>"#), Err(XmlError::UnsupportedEntity));
+}
+
+/// Positive — an empty element carries its attributes too, and its own declaration is in scope for
+/// them. `<Grantee …/>` is the shape a grantee with no members takes.
+#[test]
+fn an_empty_element_carries_its_attributes() {
+    let body = br#"<Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group"/>"#;
+    let root = parse(body).expect("parses");
+    assert_eq!(root.attribute_ns(XSI, "type"), Some("Group"));
+}
+
+/// Negative — the ceilings still bite once attributes are kept, and a declaration counts toward
+/// them: a document cannot buy extra attribute budget by spelling them `xmlns:`.
+#[test]
+fn n_declarations_count_against_the_attribute_ceiling() {
+    let mut body = String::from("<Root");
+    for index in 0..=MAX_ATTRIBUTES_PER_ELEMENT {
+        body.push_str(&format!(" xmlns:p{index}=\"urn:{index}\""));
+    }
+    body.push_str("></Root>");
+    assert_eq!(parse(body.as_bytes()), Err(XmlError::TooManyAttributes));
+
+    let value = "x".repeat(MAX_ATTRIBUTE_BYTES + 1);
+    let long = format!("<Root xmlns:p=\"{value}\"></Root>");
+    assert_eq!(parse(long.as_bytes()), Err(XmlError::AttributeTooLong));
+}

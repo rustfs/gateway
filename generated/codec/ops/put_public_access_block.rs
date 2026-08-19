@@ -50,6 +50,7 @@ impl OperationCodec for dto::PutPublicAccessBlock {
         }
         // PublicAccessBlockConfiguration — the XML request body, rooted at `PublicAccessBlockConfiguration`.
         let raw_body = body.into_buffered()?;
+        value::verify_body_digest(request, raw_body.as_ref())?;
         let root = rustfs_gateway_xml::parse(raw_body.as_ref())
             .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
         if !["PublicAccessBlockConfiguration"].contains(&root.name.as_str()) {

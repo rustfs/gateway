@@ -55,6 +55,7 @@ impl OperationCodec for dto::PutBucketPolicy {
         }
         // Policy — the buffered request body, `application/json`.
         let raw_body = body.into_buffered()?;
+        value::verify_body_digest(request, raw_body.as_ref())?;
         input.policy = value::text_payload(raw_body.as_ref(), "Policy")?;
         // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {

@@ -31,9 +31,20 @@
 //! it would be safe *today* — which is exactly the kind of safety that disappears in a dependency
 //! bump nobody reviews as a protocol change. Depth and element count are bounded for the same
 //! reason: the cap on body bytes does not bound the tree a body can describe.
+//!
+//! # Why attributes carry a namespace and not a prefix
+//!
+//! Exactly one member of the supported S3 surface is written as an XML attribute — the
+//! `<Grantee>` discriminator, which AWS sends as `xsi:type` beside an `xmlns:xsi` declaration on
+//! that same element. A reader that stored the literal string `xsi:type` would be answering a
+//! question about a document-local alias: another client may bind the same namespace to `xs`, and
+//! a document that writes `xsi:type` while binding `xsi` to nothing has not written that
+//! attribute at all. So declarations are resolved as the document is walked, each attribute keeps
+//! the namespace its prefix resolved to, and the declarations themselves are not attributes of
+//! the element they appear on.
 
-use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader, XmlVersion};
 
 use crate::error::XmlError;
 
@@ -137,6 +148,26 @@ impl XmlLimits {
     }
 }
 
+/// One attribute of a parsed element.
+///
+/// The prefix is not kept. A prefix is a document-local alias for a namespace and two documents
+/// that mean the same thing routinely spell it differently — `xsi:type` and `xs:type` are the same
+/// attribute when the two prefixes are bound to the same URI, and `xsi:type` in two documents is
+/// *not* the same attribute if only one of them declared `xsi`. So what is kept is what the
+/// document actually said: the local name and the namespace the prefix resolved to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct XmlAttribute {
+    /// Local attribute name, namespace prefix stripped.
+    pub name: String,
+    /// The namespace the prefix resolved to. `None` only for an unprefixed attribute, which is
+    /// in no namespace at all.
+    ///
+    /// An attribute whose prefix no enclosing element bound is not stored — see [`XmlNode`].
+    pub namespace: Option<String>,
+    /// Attribute value, entity references already resolved.
+    pub value: String,
+}
+
 /// One element of a parsed body.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct XmlNode {
@@ -144,11 +175,41 @@ pub struct XmlNode {
     pub name: String,
     /// Concatenated text content, entity references already resolved.
     pub text: String,
+    /// Attributes, in document order, with namespace declarations already applied and removed.
+    ///
+    /// A prefixed attribute whose prefix no enclosing element bound is **absent** rather than
+    /// present in no namespace. The two are not the same thing and collapsing them is what would
+    /// let `<Grantee xsi:type="Group">` with no `xmlns:xsi` be read as the attribute AWS sends;
+    /// an undeclared prefix is a namespace-well-formedness error, and this reader's answer to it
+    /// is that the document did not write that attribute.
+    pub attributes: Vec<XmlAttribute>,
     /// Child elements, in document order.
     pub children: Vec<XmlNode>,
 }
 
 impl XmlNode {
+    /// The value of the unprefixed attribute with this name.
+    ///
+    /// Deliberately does not match a prefixed attribute of the same local name: an unprefixed
+    /// attribute is in no namespace at all, and answering `xsi:type` to a caller that asked for
+    /// `type` is the confusion this crate keeps the namespace for.
+    #[must_use]
+    pub fn attribute(&self, name: &str) -> Option<&str> {
+        self.attributes
+            .iter()
+            .find(|attribute| attribute.namespace.is_none() && attribute.name == name)
+            .map(|attribute| attribute.value.as_str())
+    }
+
+    /// The value of the attribute in this namespace with this local name.
+    #[must_use]
+    pub fn attribute_ns(&self, namespace: &str, name: &str) -> Option<&str> {
+        self.attributes
+            .iter()
+            .find(|attribute| attribute.namespace.as_deref() == Some(namespace) && attribute.name == name)
+            .map(|attribute| attribute.value.as_str())
+    }
+
     /// The first child with this local name.
     #[must_use]
     pub fn child(&self, name: &str) -> Option<&XmlNode> {
@@ -192,6 +253,11 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
     config.check_end_names = true;
 
     let mut stack: Vec<XmlNode> = Vec::new();
+    // One frame per *open* element, holding the `xmlns` bindings that element declared. An
+    // element's own declarations are in scope for its own attributes — AWS declares `xmlns:xsi`
+    // on the same `<Grantee>` that carries `xsi:type` — so a frame is pushed before that
+    // element's attributes are resolved, and popped when the element closes.
+    let mut scopes: Vec<Vec<(String, String)>> = Vec::new();
     let mut root: Option<XmlNode> = None;
     let mut elements = 0usize;
 
@@ -208,9 +274,11 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
                 if stack.len() >= limits.max_depth {
                     return Err(XmlError::TooDeep);
                 }
-                check_attributes(&start, limits)?;
+                scopes.push(declarations(&start, limits)?);
+                let attributes = read_attributes(&start, limits, &scopes)?;
                 stack.push(XmlNode {
                     name: local_name(start.name().as_ref())?,
+                    attributes,
                     ..XmlNode::default()
                 });
             }
@@ -219,9 +287,14 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
                 if elements > limits.max_elements {
                     return Err(XmlError::TooManyElements);
                 }
-                check_attributes(&empty, limits)?;
+                // An empty element declares and closes in one event, so its frame lives exactly as
+                // long as the resolution of its own attributes.
+                scopes.push(declarations(&empty, limits)?);
+                let attributes = read_attributes(&empty, limits, &scopes)?;
+                scopes.pop();
                 let node = XmlNode {
                     name: local_name(empty.name().as_ref())?,
+                    attributes,
                     ..XmlNode::default()
                 };
                 match stack.last_mut() {
@@ -235,6 +308,7 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
                 }
             }
             Ok(Event::End(_)) => {
+                scopes.pop();
                 let Some(node) = stack.pop() else {
                     return Err(XmlError::Malformed);
                 };
@@ -290,7 +364,13 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
     root.ok_or(XmlError::Empty)
 }
 
-fn check_attributes(start: &BytesStart<'_>, limits: XmlLimits) -> Result<(), XmlError> {
+/// The `xmlns` bindings one element declares, and the ceilings every attribute is held to.
+///
+/// The limits are applied here rather than in [`read_attributes`] so that they are applied once
+/// per attribute and to *every* attribute — a declaration is an attribute on the wire, and a
+/// ceiling that skipped them would let a document carry an unbounded number of `xmlns:` pairs.
+fn declarations(start: &BytesStart<'_>, limits: XmlLimits) -> Result<Vec<(String, String)>, XmlError> {
+    let mut declared = Vec::new();
     let mut count = 0usize;
     for attribute in start.attributes() {
         let attribute = attribute.map_err(|_| XmlError::Malformed)?;
@@ -301,8 +381,76 @@ fn check_attributes(start: &BytesStart<'_>, limits: XmlLimits) -> Result<(), Xml
         if attribute.value.as_ref().len() > limits.max_attribute_bytes {
             return Err(XmlError::AttributeTooLong);
         }
+        let (prefix, local) = split_name(attribute.key.as_ref())?;
+        // `xmlns:p="…"` binds `p`; a bare `xmlns="…"` binds the *default* element namespace, and
+        // an unprefixed attribute is in no namespace whatever the default is. Only the first
+        // form is a binding this crate can be asked about.
+        if prefix.as_deref() == Some("xmlns") {
+            let value = attribute
+                .normalized_value(XmlVersion::Implicit1_0)
+                .map_err(|_| XmlError::UnsupportedEntity)?;
+            declared.push((local, value.into_owned()));
+        }
     }
-    Ok(())
+    Ok(declared)
+}
+
+/// One element's attributes, with prefixes resolved against the scopes in force and the namespace
+/// declarations themselves removed.
+fn read_attributes(
+    start: &BytesStart<'_>,
+    limits: XmlLimits,
+    scopes: &[Vec<(String, String)>],
+) -> Result<Vec<XmlAttribute>, XmlError> {
+    let mut out = Vec::new();
+    for attribute in start.attributes() {
+        let attribute = attribute.map_err(|_| XmlError::Malformed)?;
+        if attribute.value.as_ref().len() > limits.max_attribute_bytes {
+            return Err(XmlError::AttributeTooLong);
+        }
+        let (prefix, name) = split_name(attribute.key.as_ref())?;
+        if prefix.as_deref() == Some("xmlns") || (prefix.is_none() && name == "xmlns") {
+            continue;
+        }
+        let namespace = match prefix {
+            // An undeclared prefix names a namespace the document never bound. Storing it with
+            // no namespace would make it indistinguishable from the unprefixed attribute of the
+            // same local name, so it is dropped instead.
+            Some(prefix) => match resolve(scopes, &prefix) {
+                Some(namespace) => Some(namespace),
+                None => continue,
+            },
+            None => None,
+        };
+        let value = attribute
+            .normalized_value(XmlVersion::Implicit1_0)
+            .map_err(|_| XmlError::UnsupportedEntity)?;
+        out.push(XmlAttribute {
+            name,
+            namespace,
+            value: value.into_owned(),
+        });
+    }
+    Ok(out)
+}
+
+/// The namespace a prefix is bound to by the innermost element that binds it.
+fn resolve(scopes: &[Vec<(String, String)>], prefix: &str) -> Option<String> {
+    scopes.iter().rev().find_map(|frame| {
+        frame
+            .iter()
+            .find(|(bound, _)| bound == prefix)
+            .map(|(_, namespace)| namespace.clone())
+    })
+}
+
+/// An attribute name split into its prefix, when it has one, and its local part.
+fn split_name(raw: &[u8]) -> Result<(Option<String>, String), XmlError> {
+    let name = core::str::from_utf8(raw).map_err(|_| XmlError::NotUtf8)?;
+    match name.split_once(':') {
+        Some((prefix, local)) => Ok((Some(prefix.to_owned()), local.to_owned())),
+        None => Ok((None, name.to_owned())),
+    }
 }
 
 /// The five entities XML defines without a DTD. There is no sixth, by design.
