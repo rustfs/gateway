@@ -1107,19 +1107,6 @@ impl Sut for InProcess {
                 .unwrap_or_default();
             let at = fault.read("setup.fault.at").and_then(Value::as_str).unwrap_or_default();
             let code = fault.read("setup.fault.code").and_then(Value::as_str).unwrap_or_default();
-            // The two operations whose fixture handlers commit a head. `UploadPartCopy` is the
-            // third the model marks as able to fail after a `200`, and this fixture answers it
-            // without committing — so a fault armed against it would be armed against nothing, and
-            // the case would run as though it had asked for no fault at all and report whatever it
-            // happened to get. Refusing is the difference between a skip that says why and a green
-            // verdict on an assertion that was never made.
-            if !matches!(operation, "CompleteMultipartUpload" | "CopyObject") {
-                return Err(SutError::Environment(format!(
-                    "`setup.fault.operation = \"{operation}\"` names an operation this target does not \
-                     commit a head for; it commits only CompleteMultipartUpload and CopyObject, and a \
-                     fault armed against any other would never be reported"
-                )));
-            }
             if at != "after_commit" {
                 return Err(SutError::Environment(format!(
                     "`setup.fault.at = \"{at}\"` is not a point this target can fail at; it arranges \
@@ -1133,7 +1120,19 @@ impl Sut for InProcess {
                      does not admit exists"
                 )));
             };
-            fixture.arm_committed_fault(operation, code);
+            // The set is not restated here. `Fixture::arm_committed_fault` measures the name
+            // against the one list the handlers themselves read, so a name this target cannot
+            // report a fault from is refused by the code that would have had to report it.
+            // `UploadPartCopy` is the case that matters: the model marks it as able to fail after a
+            // `200` and this fixture answers it without committing, so a fault armed against it
+            // would be armed against nothing and the case would run as though it had declared none.
+            if let Err(unreportable) = fixture.arm_committed_fault(operation, code) {
+                return Err(SutError::Environment(format!(
+                    "`setup.fault.operation = \"{}\"` names an operation this target does not commit a \
+                     head for, so a fault armed against it would never be reported",
+                    unreportable.operation()
+                )));
+            }
         }
 
         for bucket in setup.read("setup.buckets").and_then(Value::as_array).unwrap_or_default() {

@@ -107,16 +107,22 @@ fn run_copy_domain() -> Report {
     runner::run(&corpus, &mut sut, &options)
 }
 
-fn reasons(report: &Report, id: &str) -> Vec<String> {
-    report
+/// Asserts a case *passed*, and says what it failed on if it did not.
+///
+/// `Verdict::Passed` rather than "has no failure diagnostics", because a skipped case has none
+/// either: `SutError::Environment` — which is how this target refuses a declaration it cannot carry
+/// out, including a `[setup.fault]` naming an operation it does not commit for — becomes
+/// `Verdict::Skipped`, and a skip and a pass are the same colour to anything that only counts
+/// complaints. This is the assertion this file exists to make, so it is the one that must not be
+/// satisfiable by a case that never ran.
+fn assert_passed(report: &Report, id: &str, why: &str) {
+    let outcome = report
         .outcomes
         .iter()
         .find(|outcome| outcome.id == id)
-        .unwrap_or_else(|| panic!("{id} is selected by the copy filter"))
-        .failures()
-        .iter()
-        .map(ToString::to_string)
-        .collect()
+        .unwrap_or_else(|| panic!("{id} is selected by the copy filter"));
+    let reasons: Vec<String> = outcome.failures().iter().map(ToString::to_string).collect();
+    assert_eq!(outcome.verdict, Verdict::Passed, "{id} is not green — {why}: {reasons:?}");
 }
 
 /// Negative — the copy family is a closed ledger: thirty-eight identifiers, contiguous, one file
@@ -258,17 +264,15 @@ fn the_copy_family_holds_the_verdicts_the_baseline_records() {
 fn the_recovered_case_is_green_without_moving_the_boundary_that_keeps_a_missing_source_a_404() {
     let report = run_copy_domain();
 
-    let recovered = reasons(&report, RECOVERED);
-    assert!(
-        recovered.is_empty(),
-        "{RECOVERED} is red — the post-commit fault seam no longer delivers a failure inside a \
-         success: {recovered:?}"
+    assert_passed(
+        &report,
+        RECOVERED,
+        "the post-commit fault seam no longer delivers a failure inside a success",
     );
-
-    let coupled = reasons(&report, COUPLED);
-    assert!(
-        coupled.is_empty(),
-        "{COUPLED} is red: a missing copy source no longer answers 404 before the copy starts, \
-         which is the boundary {RECOVERED} must be green *without* moving: {coupled:?}"
+    assert_passed(
+        &report,
+        COUPLED,
+        "a missing copy source no longer answers 404 before the copy starts, which is the boundary \
+         the recovered case must be green without moving",
     );
 }

@@ -57,12 +57,26 @@ const RECOVERED: [&str; 5] = ["c-mpu-0001", "c-mpu-0002", "c-mpu-0003", "c-mpu-0
 /// rearrangement makes `c-mpu-0001` green while turning each of these into a `200` whose body
 /// carries the refusal. A client that reads the status line — which is every client that has not
 /// been told this operation is special — records each of them as a successful upload.
-const REFUSED_BEFORE_COMMIT: [(&str, u16); 5] = [
+///
+/// Ten of them, not the five the fixture's own doc block happens to name: a guard is only as good as
+/// the cases it covers, and a boundary move that spared half of them would still be a boundary move.
+/// One is a `412`, which a list of `400`s alone would have missed.
+///
+/// `c-mpu-0041` is the completion left out. It is the same rule under two exchanges, and its status
+/// lives inside `[[exchanges]]` rather than at `expect.status`, so the second half of this ledger —
+/// reading the demand back out of the file — would have nothing to read. A row naming it with no
+/// status to check against would assert only the colour.
+const REFUSED_BEFORE_COMMIT: [(&str, u16); 10] = [
+    ("c-mpu-0019", 400),
     ("c-mpu-0020", 400),
     ("c-mpu-0021", 400),
     ("c-mpu-0022", 400),
     ("c-mpu-0023", 400),
     ("c-mpu-0026", 400),
+    ("c-mpu-0033", 400),
+    ("c-mpu-0034", 400),
+    ("c-mpu-0036", 400),
+    ("c-mpu-0042", 412),
 ];
 
 /// The cases the in-process target cannot execute, each for a reason the runner prints with the
@@ -218,8 +232,8 @@ fn the_multipart_family_runs_green_with_the_entity_tag_cases_recovered() {
 /// `<Error>` document in the body. There are two ways to arrive at that. One is to describe a fault
 /// that happens at that point. The other is to move the completion's checks below the commit, which
 /// is a smaller diff, makes `c-mpu-0001` green immediately, and turns every refusal this operation
-/// can still name a status for into a `200` whose body carries the refusal. `c-mpu-0020` …
-/// `c-mpu-0023` and `c-mpu-0026` are what that costs, and a client that reads the status line —
+/// can still name a status for into a `200` whose body carries the refusal. Every case
+/// [`REFUSED_BEFORE_COMMIT`] names is what that costs, and a client that reads the status line —
 /// which is every client that has not been told this operation is special — would record each of
 /// them as a successful upload.
 ///

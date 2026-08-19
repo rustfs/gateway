@@ -56,8 +56,8 @@ capture_etag_as = "part1_etag"
 # The assembly fails, and it fails after the head has gone out. Every refusal this operation can
 # still name a status for — an empty part list, parts out of order, a part that is not there, a part
 # below the size floor, a digest that does not match — happens above the commit boundary and keeps
-# its own status, which is what `c-mpu-0020` … `c-mpu-0026` pin. This case is the other side of that
-# boundary, and it is the only side the corpus could not describe before.
+# its own status, which is what ten other cases in this family pin. This case is the other side of
+# that boundary, and it is the only side the corpus could not describe before.
 [setup.fault]
 operation = "CompleteMultipartUpload"
 at = "after_commit"
