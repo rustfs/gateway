@@ -1,0 +1,103 @@
+# c-tagging-0025 — a version id is not a global handle.
+#
+# Schema dimensions exercised: error shape, cross-key resolution of a captured id.
+
+[case]
+id = "c-tagging-0025"
+schema_version = 1
+title = "A version id minted for one key is not a version of another key"
+rationale = """
+A store that resolves a version id on its own — an index keyed by id, rather than a lookup within \
+the key named by the request — answers one object's labels for a request that named a different \
+one. The id in this case is genuine, so the refusal cannot come from validating its shape; it has \
+to come from the store noticing that this key has no such version. That is the difference between \
+a tag read that is scoped to the resource the caller asked about and one that is not, and the \
+second is a cross-object disclosure of whatever the labels record."""
+polarity = "negative"
+operation = "GetObjectTagging"
+tags = ["tagging", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-tag-wrapped-0088", "q-tag-object-unconfigured-0090"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/versioning-workflows.html"
+summary = "A version id identifies one version of one key, so the same id under another key names nothing."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging-crosskey"
+versioning = "enabled"
+
+[[exchanges]]
+name = "write-the-labelled-key"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging-crosskey/labelled.txt"
+headers = { "content-type" = "text/plain", "x-amz-tagging" = "colour=green" }
+body = { utf8 = "first" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+labelled = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "write-a-second-key"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging-crosskey/other.txt"
+headers = { "content-type" = "text/plain" }
+body = { utf8 = "second" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "the-other-keys-id-names-nothing-here"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging-crosskey/other.txt?tagging&versionId=${capture.labelled}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchVersion"
+request_id_present = true
+
+[[exchanges]]
+name = "and-the-labelled-key-still-answers-its-own"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging-crosskey/labelled.txt?tagging&versionId=${capture.labelled}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>'''

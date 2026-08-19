@@ -1,0 +1,145 @@
+# c-tagging-0023 — an unminted version id is a refusal, never the current version's labels.
+#
+# Schema dimensions exercised: error shape on all three verbs, refusal-then-verify.
+
+[case]
+id = "c-tagging-0023"
+schema_version = 1
+title = "A ?tagging request naming a version that does not exist is a 404 NoSuchVersion"
+rationale = """
+Falling back to the current version for an unknown id is the tempting failure: every request \
+succeeds, so nothing looks broken. It is also the worst one — a caller auditing an archived \
+version is shown today's labels and told they are that version's, and a writer that meant to \
+label an archived version silently relabels the live one. All three verbs are exercised because \
+the fallback is written per handler, and a store may well resolve the read correctly and still \
+let the write land on the newest version. The read-back afterwards proves the two refused writes \
+did not touch the version that does have a set."""
+polarity = "negative"
+operation = "GetObjectTagging"
+tags = ["tagging", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-tag-wrapped-0088", "q-tag-delete-idempotent-0091"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html"
+summary = "The read names a version rather than describing one, so an id the store never issued names nothing."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "NoSuchVersion is the documented code for a request naming a version id that does not exist."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-tagging-unknown"
+versioning = "enabled"
+
+[[exchanges]]
+name = "write-a-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging-unknown/doc.txt"
+headers = { "content-type" = "text/plain" }
+body = { utf8 = "first" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+only = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "label-it"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging-unknown/doc.txt?tagging&versionId=${capture.only}"
+headers = { "content-md5" = "QTsTDAb4c0VADLNy4ipavA==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "the-read-of-an-unknown-version-is-refused"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging-unknown/doc.txt?tagging&versionId=conformance-version-9999"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchVersion"
+request_id_present = true
+
+[[exchanges]]
+name = "the-write-to-an-unknown-version-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-tagging-unknown/doc.txt?tagging&versionId=conformance-version-9999"
+headers = { "content-md5" = "Eqjc2dLsYeOiFyCAHNmyhA==" }
+body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>red</Value></Tag></TagSet></Tagging>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchVersion"
+request_id_present = true
+
+[[exchanges]]
+name = "the-untag-of-an-unknown-version-is-refused"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-tagging-unknown/doc.txt?tagging&versionId=conformance-version-9999"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchVersion"
+request_id_present = true
+
+[[exchanges]]
+name = "the-real-version-is-exactly-as-it-was"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-tagging-unknown/doc.txt?tagging&versionId=${capture.only}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>'''
