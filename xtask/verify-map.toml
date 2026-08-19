@@ -210,7 +210,7 @@ cases = "c-encryption-0001,c-encryption-0004,c-encryption-0005,c-encryption-0007
 
 [[operation]]
 name = "PutBucketLifecycleConfiguration"
-cases = "c-lifecycle-0001,c-lifecycle-0008,c-lifecycle-0009,c-lifecycle-0010,c-lifecycle-0012,c-lifecycle-0015,c-lifecycle-0016,c-lifecycle-0017,c-lifecycle-0018,c-lifecycle-0019,c-lifecycle-0020,c-lifecycle-0021,c-lifecycle-0022,c-lifecycle-0023,c-lifecycle-0024,c-lifecycle-0025,c-lifecycle-0026,c-lifecycle-0027,c-lifecycle-0028,c-lifecycle-0029"
+cases = "c-lifecycle-0001,c-lifecycle-0008,c-lifecycle-0009,c-lifecycle-0010,c-lifecycle-0012,c-lifecycle-0015,c-lifecycle-0016,c-lifecycle-0017,c-lifecycle-0018,c-lifecycle-0019,c-lifecycle-0020,c-lifecycle-0021,c-lifecycle-0022,c-lifecycle-0023,c-lifecycle-0024,c-lifecycle-0025,c-lifecycle-0026,c-lifecycle-0027,c-lifecycle-0028,c-lifecycle-0029,c-lifecycle-0030"
 
 [[operation]]
 name = "PutBucketLogging"

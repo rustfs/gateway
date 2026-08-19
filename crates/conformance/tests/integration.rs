@@ -26,6 +26,8 @@ mod copy_family;
 mod corpus;
 #[path = "domain_wiring.rs"]
 mod domain_wiring;
+#[path = "lifecycle_family.rs"]
+mod lifecycle_family;
 #[path = "list_family.rs"]
 mod list_family;
 #[path = "multipart_family.rs"]

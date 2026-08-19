@@ -53,6 +53,9 @@ mod golden;
 #[path = "hot_path.rs"]
 mod hot_path;
 
+#[path = "lifecycle_roundtrip.rs"]
+mod lifecycle_roundtrip;
+
 #[path = "limit_layering.rs"]
 mod limit_layering;
 
