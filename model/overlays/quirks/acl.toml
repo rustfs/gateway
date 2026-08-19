@@ -57,7 +57,7 @@ mutation_sources = [
 ]
 target  = "Grantee"
 summary = "The XMLSchema-instance namespace is declared on the <Grantee> element itself rather than on the document root, so a client that resolves prefixes before reading xsi:type finds the declaration where AWS puts it."
-cases   = ["c-acl-0001", "c-acl-0002", "c-acl-0003"]
+cases   = ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0038"]
 
   [[quirk.evidence]]
   kind    = "s3s-issue"
@@ -80,7 +80,7 @@ mutation_sources = [
 ]
 target  = "Grantee.Type"
 summary = "The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec."
-cases   = ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0004"]
+cases   = ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0004", "c-acl-0035", "c-acl-0038", "c-acl-0039"]
 
   [[quirk.evidence]]
   kind    = "s3s-pr"
@@ -123,7 +123,7 @@ mutation_dimension = "grantee_discriminator_policy"
 contract_value = "derive_from_identifying_member"
 target  = "Grantee.Type"
 summary = "On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries; when the unreadable attribute contradicts those members, the members decide the stored and returned type."
-cases   = ["c-acl-0005"]
+cases   = ["c-acl-0005", "c-acl-0039"]
 
   [[quirk.evidence]]
   kind    = "s3s-issue"
@@ -213,7 +213,7 @@ mutation_sources = [
 ]
 target  = "PutBucketAcl"
 summary = "Both ACL writes carry the aws.protocols#httpChecksum trait with requestChecksumRequired, which is a different trait from the smithy.api#httpChecksumRequired the lowering reads, so the requirement is stated in the overlay and a write with neither Content-MD5 nor an x-amz-checksum-* header is refused before the body is parsed."
-cases   = ["c-acl-0015", "c-acl-0016", "c-acl-0017"]
+cases   = ["c-acl-0015", "c-acl-0016", "c-acl-0017", "c-acl-0036", "c-acl-0037"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"

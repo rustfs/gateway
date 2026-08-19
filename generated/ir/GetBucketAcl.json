@@ -256,7 +256,7 @@
                                 "summary": "The documented response syntax shows the xmlns:xsi declaration written on the Grantee element beside the xsi:type attribute."
                               }
                             ],
-                "cases": ["c-acl-0001", "c-acl-0002", "c-acl-0003"]
+                "cases": ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0038"]
               },
               {
                 "id": "q-acl-0003",
@@ -275,7 +275,15 @@
                                 "summary": "The Grantee reference documents Type as an attribute of the containing element rather than as a member element."
                               }
                             ],
-                "cases": ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0004"]
+                "cases": [
+                           "c-acl-0001",
+                           "c-acl-0002",
+                           "c-acl-0003",
+                           "c-acl-0004",
+                           "c-acl-0035",
+                           "c-acl-0038",
+                           "c-acl-0039"
+                         ]
               },
               {
                 "id": "q-acl-0004",
@@ -341,7 +349,7 @@
                                 "summary": "Each documented Type value pairs with exactly one identifying member, which makes the identifying member a deterministic discriminator."
                               }
                             ],
-                "cases": ["c-acl-0005"]
+                "cases": ["c-acl-0005", "c-acl-0039"]
               }
             ],
   "ext_points": []

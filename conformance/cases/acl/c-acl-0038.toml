@@ -1,0 +1,40 @@
+[case]
+id = "c-acl-0038"
+schema_version = 1
+title = "The discriminator is read by namespace, so a client's own prefix is refused just the same"
+rationale = """
+A prefix is a document-local alias. AWS spells it xsi and binds it on the Grantee element, but nothing in XML makes that spelling part of the contract, and a reader keyed on the literal string 'xsi:type' would see no attribute here at all — it would classify this grantee by its ID and answer 200, which is the wrong answer to a document naming a type that does not exist. The same bogus value under the AWS spelling is c-acl-0035, and the same bogus value with the prefix left unbound is c-acl-0039, which is accepted: the three together say the lookup goes through the declaration and nothing else."""
+polarity = "negative"
+operation = "PutBucketAcl"
+tags = ["acl", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acl-0002", "q-acl-0003"]
+
+[[case.evidence]]
+url = "https://www.w3.org/TR/xml-names/#scoping"
+summary = "Namespaces in XML binds a prefix to a URI for the scope of the declaring element, which makes the URI the identity of a name and the prefix a local alias for it."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html"
+summary = "The documented response syntax writes the xmlns:xsi declaration on the Grantee element beside the xsi:type attribute."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "UDqdVLfk74gd5gwsUXEgKg==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xs="http://www.w3.org/2001/XMLSchema-instance" xs:type="Wombat"><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+message_present = true

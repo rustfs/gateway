@@ -7,7 +7,7 @@ contract_value = "derive_from_identifying_member"
 mutation_dimension = "grantee_discriminator_policy"
 target = "Grantee.Type"
 summary = "On the way in the discriminator is derived from whichever of ID, URI or EmailAddress the grantee carries; when the unreadable attribute contradicts those members, the members decide the stored and returned type."
-cases = ["c-acl-0005"]
+cases = ["c-acl-0005", "c-acl-0039"]
 
 [[evidence]]
 kind = "s3s-issue"

@@ -1,0 +1,59 @@
+[case]
+id = "c-acl-0036"
+schema_version = 1
+title = "PutObjectAcl with a Content-MD5 that is not the digest of its body is a 400 BadDigest"
+rationale = """
+c-acl-0015 proves the header must be present and c-acl-0017 proves a checksum header may stand in for it; neither can prove the value is checked, and a gateway that read the header and compared it to nothing would satisfy both while telling every client its round trip was verified. This is the third direction: a well-formed digest that names bytes other than the ones that arrived. It is refused before the backend is called, so the ACL is not stored — which is what the read-back exchange asserts, since a store that reported the mismatch after writing would answer this 400 and keep the grant anyway."""
+polarity = "negative"
+operation = "PutObjectAcl"
+tags = ["acl", "checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acl-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAcl.html"
+summary = "The operation documents BadDigest for a Content-MD5 that disagrees with the body it accompanies."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[setup.objects]]
+bucket = "conf-acl"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[[exchanges]]
+name = "write-with-a-digest-of-other-bytes"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl/doc.txt?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "/bpPyHzYqb2YMxYr8Z7IHQ==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "BadDigest"
+message_present = true
+
+[[exchanges]]
+name = "read-back-shows-nothing-was-stored"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl/doc.txt?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+golden = "goldens/c-acl-0036.xml"

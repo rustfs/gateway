@@ -265,7 +265,7 @@ fn n_a_checksum_algorithm_selector_alone_is_not_an_integrity_claim() {
 #[test]
 fn a_multi_object_delete_is_accepted_with_either_integrity_header() {
     for headers in [
-        &[("content-md5", "1B2M2Y8AsgTpgAmY7PhCfg==")][..],
+        &[("content-md5", "aFPqFnlCon58cZ4Qt7zwvQ==")][..],
         &[("x-amz-checksum-crc32", "AAAAAA==")][..],
     ] {
         let request = accepted("POST", "/photos?delete", headers);
@@ -285,10 +285,16 @@ fn n_refuses_an_object_path_with_no_key() {
     assert_eq!(error.status(), StatusCode::BAD_REQUEST, "a 400 from the chosen operation, not a 501");
 }
 
-// The four body-shape refusals below carry `content-md5` for one reason only: `DeleteObjects` is
-// `httpChecksumRequired`, so the integrity check now precedes the body and a fixture without it
+// The four body-shape refusals below carry an integrity header for one reason only: `DeleteObjects`
+// is `httpChecksumRequired`, so the integrity check precedes the body and a fixture without it
 // would never reach the assertion it was written for. The assertions themselves are unchanged.
-const DELETE_INTEGRITY: &[(&str, &str)] = &[("content-md5", "1B2M2Y8AsgTpgAmY7PhCfg==")];
+//
+// It is a checksum header rather than a `Content-MD5` because the digest is now verified against
+// the body: a `Content-MD5` here would have to be recomputed every time one of these four bodies is
+// edited, and the day somebody forgot, the test would go red for the digest and not for the shape
+// it is about. The header this constant does send satisfies the requirement and names nothing about
+// these bytes.
+const DELETE_INTEGRITY: &[(&str, &str)] = &[("x-amz-checksum-crc32", "AAAAAA==")];
 
 #[test]
 fn n_refuses_a_delete_objects_body_with_the_wrong_root() {

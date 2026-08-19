@@ -139,6 +139,47 @@ fn n_the_integrity_guard_is_generated_only_where_the_ir_asks_for_it() {
     }
 }
 
+/// Structural control over the emitter's own claim that the two lines go together.
+///
+/// `BUFFER_BODY` writes the buffering and the digest verification as one constant precisely so a
+/// site cannot acquire one without the other, and this is what makes that claim falsifiable: an
+/// emitter that buffered a body somewhere without settling the `Content-MD5` declared over it would
+/// produce a decoder that reads unverified bytes at exactly one operation, and every conformance
+/// case for every other operation would stay green. Both directions are asserted — one verification
+/// per buffered body, and none without one — because a decoder that verified a body it never read
+/// would not compile but a count that only checked "at least one" would not notice two reads and
+/// one check.
+#[test]
+fn every_buffered_body_is_settled_against_the_digest_declared_over_it() {
+    const READ: &str = "let raw_body = body.into_buffered()?;\n";
+    const SETTLE: &str = "        value::verify_body_digest(request, raw_body.as_ref())?;\n";
+    let artifacts = super::codegen_tests::artifacts();
+    let mut buffered = 0usize;
+    for ir in &artifacts.operations {
+        let generated = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes)
+            .expect("every included operation has a decoder");
+        let reads: Vec<usize> = generated.match_indices(READ).map(|(index, _)| index).collect();
+        assert_eq!(
+            generated.matches(SETTLE.trim_start()).count(),
+            reads.len(),
+            "{}: one verification per buffered body, and none without one",
+            ir.operation
+        );
+        for index in &reads {
+            assert!(
+                generated[index.saturating_add(READ.len())..].starts_with(SETTLE),
+                "{}: the verification is the statement immediately after the body is buffered",
+                ir.operation
+            );
+        }
+        buffered = buffered.saturating_add(reads.len());
+    }
+    assert!(
+        buffered >= 20,
+        "only {buffered} operations buffer a body; the control has nothing to look at"
+    );
+}
+
 #[test]
 fn the_two_bounded_members_reach_the_generated_decoders() {
     let artifacts = super::codegen_tests::artifacts();

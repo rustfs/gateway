@@ -6,7 +6,7 @@ classification = "mutable"
 mutation_dimension = "optionality"
 target = "PutBucketAcl"
 summary = "Both ACL writes carry the aws.protocols#httpChecksum trait with requestChecksumRequired, which is a different trait from the smithy.api#httpChecksumRequired the lowering reads, so the requirement is stated in the overlay and a write with neither Content-MD5 nor an x-amz-checksum-* header is refused before the body is parsed."
-cases = ["c-acl-0015", "c-acl-0016", "c-acl-0017"]
+cases = ["c-acl-0015", "c-acl-0016", "c-acl-0017", "c-acl-0036", "c-acl-0037"]
 
 [[source]]
 path = "PutBucketAcl.checksum.http_checksum_required"

@@ -197,11 +197,11 @@ fn unknown_element_policy(ir: &OperationIr, rules: &CodecRules) -> Result<Unknow
 
 /// Whether a shape member is carried by an XML attribute rather than by a child element.
 ///
-/// The two emitters ask this for opposite reasons and must agree: `decode` skips such a member
-/// because the reader hands attributes to nobody, and `encode` skips it as an element because it
-/// is written into the opening tag instead. One answer, one place — a disagreement here is a
-/// member written as an attribute and read back as an element, which is the round trip nothing
-/// would notice until an SDK did.
+/// The two emitters ask this for opposite reasons and must agree: `decode` reads such a member out
+/// of the opening tag instead of looking for a child element, and `encode` writes it into the
+/// opening tag instead of emitting one. One answer, one place — a disagreement here is a member
+/// written as an attribute and read back as an element, which is the round trip nothing would
+/// notice until an SDK did.
 #[must_use]
 pub fn carried_as_attribute(shape: &Shape, member: &str) -> bool {
     shape
@@ -211,7 +211,7 @@ pub fn carried_as_attribute(shape: &Shape, member: &str) -> bool {
         .any(|attribute| matches!(&attribute.source, AttributeSource::Field(name) if name == member))
 }
 
-/// The attribute name carrying a member, for the comment the emitters leave behind.
+/// The attribute name carrying a member, as the IR spells it — prefix included.
 #[must_use]
 pub fn attribute_name(shape: &Shape, member: &str) -> String {
     shape

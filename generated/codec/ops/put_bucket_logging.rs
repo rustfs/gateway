@@ -40,6 +40,7 @@ impl OperationCodec for dto::PutBucketLogging {
         input.bucket = request.require_bucket()?;
         // BucketLoggingStatus — the XML request body, rooted at `BucketLoggingStatus`.
         let raw_body = body.into_buffered()?;
+        value::verify_body_digest(request, raw_body.as_ref())?;
         let root = rustfs_gateway_xml::parse(raw_body.as_ref())
             .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
         if !["BucketLoggingStatus"].contains(&root.name.as_str()) {
@@ -104,7 +105,10 @@ fn read_grantee(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Grantee, Code
     if let Some(raw) = node.child_text("URI") {
         shape.uri = Some(raw.to_owned());
     }
-    // Type — carried by the `xsi:type` attribute, which the reader does not expose.
+    // Type — the `xsi:type` attribute, not a child element.
+    if let Some(raw) = node.attribute_ns("http://www.w3.org/2001/XMLSchema-instance", "type") {
+        shape.r#type = Some(dto::Type::custom(raw.to_owned()));
+    }
     value::exit(shape.check_required())?;
     Ok(shape)
 }

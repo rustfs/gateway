@@ -51,7 +51,9 @@ fn delete_objects_derives_every_key_and_version_action() {
         .method("POST")
         .uri("http://host.invalid/bucket?delete")
         .header("host", "host.invalid")
-        .header("content-md5", "present")
+        // The true digest of the body below: `Content-MD5` is verified against the bytes now, so a
+        // placeholder would refuse this request with `BadDigest` before any action was derived.
+        .header("content-md5", "iunWEGrmj9rjGeTZYc+R5w==")
         .body(())
         .expect("valid request");
     let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");

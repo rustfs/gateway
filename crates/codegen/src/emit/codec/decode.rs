@@ -59,7 +59,7 @@
 use std::fmt::Write as _;
 
 use rustfs_gateway_model::UnknownElementPolicyValue;
-use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Shape, Type};
+use rustfs_gateway_model::ir::{AttributeSource, Binding, Field, OperationIr, Shape, Type};
 
 use super::{CodecRules, attribute_name, bounds, carried_as_attribute, expr, forms, media, tolerance};
 use crate::emit::dto::naming;
@@ -110,6 +110,19 @@ fn for_header(indent: usize, receiver: &str, links: &[String]) -> String {
     out.push_str(&format!("{pad}{{\n"));
     out
 }
+
+/// Buffering the request body, and the one place a `Content-MD5` over it is settled.
+///
+/// The two lines are emitted together and never apart. A decoder that buffered a body without
+/// verifying the digest declared over it would accept corrupted bytes at exactly the operations
+/// AWS marks `httpChecksumRequired` — and the omission would be invisible, because a request whose
+/// digest happens to be right decodes identically either way. `value::require_integrity` is the
+/// other half and answers a different question: it asks whether a claim was *made*, before a byte
+/// is read; this asks whether the claim was *true*, which cannot be asked any earlier.
+const BUFFER_BODY: &str = concat!(
+    "        let raw_body = body.into_buffered()?;\n",
+    "        value::verify_body_digest(request, raw_body.as_ref())?;\n"
+);
 
 /// rustfmt's `max_width` for this repository.
 const MAX_WIDTH: usize = 130;
@@ -289,7 +302,8 @@ fn one_field(
             }
             Type::Blob { streaming: false } => {
                 let _ = writeln!(out, "        // {member} — the buffered request body.");
-                out.push_str(&assign(8, &target, &wrap(field, "body.into_buffered()?")));
+                out.push_str(BUFFER_BODY);
+                out.push_str(&assign(8, &target, &wrap(field, "raw_body")));
             }
             Type::Structure(shape) => {
                 let root = if ir.xml.request_root.as_deref().unwrap_or("").is_empty() {
@@ -300,7 +314,7 @@ fn one_field(
                 let aliases: Vec<String> = ir.xml.request_root_aliases.clone();
                 let reader = format!("read_{}", naming::module_name(shape));
                 let _ = writeln!(out, "        // {member} — the XML request body, rooted at `{root}`.");
-                out.push_str("        let raw_body = body.into_buffered()?;\n");
+                out.push_str(BUFFER_BODY);
                 // An optional payload means the request may carry no body at all (CreateBucket):
                 // zero bytes decode to the absent member, and anything else must still be the
                 // declared document — an empty body is the one spelling that skips the parser.
@@ -352,7 +366,7 @@ fn one_field(
             Type::String | Type::OpaqueString => {
                 let media = media::required(field, rules, op)?;
                 let _ = writeln!(out, "        // {member} — the buffered request body, `{media}`.");
-                out.push_str("        let raw_body = body.into_buffered()?;\n");
+                out.push_str(BUFFER_BODY);
                 let read = format!("value::text_payload(raw_body.as_ref(), \"{member}\")?");
                 let read = match field.ty {
                     Type::OpaqueString => format!("value::opaque(&{read})"),
@@ -463,7 +477,7 @@ fn open_request_document(ir: &OperationIr) -> Result<String, String> {
         .join(", ");
     let mut out = String::new();
     let _ = writeln!(out, "        // The XML request body, rooted at `{root}`.");
-    out.push_str("        let raw_body = body.into_buffered()?;\n");
+    out.push_str(BUFFER_BODY);
     out.push_str(&root_namespace_guard(&ir.operation, "        "));
     out.push_str("        let root = rustfs_gateway_xml::parse(raw_body.as_ref())\n");
     out.push_str(
@@ -595,6 +609,67 @@ fn xml_member(
     Ok(out)
 }
 
+/// Renders the lines that read one shape member the IR binds to an XML attribute.
+///
+/// The mirror image of [`super::encode`]'s `shape_opener`, and it must stay one: a member written
+/// into the opening tag and read back out of a child element is the round trip nothing notices
+/// until an SDK does.
+fn xml_attribute_member(
+    ir: &OperationIr,
+    shape_name: &str,
+    shape: &Shape,
+    field: &Field,
+    target: &str,
+    rules: &CodecRules,
+) -> Result<String, String> {
+    let member = &field.name;
+    let qualified = attribute_name(shape, member);
+    let accessor = attribute_accessor(&ir.operation, shape_name, shape, &qualified)?;
+    let conversion = expr::from_wire(
+        &field.ty,
+        member,
+        &ir.operation,
+        true,
+        bounds::of(field, rules, &ir.operation)?,
+        forms::of(field, rules, &ir.operation)?,
+        super::boolean::of(ir, field, rules)?,
+    )?;
+    let mut out = String::new();
+    let _ = writeln!(out, "    // {member} — the `{qualified}` attribute, not a child element.");
+    let _ = writeln!(out, "    if let Some(raw) = node.{accessor} {{");
+    out.push_str(&assign(8, target, &wrap(field, &conversion)));
+    out.push_str(&required_member_refusal(field, member, 4));
+    Ok(out)
+}
+
+/// The reader call that fetches one attribute, resolved through the IR rather than through a
+/// hard-coded namespace.
+///
+/// A prefixed attribute is looked up by the namespace its prefix is bound to, and the binding is
+/// the shape's own constant `xmlns:<prefix>` attribute on the same element — which is the
+/// declaration the encoder writes. Two spellings of the same fact would drift; this is one.
+fn attribute_accessor(operation: &str, shape_name: &str, shape: &Shape, qualified: &str) -> Result<String, String> {
+    let Some((prefix, local)) = qualified.split_once(':') else {
+        return Ok(format!("attribute(\"{qualified}\")"));
+    };
+    let declaration = format!("xmlns:{prefix}");
+    let namespace = shape
+        .xml
+        .attributes
+        .iter()
+        .find(|attribute| attribute.name == declaration)
+        .and_then(|attribute| match &attribute.source {
+            AttributeSource::Constant(literal) => Some(literal.clone()),
+            AttributeSource::Field(_) => None,
+        })
+        .ok_or_else(|| {
+            format!(
+                "codec {operation}: shape `{shape_name}` reads the `{qualified}` attribute, but declares no constant `{declaration}` on the same element for its prefix to resolve through"
+            )
+        })?;
+    Ok(format!("attribute_ns(\"{namespace}\", \"{local}\")"))
+}
+
 /// Renders the reader for one nested request shape.
 ///
 /// Takes the operation's resolved quirks because a bounded integer is bounded wherever it is read:
@@ -660,21 +735,15 @@ pub fn shape_reader(
     }
 
     for field in &shape.fields {
-        // A member the IR carries as an XML attribute is not a child element, and the reader this
-        // project ships hands attributes to nobody. Reading it as an element would accept a
-        // spelling no AWS SDK sends and refuse the one they all do; the member is left at its
-        // default and whichever shared contract owns the shape derives it. See `super`'s note on
-        // the attribute mechanism.
+        let target = format!("shape.{}", naming::field_name(&field.name));
+        // A member the IR carries as an XML attribute is not a child element. Reading it as one
+        // would accept a spelling no AWS SDK sends and refuse the one they all do, so it is read
+        // from the attribute — under the namespace the shape's own `xmlns:` constant binds, never
+        // under the prefix, which is the sender's private alias.
         if carried_as_attribute(shape, &field.name) {
-            let _ = writeln!(
-                out,
-                "    // {} — carried by the `{}` attribute, which the reader does not expose.",
-                field.name,
-                attribute_name(shape, &field.name)
-            );
+            out.push_str(&xml_attribute_member(ir, name, shape, field, &target, rules)?);
             continue;
         }
-        let target = format!("shape.{}", naming::field_name(&field.name));
         out.push_str(&xml_member(ir, field, &target, rules, "node", 4)?);
     }
     out.push_str("    value::exit(shape.check_required())?;\n    Ok(shape)\n}\n");

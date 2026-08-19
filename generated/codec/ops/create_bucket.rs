@@ -43,6 +43,7 @@ impl OperationCodec for dto::CreateBucket {
         input.bucket = request.require_bucket()?;
         // CreateBucketConfiguration — the XML request body, rooted at `CreateBucketConfiguration`.
         let raw_body = body.into_buffered()?;
+        value::verify_body_digest(request, raw_body.as_ref())?;
         if raw_body.as_ref().is_empty() {
             input.create_bucket_configuration = None;
         } else {

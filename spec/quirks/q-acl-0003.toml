@@ -6,7 +6,7 @@ classification = "mutable"
 mutation_dimension = "attribute_rename"
 target = "Grantee.Type"
 summary = "The grantee discriminator is an XML attribute of <Grantee> and not a child element, which makes it the one member of the supported surface that cannot be written by the ordinary element emitter; the frozen IR reserves xml.attributes for it and the generated encoder writes it from there rather than from a branch in the codec."
-cases = ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0004"]
+cases = ["c-acl-0001", "c-acl-0002", "c-acl-0003", "c-acl-0004", "c-acl-0035", "c-acl-0038", "c-acl-0039"]
 
 [[source]]
 path = "GetBucketAcl.shapes.Grantee.xml.attributes.1.name"

@@ -68,7 +68,7 @@ mutation_dimension = "optionality"
 mutation_sources = ["PutBucketLogging.checksum.http_checksum_required"]
 target  = "PutBucketLogging"
 summary = "The logging write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed."
-cases   = ["c-bucketconfig-0037", "c-bucketconfig-0008"]
+cases   = ["c-bucketconfig-0037", "c-bucketconfig-0008", "c-bucketconfig-0059"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"

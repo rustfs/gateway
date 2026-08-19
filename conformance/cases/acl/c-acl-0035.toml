@@ -1,0 +1,35 @@
+[case]
+id = "c-acl-0035"
+schema_version = 1
+title = "A Grantee whose xsi:type names a value outside the union is a 400 MalformedXML"
+rationale = """
+The discriminator is a closed set of three, exactly as Permission is a closed set of five, and this is the case that says so. It is also the case that makes the attribute *read* observable at all: until the XML reader resolved attributes, Grantee.Type arrived unconditionally unset and a document could name any type it liked without anything on this side being able to see what it named — a decoder that skipped the attribute would answer 200 here and store a grant nobody could describe. Its two-directional partner is c-acl-0039, which sends the same bogus value with the prefix left unbound and is accepted, because a document that never bound the prefix never wrote the attribute."""
+polarity = "negative"
+operation = "PutBucketAcl"
+tags = ["acl", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acl-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Grantee.html"
+summary = "The Grantee reference enumerates Type as exactly CanonicalUser, AmazonCustomerByEmail and Group, each paired with the member that identifies it."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "/bpPyHzYqb2YMxYr8Z7IHQ==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Wombat"><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+message_present = true

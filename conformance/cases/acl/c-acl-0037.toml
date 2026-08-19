@@ -1,0 +1,35 @@
+[case]
+id = "c-acl-0037"
+schema_version = 1
+title = "A Content-MD5 that is not base64 of sixteen bytes is a 400 InvalidDigest, not BadDigest"
+rationale = """
+The two codes are the client's only way to tell "your SDK wrote the header wrong" from "the bytes changed in flight", and they lead to different actions: the first is not worth retrying and the second is. Collapsing them is the easy mistake — one comparison answers both — so this case pins the boundary from the malformed side while c-acl-0036 pins it from the mismatched side. The value below is well-formed base64 and decodes to four bytes, so it is not a digest at all and no body could ever match it."""
+polarity = "negative"
+operation = "PutBucketAcl"
+tags = ["acl", "checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-acl-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error list separates InvalidDigest, for a Content-MD5 that is not valid, from BadDigest, for one that did not match what was received."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "AAAAAA==" }
+body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidDigest"
+message_present = true
