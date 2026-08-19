@@ -265,6 +265,10 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
         out.operations_md.clone(),
         emit::operations_md::render(&lowered.operations, &lowered.deferred),
     ));
+    files.push((
+        out.generated_dir.join("OPERATIONS.json"),
+        emit::operations_json::render(&lowered.operations),
+    ));
     files.push((out.generated_dir.join("routes.rs"), emit::rust_files::routes(&lowered.operations)));
     files.push((
         out.generated_dir.join("route_shadowing.rs"),

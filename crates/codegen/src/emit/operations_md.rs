@@ -317,7 +317,12 @@ fn invert_query_keys(operations: &[OperationIr]) -> BTreeMap<String, Vec<(String
     index
 }
 
-fn key_headers(ir: &OperationIr) -> Vec<String> {
+/// The headers with protocol weight: routed on, a prefix family, or carrying a required field.
+///
+/// Shared with `operations_json`, which reports the same set: two derivations of "key header"
+/// would be two answers to the same question, and the reverse index would disagree with the table
+/// beside it.
+pub(super) fn key_headers(ir: &OperationIr) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     for p in &ir.http.predicates {
         match p {

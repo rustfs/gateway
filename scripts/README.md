@@ -134,6 +134,8 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_host_normalize.sh` | Ring-1 server source never mutates Host or URI authority | P7-02 |
 | `check_timeout_layer_ownership.sh` | Server owns three of six idle-timeout layers; connection lifetime remains a separate safety valve; `c-lim-0061` keeps the write-progress layer's thousand-slow-reader closure, healthy p99 and resident-memory evidence executable | P3-05, P7-02 |
 | `check_tuning_doc.sh` | Every server tuning field documents both directions of its tradeoff | P7-02 |
+| `check_fuzz_targets_registered.sh` | Every `fuzz/fuzz_targets/*.rs` has a matching `[[bin]]`, every `[[bin]]` names a file that exists, and every target still declares `#![no_main]` and invokes `fuzz_target!` | P4-01 |
+| `check_operations_json_fields.sh` | `generated/OPERATIONS.json` carries all seven wire fields per operation in order, one reverse index per field, each index exactly the inverse of the forward table in both directions, and the same operation set as `OPERATIONS.md` | P4-01 |
 | `check_route_shadowing_authority.sh` | `model/overlays/route.toml` is the only source of cross-precedence route shadowing: every pair carries a reason and evidence, no `ShadowingDecl` is hand-written under `crates/core/src`, and the generated record matches the overlay pair for pair | P4-01 |
 | `test_guard_scripts.sh` | Not a guard: runs every guard on the tree and asserts each one fails on an injected violation | P0 |
 | `test_handlers_facade_fixture.sh` | Not a guard: compiles a downstream Cargo fixture whose only dependency is `rustfs-gateway` | P4-01 |

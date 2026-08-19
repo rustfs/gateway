@@ -49,6 +49,7 @@ fn rendered() -> String {
     table.render()
 }
 
+/// c-route-1012 — change any selector and this diff goes red.
 #[test]
 fn the_rendered_route_table_matches_the_golden() {
     let rendered = rendered();

@@ -359,3 +359,43 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
         }
     }
 }
+
+/// The request set both halves of `c-route-1011` walk.
+///
+/// Shared so that the sweep and the lattice probe cannot drift apart: a request added for one and
+/// not the other would make the two halves of one case cover different ground while reading as
+/// though they covered the same.
+#[must_use]
+pub fn sweep_requests() -> Vec<Req> {
+    let mut requests = Vec::new();
+    for method in ["GET", "PUT", "POST", "DELETE", "HEAD"] {
+        for path in ["/", "/bucket", "/bucket/key", "/WriteGetObjectResponse"] {
+            for query in [
+                "",
+                "acl",
+                "tagging",
+                "acl&tagging",
+                "analytics",
+                "analytics&id=x",
+                "list-type=2",
+                "uploads",
+            ] {
+                for target in TargetKind::ALL {
+                    let line = if query.is_empty() {
+                        format!("{method} {path}")
+                    } else {
+                        format!("{method} {path}?{query}")
+                    };
+                    requests.push(Req::new(&line).target(target));
+                    requests.push(
+                        Req::new(&line)
+                            .target(target)
+                            .header("x-amz-copy-source", "/other/key")
+                            .header("content-type", "multipart/form-data; boundary=----0"),
+                    );
+                }
+            }
+        }
+    }
+    requests
+}

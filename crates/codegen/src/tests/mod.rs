@@ -28,6 +28,7 @@ mod forms_tests;
 mod golden_tests;
 mod ledger_tests;
 mod naming_contract_tests;
+mod operations_json_tests;
 mod runtime_contract_tests;
 mod tolerance_tests;
 mod url_tests;

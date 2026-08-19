@@ -39,7 +39,7 @@ use rustfs_gateway_core::route::{
     ArnForm, HostClass, Predicate, RouteBuildError, RouteTable, ShadowingDecl, ShadowingDecls, ShadowingPolicy, TargetKind,
     generated_entries,
 };
-use support::{Req, entry, fixture_entries, fixture_table};
+use support::{Req, entry, fixture_entries, fixture_table, sweep_requests};
 
 /// The evidence a fixture declaration carries. Real declarations cite AWS or a defect report.
 const FIXTURE_EVIDENCE: &[&str] = &["fixture: exercised by crates/core/tests/route_table.rs"];
@@ -1847,50 +1847,74 @@ fn an_unclassifiable_request_is_simply_unrouted() {
     assert_eq!(routed(&table, &request), None, "no route, and no panic");
 }
 
-/// c-route-1011 — the property the fuzz target would assert, asserted here.
+/// c-route-1011, first half — the fixture table answers one operation per precedence.
 ///
-/// `fuzz/` is outside this task's file scope, so the differential generator lives in
-/// `hot_path.rs`; this is the same property stated over the readable table alone.
+/// Stated plainly: while precedences stay pairwise distinct, as the fixture's and the generated
+/// table's are, this sweep **cannot fail**. What it catches is a future row sharing one. The
+/// property with teeth is [`two_selectors_the_lattice_called_disjoint_never_both_match`] below.
 #[test]
 fn at_most_one_entry_per_precedence_matches_any_request() {
     let table = fixture_table();
     let mut checked = 0usize;
-    for method in ["GET", "PUT", "POST", "DELETE", "HEAD"] {
-        for path in ["/", "/bucket", "/bucket/key", "/WriteGetObjectResponse"] {
-            for query in [
-                "",
-                "acl",
-                "tagging",
-                "acl&tagging",
-                "analytics",
-                "analytics&id=x",
-                "list-type=2",
-                "uploads",
-            ] {
-                for target in TargetKind::ALL {
-                    let line = if query.is_empty() {
-                        format!("{method} {path}")
-                    } else {
-                        format!("{method} {path}?{query}")
-                    };
-                    let request = Req::new(&line).target(target);
-                    let parts = request.parts();
-                    let mut by_precedence: Vec<u16> = table
-                        .entries()
-                        .iter()
-                        .filter(|entry| entry.selector.matches(&parts))
-                        .map(|entry| entry.precedence)
-                        .collect();
-                    let before = by_precedence.len();
-                    by_precedence.sort_unstable();
-                    by_precedence.dedup();
-                    assert_eq!(before, by_precedence.len(), "two entries at one precedence matched {line}");
-                    checked = checked.saturating_add(1);
-                }
+    for request in sweep_requests() {
+        let parts = request.parts();
+        let mut by_precedence: Vec<u16> = table
+            .entries()
+            .iter()
+            .filter(|entry| entry.selector.matches(&parts))
+            .map(|entry| entry.precedence)
+            .collect();
+        let before = by_precedence.len();
+        by_precedence.sort_unstable();
+        by_precedence.dedup();
+        assert_eq!(before, by_precedence.len(), "two entries at one precedence matched");
+        checked = checked.saturating_add(1);
+    }
+    assert!(checked > 400, "the sweep must actually cover something, covered {checked}");
+}
+
+/// c-route-1011, second half — the assertion the sweep above cannot make.
+///
+/// Every pair of fixture rows is put at one precedence and offered to `RouteTable::build`. A
+/// refusal found the overlap and is not this test's business; an *acceptance* asserts the two
+/// selectors cannot both be satisfied by any request, and this hunts the sweep's request set for
+/// one that refutes it. That is the falsification channel for `lattice`: an under-reported overlap
+/// makes the build stop objecting and moves nothing in the golden table, so nothing else notices.
+/// `fuzz/fuzz_targets/route_disjoint.rs` asks the same question with libFuzzer bytes over the
+/// generated table; this asks it inside the ordinary gate, where `ci.yml` defers the fuzz job.
+#[test]
+fn two_selectors_the_lattice_called_disjoint_never_both_match() {
+    let entries = fixture_entries();
+    let mut judged = 0usize;
+    let mut accepted = 0usize;
+    for (left_index, left) in entries.iter().enumerate() {
+        for right in entries.iter().skip(left_index.saturating_add(1)) {
+            let mut left = left.clone();
+            let mut right = right.clone();
+            left.precedence = 300;
+            right.precedence = 300;
+            let (left_name, right_name) = (left.op_name, right.op_name);
+            let (left_selector, right_selector) = (left.selector.clone(), right.selector.clone());
+            judged = judged.saturating_add(1);
+            if RouteTable::build(vec![left, right], &ShadowingDecls::NONE).is_err() {
+                continue;
+            }
+            accepted = accepted.saturating_add(1);
+            for request in sweep_requests() {
+                let parts = request.parts();
+                assert!(
+                    !(left_selector.matches(&parts) && right_selector.matches(&parts)),
+                    "the lattice called these disjoint and one request satisfies both:\n  \
+                     {left_name}  {left_selector}\n  {right_name}  {right_selector}"
+                );
             }
         }
     }
-    assert!(checked > 400, "the sweep must actually cover something, covered {checked}");
+    assert!(judged > 50, "every ordered pair must be judged, judged {judged}");
+    assert!(
+        accepted > 20,
+        "if the lattice refused every pair this test would assert nothing, accepted {accepted}"
+    );
 }
 
 /// A selector that constrains one key two ways can never match, and reads as coverage.

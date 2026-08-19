@@ -9,8 +9,10 @@ cargo-fuzz = true
 
 [dependencies]
 bytes = "1"
+http = "1"
 libfuzzer-sys = "0.4"
 rustfs-gateway-core = { path = "../crates/core" }
+rustfs-gateway-http = { path = "../crates/http" }
 rustfs-gateway-sig = { path = "../crates/sig" }
 rustfs-gateway-stream = { path = "../crates/stream" }
 rustfs-gateway-types = { path = "../crates/types" }
@@ -49,6 +51,13 @@ bench = false
 [[bin]]
 name = "cors_match"
 path = "fuzz_targets/cors_match.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "route_disjoint"
+path = "fuzz_targets/route_disjoint.rs"
 test = false
 doc = false
 bench = false

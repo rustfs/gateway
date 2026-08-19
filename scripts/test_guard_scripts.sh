@@ -9352,6 +9352,231 @@ expect_fail check_route_shadowing_authority.sh \
     'never reached generated/route_shadowing.rs'
 
 # -----------------------------------------------------------------------------
+# `generated/OPERATIONS.json` is the machine-readable half of the wire reverse
+# index: seven fields per operation, one index inverting each. An agent holding
+# a failure has a query key, a header or an error code — not an operation name —
+# so a field that quietly stopped being emitted leaves a document that answers
+# every question except the one it exists for, and nothing about its shape says
+# so.
+#
+# Seven controls. Three on the field set (a field deleted, the order changed, an
+# index dropped), two on the equality between forward table and index — one per
+# direction, because an index that keeps a name after the fact that put it there
+# was deleted reads exactly like a live one — one on membership drifting from
+# `OPERATIONS.md`, and one on the emitter's own `FIELDS` declaration, which is
+# where a field would be dropped in practice.
+# -----------------------------------------------------------------------------
+
+mut_operations_json_field_deleted() {
+    python3 - <<'PYEOF'
+import json
+import pathlib
+
+path = pathlib.Path("generated/OPERATIONS.json")
+document = json.loads(path.read_text(encoding="utf-8"))
+for entry in document["operations"].values():
+    entry.pop("host_classes", None)
+document.pop("by_host_class", None)
+path.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_operations_json_fields.sh \
+    'an operation entry that lost one of its seven wire fields' \
+    mut_operations_json_field_deleted \
+    'carries the wrong wire fields'
+
+mut_operations_json_fields_reordered() {
+    python3 - <<'PYEOF'
+import json
+import pathlib
+
+path = pathlib.Path("generated/OPERATIONS.json")
+document = json.loads(path.read_text(encoding="utf-8"))
+name = sorted(document["operations"])[0]
+entry = document["operations"][name]
+document["operations"][name] = {key: entry[key] for key in reversed(list(entry))}
+path.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_operations_json_fields.sh \
+    'an operation entry whose fields were silently reordered' \
+    mut_operations_json_fields_reordered \
+    'out of order'
+
+mut_operations_json_index_dropped() {
+    python3 - <<'PYEOF'
+import json
+import pathlib
+
+path = pathlib.Path("generated/OPERATIONS.json")
+document = json.loads(path.read_text(encoding="utf-8"))
+document.pop("by_error_code", None)
+path.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_operations_json_fields.sh \
+    'a reverse index removed, leaving a field that cannot be entered from the wire' \
+    mut_operations_json_index_dropped \
+    'cannot be entered from the wire'
+
+mut_operations_json_forward_fact_unindexed() {
+    python3 - <<'PYEOF'
+import json
+import pathlib
+
+path = pathlib.Path("generated/OPERATIONS.json")
+document = json.loads(path.read_text(encoding="utf-8"))
+key = next(code for code, names in document["by_error_code"].items() if len(names) > 1)
+document["by_error_code"][key] = document["by_error_code"][key][1:]
+path.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_operations_json_fields.sh \
+    'an operation whose error code never reached the index' \
+    mut_operations_json_forward_fact_unindexed \
+    'but by_error_code'
+
+mut_operations_json_stale_index_row() {
+    python3 - <<'PYEOF'
+import json
+import pathlib
+
+path = pathlib.Path("generated/OPERATIONS.json")
+document = json.loads(path.read_text(encoding="utf-8"))
+# Delete the fact, keep the index row. This is the direction a forward-only
+# walk cannot see: every remaining fact is still indexed, so a check that only
+# asked "is each fact indexed?" would report success over a stale row.
+name = next(op for op, entry in sorted(document["operations"].items()) if entry["query_keys"])
+document["operations"][name]["query_keys"] = []
+path.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_operations_json_fields.sh \
+    'an index row that outlived the fact that built it' \
+    mut_operations_json_stale_index_row \
+    'a stale index outlives the fact that built it'
+
+mut_operations_json_operation_dropped() {
+    python3 - <<'PYEOF'
+import json
+import pathlib
+
+path = pathlib.Path("generated/OPERATIONS.json")
+document = json.loads(path.read_text(encoding="utf-8"))
+name = "GetObject"
+document["operations"].pop(name)
+for index in [key for key in document if key.startswith("by_")]:
+    for key in list(document[index]):
+        remaining = [op for op in document[index][key] if op != name]
+        if remaining:
+            document[index][key] = remaining
+        else:
+            document[index].pop(key)
+path.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_operations_json_fields.sh \
+    'an operation documented in OPERATIONS.md with no entry in the index' \
+    mut_operations_json_operation_dropped \
+    'but has no entry'
+
+mut_operations_json_emitter_field_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/codegen/src/emit/operations_json.rs")
+text = path.read_text(encoding="utf-8")
+declaration = 'pub const FIELDS: [&str; 7] = ['
+if text.count(declaration) != 1:
+    raise SystemExit("operations_json FIELDS mutation anchor is not unique")
+text = text.replace(declaration, 'pub const FIELDS: [&str; 6] = [', 1)
+field = '    "host_classes",\n    "error_codes",'
+if text.count(field) != 1:
+    raise SystemExit("operations_json host_classes mutation anchor is not unique")
+path.write_text(text.replace(field, '    "error_codes",', 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_operations_json_fields.sh \
+    'the emitter declaring six wire fields instead of seven' \
+    mut_operations_json_emitter_field_removed \
+    'this guard and the wire index require'
+
+# -----------------------------------------------------------------------------
+# `ci.yml` defers the fuzz job on purpose — a full run does not fit the ten
+# minute gate — so nothing in CI compiles `fuzz/`. That makes an unregistered
+# target invisible: the file sits in the tree, `cargo fuzz list` never names it,
+# and it reads exactly like a target that runs clean.
+#
+# Four controls, one per way a target stops being one: it is never declared, it
+# is declared against a path that moved, it loses the macro that makes it fuzz
+# anything, and it loses the attribute that hands main to libFuzzer.
+# -----------------------------------------------------------------------------
+
+mut_fuzz_target_unregistered() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("fuzz/Cargo.toml")
+text = path.read_text(encoding="utf-8")
+anchor = '[[bin]]\nname = "route_disjoint"'
+if text.count(anchor) != 1:
+    raise SystemExit("fuzz registration mutation anchor is not unique")
+path.write_text(text[: text.index(anchor)], encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_targets_registered.sh \
+    'a fuzz target file that no [[bin]] declares' mut_fuzz_target_unregistered \
+    'never runs and never says so'
+
+mut_fuzz_target_path_moved() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("fuzz/Cargo.toml")
+text = path.read_text(encoding="utf-8")
+anchor = 'path = "fuzz_targets/route_disjoint.rs"'
+if text.count(anchor) != 1:
+    raise SystemExit("fuzz path mutation anchor is not unique")
+path.write_text(text.replace(anchor, 'path = "fuzz_targets/route_disjoint_moved.rs"', 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_targets_registered.sh \
+    'a [[bin]] declared against a path that is not there' mut_fuzz_target_path_moved \
+    'but the file is'
+
+mut_fuzz_target_macro_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("fuzz/fuzz_targets/route_disjoint.rs")
+text = path.read_text(encoding="utf-8")
+anchor = "fuzz_target!(|input: &[u8]| {"
+if text.count(anchor) != 1:
+    raise SystemExit("fuzz macro mutation anchor is not unique")
+path.write_text(text.replace(anchor, "fn never_called(input: &[u8]) {", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_targets_registered.sh \
+    'a target that kept its name and lost its fuzz_target! body' mut_fuzz_target_macro_removed \
+    'runs nothing, and reports no failure'
+
+mut_fuzz_target_no_main_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("fuzz/fuzz_targets/route_disjoint.rs")
+text = path.read_text(encoding="utf-8")
+anchor = "#![no_main]\n"
+if text.count(anchor) != 1:
+    raise SystemExit("fuzz no_main mutation anchor is not unique")
+path.write_text(text.replace(anchor, "", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_targets_registered.sh \
+    'a target that stopped handing main to libFuzzer' mut_fuzz_target_no_main_removed \
+    'libFuzzer supplies main'
+
+# -----------------------------------------------------------------------------
 # A conformance case may only declare what the harness reads. Twice already a
 # case declared a precondition — `setup.buckets[].object_lock`,
 # `connection.pipeline` — that was parsed, schema-checked and then dropped, so
