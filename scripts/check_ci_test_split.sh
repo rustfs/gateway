@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # WHAT THIS CHECKS
-#   Workspace tests, the official signing suite, guard mutations, target-consolidation mutations,
-#   quirk-ledger mutations and TSAN run on separate CI runners, while the branch-protected Test
-#   check waits for every worker. This
+#   Workspace tests, the official signing suite, guard mutations split over four runners,
+#   target-consolidation mutations, quirk-ledger mutations and TSAN run on separate CI runners,
+#   while the branch-protected Test check waits for every worker. This
 #   keeps the gate wall time below ten
 #   minutes as coverage grows.
 
@@ -44,6 +44,8 @@ require_equal(workflow.fetch("env", {}).keys, workflow_env_keys,
 workspace = jobs.fetch("workspace-tests")
 signing_suite = jobs.fetch("signing-suite")
 guard = jobs.fetch("guard-self-test")
+guard_group_ids = ["guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4"]
+guard_groups = guard_group_ids.map { |job_id| jobs.fetch(job_id) }
 target = jobs.fetch("target-consolidation-self-test")
 quirk_ledger = jobs.fetch("quirk-ledger-self-test")
 dto_compiler = jobs.fetch("dto-compiler-self-test")
@@ -52,14 +54,23 @@ aggregate = jobs.fetch("test")
 
 worker_keys = ["name", "runs-on", "timeout-minutes", "steps"]
 require_equal(workspace.keys, worker_keys, "workspace-tests changed its parallel nine-minute contract")
-require_equal(guard.keys, worker_keys, "guard-self-test changed its parallel nine-minute contract")
+guard_groups.each_with_index do |job, index|
+  require_equal(job.keys, worker_keys,
+                "#{guard_group_ids[index]} changed its parallel six-minute contract")
+end
 require_equal(workspace.values_at("name", "runs-on", "timeout-minutes"),
               ["Workspace tests", "ubuntu-latest", 9], "workspace-tests identity or budget changed")
 require_equal(signing_suite.keys, worker_keys, "signing-suite changed its parallel four-minute contract")
 require_equal(signing_suite.values_at("name", "runs-on", "timeout-minutes"),
               ["Official signing suite", "ubuntu-latest", 4], "signing-suite identity or budget changed")
-require_equal(guard.values_at("name", "runs-on", "timeout-minutes"),
-              ["Guard self-test", "ubuntu-latest", 9], "guard-self-test identity or budget changed")
+# Four runners, one per quarter of the case ordinals. Six minutes each keeps the longest
+# dependency path (a guard runner plus the one-minute Test aggregate) at seven of the ten.
+guard_groups.each_with_index do |job, index|
+  expected_name = index.zero? ? "Guard self-test" : "Guard self-test #{index + 1}"
+  require_equal(job.values_at("name", "runs-on", "timeout-minutes"),
+                [expected_name, "ubuntu-latest", 6],
+                "#{guard_group_ids[index]} identity or budget changed")
+end
 require_equal(target.keys, worker_keys,
               "target-consolidation-self-test changed its parallel three-minute contract")
 require_equal(target.values_at("name", "runs-on", "timeout-minutes"),
@@ -81,7 +92,7 @@ require_equal(build_guard.values_at("name", "runs-on", "timeout-minutes"),
               ["Build guard self-test", "ubuntu-latest", 5],
               "build-guard-self-test identity or budget changed")
 
-[workspace, guard].each do |job|
+([workspace] + guard_groups).each do |job|
   steps = job.fetch("steps")
   require_equal(steps.length, 4, "a split worker changed its setup or command step count")
   expected_setup = [
@@ -107,11 +118,13 @@ require_equal(signing_suite_steps.first(3).map(&:keys), [["uses"], ["uses"], ["u
               "signing-suite setup gained executable control")
 require_equal(signing_suite_steps.last.keys, ["name", "run"],
               "signing-suite command can skip or hide failure")
-guard_steps = guard.fetch("steps")
-require_equal(guard_steps.first(3).map(&:keys), [["uses", "with"], ["uses"], ["uses"]],
-              "guard-self-test setup changed its parent-fetch contract")
-require_equal(guard_steps.first.fetch("with"), {"fetch-depth" => 0},
-              "guard-self-test cannot resolve the branch merge base")
+guard_groups.each_with_index do |job, index|
+  steps = job.fetch("steps")
+  require_equal(steps.first(3).map(&:keys), [["uses", "with"], ["uses"], ["uses"]],
+                "#{guard_group_ids[index]} setup changed its parent-fetch contract")
+  require_equal(steps.first.fetch("with"), {"fetch-depth" => 0},
+                "#{guard_group_ids[index]} cannot resolve the branch merge base")
+end
 target_steps = target.fetch("steps")
 require_equal(target_steps.length, 2,
               "target-consolidation-self-test changed its setup or command step count")
@@ -165,12 +178,16 @@ signing_suite_run = <<~'RUN'
   timeout 60s target/debug/xtask sigsuite fetch
   timeout 60s target/debug/xtask sigsuite run
 RUN
-guard_run = <<~'RUN'
-  started="$(date +%s)"
-  timeout 480s bash scripts/test_guard_scripts.sh
-  elapsed="$(( $(date +%s) - started ))"
-  echo "guard mutations completed in ${elapsed}s"
-RUN
+# Every runner declares the same budget it is given, so an overrun stops itself with a
+# diagnosis instead of being killed at exit 124 with every case still printing ok.
+guard_runs = (0...4).map do |group|
+  <<~RUN
+    started="$(date +%s)"
+    timeout 300s env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
+    elapsed="$(( $(date +%s) - started ))"
+    echo "guard mutations #{group + 1}/4 completed in ${elapsed}s"
+  RUN
+end
 target_run = <<~'RUN'
   started="$(date +%s)"
   timeout 120s bash scripts/test_test_target_consolidation.sh
@@ -199,8 +216,13 @@ require_equal(workspace.fetch("steps").last.fetch("run"), workspace_run,
               "workspace-tests command changed or can hide a failure")
 require_equal(signing_suite_steps.last.fetch("run"), signing_suite_run,
               "signing-suite command changed or can hide a failure")
-require_equal(guard.fetch("steps").last.fetch("run"), guard_run,
-              "guard-self-test command changed or can hide a failure")
+guard_groups.each_with_index do |job, index|
+  require_equal(job.fetch("steps").last.fetch("run"), guard_runs.fetch(index),
+                "#{guard_group_ids[index]} command changed, lost its shard, or can hide a failure")
+end
+# The four groups must be the four distinct quarters of one split, or a quarter of the
+# suite silently never runs while all four jobs report success.
+require_equal(guard_runs.uniq.length, 4, "the guard runners do not cover four distinct shards")
 require_equal(target.fetch("steps").last.fetch("run"), target_run,
               "target-consolidation-self-test command changed or can hide a failure")
 require_equal(quirk_ledger.fetch("steps").last.fetch("run"), quirk_ledger_run,
@@ -213,8 +235,8 @@ require_equal(build_guard.fetch("steps").last.fetch("run"), build_guard_run,
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "signing-suite", "guard-self-test", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all eight workers within the budget")
+              ["Test", ["workspace-tests", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all eleven workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
@@ -222,6 +244,9 @@ expected_env = {
   "WORKSPACE_RESULT" => "${{ needs.workspace-tests.result }}",
   "SIGNING_SUITE_RESULT" => "${{ needs.signing-suite.result }}",
   "GUARD_RESULT" => "${{ needs.guard-self-test.result }}",
+  "GUARD_2_RESULT" => "${{ needs.guard-self-test-2.result }}",
+  "GUARD_3_RESULT" => "${{ needs.guard-self-test-3.result }}",
+  "GUARD_4_RESULT" => "${{ needs.guard-self-test-4.result }}",
   "TARGET_CONSOLIDATION_RESULT" => "${{ needs.target-consolidation-self-test.result }}",
   "QUIRK_LEDGER_RESULT" => "${{ needs.quirk-ledger-self-test.result }}",
   "DTO_COMPILER_RESULT" => "${{ needs.dto-compiler-self-test.result }}",
@@ -233,6 +258,9 @@ expected_run = <<~'RUN'
   test "$WORKSPACE_RESULT" = success
   test "$SIGNING_SUITE_RESULT" = success
   test "$GUARD_RESULT" = success
+  test "$GUARD_2_RESULT" = success
+  test "$GUARD_3_RESULT" = success
+  test "$GUARD_4_RESULT" = success
   test "$TARGET_CONSOLIDATION_RESULT" = success
   test "$QUIRK_LEDGER_RESULT" = success
   test "$DTO_COMPILER_RESULT" = success
@@ -292,4 +320,51 @@ if ! grep -F 'if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then' "$GUARD_SELF_TEST" >/dev
     fail 'build-guard-self-test omits a build-backed control or mutation'
 fi
 
-printf 'OK: workspace, signing suite, guard, target-consolidation, quirk-ledger, DTO compiler, build guard and TSAN workers are parallel behind Test\n'
+# The guard self-test stops itself just before the CI `timeout` would kill it, so that an
+# overrun reads as "the suite ran out of time" instead of an unexplained exit 124. That only
+# works while the budget the script defends and the timeout CI enforces are the same number.
+python3 - "$WORKFLOW" "$GUARD_SELF_TEST" <<'PY' || exit 1
+import re
+import sys
+from pathlib import Path
+
+workflow = Path(sys.argv[1]).read_text()
+suite = Path(sys.argv[2]).read_text()
+
+if re.search(r'^GUARD_BUDGET_SECONDS="\$\{GATEWAY_GUARD_BUDGET_SECONDS:-[0-9]+\}"$', suite,
+             re.MULTILINE) is None:
+    raise SystemExit(
+        "ERROR: the guard self-test no longer reads the wall-clock budget it must defend"
+    )
+invocations = re.findall(
+    r"timeout ([0-9]+)s env ([^\n]*?) bash scripts/test_guard_scripts\.sh", workflow
+)
+shards = [
+    (int(seconds), env) for seconds, env in invocations if "GATEWAY_GUARD_SHARD_GROUP=" in env
+]
+if len(shards) != 4:
+    raise SystemExit(
+        f"ERROR: expected four guard shard invocations in CI, found {len(shards)}"
+    )
+for seconds, env in shards:
+    declared = re.search(r"GATEWAY_GUARD_BUDGET_SECONDS=([0-9]+)", env)
+    if declared is None:
+        raise SystemExit(
+            "ERROR: a guard shard runs without declaring the budget it must stop inside, so an "
+            "overrun would be killed at exit 124 before the suite could say it ran out of time"
+        )
+    if int(declared.group(1)) != seconds:
+        raise SystemExit(
+            f"ERROR: a guard shard defends {declared.group(1)}s but CI enforces {seconds}s; "
+            "an overrun would be killed at exit 124 before the suite could diagnose itself"
+        )
+groups = sorted(
+    int(re.search(r"GATEWAY_GUARD_SHARD_GROUP=([0-9]+)", env).group(1)) for _, env in shards
+)
+if groups != [0, 1, 2, 3]:
+    raise SystemExit(
+        f"ERROR: the guard shards cover groups {groups}, not every quarter of the suite"
+    )
+PY
+
+printf 'OK: workspace, signing suite, four guard shards, target-consolidation, quirk-ledger, DTO compiler, build guard and TSAN workers are parallel behind Test\n'
