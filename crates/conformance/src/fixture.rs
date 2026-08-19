@@ -2909,8 +2909,9 @@ impl Stub {
         let bucket = input.bucket.clone();
         let key = input.key.clone();
 
-        // The head is committed here. Nothing below chooses a status, and nothing below can refuse:
-        // every rule this operation has was applied above.
+        // The head is committed here. Everything below runs with the status line already on the
+        // wire, and the only thing it can still report is a failure with no status of its own —
+        // which is all a `[setup.fault]` arranged for this operation is able to be.
         Ok(Resp::commit(Box::pin(async move {
             if let Some(error) = fault {
                 return Err(error);
