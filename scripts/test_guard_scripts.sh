@@ -6111,15 +6111,69 @@ from pathlib import Path
 
 path = Path("crates/server/tests/server_load.rs")
 text = path.read_text()
-subject = "    let unloaded = probe_p99(local_addr, PROBES, PROBE_CEILING).await;\n"
+subject = (
+    "    let (control_probes, loaded_probes) = "
+    "paired_probe_p99(control.local_addr, loaded.local_addr, PROBES, PROBE_CEILING).await;\n"
+)
 if text.count(subject) != 1:
-    raise SystemExit("c-lim-0061 unloaded latency baseline is not unique")
-replacement = "    let unloaded = Duration::from_millis(500);\n"
+    raise SystemExit("c-lim-0061 paired latency reading is not unique")
+replacement = (
+    "    let loaded_probes = probe_p99(loaded.local_addr, PROBES, PROBE_CEILING).await;\n"
+    "    let control_probes = ProbeSet { p99: Duration::from_millis(500), stalled: 0 };\n"
+)
 path.write_text(text.replace(subject, replacement, 1))
 PYEOF
 }
 expect_fail check_timeout_layer_ownership.sh \
-    'c-lim-0061 replacing its unloaded latency reading with a constant' mut_server_c_lim_0061_baseline_removed
+    'c-lim-0061 replacing its concurrently sampled control with a constant' mut_server_c_lim_0061_baseline_removed
+
+mut_server_c_lim_0061_stall_count_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "            loaded_probes.stalled <= control_probes.stalled,\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 unanswered-probe direction is not unique")
+path.write_text(text.replace(subject, "            loaded_probes.stalled <= usize::MAX,\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 letting unanswered probes hide in the tail its percentile discards' \
+    mut_server_c_lim_0061_stall_count_removed
+
+mut_server_c_lim_0061_saturation_skip_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "    if control_probes.stalled > 0 {\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 saturation skip is not unique")
+path.write_text(text.replace(subject, "    if false {\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 comparing two saturated percentiles instead of skipping with the reason' \
+    mut_server_c_lim_0061_saturation_skip_removed
+
+mut_server_c_lim_0061_control_shares_the_runtime() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "    let runtime = tokio::runtime::Builder::new_multi_thread()\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 per-listener runtime is not unique")
+path.write_text(text.replace(subject, "    let runtime = tokio::runtime::Builder::new_current_thread()\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 losing the worker pool that keeps its control off the loaded listener' \
+    mut_server_c_lim_0061_control_shares_the_runtime
 
 mut_server_c_lim_0061_reuse_removed() {
     python3 - <<'PYEOF'
@@ -6127,14 +6181,94 @@ from pathlib import Path
 
 path = Path("crates/server/tests/server_load.rs")
 text = path.read_text()
-subject = "        second_growth <= reuse_ceiling,\n"
+subject = "            tail_mean <= reuse_ceiling,\n"
 if text.count(subject) != 1:
-    raise SystemExit("c-lim-0061 second-wave reuse assertion is not unique")
-path.write_text(text.replace(subject, "        second_growth <= usize::MAX,\n", 1))
+    raise SystemExit("c-lim-0061 multi-wave reuse assertion is not unique")
+path.write_text(text.replace(subject, "            tail_mean <= usize::MAX,\n", 1))
 PYEOF
 }
 expect_fail check_timeout_layer_ownership.sh \
-    'c-lim-0061 losing its second-wave reuse direction' mut_server_c_lim_0061_reuse_removed
+    'c-lim-0061 losing its multi-wave reuse direction' mut_server_c_lim_0061_reuse_removed
+
+mut_server_c_lim_0061_reuse_ceiling_hardcoded() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "        let reuse_ceiling = first_growth / TAIL_SHARE_OF_FIRST;\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 derived reuse ceiling is not unique")
+path.write_text(text.replace(subject, "        let reuse_ceiling = 8 * 1024 * 1024;\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 deriving its reuse ceiling from a constant instead of the first wave' \
+    mut_server_c_lim_0061_reuse_ceiling_hardcoded
+
+mut_server_c_lim_0061_early_retirement_unbounded() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "        retired_early <= requested / EARLY_RETIREMENT_SHARE,\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 early-retirement bound is not unique")
+path.write_text(text.replace(subject, "        retired_early <= usize::MAX,\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 timing a wave whose windows the deadline closed before they opened' \
+    mut_server_c_lim_0061_early_retirement_unbounded
+
+mut_server_c_lim_0061_sequential_first_bytes() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "        tasks.push(tokio::spawn(async move {\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 per-reader task is not unique")
+path.write_text(text.replace(subject, "        tasks.push(std::future::ready(async move {\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 waiting for a thousand first bytes one behind another' \
+    mut_server_c_lim_0061_sequential_first_bytes
+
+mut_server_c_lim_0061_instrument_control_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "    if ballast_seen < BALLAST_BYTES / BALLAST_SHARE_SEEN {\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 instrument gate is not unique")
+path.write_text(text.replace(subject, "    if false {\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 asserting reuse on a host whose ps cannot see retained memory' \
+    mut_server_c_lim_0061_instrument_control_removed
+
+mut_server_c_lim_0061_single_tail_wave() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "    for _ in 1..WAVES {\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0061 wave loop is not unique")
+path.write_text(text.replace(subject, "    for _ in 1..2 {\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0061 collapsing its wave trend back to a single second reading' \
+    mut_server_c_lim_0061_single_tail_wave
 
 mut_server_c_lim_0061_keep_alive_pulled_in() {
     python3 - <<'PYEOF'
