@@ -156,6 +156,16 @@ def load_toml(path: pathlib.Path) -> dict:
         return {}
 
 
+# Compiled once, then matched with an offset. Cutting a fresh `text[index:]` slice copies the
+# whole remainder of the file on every character, which makes an otherwise linear lexer
+# quadratic in file length; `pattern.match(text, index)` matches at the same place without the
+# copy. No pattern here carries `^`, `\A`, `\b` or a lookbehind, so anchoring at the offset is
+# exactly what slicing to it already meant.
+RAW_STRING_RE = re.compile(r'(?:b|c)?r(#+)?"')
+LIFETIME_RE = re.compile(r"'[A-Za-z_][A-Za-z0-9_]*")
+IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
 def rust_tokens(text: str) -> list[tuple[str, str, int]]:
     """Lex the Rust subset needed by this guard while discarding comments and literals as code."""
     key = cache_key(text)
@@ -185,10 +195,10 @@ def rust_tokens(text: str) -> list[tuple[str, str, int]]:
                 else:
                     index += 1
             continue
-        raw = re.match(r'(?:b|c)?r(#+)?"', text[index:])
+        raw = RAW_STRING_RE.match(text, index)
         if raw:
             hashes = raw.group(1) or ""
-            content_start = index + raw.end()
+            content_start = raw.end()
             terminator = '"' + hashes
             content_end = text.find(terminator, content_start)
             if content_end < 0:
@@ -214,7 +224,7 @@ def rust_tokens(text: str) -> list[tuple[str, str, int]]:
             continue
         if text[index] == "'":
             # A lifetime is code; a quoted character is not.
-            lifetime = re.match(r"'[A-Za-z_][A-Za-z0-9_]*", text[index:])
+            lifetime = LIFETIME_RE.match(text, index)
             if lifetime and (index + len(lifetime.group(0)) >= len(text) or text[index + len(lifetime.group(0))] != "'"):
                 tokens.append(("punct", "'", index))
                 index += 1
@@ -230,7 +240,7 @@ def rust_tokens(text: str) -> list[tuple[str, str, int]]:
                     cursor += 1
             index = cursor
             continue
-        identifier = re.match(r"[A-Za-z_][A-Za-z0-9_]*", text[index:])
+        identifier = IDENTIFIER_RE.match(text, index)
         if identifier:
             value = identifier.group(0)
             tokens.append(("ident", value, index))

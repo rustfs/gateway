@@ -39,6 +39,16 @@ def fail(message):
     raise SystemExit(f"check_scope_rejection_surface: {message}")
 
 
+# Compiled once, then matched with an offset. Cutting a fresh `source[position:]` slice copies
+# the whole remainder of the file on every character, which makes an otherwise linear blanking
+# pass quadratic in file length; `pattern.match(source, position)` matches at the same place
+# without the copy. No pattern here carries `^`, `\A`, `\b` or a lookbehind, so anchoring at
+# the offset is exactly what slicing to it already meant. `.end()` is now an absolute offset
+# into `source`.
+RAW_STRING_RE = re.compile(r'(?:br|r)(#{0,255})"')
+CHAR_LITERAL_RE = re.compile(r"(?:b)?'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^\\'\n])'")
+
+
 def rust_code(source):
     out = []
     position = 0
@@ -64,9 +74,9 @@ def rust_code(source):
             comment_depth = 1
             out.extend("  ")
             position += 2
-        elif raw := re.match(r'(?:br|r)(#{0,255})"', source[position:]):
+        elif raw := RAW_STRING_RE.match(source, position):
             closing = '"' + raw.group(1)
-            end = source.find(closing, position + raw.end())
+            end = source.find(closing, raw.end())
             if end == -1:
                 fail("authenticator.rs has an unterminated raw string")
             end += len(closing)
@@ -87,8 +97,8 @@ def rust_code(source):
                 fail("authenticator.rs has an unterminated string")
             out.extend("\n" if char == "\n" else " " for char in source[position:end])
             position = end
-        elif character := re.match(r"(?:b)?'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^\\'\n])'", source[position:]):
-            end = position + character.end()
+        elif character := CHAR_LITERAL_RE.match(source, position):
+            end = character.end()
             out.extend(" " for _ in source[position:end])
             position = end
         else:

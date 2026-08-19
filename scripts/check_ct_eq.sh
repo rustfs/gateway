@@ -201,6 +201,16 @@ from pathlib import Path
 sensitive = re.compile(sys.argv[1])
 
 
+# Compiled once, then matched with an offset. Cutting a fresh `source[index:]` slice copies
+# the whole remainder of the file on every character, which makes an otherwise linear
+# tokenizer quadratic in file length; `pattern.match(source, index)` matches at the same place
+# without the copy. No pattern here carries `^`, `\A`, `\b` or a lookbehind, so anchoring at
+# the offset is exactly what slicing to it already meant.
+RAW_STRING_RE = re.compile(r'(?:b|c)?r(#+)?"')
+LIFETIME_RE = re.compile(r"'[A-Za-z_][A-Za-z0-9_]*")
+IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
 def tokens(source: str, label: str):
     result = []
     index = 0
@@ -230,10 +240,10 @@ def tokens(source: str, label: str):
             if depth:
                 raise ValueError(f"{label}: unterminated block comment")
             continue
-        raw = re.match(r'(?:b|c)?r(#+)?"', source[index:])
+        raw = RAW_STRING_RE.match(source, index)
         if raw:
             marker = '"' + (raw.group(1) or "")
-            end = source.find(marker, index + raw.end())
+            end = source.find(marker, raw.end())
             if end < 0:
                 raise ValueError(f"{label}: unterminated raw string")
             segment = source[index : end + len(marker)]
@@ -241,7 +251,7 @@ def tokens(source: str, label: str):
             index = end + len(marker)
             continue
         if source[index] == "'":
-            lifetime = re.match(r"'[A-Za-z_][A-Za-z0-9_]*", source[index:])
+            lifetime = LIFETIME_RE.match(source, index)
             if lifetime and source[index + len(lifetime.group(0)) : index + len(lifetime.group(0)) + 1] != "'":
                 result.append(("'", line))
                 index += 1
@@ -263,7 +273,7 @@ def tokens(source: str, label: str):
                 raise ValueError(f"{label}: unterminated literal")
             index = cursor
             continue
-        identifier = re.match(r"[A-Za-z_][A-Za-z0-9_]*", source[index:])
+        identifier = IDENTIFIER_RE.match(source, index)
         if identifier:
             value = identifier.group(0)
             result.append((value, line))

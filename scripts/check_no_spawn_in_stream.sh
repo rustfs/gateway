@@ -45,6 +45,16 @@ for crate in PLANE:
     manifests.append((crate, manifest))
 
 
+# Compiled once, then matched with an offset. Cutting a fresh `text[index:]` slice copies the
+# whole remainder of the file on every character, which makes an otherwise linear scan
+# quadratic in file length; `pattern.match(text, index)` matches at the same place without the
+# copy. No pattern here carries `^`, `\A`, `\b` or a lookbehind, so anchoring at the offset is
+# exactly what slicing to it already meant. Both `.end()` values are now absolute offsets into
+# `text`.
+RAW_STRING_RE = re.compile(r'(?:b|c)?r(#*)"')
+LIFETIME_RE = re.compile(r"'[A-Za-z_][A-Za-z0-9_]*(?!')")
+
+
 def strip(text: str) -> str:
     """Blank out comments and string literals, keeping every newline in place.
 
@@ -75,10 +85,10 @@ def strip(text: str) -> str:
                         out.append("\n")
                     index += 1
             continue
-        raw = re.match(r'(?:b|c)?r(#*)"', text[index:])
+        raw = RAW_STRING_RE.match(text, index)
         if raw:
             marker = '"' + raw.group(1)
-            end = text.find(marker, index + raw.end())
+            end = text.find(marker, raw.end())
             if end < 0:
                 raise ValueError("unterminated raw string")
             out.append("\n" * text.count("\n", index, end + len(marker)))
@@ -86,10 +96,10 @@ def strip(text: str) -> str:
             continue
         # A lifetime looks like the start of a char literal and is not one. Left as-is:
         # it holds no `spawn` token and consuming it as a literal would swallow real code.
-        lifetime = re.match(r"'[A-Za-z_][A-Za-z0-9_]*(?!')", text[index:])
+        lifetime = LIFETIME_RE.match(text, index)
         if lifetime:
             out.append(lifetime.group())
-            index += lifetime.end()
+            index = lifetime.end()
             continue
         quote = index + 1 if text[index] in "bc" and index + 1 < length else index
         if text[quote] in "\"'":

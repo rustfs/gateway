@@ -120,6 +120,16 @@ def fail(message):
     failures.append(message)
 
 
+# Compiled once, then matched with an offset. Cutting a fresh `source[index:]` slice copies
+# the whole remainder of the file on every character, which makes an otherwise linear blanking
+# pass quadratic in file length; `pattern.match(source, index)` matches at the same place
+# without the copy. No pattern here carries `^`, `\A`, `\b` or a lookbehind, so anchoring at
+# the offset is exactly what slicing to it already meant. Both `.end()` values are now
+# absolute offsets into `source`.
+RAW_STRING_RE = re.compile(r'(?:br|r|b|c)?(#{0,16})"')
+CHAR_LITERAL_RE = re.compile(r"(?:b)?'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^\\'\n])'")
+
+
 def strip_comments_and_literals(source):
     """Blank out comments, string and char literals, keeping every byte offset intact.
 
@@ -151,11 +161,11 @@ def strip_comments_and_literals(source):
             depth = 1
             out.append("  ")
             index += 2
-        elif raw := re.match(r'(?:br|r|b|c)?(#{0,16})"', source[index:]):
+        elif raw := RAW_STRING_RE.match(source, index):
             if raw.group(0).endswith('"'):
                 hashes = raw.group(1)
                 closing = '"' + hashes
-                cursor = index + raw.end()
+                cursor = raw.end()
                 if hashes:
                     end = source.find(closing, cursor)
                     end = length if end == -1 else end + len(closing)
@@ -174,8 +184,8 @@ def strip_comments_and_literals(source):
                 continue
             out.append(source[index])
             index += 1
-        elif char := re.match(r"(?:b)?'(?:\\(?:x[0-9A-Fa-f]{2}|u\{[0-9A-Fa-f_]+\}|.)|[^\\'\n])'", source[index:]):
-            end = index + char.end()
+        elif char := CHAR_LITERAL_RE.match(source, index):
+            end = char.end()
             out.extend(" " for _ in source[index:end])
             index = end
         else:

@@ -93,12 +93,21 @@ def skip_quoted(source: str, start: int, quote: str) -> int:
     fail("a reviewed Rust source has an unterminated quoted literal")
 
 
+# Compiled once, then matched with an offset. Cutting a fresh `source[start:]` slice copies
+# the whole remainder of the file on every character, which makes an otherwise linear
+# tokenizer quadratic in file length; `pattern.match(source, start)` matches at the same place
+# without the copy. No pattern here carries `^`, `\A`, `\b` or a lookbehind, so anchoring at
+# the offset is exactly what slicing to it already meant. `tokens()` calls this at every
+# character, so the copy was per-character too.
+RAW_STRING_RE = re.compile(r'(?:br|rb|cr|r)(\#*)"')
+
+
 def raw_string_end(source: str, start: int) -> int | None:
-    match = re.match(r'(?:br|rb|cr|r)(\#*)"', source[start:])
+    match = RAW_STRING_RE.match(source, start)
     if not match:
         return None
     marker = '"' + match.group(1)
-    body = start + match.end()
+    body = match.end()
     end = source.find(marker, body)
     if end < 0:
         fail("a reviewed Rust source has an unterminated raw string")
