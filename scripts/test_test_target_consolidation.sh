@@ -407,6 +407,45 @@ mut_core_error_resolution_pair_incomplete() {
 }
 expect_fail 'an unpaired core error-resolution fixture is rejected fail-closed' mut_core_error_resolution_pair_incomplete
 
+mut_core_upload_pair_is_registered() {
+    cp crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.rs \
+        crates/core/tests/compile_fail/upload_probe.rs
+    cp crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.stderr \
+        crates/core/tests/compile_fail/upload_probe.stderr
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/compile_fail.rs")
+text = path.read_text()
+pattern = '    cases.compile_fail("tests/compile_fail/upload_*.rs");\n'
+if pattern not in text:
+    anchor = '    cases.compile_fail("tests/compile_fail/error_resolution_*.rs");\n'
+    text = text.replace(anchor, anchor + pattern, 1)
+path.write_text(text)
+PYEOF
+}
+expect_pass 'a paired core upload-capability fixture is registered in the shared batch' mut_core_upload_pair_is_registered
+
+mut_core_upload_pattern_omitted() {
+    cp crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.rs \
+        crates/core/tests/compile_fail/upload_probe.rs
+    cp crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.stderr \
+        crates/core/tests/compile_fail/upload_probe.stderr
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/compile_fail.rs")
+text = path.read_text()
+pattern = '    cases.compile_fail("tests/compile_fail/upload_*.rs");\n'
+path.write_text(text.replace(pattern, "", 1))
+PYEOF
+}
+expect_fail 'an existing core upload-capability pair cannot lose its harness pattern' mut_core_upload_pattern_omitted
+
+mut_core_upload_pair_incomplete() {
+    cp crates/core/tests/compile_fail/c_sig_0018_session_token_serialize.rs \
+        crates/core/tests/compile_fail/upload_probe.rs
+}
+expect_fail 'an unpaired core upload-capability fixture is rejected fail-closed' mut_core_upload_pair_incomplete
+
 mut_core_golden_restore_uses_legacy_target() {
     python3 - <<'PYEOF'
 from pathlib import Path

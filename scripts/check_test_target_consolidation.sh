@@ -208,6 +208,7 @@ core_modules = (
     "tagging_contract",
     "tagging_roundtrip",
     "tolerant_conditions",
+    "upload_capability",
 )
 core_tests = root / "crates/core/tests"
 actual_core_sources = tuple(
@@ -486,6 +487,10 @@ core_arity_sources = {path.stem for path in core_compile_dir.glob("c_err_1010_*.
 core_arity_goldens = {path.stem for path in core_compile_dir.glob("c_err_1010_*.stderr")}
 if core_arity_sources != core_arity_goldens:
     fail("core error-code arity trybuild sources and goldens must remain paired")
+core_upload_sources = {path.stem for path in core_compile_dir.glob("upload_*.rs")}
+core_upload_goldens = {path.stem for path in core_compile_dir.glob("upload_*.stderr")}
+if core_upload_sources != core_upload_goldens:
+    fail("core upload-capability trybuild sources and goldens must remain paired")
 core_calls = [
     'cases.compile_fail("tests/compile_fail/authz_*.rs");',
     'cases.pass("tests/compile_pass/authz_authorized.rs");',
@@ -497,6 +502,8 @@ if any(core_compile_dir.glob("c_sig_0123_*.rs")):
     core_calls.append('cases.compile_fail("tests/compile_fail/c_sig_0123_*.rs");')
 if core_error_sources:
     core_calls.append('cases.compile_fail("tests/compile_fail/error_resolution_*.rs");')
+if core_upload_sources:
+    core_calls.append('cases.compile_fail("tests/compile_fail/upload_*.rs");')
 expected_core_compile_code = "".join(
     (
         "#[test]fn compile_time_contracts_are_not_openable(){"
