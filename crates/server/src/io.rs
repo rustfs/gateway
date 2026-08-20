@@ -24,7 +24,7 @@
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
@@ -102,6 +102,7 @@ pub(crate) struct ProgressIo<I> {
     write_sleep: Pin<Box<Sleep>>,
     write_waiting: bool,
     first_request_observed: bool,
+    transport_read: Arc<AtomicU64>,
     linger: Linger,
     #[cfg(test)]
     header_pending_observer: Option<HeaderPendingObserver>,
@@ -120,6 +121,12 @@ struct Linger {
     /// Whether any block was ever ready. See [`ProgressIo::poll_drain`] for why this gates the
     /// drain rather than merely reporting on it.
     started: bool,
+    /// Where the octets this drain discards are reported, so that what the drain accepted is
+    /// observable from the server rather than inferred from how much a peer got out of its own
+    /// send buffer. Wired to `ServerMetrics::lingering_octets_drained`; a `ProgressIo` built
+    /// without a listener behind it (the unit tests below) keeps the unshared counter it is born
+    /// with, which nothing reads.
+    drained: Arc<AtomicU64>,
 }
 
 impl<I> ProgressIo<I> {
@@ -142,16 +149,29 @@ impl<I> ProgressIo<I> {
             write_sleep: Box::pin(sleep(write_timeout)),
             write_waiting: false,
             first_request_observed: false,
+            transport_read: Arc::new(AtomicU64::new(0)),
             linger: Linger {
                 budget: lingering_close_time,
                 write_shut: false,
                 deadline: Instant::now(),
                 quiet: Box::pin(sleep(LINGER_QUIET)),
                 started: false,
+                drained: Arc::new(AtomicU64::new(0)),
             },
             #[cfg(test)]
             header_pending_observer: None,
         }
+    }
+
+    /// Points this connection's octet counts at the listener's shared ones — everything read off
+    /// the transport, and the part of it the lingering drain discarded.
+    ///
+    /// Separate from [`ProgressIo::new`] rather than more parameters to it: these are observed,
+    /// not configured, and `new` is already at the argument count where one more is a lint.
+    pub(crate) fn count_octets_into(mut self, transport_read: Arc<AtomicU64>, drained: Arc<AtomicU64>) -> Self {
+        self.transport_read = transport_read;
+        self.linger.drained = drained;
+        self
     }
 
     #[cfg(test)]
@@ -250,6 +270,9 @@ impl<I: AsyncRead + Unpin> ProgressIo<I> {
                 Poll::Ready(Ok(())) if read.filled().is_empty() => return Poll::Ready(()),
                 Poll::Ready(Ok(())) => {
                     self.linger.started = true;
+                    let block = read.filled().len() as u64;
+                    self.transport_read.fetch_add(block, Ordering::Relaxed);
+                    self.linger.drained.fetch_add(block, Ordering::Relaxed);
                     self.linger.quiet.as_mut().reset(Instant::now() + LINGER_QUIET);
                 }
                 Poll::Pending => {
@@ -277,8 +300,12 @@ impl<I: AsyncRead + Unpin> AsyncRead for ProgressIo<I> {
         }
         let before = buffer.filled().len();
         let result = ready!(Pin::new(&mut this.inner).poll_read(context, buffer));
-        if result.is_ok() && buffer.filled().len() > before && this.request_seen.load(Ordering::Acquire) {
-            this.reset_idle();
+        if result.is_ok() && buffer.filled().len() > before {
+            this.transport_read
+                .fetch_add((buffer.filled().len() - before) as u64, Ordering::Relaxed);
+            if this.request_seen.load(Ordering::Acquire) {
+                this.reset_idle();
+            }
         }
         Poll::Ready(result)
     }

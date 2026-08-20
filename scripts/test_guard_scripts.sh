@@ -5692,12 +5692,118 @@ path = Path(".github/workflows/ci.yml")
 text = path.read_text()
 start = text.index("  msrv:")
 end = text.index("\n  clippy:", start)
-block = text[start:end].replace("toolchain: 1.97.1", "toolchain: stable", 1)
+block = text[start:end]
+if block.count("toolchain: 1.97.1") != 1:
+    raise SystemExit("MSRV job toolchain pin is missing or ambiguous")
+block = block.replace("toolchain: 1.97.1", "toolchain: stable", 1)
 path.write_text(text[:start] + block + text[end:])
 PY
 }
 expect_fail check_rust_toolchain_msrv.sh \
     'the MSRV CI job installing a moving compiler' mut_rust_toolchain_ci_version_drift
+
+# This is the exact shape main carried on 2026-08-20: no `with:`, so
+# dtolnay/rust-toolchain installs its own `stable` default and makes it the rustup
+# default, whatever stable happens to be that day. It must not read green again.
+mut_rust_toolchain_ci_step_takes_stable_default() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+old = """      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+"""
+new = """      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+"""
+if text.count(old) != 1:
+    raise SystemExit("the clippy toolchain step is missing or ambiguous")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'a CI job falling back to the action default stable toolchain' \
+    mut_rust_toolchain_ci_step_takes_stable_default
+
+# The compiler floor moves and one repeated CI pin is left behind. The workflow repeats the
+# number per job -- a workflow env var under a CARGO/RUST prefix would move the rust-cache
+# restore key -- so a partial bump is the drift this guard has to catch.
+mut_rust_toolchain_ci_pin_left_behind() {
+    python3 - <<'PY'
+from pathlib import Path
+
+for name, old, new in (
+    ("Cargo.toml", 'rust-version = "1.97.1"', 'rust-version = "1.97.2"'),
+    ("rust-toolchain.toml", 'channel = "1.97.1"', 'channel = "1.97.2"'),
+    ("README.md", "MSRV-1.97.1", "MSRV-1.97.2"),
+    ("README.md", "**MSRV: 1.97.1.**", "**MSRV: 1.97.2.**"),
+    ("README.md", "**Development toolchain: 1.97.1**", "**Development toolchain: 1.97.2**"),
+    ("docs/msrv.md", "**MSRV = 1.97.1**", "**MSRV = 1.97.2**"),
+    ("docs/msrv.md", "The workspace pins Rust 1.97.1 for development",
+     "The workspace pins Rust 1.97.2 for development"),
+):
+    path = Path(name)
+    text = path.read_text()
+    if old not in text:
+        raise SystemExit(f"missing mutation subject in {name}: {old}")
+    path.write_text(text.replace(old, new, 1))
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+if text.count("toolchain: 1.97.1") < 2:
+    raise SystemExit("the workflow no longer repeats its toolchain pin")
+# Bump every CI pin except one, so only the straggler is wrong.
+path.write_text(text.replace("toolchain: 1.97.1", "toolchain: 1.97.2").replace(
+    "toolchain: 1.97.2", "toolchain: 1.97.1", 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'one CI job left behind on the previous compiler after an MSRV bump' \
+    mut_rust_toolchain_ci_pin_left_behind
+
+mut_rust_toolchain_ci_step_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+old = """      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Workspace tests (maximum 8 minutes after setup)
+"""
+new = """      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Workspace tests (maximum 8 minutes after setup)
+"""
+if text.count(old) != 1:
+    raise SystemExit("the workspace-tests toolchain step is missing or ambiguous")
+path.write_text(text.replace(old, new, 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'a cargo job running with no declared compiler at all' mut_rust_toolchain_ci_step_removed
+
+mut_rust_toolchain_ci_nightly_undated() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+old = "          toolchain: nightly-2026-06-18\n"
+if text.count(old) != 1:
+    raise SystemExit("the TSAN nightly pin is missing or ambiguous")
+path.write_text(text.replace(old, "          toolchain: nightly\n", 1))
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'the sanitizer job trading its dated nightly for a moving one' \
+    mut_rust_toolchain_ci_nightly_undated
 
 mut_rust_toolchain_ci_workspace_check_removed() {
     python3 - <<'PY'
