@@ -122,6 +122,17 @@ fn standalone_crate_case(package: &str) -> Option<&'static str> {
 }
 
 fn crate_steps(package: &str) -> Vec<Vec<String>> {
+    if package == "xtask" {
+        let target_scope = ["--workspace", "--bin", "xtask", "--test", "xtask-integration"];
+        return vec![
+            std::iter::once("test").chain(target_scope).map(str::to_owned).collect(),
+            std::iter::once("clippy")
+                .chain(target_scope)
+                .chain(["--", "-D", "warnings"])
+                .map(str::to_owned)
+                .collect(),
+        ];
+    }
     let clippy_step = vec![
         "clippy".to_owned(),
         "-p".to_owned(),

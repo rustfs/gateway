@@ -6,7 +6,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+build = false
+autobins = false
 autotests = false
+autoexamples = false
+autobenches = false
 
 [features]
 default = ["full"]
@@ -43,6 +47,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 [lints]
 workspace = true
 
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
 [[test]]
-name = "integration"
+name = "xtask-integration"
 path = "tests/integration.rs"

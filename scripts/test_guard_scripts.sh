@@ -2157,6 +2157,45 @@ expect_fail check_xtask_codegen_surface.sh \
     'crate verification weakening all-target clippy' \
     mut_xtask_conformance_scope_weakens_all_target_clippy
 
+mut_xtask_workspace_target_reuse_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = 'let target_scope = ["--workspace", "--bin", "xtask", "--test", "xtask-integration"];'
+new = 'let target_scope = ["--bin", "xtask", "--test", "xtask-integration"];'
+if text.count(old) != 1:
+    raise SystemExit("xtask workspace target scope is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'xtask verification losing workspace feature reuse' \
+    mut_xtask_workspace_target_reuse_removed
+
+mut_xtask_clippy_omits_the_integration_target() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '''            std::iter::once("clippy")
+                .chain(target_scope)
+                .chain(["--", "-D", "warnings"])
+'''
+new = '''            std::iter::once("clippy")
+                .chain(["--", "-D", "warnings"])
+'''
+if text.count(old) != 1:
+    raise SystemExit("xtask clippy target scope is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'xtask clippy omitting the integration target' \
+    mut_xtask_clippy_omits_the_integration_target
+
 mut_xtask_crate_classifier_leaks_into_full_build() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -14349,6 +14388,85 @@ PYEOF
 expect_fail check_xtask_test_target_consolidation.sh \
     'restoring xtask implicit test discovery' mut_xtask_autotests_restored
 
+mut_xtask_autobins_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("autobins = false\n", "autobins = true\n", 1))
+PYEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'restoring xtask implicit bin discovery' mut_xtask_autobins_restored
+
+mut_xtask_autoexamples_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("autoexamples = false\n", "autoexamples = true\n", 1))
+PYEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'restoring xtask implicit example discovery' mut_xtask_autoexamples_restored
+
+mut_xtask_autobenches_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("autobenches = false\n", "autobenches = true\n", 1))
+PYEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'restoring xtask implicit bench discovery' mut_xtask_autobenches_restored
+
+mut_xtask_explicit_bin_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+entry = '''[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+'''
+if text.count(entry) != 1:
+    raise SystemExit("xtask explicit bin target is missing")
+path.write_text(text.replace(entry, "", 1))
+PYEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'removing the explicit xtask bin target' mut_xtask_explicit_bin_removed
+
+mut_xtask_integration_target_renamed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace('name = "xtask-integration"\n', 'name = "integration"\n', 1))
+PYEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'renaming the workspace-unique xtask integration target' mut_xtask_integration_target_renamed
+
+mut_xtask_implicit_library_added() {
+    cp xtask/src/main.rs xtask/src/lib.rs
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'adding an implicit xtask library target' mut_xtask_implicit_library_added
+
+mut_xtask_bench_target_added() {
+    cat >>xtask/Cargo.toml <<'TOMLEOF'
+
+[[bench]]
+name = "unexpected-bench"
+path = "src/main.rs"
+TOMLEOF
+}
+expect_fail check_xtask_test_target_consolidation.sh \
+    'adding an xtask bench target outside the exact feedback scope' mut_xtask_bench_target_added
+
 mut_xtask_registration_omitted() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -14478,7 +14596,7 @@ mut_xtask_explicit_build_reuses_source() {
 from pathlib import Path
 path = Path("xtask/Cargo.toml")
 text = path.read_text()
-path.write_text(text.replace("publish = false\n", 'publish = false\nbuild = "tests/cli_contract.rs"\n', 1))
+path.write_text(text.replace("build = false\n", 'build = "tests/cli_contract.rs"\n', 1))
 PYEOF
 }
 expect_fail check_xtask_test_target_consolidation.sh \
@@ -16525,6 +16643,28 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'a completed handler no longer requiring the absence of a deadline report' \
     'handler deadline observer evidence does not distinguish all report outcomes' \
     mut_no_deadline_report_assertion_weakened
+
+mut_signing_suite_captures_build_toolchain_cargo() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/sigsuite.rs")
+text = path.read_text()
+subject = '''fn suite_cargo_command() -> Command {
+    Command::new("cargo")
+}'''
+replacement = '''fn suite_cargo_command() -> Command {
+    Command::new(env!("CARGO"))
+}'''
+if text.count(subject) != 1:
+    raise SystemExit("repository-selected signing-suite Cargo command is not unique")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_signing_suite_lock.sh \
+    'the signing-suite runner capturing the build toolchain Cargo path' \
+    'signing-suite runner must launch Cargo through the repository-selected rustup proxy' \
+    mut_signing_suite_captures_build_toolchain_cargo
 
 expect_signing_suite_dirty_checkout_fail() {
     local checkout output rc=0

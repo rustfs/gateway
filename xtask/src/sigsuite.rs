@@ -132,12 +132,16 @@ fn validate_checkout(checkout: &Path) -> Result<(), String> {
         .ok_or_else(|| "checkout does not match the protected lock".to_owned())
 }
 
+fn suite_cargo_command() -> Command {
+    Command::new("cargo")
+}
+
 fn run() -> Result<(), String> {
     let lock = lock();
     let checkout = checkout();
     validate_checkout(&checkout).map_err(|error| format!("run `cargo xtask sigsuite fetch` first: {error}"))?;
     let suite = checkout.join(lock.suite_path);
-    let status = Command::new(env!("CARGO"))
+    let status = suite_cargo_command()
         .current_dir(root())
         .args([
             "test",
@@ -166,5 +170,10 @@ mod tests {
     fn command_requires_an_exact_action() {
         assert_eq!(command(&[]), ExitCode::FAILURE);
         assert_eq!(command(&["unknown".to_owned()]), ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn suite_uses_the_repository_selected_cargo() {
+        assert_eq!(suite_cargo_command().get_program(), "cargo");
     }
 }

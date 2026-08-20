@@ -599,6 +599,20 @@ if compact(verify_crate_items[0][1]) != expected_verify_crate_body:
     fail("crate verification must disclose each fast-scope boundary and keep the 30-second deadline")
 crate_steps_items = functions_named("crate_steps", syntax, comments_removed)
 expected_crate_steps_body = compact('''
+if package == "xtask" {
+    let target_scope = ["--workspace", "--bin", "xtask", "--test", "xtask-integration"];
+    return vec![
+        std::iter::once("test")
+            .chain(target_scope)
+            .map(str::to_owned)
+            .collect(),
+        std::iter::once("clippy")
+            .chain(target_scope)
+            .chain(["--", "-D", "warnings"])
+            .map(str::to_owned)
+            .collect(),
+    ];
+}
 let clippy_step = vec![
     "clippy".to_owned(),
     "-p".to_owned(),
@@ -637,7 +651,7 @@ if package == "rustfs-gateway" {
 vec![test_step, clippy_step]
 ''')
 if compact(crate_steps_items[0][1]) != expected_crate_steps_body:
-    fail("crate verification steps must preserve both core runtime targets, compile-fail skips, conformance library scope and all-target clippy")
+    fail("crate verification steps must preserve xtask workspace target reuse, both core runtime targets, compile-fail skips, conformance library scope and all-target clippy")
 conformance_test_items = functions_named("conformance_test_step", syntax, comments_removed)
 expected_conformance_test_body = compact('''
 vec![
