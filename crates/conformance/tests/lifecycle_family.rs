@@ -14,8 +14,8 @@
 
 //! The `lifecycle/` family as a closed ledger, executed rather than merely loaded.
 //!
-//! Responsible for: pinning the lifecycle family as a *closed* set — thirty identifiers with no
-//! gap and no duplicate, eighteen negative against twelve positive, all three operations of the
+//! Responsible for: pinning the lifecycle family as a *closed* set — thirty-two identifiers with
+//! no gap and no duplicate, nineteen negative against thirteen positive, all three operations of the
 //! family reached — for proving the family really runs against the in-process target with every
 //! case green and none skipped, and for the binding rustfs/backlog#1719 §8 asks for and no
 //! command in this repository provides: every quirk the lifecycle overlay declares is claimed by
@@ -66,12 +66,13 @@ use rustfs_gateway_conformance::runner::{self, RunOptions};
 
 /// The size of the family: the twenty-nine cases landed with the family in rustfs/gateway#24,
 /// plus the body-digest negative that only became expressible once `verify_body_digest` had a
-/// production caller.
-const FAMILY_SIZE: usize = 30;
+/// production caller, plus the pair that pins a filter tag key of `..` — the value the family's
+/// round-trip property shrank to while `Tag.Key` was still typed as an object key.
+const FAMILY_SIZE: usize = 32;
 
 /// The polarity split, in the order `AGENTS.md` states the rule: negatives outnumber positives.
-const NEGATIVE: usize = 18;
-const POSITIVE: usize = 12;
+const NEGATIVE: usize = 19;
+const POSITIVE: usize = 13;
 
 /// Every quirk `model/overlays/quirks/lifecycle.toml` declares, in id order.
 ///
@@ -129,13 +130,13 @@ fn run_lifecycle_domain() -> Report {
     runner::run(&corpus, &mut sut, &options)
 }
 
-/// Negative — the lifecycle family is a closed ledger: thirty identifiers, contiguous, one file
-/// each.
+/// Negative — the lifecycle family is a closed ledger: thirty-two identifiers, contiguous, one
+/// file each.
 ///
 /// A gap means a case was deleted, which `AGENTS.md` lists as a silently dropped guarantee; a
 /// duplicate means two files claim one identifier, after which only one of them is ever reported.
 #[test]
-fn the_lifecycle_family_is_a_closed_ledger_of_thirty_identifiers() {
+fn the_lifecycle_family_is_a_closed_ledger_of_thirty_two_identifiers() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -158,7 +159,7 @@ fn the_lifecycle_family_is_a_closed_ledger_of_thirty_identifiers() {
 /// Negative — the family keeps negatives in the majority, which is the corpus rule applied to one
 /// family rather than to the whole corpus, where a large well-balanced neighbour can pay for it.
 #[test]
-fn the_lifecycle_family_keeps_eighteen_negative_against_twelve_positive() {
+fn the_lifecycle_family_keeps_nineteen_negative_against_thirteen_positive() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -190,7 +191,8 @@ fn every_operation_of_the_lifecycle_family_is_exercised() {
     }
 }
 
-/// Positive — the family executes against the assembled service, all thirty green, none skipped.
+/// Positive — the family executes against the assembled service, all thirty-two green, none
+/// skipped.
 ///
 /// Three separate things are asserted, because each is satisfiable without the others and the
 /// combination is what "the family passes" is usually taken to mean:

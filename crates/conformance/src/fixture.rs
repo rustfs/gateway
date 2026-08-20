@@ -2439,34 +2439,17 @@ fn refused_tagging(rejection: TaggingRejection) -> HandlerError {
     HandlerError::new(rejection.code().clone(), rejection.reason())
 }
 
-/// A tag key, as the type the model gives it.
-///
-/// The pinned model types `Tag.Key` as `ObjectKey`, so an empty key — which is what `x-amz-tagging:
-/// =1` decodes to — has no representation at all. Refusing it on the way in is what keeps the read
-/// path total: every pair in a [`StoredObject`] came through here, so rendering one back can only
-/// fail on a value this fixture never stored.
-///
-/// # Errors
-///
-/// `InvalidTag`, in AWS's own wording, for a key the type will not hold.
-fn require_tag_key(key: &str) -> Result<ObjectKey, HandlerError> {
-    ObjectKey::new(key).map_err(|_| HandlerError::new(ErrorCode::INVALID_TAG, "The TagKey you have provided is invalid"))
-}
-
 /// The stored pairs, rendered as the `<TagSet>` a tagging read answers with.
 ///
-/// # Errors
-///
-/// `InvalidTag` for a key the model's type cannot hold. Unreachable for anything this fixture
-/// stored — both writers go through [`require_tag_key`] — and propagated rather than unwrapped
-/// because "unreachable" is a claim about two other functions, not about this one.
-fn tag_elements(tags: &[(String, String)]) -> Result<Vec<dto::Tag>, HandlerError> {
+/// Total, and that is the point: `Tag.Key` is a `String`, so every pair this fixture stored has a
+/// representation on the way out. It used to be fallible — the dto typed the key as an `ObjectKey`
+/// and a key that type would not hold had to become an `InvalidTag` on a *read* — which put a
+/// refusal on the answering path for a value the writing path had already accepted.
+fn tag_elements(tags: &[(String, String)]) -> Vec<dto::Tag> {
     tags.iter()
-        .map(|(key, value)| {
-            Ok(dto::Tag {
-                key: require_tag_key(key)?,
-                value: value.clone(),
-            })
+        .map(|(key, value)| dto::Tag {
+            key: key.clone(),
+            value: value.clone(),
         })
         .collect()
 }
@@ -3174,7 +3157,7 @@ impl Stub {
             }
         };
         Ok(Resp::new(dto::GetObjectTaggingOutput {
-            tag_set: tag_elements(&object.tags)?,
+            tag_set: tag_elements(&object.tags),
             version_id: reported,
         }))
     }
@@ -3360,7 +3343,7 @@ impl Stub {
             .bucket_tags(input.bucket.as_str())
             .ok_or_else(|| HandlerError::new(ErrorCode::NO_SUCH_TAG_SET, "The TagSet does not exist"))?;
         Ok(Resp::new(dto::GetBucketTaggingOutput {
-            tag_set: tag_elements(tags)?,
+            tag_set: tag_elements(tags),
         }))
     }
 

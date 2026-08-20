@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><Expiration><Days>7</Days></Expiration><ID>dotted-tag</ID><Filter><Tag><Key>..</Key><Value>v</Value></Tag></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>

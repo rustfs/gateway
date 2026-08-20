@@ -925,7 +925,7 @@
                                      "wire_name": "Key",
                                      "required": true,
                                      "binding": { "kind": "BodyXml" },
-                                     "type": { "kind": "ObjectKey" },
+                                     "type": { "kind": "String" },
                                      "hot": true,
                                      "quirk_refs": []
                                    },

@@ -132,3 +132,17 @@ required = ["Key", "Value"]
 hot = ["Key", "Value"]
 element_order = ["Key", "Value"]
 
+# The model targets `Key` at the `ObjectKey` shape, and `scalars.toml` maps that name onto the
+# `ObjectKey` type — which is the wrong type for a tag key twice over. A tag key is not a path:
+# `..` is a legal tag key and an object key the traversal floor refuses, so the two halves of this
+# codec disagreed about what is representable — the encoder wrote `<Key>..</Key>` for a lifecycle
+# filter tag and the decoder answered `InvalidArgument` to the document it had just produced. In
+# the other direction `ObjectKey` admits `<`, `&` and `#`, which the tag alphabet does not. The
+# member is carried as a plain string: the representation rules a tag key actually has — the
+# 128-UTF-16-unit ceiling and the documented alphabet — are `ops/shared/tagging.rs`'s
+# `validate_tag_set`, which is also the only reader of the `x-amz-tagging` header channel, so
+# typing them here would be the second copy of a rule this workspace keeps exactly one of.
+[[shape.Tag.field]]
+name = "Key"
+type = "String"
+

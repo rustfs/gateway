@@ -228,7 +228,6 @@ fn is_midnight_utc(date: Timestamp) -> bool {
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rustfs_gateway_types::ObjectKey;
     use rustfs_gateway_types::dto::{LifecycleExpiration, LifecycleRuleAndOperator, Status, Tag, Transition};
 
     /// 2030-01-01T00:00:00Z.
@@ -256,7 +255,7 @@ mod tests {
 
     fn tag(key: &str, value: &str) -> Tag {
         Tag {
-            key: ObjectKey::new(key).expect("a valid tag key"),
+            key: key.to_owned(),
             value: value.to_owned(),
         }
     }

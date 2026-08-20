@@ -16455,13 +16455,24 @@ expect_fail check_signing_suite_lock.sh \
     'the signing-suite lock disappearing from the protected table' \
     mut_signing_suite_protected_row_removed
 
+# The three version mutations below read the version out of the manifest rather than naming it.
+# A literal is a mutation with an expiry date: the moment the crate is bumped or the model is
+# re-pinned, `str.replace` matches nothing, writes the file back unchanged, and the guard passes
+# because there was nothing to catch — an `expect_fail` case that has quietly become an
+# `expect_pass` one. Measured: bumping the types crate to 0.4.0 turned
+# `mut_types_version_numeric_part_diverges` into a no-op. Each mutation now asserts it changed
+# something, so a subject that stops existing is a loud failure rather than a silent pass.
 mut_types_version_loses_model_date() {
     python3 - <<'PYEOF'
 import pathlib
+import re
 
 path = pathlib.Path("crates/types/Cargo.toml")
-text = path.read_text().replace('version = "0.3.0+aws.2026-08-04"', 'version = "0.3.0"', 1)
-path.write_text(text)
+text = path.read_text()
+mutated, count = re.subn(r'(?m)^(version = "[0-9]+\.[0-9]+\.[0-9]+)\+aws\.[0-9]{4}-[0-9]{2}-[0-9]{2}"$', r'\1"', text, count=1)
+if count != 1:
+    raise SystemExit("missing types version model-date mutation subject")
+path.write_text(mutated)
 PYEOF
 }
 expect_fail check_version_metadata.sh \
@@ -16470,10 +16481,14 @@ expect_fail check_version_metadata.sh \
 mut_types_version_has_invalid_model_date() {
     python3 - <<'PYEOF'
 import pathlib
+import re
 
 path = pathlib.Path("crates/types/Cargo.toml")
-text = path.read_text().replace('aws.2026-08-04', 'aws.2026-02-30', 1)
-path.write_text(text)
+text = path.read_text()
+mutated, count = re.subn(r'\+aws\.[0-9]{4}-[0-9]{2}-[0-9]{2}"', '+aws.2026-02-30"', text, count=1)
+if count != 1:
+    raise SystemExit("missing types version calendar-date mutation subject")
+path.write_text(mutated)
 PYEOF
 }
 expect_fail check_version_metadata.sh \
@@ -16482,10 +16497,19 @@ expect_fail check_version_metadata.sh \
 mut_types_version_numeric_part_diverges() {
     python3 - <<'PYEOF'
 import pathlib
+import re
 
 path = pathlib.Path("crates/types/Cargo.toml")
-text = path.read_text().replace('version = "0.3.0+aws.', 'version = "0.4.0+aws.', 1)
-path.write_text(text)
+text = path.read_text()
+mutated, count = re.subn(
+    r'(?m)^version = "([0-9]+)\.([0-9]+)\.([0-9]+)\+aws\.',
+    lambda m: f'version = "{m.group(1)}.{int(m.group(2)) + 1}.{m.group(3)}+aws.',
+    text,
+    count=1,
+)
+if count != 1:
+    raise SystemExit("missing types version numeric mutation subject")
+path.write_text(mutated)
 PYEOF
 }
 expect_fail check_version_metadata.sh \

@@ -156,7 +156,7 @@ fn projection(tags: &[dto::Tag]) -> Projection {
 
 fn tag(key: &str, value: &str) -> dto::Tag {
     dto::Tag {
-        key: rustfs_gateway_types::ObjectKey::new(key).expect("a fixture key the model can hold"),
+        key: key.to_owned(),
         value: value.to_owned(),
     }
 }
@@ -177,25 +177,17 @@ fn tag_text(min: usize, max: usize) -> impl Strategy<Value = String> {
 
 /// Sets of up to ten tags with distinct keys, values free to be empty.
 ///
-/// Keys the object-key floor refuses are dropped rather than generated, and that is a narrowing
-/// with a reason: `Tag.Key` targets `com.amazonaws.s3#ObjectKey` in the pinned model, so the
-/// decoder runs `floor_check_key` over a *label*, and a tag key of `//x` — legal in AWS's tag
-/// alphabet, which admits `/` — is refused here as a UNC path. That divergence is real and it is
-/// not this issue's; it belongs to rustfs/backlog#1750, and it is pinned by
-/// [`n_a_tag_key_the_object_key_floor_refuses_is_a_known_divergence`] so that narrowing the
-/// generator does not also hide it.
+/// Nothing is filtered out of the key alphabet, and that matters: until the `Tag.Key` member was
+/// typed as a plain string this generator had to drop every key the *object-key* floor refuses —
+/// `//x`, `../x` — because the decoder ran a path floor over what is a label. A generator that
+/// skips the values its own decoder cannot read is a property that cannot see the asymmetry it
+/// exists to find, so the narrowing came out with the defect.
 fn tag_sets() -> impl Strategy<Value = Vec<dto::Tag>> {
     (
         proptest::collection::btree_set(tag_text(1, 12), 0..10),
         proptest::collection::vec(tag_text(0, 12), 10),
     )
-        .prop_map(|(keys, values)| {
-            keys.into_iter()
-                .filter(|key| rustfs_gateway_types::floor_check_key(key).is_ok())
-                .zip(values)
-                .map(|(k, v)| tag(&k, &v))
-                .collect()
-        })
+        .prop_map(|(keys, values)| keys.into_iter().zip(values).map(|(k, v)| tag(&k, &v)).collect())
 }
 
 // ── the property ─────────────────────────────────────────────────────────────────────────────
@@ -345,31 +337,65 @@ fn n_a_document_that_round_trips_is_not_thereby_a_set_that_may_be_stored() {
     validate_tag_set(&pairs, TagScope::Object).expect_err("the character set is the validator's rule, not the codec's");
 }
 
-/// Negative — a tag key the object-key floor refuses does not survive, and that is a divergence.
+/// A tag key that reads as a path traversal is a tag key, and survives the round trip.
 ///
-/// `Tag.Key` targets `com.amazonaws.s3#ObjectKey` in the pinned model, so the generated decoder
-/// runs `value::object_key` — and with it `floor_check_key`, the path floor that refuses a leading
-/// `//` as a UNC spelling and any `..` segment as traversal — over what is a *label*, not a path.
-/// AWS's tag alphabet admits `/` and `.`, so `//x` is a tag key a client may legitimately send and
-/// this gateway answers `400 InvalidArgument` for. The encoder writes it happily, which makes it
-/// the same class of asymmetry rustfs/backlog#1717 fixed one level up: a document this service
-/// writes and will not read.
+/// The named half of the property, and the regression this file's generator was narrowed around.
+/// `Tag.Key` targets `com.amazonaws.s3#ObjectKey` in the pinned model — AWS's own modelling
+/// shortcut, since a tag key is not an object key — and `scalars.toml` turned that shape name into
+/// the `ObjectKey` type, so the generated decoder ran `value::object_key` and with it
+/// `floor_check_key`: the *path* floor that refuses a leading `//` as a UNC spelling and any `..`
+/// segment as traversal. AWS's tag alphabet admits both `/` and `.`, so `..` and `//label` are tag
+/// keys a client may legitimately send, and the encoder wrote them happily while the decoder
+/// answered `400 InvalidArgument` to the document the encoder had just produced. The member is a
+/// plain string now, and these three keys are the values that go red if it is ever typed back.
 ///
-/// Pinned rather than fixed here: the repair is a type for tag keys that is not the object-key
-/// type, which is a model and codegen change with its own blast radius, and the key floor and its
-/// double-slash policy are rustfs/backlog#1750's subject. This test is what makes the narrowing in
-/// [`tag_sets`] honest — it goes red
-/// the day the divergence is repaired, and whoever repairs it deletes it here.
+/// `..` is here by name because it is the exact value the lifecycle property shrank to; the sibling
+/// test in `lifecycle_roundtrip.rs` pins it on the other family reached through the same shape.
 #[test]
-fn n_a_tag_key_the_object_key_floor_refuses_is_a_known_divergence() {
-    for key in ["//label", "../label"] {
-        let document = encode_object_read(vec![tag(key, "v")]);
-        let error = decode_object_write(&document).expect_err("the object-key floor refuses this label");
-        assert_eq!(error.code().as_str(), "InvalidArgument", "{key}: {error:?}");
+fn a_tag_key_that_looks_like_a_path_survives_the_round_trip() {
+    for key in ["..", "//label", "../label"] {
+        let original = vec![tag(key, "v")];
+        let document = encode_object_read(original.clone());
+        let decoded = decode_object_write(&document)
+            .unwrap_or_else(|error| panic!("{key}: a document this codec wrote is one it must read: {error:?}: {document}"));
+        assert_eq!(projection(&decoded.tag_set), projection(&original), "{key}: {document}");
     }
+}
 
-    // The floor is a prefix and segment rule, not a ban on the character: a slash inside a label
-    // is fine, and this half is what says the divergence is narrow rather than "no `/` in a tag".
-    let document = encode_object_read(vec![tag("a/b//c", "v")]);
-    decode_object_write(&document).expect("a slash inside a label is not a UNC path");
+/// Negative — repairing the key type did not loosen a member that really is an object key.
+///
+/// The fix moved one member off the `ObjectKey` type; the danger of that shape of change is that
+/// it is applied one member too widely. `ObjectIdentifier.Key` in a `DeleteObjects` body *is* a
+/// path, the traversal floor is what keeps `../victim/x` out of the storage layer, and this asserts
+/// the floor still answers there. Without it, the whole repair could be re-done as "stop running
+/// `floor_check_key` in the codec" and every other test in this file would stay green.
+#[test]
+fn n_a_traversal_key_in_a_delete_body_is_still_refused() {
+    let request = accepted("POST", "/photos?delete", INTEGRITY);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let body = RequestBody::Buffered(Bytes::from_static(b"<Delete><Object><Key>../victim/x</Key></Object></Delete>"));
+    let error = dto::DeleteObjects::decode(&view, body).expect_err("an object key is still a path");
+    assert_eq!(error.code().as_str(), "InvalidArgument", "{error:?}");
+}
+
+/// Negative — a tag key the codec now carries is still a tag key the validator may refuse.
+///
+/// The seam [`n_a_document_that_round_trips_is_not_thereby_a_set_that_may_be_stored`] draws over
+/// the character set, drawn again over the two rules the object-key type used to enforce by
+/// accident: an empty key, and a key past the documented ceiling. Neither is the codec's business
+/// any more, and neither may reach a stored set — so the ceiling has to be somewhere, and this
+/// says where.
+#[test]
+fn n_an_empty_or_oversized_tag_key_is_refused_by_the_validator() {
+    let document = encode_object_read(vec![tag("", "v")]);
+    let decoded = decode_object_write(&document).expect("an empty key is text, and text round-trips");
+    let pairs = projection(&decoded.tag_set);
+    assert_eq!(pairs, vec![(String::new(), "v".to_owned())]);
+    validate_tag_set(&pairs, TagScope::Object).expect_err("an empty tag key has no legal representation");
+
+    let long = "k".repeat(129);
+    let document = encode_object_read(vec![tag(&long, "v")]);
+    let decoded = decode_object_write(&document).expect("an oversized key is text, and text round-trips");
+    let pairs = projection(&decoded.tag_set);
+    validate_tag_set(&pairs, TagScope::Object).expect_err("128 UTF-16 units is the validator's ceiling");
 }

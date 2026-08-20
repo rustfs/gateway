@@ -246,7 +246,6 @@ fn validate_filter(filter: &ReplicationRuleFilter) -> Result<(), ReplicationReje
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rustfs_gateway_types::ObjectKey;
     use rustfs_gateway_types::dto::{
         DeleteMarkerReplication, Destination, EncryptionConfiguration, ReplicationRuleAndOperator, Status, Tag,
     };
@@ -299,7 +298,7 @@ mod tests {
 
     fn tag(key: &str, value: &str) -> Tag {
         Tag {
-            key: ObjectKey::new(key).expect("a valid tag key"),
+            key: key.to_owned(),
             value: value.to_owned(),
         }
     }
