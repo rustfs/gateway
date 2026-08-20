@@ -202,6 +202,7 @@ core_modules = (
     "purity_guard",
     "range_part_table",
     "registration",
+    "replication_roundtrip",
     "response_override_safety",
     "route_table",
     "static_dispatch",

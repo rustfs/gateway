@@ -3,6 +3,19 @@
 /docs/plans/
 /docs/superpowers/
 
-# proptest saves shrunk failing seeds beside the test; they are a local debugging aid, not a
-# checked-in fixture, and a stale one names inputs the generator no longer produces.
+# proptest saves the shrunk input of a failing property beside the test source. Ignoring all of
+# them made a counterexample found on one machine unreplayable on every other one, which is how
+# rustfs/gateway#226 stayed a random ambush on unrelated branches for days; proptest's own header
+# in the file recommends checking it in. So a seed that sits beside a checked-in integration test
+# is a fixture and is kept, and everything else — spikes, scratch crates, anything outside a
+# tests/ directory — stays a local debugging aid.
+#
+# Keeping a seed is the weaker half of the discipline, not the whole of it: a counterexample you
+# have diagnosed belongs in a named test that says what is wrong and names the issue, because
+# that replays deterministically and cannot go stale against a generator that moved. The seed is
+# what carries the ones nobody has diagnosed yet.
+#
+# One consequence to know before it surprises you: mutation testing a property writes a seed for
+# the mutant, which is junk the moment the mutation is reverted. Delete it; do not commit it.
 *.proptest-regressions
+!crates/*/tests/*.proptest-regressions
