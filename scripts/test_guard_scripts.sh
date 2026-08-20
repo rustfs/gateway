@@ -12389,6 +12389,109 @@ GOVPY
 }
 expect_fail check_governor_fast_path.sh \
     'client-map allocation moved into the decision path' mut_governor_client_map_allocates_on_demand
+
+mut_chunk_limit_identity_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/ingest_chunk_rules.rs")
+text = path.read_text()
+old = "/// c-lim-0042 / c-ing-0021. Negative, and the reason this task exists:"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0042 identity anchor drifted")
+path.write_text(text.replace(old, "/// c-ing-0021. Negative, and the reason this task exists:", 1))
+PYEOF
+}
+expect_fail check_chunk_limits.sh \
+    'c-lim-0042 losing its header-rejection identity' mut_chunk_limit_identity_removed \
+    'c-lim-0042 header-rejection identity is missing or duplicated'
+
+mut_chunk_limit_header_read_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/ingest_chunk_rules.rs")
+text = path.read_text()
+old = '''\
+    let before = pipeline.window_bytes();
+    let err = drain_pipeline(&mut pipeline, 4096).expect_err("an over-large chunk is refused");
+
+    assert_eq!(err.bytes_before_error(), 0);
+'''
+new = old.replace("err.bytes_before_error(), 0", "err.bytes_before_error(), 1")
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0042 header-read anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_chunk_limits.sh \
+    'c-lim-0042 losing its zero-data-byte direction' mut_chunk_limit_header_read_removed \
+    "c-lim-0042 header-rejection evidence lost 'err.bytes_before_error(), 0'"
+
+mut_chunk_limit_attack_replaced_by_control() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/ingest_chunk_rules.rs")
+text = path.read_text()
+old = '''\
+            let mut pipeline =
+                unsigned_pipeline(FOUR_GIB_CHUNK_HEADER.to_vec(), 1024, 4096, no_observers(), ChunkLimits::default());
+'''
+new = '''\
+            let mut pipeline =
+                unsigned_pipeline(b"0\\r\\n\\r\\n".to_vec(), 8, 0, no_observers(), ChunkLimits::default());
+'''
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0042 attack anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_chunk_limits.sh \
+    'c-lim-0042 measuring a legal request as its attack' mut_chunk_limit_attack_replaced_by_control \
+    "c-lim-0042 peak-RSS probe lost 'FOUR_GIB_CHUNK_HEADER.to_vec()'"
+
+mut_chunk_limit_ballast_control_reversed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/ingest_chunk_rules.rs")
+text = path.read_text()
+old = "ballast.saturating_sub(control) >= RSS_HEADROOM_BYTES"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0042 ballast anchor drifted")
+path.write_text(text.replace(old, "ballast.saturating_sub(control) <= RSS_HEADROOM_BYTES", 1))
+PYEOF
+}
+expect_fail check_chunk_limits.sh \
+    'c-lim-0042 accepting an RSS instrument that cannot see ballast' mut_chunk_limit_ballast_control_reversed \
+    "c-lim-0042 peak-RSS evidence lost 'ballast.saturating_sub(control) >= RSS_HEADROOM_BYTES'"
+
+mut_chunk_limit_rss_ceiling_widened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/ingest_chunk_rules.rs")
+text = path.read_text()
+old = "attack.saturating_sub(control) < RSS_HEADROOM_BYTES"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0042 RSS ceiling anchor drifted")
+path.write_text(text.replace(old, "attack.saturating_sub(control) < u64::MAX", 1))
+PYEOF
+}
+expect_fail check_chunk_limits.sh \
+    'c-lim-0042 widening its RSS ceiling to an unfalsifiable value' mut_chunk_limit_rss_ceiling_widened \
+    "c-lim-0042 peak-RSS evidence lost 'attack.saturating_sub(control) < RSS_HEADROOM_BYTES'"
+
+mut_chunk_limit_rss_observer_constant() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/ingest_chunk_rules.rs")
+text = path.read_text()
+old = "    parse_peak_rss(&String::from_utf8_lossy(&output.stderr))"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0042 RSS observer anchor drifted")
+path.write_text(text.replace(old, "    0", 1))
+PYEOF
+}
+expect_fail check_chunk_limits.sh \
+    'c-lim-0042 replacing the OS peak-RSS observation with a constant' mut_chunk_limit_rss_observer_constant \
+    "c-lim-0042 RSS instrument lost 'parse_peak_rss(&String::from_utf8_lossy(&output.stderr))'"
 # check_secret_hygiene.sh has six rules over the credential containers in crates/gateway/src/ext/,
 # which is outside the path scope of check_ct_eq.sh rules 3-6. Each is mutated separately, because
 # one case would leave the other five as prose. rustfs/backlog#1736 is the task, and

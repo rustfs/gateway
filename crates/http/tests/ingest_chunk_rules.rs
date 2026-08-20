@@ -28,6 +28,38 @@ mod support;
 use rustfs_gateway_http::{ChunkLimits, ChunkReject};
 use support::ingest::{ScriptReader, drain_pipeline, no_observers, raw_chunk_body, unsigned_body, unsigned_pipeline};
 
+const FOUR_GIB_CHUNK_HEADER: &[u8] = b"ffffffff\r\n";
+const RSS_HEADROOM_BYTES: u64 = 8 * 1024 * 1024;
+const RSS_BALLAST_BYTES: usize = 24 * 1024 * 1024;
+const RSS_PROBE_ENV: &str = "RUSTFS_GATEWAY_CHUNK_LIMIT_RSS_PROBE";
+const RSS_PROBE_TEST: &str = "c_lim_0042_four_gibibyte_chunk_peak_rss_stays_below_eight_mibibytes";
+
+#[derive(Clone, Copy)]
+enum PeakMode {
+    Control,
+    Attack,
+    Ballast,
+}
+
+impl PeakMode {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Control => "control",
+            Self::Attack => "attack",
+            Self::Ballast => "ballast",
+        }
+    }
+
+    fn requested() -> Option<Self> {
+        match std::env::var(RSS_PROBE_ENV).ok()?.as_str() {
+            "control" => Some(Self::Control),
+            "attack" => Some(Self::Attack),
+            "ballast" => Some(Self::Ballast),
+            other => panic!("unknown c-lim-0042 RSS probe mode: {other}"),
+        }
+    }
+}
+
 fn reject_of(body: Vec<u8>, declared: u64, limits: ChunkLimits) -> (ChunkReject, usize) {
     let mut pipeline = unsigned_pipeline(body, 64 * 1024, declared, no_observers(), limits);
     let err = drain_pipeline(&mut pipeline, 4096).err();
@@ -38,6 +70,87 @@ fn reject_of(body: Vec<u8>, declared: u64, limits: ChunkLimits) -> (ChunkReject,
 
 fn refuse(header_line: &str, data: &[u8]) -> ChunkReject {
     reject_of(raw_chunk_body(header_line, data), 4096, ChunkLimits::default()).0
+}
+
+fn run_peak_probe(mode: PeakMode) {
+    let mut ballast = match mode {
+        PeakMode::Ballast => vec![0_u8; RSS_BALLAST_BYTES],
+        PeakMode::Control | PeakMode::Attack => Vec::new(),
+    };
+    for byte in ballast.iter_mut().step_by(4096) {
+        *byte = 0xA5;
+    }
+    std::hint::black_box(&ballast);
+
+    match mode {
+        PeakMode::Attack => {
+            let mut pipeline =
+                unsigned_pipeline(FOUR_GIB_CHUNK_HEADER.to_vec(), 1024, 4096, no_observers(), ChunkLimits::default());
+            let err = drain_pipeline(&mut pipeline, 4096).expect_err("the four-GiB chunk header is refused");
+            assert_eq!(err.bytes_before_error(), 0);
+            assert!(matches!(
+                pipeline.reject(),
+                Some(ChunkReject::ChunkSizeTooLarge {
+                    declared: 0xffff_ffff,
+                    ..
+                })
+            ));
+            assert_eq!(pipeline.decoded_bytes(), 0);
+        }
+        PeakMode::Control | PeakMode::Ballast => {
+            let mut pipeline = unsigned_pipeline(b"0\r\n\r\n".to_vec(), 8, 0, no_observers(), ChunkLimits::default());
+            let decoded = drain_pipeline(&mut pipeline, 16).expect("the empty control body is accepted");
+            assert!(decoded.is_empty());
+        }
+    }
+    std::hint::black_box(&ballast);
+}
+
+#[cfg(target_os = "linux")]
+fn parse_peak_rss(stderr: &str) -> u64 {
+    let kibibytes = stderr
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Maximum resident set size (kbytes):"))
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .expect("GNU time reports maximum resident set size");
+    kibibytes.checked_mul(1024).expect("peak RSS fits in u64")
+}
+
+#[cfg(target_os = "macos")]
+fn parse_peak_rss(stderr: &str) -> u64 {
+    stderr
+        .lines()
+        .find_map(|line| line.trim().strip_suffix("maximum resident set size"))
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .expect("BSD time reports maximum resident set size")
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn parse_peak_rss(_stderr: &str) -> u64 {
+    panic!("c-lim-0042 peak RSS is supported only on Linux and macOS");
+}
+
+fn measure_peak_rss(mode: PeakMode) -> u64 {
+    let executable = std::env::current_exe().expect("the active test binary has a path");
+    let mut command = std::process::Command::new("/usr/bin/time");
+    #[cfg(target_os = "linux")]
+    command.arg("-v");
+    #[cfg(target_os = "macos")]
+    command.arg("-l");
+    let output = command
+        .arg(executable)
+        .args(["--exact", RSS_PROBE_TEST, "--nocapture"])
+        .env(RSS_PROBE_ENV, mode.name())
+        .output()
+        .expect("the peak-RSS probe starts under /usr/bin/time");
+    assert!(
+        output.status.success(),
+        "the {} peak-RSS probe failed:\n{}{}",
+        mode.name(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    parse_peak_rss(&String::from_utf8_lossy(&output.stderr))
 }
 
 // ── positive ───────────────────────────────────────────────────────────────────────────
@@ -96,7 +209,7 @@ fn an_uppercase_hex_chunk_size_is_accepted() {
 
 // ── negative ───────────────────────────────────────────────────────────────────────────
 
-/// Negative, and the reason this task exists: a chunk announcing four gigabytes is refused at its
+/// c-lim-0042 / c-ing-0021. Negative, and the reason this task exists: a chunk announcing four gigabytes is refused at its
 /// header. Not one data byte is read and the window never grows to hold it.
 #[test]
 fn c_ing_0021_a_four_gigabyte_chunk_is_refused_at_the_header_without_reading_a_data_byte() {
@@ -115,6 +228,37 @@ fn c_ing_0021_a_four_gigabyte_chunk_is_refused_at_the_header_without_reading_a_d
     assert_eq!(pipeline.decoded_bytes(), 0);
     assert_eq!(pipeline.window_bytes(), before, "the window must not grow towards the announced size");
     assert!(pipeline.window_bytes() <= 64 * 1024, "peak buffer stays at the initial window");
+}
+
+/// c-lim-0042. The same exact rejection adds less than eight MiB to the process peak RSS.
+#[test]
+fn c_lim_0042_four_gibibyte_chunk_peak_rss_stays_below_eight_mibibytes() {
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        eprintln!("SKIP c-lim-0042 peak RSS: this platform has no supported OS peak-RSS observer");
+        return;
+    }
+
+    if let Some(mode) = PeakMode::requested() {
+        run_peak_probe(mode);
+        return;
+    }
+
+    let control = measure_peak_rss(PeakMode::Control);
+    let attack = measure_peak_rss(PeakMode::Attack);
+    let ballast = measure_peak_rss(PeakMode::Ballast);
+    println!("c-lim-0042 peak RSS: control={control}, attack={attack}, ballast={ballast}");
+    assert!(
+        ballast.saturating_sub(control) >= RSS_HEADROOM_BYTES,
+        "the RSS instrument saw only {} additional bytes from a {}-byte touched ballast",
+        ballast.saturating_sub(control),
+        RSS_BALLAST_BYTES
+    );
+    assert!(
+        attack.saturating_sub(control) < RSS_HEADROOM_BYTES,
+        "the four-GiB chunk declaration increased peak RSS by {} bytes (control {control}, attack {attack})",
+        attack.saturating_sub(control)
+    );
 }
 
 /// Negative: the same announcement fed one byte per read is refused just as early, so the attack
