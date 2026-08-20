@@ -12,7 +12,7 @@ Agent entry point for repository automation commands.
 | `src/ir/negative.rs` | Exact negative corpus manifest and mutation runner. | Negative IR cases or expected diagnostics change. |
 | `src/ir/semantic.rs` | Cross-field, shape, unwrapped-output, and quirk invariants. | A semantic IR rule changes. |
 | `src/mutate.rs` | `conformance mutate`: the per-quirk kill matrix, and the guards that keep a mutation which never reached the gateway from reading as a gap in the corpus. | A mutation verdict, the inert/not-measured rules, or the restore loop changes. |
-| `src/mutate/tests.rs` | Verdict-order controls for the mutation classifier. | A guard in front of `SURVIVED` changes. |
+| `src/mutate/tests.rs` | Verdict-order controls for the mutation classifier, including the two shapes of ledger row that certify nothing (`UNWITNESSED`) and the live-case control that keeps `SURVIVED` meaning a corpus gap. | A guard in front of `SURVIVED` changes. |
 | `src/new_op.rs` | Intentionally-red operation scaffold. | Scaffold contents or collision checks change. |
 | `src/route.rs` | Route explanation CLI rendering. | `route explain` output changes. |
 | `src/security_posture.rs` | Fail-closed dry-run preview derived from standard operation-floor sources. | The security-posture command or standard floor inventory changes. |

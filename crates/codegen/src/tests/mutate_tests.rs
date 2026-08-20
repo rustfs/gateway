@@ -26,7 +26,7 @@ use rustfs_gateway_model::ir::OperationIr;
 use super::codegen_tests::{artifacts, root};
 use crate::emit::quirk_toml::{ResolvedSource, SourceValue, resolve_at};
 use crate::mutate::apply::apply;
-use crate::mutate::{Mutation, plan, quirk_families};
+use crate::mutate::{ABSENT_NOT_CONFIGURED_MUTANT, Mutation, plan, quirk_families};
 use crate::{CodegenInput, CodegenOutput, generate, generate_mutated};
 
 /// The lifecycle request root: a string source with a real production consumer, used as the
@@ -114,13 +114,64 @@ fn n_an_unknown_path_shape_is_an_error_and_not_a_silent_no_op() {
 }
 
 #[test]
-fn n_an_absent_optional_value_has_no_planned_mutation() {
+fn an_absent_not_configured_error_is_flipped_to_a_declared_code() {
+    // The rule's content is the absence: "this operation owes no operation-specific 404". Any
+    // declared code violates it, so the flip that tests it is `None -> Some(..)` — and refusing to
+    // plan it, as this planner once did, put six rules beyond the reach of the whole command
+    // before anything was built (rustfs/backlog#1761).
+    let mutation = plan(
+        "q-example",
+        MutationDimension::Optionality,
+        &source("GetBucketAcl.errors.not_configured", SourceValue::OptionalText(None)),
+    )
+    .expect("an absent not-configured error has one obvious violation");
+    assert_eq!(mutation.from, SourceValue::OptionalText(None));
+    assert_eq!(
+        mutation.to,
+        SourceValue::OptionalText(Some(ABSENT_NOT_CONFIGURED_MUTANT.to_owned())),
+        "the flip has to name a code the error-status authority declares, or the mutated tree \
+         fails to compile and the row reads KILLED_BY_COMPILE instead of being measured"
+    );
+}
+
+#[test]
+fn n_the_code_the_absence_flip_writes_is_one_the_pinned_authority_declares() {
+    // The control on the constant above. `OperationSpec::standard` asserts at const-evaluation
+    // time that a lowered unconfigured code has a row in `model/overlays/error-status.toml`; a
+    // constant that drifted out of that table would turn every one of these six rows into a
+    // compile kill, which reads exactly like the compiler catching the mutation.
+    let artifacts = artifacts();
+    artifacts
+        .error_codes
+        .path(ABSENT_NOT_CONFIGURED_MUTANT)
+        .unwrap_or_else(|error| panic!("`{ABSENT_NOT_CONFIGURED_MUTANT}` has no status row: {error}"));
+}
+
+#[test]
+fn n_an_absent_optional_value_that_is_not_a_not_configured_error_has_no_planned_mutation() {
+    // Absence is only self-evidently violable where the rule is "there is no code here". For any
+    // other optional source the planner still has no evidence for which present value the protocol
+    // would carry, and guessing one would test the harness rather than the corpus.
     let error = plan(
         "q-example",
         MutationDimension::Optionality,
-        &source("Op.errors.not_configured", SourceValue::OptionalText(None)),
+        &source("GetObject.output.StorageClass.omit_when", SourceValue::OptionalText(None)),
     )
     .expect_err("dropping an already absent value changes nothing");
+    assert!(error.contains("already absent"), "{error}");
+}
+
+#[test]
+fn n_a_not_configured_source_under_another_dimension_is_still_unplannable() {
+    // The absence flip is the `optionality` rule's flip. A different dimension pointed at the same
+    // path is a declaration this planner has no reviewed answer for, and inventing one there would
+    // silently widen what the matrix claims to have tested.
+    let error = plan(
+        "q-example",
+        MutationDimension::ElementRename,
+        &source("GetBucketAcl.errors.not_configured", SourceValue::OptionalText(None)),
+    )
+    .expect_err("only the optionality dimension has a planned absence flip");
     assert!(error.contains("already absent"), "{error}");
 }
 

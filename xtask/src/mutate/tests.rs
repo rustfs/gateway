@@ -14,8 +14,9 @@
 
 //! The verdict a mutated run is allowed to carry.
 //!
-//! Responsible for: pinning the order of the three guards that stand in front of `SURVIVED`, so
-//! that a mutation which never reached the gateway can never be reported as a gap in the corpus.
+//! Responsible for: pinning the order of the guards that stand in front of `SURVIVED`, so that
+//! neither a mutation which never reached the gateway nor a rule whose ledger row names no case
+//! that could have gone red is ever reported as a gap in the corpus.
 //! NOT responsible for: applying a mutation, building, or running the suite.
 //! Upstream: `super::classify`. Downstream: nothing.
 //!
@@ -43,10 +44,15 @@ fn baseline() -> BTreeMap<String, String> {
 fn measured(pairs: &[(&str, &str)]) -> Measurement {
     Measurement {
         artifacts_changed: true,
-        compiled: true,
+        compile_failure: None,
         library_rebuilt: true,
         verdicts: Some(verdicts(pairs)),
     }
+}
+
+/// The ledger row of a rule whose declared evidence is live: a case the baseline ran and passed.
+fn witnessed() -> Vec<String> {
+    vec!["c-lifecycle-0001".to_owned()]
 }
 
 #[test]
@@ -89,7 +95,7 @@ fn n_identical_artefacts_are_inert_and_never_a_survivor() {
         &[],
         &Measurement {
             artifacts_changed: false,
-            compiled: true,
+            compile_failure: None,
             library_rebuilt: true,
             verdicts: Some(verdicts(&[("c-lifecycle-0001", "passed"), ("c-lifecycle-0002", "passed")])),
         },
@@ -104,12 +110,16 @@ fn n_a_tree_that_does_not_compile_is_not_a_case_kill() {
         &["c-lifecycle-0001".to_owned()],
         &Measurement {
             artifacts_changed: true,
-            compiled: false,
+            compile_failure: Some("rustfs-gateway".to_owned()),
             library_rebuilt: false,
             verdicts: None,
         },
     );
-    assert_eq!(outcome, Outcome::KilledByCompile, "the compiler noticing is not the corpus noticing");
+    assert_eq!(
+        outcome,
+        Outcome::KilledByCompile("rustfs-gateway".to_owned()),
+        "the compiler noticing is not the corpus noticing"
+    );
 }
 
 #[test]
@@ -122,7 +132,7 @@ fn n_a_library_that_was_not_rebuilt_is_inert_even_when_a_case_looks_red() {
         &["c-lifecycle-0001".to_owned()],
         &Measurement {
             artifacts_changed: true,
-            compiled: true,
+            compile_failure: None,
             library_rebuilt: false,
             verdicts: Some(verdicts(&[("c-lifecycle-0001", "failed"), ("c-lifecycle-0002", "passed")])),
         },
@@ -137,7 +147,7 @@ fn n_a_run_with_no_report_is_not_measured() {
         &[],
         &Measurement {
             artifacts_changed: true,
-            compiled: true,
+            compile_failure: None,
             library_rebuilt: true,
             verdicts: None,
         },
@@ -165,14 +175,19 @@ fn n_a_run_that_measured_fewer_cases_is_not_measured_even_when_one_went_red() {
 fn n_everything_green_after_a_real_mutation_is_the_finding_not_a_pass() {
     let outcome = classify(
         &baseline(),
-        &["c-lifecycle-0001".to_owned()],
+        &witnessed(),
         &measured(&[("c-lifecycle-0001", "passed"), ("c-lifecycle-0002", "passed")]),
     );
     assert_eq!(outcome, Outcome::Survived);
 }
 
 #[test]
-fn n_a_case_already_red_at_baseline_cannot_be_a_kill() {
+fn n_a_rule_whose_only_named_case_is_red_at_baseline_is_unwitnessed_not_a_survivor() {
+    // `q-attributes-root-0087` in the flesh: its one declared case `c-etag-0001` is failing at
+    // baseline because the fixture answers `501` for `GetObjectAttributes`. A case that is already
+    // red cannot go red, so the green suite says nothing at all about this rule — and reporting
+    // `SURVIVED` invites the one repair that cannot work, writing more cases against an operation
+    // no case can reach.
     let mut baseline = baseline();
     baseline.insert("c-lifecycle-0003".to_owned(), "failed".to_owned());
     let outcome = classify(
@@ -184,7 +199,116 @@ fn n_a_case_already_red_at_baseline_cannot_be_a_kill() {
             ("c-lifecycle-0003", "failed"),
         ]),
     );
-    assert_eq!(outcome, Outcome::Survived, "a case that was already red proves nothing about this rule");
+    match outcome {
+        Outcome::Unwitnessed(why) => {
+            assert!(why.contains("c-lifecycle-0003"), "the row that certifies nothing has to be named: {why}");
+            assert!(why.contains("not green at baseline"), "{why}");
+        }
+        other => panic!("a case that was already red proves nothing about this rule: {other:?}"),
+    }
+}
+
+#[test]
+fn n_a_rule_whose_only_named_case_was_skipped_at_baseline_is_unwitnessed() {
+    // The third way a row can be dead, and the reason the check is "green" rather than "not
+    // failed": a case the baseline skipped — an unmet precondition, a capability the target does
+    // not have — ran no assertion at baseline and will run none under the mutation either.
+    let mut baseline = baseline();
+    baseline.insert("c-lifecycle-0004".to_owned(), "skipped".to_owned());
+    let outcome = classify(
+        &baseline,
+        &["c-lifecycle-0004".to_owned()],
+        &measured(&[
+            ("c-lifecycle-0001", "passed"),
+            ("c-lifecycle-0002", "passed"),
+            ("c-lifecycle-0004", "skipped"),
+        ]),
+    );
+    match outcome {
+        Outcome::Unwitnessed(why) => assert!(why.contains("`skipped`, not green at baseline"), "{why}"),
+        other => panic!("a skipped case runs no assertion, so it cannot carry a ledger row: {other:?}"),
+    }
+}
+
+#[test]
+fn n_a_rule_whose_only_named_case_is_not_in_the_corpus_is_unwitnessed() {
+    // `q-timestamp-0011` in the flesh: its "case" `c-objectlock-0001` is a unit test in
+    // `crates/types/src/scalar/tests/timestamp_tests.rs`, which `check_quirk_ledger.sh` admits as
+    // a direct case and this run never executes. The static ledger and the dynamic matrix are only
+    // meaningful read together, and this is the row where they disagree.
+    let outcome = classify(
+        &baseline(),
+        &["c-objectlock-0001".to_owned()],
+        &measured(&[("c-lifecycle-0001", "passed"), ("c-lifecycle-0002", "passed")]),
+    );
+    match outcome {
+        Outcome::Unwitnessed(why) => {
+            assert!(why.contains("c-objectlock-0001"), "{why}");
+            assert!(why.contains("not a case this run measured"), "{why}");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn n_a_rule_that_names_no_case_at_all_is_unwitnessed() {
+    // The degenerate ledger row. Nothing named it, so nothing failed to catch it.
+    let outcome = classify(
+        &baseline(),
+        &[],
+        &measured(&[("c-lifecycle-0001", "passed"), ("c-lifecycle-0002", "passed")]),
+    );
+    match outcome {
+        Outcome::Unwitnessed(why) => assert!(why.contains("names no case"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn n_one_live_case_among_dead_ones_is_still_a_survivor() {
+    // The control in the other direction, and the reason `UNWITNESSED` cannot quietly swallow the
+    // finding it was carved out of: `q-mpu-attributes-etag-0036` names `c-mpu-0002` and
+    // `c-mpu-0018`, both green at baseline, and stays `SURVIVED` after this change. One case that
+    // could have gone red and did not is a corpus gap, however many dead rows sit beside it.
+    let mut baseline = baseline();
+    baseline.insert("c-lifecycle-0003".to_owned(), "failed".to_owned());
+    let outcome = classify(
+        &baseline,
+        &[
+            "c-lifecycle-0003".to_owned(),
+            "c-objectlock-0001".to_owned(),
+            "c-lifecycle-0002".to_owned(),
+        ],
+        &measured(&[
+            ("c-lifecycle-0001", "passed"),
+            ("c-lifecycle-0002", "passed"),
+            ("c-lifecycle-0003", "failed"),
+        ]),
+    );
+    assert_eq!(
+        outcome,
+        Outcome::Survived,
+        "a rule with one case that was green and stayed green is a corpus gap, not an unwitnessed row"
+    );
+}
+
+#[test]
+fn n_a_kill_by_another_case_outranks_an_unwitnessed_ledger_row() {
+    // Ordering control. A rule whose declared evidence is all dead can still be caught by a case
+    // nobody bound to it, and that is a fact about the corpus worth more than the ledger defect.
+    // Checking the witness first would report `UNWITNESSED` over a real red case.
+    let outcome = classify(
+        &baseline(),
+        &["c-objectlock-0001".to_owned()],
+        &measured(&[("c-lifecycle-0001", "failed"), ("c-lifecycle-0002", "passed")]),
+    );
+    assert_eq!(
+        outcome,
+        Outcome::Killed {
+            by: vec!["c-lifecycle-0001".to_owned()],
+            declared: false,
+        }
+    );
 }
 
 #[test]
@@ -193,7 +317,7 @@ fn n_a_case_turning_green_under_the_mutation_is_not_a_kill() {
     baseline.insert("c-lifecycle-0003".to_owned(), "failed".to_owned());
     let outcome = classify(
         &baseline,
-        &[],
+        &witnessed(),
         &measured(&[
             ("c-lifecycle-0001", "passed"),
             ("c-lifecycle-0002", "passed"),
@@ -228,12 +352,13 @@ fn n_only_a_kill_by_a_named_case_lets_the_command_exit_zero() {
         declared: false,
     };
     assert!(!unnamed.is_pass(), "an uncredited kill leaves a ledger row unproven");
-    assert!(!Outcome::KilledByCompile.is_pass());
+    assert!(!Outcome::KilledByCompile(String::new()).is_pass());
     assert!(!Outcome::Survived.is_pass());
     assert!(!Outcome::Inert(String::new()).is_pass());
     assert!(!Outcome::Unplannable(String::new()).is_pass());
     assert!(!Outcome::Unsupported(String::new()).is_pass());
     assert!(!Outcome::NotMeasured(String::new()).is_pass());
+    assert!(!Outcome::Unwitnessed(String::new()).is_pass());
     assert!(
         Outcome::Killed {
             by: vec!["c-lifecycle-0001".to_owned()],

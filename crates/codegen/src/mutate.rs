@@ -83,6 +83,23 @@ impl Mutation {
 /// run produced it. The prefix cannot collide with a real S3 spelling.
 const RENAME_PREFIX: &str = "Mutated";
 
+/// The declared error code written where a rule's whole content is that the operation owes *no*
+/// operation-specific not-configured error.
+///
+/// A rule spelled as an absence still has a violation: the claim is "there is no 404 here", so any
+/// code at all contradicts it and there is nothing to choose between them on protocol grounds. The
+/// choice is made on two mechanical grounds instead. It has to be a code
+/// `model/overlays/error-status.toml` declares, because `OperationSpec::standard` refuses at
+/// const-evaluation time a lowered code the authority does not carry — a constant that drifted out
+/// of that table would turn every one of these rows into a compile kill, which reads exactly like
+/// the compiler catching the mutation. And it names a subresource that is not the one under
+/// mutation in any of them, so a reviewer reading `NoSuchLifecycleConfiguration` on a bucket ACL
+/// read knows immediately that it came from here and not from the overlay.
+pub const ABSENT_NOT_CONFIGURED_MUTANT: &str = "NoSuchLifecycleConfiguration";
+
+/// The lowered-IR path suffix whose absence is itself the rule.
+const NOT_CONFIGURED_SUFFIX: &str = ".errors.not_configured";
+
 /// Plans the flip for one resolved source under one mutation dimension.
 ///
 /// Every dimension gets the one alternative that a client would actually observe: a boolean is
@@ -109,6 +126,12 @@ fn alternative(dimension: MutationDimension, current: &SourceValue, path: &str) 
         // Absence is itself a rule here. Dropping the value is the mutation that matters: the
         // operation-specific error code becomes a generic one, the omission condition disappears.
         SourceValue::OptionalText(Some(_)) => Ok(SourceValue::OptionalText(None)),
+        // The other direction, for the one source whose absence is a claim rather than a silence.
+        SourceValue::OptionalText(None)
+            if dimension == MutationDimension::Optionality && path.ends_with(NOT_CONFIGURED_SUFFIX) =>
+        {
+            Ok(SourceValue::OptionalText(Some(ABSENT_NOT_CONFIGURED_MUTANT.to_owned())))
+        }
         SourceValue::OptionalText(None) => Err(format!(
             "source `{path}` is already absent, and this planner has no evidence for which present \
              value the protocol would otherwise carry"
