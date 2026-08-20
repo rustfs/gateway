@@ -165,8 +165,6 @@ where
                 }
                 Poll::Ready(Ok(Some(frame))) => frame,
             };
-            // A trailer frame carries no payload. This assembly does not verify trailers, so it
-            // neither counts nor keeps one; the framing layer is where a trailer is judged.
             // Neither this skip nor the empty-frame skip below is bounded — rustfs/gateway#263.
             let Ok(mut data) = frame.into_data() else {
                 continue;
