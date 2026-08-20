@@ -1,0 +1,74 @@
+# c-mpu-0051 — a completion under a real upload id belonging to another bucket.
+
+[case]
+id = "c-mpu-0051"
+schema_version = 1
+title = "A completion naming a valid upload id from another bucket is refused"
+rationale = """
+A completion is the one request that spends an upload id, so accepting a foreign one is not a read \
+of somebody else's state but the end of it: the stranger's part list decides which of the owner's \
+parts become the object and which are discarded, and the owner's own completion afterwards finds \
+nothing to complete. The body here is entirely well-formed and names the victim's part with the \
+victim's digest — the material `c-mpu-0050` proves a listing must not hand out — so the only thing \
+wrong with this request is whose upload it is, which is the whole of what the case measures. The \
+refusal carries a 404 rather than a committed 200 with an error inside it, which is what says the id \
+was resolved before the head went out."""
+polarity = "negative"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "security", "upload-id", "error-shape"]
+quirks = ["q-mpu-upload-id-0037"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/51"
+summary = "Upstream acted on any upload id it was handed without checking which resource it belonged to."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "The completion is documented as naming a bucket, a key and an upload id together, and it assembles the object from the parts of that upload."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.buckets]]
+name = "conf-mpu-other"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu-other"
+key = "someone-elses-object"
+capture_upload_id_as = "foreign_upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 4242 }
+capture_etag_as = "victim_part_etag"
+
+[request]
+method = "POST"
+target = "/conf-mpu/someone-elses-object?uploadId=${capture.foreign_upload_id}"
+headers = { "content-type" = "application/xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[request.body]
+utf8 = '''
+<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.victim_part_etag}</ETag></Part></CompleteMultipartUpload>'''
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag"]
+
+[expect.error]
+code = "NoSuchUpload"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchUpload</Code><Message>The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

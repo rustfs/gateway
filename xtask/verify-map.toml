@@ -2,11 +2,11 @@
 
 [[operation]]
 name = "AbortMultipartUpload"
-cases = "c-mpu-0014,c-mpu-0032"
+cases = "c-mpu-0014,c-mpu-0032,c-mpu-0049"
 
 [[operation]]
 name = "CompleteMultipartUpload"
-cases = "c-cond-0024,c-cond-0025,c-mpu-0001,c-mpu-0002,c-mpu-0003,c-mpu-0005,c-mpu-0008,c-mpu-0009,c-mpu-0015,c-mpu-0016,c-mpu-0017,c-mpu-0019,c-mpu-0020,c-mpu-0021,c-mpu-0022,c-mpu-0023,c-mpu-0026,c-mpu-0033,c-mpu-0034,c-mpu-0035,c-mpu-0036,c-mpu-0037,c-mpu-0038,c-mpu-0039,c-mpu-0040,c-mpu-0041,c-mpu-0042"
+cases = "c-cond-0024,c-cond-0025,c-mpu-0001,c-mpu-0002,c-mpu-0003,c-mpu-0005,c-mpu-0008,c-mpu-0009,c-mpu-0015,c-mpu-0016,c-mpu-0017,c-mpu-0019,c-mpu-0020,c-mpu-0021,c-mpu-0022,c-mpu-0023,c-mpu-0026,c-mpu-0033,c-mpu-0034,c-mpu-0035,c-mpu-0036,c-mpu-0037,c-mpu-0038,c-mpu-0039,c-mpu-0040,c-mpu-0041,c-mpu-0042,c-mpu-0051"
 
 [[operation]]
 name = "CopyObject"
@@ -190,7 +190,7 @@ cases = "c-list-0001,c-list-0004,c-list-0005,c-list-0006,c-list-0007,c-list-0008
 
 [[operation]]
 name = "ListParts"
-cases = "c-mpu-0010,c-mpu-0046,c-mpu-0048"
+cases = "c-mpu-0010,c-mpu-0046,c-mpu-0048,c-mpu-0050"
 
 [[operation]]
 name = "PutBucketAccelerateConfiguration"
@@ -286,5 +286,5 @@ cases = "c-mpu-0018,c-mpu-0024,c-mpu-0025,c-mpu-0027,c-mpu-0028,c-mpu-0029,c-mpu
 
 [[operation]]
 name = "UploadPartCopy"
-cases = "c-authz-0001,c-authz-1001,c-copy-0011,c-copy-0013,c-copy-0014,c-copy-0015,c-copy-0020,c-copy-0036,c-copy-0037,c-range-0006"
+cases = "c-authz-0001,c-authz-1001,c-copy-0011,c-copy-0013,c-copy-0014,c-copy-0015,c-copy-0020,c-copy-0036,c-copy-0037,c-mpu-0052,c-range-0006"
 

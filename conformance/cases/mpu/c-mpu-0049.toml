@@ -1,0 +1,94 @@
+# c-mpu-0049 — an abort under a real upload id belonging to another bucket.
+
+[case]
+id = "c-mpu-0049"
+schema_version = 1
+title = "An abort naming a valid upload id from another bucket is refused and destroys nothing"
+rationale = """
+Abort is the destructive member of the family: its entire effect is to throw away work in progress, \
+and it leaves nothing behind for the owner to find. `c-mpu-0029` pins the same forged ownership on \
+the write path, where an absent entity tag is the proof that nothing landed; an abort answers no \
+such header, so a 404 on its own is equally consistent with a server that reclaimed the upload and \
+then reported not-found. The second exchange is the half that cannot be faked: the owner lists its \
+parts afterwards and finds them where it left them. The refused answer is also byte for byte the one \
+an id that never existed gets, because a caller able to tell 'that id is real but not yours' from \
+'no such id' has been told the id it guessed is genuine."""
+polarity = "negative"
+operation = "AbortMultipartUpload"
+tags = ["multipart", "security", "upload-id", "error-shape"]
+quirks = ["q-mpu-upload-id-0037", "q-mpu-abort-0035"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/51"
+summary = "Upstream acted on any upload id it was handed without checking which resource it belonged to."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html"
+summary = "The abort is documented as naming a bucket, a key and an upload id together, and it frees the parts of that upload."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.buckets]]
+name = "conf-mpu-other"
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu-other"
+key = "someone-elses-object"
+capture_upload_id_as = "foreign_upload_id"
+
+[[setup.multipart_uploads.parts]]
+part_number = 1
+body = { size = 4242 }
+
+[[exchanges]]
+name = "abort-from-another-bucket"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-mpu/someone-elses-object?uploadId=${capture.foreign_upload_id}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchUpload"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchUpload</Code><Message>The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+
+[[exchanges]]
+name = "owner-still-has-the-upload"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu-other/someone-elses-object?uploadId=${capture.foreign_upload_id}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = [
+  "<ListPartsResult",
+  "<UploadId>${capture.foreign_upload_id}</UploadId>",
+  "<PartNumber>1</PartNumber>",
+  "<Size>4242</Size>",
+]
