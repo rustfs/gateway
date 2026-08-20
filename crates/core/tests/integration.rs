@@ -23,6 +23,9 @@ mod support;
 #[path = "acl_contract.rs"]
 mod acl_contract;
 
+#[path = "acl_roundtrip.rs"]
+mod acl_roundtrip;
+
 #[path = "authz_consumption.rs"]
 mod authz_consumption;
 

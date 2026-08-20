@@ -189,6 +189,7 @@ license_header = """// Copyright 2026 RustFS Team
 
 core_modules = (
     "acl_contract",
+    "acl_roundtrip",
     "authz_consumption",
     "codec_binding",
     "compile_fail",
