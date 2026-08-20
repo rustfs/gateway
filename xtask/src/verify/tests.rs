@@ -116,6 +116,36 @@ fn a_legacy_short_name_still_resolves_to_the_prefixed_package() {
 }
 
 #[test]
+fn xtask_fast_scope_reuses_the_workspace_feature_graph_for_every_target() {
+    let steps = crate_steps("xtask");
+
+    assert_eq!(
+        steps[0],
+        ["test", "--workspace", "--bin", "xtask", "--test", "xtask-integration"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        steps[1],
+        [
+            "clippy",
+            "--workspace",
+            "--bin",
+            "xtask",
+            "--test",
+            "xtask-integration",
+            "--",
+            "-D",
+            "warnings",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn conformance_fast_scope_keeps_integration_contracts_in_the_workspace_gate() {
     let steps = crate_steps("rustfs-gateway-conformance");
 
@@ -188,6 +218,41 @@ fn facade_fast_scope_keeps_heavy_contracts_in_the_workspace_gate() {
         include_str!("../../../crates/gateway/tests/cors_runtime.rs")
             .contains("fn a_million_unique_keys_keep_rss_within_the_entry_budget()"),
         "the workspace-only RSS contract must remain an active test"
+    );
+}
+
+#[test]
+fn server_fast_scope_keeps_thousand_connection_load_in_the_workspace_gate() {
+    let batches = crate_step_batches("rustfs-gateway-server");
+
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].len(), 2);
+    assert_eq!(
+        batches[0][0],
+        [
+            "test",
+            "-p",
+            "rustfs-gateway-server",
+            "--",
+            "--skip",
+            "c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget",
+            "--skip",
+            "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+    );
+    assert_eq!(batches[0][1][0], "clippy");
+    assert!(
+        include_str!("../../../crates/server/tests/server_load.rs")
+            .contains("fn c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget()"),
+        "the workspace-only c-lim-0006 load contract must remain active"
+    );
+    assert!(
+        include_str!("../../../crates/server/tests/server_load.rs")
+            .contains("fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic()"),
+        "the workspace-only c-lim-0061 load contract must remain active"
     );
 }
 

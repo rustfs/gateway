@@ -75,6 +75,8 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
         format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
     } else if package == "rustfs-gateway-conformance" {
         format!("crate {package} library scope; integration contracts remain in cargo test --workspace")
+    } else if package == "rustfs-gateway-server" {
+        format!("crate {package} runtime scope; thousand-connection load contracts remain in cargo test --workspace")
     } else {
         format!("crate {package}")
     };
@@ -94,13 +96,25 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
 
 fn crate_step_batches(package: &str) -> Vec<Vec<Vec<String>>> {
     let mut steps = crate_steps(package);
-    if package != "rustfs-gateway" {
-        return vec![steps];
+    if package == "rustfs-gateway" {
+        let mut test = steps.remove(0);
+        test.extend(["--skip".to_owned(), GATEWAY_RSS_TEST.to_owned()]);
+        let clippy = steps.remove(0);
+        return vec![vec![test, clippy]];
     }
-    let mut test = steps.remove(0);
-    test.extend(["--skip".to_owned(), GATEWAY_RSS_TEST.to_owned()]);
-    let clippy = steps.remove(0);
-    vec![vec![test, clippy]]
+    if package == "rustfs-gateway-server" {
+        let mut test = steps.remove(0);
+        test.extend([
+            "--".to_owned(),
+            "--skip".to_owned(),
+            "c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget".to_owned(),
+            "--skip".to_owned(),
+            "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic".to_owned(),
+        ]);
+        let clippy = steps.remove(0);
+        return vec![vec![test, clippy]];
+    }
+    vec![steps]
 }
 
 fn standalone_crate_case(package: &str) -> Option<&'static str> {
@@ -108,6 +122,17 @@ fn standalone_crate_case(package: &str) -> Option<&'static str> {
 }
 
 fn crate_steps(package: &str) -> Vec<Vec<String>> {
+    if package == "xtask" {
+        let target_scope = ["--workspace", "--bin", "xtask", "--test", "xtask-integration"];
+        return vec![
+            std::iter::once("test").chain(target_scope).map(str::to_owned).collect(),
+            std::iter::once("clippy")
+                .chain(target_scope)
+                .chain(["--", "-D", "warnings"])
+                .map(str::to_owned)
+                .collect(),
+        ];
+    }
     let clippy_step = vec![
         "clippy".to_owned(),
         "-p".to_owned(),
