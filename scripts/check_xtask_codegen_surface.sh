@@ -640,6 +640,7 @@ if package == "rustfs-gateway-core" {
 }
 let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
 if package == "rustfs-gateway" {
+    test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);
     test_step.extend([
         "--".to_owned(),
         "--skip".to_owned(),
@@ -651,7 +652,7 @@ if package == "rustfs-gateway" {
 vec![test_step, clippy_step]
 ''')
 if compact(crate_steps_items[0][1]) != expected_crate_steps_body:
-    fail("crate verification steps must preserve xtask workspace target reuse, both core runtime targets, compile-fail skips, conformance library scope and all-target clippy")
+    fail("crate verification steps must preserve xtask workspace target reuse, both core runtime targets, gateway library and integration targets, compile-fail skips, conformance library scope and all-target clippy")
 conformance_test_items = functions_named("conformance_test_step", syntax, comments_removed)
 expected_conformance_test_body = compact('''
 vec![

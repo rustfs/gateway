@@ -1968,6 +1968,7 @@ from pathlib import Path
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '''    if package == "rustfs-gateway" {
+        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);
         test_step.extend([
             "--".to_owned(),
             "--skip".to_owned(),
@@ -1976,6 +1977,7 @@ old = '''    if package == "rustfs-gateway" {
     } else if package == "rustfs-gateway-conformance" {
 '''
 new = '''    if package == "rustfs-gateway" {
+        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);
     } else if package == "rustfs-gateway-conformance" {
 '''
 if text.count(old) != 1:
@@ -1986,6 +1988,40 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'the gateway fast scope losing its compile-fail skip' \
     mut_xtask_gateway_fast_scope_loses_compile_fail_skip
+
+mut_xtask_gateway_fast_scope_drops_library_tests() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);'
+new = '        test_step.extend(["--test".to_owned(), "integration".to_owned()]);'
+if text.count(old) != 1:
+    raise SystemExit("gateway bounded runtime target list is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gateway fast scope dropping its library tests' \
+    mut_xtask_gateway_fast_scope_drops_library_tests
+
+mut_xtask_gateway_fast_scope_drops_integration_tests() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);'
+new = '        test_step.push("--lib".to_owned());'
+if text.count(old) != 1:
+    raise SystemExit("gateway bounded runtime target list is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gateway fast scope dropping its integration tests' \
+    mut_xtask_gateway_fast_scope_drops_integration_tests
 
 mut_xtask_gateway_fast_scope_drops_its_conformance_case() {
     python3 - <<'PYEOF'

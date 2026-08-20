@@ -160,6 +160,7 @@ fn crate_steps(package: &str) -> Vec<Vec<String>> {
     }
     let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
     if package == "rustfs-gateway" {
+        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);
         test_step.extend([
             "--".to_owned(),
             "--skip".to_owned(),
