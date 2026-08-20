@@ -18,25 +18,46 @@ fail() {
 command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
 command -v git >/dev/null 2>&1 || fail 'required command is missing: git'
 [[ -f "${ROOT_DIR}/AGENTS.md" ]] || fail 'rule input is missing: AGENTS.md'
+[[ -n "${GATEWAY_PR_BODY_JSON+x}" ]] || fail 'required input is missing: GATEWAY_PR_BODY_JSON'
+# The pull-request body arrives JSON-encoded because the workflow prints this step's env
+# block into the CI log, where the runner reads a line beginning `::` as a workflow
+# command (rustfs/gateway#224). A raw newline here means the encoding did not happen, so
+# the body could be forging or suppressing annotations already. Fail closed.
+[[ "$GATEWAY_PR_BODY_JSON" != *$'\n'* ]] ||
+    fail 'GATEWAY_PR_BODY_JSON must be a single-line JSON string (rule: rustfs/gateway#224)'
+[[ "$GATEWAY_PR_BODY_JSON" != *$'\r'* ]] ||
+    fail 'GATEWAY_PR_BODY_JSON must be a single-line JSON string (rule: rustfs/gateway#224)'
 [[ -n "${GATEWAY_PROTECTED_BASE:-}" ]] || fail 'required input is missing: GATEWAY_PROTECTED_BASE'
 [[ -n "${GATEWAY_PROTECTED_HEAD:-}" ]] || fail 'required input is missing: GATEWAY_PROTECTED_HEAD'
-[[ -n "${GATEWAY_PR_BODY+x}" ]] || fail 'required input is missing: GATEWAY_PR_BODY'
 
-python3 - "$ROOT_DIR" "$GATEWAY_PROTECTED_BASE" "$GATEWAY_PROTECTED_HEAD" "$GATEWAY_PR_BODY" <<'PY'
+python3 - "$ROOT_DIR" "$GATEWAY_PROTECTED_BASE" "$GATEWAY_PROTECTED_HEAD" "$GATEWAY_PR_BODY_JSON" <<'PY'
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
-base, head, body = sys.argv[2:]
+base, head, body_json = sys.argv[2:]
 
 
 def fail(message: str) -> None:
     print(f"check_protected_files: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+try:
+    decoded = json.loads(body_json)
+except ValueError as error:
+    fail(f"GATEWAY_PR_BODY_JSON is not JSON (rule: rustfs/gateway#224): {error}")
+# A pull request with no description arrives as JSON null.
+if decoded is None:
+    decoded = ""
+if not isinstance(decoded, str):
+    fail(f"GATEWAY_PR_BODY_JSON must decode to a string, got {type(decoded).__name__}")
+body = decoded
 
 
 def git(*arguments: str) -> bytes:

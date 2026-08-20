@@ -201,6 +201,22 @@ guard_group_of() {
     printf '%s\n' "$((($1 - 1) % $2))"
 }
 
+# json_string <text>
+# Encodes text as a single-line JSON string, which is what `toJSON()` puts in
+# GATEWAY_PR_BODY_JSON in .github/workflows/ci.yml. The pull-request body is exported
+# encoded so that no line of it can start a CI log line and be read as a workflow command
+# (rustfs/gateway#224), and the guards that consume it decode it and reject anything that
+# still carries a raw newline. The suite therefore has to hand them the shape CI does.
+json_string() {
+    local text="$1"
+    text="${text//\\/\\\\}"
+    text="${text//\"/\\\"}"
+    text="${text//$'\r'/\\r}"
+    text="${text//$'\t'/\\t}"
+    text="${text//$'\n'/\\n}"
+    printf '"%s"' "$text"
+}
+
 # guard_worker_of <ordinal> <groups> <workers>
 # Pure: which worker process inside the owning runner runs the case, striding for
 # the same reason. Both are functions of the ordinal alone, which is what lets
@@ -6897,7 +6913,7 @@ expect_protected_fail() {
     [[ -x "${SCRIPT_DIR}/check_protected_files.sh" ]] || { fail_msg "check_protected_files.sh is missing or not executable; cannot test: ${desc}"; return; }
     make_sandbox; sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null && git add -A && git -c user.name=t -c user.email=t@t commit -qm mutation)
-    GATEWAY_CHECK_ROOT="$sandbox" GATEWAY_PROTECTED_BASE=HEAD^ GATEWAY_PROTECTED_HEAD=HEAD GATEWAY_PR_BODY='' \
+    GATEWAY_CHECK_ROOT="$sandbox" GATEWAY_PROTECTED_BASE=HEAD^ GATEWAY_PROTECTED_HEAD=HEAD GATEWAY_PR_BODY_JSON='""' \
         "${SCRIPT_DIR}/check_protected_files.sh" >/dev/null 2>&1 || rc=$?
     [[ "$rc" -ne 0 ]] && pass_msg "check_protected_files.sh catches: ${desc}" || fail_msg "check_protected_files.sh did NOT catch: ${desc}"
 }
@@ -6909,7 +6925,7 @@ expect_protected_pass() {
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null && git add -A && git -c user.name=t -c user.email=t@t commit -qm mutation)
-    GATEWAY_CHECK_ROOT="$sandbox" GATEWAY_PROTECTED_BASE=HEAD^ GATEWAY_PROTECTED_HEAD=HEAD GATEWAY_PR_BODY="$body" \
+    GATEWAY_CHECK_ROOT="$sandbox" GATEWAY_PROTECTED_BASE=HEAD^ GATEWAY_PROTECTED_HEAD=HEAD GATEWAY_PR_BODY_JSON="$(json_string "$body")" \
         "${SCRIPT_DIR}/check_protected_files.sh" >/dev/null 2>&1 || rc=$?
     [[ "$rc" -eq 0 ]] && pass_msg "check_protected_files.sh allows: ${desc}" || fail_msg "check_protected_files.sh rejected: ${desc}"
 }
@@ -6931,11 +6947,25 @@ expect_protected_fail 'a newly added protocol overlay without BREAKING' mut_new_
 mut_protected_table_drift() { sed 's/`rustfmt.toml`/`rustfmt-contract.toml`/' AGENTS.md >AGENTS.md.mut; mv AGENTS.md.mut AGENTS.md; }
 expect_protected_fail 'the AGENTS protected path table drifting from the executable policy' mut_protected_table_drift
 
-probe_protected_missing_inputs() {
+probe_protected_missing_body() {
     local output rc=0
     cases=$((cases + 1))
     guard_case_owned "$cases" || return 0
     output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" "${SCRIPT_DIR}/check_protected_files.sh" 2>&1)" || rc=$?
+    [[ "$rc" -ne 0 && "$output" == *'required input is missing: GATEWAY_PR_BODY_JSON'* ]] && \
+        pass_msg 'check_protected_files.sh fails closed without the PR body' || \
+        fail_msg 'check_protected_files.sh reported green without the PR body'
+}
+probe_protected_missing_body
+
+# The untrusted input is validated before the comparison revisions, so this second half is
+# what still proves the revisions are required at all.
+probe_protected_missing_inputs() {
+    local output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" GATEWAY_PR_BODY_JSON='""' \
+        "${SCRIPT_DIR}/check_protected_files.sh" 2>&1)" || rc=$?
     [[ "$rc" -ne 0 && "$output" == *'required input is missing: GATEWAY_PROTECTED_BASE'* ]] && \
         pass_msg 'check_protected_files.sh fails closed without PR comparison inputs' || \
         fail_msg 'check_protected_files.sh reported green without PR comparison inputs'
@@ -7853,7 +7883,7 @@ expect_role_result() {
     GATEWAY_CHECK_ROOT="$REPO_ROOT" \
         GATEWAY_CHANGED_FILES="$changed" \
         GATEWAY_CHANGED_DIFF="$changed_diff" \
-        GATEWAY_PR_BODY="$body" \
+        GATEWAY_PR_BODY_JSON="$(json_string "$body")" \
         "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
     if [[ "$expected" == pass && "$rc" -eq 0 ]]; then
         pass_msg "check_role_verdicts.sh allows: ${desc}"
@@ -7922,7 +7952,7 @@ probe_role_verdict_missing_inputs() {
     local rc=0
     cases=$((cases + 1))
     guard_case_owned "$cases" || return 0
-    GATEWAY_CHECK_ROOT="$REPO_ROOT" GATEWAY_PR_BODY='' \
+    GATEWAY_CHECK_ROOT="$REPO_ROOT" GATEWAY_PR_BODY_JSON='""' \
         "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
     if [[ "$rc" -ne 0 ]]; then
         pass_msg 'check_role_verdicts.sh fails closed without changed-file inputs'
@@ -7931,6 +7961,50 @@ probe_role_verdict_missing_inputs() {
     fi
 }
 probe_role_verdict_missing_inputs
+
+# rustfs/gateway#224. The pull-request body is exported JSON-encoded so that no line of it
+# starts a CI log line, where the runner would read a leading `::` as a workflow command.
+# Both consumers refuse anything that still carries a raw newline, because a raw newline
+# means the encoding did not happen and the body may already have forged or suppressed an
+# annotation before the guard ever ran. The other direction -- that a well-formed
+# single-line body is accepted -- is every passing expect_role_result case above.
+probe_pr_body_multiline_is_refused() {
+    local guard="$1" output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" \
+        GATEWAY_CHANGED_FILES=$'M\tscripts/check_example.sh' \
+        GATEWAY_PROTECTED_BASE=HEAD^ GATEWAY_PROTECTED_HEAD=HEAD \
+        GATEWAY_ROLE_BASE=HEAD^ GATEWAY_ROLE_HEAD=HEAD \
+        GATEWAY_PR_BODY_JSON=$'"## Role Verdicts"\n::warning::forged finding' \
+        "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 && "$output" == *'must be a single-line JSON string'* ]]; then
+        pass_msg "${guard} refuses a pull-request body that was never JSON-encoded"
+    else
+        fail_msg "${guard} accepted a multi-line GATEWAY_PR_BODY_JSON"
+    fi
+}
+probe_pr_body_multiline_is_refused check_role_verdicts.sh
+probe_pr_body_multiline_is_refused check_protected_files.sh
+
+probe_pr_body_non_json_is_refused() {
+    local guard="$1" output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" \
+        GATEWAY_CHANGED_FILES=$'M\tscripts/check_example.sh' \
+        GATEWAY_PROTECTED_BASE=HEAD^ GATEWAY_PROTECTED_HEAD=HEAD \
+        GATEWAY_ROLE_BASE=HEAD^ GATEWAY_ROLE_HEAD=HEAD \
+        GATEWAY_PR_BODY_JSON='## Role Verdicts - simplicity-adversary: attacked it - no break found.' \
+        "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 && "$output" == *'is not JSON'* ]]; then
+        pass_msg "${guard} refuses a single-line body that was never JSON-encoded"
+    else
+        fail_msg "${guard} accepted a GATEWAY_PR_BODY_JSON that is not JSON"
+    fi
+}
+probe_pr_body_non_json_is_refused check_role_verdicts.sh
+probe_pr_body_non_json_is_refused check_protected_files.sh
 
 probe_role_verdict_table_drift() {
     local sandbox rc=0
@@ -7942,7 +8016,7 @@ probe_role_verdict_table_drift() {
     rm -f "${sandbox}/AGENTS.md.bak"
     GATEWAY_CHECK_ROOT="$sandbox" \
         GATEWAY_CHANGED_FILES=$'M\tscripts/check_example.sh' \
-        GATEWAY_PR_BODY=$'## Role Verdicts\n- simplicity-adversary: attacked the input boundary — no break found.' \
+        GATEWAY_PR_BODY_JSON="$(json_string $'## Role Verdicts\n- simplicity-adversary: attacked the input boundary — no break found.')" \
         "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
     if [[ "$rc" -ne 0 ]]; then
         pass_msg 'check_role_verdicts.sh catches AGENTS.md trigger-table drift'
@@ -8008,7 +8082,7 @@ probe_role_verdict_ignores_base_branch_commits() {
     GATEWAY_CHECK_ROOT="$repo" \
         GATEWAY_ROLE_BASE="$ROLE_BASE_SHA" \
         GATEWAY_ROLE_HEAD="$ROLE_HEAD_SHA" \
-        GATEWAY_PR_BODY="$ROLE_SIMPLICITY_ONLY_BODY" \
+        GATEWAY_PR_BODY_JSON="$(json_string "$ROLE_SIMPLICITY_ONLY_BODY")" \
         "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
     rm -rf "$repo"
     if [[ "$rc" -eq 0 ]]; then
@@ -8028,7 +8102,7 @@ probe_role_verdict_still_sees_branch_paths() {
     GATEWAY_CHECK_ROOT="$repo" \
         GATEWAY_ROLE_BASE="$ROLE_BASE_SHA" \
         GATEWAY_ROLE_HEAD="$ROLE_HEAD_SHA" \
-        GATEWAY_PR_BODY="$ROLE_SIMPLICITY_ONLY_BODY" \
+        GATEWAY_PR_BODY_JSON="$(json_string "$ROLE_SIMPLICITY_ONLY_BODY")" \
         "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
     rm -rf "$repo"
     if [[ "$rc" -ne 0 ]]; then
@@ -8065,7 +8139,7 @@ probe_role_verdict_two_dot_diff_is_caught() {
     GATEWAY_CHECK_ROOT="$repo" \
         GATEWAY_ROLE_BASE="$ROLE_BASE_SHA" \
         GATEWAY_ROLE_HEAD="$ROLE_HEAD_SHA" \
-        GATEWAY_PR_BODY="$ROLE_SIMPLICITY_ONLY_BODY" \
+        GATEWAY_PR_BODY_JSON="$(json_string "$ROLE_SIMPLICITY_ONLY_BODY")" \
         bash "${mutated}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
     rm -rf "$repo" "$mutated"
     if [[ "$rc" -ne 0 ]]; then
@@ -8102,7 +8176,7 @@ probe_compat_role_required() {
     GATEWAY_CHECK_ROOT="$repo" \
         GATEWAY_ROLE_BASE="$base" \
         GATEWAY_ROLE_HEAD="$head" \
-        GATEWAY_PR_BODY=$'## Role Verdicts\n- simplicity-adversary: attacked the compatibility surface — no break found.' \
+        GATEWAY_PR_BODY_JSON="$(json_string $'## Role Verdicts\n- simplicity-adversary: attacked the compatibility surface — no break found.')" \
         "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
     rm -rf "$repo"
     if [[ "$rc" -ne 0 ]]; then
@@ -8139,7 +8213,7 @@ probe_compat_source_role_required() {
     GATEWAY_CHECK_ROOT="$repo" \
         GATEWAY_ROLE_BASE="$base" \
         GATEWAY_ROLE_HEAD="$head" \
-        GATEWAY_PR_BODY=$'## Role Verdicts\n- simplicity-adversary: attacked the compatibility surface — no break found.\n- protocol-auditor: attacked the wire contract — no break found.' \
+        GATEWAY_PR_BODY_JSON="$(json_string $'## Role Verdicts\n- simplicity-adversary: attacked the compatibility surface — no break found.\n- protocol-auditor: attacked the wire contract — no break found.')" \
         "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
     rm -rf "$repo"
     if [[ "$rc" -ne 0 ]]; then
@@ -8177,7 +8251,7 @@ probe_existing_compat_body_role_required() {
     GATEWAY_CHECK_ROOT="$repo" \
         GATEWAY_ROLE_BASE="$base" \
         GATEWAY_ROLE_HEAD="$head" \
-        GATEWAY_PR_BODY=$'## Role Verdicts\n- simplicity-adversary: attacked the compatibility surface — no break found.\n- protocol-auditor: attacked the wire contract — no break found.' \
+        GATEWAY_PR_BODY_JSON="$(json_string $'## Role Verdicts\n- simplicity-adversary: attacked the compatibility surface — no break found.\n- protocol-auditor: attacked the wire contract — no break found.')" \
         "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
     rm -rf "$repo"
     if [[ "$rc" -ne 0 ]]; then
@@ -14104,6 +14178,122 @@ PYEOF
 expect_fail check_ci_test_split.sh \
     'the guard self-test ignoring the budget CI hands it, which is what keeps an overrun legible' \
     mut_guard_budget_declaration_removed
+
+# -----------------------------------------------------------------------------
+# rustfs/gateway#224: the pull-request body reaches the CI log, and the runner reads a log
+# line beginning `::` as a workflow command. The body is therefore exported JSON-encoded,
+# which puts it on one line and takes the `::` away from the start of it.
+#
+# check_ci_annotation_integrity.sh proves that by rendering the step's env block the way
+# the runner prints it and scanning the result the way the runner reads it. These cases
+# prove the guard: the workflow shape it defends, the trigger the severity bound rests on,
+# the run-time invariant in its consumers, and its own model of the runner.
+# -----------------------------------------------------------------------------
+mut_ci_pr_body_exported_raw() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+before = "GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}"
+after = "GATEWAY_PR_BODY_JSON: ${{ github.event.pull_request.body }}"
+if text.count(before) != 2:
+    raise SystemExit("missing the JSON-encoded pull-request body exports")
+path.write_text(text.replace(before, after))
+PYEOF
+}
+expect_fail check_ci_annotation_integrity.sh \
+    'the pull-request body exported raw, letting its author forge and suppress CI annotations' \
+    mut_ci_pr_body_exported_raw \
+    'would be parsed as a workflow command'
+
+mut_ci_untrusted_title_exported_raw() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+before = "          GATEWAY_ROLE_BASE: ${{ github.event.pull_request.base.sha }}\n"
+after = before + "          GATEWAY_PR_TITLE: ${{ github.event.pull_request.title }}\n"
+if text.count(before) != 1:
+    raise SystemExit("missing the role-verdict environment anchor")
+path.write_text(text.replace(before, after, 1))
+PYEOF
+}
+expect_fail check_ci_annotation_integrity.sh \
+    'a second author-controlled field exported raw beside the encoded body' \
+    mut_ci_untrusted_title_exported_raw \
+    'exposes github.event.pull_request.title'
+
+mut_ci_pr_body_export_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+before = "          GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}\n"
+if text.count(before) != 2:
+    raise SystemExit("missing the JSON-encoded pull-request body exports")
+path.write_text(text.replace(before, ""))
+PYEOF
+}
+expect_fail check_ci_annotation_integrity.sh \
+    'the body export disappearing, which would leave the guard with nothing to prove' \
+    mut_ci_pr_body_export_removed \
+    'no workflow step exports the pull-request body'
+
+mut_ci_pull_request_target_added() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+before = "on:\n  push:\n    branches: [main]\n"
+after = "on:\n  pull_request_target:\n    branches: [main]\n  push:\n    branches: [main]\n"
+if text.count(before) != 1:
+    raise SystemExit("missing the workflow trigger anchor")
+path.write_text(text.replace(before, after, 1))
+PYEOF
+}
+expect_fail check_ci_annotation_integrity.sh \
+    'a pull_request_target trigger, which hands a fork write access and secrets' \
+    mut_ci_pull_request_target_added \
+    'triggers on pull_request_target'
+
+mut_pr_body_single_line_check_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("scripts/check_role_verdicts.sh")
+text = path.read_text()
+before = "[[ \"$GATEWAY_PR_BODY_JSON\" != *$'\\n'* ]] ||"
+after = "[[ 1 == 1 ]] ||"
+if text.count(before) != 1:
+    raise SystemExit("missing the single-line body invariant")
+path.write_text(text.replace(before, after, 1))
+PYEOF
+}
+expect_fail check_ci_annotation_integrity.sh \
+    'a consumer dropping the run-time invariant that catches an unencoded body' \
+    mut_pr_body_single_line_check_removed \
+    'accepts a multi-line GATEWAY_PR_BODY_JSON'
+
+mut_annotation_scanner_is_a_no_op() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("scripts/check_ci_annotation_integrity.sh")
+text = path.read_text()
+before = '    raised: list[tuple[str, str]] = []\n'
+after = '    raised: list[tuple[str, str]] = []\n    return raised\n'
+if text.count(before) != 1:
+    raise SystemExit("missing the runner-model scanner")
+path.write_text(text.replace(before, after, 1))
+PYEOF
+}
+expect_fail_self_mutation check_ci_annotation_integrity.sh \
+    'its own model of the runner reduced to a no-op, which would make both directions green forever' \
+    mut_annotation_scanner_is_a_no_op
 
 fi
 

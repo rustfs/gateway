@@ -161,7 +161,7 @@ jobs:
         env:
           GATEWAY_PROTECTED_BASE: ${{ github.event.pull_request.base.sha }}
           GATEWAY_PROTECTED_HEAD: ${{ github.event.pull_request.head.sha }}
-          GATEWAY_PR_BODY: ${{ github.event.pull_request.body }}
+          GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             bash scripts/check_protected_files.sh
@@ -170,7 +170,7 @@ jobs:
         env:
           GATEWAY_ROLE_BASE: ${{ github.event.pull_request.base.sha }}
           GATEWAY_ROLE_HEAD: ${{ github.event.pull_request.head.sha }}
-          GATEWAY_PR_BODY: ${{ github.event.pull_request.body }}
+          GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             bash scripts/check_role_verdicts.sh
