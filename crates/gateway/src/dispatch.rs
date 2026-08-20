@@ -77,7 +77,7 @@ use rustfs_gateway_types::ErrorCode;
 
 use crate::ext::{Next, OpLayer, Terminal};
 use crate::request_config::{InputAuthorized, RequestConfig};
-use crate::request_deadline::{HandlerDeadlineOutcome, handler_with_deadline};
+use crate::request_deadline::{HandlerDeadlineOutcome, commit_with_progress_deadline, handler_with_deadline};
 
 /// A `Resp<O>`'s output whose `O` this table has forgotten.
 type ErasedOutput = Box<dyn std::any::Any + Send>;
@@ -180,6 +180,7 @@ impl OperationDispatch {
                 .ok_or_else(|| HandlerError::internal_error("registered operation is missing its handler deadline class"))?;
             let deadline = request_config.config().handler_deadline(deadline_class);
             let cleanup_grace = request_config.config().handler_cleanup_grace();
+            let commit_progress = request_config.config().commit_progress_deadline();
             let deadline_cancellation = cancellation.clone();
             Ok(Invocation {
                 _cancellation: cancellation,
@@ -204,14 +205,18 @@ impl OperationDispatch {
                         HandlerError::internal_error("the registered dispatch received another operation's response")
                     })?;
                     let (answer, status) = response.into_parts();
-                    let answer =
-                        match answer {
-                            CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput),
-                            CoreAnswer::Committed(work) => ErasedAnswer::Committed(Box::pin(async move {
-                                work.await.map(|output| Box::new(output) as ErasedOutput)
-                            })),
-                            CoreAnswer::EventStream(stream) => ErasedAnswer::EventStream(stream),
-                        };
+                    let answer = match answer {
+                        CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput),
+                        // Bounded here rather than after the erasure, so that the deadline wraps
+                        // the backend's own future and not a layer of `Box<dyn Any>` around it.
+                        CoreAnswer::Committed(work) => {
+                            let work = commit_with_progress_deadline(work, commit_progress);
+                            ErasedAnswer::Committed(Box::pin(
+                                async move { work.await.map(|output| Box::new(output) as ErasedOutput) },
+                            ))
+                        }
+                        CoreAnswer::EventStream(stream) => ErasedAnswer::EventStream(stream),
+                    };
                     Ok((answer, status))
                 }),
             })

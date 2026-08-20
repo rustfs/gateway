@@ -522,8 +522,31 @@ pub struct Fixture {
 struct CommittedFault {
     /// The operation whose work fails. A case with several exchanges fails one of them, not all.
     operation: String,
-    /// The code the failure reports, inside the body, under the status already sent.
-    code: ErrorCode,
+    /// What the work does once the head is out.
+    effect: CommittedFaultEffect,
+}
+
+/// The two ways a committed continuation can go wrong, which are not one thing with a parameter.
+/// One *reports*: it has an answer and no status to put it in. The other has no answer at all, so
+/// only a bound outside it can end the response. Modelling the second as the first with a special
+/// code would make the case that asserts the bound satisfiable by a backend that simply failed fast.
+#[derive(Debug, Clone)]
+enum CommittedFaultEffect {
+    /// The work reports this code, inside the body, under the status already sent.
+    Reports(ErrorCode),
+    /// The work never resolves. Nothing below the framework can end the response.
+    StopsMakingProgress,
+}
+
+/// What an armed [`CommittedFault`] does to one continuation. Returned to the handler rather than
+/// applied for it: the lookup happens before the head is committed and the effect after, and a
+/// helper doing both would hide the boundary being asserted.
+#[derive(Debug)]
+pub(crate) enum ArmedFault {
+    /// Fail the continuation with this refusal.
+    Reports(HandlerError),
+    /// Never resolve.
+    StopsMakingProgress,
 }
 
 /// The operation names this fixture commits a head for, and can therefore report a fault from.
@@ -593,6 +616,24 @@ impl Fixture {
     /// never reads one leaves the case running with nothing arranged, and a case that reports on a
     /// scenario that did not happen is worse than one that does not run.
     pub fn arm_committed_fault(&mut self, operation: &str, code: ErrorCode) -> Result<(), UnreportableFault> {
+        self.arm(operation, CommittedFaultEffect::Reports(code))
+    }
+
+    /// Arms the stall `[setup.fault] at = "no_progress_after_commit"` declared: `operation` commits
+    /// its head and its continuation then never resolves. The backend a bound on progress has to be
+    /// measured against — every other way this fixture can fail an operation eventually answers
+    /// something, and a response that answers is one nothing had to end.
+    ///
+    /// # Errors
+    ///
+    /// [`UnreportableFault`], on the same list and for the same reason as
+    /// [`Fixture::arm_committed_fault`].
+    pub fn arm_committed_stall(&mut self, operation: &str) -> Result<(), UnreportableFault> {
+        self.arm(operation, CommittedFaultEffect::StopsMakingProgress)
+    }
+
+    /// The one place the operation name is measured against [`COMMITTED_OPERATIONS`].
+    fn arm(&mut self, operation: &str, effect: CommittedFaultEffect) -> Result<(), UnreportableFault> {
         if !COMMITTED_OPERATIONS.contains(&operation) {
             return Err(UnreportableFault {
                 operation: operation.to_owned(),
@@ -600,7 +641,7 @@ impl Fixture {
         }
         self.committed_fault = Some(CommittedFault {
             operation: operation.to_owned(),
-            code,
+            effect,
         });
         Ok(())
     }
@@ -617,12 +658,17 @@ impl Fixture {
     /// fail loudly: it resolves to `InternalError`, and the case reads as a defect in the
     /// committed-response path rather than as a fault that was armed wrong.
     #[must_use]
-    fn committed_fault(&self, operation: &str, subject: &str) -> Option<HandlerError> {
+    fn committed_fault(&self, operation: &str, subject: &str) -> Option<ArmedFault> {
         let fault = self.committed_fault.as_ref().filter(|fault| fault.operation == operation)?;
-        if fault.code == ErrorCode::NO_SUCH_KEY {
-            return Some(no_such_key(subject));
+        match &fault.effect {
+            CommittedFaultEffect::StopsMakingProgress => Some(ArmedFault::StopsMakingProgress),
+            CommittedFaultEffect::Reports(code) if *code == ErrorCode::NO_SUCH_KEY => {
+                Some(ArmedFault::Reports(no_such_key(subject)))
+            }
+            CommittedFaultEffect::Reports(code) => {
+                Some(ArmedFault::Reports(HandlerError::new(code.clone(), COMMITTED_FAULT_MESSAGE)))
+            }
         }
-        Some(HandlerError::new(fault.code.clone(), COMMITTED_FAULT_MESSAGE))
     }
 
     /// When a copy retrieved *now* would lapse, as the RFC 1123 string `x-amz-restore` carries.
@@ -3041,8 +3087,10 @@ impl Stub {
         // wire, and the only thing it can still report is a failure with no status of its own —
         // which is all a `[setup.fault]` arranged for this operation is able to be.
         Ok(Resp::commit(Box::pin(async move {
-            if let Some(error) = fault {
-                return Err(error);
+            match fault {
+                Some(ArmedFault::Reports(error)) => return Err(error),
+                Some(ArmedFault::StopsMakingProgress) => core::future::pending::<()>().await,
+                None => {}
             }
             let etag = object.etag.clone();
             let mut fixture = state
@@ -4428,8 +4476,11 @@ impl Stub {
         // The head is committed here. Everything below runs with the status line already on the
         // wire, and the only thing it can still report is a failure with no status of its own.
         Ok(Resp::commit(Box::pin(async move {
-            if let Some(error) = fault {
-                return Err(error);
+            match fault {
+                Some(ArmedFault::Reports(error)) => return Err(error),
+                // Nothing below runs: what ends this response is outside this future entirely.
+                Some(ArmedFault::StopsMakingProgress) => core::future::pending::<()>().await,
+                None => {}
             }
             let mut assembled = Vec::new();
             let mut digests = Vec::new();
@@ -5201,6 +5252,63 @@ mod tests {
             let refusal = refusal.unwrap_or_else(|| panic!("{operation} answered rather than reporting the armed fault"));
             assert_eq!(*refusal.code(), ErrorCode::INTERNAL_ERROR, "{operation}");
         }
+    }
+
+    /// **Negative — every operation named in [`COMMITTED_OPERATIONS`] really *stalls* when a stall
+    /// is armed against it.**
+    ///
+    /// The same argument as the test above, for the other effect. A handler that read the armed
+    /// fault but only knew how to report a code would run the *ordinary* path for a stall, and the
+    /// case asserting a bound on progress would be red for a reason unrelated to the bound.
+    ///
+    /// "Never resolves" is observed by polling, not waiting — one poll with a no-op waker, which
+    /// must answer `Pending`. Awaiting it would hang, and a hanging test reads as infrastructure.
+    #[test]
+    fn every_operation_this_fixture_commits_for_stalls_when_a_stall_is_armed_against_it() {
+        for operation in COMMITTED_OPERATIONS {
+            let mut fixture = Fixture::at(0);
+            fixture.declare_bucket("conf-bucket", false);
+            fixture.put_object("conf-bucket", "src", StoredObject::new(b"source bytes".to_vec(), None, 0));
+            let upload = fixture.create_upload("conf-bucket", "k");
+            let first = fixture.put_part(&upload, 1, vec![0_u8; MIN_PART_BYTES]);
+            fixture
+                .arm_committed_stall(operation)
+                .expect("a name this fixture commits for");
+            let stub = Stub::new(Arc::new(Mutex::new(fixture)));
+
+            let pending = match *operation {
+                "CompleteMultipartUpload" => {
+                    let input = completion(&upload, vec![(1, Some(&first))]);
+                    stalls_for_ever(stub.complete_multipart_upload(&input).expect("a committed answer"))
+                }
+                "CopyObject" => {
+                    let input = copy("/conf-bucket/src", "dst");
+                    stalls_for_ever(stub.copy_object(&input).expect("a committed answer"))
+                }
+                other => panic!("{other} is in COMMITTED_OPERATIONS and this test does not drive it"),
+            };
+            assert!(pending, "{operation} answered rather than stalling when a stall was armed");
+        }
+    }
+
+    fn stalls_for_ever<O: rustfs_gateway::Operation>(resp: Resp<O>) -> bool {
+        let (answer, _status) = resp.into_parts();
+        let rustfs_gateway::Answer::Committed(mut work) = answer else {
+            panic!("{} did not commit its head", O::NAME);
+        };
+        let mut context = core::task::Context::from_waker(core::task::Waker::noop());
+        work.as_mut().poll(&mut context).is_pending()
+    }
+
+    /// Negative — a stall armed against an operation this fixture never commits for is refused.
+    #[test]
+    fn a_stall_armed_against_an_operation_this_fixture_never_commits_for_is_refused() {
+        let mut fixture = Fixture::at(0);
+        let refused = fixture
+            .arm_committed_stall("UploadPartCopy")
+            .expect_err("an operation this fixture does not commit for");
+        assert_eq!(refused.operation(), "UploadPartCopy");
+        assert!(fixture.committed_fault("UploadPartCopy", "k").is_none());
     }
 
     /// Negative — a fault armed against an operation this fixture never commits for is refused.

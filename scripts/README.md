@@ -143,6 +143,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_agents_context_contract.sh` | The root task-start context budget remains bounded at 8 files and 40k tokens | P0-03 |
 | `check_agents_layering.sh` | Scoped AGENTS files wait for the five-rule trigger and duplicate checker | P7-05 |
 | `check_config_load_once.sh` | `c-lim-0005` binds one request to one hot-config snapshot; `c-lim-0041` freezes every `.load()` / `.load_full()` call site at request entry | P3-05, P7-01 |
+| `check_governor_fast_path.sh` | `c-lim-0004` binds an admitted request to the synchronous Governor path and structurally rejects allocation operations there | P3-05 |
 | `check_default_doc.sh` | Every public extension `Default` implementation states its security consequence; derived subjects are discovered rather than listed by hand | P7-01 |
 | `check_minimal_assembly_lines.sh` | The complete assembly in the minimal example stays within twenty effective Rust lines | P7-01 |
 | `check_gateway_tsan_wiring.sh` | The TSAN job keeps sanitizer/build-std flags, runs in required CI, and drives exactly 100 completed OS threads | P7-01 |

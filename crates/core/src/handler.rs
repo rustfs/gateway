@@ -366,6 +366,27 @@ impl<O: Operation> Resp<O> {
     pub fn into_parts(self) -> (Answer<O>, u16) {
         (self.answer, self.status)
     }
+
+    /// Wraps a committed continuation, leaving every other answer and the status untouched.
+    ///
+    /// The framework's one way to put something around the work a backend committed to — a
+    /// progress bound, an observer — without taking the answer apart and putting it back together.
+    /// Rebuilding it at the call site is what this exists to prevent: `Answer` has three variants
+    /// and only one of the three has a constructor that can carry an arbitrary status, so a call
+    /// site that destructured and reassembled would silently move an event stream's status back to
+    /// the operation's declared one.
+    ///
+    /// `f` is not called for a settled or event-stream answer, which is the other half of the
+    /// contract: a wrapper meant for a continuation must not become a wrapper on everything.
+    #[must_use]
+    pub fn map_commit_work(self, f: impl FnOnce(CommitWork<O>) -> CommitWork<O>) -> Self {
+        let Self { answer, status } = self;
+        let answer = match answer {
+            Answer::Committed(work) => Answer::Committed(f(work)),
+            settled_or_stream => settled_or_stream,
+        };
+        Self { answer, status }
+    }
 }
 
 impl<O: Operation> fmt::Debug for Resp<O>
