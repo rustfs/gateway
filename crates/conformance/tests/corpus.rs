@@ -154,7 +154,7 @@ fn the_whole_corpus_is_internally_consistent() {
     let rejected: Vec<String> = report
         .outcomes
         .iter()
-        .filter(|outcome| outcome.verdict != Verdict::Passed)
+        .filter(|outcome| outcome.verdict != Verdict::Validated)
         .map(|outcome| {
             let reasons: Vec<String> = outcome.failures().iter().map(ToString::to_string).collect();
             format!("{} ({}): {}", outcome.id, outcome.relative, reasons.join(" | "))
@@ -178,6 +178,11 @@ fn every_case_reaches_a_conclusion_and_a_skip_states_its_reason() {
                 outcome.id
             ),
             Verdict::Passed | Verdict::Failed => {}
+            Verdict::Validated => panic!(
+                "{} is validated in a run that was not validate-only; a corpus check must never \
+                 be reachable from a command that claims to have executed something",
+                outcome.id
+            ),
         }
     }
 }

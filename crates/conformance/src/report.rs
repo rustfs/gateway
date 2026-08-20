@@ -37,6 +37,13 @@ pub enum Verdict {
     Failed,
     /// The case did not run, and why is recorded.
     Skipped,
+    /// The case is internally consistent, and no assertion in it was evaluated.
+    ///
+    /// This is what `validate` produces, and it is deliberately not [`Verdict::Passed`]. A corpus
+    /// check that reached the same verdict as an executed case made a newly written case whose
+    /// every assertion was wrong read green through the one command the feedback-loop table sends
+    /// an agent to after changing a case.
+    Validated,
 }
 
 impl Verdict {
@@ -47,6 +54,7 @@ impl Verdict {
             Verdict::Passed => "passed",
             Verdict::Failed => "failed",
             Verdict::Skipped => "skipped",
+            Verdict::Validated => "validated",
         }
     }
 
@@ -168,6 +176,12 @@ pub struct Report {
     pub notes: Vec<String>,
     /// Negative and positive case counts, for the corpus-wide polarity requirement.
     pub polarity: (usize, usize),
+    /// Whether the run stopped after the corpus checks, without touching the target.
+    ///
+    /// The renderer needs this and not only the verdicts: `target`, `transport` and `profile`
+    /// describe a target this run never contacted, and printing them over a corpus check is the
+    /// half of the defect the verdict alone does not cover.
+    pub validate_only: bool,
 }
 
 impl Report {
@@ -251,26 +265,42 @@ impl Report {
     #[must_use]
     pub fn render_text(&self, baseline: Option<&Baseline>) -> String {
         let mut out = String::new();
-        out.push_str(&format!("conformance: {} cases\n", self.outcomes.len()));
-        out.push_str(&format!("  target    {}\n", self.target));
-        out.push_str(&format!("  transport {}\n", self.transport));
-        out.push_str(&format!("  profile   {}\n", self.profile));
+        if self.validate_only {
+            // Deliberately not the run banner. `target`, `transport` and `profile` describe a
+            // target this run never contacted, and a header that names one reports an intention as
+            // an observation. The last line names the command that does measure, because a reader
+            // who wanted a measurement is holding the wrong report.
+            out.push_str(&format!("conformance: {} case(s) validated, none executed\n", self.outcomes.len()));
+            out.push_str("  checked   the frozen schema and the corpus conventions\n");
+            out.push_str("  not run   no case was executed, and no assertion in one was evaluated\n");
+            out.push_str("  to run    conformance run --filter '<case-id>'\n");
+        } else {
+            out.push_str(&format!("conformance: {} cases\n", self.outcomes.len()));
+            out.push_str(&format!("  target    {}\n", self.target));
+            out.push_str(&format!("  transport {}\n", self.transport));
+            out.push_str(&format!("  profile   {}\n", self.profile));
+        }
         if self.filtered_out > 0 {
             out.push_str(&format!("  filtered  {} case(s) excluded by --filter\n", self.filtered_out));
         }
         out.push('\n');
 
         for (domain, outcomes) in self.by_domain() {
-            let passed = outcomes.iter().filter(|o| o.verdict == Verdict::Passed).count();
-            let failed = outcomes.iter().filter(|o| o.verdict == Verdict::Failed).count();
-            let skipped = outcomes.iter().filter(|o| o.verdict == Verdict::Skipped).count();
-            out.push_str(&format!(
-                "{domain}/  {} case(s): {passed} passed, {failed} failed, {skipped} skipped\n",
-                outcomes.len()
-            ));
+            let count = |verdict: Verdict| outcomes.iter().filter(|o| o.verdict == verdict).count();
+            let tally = if self.validate_only {
+                format!("{} validated, {} failed", count(Verdict::Validated), count(Verdict::Failed))
+            } else {
+                format!(
+                    "{} passed, {} failed, {} skipped",
+                    count(Verdict::Passed),
+                    count(Verdict::Failed),
+                    count(Verdict::Skipped)
+                )
+            };
+            out.push_str(&format!("{domain}/  {} case(s): {tally}\n", outcomes.len()));
             for outcome in outcomes {
                 out.push_str(&format!(
-                    "  {:<8} {:<16} {}\n",
+                    "  {:<9} {:<16} {}\n",
                     outcome.verdict.as_str(),
                     outcome.id,
                     outcome.title.as_deref().unwrap_or("")
@@ -306,12 +336,20 @@ impl Report {
 
         let tally = self.tally();
         let count = |verdict: Verdict| tally.get(&verdict).copied().unwrap_or(0);
-        out.push_str(&format!(
-            "summary: {} passed, {} failed, {} skipped\n",
-            count(Verdict::Passed),
-            count(Verdict::Failed),
-            count(Verdict::Skipped)
-        ));
+        if self.validate_only {
+            out.push_str(&format!(
+                "summary: {} validated, {} failed — no case was executed\n",
+                count(Verdict::Validated),
+                count(Verdict::Failed)
+            ));
+        } else {
+            out.push_str(&format!(
+                "summary: {} passed, {} failed, {} skipped\n",
+                count(Verdict::Passed),
+                count(Verdict::Failed),
+                count(Verdict::Skipped)
+            ));
+        }
         let (negative, positive) = self.polarity;
         out.push_str(&format!(
             "polarity: {negative} negative, {positive} positive ({})\n",
@@ -373,7 +411,13 @@ impl Report {
     #[must_use]
     pub fn render_junit(&self) -> String {
         let failures = self.outcomes.iter().filter(|o| o.verdict == Verdict::Failed).count();
-        let skipped = self.outcomes.iter().filter(|o| o.verdict == Verdict::Skipped).count();
+        // A validated case counts as skipped, never as a JUnit pass: JUnit has no third colour,
+        // and a bare `<testcase/>` is how a CI dashboard renders "this ran and held".
+        let skipped = self
+            .outcomes
+            .iter()
+            .filter(|o| matches!(o.verdict, Verdict::Skipped | Verdict::Validated))
+            .count();
         let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         out.push_str(&format!(
             "<testsuite name=\"conformance\" tests=\"{}\" failures=\"{failures}\" skipped=\"{skipped}\">\n",
@@ -387,6 +431,14 @@ impl Report {
             ));
             match outcome.verdict {
                 Verdict::Passed => out.push_str("/>\n"),
+                Verdict::Validated => {
+                    out.push_str(">\n");
+                    out.push_str(
+                        "    <skipped message=\"validated against the schema and the conventions; \
+                         no assertion was evaluated\"/>\n",
+                    );
+                    out.push_str("  </testcase>\n");
+                }
                 Verdict::Skipped => {
                     out.push_str(">\n");
                     out.push_str(&format!(
@@ -537,6 +589,20 @@ mod tests {
             filtered_out: 0,
             notes: vec!["the facade must expose: a service entry point".to_owned()],
             polarity: (2, 1),
+            validate_only: false,
+        }
+    }
+
+    /// A report in the shape `validate` produces: every case checked, none executed.
+    fn validated_report() -> Report {
+        Report {
+            outcomes: vec![
+                outcome("c-etag-0001", "etag", Verdict::Validated),
+                outcome("c-sig-0001", "sig", Verdict::Failed),
+            ],
+            notes: Vec::new(),
+            validate_only: true,
+            ..report()
         }
     }
 
@@ -546,6 +612,91 @@ mod tests {
         assert!(rendered.contains("etag/  1 case(s)"));
         assert!(rendered.contains("sig/  1 case(s)"));
         assert!(rendered.contains("summary: 1 passed, 1 failed, 1 skipped"));
+    }
+
+    /// Negative — the summary of a corpus check must not spell the word a run's summary spells.
+    #[test]
+    fn a_validate_only_summary_counts_validated_rather_than_passed() {
+        let rendered = validated_report().render_text(None);
+        assert!(
+            !rendered.contains("passed"),
+            "a corpus check reports a pass it never observed:\n{rendered}"
+        );
+        assert!(rendered.contains("summary: 1 validated, 1 failed"), "{rendered}");
+        assert!(rendered.contains("etag/  1 case(s): 1 validated, 0 failed"), "{rendered}");
+    }
+
+    /// Negative — the banner must not name a target, a transport or a profile it never reached.
+    ///
+    /// The verdict alone does not cover this: an agent scanning the head of the report reads
+    /// `target rustfs-gateway assembled in process ... transport hyper` and concludes a service
+    /// answered.
+    #[test]
+    fn a_validate_only_report_names_no_target_and_no_transport() {
+        let rendered = validated_report().render_text(None);
+        assert!(!rendered.contains("scripted"), "the target it never contacted:\n{rendered}");
+        assert!(!rendered.contains("transport"), "the transport it never opened:\n{rendered}");
+        assert!(!rendered.contains("profile"), "the profile it never claimed:\n{rendered}");
+        assert!(rendered.contains("no case was executed"), "{rendered}");
+    }
+
+    /// A reader holding a validate-only report is told which command does measure.
+    #[test]
+    fn a_validate_only_report_names_the_command_that_executes() {
+        assert!(
+            validated_report()
+                .render_text(None)
+                .contains("conformance run --filter \'<case-id>\'")
+        );
+    }
+
+    /// Negative — a run report keeps its banner and its `passed` tally exactly as it was.
+    #[test]
+    fn an_executed_report_still_names_its_target_and_counts_passes() {
+        let rendered = report().render_text(None);
+        assert!(rendered.contains("target    scripted"), "{rendered}");
+        assert!(rendered.contains("transport hyper"), "{rendered}");
+        assert!(rendered.contains("summary: 1 passed, 1 failed, 1 skipped"), "{rendered}");
+        assert!(!rendered.contains("validated"), "{rendered}");
+    }
+
+    /// Negative — JUnit has no third colour, and a bare `<testcase/>` is how a dashboard draws
+    /// "this ran and held". A validated case must not reach that shape.
+    #[test]
+    fn a_validated_case_is_not_a_junit_pass() {
+        let rendered = validated_report().render_junit();
+        assert!(rendered.contains("tests=\"2\" failures=\"1\" skipped=\"1\""), "{rendered}");
+        assert!(rendered.contains("no assertion was evaluated"), "{rendered}");
+        assert!(
+            !rendered.contains("name=\"c-etag-0001\"/>"),
+            "the validated case is rendered as a JUnit pass:\n{rendered}"
+        );
+    }
+
+    /// The machine-readable report carries the distinction too — a consumer that only reads JSON
+    /// must not have to infer it from the command line that produced the file.
+    #[test]
+    fn the_json_report_spells_the_validated_verdict() {
+        let rendered = validated_report().render_json();
+        assert!(rendered.contains("\"verdict\": \"validated\""), "{rendered}");
+        assert!(json::parse(&rendered).is_ok(), "{rendered}");
+    }
+
+    /// Negative — a case that was never executed cannot pay off a baseline failure.
+    #[test]
+    fn a_validated_case_is_not_an_improvement_over_a_recorded_failure() {
+        let baseline = Baseline::from_json(r#"{"cases": {"c-etag-0001": "failed"}}"#).expect("valid baseline");
+        assert!(
+            validated_report().improvements(Some(&baseline)).is_empty(),
+            "a corpus check tightened the ratchet without running anything"
+        );
+    }
+
+    /// Negative — and it cannot hide one either: a schema or convention failure is still a
+    /// regression, which is what keeps `validate`\'s exit status meaningful.
+    #[test]
+    fn a_validate_only_report_still_regresses_on_a_convention_failure() {
+        assert_eq!(validated_report().regressions(None).len(), 1);
     }
 
     #[test]

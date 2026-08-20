@@ -60,7 +60,7 @@ fn with_no_target_every_runnable_case_is_skipped_and_says_why() {
 }
 
 #[test]
-fn validate_only_passes_the_corpus_without_touching_a_target() {
+fn validate_only_validates_the_corpus_without_touching_a_target() {
     let corpus = corpus();
     let mut sut = Unwired;
     let options = RunOptions {
@@ -71,10 +71,67 @@ fn validate_only_passes_the_corpus_without_touching_a_target() {
     let failed: Vec<&str> = report
         .outcomes
         .iter()
-        .filter(|o| o.verdict != Verdict::Passed)
+        .filter(|o| o.verdict != Verdict::Validated)
         .map(|o| o.id.as_str())
         .collect();
     assert!(failed.is_empty(), "these cases are not internally consistent: {failed:?}");
+}
+
+/// Negative — a validate-only run must not be readable as a run that measured something.
+///
+/// The defect: `validate` set `Verdict::Passed` and the renderer printed the same target banner,
+/// the same `1 passed`, and the same summary line a real run prints. `AGENTS.md` sent an agent to
+/// `conformance validate --filter '<case-id>'` after changing one case, so a new case whose every
+/// assertion was wrong read green through the one command the feedback-loop table names.
+#[test]
+fn a_validate_only_run_never_renders_as_an_execution_result() {
+    let corpus = corpus();
+    let mut sut = Unwired;
+    let options = RunOptions {
+        validate_only: true,
+        filter: Some("c-etag-0001".to_owned()),
+        ..RunOptions::default()
+    };
+    let rendered = run(&corpus, &mut sut, &options).render_text(None);
+    assert!(
+        !rendered.contains("passed"),
+        "a validate-only report claims a pass, and nothing was executed:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("target "),
+        "a validate-only report names a target it never contacted:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("transport "),
+        "a validate-only report names a transport it never opened:\n{rendered}"
+    );
+}
+
+/// Negative — the verdict itself, not only its rendering, must differ from an executed pass.
+///
+/// The rendering test above would still hold if the renderer special-cased the word while the
+/// verdict stayed `Passed`; every other consumer — the JSON report, the JUnit document, the
+/// baseline — reads the verdict.
+#[test]
+fn a_validate_only_verdict_is_not_the_verdict_an_executed_case_gets() {
+    let corpus = corpus();
+    let mut sut = Unwired;
+    let options = RunOptions {
+        validate_only: true,
+        ..RunOptions::default()
+    };
+    let report = run(&corpus, &mut sut, &options);
+    assert!(!report.outcomes.is_empty(), "the corpus is empty");
+    let claimed: Vec<&str> = report
+        .outcomes
+        .iter()
+        .filter(|outcome| outcome.verdict == Verdict::Passed)
+        .map(|outcome| outcome.id.as_str())
+        .collect();
+    assert!(
+        claimed.is_empty(),
+        "these cases were never executed and are recorded as passed: {claimed:?}"
+    );
 }
 
 #[test]

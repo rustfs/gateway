@@ -435,10 +435,16 @@ fn snake_case(name: &str) -> String {
     out
 }
 
+/// The one conformance case each crate's 30-second loop reports by name.
+///
+/// Every case here must *execute*: the loop runs it rather than validating it, and a case that
+/// cannot reach a target reports the crate as verified over a case no target answered.
+/// `rustfs-gateway-http` named `c-chunked-0001` while that case was skipped on both transports —
+/// streaming-trailer signing is not wired — so it names the checksum case, which runs.
 fn crate_case(package: &str) -> Option<&'static str> {
     match package {
         "rustfs-gateway-sig" => Some("c-sig-0001"),
-        "rustfs-gateway-http" => Some("c-chunked-0001"),
+        "rustfs-gateway-http" => Some("c-checksum-0001"),
         "rustfs-gateway-core" | "rustfs-gateway" => Some("c-object-0001"),
         _ => None,
     }
