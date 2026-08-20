@@ -72,6 +72,7 @@ expected_rows = [
     "`crates/core/tests/golden/route-table.txt`",
     "`model/overlays/**`",
     "`model/overlays/error-status.toml`",
+    "`generated/ERROR_CODES.md`, `generated/error_codes.json`",
     "`spec/quirks/**`",
     "`spec/contracts/**`",
     "`spec/third-party/aws-signing-test-suite.lock`",
@@ -109,6 +110,8 @@ exact = {
     "model/sts.json.sha256",
     "model/PROVENANCE.md",
     "generated/dto/field_counts.txt",
+    "generated/ERROR_CODES.md",
+    "generated/error_codes.json",
     "crates/core/tests/golden/route-table.txt",
     "spec/third-party/aws-signing-test-suite.lock",
 }
