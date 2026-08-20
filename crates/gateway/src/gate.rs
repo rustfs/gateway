@@ -55,22 +55,18 @@
 //! the frames behind it are never buffered. A ceiling that is only consulted once the body is in
 //! hand is not a ceiling; it is a report.
 
-use core::task::Poll;
-use std::pin::Pin;
 use std::time::Duration;
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures_timer::Delay;
+use bytes::{BufMut, Bytes, BytesMut};
 use http::StatusCode;
-use http_body_util::BodyExt;
 use rustfs_gateway_core::{HandlerError, ResponseKind};
 use rustfs_gateway_http::{BodyIntegrity, ChecksumVerified};
 use rustfs_gateway_sig::Verdict;
 use rustfs_gateway_types::ErrorCode;
-use sha2::{Digest, Sha256};
 
 use crate::integrity::checksum_refusal;
 use crate::render::{S3Error, from_handler, from_transport_limit};
+use crate::wire_read::{WireFrames, WireProgress, WireReader};
 
 /// Evidence that a request's signature reached a verdict and the verdict was not a rejection.
 ///
@@ -157,7 +153,7 @@ impl BodyTimeouts {
         self.read_idle
     }
 
-    const fn waiting_for(self, body_byte_seen: bool) -> Duration {
+    pub(crate) const fn waiting_for(self, body_byte_seen: bool) -> Duration {
         if body_byte_seen { self.read_idle } else { self.first_byte }
     }
 }
@@ -223,21 +219,18 @@ where
         // contradiction between two claims is not decidable from any number of body bytes.
         integrity: BodyIntegrity,
     ) -> Result<Bytes, S3Error> {
-        let mut sha256 = match digest {
-            BodyDigestObligation::None => None,
-            BodyDigestObligation::Sha256(_) => Some(Sha256::new()),
-        };
         // Opened here, closed on every path that reaches a caller with bytes in hand. Not two
         // halves of one guarantee: `BodyDigestObligation::Sha256` is minted only by
         // `presigned_body_obligation`, so a header-signed request's payload hash is still not
         // compared here — a P2 gap this predates and does not close.
+        let mut progress = WireProgress::new(digest);
         // Only when the body is *not* `aws-chunked`: under framing the bytes arriving here are
         // chunk headers, signatures and CRLFs, and the object's own octets exist only after the
         // decoder has produced them, so the framed path is fed from inside `ChunkIngest::run`.
         let fuse_digests = ingest.is_none() && !integrity.is_empty();
         let mut digests = integrity.begin();
         let Some(body) = self.body else {
-            if !body_digest_matches(digest, sha256) {
+            if !progress.digest_matches(digest) {
                 return Err(content_sha256_mismatch());
             }
             // An absent body is a zero-length body, and a zero-length body has a digest. A request
@@ -256,111 +249,55 @@ where
         }
 
         let mut body = core::pin::pin!(body);
-        let mut collected = BytesMut::new();
-        let mut seen: u64 = 0;
-        while let Some(frame) = next_frame(&mut body, timeouts.waiting_for(seen != 0)).await? {
-            let frame = frame.map_err(|_| incomplete())?;
-            let Ok(mut data) = frame.into_data() else {
-                // A trailer frame carries no payload. This assembly does not verify trailers, so
-                // it neither counts nor keeps one; the framing layer is where a trailer is judged.
-                continue;
-            };
-            seen = seen.saturating_add(data.remaining() as u64);
-            // Inside the loop, before the bytes are kept: this is the whole difference between a
-            // cap and a post-mortem. `data` itself is dropped with the error, so the frame that
-            // crossed the line is not buffered either.
-            if let Some(cap) = ceilings.declared
-                && seen > cap
-            {
-                return Err(past_declared_cap());
+        // Both ceilings are applied to the *wire* bytes — the ones the peer wrote and this process
+        // is holding — frame by frame inside `WireFrames`, whichever branch below consumes them.
+        // `crate::chunked` states why that is the right side of the decode to count on.
+        let body = match ingest {
+            // Pulled, not collected. The decoder reads frames through `WireReader` as its window
+            // has room for them, so the wire octets are never resident beside the decoded body:
+            // the pipeline's bound is the only bound there is, which is what rustfs/gateway#229
+            // is about. The decoder also feeds the digests as it produces the object's own
+            // octets, so the checksum covers what the caller claimed a digest for and not the
+            // framing around it.
+            Some(ingest) => {
+                let frames = WireFrames::new(body.as_mut(), &mut progress, ceilings, timeouts);
+                let decoded = ingest.run(WireReader::new(frames), &mut digests).await;
+                // The reader's refusal outranks the pipeline's: a ceiling that answered `413` is
+                // not an `IncompleteBody`, and the pull contract cannot carry the difference.
+                decoded.map_err(|error| progress.take_refusal().unwrap_or(error))?
             }
-            if seen > ceilings.buffered {
-                return Err(past_buffered_ceiling());
-            }
-            // Every digest this body owes is fed from this borrowed run while it is still in
-            // cache, so the body is walked once however many claims it carries.
-            if sha256.is_some() || fuse_digests {
-                // Taken whole and then handed over, rather than walked chunk by chunk into the
-                // collector. The digests see the same bytes in the same order either way; what
-                // changes is who owns them afterwards. `Buf::copy_to_bytes` over a whole `Bytes` is
-                // a split of the same allocation, and `BytesMut::put` into a collector with no
-                // capacity yet takes that allocation instead of copying into a new one — so a body
-                // that arrives as one frame leaves this function as the memory it arrived in. The
-                // old loop copied every such body once, in full, to hand back a buffer holding the
-                // same bytes: a mebibyte request allocated 1,078,095 bytes where it now allocates
-                // 29,519. `tests/request_allocations.rs` is what keeps it that way.
-                let frame_bytes = data.copy_to_bytes(data.remaining());
-                if let Some(hasher) = sha256.as_mut() {
-                    hasher.update(&frame_bytes);
+            // Not framed, so these bytes are the object's own and the collector keeps them whole.
+            // Every digest this body owes is fed from the frame while it is still in cache, so the
+            // body is walked once however many claims it carries.
+            None => {
+                let mut frames = WireFrames::new(body.as_mut(), &mut progress, ceilings, timeouts);
+                let mut collected = BytesMut::new();
+                while let Some(frame) = core::future::poll_fn(|context| frames.poll_next(context)).await? {
+                    if fuse_digests {
+                        digests.update(&frame);
+                    }
+                    // `BytesMut::put` into a collector with no capacity yet takes the frame's own
+                    // allocation instead of copying into a new one, so a body that arrives as one
+                    // frame leaves this function as the memory it arrived in. A mebibyte request
+                    // allocated 1,078,095 bytes before that; `tests/request_allocations.rs` is
+                    // what keeps it at 29,519.
+                    collected.put(frame);
                 }
-                if fuse_digests {
-                    digests.update(&frame_bytes);
-                }
-                collected.put(frame_bytes);
-            } else {
-                collected.put(data);
+                collected.freeze()
             }
-        }
-        if !body_digest_matches(digest, sha256) {
+        };
+        // After the read rather than before it: under framing the payload hash is only complete
+        // once the pipeline has pulled the last frame through. The comparison itself is unchanged,
+        // and a framed body never carries one — `presigned_body_obligation` refuses a presigned
+        // streaming request outright, and that is the only place a `Sha256` obligation is minted.
+        if !progress.digest_matches(digest) {
             return Err(content_sha256_mismatch());
         }
-        let wire_bytes = collected.freeze();
-        // The decode runs here and nowhere earlier. Both ceilings above have already been applied
-        // to the *wire* bytes — the ones the peer wrote and this process is holding — and only what
-        // survived them is handed to the chunk parser. `crate::chunked` states why that is the
-        // right side of the decode to count on.
-        let body = match ingest {
-            // The decoder feeds the digests as it produces the object's own octets, so the
-            // checksum covers what the caller claimed a digest for and not the framing around it.
-            Some(ingest) => ingest.run(wire_bytes, &mut digests).await?,
-            // Already fed, frame by frame, by the loop above.
-            None => wire_bytes,
-        };
         // Bound and dropped on purpose: the witness's value is where it can be produced, not what
         // it carries. When the commit path takes an integrity proof by value (P5), it takes this.
         let _verified: ChecksumVerified = digests.verify().map_err(checksum_refusal)?;
         Ok(body)
     }
-}
-
-async fn next_frame<B>(
-    body: &mut Pin<&mut B>,
-    timeout: Duration,
-) -> Result<Option<Result<http_body::Frame<B::Data>, B::Error>>, S3Error>
-where
-    B: http_body::Body,
-{
-    let mut frame = core::pin::pin!(body.frame());
-    let mut deadline = core::pin::pin!(Delay::new(timeout));
-    let mut first_poll = true;
-    core::future::poll_fn(move |context| {
-        if first_poll {
-            first_poll = false;
-            if let Poll::Ready(frame) = frame.as_mut().poll(context) {
-                return Poll::Ready(Ok(frame));
-            }
-            if deadline.as_mut().poll(context).is_ready() {
-                return Poll::Ready(Err(body_idle_timeout()));
-            }
-            return Poll::Pending;
-        }
-        if deadline.as_mut().poll(context).is_ready() {
-            return Poll::Ready(Err(body_idle_timeout()));
-        }
-        if let Poll::Ready(frame) = frame.as_mut().poll(context) {
-            return Poll::Ready(Ok(frame));
-        }
-        Poll::Pending
-    })
-    .await
-}
-
-fn body_digest_matches(digest: BodyDigestObligation, sha256: Option<Sha256>) -> bool {
-    if let (BodyDigestObligation::Sha256(expected), Some(hasher)) = (digest, sha256) {
-        let actual: [u8; 32] = hasher.finalize().into();
-        return actual == expected;
-    }
-    true
 }
 
 fn content_sha256_mismatch() -> S3Error {
@@ -403,7 +340,7 @@ pub(crate) const MAX_DELETE_OBJECTS_BODY_BYTES: u64 = 2 * 1024 * 1024;
 /// whole body no second option. Draining them instead would be performing the transfer this
 /// refusal exists to avoid — `crate::close::after_body_ceiling` is where that judgement is
 /// written down. `c-object-0015` is the case.
-fn past_declared_cap() -> S3Error {
+pub(crate) fn past_declared_cap() -> S3Error {
     from_handler(
         HandlerError::new(ErrorCode::INVALID_REQUEST, "the request body is larger than this operation permits"),
         ResponseKind::Other,
@@ -412,7 +349,7 @@ fn past_declared_cap() -> S3Error {
 }
 
 /// The refusal for a body larger than this assembly will hold.
-fn past_buffered_ceiling() -> S3Error {
+pub(crate) fn past_buffered_ceiling() -> S3Error {
     from_transport_limit(
         HandlerError::new(
             ErrorCode::ENTITY_TOO_LARGE,
@@ -426,7 +363,7 @@ fn past_buffered_ceiling() -> S3Error {
 /// The refusal for a body that stopped early or ran on: both mean the body that arrived is not the
 /// body that was announced, and saying which ceiling was hit tells a caller how to retry with a
 /// body that is not refused.
-fn incomplete() -> S3Error {
+pub(crate) fn incomplete() -> S3Error {
     // Closes, for the reason `ChunkReject::TruncatedStream` does: the transport reported the body
     // did not arrive as framed, so there is no well-defined remainder to drain and no
     // synchronisation point to resume from. RFC 9112 §6.3 and §9.3.
@@ -438,7 +375,7 @@ fn incomplete() -> S3Error {
 }
 
 /// The indistinguishable refusal for first-byte and between-frame idle expiry.
-fn body_idle_timeout() -> S3Error {
+pub(crate) fn body_idle_timeout() -> S3Error {
     from_transport_limit(
         HandlerError::new(ErrorCode::REQUEST_TIMEOUT, "the request body stopped making progress"),
         StatusCode::REQUEST_TIMEOUT,
@@ -704,6 +641,153 @@ mod tests {
         assert_eq!(bytes, Bytes::from_static(b"first-second"));
         assert_eq!(read.bytes_read(), 12);
         assert!(read.is_exhausted());
+    }
+
+    /// An unsigned `aws-chunked` ingest for a body declaring `decoded` bytes on a `wire` of that
+    /// many. The only framed shape this assembly decodes without published signing material.
+    fn unsigned_ingest(decoded: u64, wire: u64) -> crate::chunked::ChunkIngest {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::HeaderName::from_static("x-amz-decoded-content-length"),
+            http::HeaderValue::from_str(&decoded.to_string()).expect("a digit run"),
+        );
+        let mut framing_headers = http::HeaderMap::new();
+        framing_headers.insert(
+            http::header::CONTENT_LENGTH,
+            http::HeaderValue::from_str(&wire.to_string()).expect("a digit run"),
+        );
+        let framing = rustfs_gateway_http::Framing::classify(
+            http::Version::HTTP_11,
+            &framing_headers,
+            &rustfs_gateway_http::Limits::default(),
+        )
+        .expect("a framed request");
+        crate::chunked::ChunkIngest::prepare(
+            &rustfs_gateway_sig::PayloadMode::StreamingUnsigned {
+                trailer: rustfs_gateway_sig::TrailerSet::None,
+            },
+            &headers,
+            &framing,
+            &crate::ext::ChunkSink::new(),
+            None,
+            rustfs_gateway_http::ChunkLimits::default(),
+        )
+        .expect("head-level checks pass")
+        .expect("a framed mode")
+    }
+
+    /// `count` well-formed unsigned `aws-chunked` frames, one whole chunk each.
+    ///
+    /// Well-formed on purpose: a body of arbitrary bytes would be refused by the decoder's own
+    /// grammar long before a ceiling could fire, and the case would then be asserting on the
+    /// wrong refusal.
+    fn framed_chunks(count: usize) -> Vec<Bytes> {
+        let mut chunk = b"40\r\n".to_vec();
+        chunk.extend_from_slice(&[b'k'; 64]);
+        chunk.extend_from_slice(b"\r\n");
+        assert_eq!(chunk.len() as u64, CHUNK_FRAME_BYTES);
+        core::iter::repeat_n(Bytes::from(chunk), count).collect()
+    }
+
+    /// The wire size of one frame from [`framed_chunks`]: a size line, 64 data bytes, two CRLFs.
+    const CHUNK_FRAME_BYTES: u64 = 70;
+
+    /// Positive — a framed body is pulled to its end, so the transport is left with nothing
+    /// undrained and the connection stays reusable.
+    ///
+    /// The `is_exhausted` half is the one that matters. Now that the decoder pulls frames instead
+    /// of being handed a collected body, a pipeline that stopped at the terminal chunk without
+    /// asking the transport for the next frame would produce this same decoded body over a socket
+    /// that still had bytes queued on it.
+    #[tokio::test]
+    async fn a_framed_body_is_pulled_to_the_end_of_the_transport() {
+        let proof = Authenticated::granted_for_test();
+        let wire: &[u8] = b"b\r\nhello world\r\n0\r\n\r\n";
+        let frames = wire.chunks(4).map(Bytes::copy_from_slice).collect::<Vec<_>>();
+        let (body, read) = crate::probe::ObservedBody::new(frames);
+        let ingest = unsigned_ingest(11, wire.len() as u64);
+        let decoded = SealedBody::seal(Some(body), Some(wire.len() as u64))
+            .read(
+                &proof,
+                roomy(),
+                BodyTimeouts::S3,
+                Some(ingest),
+                BodyDigestObligation::None,
+                BodyIntegrity::NONE,
+            )
+            .await
+            .expect("well-formed unsigned framing");
+        assert_eq!(decoded, Bytes::from_static(b"hello world"));
+        assert_eq!(read.bytes_read(), wire.len() as u64, "the wire body was not read to its end");
+        assert!(read.is_exhausted(), "the transport was left with frames nobody asked for");
+    }
+
+    /// Negative — a framed body past the assembly's ceiling is a `413 EntityTooLarge`, refused at
+    /// the frame that crossed the line and with the frames behind it never polled.
+    ///
+    /// The status is the assertion. The decoder pulls its wire bytes through a contract that
+    /// carries a `StreamError` — which has no status and no S3 error code — so a ceiling flattened
+    /// into that contract comes back as `400 IncompleteBody`: the wrong code, the wrong band for
+    /// an SDK's retry logic, and a statement about the request where the truth is a statement
+    /// about the server. `crate::wire_read` keeps the refusal whole beside the stream for exactly
+    /// this, and without this case that arrangement is untested.
+    #[tokio::test]
+    async fn a_framed_body_past_the_ceiling_is_a_413_and_not_an_incomplete_body() {
+        let proof = Authenticated::granted_for_test();
+        let (body, read) = crate::probe::ObservedBody::new(framed_chunks(100));
+        let ceilings = BodyCeilings {
+            buffered: 1024,
+            declared: None,
+        };
+        let ingest = unsigned_ingest(6400, 7000);
+        let error = SealedBody::seal(Some(body), None)
+            .read(
+                &proof,
+                ceilings,
+                BodyTimeouts::S3,
+                Some(ingest),
+                BodyDigestObligation::None,
+                BodyIntegrity::NONE,
+            )
+            .await
+            .expect_err("over the ceiling");
+        assert_eq!(error.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
+        assert_eq!(error.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(
+            read.bytes_read() <= 1024 + CHUNK_FRAME_BYTES,
+            "{} wire bytes were pulled past a 1024-byte ceiling",
+            read.bytes_read()
+        );
+        assert!(!read.is_exhausted(), "the rest of the body was never pulled");
+    }
+
+    /// Negative — the operation's own cap keeps its `400 InvalidRequest` on the framed path too.
+    ///
+    /// The pair with the case above: two ceilings that answer with two different codes, and a
+    /// refusal channel that collapsed them into one would satisfy whichever of the two it happened
+    /// to collapse onto.
+    #[tokio::test]
+    async fn a_framed_body_past_the_operation_cap_is_a_400_invalid_request() {
+        let proof = Authenticated::granted_for_test();
+        let (body, _) = crate::probe::ObservedBody::new(framed_chunks(100));
+        let ceilings = BodyCeilings {
+            buffered: 1 << 20,
+            declared: Some(128),
+        };
+        let ingest = unsigned_ingest(6400, 7000);
+        let error = SealedBody::seal(Some(body), None)
+            .read(
+                &proof,
+                ceilings,
+                BodyTimeouts::S3,
+                Some(ingest),
+                BodyDigestObligation::None,
+                BodyIntegrity::NONE,
+            )
+            .await
+            .expect_err("past the operation's cap");
+        assert_eq!(error.code(), Some(&ErrorCode::INVALID_REQUEST));
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
     }
 
     /// c-lim-0033. Negative — a real h1 connection closes after the first-body-byte deadline.
