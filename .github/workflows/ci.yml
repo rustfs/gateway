@@ -414,7 +414,7 @@ jobs:
           scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
 
   build-guard-self-test:
-    name: Build guard self-test
+    name: Build guard self-test 1
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -423,9 +423,23 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Build-backed guards (maximum 4.5 minutes after setup)
+      - name: Build-backed guards 1 of 2 (maximum 4.5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 270 "build-backed guards" env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 270 "build-backed guards 1/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
+
+  build-guard-self-test-2:
+    name: Build guard self-test 2
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build-backed guards 2 of 2 (maximum 4.5 minutes after setup)
+        run: |
+          scripts/ci_budget.sh 270 "build-backed guards 2/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
 
   error-status-self-test:
     name: Error status self-test
@@ -437,11 +451,11 @@ jobs:
         run: |
           scripts/ci_budget.sh 60 "error status self-test" env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
 
-  # Branch protection requires this exact check name. It aggregates all twelve parallel jobs and must
+  # Branch protection requires this exact check name. It aggregates all thirteen parallel jobs and must
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]
+    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -458,6 +472,7 @@ jobs:
           QUIRK_LEDGER_RESULT: ${{ needs.quirk-ledger-self-test.result }}
           DTO_COMPILER_RESULT: ${{ needs.dto-compiler-self-test.result }}
           BUILD_GUARD_RESULT: ${{ needs.build-guard-self-test.result }}
+          BUILD_GUARD_2_RESULT: ${{ needs.build-guard-self-test-2.result }}
           ERROR_STATUS_RESULT: ${{ needs.error-status-self-test.result }}
           TSAN_RESULT: ${{ needs.gateway-tsan.result }}
         run: |
@@ -471,5 +486,6 @@ jobs:
           test "$QUIRK_LEDGER_RESULT" = success
           test "$DTO_COMPILER_RESULT" = success
           test "$BUILD_GUARD_RESULT" = success
+          test "$BUILD_GUARD_2_RESULT" = success
           test "$ERROR_STATUS_RESULT" = success
           test "$TSAN_RESULT" = success

@@ -134,13 +134,13 @@ guard_budget_verdict() {
 #     `shard_sandbox_isolation_contract` proves it in both directions.
 #   * One shared CARGO_TARGET_DIR. It stays shared, because giving each shard its
 #     own would cold-compile the workspace per shard, which is the cost the
-#     sharing was introduced to remove. That is sound under concurrency for two
-#     reasons: cargo takes an exclusive lock on the target directory for the
-#     duration of a build, so concurrent invocations serialise rather than
-#     interleave; and the mode that shards is the mode that never compiles. The
-#     guards that compile carry `# REQUIRES-BUILD`, the positive control skips
-#     them, and their mutations live in the mode-scoped runs — which never shard.
-#     `guard_shard_plan` and its four cases pin that scoping.
+#     sharing was introduced to remove. That is sound inside one runner because
+#     cargo takes an exclusive lock on the target directory for the duration of a
+#     build, so concurrent invocations serialise rather than interleave. The
+#     build-backed mode stays single-process per runner, but may stride its cases
+#     over isolated CI runners through GATEWAY_GUARD_SHARD_GROUPS. Other
+#     mode-scoped runs stay single-process on one runner. `guard_shard_plan` and
+#     its cases pin the process-level scoping.
 #
 # Coverage is not taken on trust, and it survives being split over runners that
 # never see each other. Every worker counts every case it *considers*, whether or
@@ -235,10 +235,10 @@ guard_case_owned() {
 }
 
 # guard_shard_plan <requested> <quirk-only> <dto-only> <build-only> <error-status-only>
-# Pure: how many shards a run actually gets. The mode-scoped runs are already
+# Pure: how many worker processes a run gets. The mode-scoped runs are already
 # minutes-scale, and the build-guard mode is the one whose cases compile, so it
-# is also the one that must keep CARGO_TARGET_DIR to itself. All four stay
-# single-process.
+# must keep one CARGO_TARGET_DIR per runner. All four stay single-process; CI may
+# still partition a mode across isolated runners with the group variables.
 guard_shard_plan() {
     local requested="$1" quirk="$2" dto="$3" build="$4" error_status="${5:-0}"
     if ((quirk + dto + build + error_status > 0)); then
@@ -11851,37 +11851,39 @@ absolute_scanner_path_case clean \
 absolute_scanner_path_case caught \
     'an absolute grep path cannot bypass the process counter' mut_absolute_scanner_path
 
-# No shard gate: guard_shard_plan keeps GATEWAY_GUARD_BUILD_GUARDS_ONLY single-process.
 cases=$((cases + 1))
-missing_shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing.XXXXXX")"
-missing_count_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-count.XXXXXX")"
-if prepare_scanner_shims "$missing_shim_dir"; then
-    rm -f "${missing_shim_dir}/grep"
+if guard_case_owned "$cases"; then
+    missing_shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing.XXXXXX")"
+    missing_count_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-count.XXXXXX")"
+    if prepare_scanner_shims "$missing_shim_dir"; then
+        rm -f "${missing_shim_dir}/grep"
+    fi
+    if validate_scanner_shims "$missing_shim_dir" "$missing_count_dir"; then
+        fail_msg 'scanner process harness reported green with a missing grep shim'
+    else
+        pass_msg 'scanner process harness fails closed when a shim is missing'
+    fi
+    rm -rf "$missing_shim_dir" "$missing_count_dir"
 fi
-if validate_scanner_shims "$missing_shim_dir" "$missing_count_dir"; then
-    fail_msg 'scanner process harness reported green with a missing grep shim'
-else
-    pass_msg 'scanner process harness fails closed when a shim is missing'
-fi
-rm -rf "$missing_shim_dir" "$missing_count_dir"
 
-# No shard gate: guard_shard_plan keeps GATEWAY_GUARD_BUILD_GUARDS_ONLY single-process.
 cases=$((cases + 1))
-missing_tool_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-tool.XXXXXX")"
-missing_tool_count_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-tool-count.XXXXXX")"
-missing_tool_rc=0
-if write_scanner_shim "$missing_tool_dir" gateway-scanner-tool-that-does-not-exist; then
-    GATEWAY_SCANNER_COUNT_DIR="$missing_tool_count_dir" \
-        "$missing_tool_dir/gateway-scanner-tool-that-does-not-exist" \
-        >/dev/null 2>&1 || missing_tool_rc=$?
+if guard_case_owned "$cases"; then
+    missing_tool_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-tool.XXXXXX")"
+    missing_tool_count_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-scanner-missing-tool-count.XXXXXX")"
+    missing_tool_rc=0
+    if write_scanner_shim "$missing_tool_dir" gateway-scanner-tool-that-does-not-exist; then
+        GATEWAY_SCANNER_COUNT_DIR="$missing_tool_count_dir" \
+            "$missing_tool_dir/gateway-scanner-tool-that-does-not-exist" \
+            >/dev/null 2>&1 || missing_tool_rc=$?
+    fi
+    if [[ "$missing_tool_rc" -ne 0 \
+        && -s "$missing_tool_count_dir/gateway-scanner-tool-that-does-not-exist" ]]; then
+        pass_msg 'scanner process harness counts a missing scanner tool and fails closed'
+    else
+        fail_msg 'scanner process harness reported green or did not count a missing scanner tool'
+    fi
+    rm -rf "$missing_tool_dir" "$missing_tool_count_dir"
 fi
-if [[ "$missing_tool_rc" -ne 0 \
-    && -s "$missing_tool_count_dir/gateway-scanner-tool-that-does-not-exist" ]]; then
-    pass_msg 'scanner process harness counts a missing scanner tool and fails closed'
-else
-    fail_msg 'scanner process harness reported green or did not count a missing scanner tool'
-fi
-rm -rf "$missing_tool_dir" "$missing_tool_count_dir"
 fi
 if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
 # check_stage_filter_sync.sh has four rules and each one gets its own negative
@@ -13425,18 +13427,35 @@ expect_fail check_ci_test_split.sh \
     'the DTO compiler job swallowing a failure or timeout' mut_ci_dto_compiler_failure_swallowed
 
 mut_ci_build_guard_command_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 270 "build-backed guards" env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        'scripts/ci_budget.sh 270 "build-backed guards" true'
+    replace_ci_text 'scripts/ci_budget.sh 270 "build-backed guards 1/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 270 "build-backed guards 1/2" true'
 }
 expect_fail check_ci_test_split.sh \
     'the build-backed mutation suite being replaced with a no-op' mut_ci_build_guard_command_dropped
 
 mut_ci_build_guard_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 270 "build-backed guards" env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        '          scripts/ci_budget.sh 270 "build-backed guards" env GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 270 "build-backed guards 1/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 270 "build-backed guards 1/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the build-backed guard job swallowing a failure or timeout' mut_ci_build_guard_failure_swallowed
+
+mut_ci_build_guard_second_shard_duplicated() {
+    replace_ci_text 'scripts/ci_budget.sh 270 "build-backed guards 2/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 270 "build-backed guards 2/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh'
+}
+expect_fail check_ci_test_split.sh \
+    'the second build-backed worker repeating the first half' \
+    mut_ci_build_guard_second_shard_duplicated \
+    'build-guard-self-test-2 command changed, lost its shard, or can hide a failure'
+
+mut_ci_build_guard_second_failure_swallowed() {
+    replace_ci_text '          scripts/ci_budget.sh 270 "build-backed guards 2/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 270 "build-backed guards 2/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh || true'
+}
+expect_fail check_ci_test_split.sh \
+    'the second build-backed worker swallowing a failure or timeout' \
+    mut_ci_build_guard_second_failure_swallowed
 
 mut_ci_build_guard_macro_control_dropped() {
     python3 - <<'PYEOF'
@@ -13469,14 +13488,14 @@ expect_fail check_ci_test_split.sh \
     'the branch-protected Test check being renamed' mut_ci_required_name_changed
 
 mut_ci_aggregate_drops_guard() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
 
 mut_ci_aggregate_drops_target() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -13484,7 +13503,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_target
 
 mut_ci_aggregate_drops_quirk_ledger() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -13492,7 +13511,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_quirk_ledger
 
 mut_ci_aggregate_drops_dto_compiler() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -13500,15 +13519,23 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_dto_compiler
 
 mut_ci_aggregate_drops_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for build-backed mutations' \
     mut_ci_aggregate_drops_build_guard
 
+mut_ci_aggregate_drops_second_build_guard() {
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]'
+}
+expect_fail check_ci_test_split.sh \
+    'the required Test check no longer waiting for the second build-backed worker' \
+    mut_ci_aggregate_drops_second_build_guard
+
 mut_ci_aggregate_drops_error_status() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -13572,12 +13599,12 @@ expect_fail check_ci_test_split.sh \
 mut_ci_aggregate_budget_widened() {
     replace_ci_text '  test:
     name: Test
-    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]
+    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1' '  test:
     name: Test
-    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]
+    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2'
@@ -13625,6 +13652,14 @@ mut_ci_build_guard_result_ignored() {
 expect_fail check_ci_test_split.sh \
     'the aggregate check ignoring the build-backed guard result' mut_ci_build_guard_result_ignored
 
+mut_ci_second_build_guard_result_ignored() {
+    replace_ci_text 'BUILD_GUARD_2_RESULT: ${{ needs.build-guard-self-test-2.result }}' \
+        'BUILD_GUARD_2_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the second build-backed guard result' \
+    mut_ci_second_build_guard_result_ignored
+
 mut_ci_workspace_comparison_dropped() {
     replace_ci_text '          test "$WORKSPACE_RESULT" = success' '          true'
 }
@@ -13664,6 +13699,13 @@ mut_ci_build_guard_comparison_dropped() {
 expect_fail check_ci_test_split.sh \
     'the aggregate check not executing the build-backed guard result comparison' \
     mut_ci_build_guard_comparison_dropped
+
+mut_ci_second_build_guard_comparison_dropped() {
+    replace_ci_text '          test "$BUILD_GUARD_2_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the second build-backed guard result comparison' \
+    mut_ci_second_build_guard_comparison_dropped
 
 mut_ci_workers_share_concurrency_lane() {
     replace_ci_text '  workspace-tests:
@@ -17045,7 +17087,7 @@ shard_case 'the quirk-ledger mode never shards' \
     shard_plan_is 1 4 1 0 0
 shard_case 'the DTO compiler mode never shards' \
     shard_plan_is 1 4 0 1 0
-shard_case 'the build-guard mode never shards, so the compiling cases keep CARGO_TARGET_DIR alone' \
+shard_case 'the build-guard mode uses one worker per runner, keeping its CARGO_TARGET_DIR private' \
     shard_plan_is 1 4 0 0 1
 shard_case 'the error-status mode never shards' \
     shard_plan_is 1 4 0 0 0 1
