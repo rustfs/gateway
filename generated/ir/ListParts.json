@@ -646,7 +646,16 @@
                                 "summary": "The request is documented as naming a bucket, a key and an upload id together, and the id is only meaningful for that pair."
                               }
                             ],
-                "cases": ["c-mpu-0028", "c-mpu-0029", "c-mpu-0030", "c-mpu-0031"]
+                "cases": [
+                           "c-mpu-0028",
+                           "c-mpu-0029",
+                           "c-mpu-0030",
+                           "c-mpu-0031",
+                           "c-mpu-0049",
+                           "c-mpu-0050",
+                           "c-mpu-0051",
+                           "c-mpu-0052"
+                         ]
               },
               {
                 "id": "q-mpu-limits-0038",

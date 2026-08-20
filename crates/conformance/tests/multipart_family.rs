@@ -14,8 +14,8 @@
 
 //! The ledger of the multipart family, and the three entity-tag cases it was blocked on.
 //!
-//! Responsible for: pinning the multipart family as a *closed* set — forty-eight identifiers with
-//! no gap and no duplicate, thirty-one negative against seventeen positive, every one of them
+//! Responsible for: pinning the multipart family as a *closed* set — fifty-two identifiers with
+//! no gap and no duplicate, thirty-five negative against seventeen positive, every one of them
 //! carrying a verdict in the checked-in baseline — and for proving the family executes against the
 //! in-process target with no regression, with every id in `RECOVERED` green,
 //! and with no case skipping that was not already skipping. A family whose size, polarity and
@@ -33,11 +33,11 @@ use rustfs_gateway_conformance::runner::{self, RunOptions};
 
 /// The size of the family. A number, not a range: the point of the guard is that growing or
 /// shrinking the family is a decision somebody writes down, and this is where they write it.
-const FAMILY_SIZE: usize = 48;
+const FAMILY_SIZE: usize = 52;
 
 /// The polarity split, in the order `AGENTS.md` states the rule: negatives must outnumber
-/// positives, and here they do by fourteen.
-const NEGATIVE: usize = 31;
+/// positives, and here they do by eighteen.
+const NEGATIVE: usize = 35;
 const POSITIVE: usize = 17;
 
 /// The cases this family was blocked on. Three are about the entity tag a multipart upload
@@ -107,13 +107,13 @@ fn baseline() -> Baseline {
     Baseline::from_json(&source).expect("the baseline parses")
 }
 
-/// The multipart family is a closed ledger: forty-eight identifiers, contiguous, each in its own
+/// The multipart family is a closed ledger: fifty-two identifiers, contiguous, each in its own
 /// file.
 ///
 /// A gap means a case was deleted — which `AGENTS.md` lists as a silently dropped guarantee — and a
 /// duplicate means two files claim one identifier, after which only one of them is ever reported.
 #[test]
-fn the_multipart_family_is_a_closed_ledger_of_forty_eight_identifiers() {
+fn the_multipart_family_is_a_closed_ledger_of_fifty_two_identifiers() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -143,7 +143,7 @@ fn the_multipart_family_is_a_closed_ledger_of_forty_eight_identifiers() {
 /// The corpus-wide check in `tests/corpus.rs` compares two totals over six hundred cases, so a
 /// family that flipped every one of its own cases to positive would still leave it green.
 #[test]
-fn the_multipart_family_keeps_thirty_one_negative_against_seventeen_positive() {
+fn the_multipart_family_keeps_thirty_five_negative_against_seventeen_positive() {
     let corpus = corpus();
     let cases = family(&corpus);
 

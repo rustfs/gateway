@@ -1,0 +1,66 @@
+# c-mpu-0052 — a part copy under a real upload id for another key in the same bucket.
+
+[case]
+id = "c-mpu-0052"
+schema_version = 1
+title = "A part copy under a valid upload id for a different key in the same bucket is refused"
+rationale = """
+The part copy is the write path `c-mpu-0030` covers for an uploaded part, with one difference that \
+matters: the bytes never leave the server, so a caller who may read one object can push its contents \
+into an upload for an object it may not write, and the owner completes the result without a failed \
+request anywhere in either party's logs. The copy source here is a real object the caller may read, \
+which is what makes the case about ownership of the upload rather than about a missing source, and \
+the absent entity tag is the proof that the refusal happened before any part was placed."""
+polarity = "negative"
+operation = "UploadPartCopy"
+tags = ["multipart", "security", "upload-id", "error-shape"]
+quirks = ["q-mpu-upload-id-0037"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/51"
+summary = "Upstream acted on any upload id it was handed without checking which resource it belonged to."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "The part copy is documented as naming a destination bucket, key and upload id alongside the source it reads, and the part it writes belongs to that upload."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[setup.objects]]
+bucket = "conf-mpu"
+key = "src/readable"
+content_type = "text/plain"
+body = { utf8 = "0123456789" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-mpu"
+key = "the-right-key"
+capture_upload_id_as = "upload_id"
+
+[request]
+method = "PUT"
+target = "/conf-mpu/the-wrong-key?partNumber=1&uploadId=${capture.upload_id}"
+headers = { "x-amz-copy-source" = "/conf-mpu/src/readable" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag", "x-amz-copy-source-version-id"]
+
+[expect.error]
+code = "NoSuchUpload"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>NoSuchUpload</Code><Message>The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
