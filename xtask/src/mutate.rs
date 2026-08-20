@@ -279,14 +279,33 @@ fn run(options: &Options) -> Result<bool, String> {
             .as_ref()
             .map_or_else(|| "every case".to_owned(), |filter| format!("filter `{filter}`"))
     );
-    let mut settled = build(&root)?.require_success("the unmutated tree does not build")?;
+    build(&root)?.require_success("the unmutated tree does not build")?;
     let baseline_verdicts =
         corpus(&root, options.filter.as_deref())?.ok_or_else(|| "the unmutated corpus run produced no report".to_owned())?;
     println!(
-        "baseline: {} cases measured, {} green\n",
+        "baseline: {} cases measured, {} green",
         baseline_verdicts.len(),
         baseline_verdicts.values().filter(|v| *v == PASSED).count()
     );
+
+    // Settle the freshness signal before it becomes load-bearing. The corpus run is a second cargo
+    // invocation and on a cold target directory it leaves the gateway stale, so the first mutated
+    // rule of a run reads as `library_rebuilt` whether or not the mutation touched anything the
+    // gateway compiles — which reports an INERT rule as SURVIVED, the one confusion this command
+    // exists to prevent. Observed on `main` for `q-lc-0001`: SURVIVED on the first run of a fresh
+    // worktree, INERT on every run after. One rebuild absorbs the staleness; if the next build is
+    // still not fresh, freshness cannot answer for anything here and saying so is the only honest
+    // outcome.
+    build(&root)?.require_success("the unmutated tree does not build after the baseline run")?;
+    let mut settled = build(&root)?.require_success("the unmutated tree does not build after the baseline run")?;
+    if settled.rebuilt {
+        return Err(
+            "cargo rebuilt `rustfs-gateway` from an unchanged tree, so its freshness cannot say whether a \
+             mutation reached the library; every rule would be reported as SURVIVED without evidence"
+                .to_owned(),
+        );
+    }
+    println!();
 
     let mut results: Vec<(String, String, Outcome)> = Vec::new();
     for target in &targets {

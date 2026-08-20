@@ -15,9 +15,21 @@
 //! Rust-aware enforcement of ADR-0004's `OperationSpec` builder policy.
 //!
 //! Responsible for: finding direct or syntactically aliased `OperationSpec` struct expressions in
-//! tracked or new Rust source. NOT responsible for: full Rust name resolution, macro expansion,
-//! type-checking, or registry validation. Upstream: Git and `syn`. Downstream:
+//! tracked or new Rust source, and finding `OperationSpec::builder` calls inside
+//! `crates/core/src/ops/**`, where a standard operation must derive its IR facts instead of
+//! restating them. NOT responsible for: full Rust name resolution, macro expansion, type-checking,
+//! or registry validation. Upstream: Git and `syn`. Downstream:
 //! `scripts/check_operation_spec_builder.sh`.
+//!
+//! # Why the second rule is here and not a grep
+//!
+//! `OperationSpec::builder(name, status, not_configured)` takes two values that `model/overlays/**`
+//! already declares, so a standard operation that calls it writes a second copy of a rule the
+//! generated table carries. gateway#242 recorded what that costs: the generated copy was the one
+//! nothing read, so flipping the overlay changed no served byte. `OperationSpec::standard` reads
+//! both facts from `generated/routes.rs`; the builder stays for a dialect's vendor operation, which
+//! has no generated row. A `grep` cannot see through the aliasing the first rule already resolves,
+//! so the two rules share one resolver.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -29,6 +41,8 @@ use syn::{Type, UseTree};
 
 const ALLOWED_LITERAL: &str = "crates/core/tests/compile_fail/operation_spec_literal.rs";
 const DEFINITION_FILE: &str = "crates/core/src/registry/mod.rs";
+/// Where an operation's specification is written, and therefore where the builder is refused.
+const OPS_DIRECTORY: &str = "crates/core/src/ops";
 
 pub(crate) fn check(args: &[String]) -> ExitCode {
     let [root] = args else {
@@ -93,10 +107,16 @@ pub(crate) fn check(args: &[String]) -> ExitCode {
     }
 
     if violations != 0 {
-        eprintln!("ADR-0004 P9: construct OperationSpec with OperationSpec::builder(...).");
+        eprintln!(
+            "ADR-0004 P9: construct OperationSpec with OperationSpec::builder(...), and in \
+             crates/core/src/ops/** with OperationSpec::standard(name) so the success status and \
+             the unconfigured-subresource code come from generated/routes.rs (gateway#242)."
+        );
         ExitCode::FAILURE
     } else {
-        println!("OK: every OperationSpec construction uses the additive builder");
+        println!(
+            "OK: every OperationSpec construction uses the additive builder, and every standard operation derives its IR facts"
+        );
         ExitCode::SUCCESS
     }
 }
@@ -263,7 +283,36 @@ struct LiteralFinder<'a> {
     violations: &'a mut usize,
 }
 
+impl LiteralFinder<'_> {
+    /// Whether this file states a standard operation's specification.
+    fn is_operation_file(&self) -> bool {
+        self.relative.starts_with(Path::new(OPS_DIRECTORY))
+    }
+}
+
 impl<'ast> Visit<'ast> for LiteralFinder<'_> {
+    fn visit_expr_call(&mut self, expression: &'ast syn::ExprCall) {
+        if self.is_operation_file()
+            && let syn::Expr::Path(callee) = expression.func.as_ref()
+            && callee.qself.is_none()
+        {
+            let mut path: Vec<String> = callee.path.segments.iter().map(|segment| segment.ident.to_string()).collect();
+            if path.last().map(String::as_str) == Some("builder") && path.len() >= 2 && {
+                path.pop();
+                type_path_resolves(self.relative, &path, self.aliases)
+            } {
+                let line = callee.path.span().start().line;
+                eprintln!(
+                    "{}:{line}: a standard operation must use OperationSpec::standard(name); the builder's \
+                     success status and unconfigured code are a second copy of generated/routes.rs",
+                    self.relative.display()
+                );
+                *self.violations += 1;
+            }
+        }
+        visit::visit_expr_call(self, expression);
+    }
+
     fn visit_expr_struct(&mut self, expression: &'ast syn::ExprStruct) {
         let path: Vec<String> = expression
             .path
