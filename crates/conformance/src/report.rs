@@ -385,9 +385,16 @@ impl Report {
     #[must_use]
     pub fn render_json(&self) -> String {
         let mut out = String::from("{\n");
-        out.push_str(&format!("  \"target\": {},\n", quote(&self.target)));
-        out.push_str(&format!("  \"transport\": {},\n", quote(&self.transport)));
-        out.push_str(&format!("  \"profile\": {},\n", quote(&self.profile)));
+        out.push_str(&format!("  \"validate_only\": {},\n", self.validate_only));
+        // `null`, not the name, and not the field's absence. A validate-only run contacted no
+        // target, so there is no value here that is true; a consumer holding this file and nothing
+        // else would read the run banner's claim off `target` exactly as a reader of the text
+        // report did before it was split. The keys stay present so that reading one is never a
+        // missing-key error in a consumer that does not branch on `validate_only`.
+        let named = |value: &str| if self.validate_only { "null".to_owned() } else { quote(value) };
+        out.push_str(&format!("  \"target\": {},\n", named(&self.target)));
+        out.push_str(&format!("  \"transport\": {},\n", named(&self.transport)));
+        out.push_str(&format!("  \"profile\": {},\n", named(&self.profile)));
         out.push_str("  \"cases\": [\n");
         for (index, outcome) in self.outcomes.iter().enumerate() {
             let comma = if index + 1 == self.outcomes.len() { "" } else { "," };
@@ -680,6 +687,30 @@ mod tests {
         let rendered = validated_report().render_json();
         assert!(rendered.contains("\"verdict\": \"validated\""), "{rendered}");
         assert!(json::parse(&rendered).is_ok(), "{rendered}");
+    }
+
+    /// Negative — the machine-readable report must not name a target it never contacted either.
+    ///
+    /// The text banner was the half of this defect a reader sees; `validate --json <file>` writes
+    /// the same claim through the same flag a run uses, and a consumer holding only that file has
+    /// nothing else to go on. The per-case verdict already says `validated`; the header still said
+    /// a service answered.
+    #[test]
+    fn a_validate_only_json_report_names_no_target_and_no_transport() {
+        let rendered = validated_report().render_json();
+        assert!(rendered.contains("\"validate_only\": true"), "{rendered}");
+        assert!(!rendered.contains("\"scripted\""), "the target it never contacted:\n{rendered}");
+        assert!(!rendered.contains("\"hyper\""), "the transport it never opened:\n{rendered}");
+        assert!(json::parse(&rendered).is_ok(), "{rendered}");
+    }
+
+    /// Negative — a run's JSON keeps naming its target, which is what the field is for.
+    #[test]
+    fn an_executed_json_report_still_names_its_target() {
+        let rendered = report().render_json();
+        assert!(rendered.contains("\"validate_only\": false"), "{rendered}");
+        assert!(rendered.contains("\"target\": \"scripted\""), "{rendered}");
+        assert!(rendered.contains("\"transport\": \"hyper\""), "{rendered}");
     }
 
     /// Negative — a case that was never executed cannot pay off a baseline failure.
