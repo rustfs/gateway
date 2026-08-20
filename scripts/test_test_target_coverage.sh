@@ -34,20 +34,44 @@ initialize_sandbox() {
         check_xtask_test_target_consolidation.sh; do
         cp "$REPO_ROOT/scripts/$guard" "$SANDBOX/scripts/"
     done
-    # The member set comes from the real tree rather than a list here: hard-coding it would
-    # reproduce inside the self-test the very defect the guard exists to remove.
-    while IFS= read -r manifest; do
-        member="$(dirname "${manifest#"$REPO_ROOT"/}")"
-        mkdir -p "$SANDBOX/$member"
-        cp "$manifest" "$SANDBOX/$member/Cargo.toml"
-        if [[ -d "$REPO_ROOT/$member/tests" ]]; then
-            (cd "$REPO_ROOT/$member/tests" && find . -type d -print0) |
-                (cd "$SANDBOX/$member" && mkdir -p tests && xargs -0 -I{} mkdir -p "tests/{}")
-            (cd "$REPO_ROOT/$member/tests" && find . -type f -name '*.rs' -print0) |
-                (cd "$SANDBOX/$member/tests" && xargs -0 -I{} touch "{}")
-        fi
-    done < <(find "$REPO_ROOT/crates" "$REPO_ROOT/spikes" "$REPO_ROOT/xtask" \
-        -mindepth 1 -maxdepth 2 -name Cargo.toml -print 2>/dev/null | sort)
+    # The member set is resolved from the root manifest's own patterns, not listed here. A list
+    # would reproduce inside the self-test the exact defect the guard exists to remove: it would
+    # go on passing after a member arrived that it had never heard of. `fuzz/` has a Cargo.toml
+    # and is not a member, and this is what keeps it out without naming it.
+    python3 - "$REPO_ROOT" "$SANDBOX" <<'PYEOF'
+from pathlib import Path
+import shutil
+import sys
+import tomllib
+
+source, sandbox = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
+patterns = tomllib.loads((source / "Cargo.toml").read_text())["workspace"]["members"]
+members = sorted(
+    {
+        match
+        for pattern in patterns
+        for match in (source.glob(pattern) if "*" in pattern or "?" in pattern else [source / pattern])
+        if (match / "Cargo.toml").is_file()
+    }
+)
+if not members:
+    raise SystemExit("the workspace manifest resolved to no members")
+for member in members:
+    target = sandbox / member.relative_to(source)
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copy(member / "Cargo.toml", target / "Cargo.toml")
+    tests = member / "tests"
+    if not tests.is_dir():
+        continue
+    for entry in tests.rglob("*"):
+        mirrored = target / entry.relative_to(member)
+        if entry.is_dir():
+            mirrored.mkdir(parents=True, exist_ok=True)
+        elif entry.suffix == ".rs":
+            mirrored.parent.mkdir(parents=True, exist_ok=True)
+            mirrored.touch()
+print(f"skeleton: {len(members)} workspace members")
+PYEOF
     git -C "$SANDBOX" init -q
     git -C "$SANDBOX" add -A
     git -C "$SANDBOX" \
