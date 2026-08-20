@@ -215,7 +215,7 @@ impl OperationSpec {
         };
         let not_configured_error = match row.not_configured {
             Some(code) => {
-                let declared = ErrorCode::declared(code);
+                let declared = ErrorCode::known(code);
                 // A lowered spelling with no row in `model/overlays/error-status.toml` has no
                 // status, so it has no answer either. Refusing at compile time is the only reading
                 // that does not quietly turn the rule into `None`.

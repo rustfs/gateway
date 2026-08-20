@@ -57,7 +57,7 @@ fn every_lowered_unconfigured_code_is_a_declared_404() {
             declared.default_status()
         );
         assert_eq!(
-            ErrorCode::declared(spelling),
+            ErrorCode::known(spelling),
             Some(declared),
             "{}: the const lookup and the iterator lookup disagree about `{spelling}`",
             row.operation

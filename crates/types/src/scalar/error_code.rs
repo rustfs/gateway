@@ -90,29 +90,33 @@ impl ErrorCode {
         }
     }
 
-    /// The declared code with this wire spelling, in const context, or `None`.
+    /// The declared code with this wire spelling, or `None`.
     ///
-    /// The `const` counterpart of [`ErrorCode::known`], and the same authority: both read
-    /// `CODE_TABLE`, which `model/overlays/error-status.toml` generates. Nothing here names a
-    /// status — a code's status is the overlay's answer alone.
+    /// The replacement for the old `From<&'static str>`: a spelling with no row has no status, so
+    /// it has no `ErrorCode` either. A caller that means to answer with an undeclared code says so
+    /// with [`ErrorCode::custom`] and names the status.
     ///
-    /// It exists because an operation's `OperationSpec` is a `static` built at compile time, where
-    /// an iterator chain cannot run. Without it the code has to be written out a second time by
-    /// hand beside the generated one, which is the divergence recorded as rustfs/gateway#242.
+    /// A `const fn`, because an operation's `OperationSpec` is a `static` built at compile time and
+    /// has to reach the authority from there. Written as a `while` rather than an iterator chain for
+    /// that reason alone — it is the same table and the same answer at run time. Without it the
+    /// unconfigured-subresource code has to be written out a second time by hand beside the
+    /// generated one, which is the divergence recorded as rustfs/gateway#242.
     ///
     /// ```
     /// use rustfs_gateway_types::ErrorCode;
     ///
-    /// const CODE: Option<ErrorCode> = ErrorCode::declared("NoSuchLifecycleConfiguration");
+    /// assert_eq!(ErrorCode::known("NoSuchKey"), Some(ErrorCode::NO_SUCH_KEY));
+    /// assert_eq!(ErrorCode::known("NoSuchThing"), None);
+    ///
+    /// const CODE: Option<ErrorCode> = ErrorCode::known("NoSuchLifecycleConfiguration");
     /// assert_eq!(CODE, Some(ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION));
-    /// assert!(ErrorCode::declared("NoSuchThing").is_none());
     /// ```
     #[must_use]
     // Const context only: `<[T]>::get` is not a `const fn` on this toolchain, and every index here
     // is bounded by the `while` above it, so an out-of-range read is a compile-time evaluation
     // failure rather than a panic a request can reach.
     #[allow(clippy::indexing_slicing, reason = "const-evaluated bounds; see the comment above")]
-    pub const fn declared(code: &str) -> Option<Self> {
+    pub const fn known(code: &str) -> Option<Self> {
         let mut index = 0;
         while index < CODE_TABLE.len() {
             let (name, status) = CODE_TABLE[index];
@@ -125,26 +129,6 @@ impl ErrorCode {
             index += 1;
         }
         None
-    }
-
-    /// The declared code with this wire spelling, or `None`.
-    ///
-    /// The replacement for the old `From<&'static str>`: a spelling with no row has no status, so
-    /// it has no `ErrorCode` either. A caller that means to answer with an undeclared code says so
-    /// with [`ErrorCode::custom`] and names the status.
-    ///
-    /// ```
-    /// use rustfs_gateway_types::ErrorCode;
-    ///
-    /// assert_eq!(ErrorCode::known("NoSuchKey"), Some(ErrorCode::NO_SUCH_KEY));
-    /// assert_eq!(ErrorCode::known("NoSuchThing"), None);
-    /// ```
-    #[must_use]
-    pub fn known(code: &str) -> Option<Self> {
-        CODE_TABLE.iter().find(|(name, _)| *name == code).map(|(name, status)| Self {
-            name: Cow::Borrowed(name),
-            status: *status,
-        })
     }
 
     /// The wire spelling.
