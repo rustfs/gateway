@@ -273,20 +273,13 @@ fn prefix() -> impl Strategy<Value = String> {
 
 /// A tag for a filter, on the direct `<Tag>` or inside an `<And>`.
 ///
-/// Keys the object-key floor refuses are dropped rather than generated — a narrowing whose reason,
-/// owner and expiry are spelled out on
-/// [`n_a_tag_key_the_object_key_floor_refuses_is_a_known_divergence`], which pins the divergence so
-/// that dropping it here hides nothing.
+/// Nothing is filtered out of the key alphabet. It had to be, while `Tag.Key` was typed as an
+/// `ObjectKey` and the decoder ran the *path* floor over a label: `..` was the one spelling in this
+/// alphabet that tripped it, and roughly one run in thirty went red on it. A generator that avoids
+/// the values its own decoder cannot read is a property that cannot see the asymmetry it exists to
+/// find, so the narrowing comes out with the defect.
 fn tag() -> impl Strategy<Value = dto::Tag> {
-    ("[a-zA-Z0-9&<>_.-]{1,20}", "[a-zA-Z0-9&<>\"' _.-]{0,20}")
-        .prop_filter(
-            "a tag key the object-key floor refuses is a divergence this property does not own; see rustfs/backlog#1750",
-            |(key, _)| rustfs_gateway_types::floor_check_key(key).is_ok(),
-        )
-        .prop_map(|(key, value)| dto::Tag {
-            key: rustfs_gateway_types::ObjectKey::new(key).expect("a tag key inside the generated alphabet is a valid key"),
-            value,
-        })
+    ("[a-zA-Z0-9&<>_.-]{1,20}", "[a-zA-Z0-9&<>\"' _.-]{0,20}").prop_map(|(key, value)| dto::Tag { key, value })
 }
 
 /// A filter with exactly one direct child, or an `<And>` holding two or more conditions. Both
@@ -602,7 +595,7 @@ fn an_identifier_of_awkward_text_comes_back_unchanged() {
         id: Some(awkward.to_owned()),
         filter: Some(dto::LifecycleRuleFilter {
             tag: Some(dto::Tag {
-                key: rustfs_gateway_types::ObjectKey::new("k&y").expect("a tag key with an ampersand is a valid key"),
+                key: "k&y".to_owned(),
                 value: awkward.to_owned(),
             }),
             ..dto::LifecycleRuleFilter::default()
@@ -619,6 +612,41 @@ fn an_identifier_of_awkward_text_comes_back_unchanged() {
         .expect("a document with a rule decodes to a configuration");
 
     assert_eq!(projection(&decoded.rules), projection(&rules));
+}
+
+/// Negative — the rule-level `<Prefix>` next to such a tag is still a prefix, not a key.
+///
+/// A tag key is not an object key, which is what the test above says; the converse is that nothing
+/// else in this document became more permissive with it. A lifecycle `<Prefix>` was never an
+/// `ObjectKey` and must not have acquired the tag key's leniency, and a rule carrying both a
+/// traversal-shaped tag and a traversal-shaped prefix is the document that would show a repair
+/// applied one member too widely.
+#[test]
+fn n_a_traversal_shaped_prefix_is_still_carried_as_written() {
+    let rules = vec![dto::LifecycleRule {
+        prefix: Some("../elsewhere/".to_owned()),
+        status: dto::Status::ENABLED,
+        ..dto::LifecycleRule::default()
+    }];
+    let decoded = decode_write(&encode_read(rules.clone()))
+        .expect("a legacy prefix is opaque text on this wire")
+        .expect("a document with a rule decodes to a configuration");
+    assert_eq!(projection(&decoded.rules), projection(&rules));
+
+    // And the document is still refused by the family's own validator for the reason it always
+    // was — the prefix is the scope, so this rule is legal — while a rule with neither is not.
+    validate_lifecycle(&decoded).expect("a rule scoped by a prefix is a scoped rule");
+    let unscoped = dto::BucketLifecycleConfiguration {
+        rules: vec![dto::LifecycleRule {
+            status: dto::Status::ENABLED,
+            ..dto::LifecycleRule::default()
+        }],
+    };
+    assert_eq!(
+        validate_lifecycle(&unscoped),
+        Err(LifecycleRejection::ScopeMissing),
+        "the tag key repair must not have taken the scope requirement with it"
+    );
 }
 
 /// The one place the round trip is deliberately not an identity, pinned rather than avoided.
@@ -730,57 +758,51 @@ fn n_an_element_this_codec_does_not_know_is_gone_after_a_re_encode() {
     );
 }
 
-/// Negative — a tag key the object-key floor refuses does not survive, and that is a divergence.
+/// A tag key that reads as a path survives the round trip, in both filter positions.
 ///
-/// `Tag.Key` targets `com.amazonaws.s3#ObjectKey`, so the decoder runs `floor_check_key` — the path
-/// floor refusing a leading `//` as UNC and any `..` segment as traversal — over what is a *label*,
-/// while `ObjectKey::new` on the way *out* does not. The asymmetry sits inside one type: this codec
-/// writes a document it will not read, and since the write path is parse-then-reserialise, a rule
-/// scoped by such a key is one no operator can install at all.
+/// `Tag.Key` targeted `com.amazonaws.s3#ObjectKey` in the pinned model — AWS's own modelling
+/// shortcut, since a tag key is not an object key — so the decoder ran `floor_check_key`, the path
+/// floor refusing a leading `//` as UNC and any `..` segment as traversal, over what is a *label*,
+/// while `ObjectKey::new` on the way *out* did not. The asymmetry sat inside one type: this codec
+/// wrote a document it would not read, and since the write path is parse-then-reserialise, a rule
+/// scoped by such a key was one no operator could install at all.
 ///
-/// This family's instance is rustfs/gateway#226, and it is the third of three: rustfs/gateway#227
-/// pinned it in the tagging round-trip and rustfs/gateway#251 in the replication one, as
-/// `a_filter_tag_key_naming_a_traversal_segment_is_written_and_then_refused` (rustfs/gateway#247).
-/// Lifecycle reaches it by a narrower door than either — that alphabet carries `/` and this one does
-/// not, leaving `..` alone as the single spelling [`tag`] can generate, about 3% of runs, which is
-/// why this is the family that stayed intermittently red instead of being caught on the way in. The
-/// keys below are deliberately not all reachable from [`tag`]: they are the shape of the rule, not a
-/// sample of it.
+/// This is the flipped form of the pin rustfs/gateway#253 landed for rustfs/gateway#226, with its
+/// two siblings in `tagging_roundtrip.rs` and `replication_roundtrip.rs`; the member is a plain
+/// string now (rustfs/backlog#1896). Both positions a tag can occupy are asserted, because both are
+/// fed by the one generator and a repair reaching only the direct `<Tag>` would leave `<And>`
+/// broken. The rule is also one `validate_lifecycle` accepts, which is what says the round trip is
+/// the codec's answer and not the validator's.
 ///
-/// Pinned rather than fixed: the repair is a tag-key type that is not the object-key type, a model
-/// and codegen change with its own blast radius, and the floor and its double-slash policy are
-/// rustfs/backlog#1750's subject — so it has to move all three families at once and does not belong
-/// in a test PR. This is what makes the narrowing in [`tag`] honest: it goes red the day that lands,
-/// and whoever lands it deletes this and its two siblings together.
+/// The second loop is what stops an over-broad reading of the repair: a slash inside a label and a
+/// dot that is not a whole `..` segment round-tripped before this change and still do, so a repair
+/// that had reached for "no `/` or `.` in a tag key" cannot pass by making the first loop green.
 #[test]
-fn n_a_tag_key_the_object_key_floor_refuses_is_a_known_divergence() {
-    // Both positions a tag can occupy, because both are fed by the one narrowed generator: a
-    // repair reaching only the direct `<Tag>` would leave `<And>` diverging.
-    for key in ["..", "//nightly", "../nightly", "a/../b"] {
+fn a_tag_key_that_looks_like_a_path_survives_in_both_filter_positions() {
+    for key in [
+        "..",
+        "//nightly",
+        "../nightly",
+        "a/../b",
+        "a/b//c",
+        "a/./b",
+        ".",
+        "...",
+        "a.b",
+    ] {
         for filter in tag_filters(key) {
-            // The rule is one this family accepts, so the refusal below is the codec's and not the
-            // validator's — which is what makes it a divergence rather than a rule working.
             let rules = scoped_rule(filter);
             assert_eq!(
                 validate_lifecycle(&dto::BucketLifecycleConfiguration { rules: rules.clone() }),
                 Ok(()),
                 "{key}: the semantic rules refuse this before the codec ever sees it"
             );
-            let error = decode_write(&encode_read(rules)).expect_err("the floor refuses this label");
-            assert_eq!(error.code().as_str(), "InvalidArgument", "{key}: {error:?}");
+            let document = encode_read(rules.clone());
+            let decoded = decode_write(&document)
+                .unwrap_or_else(|error| panic!("{key}: a document this codec wrote is one it must read: {error:?}: {document}"))
+                .expect("a document with a rule decodes to a configuration");
+            assert_eq!(projection(&decoded.rules), projection(&rules), "{key}: {document}");
         }
-    }
-
-    // The floor is a prefix and segment rule, not a ban on the characters: a slash inside a label,
-    // and a dot that is not a whole `..` segment, both round-trip. Without this half an over-broad
-    // repair — one simply banning `/` or `.` in a tag key — would leave the loop above green.
-    for key in ["a/b//c", "a/./b", ".", "...", "a.b"] {
-        let [direct, _] = tag_filters(key);
-        let rules = scoped_rule(direct);
-        let decoded = decode_write(&encode_read(rules.clone()))
-            .unwrap_or_else(|error| panic!("{key}: a label is not a path: {error:?}"))
-            .expect("a document with a rule decodes to a configuration");
-        assert_eq!(projection(&decoded.rules), projection(&rules), "{key}");
     }
 }
 
@@ -800,11 +822,11 @@ fn scoped_rule(filter: dto::LifecycleRuleFilter) -> Vec<dto::LifecycleRule> {
 
 /// The two filter shapes one tag key can occupy: the direct `<Tag>`, and the same tag inside an
 /// `<And>` beside the prefix the grammar's two-condition minimum requires — the shape the shrunk
-/// counterexample arrived in. `ObjectKey::new` does not run the floor `value::object_key` runs on
-/// the way back in, and that gap is the whole divergence.
+/// counterexample arrived in. Both are generated by [`tag`], so a repair or a regression reaching
+/// only one of them is a repair or a regression this pair still sees.
 fn tag_filters(key: &str) -> [dto::LifecycleRuleFilter; 2] {
     let tag = || dto::Tag {
-        key: rustfs_gateway_types::ObjectKey::new(key).expect("the encode side does not run the floor"),
+        key: key.to_owned(),
         value: String::new(),
     };
     [

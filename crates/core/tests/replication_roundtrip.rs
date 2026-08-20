@@ -65,7 +65,6 @@ use rustfs_gateway_core::codec::{MetaView, OperationCodec, RequestBody};
 use rustfs_gateway_core::ops::shared::replication::{ReplicationRejection, validate_replication};
 use rustfs_gateway_core::route::TargetKind;
 use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_types::ObjectKey;
 use rustfs_gateway_types::dto;
 
 /// `PutBucketReplication` is `httpChecksumRequired`, so every read fixture has to make an
@@ -267,20 +266,18 @@ fn prefix() -> impl Strategy<Value = String> {
     "[a-z0-9&<>\"'é/_-]{1,24}"
 }
 
-/// A tag key. The alphabet excludes `.` — and therefore the `..` segment — because this build's
-/// decoder refuses a tag key that reads as a path traversal while its encoder writes one, so a
-/// generated `..` would make the property fail at random rather than say what is wrong. The gap
-/// is not hidden: it is pinned by
-/// [`a_filter_tag_key_naming_a_traversal_segment_is_written_and_then_refused`].
+/// A tag key. The alphabet carries `.` — and therefore reaches the `..` segment — which it could
+/// not while `Tag.Key` was typed as an `ObjectKey`: the decoder ran the *path* floor over a label,
+/// so a generated `..` made the property fail at random instead of saying what was wrong, and the
+/// alphabet had to be narrowed around it. A generator that avoids the values its own decoder
+/// cannot read is a property that cannot see the asymmetry it exists to find, so the narrowing
+/// came out with the defect.
 fn tag_key() -> impl Strategy<Value = String> {
-    "[a-zA-Z0-9&<>_-]{1,20}"
+    "[a-zA-Z0-9&<>._-]{1,20}"
 }
 
 fn tag() -> impl Strategy<Value = dto::Tag> {
-    (tag_key(), "[a-zA-Z0-9&<>\"' _.-]{0,20}").prop_map(|(key, value)| dto::Tag {
-        key: ObjectKey::new(key).expect("a tag key inside the generated alphabet is a valid key"),
-        value,
-    })
+    (tag_key(), "[a-zA-Z0-9&<>\"' _.-]{0,20}").prop_map(|(key, value)| dto::Tag { key, value })
 }
 
 /// A filter with exactly one direct child, or an `<And>` holding two or more conditions. A filter
@@ -570,51 +567,78 @@ fn an_identifier_of_awkward_text_comes_back_unchanged() {
 
 // ── the two gaps the generator does not sample, pinned in the direction they have ────────────
 
-/// A tag key naming a path-traversal segment. `Tag.Key` targets `ObjectKey`, so a *label* is
-/// validated by the *path* floor: `codec::value::object_key` runs `floor_check_key` before
-/// building the key, and that floor refuses `..`, a leading `//`, a leading backslash and a
-/// drive-rooted spelling — none of which means anything to a tag.
-///
-/// The encoder has no such floor, so the gateway writes a document it will not read: a stored
-/// configuration whose filter names such a tag stops parsing on the next read, and this family
-/// parses fail-closed. Pinned in the direction it currently has rather than fixed here, so the
-/// property lands and the defect has a name: rustfs/gateway#247. The same defect is
-/// rustfs/gateway#226 in the lifecycle family and rustfs/backlog#1750 in the tagging one, which
-/// is why the fix has to move all three at once and does not belong in a test PR.
-#[test]
-fn a_filter_tag_key_naming_a_traversal_segment_is_written_and_then_refused() {
-    for label in ["..", "//label", "a/../b", "C:\\label"] {
-        let configuration = dto::ReplicationConfiguration {
-            role: ROLE.to_owned(),
-            rules: vec![dto::ReplicationRule {
-                filter: Some(dto::ReplicationRuleFilter {
-                    tag: Some(dto::Tag {
-                        key: ObjectKey::new(label).expect("the DTO's own constructor has no path floor"),
-                        value: "v".to_owned(),
-                    }),
-                    ..dto::ReplicationRuleFilter::default()
+/// One rule scoped by a single tag, with the `<Priority>` the V2 schema demands made optional so
+/// that the negative below can leave it out. Shared by the two tests that follow, which differ in
+/// exactly that one member and would otherwise be the same forty lines twice.
+fn configuration_scoped_by_tag(key: &str, priority: Option<i32>) -> dto::ReplicationConfiguration {
+    dto::ReplicationConfiguration {
+        role: ROLE.to_owned(),
+        rules: vec![dto::ReplicationRule {
+            filter: Some(dto::ReplicationRuleFilter {
+                tag: Some(dto::Tag {
+                    key: key.to_owned(),
+                    value: "v".to_owned(),
                 }),
-                priority: Some(1),
-                delete_marker_replication: Some(dto::DeleteMarkerReplication { status: None }),
-                status: dto::Status::ENABLED,
-                destination: dto::Destination {
-                    bucket: DESTINATION_ARN.to_owned(),
-                    ..dto::Destination::default()
-                },
-                ..dto::ReplicationRule::default()
-            }],
-        };
+                ..dto::ReplicationRuleFilter::default()
+            }),
+            priority,
+            delete_marker_replication: Some(dto::DeleteMarkerReplication { status: None }),
+            status: dto::Status::ENABLED,
+            destination: dto::Destination {
+                bucket: DESTINATION_ARN.to_owned(),
+                ..dto::Destination::default()
+            },
+            ..dto::ReplicationRule::default()
+        }],
+    }
+}
 
-        let document = encode_read(configuration);
+/// A tag key naming a path-traversal segment survives the round trip, because a tag key is a label
+/// and not a path.
+///
+/// `Tag.Key` targeted `ObjectKey` in the pinned model — AWS's own modelling shortcut — so
+/// `codec::value::object_key` ran `floor_check_key` over a label, and that floor refuses `..`, a
+/// leading `//`, a leading backslash and a drive-rooted spelling. The encoder had no such floor, so
+/// this gateway wrote a document it would not read, and a stored configuration whose filter named
+/// such a tag stopped parsing on the next read — in a family that parses fail-closed. The member is
+/// a plain string now (rustfs/backlog#1896); these four labels are what goes red if it is ever typed
+/// back, and the sibling tests in `lifecycle_roundtrip.rs` and `tagging_roundtrip.rs` pin the same
+/// labels on the two other families reached through the same shape.
+#[test]
+fn a_filter_tag_key_naming_a_traversal_segment_survives_the_round_trip() {
+    for label in ["..", "//label", "a/../b", "C:\\label"] {
+        let document = encode_read(configuration_scoped_by_tag(label, Some(1)));
         assert!(
             document.contains(&format!("<Key>{}</Key>", label.replace('&', "&amp;"))),
-            "the encoder wrote the label unchanged, which is the half of the asymmetry that is not the bug: {document}"
+            "the encoder wrote the label unchanged: {document}"
         );
 
-        let error = decode_write(&document).expect_err("the path floor refuses the label this codec just wrote");
-        assert_eq!(error.code().as_str(), "InvalidArgument", "label: {label}");
-        assert_eq!(error.member(), Some("Key"), "label: {label}");
+        let decoded = decode_write(&document)
+            .unwrap_or_else(|error| panic!("{label}: a document this codec wrote is one it must read: {error:?}: {document}"));
+        let key = decoded.rules[0]
+            .filter
+            .as_ref()
+            .and_then(|filter| filter.tag.as_ref())
+            .map(|tag| tag.key.as_str());
+        assert_eq!(key, Some(label), "label: {label}: {document}");
     }
+}
+
+/// Negative — the V2 schema's own requirements still bind on a rule scoped by such a tag.
+///
+/// The repair moved one member off the `ObjectKey` type, and the failure mode of that shape of
+/// change is applying it one member too widely. A `<Filter>` obliges the rule to carry a
+/// `<Priority>` beside it, which is `validate_replication`'s rule and not the codec's; a rule whose
+/// filter names a traversal-shaped tag key and omits the priority is the document that would show
+/// the leniency having spread from the key to the grammar around it.
+#[test]
+fn n_a_traversal_shaped_tag_key_does_not_excuse_a_filter_without_a_priority() {
+    let decoded = decode_write(&encode_read(configuration_scoped_by_tag("..", None))).expect("a tag key is text on this wire");
+    assert_eq!(
+        validate_replication(&decoded),
+        Err(ReplicationRejection::PriorityMissingWithFilter),
+        "the tag key repair must not have taken the V2 schema's requirements with it"
+    );
 }
 
 /// The legacy rule-level `<Prefix>`, empty. It survives ingress as `Some("")` and the encoder

@@ -1,0 +1,53 @@
+[case]
+id = "c-lifecycle-0032"
+schema_version = 1
+title = "A filter Tag with no Key element is refused as MalformedXML"
+rationale = """
+The sibling of c-lifecycle-0031, and the half that says the repair was applied to one member rather than to the member's requiredness. Carrying Tag.Key as a plain string removed the object-key rules the type used to enforce by accident; it must not have removed the one rule the model states, which is that the element has to be there. An absent Key and a Key holding text that used to be refused are one edit apart, and a suite with only the positive half stays green through a decoder that reads a keyless Tag as a tag with an empty key."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Tag.html"
+summary = "Both members of the Tag shape are documented as required, so a Tag without a Key is not a tag."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRuleFilter.html"
+summary = "A filter scoped by a Tag names that tag by key and value; neither half has a documented default."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "tag-without-key"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "QjmJg1KW0MkH6ozAq425+g==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>7</Days></Expiration><ID>keyless</ID><Filter><Tag><Value>v</Value></Tag></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the body omits a member the schema requires</Message><Resource>Key</Resource><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

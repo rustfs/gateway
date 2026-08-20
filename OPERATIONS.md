@@ -1413,7 +1413,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `LifecycleRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `ObjectSizeGreaterThan: Long`, `ObjectSizeLessThan: Long`, `And: Structure(LifecycleRuleAndOperator)`
 - `NoncurrentVersionExpiration` (Structure) — `NoncurrentDays: Integer`, `NewerNoncurrentVersions: Integer`
 - `NoncurrentVersionTransition` (Structure) — `NoncurrentDays: Integer`, `StorageClass: StringEnum`, `NewerNoncurrentVersions: Integer`
-- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Tag` (Structure) — `Key: String`, `Value: String`
 - `Transition` (Structure) — `Date: Timestamp(Iso8601)`, `Days: Integer`, `StorageClass: StringEnum`
 
 ### GetBucketLocation
@@ -1706,7 +1706,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `ReplicationTimeValue` (Structure) — `Minutes: Integer`
 - `SourceSelectionCriteria` (Structure) — `SseKmsEncryptedObjects: Structure(SseKmsEncryptedObjects)`, `ReplicaModifications: Structure(ReplicaModifications)`
 - `SseKmsEncryptedObjects` (Structure) — `Status: StringEnum`
-- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Tag` (Structure) — `Key: String`, `Value: String`
 
 ### GetBucketRequestPayment
 
@@ -1793,7 +1793,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Body shapes**
 
-- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Tag` (Structure) — `Key: String`, `Value: String`
 
 ### GetBucketVersioning
 
@@ -2216,7 +2216,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Body shapes**
 
-- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Tag` (Structure) — `Key: String`, `Value: String`
 
 ### GetPublicAccessBlock
 
@@ -2957,7 +2957,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `LifecycleRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `ObjectSizeGreaterThan: Long`, `ObjectSizeLessThan: Long`, `And: Structure(LifecycleRuleAndOperator)`
 - `NoncurrentVersionExpiration` (Structure) — `NoncurrentDays: Integer`, `NewerNoncurrentVersions: Integer`
 - `NoncurrentVersionTransition` (Structure) — `NoncurrentDays: Integer`, `StorageClass: StringEnum`, `NewerNoncurrentVersions: Integer`
-- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Tag` (Structure) — `Key: String`, `Value: String`
 - `Transition` (Structure) — `Date: Timestamp(Iso8601)`, `Days: Integer`, `StorageClass: StringEnum`
 
 ### PutBucketLogging
@@ -3185,7 +3185,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `ReplicationTimeValue` (Structure) — `Minutes: Integer`
 - `SourceSelectionCriteria` (Structure) — `SseKmsEncryptedObjects: Structure(SseKmsEncryptedObjects)`, `ReplicaModifications: Structure(ReplicaModifications)`
 - `SseKmsEncryptedObjects` (Structure) — `Status: StringEnum`
-- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Tag` (Structure) — `Key: String`, `Value: String`
 
 ### PutBucketRequestPayment
 
@@ -3281,7 +3281,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Body shapes**
 
-- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Tag` (Structure) — `Key: String`, `Value: String`
 - `Tagging` (Structure) — `TagSet: List<Structure(Tag)>(Tag)`
 
 ### PutBucketVersioning
@@ -3707,7 +3707,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Body shapes**
 
-- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Tag` (Structure) — `Key: String`, `Value: String`
 - `Tagging` (Structure) — `TagSet: List<Structure(Tag)>(Tag)`
 
 ### PutPublicAccessBlock
@@ -3830,7 +3830,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `RestoreRequest` (Structure) — `Days: Integer`, `GlacierJobParameters: Structure(GlacierJobParameters)`, `Type: StringEnum`, `Tier: StringEnum`, `Description: String`, `SelectParameters: Structure(SelectParameters)`, `OutputLocation: Structure(OutputLocation)`
 - `S3Location` (Structure) — `BucketName: BucketName`, `Prefix: String`, `Encryption: Structure(Encryption)`, `CannedACL: StringEnum`, `AccessControlList: List<Structure(Grant)>(Grant)`, `Tagging: Structure(Tagging)`, `UserMetadata: List<Structure(MetadataEntry)>(MetadataEntry)`, `StorageClass: StringEnum`
 - `SelectParameters` (Structure) — `InputSerialization: Structure(InputSerialization)`, `ExpressionType: StringEnum`, `Expression: String`, `OutputSerialization: Structure(OutputSerialization)`
-- `Tag` (Structure) — `Key: ObjectKey`, `Value: String`
+- `Tag` (Structure) — `Key: String`, `Value: String`
 - `Tagging` (Structure) — `TagSet: List<Structure(Tag)>(Tag)`
 
 ### SelectObjectContent

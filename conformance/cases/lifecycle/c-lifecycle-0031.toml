@@ -1,0 +1,79 @@
+[case]
+id = "c-lifecycle-0031"
+schema_version = 1
+title = "A filter tag key of .. is written, read back and accepted again"
+rationale = """
+A tag key is a label, not a path, and AWS's tag alphabet admits the dot — so `..` is a filter tag key a client may send. The pinned model targets Tag.Key at the ObjectKey shape, which is AWS's own modelling shortcut, and typing the member from that shape name made the decoder run the object-key traversal floor over a label: the service wrote `<Key>..</Key>` on the read and answered 400 InvalidArgument to the document it had just written. The third exchange is the assertion — a configuration an operator reads and puts straight back must be accepted — because that read-modify-write cycle is how the defect destroys an installed rule rather than merely rejecting a request."""
+polarity = "positive"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html"
+summary = "The documented tag alphabet admits letters, numbers, spaces and the set + - = . _ : / @, so a key of two dots is representable."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRuleFilter.html"
+summary = "A filter may be scoped by a single Tag, whose Key and Value are the pair the rule matches on."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Tag.html"
+summary = "The Tag shape's Key member is documented as the tag name, with no object-key path rules attached to it."
+kind = "smithy-model"
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-dotted-tag"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "GSRCIk8kRmRePSjHTP4SKQ==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>7</Days></Expiration><ID>dotted-tag</ID><Filter><Tag><Key>..</Key><Value>v</Value></Tag></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-lifecycle-0031.xml"
+
+[[exchanges]]
+name = "put-what-was-read"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "gEbikS8p/bBavyf2EvLV9A==" }
+body = { utf8 = '''<?xml version="1.0" encoding="UTF-8"?>
+<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><Expiration><Days>7</Days></Expiration><ID>dotted-tag</ID><Filter><Tag><Key>..</Key><Value>v</Value></Tag></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>''' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"

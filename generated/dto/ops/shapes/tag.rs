@@ -30,7 +30,7 @@
 #[derive(Debug, Clone, Default)]
 pub struct Tag {
     /// Wire `Key`, bound as BodyXml. Required.
-    pub key: crate::ObjectKey,
+    pub key: String,
     /// Wire `Value`, bound as BodyXml. Required.
     pub value: String,
 }
