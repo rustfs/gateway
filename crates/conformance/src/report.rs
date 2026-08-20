@@ -696,7 +696,12 @@ mod tests {
     /// regression, which is what keeps `validate`\'s exit status meaningful.
     #[test]
     fn a_validate_only_report_still_regresses_on_a_convention_failure() {
-        assert_eq!(validated_report().regressions(None).len(), 1);
+        let subject = validated_report();
+        // By id, not by count. A count of one is satisfied by whichever of the two cases the
+        // filter happens to select, so `regressions()` could pick the validated case instead of
+        // the failed one and this would still read green.
+        let regressed: Vec<&str> = subject.regressions(None).iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(regressed, ["c-sig-0001"], "the failed case is the only regression");
     }
 
     #[test]
