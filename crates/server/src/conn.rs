@@ -438,6 +438,7 @@ where
         header_deadline,
         config.keep_alive_idle,
         config.write_progress_timeout,
+        config.lingering_close_time,
     );
     #[cfg(test)]
     let io = match &deadline_observer {

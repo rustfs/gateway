@@ -8,7 +8,7 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/config.rs` | Serializable tuning, defaults and validation | A knob is missing or accepts an unsafe value |
 | `src/listener.rs` | socket2 bind, tuning and read-back | Bind family or socket option is wrong |
 | `src/tls.rs` | Atomic TLS config and fail-closed reload | New handshakes see the wrong certificate |
-| `src/io.rs` | Write-progress and connection-idle timers | A slow reader is killed or never released |
+| `src/io.rs` | Write-progress and connection-idle timers, and the lingering read on close | A slow reader is killed or never released, or a peer sees `ECONNRESET` where a close was due |
 | `src/conn.rs` | Admission, Hyper driving and connection lifecycle | Accept, h1/h2 or shutdown sequencing fails |
 | `src/request_capacity.rs` | Global request permits and accept-loop capacity notification | H1/H2 exceed the shared request ceiling or listener acceptance fails to pause |
 | `src/shutdown.rs` | Trigger, report and metrics | Drain or abort counts are wrong |
@@ -17,3 +17,4 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `tests/acceptance.rs` | Deterministic config, dispatch and TLS reload cases | A source-only contract regresses |
 | `tests/server_runtime.rs` | Live h1 admission and shutdown cases | Socket lifecycle behaviour regresses |
 | `tests/tls_h2.rs` | Live TLS and h2 cases | Reload, TLS admission or h2 flow control regresses |
+| `tests/lingering_close.rs` | How a refused connection ends, on a real socket: closed, open or reset | A client reads `ECONNRESET` instead of the refusal, or a close costs a connection slot |
