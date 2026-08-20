@@ -1732,12 +1732,6 @@ fn guard_read(
     }
 }
 
-/// `NoSuchKey`, raised only once every condition has been evaluated against the absence.
-///
-/// The document carries `<Key>`, which is the only element in it that says *which* read missed —
-/// a client batching reads on one connection cannot tell two 404s apart without it. The key is the
-/// one the request named, so it is an echo to a caller already authenticated and authorised, and
-/// the writer escapes it: see `rustfs_gateway`'s renderer.
 /// The unconfigured answer for a bucket subresource read, taken from the operation's declaration.
 ///
 /// `model/overlays/ops/**` is the one authority for which `404` an unconfigured subresource owes;
@@ -1941,6 +1935,12 @@ fn deleted_by_marker(key: &str, last_modified: i64) -> HandlerError {
         .unwrap_or_else(|_| HandlerError::internal_error("a fixture delete marker has no renderable instant"))
 }
 
+/// `NoSuchKey`, raised only once every condition has been evaluated against the absence.
+///
+/// The document carries `<Key>`, which is the only element in it that says *which* read missed —
+/// a client batching reads on one connection cannot tell two 404s apart without it. The key is the
+/// one the request named, so it is an echo to a caller already authenticated and authorised, and
+/// the writer escapes it: see `rustfs_gateway`'s renderer.
 fn no_such_key(key: &str) -> HandlerError {
     match ObjectKey::new(key.to_owned()) {
         Ok(key) => HandlerErrorContext::missing_object_for(key, MissingObject::Key, ResourceVisibility::Visible).into(),
