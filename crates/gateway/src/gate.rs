@@ -283,8 +283,9 @@ where
                     // `BytesMut::put` into a collector with no capacity yet takes the frame's own
                     // allocation instead of copying into a new one, so a body that arrives as one
                     // frame leaves this function as the memory it arrived in. A mebibyte request
-                    // allocated 1,078,095 bytes before that; `tests/request_allocations.rs` is
-                    // what keeps it at 29,519.
+                    // allocated 1,078,095 bytes before rustfs/gateway#225 and under thirty
+                    // kibibytes since; `tests/request_allocations.rs` is what keeps it there, and
+                    // it is a bound on the shape rather than on the number.
                     collected.put(frame);
                 }
                 collected.freeze()
