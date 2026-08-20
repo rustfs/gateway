@@ -377,6 +377,58 @@ mod tests {
         assert_feedback_case("c-object-0001", "hyper");
     }
 
+    /// One set of options, so the two commands are compared on the same case and the same target.
+    fn one_case(command: Command) -> Options {
+        Options {
+            command,
+            filter: Some("c-object-0001".to_owned()),
+            transport: Transport::Hyper,
+            profile: Profile::Aws,
+            root: None,
+            endpoint: None,
+            baseline: None,
+            json: None,
+            junit: None,
+            exclude_slow: false,
+        }
+    }
+
+    /// Negative — `validate` stays green on a case a target answered wrongly, and `run` does not.
+    ///
+    /// rustfs/gateway#245 asked for exactly this assertion: a case that is red under `run` must not
+    /// produce a success under the documented single-case workflow, "otherwise the fix is itself
+    /// unfalsifiable". Both halves run against one target that answers `c-object-0001` with a 500
+    /// and the wrong body, so the difference between the two exit codes is the difference between
+    /// the two commands and not between two cases.
+    ///
+    /// This is the reason the feedback-loop table in `AGENTS.md` now names `run`: no wording change
+    /// to `validate`'s report can make it detect a wrong assertion, because it evaluates none.
+    #[test]
+    fn validate_stays_green_on_a_case_run_finds_red_which_is_why_the_table_names_run() {
+        let wrong = crate::observation::Observation::response(
+            500,
+            vec![("content-type".to_owned(), "application/xml".to_owned())],
+            b"<Error><Code>InternalError</Code></Error>".to_vec(),
+        );
+        let mut under_run = crate::sut::Scripted::new().with("c-object-0001", 0, wrong.clone());
+        assert_eq!(
+            execute(&one_case(Command::Run), &mut under_run),
+            ExitCode::from(exit::REGRESSION),
+            "the documented command did not go red on a case whose target answered wrongly"
+        );
+        let mut under_validate = crate::sut::Scripted::new().with("c-object-0001", 0, wrong);
+        assert_eq!(
+            execute(&one_case(Command::Validate), &mut under_validate),
+            ExitCode::SUCCESS,
+            "validate is a corpus check and this case is internally consistent"
+        );
+        assert!(
+            under_validate.seen.is_empty(),
+            "validate handed a request to the target: {:?}",
+            under_validate.seen
+        );
+    }
+
     /// Negative — a filter that names no case must not exit green.
     ///
     /// `--filter '<case-id>'` is how the feedback-loop table selects one case. A typo in the id
