@@ -1,0 +1,50 @@
+# c-location-0001 — the location response is the member itself, with no output wrapper.
+#
+# Schema dimensions exercised: an exact response body, and a needle for the wrapper element that
+# the generic restXml shape would have introduced.
+
+[case]
+id = "c-location-0001"
+schema_version = 1
+title = "GetBucketLocation answers with LocationConstraint as the root element"
+rationale = """
+`GetBucketLocation` is the one read in this surface whose body is a single member promoted to the document root: AWS sends `<LocationConstraint>` itself, not the generic `<GetBucketLocationOutput>` wrapper every other restXml output carries. s3s shipped the double-wrapped body for years, which is why the unwrapping is data in the IR rather than a branch in the encoder — and why it needs a case that reads the bytes on the wire. The exact body is pinned rather than a containment check, because the defect this guards against adds an enclosing element without removing anything: a `contains` needle for `LocationConstraint` stays green through it. The companion needle names the nested closing pair rather than an `Output` element name, because the wrapper the emitter would write carries the operation's declared response root — `LocationConstraint` again — so a needle for `GetBucketLocationOutput` is one no build could ever produce."""
+polarity = "positive"
+operation = "GetBucketLocation"
+tags = ["xml", "wire-bytes", "region"]
+timeout_ms = 10000
+quirks = ["q-unwrapped-0001"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+summary = "The documented response syntax shows one top level LocationConstraint element with no enclosing output element."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/127"
+summary = "Upstream shipped a double wrapped body until this change, which is the defect this case pins the bytes against."
+kind = "s3s-pr"
+
+[[setup.buckets]]
+name = "conf-location-far"
+region = "eu-west-1"
+
+[request]
+method = "GET"
+target = "/conf-location-far?location"
+headers = { }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+not_contains_utf8 = ["</LocationConstraint></LocationConstraint>"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">eu-west-1</LocationConstraint>'''

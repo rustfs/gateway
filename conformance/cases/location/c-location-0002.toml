@@ -1,0 +1,42 @@
+# c-location-0002 — the us-east-1 answer is an empty element, not an absent one.
+#
+# Schema dimensions exercised: an exact response body over a member whose value is null.
+
+[case]
+id = "c-location-0002"
+schema_version = 1
+title = "A us-east-1 bucket answers with an empty LocationConstraint element"
+rationale = """
+AWS reports a us-east-1 bucket as having a null location constraint, and it still sends the element: the body is `<LocationConstraint></LocationConstraint>`, not a zero-length body and not a document with the element omitted. A client that branches on the element's presence to decide whether the read succeeded therefore has to see it. This is the boundary of the previous case rather than a second happy path — the value is absent and the element is not — so it is pinned as exact bytes; a containment check for `LocationConstraint` cannot tell an emitted empty element from an omitted one."""
+polarity = "negative"
+operation = "GetBucketLocation"
+tags = ["xml", "wire-bytes", "region"]
+timeout_ms = 10000
+quirks = ["q-empty-0002"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+summary = "States that buckets in us-east-1 have a null location constraint, while the element itself is still part of the response."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-location-home"
+
+[request]
+method = "GET"
+target = "/conf-location-home?location"
+headers = { }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/"></LocationConstraint>'''

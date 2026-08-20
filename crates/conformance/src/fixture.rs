@@ -3441,10 +3441,37 @@ impl Stub {
         }))
     }
 
+    /// The bucket's region, with the us-east-1 answer being no constraint at all.
+    ///
+    /// Answered from the bucket's own `[[setup.buckets]] region`, not from a constant: an output
+    /// that is the same value for every bucket cannot show the difference between the unwrapped
+    /// body AWS sends and the generic wrapper `q-unwrapped-0001` records as the shipped defect.
+    /// With `LocationConstraint` absent the two spellings render identical bytes — the root is
+    /// written either way and the only member is omitted — so a case written against the constant
+    /// is a case that cannot fail. `us-east-1` is excluded by name rather than by comparison with
+    /// the fixture's home region, because AWS's null constraint is a fact about that one region
+    /// and not about wherever the deployment happens to live.
+    ///
+    /// There is deliberately no redirect here: `GetBucketLocation` is answerable from any region,
+    /// which is what makes it the operation a client uses to find out where a bucket is.
     fn get_bucket_location(&self, input: &dto::GetBucketLocationInput) -> HandlerResult<dto::GetBucketLocation> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        Ok(Resp::new(dto::GetBucketLocationOutput::default()))
+        let location_constraint = match fixture.bucket_region(input.bucket.as_str()) {
+            None | Some("us-east-1") => None,
+            Some(region) => Some(
+                dto::LocationConstraint::VALUES
+                    .iter()
+                    .find(|known| **known == region)
+                    .copied()
+                    .map(dto::LocationConstraint::from)
+                    // A `[[setup.buckets]] region` outside the pinned model would otherwise be
+                    // reported as "this bucket is in us-east-1", which is a wrong answer wearing a
+                    // valid shape.
+                    .ok_or_else(|| HandlerError::internal_error("the fixture holds a bucket region the model does not name"))?,
+            ),
+        };
+        Ok(Resp::new(dto::GetBucketLocationOutput { location_constraint }))
     }
 
     /// The stored CORS document, or the family's defining 404.
