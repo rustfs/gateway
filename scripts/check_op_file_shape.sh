@@ -196,10 +196,37 @@ def mask(text: str) -> str:
 
 
 def cfg_test_spans(code: str) -> list[tuple[int, int]]:
+    """Every `#[cfg(test)]` item, from its attribute to the end of that item.
+
+    An item ends at its own balanced closing brace *or* at its own terminating
+    semicolon, whichever comes first. The semicolon arm is not decoration: the
+    `#[cfg(test)] #[path = "x_tests.rs"] mod tests;` split this repository uses
+    when a file crosses the 800-line limit never opens a brace, so searching
+    ahead for a `{` walks past the whole declaration and lands on the *next*
+    braced item in the file — which is then suppressed as though it were test
+    code. 35 declarations in this workspace have that shape, and on the day this
+    was written the resulting spans covered 25,124 bytes of production code:
+    `crates/sig/src/lib.rs` hid its `pub use canonical::{ .. }` re-export list
+    behind `mod full_chain_tests;`, and `crates/core/src/codec/mod.rs` hid
+    `pub use crate::codec::response::{ .. }` behind `mod tests;`.
+
+    Nothing in that suppressed text happened to be an `impl Operation`, so no
+    declaration was actually missed — the property this restores is that adding
+    one there cannot go unnoticed. The same defect in
+    `check_cors_credentials_exclusive.sh` (rustfs/gateway#238) ran to end of file
+    instead, because that scanner blanked forward rather than searching for a
+    brace; both are the one shape, a bodyless item read as though it had a body.
+    """
     spans = []
     for marker in re.finditer(r"#\[cfg\(test\)\]", code):
         start = code.find("{", marker.end())
-        if start == -1:
+        terminator = code.find(";", marker.end())
+        if start == -1 and terminator == -1:
+            continue
+        # `code` is already masked, so a `;` inside a comment or a string cannot
+        # end an item here, and a `{` inside one cannot open a body.
+        if start == -1 or (terminator != -1 and terminator < start):
+            spans.append((marker.start(), terminator))
             continue
         depth = 0
         end = start

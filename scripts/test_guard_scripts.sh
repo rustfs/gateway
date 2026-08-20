@@ -7222,6 +7222,22 @@ mut_c_sig_0551_sig_v2_equality() {
 expect_ct_eq_fail \
     '[c-sig-0551] any == inside the sig_v2 subtree, which compares nothing directly' mut_c_sig_0551_sig_v2_equality
 
+# rustfs/gateway#240 named this guard as one of five that blank from `#[cfg(test)]`
+# to a brace a bodyless `mod tests;` never opens. It does not — it blanks
+# comment-only lines and nothing else, and says so at check_ct_eq.sh:649 — and
+# this case is the evidence rather than the reading. `crates/sig/src/signer.rs`
+# is the file the issue measured: its declaration sits at line 685 of 687, so
+# the appended comparison lands *after* it. A guard that stopped at the
+# attribute would report this file clean, which is the one outcome that must
+# not be possible on the path that verifies signatures.
+mut_c_sig_0551_equality_after_bodyless_cfg_test() {
+    printf '\nfn oops(signature: &[u8], other: &[u8]) -> bool { signature == other }\n' \
+        >>crates/sig/src/signer.rs
+}
+expect_ct_eq_fail \
+    '[c-sig-0551] == on signature material appended after the bodyless #[cfg(test)] mod tests; in signer.rs' \
+    mut_c_sig_0551_equality_after_bodyless_cfg_test
+
 mut_secret_partial_eq_without_ct_eq() {
     cat >>crates/sig/src/secret.rs <<'RS'
 
@@ -9948,6 +9964,72 @@ PYEOF
 expect_guard_pass check_op_file_shape.sh \
     'the same operation impl inside a #[cfg(test)] module' \
     mut_op_shape_impl_in_test_module
+
+# rustfs/gateway#240. The same smuggled operation, behind a `#[cfg(test)]` item
+# that never opens a brace — the `#[path] mod tests;` split this repository uses
+# when a file crosses 800 lines. `cfg_test_spans` used to search ahead for the
+# next `{` from the attribute, which walks straight past a bodyless declaration
+# and lands on the *following* item, suppressing it as though it were test code.
+# On origin/main@089f760 this mutation exits 0 in silence while the identical
+# `impl Operation for SmuggledIn {}` one line higher — the case above — is
+# caught, which is the whole difference: not that the guard is wrong about the
+# declaration, but that a declaration is enough to switch it off for what comes
+# after. 35 declarations in this workspace have that shape.
+mut_op_shape_impl_after_bodyless_cfg_test() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/registry/opset.rs")
+p.write_text(
+    p.read_text()
+    + '\n#[cfg(test)]\n#[path = "opset_probe_tests.rs"]\nmod probe_tests;\n'
+    + "\nimpl Operation for SmuggledIn {}\n"
+)
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'an operation smuggled in after a bodyless #[cfg(test)] mod declaration' \
+    'declares `impl Operation` outside the ops tree' \
+    mut_op_shape_impl_after_bodyless_cfg_test
+
+# The same blind spot on rule 1 rather than rule 3, because the two rules read
+# the span list through different call sites and one of them passing proves
+# nothing about the other. A second operation appended to an existing operation
+# file — the git conflict the whole One Operation Per File rule exists to
+# prevent — is invisible to origin/main@089f760 once a bodyless declaration sits
+# above it, and the guard reports the file as declaring exactly one.
+mut_op_shape_second_operation_after_bodyless_cfg_test() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/ops/get_bucket_versioning.rs")
+p.write_text(
+    p.read_text()
+    + '\n#[cfg(test)]\n#[path = "get_bucket_versioning_extra_tests.rs"]\nmod extra_tests;\n'
+    + "\nimpl Operation for GetBucketVersioningAgain {}\n"
+)
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a second operation after a bodyless #[cfg(test)] mod declaration' \
+    'declares 2 `impl Operation`' \
+    mut_op_shape_second_operation_after_bodyless_cfg_test
+
+# And the other direction, so the fix cannot be "stop suppressing test code".
+# A real `#[cfg(test)] mod { .. }` that *follows* a bodyless declaration must
+# still be a test module: the semicolon ends the declaration and nothing else.
+mut_op_shape_test_module_after_bodyless_cfg_test() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/core/src/registry/opset.rs")
+p.write_text(
+    p.read_text()
+    + '\n#[cfg(test)]\n#[path = "opset_probe_tests.rs"]\nmod probe_tests;\n'
+    + "\n#[cfg(test)]\nmod smuggle_probe {\n    impl Operation for SmuggledIn {}\n}\n"
+)
+PYEOF
+}
+expect_guard_pass check_op_file_shape.sh \
+    'a #[cfg(test)] module following a bodyless #[cfg(test)] declaration' \
+    mut_op_shape_test_module_after_bodyless_cfg_test
 
 mut_op_shape_name_disagrees() {
     python3 - <<'PYEOF'
