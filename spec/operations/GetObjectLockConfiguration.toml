@@ -81,9 +81,9 @@ kind = "Structure"
 element_order = ["Mode", "Days", "Years"]
 
 [shape.DefaultRetention.empty_value]
-Mode = "omit"
-Days = "omit"
-Years = "omit"
+Mode = "emit"
+Days = "emit"
+Years = "emit"
 
 [[shape.DefaultRetention.field]]
 name = "Mode"
@@ -118,8 +118,8 @@ kind = "Structure"
 element_order = ["ObjectLockEnabled", "Rule"]
 
 [shape.ObjectLockConfiguration.empty_value]
-ObjectLockEnabled = "omit"
-Rule = "omit"
+ObjectLockEnabled = "emit"
+Rule = "emit"
 
 [[shape.ObjectLockConfiguration.field]]
 name = "ObjectLockEnabled"
@@ -145,7 +145,7 @@ kind = "Structure"
 element_order = ["DefaultRetention"]
 
 [shape.ObjectLockRule.empty_value]
-DefaultRetention = "omit"
+DefaultRetention = "emit"
 
 [[shape.ObjectLockRule.field]]
 name = "DefaultRetention"

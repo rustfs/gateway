@@ -262,13 +262,15 @@ fn rule_id() -> impl Strategy<Value = String> {
     )
 }
 
-/// A key prefix. The empty one is legal on the wire and is deliberately *not* generated: it is
-/// the `omit`-on-empty boundary, where `<Prefix></Prefix>` decodes as absent rather than as
-/// itself, so it is not an identity. Excluding it from the generator is not hiding it — it is
-/// pinned exactly, in both of the places it can appear, by
-/// [`an_empty_prefix_is_the_same_scope_as_no_prefix_and_the_rule_keeps_one`].
+/// A key prefix, including the empty one.
+///
+/// The empty prefix had to be excluded while an optional member's empty value was dropped on the
+/// way out: `<Prefix></Prefix>` came back absent rather than as itself, so the identity did not
+/// hold and the generator was narrowed around it. A generator that avoids the values its own
+/// encoder will not write back is a property that cannot see the asymmetry it exists to find, so
+/// the narrowing comes out with the defect (rustfs/gateway#221).
 fn prefix() -> impl Strategy<Value = String> {
-    "[a-z0-9&<>\"'é/_-]{1,24}"
+    "[a-z0-9&<>\"'é/_-]{0,24}"
 }
 
 /// A tag for a filter, on the direct `<Tag>` or inside an `<And>`.
@@ -649,14 +651,16 @@ fn n_a_traversal_shaped_prefix_is_still_carried_as_written() {
     );
 }
 
-/// The one place the round trip is deliberately not an identity, pinned rather than avoided.
+/// An empty `<Prefix>` inside a `<Filter>` comes back as itself, not as an absent member.
 ///
-/// An empty `<Prefix>` means "every object", and so does no `<Prefix>` at all, so the codec omits
-/// the member on the way out and the value comes back absent rather than as `Some("")`. Inside a
-/// `<Filter>` that is exactly right and costs nothing: the filter element remains, and an empty
-/// filter is the same scope.
+/// The two are the same *scope* — both mean every object — which is why this half of the
+/// divergence was silent where the rule-level one was a 400. It is still a document the operator
+/// wrote and the service did not write back, and a client diffing configuration state sees a
+/// change nobody made. Asserted beside the rule-level case because the repair has to reach both
+/// positions: `Prefix` is a member of `LifecycleRule` and of `LifecycleRuleFilter`, and the two
+/// are lowered as separate shapes.
 #[test]
-fn an_empty_prefix_inside_a_filter_is_the_same_scope_as_no_prefix() {
+fn an_empty_prefix_inside_a_filter_comes_back_as_itself() {
     let rules = vec![dto::LifecycleRule {
         id: Some("in-filter".to_owned()),
         filter: Some(dto::LifecycleRuleFilter {
@@ -671,33 +675,34 @@ fn an_empty_prefix_inside_a_filter_is_the_same_scope_as_no_prefix() {
         .expect("a document with a rule decodes to a configuration");
 
     let filter = decoded.rules[0].filter.as_ref().expect("the filter element survived");
-    assert_eq!(filter.prefix, None, "an empty prefix comes back absent, which is the same scope");
+    assert_eq!(
+        filter.prefix.as_deref(),
+        Some(""),
+        "an empty prefix inside a filter is written as an empty element and read back as itself"
+    );
 }
 
-/// The divergence this file found: a rule whose only scope is an *empty* rule-level `<Prefix>`.
+/// An empty rule-level `<Prefix>` survives a read-modify-write, which it did not before.
 ///
-/// The legacy pre-`Filter` spelling puts the scope directly on the rule, and the empty spelling
-/// `<Prefix></Prefix>` is how that revision said "every object" — it is what AWS's own v1
-/// examples carry. The **decoder** keeps it: the member arrives as `Some("")` and the rule has a
-/// scope, so the write is accepted. The **encoder** does not: `omit`-on-empty drops the element,
-/// and the document that comes out carries neither a `<Filter>` nor a `<Prefix>`. Read that
-/// document back and the same rule is now `ScopeMissing`, a `400 MalformedXML`.
+/// The legacy pre-`Filter` spelling puts the scope directly on the rule, and `<Prefix></Prefix>`
+/// is how that revision said "every object" — it is what AWS's own v1 examples carry. The
+/// **decoder** always kept it: the member arrives as `Some("")` and the rule has a scope, so the
+/// write is accepted. The **encoder** did not: an optional member defaulted to `omit`-on-empty,
+/// so the element was dropped and the document that came out carried neither a `<Filter>` nor a
+/// `<Prefix>`. Reading that document back made the same rule `ScopeMissing`, a `400`.
 ///
-/// The two halves are asserted together because separately each looks correct. Together they are
-/// this family's hard constraint pointing the wrong way: RustFS persists by parsing and
-/// re-serialising, so a rule an operator successfully installed under the v1 spelling becomes,
-/// after one read-modify-write, a stored document the next release refuses to load. It is at
-/// least loud — a refusal rather than the silent leniency failure the family is built around —
-/// but it is a configuration this codec wrote and cannot read.
+/// RustFS persists by parsing and re-serialising, so a rule an operator successfully installed
+/// under the v1 spelling became, after one read-modify-write on an unrelated member, a stored
+/// document the next read refused. The three assertions walk that exact cycle — install, read
+/// back, install what was read — because it is the cycle and not the single encode that destroys
+/// the rule. `c-lifecycle-0038` is the same cycle over the wire.
 ///
-/// Fixing it means the encoder writing `<Prefix></Prefix>` for a present-but-empty legacy prefix,
-/// which is a codegen `omit`-on-empty change rather than a lifecycle change, so it is not this
-/// slice's. The behaviour is pinned in the direction it actually has, with the issue that owns it
-/// named; invert the second half in the change that fixes it.
-///
-/// Owner: rustfs/backlog#1719.
+/// The repair is not a lifecycle change: `Option::None` is what "absent" means for an optional
+/// member, so an encoder that also drops `Some("")` collapses two values the decoder tells apart.
+/// The default is now `emit` for every member, and `omit` is a declaration an overlay makes with
+/// evidence. rustfs/gateway#221.
 #[test]
-fn n_an_empty_legacy_prefix_is_accepted_on_the_way_in_and_dropped_on_the_way_out() {
+fn an_empty_legacy_prefix_survives_a_read_modify_write() {
     let stored = "<LifecycleConfiguration><Rule><ID>legacy</ID><Prefix></Prefix>\
                   <Status>Enabled</Status></Rule></LifecycleConfiguration>";
 
@@ -707,7 +712,7 @@ fn n_an_empty_legacy_prefix_is_accepted_on_the_way_in_and_dropped_on_the_way_out
     assert_eq!(
         decoded.rules[0].prefix,
         Some(String::new()),
-        "the decoder dropped the empty legacy prefix, so the rule never had a scope to lose"
+        "the decoder keeps the empty legacy prefix, so the rule has a scope"
     );
     assert_eq!(
         validate_lifecycle(&dto::BucketLifecycleConfiguration {
@@ -718,15 +723,60 @@ fn n_an_empty_legacy_prefix_is_accepted_on_the_way_in_and_dropped_on_the_way_out
     );
 
     let re_encoded = encode_read(decoded.rules);
+    assert!(
+        re_encoded.contains("<Prefix></Prefix>"),
+        "the encoder must write back the member it was given: {re_encoded}"
+    );
+
     let reread = decode_write(&re_encoded)
         .expect("the re-encoded document is still well formed")
         .expect("a document with a rule decodes to a configuration");
     assert_eq!(
+        reread.rules[0].prefix,
+        Some(String::new()),
+        "the second read sees the scope the operator wrote: {re_encoded}"
+    );
+    assert_eq!(
         validate_lifecycle(&dto::BucketLifecycleConfiguration { rules: reread.rules }),
-        Err(LifecycleRejection::ScopeMissing),
-        "the empty legacy prefix now survives the encode, so a v1 rule is readable after a \
-         read-modify-write; invert this half and add the accepting conformance case in the same \
-         change: {re_encoded}"
+        Ok(()),
+        "so putting back what was read is accepted, which is what a read-modify-write does"
+    );
+}
+
+/// Negative — the repair does not run the other way. An absent `<Prefix>` stays absent.
+///
+/// The two directions are one decision and only one of them was wrong, so a repair that reached
+/// for "always write a `<Prefix>`" would satisfy the test above and be a different defect: every
+/// rule scoped by a `<Filter>` would grow a second, empty scope, and `validate_lifecycle` refuses
+/// a rule that carries both (`c-lifecycle-0019`). This is the control that says the encoder
+/// learned to write `Some("")`, not to invent it. `c-lifecycle-0039` is the same control on the
+/// wire.
+#[test]
+fn n_an_absent_prefix_does_not_come_back_as_an_empty_one() {
+    let stored = "<LifecycleConfiguration><Rule><ID>filtered</ID>\
+                  <Filter><Prefix>logs/</Prefix></Filter>\
+                  <Status>Enabled</Status></Rule></LifecycleConfiguration>";
+
+    let decoded = decode_write(stored)
+        .expect("a rule scoped by a filter is well formed")
+        .expect("a document with a rule decodes to a configuration");
+    assert_eq!(decoded.rules[0].prefix, None, "the rule never named a legacy prefix");
+
+    let re_encoded = encode_read(decoded.rules);
+    assert_eq!(
+        re_encoded.matches("<Prefix>").count(),
+        1,
+        "only the filter's prefix may be written; a rule-level one was invented: {re_encoded}"
+    );
+
+    let reread = decode_write(&re_encoded)
+        .expect("the re-encoded document is still well formed")
+        .expect("a document with a rule decodes to a configuration");
+    assert_eq!(reread.rules[0].prefix, None, "and it is still absent on the second read");
+    assert_eq!(
+        validate_lifecycle(&dto::BucketLifecycleConfiguration { rules: reread.rules }),
+        Ok(()),
+        "a rule carrying both a legacy prefix and a filter is refused, so an invented one shows up here"
     );
 }
 

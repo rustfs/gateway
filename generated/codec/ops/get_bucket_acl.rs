@@ -82,7 +82,7 @@ fn write_grant(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Grant) -
         writer.close();
     }
     if let Some(v) = value.permission.as_ref() {
-        writer.element_if_present("Permission", v.as_str());
+        writer.element("Permission", v.as_str());
     }
     Ok(())
 }
@@ -100,16 +100,16 @@ fn open_grantee(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Grantee
 /// Writes one `Grantee` element's children, in the wire order the IR records.
 fn write_grantee(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Grantee) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("ID", v.as_str());
+        writer.element("ID", v.as_str());
     }
     if let Some(v) = value.display_name.as_ref() {
-        writer.element_if_present("DisplayName", v.as_str());
+        writer.element("DisplayName", v.as_str());
     }
     if let Some(v) = value.email_address.as_ref() {
-        writer.element_if_present("EmailAddress", v.as_str());
+        writer.element("EmailAddress", v.as_str());
     }
     if let Some(v) = value.uri.as_ref() {
-        writer.element_if_present("URI", v.as_str());
+        writer.element("URI", v.as_str());
     }
     Ok(())
 }
@@ -117,10 +117,10 @@ fn write_grantee(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Grante
 /// Writes one `Owner` element's children, in the wire order the IR records.
 fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("ID", v.as_str());
+        writer.element("ID", v.as_str());
     }
     if let Some(v) = value.display_name.as_ref() {
-        writer.element_if_present("DisplayName", v.as_str());
+        writer.element("DisplayName", v.as_str());
     }
     Ok(())
 }

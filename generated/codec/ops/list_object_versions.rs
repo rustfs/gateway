@@ -113,17 +113,17 @@ impl OperationCodec for dto::ListObjectVersions {
             writer.element("VersionIdMarker", v.as_str());
         }
         if let Some(v) = output.next_key_marker.as_ref() {
-            writer.element_if_present("NextKeyMarker", &value::url_encoded(v.as_str(), url_encoding));
+            writer.element("NextKeyMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.next_version_id_marker.as_ref() {
-            writer.element_if_present("NextVersionIdMarker", v.as_str());
+            writer.element("NextVersionIdMarker", v.as_str());
         }
         {
             let v = &output.max_keys;
             writer.element("MaxKeys", &v.to_string());
         }
         if let Some(v) = output.delimiter.as_ref() {
-            writer.element_if_present("Delimiter", &value::url_encoded(v.as_str(), url_encoding));
+            writer.element("Delimiter", &value::url_encoded(v.as_str(), url_encoding));
         }
         {
             let v = &output.is_truncated;
@@ -145,7 +145,7 @@ impl OperationCodec for dto::ListObjectVersions {
             writer.close();
         }
         if let Some(v) = output.encoding_type.as_ref() {
-            writer.element_if_present("EncodingType", v.as_str());
+            writer.element("EncodingType", v.as_str());
         }
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -231,7 +231,7 @@ fn write_object_version(
         writer.element("ChecksumAlgorithm", v.as_str());
     }
     if let Some(v) = value.checksum_type.as_ref() {
-        writer.element_if_present("ChecksumType", v.as_str());
+        writer.element("ChecksumType", v.as_str());
     }
     {
         let v = &value.size;
@@ -257,10 +257,10 @@ fn write_object_version(
 /// Writes one `Owner` element's children, in the wire order the IR records.
 fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("ID", v.as_str());
+        writer.element("ID", v.as_str());
     }
     if let Some(v) = value.display_name.as_ref() {
-        writer.element_if_present("DisplayName", v.as_str());
+        writer.element("DisplayName", v.as_str());
     }
     Ok(())
 }
@@ -268,10 +268,10 @@ fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -
 /// Writes one `RestoreStatus` element's children, in the wire order the IR records.
 fn write_restore_status(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::RestoreStatus) -> Result<(), CodecError> {
     if let Some(v) = value.is_restore_in_progress.as_ref() {
-        writer.element_if_present("IsRestoreInProgress", if *v { "true" } else { "false" });
+        writer.element("IsRestoreInProgress", if *v { "true" } else { "false" });
     }
     if let Some(v) = value.restore_expiry_date.as_ref() {
-        writer.element_if_present("RestoreExpiryDate", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+        writer.element("RestoreExpiryDate", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
     }
     Ok(())
 }

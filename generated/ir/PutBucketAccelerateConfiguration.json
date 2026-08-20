@@ -103,7 +103,7 @@
                                                      ],
                                            "xml": {
                                                     "element_order": ["Status"],
-                                                    "empty_value_policy": { "Status": "omit" },
+                                                    "empty_value_policy": { "Status": "emit" },
                                                     "attributes": []
                                                   }
                                          }

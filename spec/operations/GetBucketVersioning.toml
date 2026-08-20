@@ -45,8 +45,8 @@ element_order = ["Status", "MFADelete"]
 url_encoded_fields = []
 
 [xml.empty_value]
-Status = "omit"
-MFADelete = "omit"
+Status = "emit"
+MFADelete = "emit"
 
 [errors]
 not_configured = ""

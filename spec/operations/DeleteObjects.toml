@@ -45,8 +45,8 @@ element_order = ["Deleted", "Errors"]
 url_encoded_fields = []
 
 [xml.empty_value]
-Deleted = "omit"
-Errors = "omit"
+Deleted = "emit"
+Errors = "emit"
 
 [errors]
 not_configured = ""
@@ -152,7 +152,7 @@ element_order = ["Objects", "Quiet"]
 
 [shape.Delete.empty_value]
 Objects = "emit"
-Quiet = "omit"
+Quiet = "emit"
 
 [[shape.Delete.field]]
 name = "Objects"
@@ -177,10 +177,10 @@ kind = "Structure"
 element_order = ["Key", "VersionId", "DeleteMarker", "DeleteMarkerVersionId"]
 
 [shape.DeletedObject.empty_value]
-Key = "omit"
-VersionId = "omit"
-DeleteMarker = "omit"
-DeleteMarkerVersionId = "omit"
+Key = "emit"
+VersionId = "emit"
+DeleteMarker = "emit"
+DeleteMarkerVersionId = "emit"
 
 [[shape.DeletedObject.field]]
 name = "Key"
@@ -223,10 +223,10 @@ kind = "Structure"
 element_order = ["Key", "VersionId", "Code", "Message"]
 
 [shape.Error.empty_value]
-Key = "omit"
-VersionId = "omit"
-Code = "omit"
-Message = "omit"
+Key = "emit"
+VersionId = "emit"
+Code = "emit"
+Message = "emit"
 
 [[shape.Error.field]]
 name = "Key"
@@ -270,10 +270,10 @@ element_order = ["Key", "VersionId", "ETag", "LastModifiedTime", "Size"]
 
 [shape.ObjectIdentifier.empty_value]
 Key = "emit"
-VersionId = "omit"
-ETag = "omit"
-LastModifiedTime = "omit"
-Size = "omit"
+VersionId = "emit"
+ETag = "emit"
+LastModifiedTime = "emit"
+Size = "emit"
 
 [[shape.ObjectIdentifier.field]]
 name = "Key"

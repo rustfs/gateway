@@ -44,14 +44,16 @@
 //! `replication/` goldens, and the two guards are complementary rather than redundant — a golden
 //! pins one document exactly, a property pins every document approximately.
 //!
-//! # The two members the generator deliberately does not sample
+//! # The values the generator once could not sample, and now can
 //!
-//! Both are values the encoder writes and this build's decoder will not read back as itself, so
-//! sampling them would make the property fail at random rather than say what is wrong. Each is
-//! pinned instead, exactly, in the direction it currently has, by a named test below:
-//! [`a_filter_tag_key_naming_a_traversal_segment_is_written_and_then_refused`] and
-//! [`an_empty_legacy_prefix_does_not_come_back_as_itself`].
-
+//! Two members used to be excluded because the encoder wrote them and this codec would not read
+//! them back as themselves, so sampling them made the property fail at random instead of saying
+//! what was wrong. Both are repaired and both are sampled again: a filter tag key naming a
+//! traversal segment (rustfs/gateway#247, the `Tag.Key`-as-`ObjectKey` typing) and an empty
+//! legacy `<Prefix>` (rustfs/gateway#248, the `omit`-on-empty default). Each keeps a named test
+//! below that says the value in full, because a shrunk sample names a character and a named test
+//! names a defect.
+//!
 // The crate denies these so that no request path can panic on a caller's bytes. A test asserts
 // against a fixture it wrote itself, where a panic is the failure report; AGENTS.md exempts test
 // code from the rule, and this is where that exemption is spelled.
@@ -259,11 +261,15 @@ fn rule_id() -> impl Strategy<Value = String> {
     )
 }
 
-/// A key prefix. The empty one is legal on the wire and deliberately *not* generated: it is the
-/// `omit`-on-empty boundary, where the encoder drops the element and the value comes back absent
-/// rather than as itself, pinned exactly by [`an_empty_legacy_prefix_does_not_come_back_as_itself`].
+/// A key prefix, including the empty one.
+///
+/// The empty prefix had to be excluded while an optional member's empty value was dropped on the
+/// way out: the encoder wrote no element and the value came back absent rather than as itself. A
+/// generator that avoids the values its own encoder will not write back is a property that cannot
+/// see the asymmetry it exists to find, so the narrowing comes out with the defect
+/// (rustfs/gateway#248).
 fn prefix() -> impl Strategy<Value = String> {
-    "[a-z0-9&<>\"'é/_-]{1,24}"
+    "[a-z0-9&<>\"'é/_-]{0,24}"
 }
 
 /// A tag key. The alphabet carries `.` — and therefore reaches the `..` segment — which it could
@@ -305,11 +311,12 @@ fn replication_rule_filter() -> impl Strategy<Value = dto::ReplicationRuleFilter
     ]
 }
 
-/// A destination, with every optional member reachable. `Account` and `ReplicaKmsKeyID` are
-/// generated non-empty for the same reason `prefix()` is: both are `omit`-on-empty.
+/// A destination, with every optional member reachable, empty values included: an optional
+/// member's empty value is written as an empty element now, so `Account` and `ReplicaKmsKeyID`
+/// are sampled over the same range as everything else.
 fn destination() -> impl Strategy<Value = dto::Destination> {
     (
-        prop::option::of("[0-9]{12}"),
+        prop::option::of("[0-9]{0,12}"),
         prop::option::of(prop_oneof![
             Just("STANDARD".to_owned()),
             Just("STANDARD_IA".to_owned()),
@@ -641,14 +648,20 @@ fn n_a_traversal_shaped_tag_key_does_not_excuse_a_filter_without_a_priority() {
     );
 }
 
-/// The legacy rule-level `<Prefix>`, empty. It survives ingress as `Some("")` and the encoder
-/// omits an empty `omit`-on-empty member, so the value comes back absent rather than as itself —
-/// the same asymmetry rustfs/gateway#221 records for the lifecycle family. Replication does not
-/// turn it into a refusal, because a rule with no scope at all is legal here, so it is a silent
-/// change of the stored document rather than an outage — which is why it needed a property to
-/// find it at all. Filed as rustfs/gateway#248, pinned here in the direction it has.
+/// The legacy rule-level `<Prefix>`, empty, comes back as itself.
+///
+/// Ingress always kept it as `Some("")`; the encoder dropped it, because an optional member
+/// defaulted to `omit`-on-empty, and the second read therefore saw a rule that never named a
+/// scope. Replication does not turn that into a refusal — a rule with no scope at all is legal
+/// here, it is AWS's own replicate-everything example — so it was a silent change of the stored
+/// document rather than an outage, which is why it needed a property to find it at all.
+///
+/// The document is walked twice on purpose. `decode ∘ encode` being the identity is the claim;
+/// `decode ∘ encode ∘ decode ∘ encode == decode ∘ encode` was already true *while the defect was
+/// live*, because the document changed once and then stabilised on a different one. Only the
+/// first re-serialisation can see it. rustfs/gateway#248.
 #[test]
-fn an_empty_legacy_prefix_does_not_come_back_as_itself() {
+fn an_empty_legacy_prefix_comes_back_as_itself() {
     let document = "<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication</Role>\
                     <Rule><Prefix></Prefix><Status>Enabled</Status>\
                     <Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule>\
@@ -656,14 +669,52 @@ fn an_empty_legacy_prefix_does_not_come_back_as_itself() {
 
     let once = decode_write(document).expect("an empty legacy prefix is accepted on ingress");
     let reserialised = encode_read(once.clone());
-    let twice = decode_write(&reserialised).expect("and the re-read still parses, unlike the lifecycle family");
+    let twice = decode_write(&reserialised).expect("and the re-read still parses");
 
     assert_eq!(once.rules[0].prefix.as_deref(), Some(""), "ingress keeps the empty prefix");
     assert!(
-        !reserialised.contains("<Prefix"),
-        "the encoder drops the member it was given: {reserialised}"
+        reserialised.contains("<Prefix></Prefix>"),
+        "the encoder writes back the member it was given: {reserialised}"
     );
-    assert_eq!(twice.rules[0].prefix, None, "so the second read sees a rule that never named a scope");
+    assert_eq!(
+        twice.rules[0].prefix.as_deref(),
+        Some(""),
+        "so the second read sees the scope the operator wrote: {reserialised}"
+    );
+}
+
+/// Negative — the repair does not run the other way. An absent `<Prefix>` stays absent.
+///
+/// A repair that reached for "always write a `<Prefix>`" would satisfy the test above and be a
+/// different defect: here it would give every V2 rule a legacy scope beside its `<Filter>`, which
+/// is the V1/V2 mixture `validate_replication` refuses. The control is what says the encoder
+/// learned to write `Some("")` rather than to invent it.
+#[test]
+fn n_an_absent_prefix_does_not_come_back_as_an_empty_one() {
+    let document = "<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication</Role>\
+                    <Rule><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter>\
+                    <DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication>\
+                    <Status>Enabled</Status>\
+                    <Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule>\
+                    </ReplicationConfiguration>";
+
+    let once = decode_write(document).expect("a V2 rule scoped by a filter is well formed");
+    assert_eq!(once.rules[0].prefix, None, "the rule never named a legacy prefix");
+
+    let reserialised = encode_read(once);
+    assert_eq!(
+        reserialised.matches("<Prefix>").count(),
+        1,
+        "only the filter's prefix may be written; a rule-level one was invented: {reserialised}"
+    );
+
+    let twice = decode_write(&reserialised).expect("the re-encoded document is still well formed");
+    assert_eq!(twice.rules[0].prefix, None, "and it is still absent on the second read");
+    assert_eq!(
+        validate_replication(&twice),
+        Ok(()),
+        "a rule mixing the legacy prefix with a filter is refused, so an invented one shows up here"
+    );
 }
 
 // ── negative: the shapes that must never be stored ───────────────────────────────────────────

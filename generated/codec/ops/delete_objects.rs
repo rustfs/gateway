@@ -128,16 +128,16 @@ fn read_delete(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Delete, CodecE
 /// Writes one `DeletedObject` element's children, in the wire order the IR records.
 fn write_deleted_object(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::DeletedObject) -> Result<(), CodecError> {
     if let Some(v) = value.key.as_ref() {
-        writer.element_if_present("Key", v.as_str());
+        writer.element("Key", v.as_str());
     }
     if let Some(v) = value.version_id.as_ref() {
-        writer.element_if_present("VersionId", v.as_str());
+        writer.element("VersionId", v.as_str());
     }
     if let Some(v) = value.delete_marker.as_ref() {
-        writer.element_if_present("DeleteMarker", if *v { "true" } else { "false" });
+        writer.element("DeleteMarker", if *v { "true" } else { "false" });
     }
     if let Some(v) = value.delete_marker_version_id.as_ref() {
-        writer.element_if_present("DeleteMarkerVersionId", v.as_str());
+        writer.element("DeleteMarkerVersionId", v.as_str());
     }
     Ok(())
 }
@@ -145,16 +145,16 @@ fn write_deleted_object(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto:
 /// Writes one `Error` element's children, in the wire order the IR records.
 fn write_error(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Error) -> Result<(), CodecError> {
     if let Some(v) = value.key.as_ref() {
-        writer.element_if_present("Key", v.as_str());
+        writer.element("Key", v.as_str());
     }
     if let Some(v) = value.version_id.as_ref() {
-        writer.element_if_present("VersionId", v.as_str());
+        writer.element("VersionId", v.as_str());
     }
     if let Some(v) = value.code.as_ref() {
-        writer.element_if_present("Code", v.as_str());
+        writer.element("Code", v.as_str());
     }
     if let Some(v) = value.message.as_ref() {
-        writer.element_if_present("Message", v.as_str());
+        writer.element("Message", v.as_str());
     }
     Ok(())
 }

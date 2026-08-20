@@ -48,16 +48,16 @@ url_encoded_fields = ["Prefix", "Delimiter", "KeyMarker", "NextKeyMarker", "Vers
 IsTruncated = "emit"
 KeyMarker = "emit"
 VersionIdMarker = "emit"
-NextKeyMarker = "omit"
-NextVersionIdMarker = "omit"
-Versions = "omit"
-DeleteMarkers = "omit"
+NextKeyMarker = "emit"
+NextVersionIdMarker = "emit"
+Versions = "emit"
+DeleteMarkers = "emit"
 Name = "emit"
 Prefix = "emit"
-Delimiter = "omit"
+Delimiter = "emit"
 MaxKeys = "emit"
-CommonPrefixes = "omit"
-EncodingType = "omit"
+CommonPrefixes = "emit"
+EncodingType = "emit"
 
 [errors]
 not_configured = ""
@@ -297,7 +297,7 @@ kind = "Structure"
 element_order = ["Key", "VersionId", "IsLatest", "LastModified", "Owner"]
 
 [shape.DeleteMarkerEntry.empty_value]
-Owner = "omit"
+Owner = "emit"
 Key = "emit"
 VersionId = "emit"
 IsLatest = "emit"
@@ -354,16 +354,16 @@ element_order = ["Key", "VersionId", "IsLatest", "LastModified", "ETag", "Checks
 
 [shape.ObjectVersion.empty_value]
 ETag = "emit"
-ChecksumAlgorithm = "omit"
-ChecksumType = "omit"
+ChecksumAlgorithm = "emit"
+ChecksumType = "emit"
 Size = "emit"
 StorageClass = "emit"
 Key = "emit"
 VersionId = "emit"
 IsLatest = "emit"
 LastModified = "emit"
-Owner = "omit"
-RestoreStatus = "omit"
+Owner = "emit"
+RestoreStatus = "emit"
 
 [[shape.ObjectVersion.field]]
 name = "ETag"
@@ -471,8 +471,8 @@ kind = "Structure"
 element_order = ["ID", "DisplayName"]
 
 [shape.Owner.empty_value]
-DisplayName = "omit"
-ID = "omit"
+DisplayName = "emit"
+ID = "emit"
 
 [[shape.Owner.field]]
 name = "DisplayName"
@@ -497,8 +497,8 @@ kind = "Structure"
 element_order = ["IsRestoreInProgress", "RestoreExpiryDate"]
 
 [shape.RestoreStatus.empty_value]
-IsRestoreInProgress = "omit"
-RestoreExpiryDate = "omit"
+IsRestoreInProgress = "emit"
+RestoreExpiryDate = "emit"
 
 [[shape.RestoreStatus.field]]
 name = "IsRestoreInProgress"

@@ -45,10 +45,10 @@ element_order = ["TopicConfigurations", "QueueConfigurations", "LambdaFunctionCo
 url_encoded_fields = []
 
 [xml.empty_value]
-TopicConfigurations = "omit"
-QueueConfigurations = "omit"
-LambdaFunctionConfigurations = "omit"
-EventBridgeConfiguration = "omit"
+TopicConfigurations = "emit"
+QueueConfigurations = "emit"
+LambdaFunctionConfigurations = "emit"
+EventBridgeConfiguration = "emit"
 
 [errors]
 not_configured = ""
@@ -118,8 +118,8 @@ kind = "Structure"
 element_order = ["Name", "Value"]
 
 [shape.FilterRule.empty_value]
-Name = "omit"
-Value = "omit"
+Name = "emit"
+Value = "emit"
 
 [[shape.FilterRule.field]]
 name = "Name"
@@ -145,10 +145,10 @@ kind = "Structure"
 element_order = ["Id", "LambdaFunctionArn", "Events", "Filter"]
 
 [shape.LambdaFunctionConfiguration.empty_value]
-Id = "omit"
+Id = "emit"
 LambdaFunctionArn = "emit"
 Events = "emit"
-Filter = "omit"
+Filter = "emit"
 
 [[shape.LambdaFunctionConfiguration.field]]
 name = "Id"
@@ -191,7 +191,7 @@ kind = "Structure"
 element_order = ["Key"]
 
 [shape.NotificationConfigurationFilter.empty_value]
-Key = "omit"
+Key = "emit"
 
 [[shape.NotificationConfigurationFilter.field]]
 name = "Key"
@@ -207,10 +207,10 @@ kind = "Structure"
 element_order = ["Id", "QueueArn", "Events", "Filter"]
 
 [shape.QueueConfiguration.empty_value]
-Id = "omit"
+Id = "emit"
 QueueArn = "emit"
 Events = "emit"
-Filter = "omit"
+Filter = "emit"
 
 [[shape.QueueConfiguration.field]]
 name = "Id"
@@ -253,7 +253,7 @@ kind = "Structure"
 element_order = ["FilterRules"]
 
 [shape.S3KeyFilter.empty_value]
-FilterRules = "omit"
+FilterRules = "emit"
 
 [[shape.S3KeyFilter.field]]
 name = "FilterRules"
@@ -269,10 +269,10 @@ kind = "Structure"
 element_order = ["Id", "TopicArn", "Events", "Filter"]
 
 [shape.TopicConfiguration.empty_value]
-Id = "omit"
+Id = "emit"
 TopicArn = "emit"
 Events = "emit"
-Filter = "omit"
+Filter = "emit"
 
 [[shape.TopicConfiguration.field]]
 name = "Id"

@@ -84,7 +84,7 @@ fn write_object_lock_legal_hold(
     value: &dto::ObjectLockLegalHold,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.status.as_ref() {
-        writer.element_if_present("Status", v.as_str());
+        writer.element("Status", v.as_str());
     }
     Ok(())
 }

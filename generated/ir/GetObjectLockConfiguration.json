@@ -97,7 +97,7 @@
                                               ],
                                     "xml": {
                                              "element_order": ["Mode", "Days", "Years"],
-                                             "empty_value_policy": { "Mode": "omit", "Days": "omit", "Years": "omit" },
+                                             "empty_value_policy": { "Mode": "emit", "Days": "emit", "Years": "emit" },
                                              "attributes": []
                                            }
                                   },
@@ -126,8 +126,8 @@
                                            "xml": {
                                                     "element_order": ["ObjectLockEnabled", "Rule"],
                                                     "empty_value_policy": {
-                                                                            "ObjectLockEnabled": "omit",
-                                                                            "Rule": "omit"
+                                                                            "ObjectLockEnabled": "emit",
+                                                                            "Rule": "emit"
                                                                           },
                                                     "attributes": []
                                                   }
@@ -147,7 +147,7 @@
                                             ],
                                   "xml": {
                                            "element_order": ["DefaultRetention"],
-                                           "empty_value_policy": { "DefaultRetention": "omit" },
+                                           "empty_value_policy": { "DefaultRetention": "emit" },
                                            "attributes": []
                                          }
                                 }

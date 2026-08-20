@@ -45,7 +45,7 @@ element_order = ["Status"]
 url_encoded_fields = []
 
 [xml.empty_value]
-Status = "omit"
+Status = "emit"
 
 [errors]
 not_configured = ""

@@ -127,7 +127,7 @@
                                                             ],
                                                   "xml": {
                                                            "element_order": ["DaysAfterInitiation"],
-                                                           "empty_value_policy": { "DaysAfterInitiation": "omit" },
+                                                           "empty_value_policy": { "DaysAfterInitiation": "emit" },
                                                            "attributes": []
                                                          }
                                                 },
@@ -192,9 +192,9 @@
                                        "xml": {
                                                 "element_order": ["Date", "Days", "ExpiredObjectDeleteMarker"],
                                                 "empty_value_policy": {
-                                                                        "Date": "omit",
-                                                                        "Days": "omit",
-                                                                        "ExpiredObjectDeleteMarker": "omit"
+                                                                        "Date": "emit",
+                                                                        "Days": "emit",
+                                                                        "ExpiredObjectDeleteMarker": "emit"
                                                                       },
                                                 "attributes": []
                                               }
@@ -313,15 +313,15 @@
                                                              "AbortIncompleteMultipartUpload"
                                                            ],
                                           "empty_value_policy": {
-                                                                  "Expiration": "omit",
-                                                                  "ID": "omit",
-                                                                  "Prefix": "omit",
-                                                                  "Filter": "omit",
+                                                                  "Expiration": "emit",
+                                                                  "ID": "emit",
+                                                                  "Prefix": "emit",
+                                                                  "Filter": "emit",
                                                                   "Status": "emit",
-                                                                  "Transitions": "omit",
-                                                                  "NoncurrentVersionTransitions": "omit",
-                                                                  "NoncurrentVersionExpiration": "omit",
-                                                                  "AbortIncompleteMultipartUpload": "omit"
+                                                                  "Transitions": "emit",
+                                                                  "NoncurrentVersionTransitions": "emit",
+                                                                  "NoncurrentVersionExpiration": "emit",
+                                                                  "AbortIncompleteMultipartUpload": "emit"
                                                                 },
                                           "attributes": []
                                         }
@@ -379,10 +379,10 @@
                                                                         "ObjectSizeLessThan"
                                                                       ],
                                                      "empty_value_policy": {
-                                                                             "Prefix": "omit",
-                                                                             "Tags": "omit",
-                                                                             "ObjectSizeGreaterThan": "omit",
-                                                                             "ObjectSizeLessThan": "omit"
+                                                                             "Prefix": "emit",
+                                                                             "Tags": "emit",
+                                                                             "ObjectSizeGreaterThan": "emit",
+                                                                             "ObjectSizeLessThan": "emit"
                                                                            },
                                                      "attributes": []
                                                    }
@@ -448,11 +448,11 @@
                                                                    "And"
                                                                  ],
                                                 "empty_value_policy": {
-                                                                        "Prefix": "omit",
-                                                                        "Tag": "omit",
-                                                                        "ObjectSizeGreaterThan": "omit",
-                                                                        "ObjectSizeLessThan": "omit",
-                                                                        "And": "omit"
+                                                                        "Prefix": "emit",
+                                                                        "Tag": "emit",
+                                                                        "ObjectSizeGreaterThan": "emit",
+                                                                        "ObjectSizeLessThan": "emit",
+                                                                        "And": "emit"
                                                                       },
                                                 "attributes": []
                                               }
@@ -482,8 +482,8 @@
                                                "xml": {
                                                         "element_order": ["NoncurrentDays", "NewerNoncurrentVersions"],
                                                         "empty_value_policy": {
-                                                                                "NoncurrentDays": "omit",
-                                                                                "NewerNoncurrentVersions": "omit"
+                                                                                "NoncurrentDays": "emit",
+                                                                                "NewerNoncurrentVersions": "emit"
                                                                               },
                                                         "attributes": []
                                                       }
@@ -536,9 +536,9 @@
                                                                            "NewerNoncurrentVersions"
                                                                          ],
                                                         "empty_value_policy": {
-                                                                                "NoncurrentDays": "omit",
-                                                                                "StorageClass": "omit",
-                                                                                "NewerNoncurrentVersions": "omit"
+                                                                                "NoncurrentDays": "emit",
+                                                                                "StorageClass": "emit",
+                                                                                "NewerNoncurrentVersions": "emit"
                                                                               },
                                                         "attributes": []
                                                       }
@@ -614,7 +614,7 @@
                                         ],
                               "xml": {
                                        "element_order": ["Date", "Days", "StorageClass"],
-                                       "empty_value_policy": { "Date": "omit", "Days": "omit", "StorageClass": "omit" },
+                                       "empty_value_policy": { "Date": "emit", "Days": "emit", "StorageClass": "emit" },
                                        "attributes": []
                                      }
                             }

@@ -69,7 +69,7 @@ impl OperationCodec for dto::GetBucketPolicyStatus {
 /// Writes one `PolicyStatus` element's children, in the wire order the IR records.
 fn write_policy_status(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::PolicyStatus) -> Result<(), CodecError> {
     if let Some(v) = value.is_public.as_ref() {
-        writer.element_if_present("IsPublic", if *v { "true" } else { "false" });
+        writer.element("IsPublic", if *v { "true" } else { "false" });
     }
     Ok(())
 }

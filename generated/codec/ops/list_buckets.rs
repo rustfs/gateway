@@ -81,10 +81,10 @@ impl OperationCodec for dto::ListBuckets {
         }
         writer.close();
         if let Some(v) = output.continuation_token.as_ref() {
-            writer.element_if_present("ContinuationToken", v.as_str());
+            writer.element("ContinuationToken", v.as_str());
         }
         if let Some(v) = output.prefix.as_ref() {
-            writer.element_if_present("Prefix", v.as_str());
+            writer.element("Prefix", v.as_str());
         }
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -108,10 +108,10 @@ fn write_bucket(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Bucket)
         writer.element("CreationDate", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
     }
     if let Some(v) = value.bucket_region.as_ref() {
-        writer.element_if_present("BucketRegion", v.as_str());
+        writer.element("BucketRegion", v.as_str());
     }
     if let Some(v) = value.bucket_arn.as_ref() {
-        writer.element_if_present("BucketArn", v.as_str());
+        writer.element("BucketArn", v.as_str());
     }
     Ok(())
 }
@@ -119,10 +119,10 @@ fn write_bucket(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Bucket)
 /// Writes one `Owner` element's children, in the wire order the IR records.
 fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("ID", v.as_str());
+        writer.element("ID", v.as_str());
     }
     if let Some(v) = value.display_name.as_ref() {
-        writer.element_if_present("DisplayName", v.as_str());
+        writer.element("DisplayName", v.as_str());
     }
     Ok(())
 }

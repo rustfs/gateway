@@ -100,22 +100,22 @@ impl OperationCodec for dto::ListMultipartUploads {
             writer.element("Bucket", v.as_str());
         }
         if let Some(v) = output.key_marker.as_ref() {
-            writer.element_if_present("KeyMarker", &value::url_encoded(v.as_str(), url_encoding));
+            writer.element("KeyMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.upload_id_marker.as_ref() {
-            writer.element_if_present("UploadIdMarker", v.as_str());
+            writer.element("UploadIdMarker", v.as_str());
         }
         if let Some(v) = output.next_key_marker.as_ref() {
-            writer.element_if_present("NextKeyMarker", &value::url_encoded(v.as_str(), url_encoding));
+            writer.element("NextKeyMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.prefix.as_ref() {
-            writer.element_if_present("Prefix", &value::url_encoded(v.as_str(), url_encoding));
+            writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.delimiter.as_ref() {
-            writer.element_if_present("Delimiter", &value::url_encoded(v.as_str(), url_encoding));
+            writer.element("Delimiter", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.next_upload_id_marker.as_ref() {
-            writer.element_if_present("NextUploadIdMarker", v.as_str());
+            writer.element("NextUploadIdMarker", v.as_str());
         }
         {
             let v = &output.max_uploads;
@@ -136,7 +136,7 @@ impl OperationCodec for dto::ListMultipartUploads {
             writer.close();
         }
         if let Some(v) = output.encoding_type.as_ref() {
-            writer.element_if_present("EncodingType", v.as_str());
+            writer.element("EncodingType", v.as_str());
         }
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -165,10 +165,10 @@ fn write_common_prefix(
 /// Writes one `Initiator` element's children, in the wire order the IR records.
 fn write_initiator(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Initiator) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("ID", v.as_str());
+        writer.element("ID", v.as_str());
     }
     if let Some(v) = value.display_name.as_ref() {
-        writer.element_if_present("DisplayName", v.as_str());
+        writer.element("DisplayName", v.as_str());
     }
     Ok(())
 }
@@ -180,16 +180,16 @@ fn write_multipart_upload(
     url_encoding: value::UrlEncoding,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.upload_id.as_ref() {
-        writer.element_if_present("UploadId", v.as_str());
+        writer.element("UploadId", v.as_str());
     }
     if let Some(v) = value.key.as_ref() {
-        writer.element_if_present("Key", &value::url_encoded_key(v, url_encoding));
+        writer.element("Key", &value::url_encoded_key(v, url_encoding));
     }
     if let Some(v) = value.initiated.as_ref() {
-        writer.element_if_present("Initiated", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+        writer.element("Initiated", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
     }
     if let Some(v) = value.storage_class.as_ref() {
-        writer.element_if_present("StorageClass", v.as_str());
+        writer.element("StorageClass", v.as_str());
     }
     if let Some(v) = value.owner.as_ref() {
         writer.open("Owner", None);
@@ -202,10 +202,10 @@ fn write_multipart_upload(
         writer.close();
     }
     if let Some(v) = value.checksum_algorithm.as_ref() {
-        writer.element_if_present("ChecksumAlgorithm", v.as_str());
+        writer.element("ChecksumAlgorithm", v.as_str());
     }
     if let Some(v) = value.checksum_type.as_ref() {
-        writer.element_if_present("ChecksumType", v.as_str());
+        writer.element("ChecksumType", v.as_str());
     }
     Ok(())
 }
@@ -213,10 +213,10 @@ fn write_multipart_upload(
 /// Writes one `Owner` element's children, in the wire order the IR records.
 fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("ID", v.as_str());
+        writer.element("ID", v.as_str());
     }
     if let Some(v) = value.display_name.as_ref() {
-        writer.element_if_present("DisplayName", v.as_str());
+        writer.element("DisplayName", v.as_str());
     }
     Ok(())
 }

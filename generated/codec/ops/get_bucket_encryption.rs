@@ -87,7 +87,7 @@ fn write_server_side_encryption_by_default(
         writer.element("SSEAlgorithm", v.as_str());
     }
     if let Some(v) = value.kms_master_key_id.as_ref() {
-        writer.element_if_present("KMSMasterKeyID", v.as_str());
+        writer.element("KMSMasterKeyID", v.as_str());
     }
     Ok(())
 }
@@ -116,7 +116,7 @@ fn write_server_side_encryption_rule(
         writer.close();
     }
     if let Some(v) = value.bucket_key_enabled.as_ref() {
-        writer.element_if_present("BucketKeyEnabled", if *v { "true" } else { "false" });
+        writer.element("BucketKeyEnabled", if *v { "true" } else { "false" });
     }
     if let Some(v) = value.blocked_encryption_types.as_ref() {
         writer.open("BlockedEncryptionTypes", None);

@@ -52,10 +52,10 @@ impl OperationCodec for dto::GetBucketVersioning {
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.open("VersioningConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
         if let Some(v) = output.status.as_ref() {
-            writer.element_if_present("Status", v.as_str());
+            writer.element("Status", v.as_str());
         }
         if let Some(v) = output.mfa_delete.as_ref() {
-            writer.element_if_present("MfaDelete", v.as_str());
+            writer.element("MfaDelete", v.as_str());
         }
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());

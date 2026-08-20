@@ -46,7 +46,7 @@ url_encoded_fields = []
 
 [xml.empty_value]
 ETag = "emit"
-LastModified = "omit"
+LastModified = "emit"
 
 [errors]
 not_configured = ""
