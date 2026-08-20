@@ -27,10 +27,10 @@ else
     if grep -Eq 'Box::|Vec::|format!|to_owned\(|\.clone\(' <<<"$fast_path"; then
         fail 'the synchronous decision path contains an allocating operation'
     fi
-    auth_line="$(grep -nF 'ClassKind::Authenticated => return Some(Lease::admit())' <<<"$fast_path" | cut -d: -f1)"
-    clock_line="$(grep -nF 'self.clock.monotonic()' <<<"$fast_path" | cut -d: -f1)"
+    auth_line="$(grep -nF 'ClassKind::Authenticated => return Some(Lease::admit())' <<<"$fast_path" | cut -d: -f1 || true)"
+    clock_line="$(grep -nF 'self.clock.monotonic()' <<<"$fast_path" | cut -d: -f1 || true)"
     if [[ -z "$auth_line" || -z "$clock_line" || "$auth_line" -ge "$clock_line" ]]; then
-        fail 'authenticated traffic no longer returns before the clock and address locks'
+        fail 'c-lim-0004 authenticated traffic no longer returns a permit before the clock and address locks'
     fi
 fi
 
@@ -56,4 +56,7 @@ if grep -Eq '^[[:space:]]+pub (operation|bucket|declared_body_bytes|identity|cli
     fail 'GovernorRequest exposes writable framework-owned fields'
 fi
 
+if [[ "$status" == 0 ]]; then
+    printf 'OK: c-lim-0004 binds the admitted governor path to the synchronous nonallocating implementation\n'
+fi
 exit "$status"

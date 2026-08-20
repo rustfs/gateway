@@ -12316,6 +12316,23 @@ expect_fail check_governor_position.sh \
     'c-lim-0040 losing its zero-body-read observation' mut_governor_runtime_body_read \
     'c-lim-0040 runtime evidence lost its zero body reads'
 
+mut_governor_c_lim_0004_admission_removed() {
+    python3 - <<'GOVPY'
+import pathlib
+
+path = pathlib.Path("crates/gateway/src/ext/governor/default.rs")
+old = "            ClassKind::Authenticated => return Some(Lease::admit()),"
+new = "            ClassKind::Authenticated => return None,"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0004 synchronous admission anchor drifted")
+path.write_text(text.replace(old, new, 1))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'c-lim-0004 synchronous admission being removed' mut_governor_c_lim_0004_admission_removed \
+    'c-lim-0004 authenticated traffic no longer returns a permit'
+
 mut_governor_sync_path_allocates() {
     python3 - <<'GOVPY'
 import pathlib
@@ -12326,7 +12343,8 @@ path.write_text(text.replace(needle, needle + "\n        let _allocation = Box::
 GOVPY
 }
 expect_fail check_governor_fast_path.sh \
-    'an allocation added to the synchronous governor path' mut_governor_sync_path_allocates
+    'c-lim-0004 synchronous governor path allocating' mut_governor_sync_path_allocates \
+    'the synchronous decision path contains an allocating operation'
 
 mut_governor_single_client_lock() {
     python3 - <<'GOVPY'
