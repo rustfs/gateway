@@ -125,7 +125,14 @@ impl UploadRejection {
 ///
 /// There is no accessor. A claim can be handed to [`resolve_upload`] and that is all it is for —
 /// which is what makes "the id was resolved before it was used" structural rather than a habit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// No `Debug`, for the same reason [`super::copy_source::CopySource`] has none and with a sharper
+/// edge: an upload id **is** the bearer credential, and the failure this whole module exists to
+/// answer begins with ids reaching logs, referrers and shared traces. A derived `Debug` makes one
+/// `tracing::debug!("{claim:?}")` away from writing a credential into a log line, and
+/// `tests/compile_fail/upload_debug.rs` is the proof that it does not compile. No `PartialEq`
+/// either: a bearer value invites an `==` that decides something, and nothing here compares one.
+#[derive(Clone, Copy)]
 pub struct UploadIdClaim<'a> {
     raw: &'a str,
 }
@@ -146,12 +153,15 @@ impl<'a> UploadIdClaim<'a> {
 /// [`ResolvedUploadId::id`], so a handler that never performed the exchange has no id to reach it
 /// with.
 ///
+/// It carries no `Debug` and no `PartialEq`, for the reason recorded on [`UploadIdClaim`]: the id
+/// stays a credential after it has been resolved, and resolving it does not make it printable.
+///
 /// rustfs/gateway#7 sketches this type as `UploadHandle`. It is not called that, and the reason is
 /// mechanical rather than taste: `nothing_on_the_routing_path_holds_a_store` refuses the identifier
 /// segment `Handle` anywhere under `crates/core/src`, because that is the vocabulary of the store
 /// this crate must never hold. `ResolvedUploadId` also matches the sibling this is modelled on,
 /// [`super::copy_source::ResolvedCopySource`]. Do not rename it back.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct ResolvedUploadId<'a> {
     id: &'a str,
 }
