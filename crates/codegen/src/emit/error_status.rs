@@ -99,10 +99,10 @@ pub fn render(rows: &[ErrorStatus]) -> Result<String, String> {
 
     out.push_str(
         "/// Every code the authority declares, with its status. The lookup behind\n\
-         /// [`ErrorCode::is_known`], [`ErrorCode::known`], and\n\
-         /// nothing else: a status is carried by the value, so no caller ever has to miss in\n\
-         /// this table and guess. A `const` rather than a `static` because a `const fn` may not\n\
-         /// read a `static`, and [`ErrorCode::declared`] has to run in a `static` initializer.\n",
+         /// [`ErrorCode::is_known`] and [`ErrorCode::known`], and nothing else: a status is\n\
+         /// carried by the value, so no caller ever has to miss in this table and guess. A\n\
+         /// `const` rather than a `static` because a `const fn` may not read a `static`, and\n\
+         /// [`ErrorCode::known`] has to run in a `static` initializer.\n",
     );
     out.push_str("pub(super) const CODE_TABLE: &[(&str, StatusCode)] = &[\n");
     for row in rows {

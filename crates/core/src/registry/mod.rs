@@ -200,9 +200,10 @@ impl OperationSpec {
     ///
     /// # Panics
     ///
-    /// At compile time, when `name` has no row in the generated route table. That is the whole
-    /// point of the panic: a standard operation with no generated row has no authority to derive
-    /// from, and the failure is at the `static` that asked for it.
+    /// At compile time, when `name` has no row in the generated route table, or when that row's
+    /// unconfigured code has no row in `model/overlays/error-status.toml`. That is the whole point
+    /// of both: a standard operation with no authority to derive from must not be given an invented
+    /// status or a quietly absent code, and the failure is at the `static` that asked for it.
     #[must_use]
     // The panic is a compile-time evaluation failure for every caller this constructor has: a
     // standard operation's specification is a `static`, and its name is a literal that the same
