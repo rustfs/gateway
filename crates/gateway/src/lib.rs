@@ -205,6 +205,16 @@ pub use rustfs_gateway_core::ops::shared::precondition::{
 // The other half of the range contract. `evaluate_range` stops at a part *selector* because the
 // part table is a fact only the handler has; this is what a backend resolves it with.
 pub use rustfs_gateway_core::ops::shared::part_table::{PartWindow, resolve_part};
+// The upload-id capability. Five multipart operations are handed an id the caller chose to send,
+// and the rule that separates a genuine id from a genuine id *belonging to somebody else* is one
+// comparison that every one of them must make identically — including the part that makes all its
+// refusals indistinguishable. Like the part table it can only run in the backend, because only the
+// backend can look an upload up, so `resolve_upload` takes the lookup as a closure and owns the
+// order: shape, then lookup, then ownership. `ResolvedUploadId` is the only value carrying an id a
+// handler can act on, and this exchange is its only producer.
+pub use rustfs_gateway_core::ops::shared::upload_id::{
+    RecordedUpload, ResolvedUploadId, UploadIdClaim, UploadRejection, resolve_upload,
+};
 pub use rustfs_gateway_core::{copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds};
 
 // The copy-source contract. A backend receives `CopySourceResources` through `Req::resources`

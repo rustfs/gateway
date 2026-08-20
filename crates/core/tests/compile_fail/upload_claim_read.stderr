@@ -1,0 +1,5 @@
+error[E0616]: field `raw` of struct `UploadIdClaim` is private
+  --> tests/compile_fail/upload_claim_read.rs:26:19
+   |
+26 |     let _ = claim.raw;
+   |                   ^^^ private field

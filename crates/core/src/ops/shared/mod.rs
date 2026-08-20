@@ -55,3 +55,4 @@ pub mod replication;
 pub mod restore;
 pub mod select;
 pub mod tagging;
+pub mod upload_id;
