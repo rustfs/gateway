@@ -117,8 +117,9 @@ pub use crate::clock::{
 };
 pub use crate::close::ConnectionIntent;
 pub use crate::config::{
-    ConfigHandle, ConfigSnapshot, DEFAULT_EXTENDED_HANDLER_DEADLINE, DEFAULT_STANDARD_HANDLER_DEADLINE, HandlerDeadlineConfig,
-    HandlerDeadlineConfigError, ServiceConfig,
+    ConfigHandle, ConfigSnapshot, DEFAULT_COMMIT_PROGRESS_DEADLINE, DEFAULT_EXTENDED_HANDLER_DEADLINE,
+    DEFAULT_STANDARD_HANDLER_DEADLINE, HandlerDeadlineConfig, HandlerDeadlineConfigError, KEEPALIVE_INTERVALS_WITHOUT_PROGRESS,
+    ServiceConfig,
 };
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,

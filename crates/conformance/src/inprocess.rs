@@ -87,11 +87,11 @@ use rustfs_gateway::sig::{
 };
 use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, BucketName, ClassKind, CorsSource, CorsSourceError, CredentialGuardConfig,
-    CredentialLookup, CredentialProvider, Credentials, Decision, ErrorCode, FixedClock, Governor, GovernorRequest,
-    GuardedCredentialProvider, HandlerResult, InputAuthzRequest, InputDecisions, Lease, Limits, Next, ObservedBody, PolicyError,
-    PolicySnapshot, ProviderError, RegionSet, Req, RequestContext, S3Service, ServiceBuilder, SessionBinding, SigV4Authenticator,
-    SnapshotId, StaticCredentials, VirtualHostStyle, WireRequest, allow_when, collect, dto, fn_credential_provider, op_layer,
-    policy_from,
+    CredentialLookup, CredentialProvider, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, Decision, ErrorCode, FixedClock,
+    Governor, GovernorRequest, GuardedCredentialProvider, HandlerDeadlineConfig, HandlerResult, InputAuthzRequest,
+    InputDecisions, Lease, Limits, Next, ObservedBody, PolicyError, PolicySnapshot, ProviderError, RegionSet, Req,
+    RequestContext, S3Service, ServiceBuilder, ServiceConfig, SessionBinding, SigV4Authenticator, SnapshotId, StaticCredentials,
+    VirtualHostStyle, WireRequest, allow_when, collect, dto, fn_credential_provider, op_layer, policy_from,
 };
 
 use crate::exec::block_on;
@@ -393,6 +393,10 @@ impl InProcess {
         let regions =
             RegionSet::new([REGION]).map_err(|error| SutError::Environment(format!("`{REGION}` is not a region: {error}")))?;
         let clock = FixedClock::at_unix_seconds(at_unix_seconds).skewed_by_millis(skew_ms);
+        // The fallback is unreachable: `COMMIT_PROGRESS_DEADLINE` is a non-zero constant.
+        let deadlines = HandlerDeadlineConfig::default()
+            .try_with_commit_progress(crate::sut::COMMIT_PROGRESS_DEADLINE)
+            .unwrap_or_default();
         let builder = ServiceBuilder::new()
             .register::<dto::AbortMultipartUpload, _>(Arc::clone(&backend))
             .register::<dto::CompleteMultipartUpload, _>(Arc::clone(&backend))
@@ -543,6 +547,8 @@ impl InProcess {
                 rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
             )
             .limits(self.limits)
+            .config(ServiceConfig::new(DEFAULT_MAX_BUFFERED_BODY_BYTES).with_handler_deadlines(deadlines))
+            .0
             .build()
             .map_err(|error| SutError::Environment(format!("the service could not be assembled: {error}")))
     }
@@ -1107,29 +1113,29 @@ impl Sut for InProcess {
                 .unwrap_or_default();
             let at = fault.read("setup.fault.at").and_then(Value::as_str).unwrap_or_default();
             let code = fault.read("setup.fault.code").and_then(Value::as_str).unwrap_or_default();
-            if at != "after_commit" {
-                return Err(SutError::Environment(format!(
-                    "`setup.fault.at = \"{at}\"` is not a point this target can fail at; it arranges \
-                     `after_commit` and nothing else"
-                )));
-            }
-            let Some(code) = ErrorCode::known(code) else {
-                return Err(SutError::Environment(format!(
-                    "`setup.fault.code = \"{code}\"` is not a declared error code, so it has no status \
-                     and no row; a fault reporting it would put a code on the wire that this workspace \
-                     does not admit exists"
-                )));
+            // Neither arm restates the operation set; both measure the name against the one list the
+            // handlers read. `UploadPartCopy` is why: able to fail after a `200` in the model, and
+            // answered here without committing anything for it to fail after.
+            let armed = match (at, ErrorCode::known(code)) {
+                ("no_progress_after_commit", _) => fixture.arm_committed_stall(operation),
+                ("after_commit", Some(code)) => fixture.arm_committed_fault(operation, code),
+                ("after_commit", None) => {
+                    return Err(SutError::Environment(format!(
+                        "`setup.fault.code = \"{code}\"` is not a declared error code, so it has no status and no row; \
+                     a fault reporting it would put a code on the wire this workspace does not admit exists"
+                    )));
+                }
+                (other, _) => {
+                    return Err(SutError::Environment(format!(
+                        "`setup.fault.at = \"{other}\"` is not a point this target can fail at; it arranges \
+                     `after_commit` and `no_progress_after_commit`, and nothing else"
+                    )));
+                }
             };
-            // The set is not restated here. `Fixture::arm_committed_fault` measures the name
-            // against the one list the handlers themselves read, so a name this target cannot
-            // report a fault from is refused by the code that would have had to report it.
-            // `UploadPartCopy` is the case that matters: the model marks it as able to fail after a
-            // `200` and this fixture answers it without committing, so a fault armed against it
-            // would be armed against nothing and the case would run as though it had declared none.
-            if let Err(unreportable) = fixture.arm_committed_fault(operation, code) {
+            if let Err(unreportable) = armed {
                 return Err(SutError::Environment(format!(
-                    "`setup.fault.operation = \"{}\"` names an operation this target does not commit a \
-                     head for, so a fault armed against it would never be reported",
+                    "`setup.fault.operation = \"{}\"` names an operation this target does not commit a head for, \
+                     so a fault armed against it would never be reported",
                     unreportable.operation()
                 )));
             }

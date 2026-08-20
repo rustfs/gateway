@@ -16377,8 +16377,11 @@ from pathlib import Path
 
 path = Path("crates/gateway/src/lib.rs")
 text = path.read_text()
-subject = " DEFAULT_STANDARD_HANDLER_DEADLINE, HandlerDeadlineConfig,\n"
-replacement = " DEFAULT_STANDARD_HANDLER_DEADLINE,\n"
+# Anchored on the two names and not on the line they sit on: this re-export list is rewrapped by
+# rustfmt whenever a name is added to it, and a subject carrying the line break silently stops
+# matching, at which point this mutation aborts and the case it belongs to never runs at all.
+subject = "DEFAULT_STANDARD_HANDLER_DEADLINE, HandlerDeadlineConfig,"
+replacement = "DEFAULT_STANDARD_HANDLER_DEADLINE,"
 if text.count(subject) != 1:
     raise SystemExit("missing unique handler deadline config facade-export mutation subject")
 path.write_text(text.replace(subject, replacement, 1))

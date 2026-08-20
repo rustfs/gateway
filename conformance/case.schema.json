@@ -225,7 +225,7 @@
         "fault": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["operation", "at", "code"],
+          "required": ["operation", "at"],
           "description": "A failure the backend is to produce at a named point inside one operation. Every other setup declaration describes state that was already true when the request arrived, and a fault that was already true is refused with its own status before any of the response has gone out. This is the only way the corpus can describe a failure discovered after that point.",
           "properties": {
             "operation": {
@@ -234,15 +234,25 @@
               "description": "The operation that fails. Named here rather than read from case.operation because a case with several exchanges must be able to say which one of them fails."
             },
             "at": {
-              "enum": ["after_commit"],
-              "description": "after_commit: the operation passes every check that can still choose a status, its response head goes out carrying the success status, and only then does the work fail. The failure reaches the client as a document inside a success, which is what expect.kind = 'stream_error' with stream_termination = 'error_document' observes. Only an operation AWS documents as flushing its head early may be named; for any other the point does not exist, and a case naming one is refused rather than quietly run as an ordinary refusal."
+              "enum": ["after_commit", "no_progress_after_commit"],
+              "description": "after_commit: the operation passes every check that can still choose a status, its response head goes out carrying the success status, and only then does the work fail. The failure reaches the client as a document inside a success, which is what expect.kind = 'stream_error' with stream_termination = 'error_document' observes. no_progress_after_commit: the same head goes out and the work then never finishes at all, so there is no failure for the backend to report and the response can only be ended by a bound outside it. Both points exist only for an operation AWS documents as flushing its head early; for any other neither exists, and a case naming one is refused rather than quietly run as an ordinary refusal."
             },
             "code": {
               "type": "string",
               "pattern": "^[A-Z][A-Za-z0-9]*$",
-              "description": "The S3 error code the work reports. It travels in the body under the committed status, never as the status: by the time this code exists the status line has been sent."
+              "description": "The S3 error code the work reports. It travels in the body under the committed status, never as the status: by the time this code exists the status line has been sent. Required for at = 'after_commit' and forbidden for at = 'no_progress_after_commit', where the backend reports nothing at all and any code named here would be a code no implementation could produce."
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "at": { "const": "after_commit" } }, "required": ["at"] },
+              "then": { "required": ["code"] }
+            },
+            {
+              "if": { "properties": { "at": { "const": "no_progress_after_commit" } }, "required": ["at"] },
+              "then": { "not": { "required": ["code"] } }
+            }
+          ]
         },
         "cleanup": { "enum": ["auto", "none"] }
       }

@@ -1,4 +1,8 @@
 # c-mpu-0040 — a stalled completion ends the stream instead of hanging.
+#
+# Schema dimensions exercised: setup.fault at = "no_progress_after_commit", expect.kind =
+# "stream_error" with stream_termination and body_bytes_before_error, multipart fixtures, capture of
+# a server-minted upload id.
 
 [case]
 id = "c-mpu-0040"
@@ -8,12 +12,25 @@ rationale = """
 The whitespace that keeps a slow completion alive also keeps a stuck one alive, and a client cannot \
 tell the two apart: both look like a response in progress. Without a bound on time between \
 progress, a backend that has stopped answering holds every such request open until the client's own \
-timeout, and a retry storm follows. The bound has to be on progress rather than on total duration, \
-because a legitimately slow completion must not be cut off. The fixture needs a backend that stops \
-making progress, which is why this case is not in the fast gate."""
+timeout, and a retry storm follows — each retry starting another completion beside the one that is \
+already stuck. The bound has to be on progress rather than on total duration, because a \
+legitimately slow completion must not be cut off. The fixture needs a backend that stops making \
+progress, which `[setup.fault] at = "no_progress_after_commit"` is: the head goes out and the \
+continuation then never resolves, so nothing inside the operation can end the response.
+
+What ends it is asserted by the document rather than by the connection. Both halves matter. A \
+completion whose head is already committed has exactly one channel left for a verdict — the body \
+under the spent status, which `q-mpu-late-error-0033` is the whole of — so a bound that closed the \
+socket instead would be throwing that channel away and handing the client something it cannot \
+tell from a network failure, which is the ambiguity this case exists to remove. And an assertion \
+about the connection is the weaker one: a gateway that panicked, or a process that died, would \
+satisfy `abrupt_close` exactly as well as a bound that fired on purpose. `InternalError` with the \
+progress message is satisfied only by a framework that decided to stop waiting and said so, and it \
+is deliberately a different message from the one an armed `after_commit` fault reports in \
+`c-mpu-0001`, so neither case can be green for the other's reason."""
 polarity = "negative"
 operation = "CompleteMultipartUpload"
-tags = ["multipart", "streaming", "timing", "slow"]
+tags = ["multipart", "streaming", "timing"]
 quirks = ["q-mpu-late-error-0033"]
 timeout_ms = 120000
 
@@ -21,6 +38,11 @@ timeout_ms = 120000
 url = "https://github.com/s3s-project/s3s/issues/54"
 summary = "An incomplete response leaves the client waiting with no way to decide what happened."
 kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "AWS states the request can return a 200 whose body carries an error, and that clients must inspect the body."
+kind = "aws-doc"
 
 [clock]
 fixed = "2026-01-02T03:04:05Z"
@@ -38,6 +60,14 @@ part_number = 1
 body = { size = 5242880 }
 capture_etag_as = "part1_etag"
 
+# Every check this completion can still name a status for runs first and passes: the request is well
+# formed, the part is there, and the digest is the one the upload reported. What is arranged is the
+# one thing that cannot be discovered while a status is still choosable — a continuation that, once
+# the head is out, never finishes.
+[setup.fault]
+operation = "CompleteMultipartUpload"
+at = "no_progress_after_commit"
+
 [request]
 method = "POST"
 target = "/conf-mpu/stalled-completion?uploadId=${capture.upload_id}"
@@ -50,10 +80,32 @@ utf8 = '''
 
 [expect]
 kind = "stream_error"
-stream_termination = "abrupt_close"
+stream_termination = "error_document"
 status = 200
-body_bytes_before_error = 0
-connection_after = "closed"
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
 
+# Bytes of the XML declaration and its newline: everything the server had committed before the
+# continuation stopped answering. Zero keep-alive bytes, because nothing writes one yet — when
+# something does, this number moves and the case is where that is noticed.
+body_bytes_before_error = 39
+
+[expect.error]
+code = "InternalError"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+# The whole point of the case: the exchange concludes. Without a bound on progress this number is
+# unreachable at any value, because the response never ends at all.
 [expect.timing]
-terminate_within_ms = 90000
+terminate_within_ms = 30000
+
+[expect.body]
+redact = ["RequestId", "HostId", "UploadId"]
+contains_utf8 = [
+  "<Code>InternalError</Code>",
+  "<Message>the committed continuation reported no outcome inside the progress deadline</Message>",
+]
+not_contains_utf8 = ["<CompleteMultipartUploadResult"]

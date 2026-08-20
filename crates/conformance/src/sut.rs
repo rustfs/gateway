@@ -28,6 +28,17 @@ use crate::observation::Observation;
 use crate::value::Value;
 use std::collections::BTreeMap;
 
+/// How long a target here lets a committed continuation go without producing its outcome.
+///
+/// Two seconds, and deliberately not the shipped `rustfs_gateway::DEFAULT_COMMIT_PROGRESS_DEADLINE`,
+/// which is a minute. What `c-mpu-0040` asserts is *that* a stalled completion is ended and with
+/// which document; a real minute of waiting to say so would be a tenth of the whole gate's clock
+/// spent watching a timer. Far above every other case's entire runtime, so nothing that answers is
+/// bounded by it — which is the property `c-mpu-0040`'s slow-continuation control turns on.
+///
+/// Read by `crate::inprocess`, which assembles the service both transports run against.
+pub const COMMIT_PROGRESS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// The assembly path a case runs on. Every case runs on every path and the runs must agree, so
 /// this is injected by the runner and is deliberately not expressible in a case file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

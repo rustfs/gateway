@@ -34,6 +34,8 @@ mod authz_implementations;
 mod backend_reachability;
 #[path = "chunked_allocations.rs"]
 mod chunked_allocations;
+#[path = "committed_progress.rs"]
+mod committed_progress;
 #[path = "compat_aliases.rs"]
 mod compat_aliases;
 #[path = "compile_fail.rs"]
