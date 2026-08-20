@@ -26,8 +26,23 @@ use rustfs_gateway::S3Service;
 
 /// The two decoded sizes, and the ratio between them is the instrument.
 const SMALL: usize = 64 * 1024;
-/// Sixteen times the smaller body.
-const LARGE: usize = 16 * SMALL;
+/// Four times the smaller body.
+///
+/// Four rather than the two hundred and fifty-six rustfs/gateway#225 and #233 use, and the reason
+/// is CI clock rather than taste. Every `dhat` probe is its own process, and on this repository's
+/// runner one costs the better part of a minute regardless of what it measures — #225's gate
+/// already spends about fifty seconds there. The `Workspace tests` job has no headroom to give a
+/// second gate (rustfs/gateway#269), so this one buys its ratio down to the smallest that still
+/// resolves the defect.
+///
+/// Four resolves it with room to spare, and that is measured rather than assumed: the peak growth
+/// per body byte reads 1.0000 at 4x, 1.00002 at 16x, 0.99995 at 64x and 0.99999 at 256x, so the
+/// shape is flat and 16x was not a lucky point. A second copy of the body — the defect — is twice
+/// [`payload_growth`] against an allowance of one copy plus [`BYTES_HEADROOM`], which at this ratio
+/// is still a fifty per cent margin.
+///
+/// [`payload_growth`]: c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body
+const LARGE: usize = 4 * SMALL;
 
 /// The decoded bytes one `aws-chunked` chunk carries.
 const CHUNK: usize = 32 * 1024;
@@ -247,17 +262,20 @@ const COPIES_HELD: u64 = 1;
 /// that grows. Before #229 the same probe read 6.03 without the harness copy, because the wire
 /// collector was a second such buffer.
 ///
-/// The doubling is the `bytes` crate's growth policy rather than anything this repository decides,
-/// so [`BYTES_HEADROOM`] deliberately leaves room above three for a policy that is less tight than
-/// two — but not enough room for a fourth copy of the body, which is what the defect looks like.
-const COPIES_ALLOCATED: u64 = 3;
+/// The allowance is four rather than three, and the fourth is slack rather than an observation:
+/// doubling is the `bytes` crate's growth policy, not anything this repository decides, and a
+/// growth factor of 1.5 would spend about three copies on the collector alone. Four leaves room for
+/// that and still refuses what this line exists to catch — restoring the wire collector puts the
+/// same probe at **seven**.
+const COPIES_ALLOCATED: u64 = 4;
 
-/// Allocator and per-request bookkeeping that does not scale with the body, plus slack for a
-/// `bytes` growth policy other than doubling.
+/// Allocator and per-request bookkeeping that does not scale with the body.
 ///
-/// The pipeline's own 64 KiB window is the same size in both runs, so it cancels rather than
-/// needing room here.
-const BYTES_HEADROOM: u64 = 512 * 1024;
+/// The overshoot this has to cover is one wire frame and some allocator rounding — measured at
+/// about sixteen kibibytes, and flat in the body size rather than proportional to it, because the
+/// pipeline's own 64 KiB window is the same in both runs and cancels. Sixty-four kibibytes is four
+/// times that and still a quarter of the smaller body, so it cannot swallow a copy of anything.
+const BYTES_HEADROOM: u64 = 64 * 1024;
 
 /// How many heap blocks the harness itself spends per wire frame.
 ///
