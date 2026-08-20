@@ -99,16 +99,11 @@ begin
     abort("check_rust_toolchain_msrv: critical CI msrv steps must always run and fail closed") unless (step.keys & forbidden).empty?
   end
 
-  # One authority for the compiler, named once in the workflow environment and bound here to
-  # rust-toolchain.toml. Every job then references it, so no job can carry a second version.
-  env = workflow.fetch("env", {})
-  abort("check_rust_toolchain_msrv: CI workflow env must be a mapping") unless env.is_a?(Hash)
-  pinned = env["RUST_TOOLCHAIN"]
-  unless pinned == ARGV.fetch(1)
-    abort("check_rust_toolchain_msrv: CI RUST_TOOLCHAIN #{pinned.inspect} must exactly match " \
-          "the rust-toolchain.toml channel #{ARGV.fetch(1).inspect}")
-  end
-  reference = "${{ env.RUST_TOOLCHAIN }}"
+  # rust-toolchain.toml is the one authority; the workflow repeats the number per job because a
+  # workflow `env:` var whose name begins with CARGO/CC/CFLAGS/CXX/CMAKE/RUST is hashed into
+  # Swatinem/rust-cache's restore key, and moving that key costs every job a cold rebuild.
+  # The repetition cannot drift because this guard compares every one of them to the file.
+  reference = ARGV.fetch(1)
 
   with = toolchain_steps.first.fetch("with")
   abort("check_rust_toolchain_msrv: rust-toolchain inputs must be a mapping") unless with.is_a?(Hash)
@@ -150,7 +145,7 @@ begin
         end
       elsif requested != reference
         abort("check_rust_toolchain_msrv: CI job #{job_id} installs #{requested.inspect} instead " \
-              "of the pinned #{reference}")
+              "of the pinned #{reference.inspect} in rust-toolchain.toml")
       end
     end
   end

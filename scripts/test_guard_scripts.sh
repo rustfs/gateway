@@ -5619,30 +5619,17 @@ from pathlib import Path
 
 path = Path(".github/workflows/ci.yml")
 text = path.read_text()
-old = "  RUST_TOOLCHAIN: 1.97.1\n"
-if text.count(old) != 1:
-    raise SystemExit("the workflow toolchain pin is missing or ambiguous")
-path.write_text(text.replace(old, "  RUST_TOOLCHAIN: stable\n", 1))
+start = text.index("  msrv:")
+end = text.index("\n  clippy:", start)
+block = text[start:end]
+if block.count("toolchain: 1.97.1") != 1:
+    raise SystemExit("MSRV job toolchain pin is missing or ambiguous")
+block = block.replace("toolchain: 1.97.1", "toolchain: stable", 1)
+path.write_text(text[:start] + block + text[end:])
 PY
 }
 expect_fail check_rust_toolchain_msrv.sh \
-    'CI installing a moving compiler instead of the pinned one' mut_rust_toolchain_ci_version_drift
-
-mut_rust_toolchain_ci_pin_drift() {
-    python3 - <<'PY'
-from pathlib import Path
-
-path = Path(".github/workflows/ci.yml")
-text = path.read_text()
-old = "  RUST_TOOLCHAIN: 1.97.1\n"
-if text.count(old) != 1:
-    raise SystemExit("the workflow toolchain pin is missing or ambiguous")
-path.write_text(text.replace(old, "  RUST_TOOLCHAIN: 1.97.0\n", 1))
-PY
-}
-expect_fail check_rust_toolchain_msrv.sh \
-    'the CI toolchain pin drifting one patch release from rust-toolchain.toml' \
-    mut_rust_toolchain_ci_pin_drift
+    'the MSRV CI job installing a moving compiler' mut_rust_toolchain_ci_version_drift
 
 # This is the exact shape main carried on 2026-08-20: no `with:`, so
 # dtolnay/rust-toolchain installs its own `stable` default and makes it the rustup
@@ -5655,7 +5642,7 @@ path = Path(".github/workflows/ci.yml")
 text = path.read_text()
 old = """      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 """
@@ -5672,21 +5659,41 @@ expect_fail check_rust_toolchain_msrv.sh \
     'a CI job falling back to the action default stable toolchain' \
     mut_rust_toolchain_ci_step_takes_stable_default
 
-mut_rust_toolchain_ci_step_names_stable() {
+# The compiler floor moves and one repeated CI pin is left behind. The workflow repeats the
+# number per job -- a workflow env var under a CARGO/RUST prefix would move the rust-cache
+# restore key -- so a partial bump is the drift this guard has to catch.
+mut_rust_toolchain_ci_pin_left_behind() {
     python3 - <<'PY'
 from pathlib import Path
 
+for name, old, new in (
+    ("Cargo.toml", 'rust-version = "1.97.1"', 'rust-version = "1.97.2"'),
+    ("rust-toolchain.toml", 'channel = "1.97.1"', 'channel = "1.97.2"'),
+    ("README.md", "MSRV-1.97.1", "MSRV-1.97.2"),
+    ("README.md", "**MSRV: 1.97.1.**", "**MSRV: 1.97.2.**"),
+    ("README.md", "**Development toolchain: 1.97.1**", "**Development toolchain: 1.97.2**"),
+    ("docs/msrv.md", "**MSRV = 1.97.1**", "**MSRV = 1.97.2**"),
+    ("docs/msrv.md", "The workspace pins Rust 1.97.1 for development",
+     "The workspace pins Rust 1.97.2 for development"),
+):
+    path = Path(name)
+    text = path.read_text()
+    if old not in text:
+        raise SystemExit(f"missing mutation subject in {name}: {old}")
+    path.write_text(text.replace(old, new, 1))
+
 path = Path(".github/workflows/ci.yml")
 text = path.read_text()
-old = "          toolchain: ${{ env.RUST_TOOLCHAIN }}\n"
-if text.count(old) < 2:
-    raise SystemExit("the workflow no longer shares one toolchain reference")
-path.write_text(text.replace(old, "          toolchain: stable\n", 1))
+if text.count("toolchain: 1.97.1") < 2:
+    raise SystemExit("the workflow no longer repeats its toolchain pin")
+# Bump every CI pin except one, so only the straggler is wrong.
+path.write_text(text.replace("toolchain: 1.97.1", "toolchain: 1.97.2").replace(
+    "toolchain: 1.97.2", "toolchain: 1.97.1", 1))
 PY
 }
 expect_fail check_rust_toolchain_msrv.sh \
-    'one CI job naming a moving channel while the rest use the pin' \
-    mut_rust_toolchain_ci_step_names_stable
+    'one CI job left behind on the previous compiler after an MSRV bump' \
+    mut_rust_toolchain_ci_pin_left_behind
 
 mut_rust_toolchain_ci_step_removed() {
     python3 - <<'PY'
@@ -5696,7 +5703,7 @@ path = Path(".github/workflows/ci.yml")
 text = path.read_text()
 old = """      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Workspace tests (maximum 8 minutes after setup)
 """

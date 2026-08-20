@@ -31,7 +31,6 @@ end
 abort("ERROR: workflow defaults may not override split-job failure propagation") if workflow.key?("defaults")
 workflow_env_keys = [
   "CARGO_TERM_COLOR",
-  "RUST_TOOLCHAIN",
   "CARGO_SEMVER_CHECKS_TOOL",
   "CARGO_HACK_TOOL",
   "CARGO_LLVM_COV_TOOL",
