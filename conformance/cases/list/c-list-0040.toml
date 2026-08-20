@@ -1,6 +1,14 @@
 # c-list-0040 — one page costs one page, whatever the bucket costs.
 #
 # Schema dimensions exercised: a bucket much larger than the page, a bounded response time and a bounded body.
+#
+# The memory half of this title is NOT asserted here and cannot be: schema version 1 has no form
+# for an allocation budget, and a bounded body plus a bounded time are satisfied by a server that
+# enumerated the whole bucket on a fast machine. That half is measured in
+# `crates/conformance/src/fixture/list_allocations.rs`, which pages a 1,000-key bucket and a 64,000-key
+# bucket at the same page size under a heap profiler and requires the two to cost the same. Read
+# this case's green as "the page is right and it arrived"; read that test's green as "the page cost
+# a page".
 
 [case]
 id = "c-list-0040"

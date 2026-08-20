@@ -43,10 +43,12 @@
 //!   true` becomes one delete marker, in the order the case wrote them. In every other bucket a
 //!   key has exactly one version, spelled `null`, which is what S3 calls the version of an object
 //!   in a bucket that was never versioned. Nothing else mints a version.
-//! * **A cursor is opaque and verifiable.** `NextContinuationToken` is the position it resumes
-//!   from, hex-encoded and checksummed, so a token that was altered, truncated, extended or made
-//!   up is *refused* rather than read as some other position. A verbatim marker would make four
-//!   security cases (`c-list-0029` … `c-list-0032`) unable to fail, which is worse than failing.
+//! * **A cursor is authenticated, not merely checksummed.** `NextContinuationToken` is the
+//!   position it resumes from, carried under an HMAC over that position *and over the listing it
+//!   belongs to* — see [`crate::token`]. A token that was altered, truncated, extended, replayed
+//!   against another bucket or prefix, or composed by a client from scratch is *refused* rather
+//!   than read as some other position. The unkeyed checksum this replaced could not do the last of
+//!   those: every input to it was public, so recomputing it was the forgery.
 //! * **`encoding-type` is echoed, never applied.** `spec/operations/*.toml` declares
 //!   `url_encoded_fields` for every listing and the generated codec does not act on it, so
 //!   percent-encoding a key here would paper over a code-generator gap with backend code that
@@ -106,29 +108,33 @@
 //! red for it — see `MAP.md` finding 15, which names the three cases and what each one now needs.
 
 use std::collections::BTreeMap;
+use std::ops::Bound;
 use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::dto;
 use rustfs_gateway::{
     AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome,
-    CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, EventSequence, GranteeType, Handler, HandlerError,
-    HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators, Operation,
-    PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors,
-    RecordedUpload, RegionLabel, RegionSet, Req, RequestKind, ResolvedUploadId, ResourceVisibility, Resp, RestoreState,
-    RestoreStatus, TagScope, TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee, collect,
-    completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_source_guards_before_target_write,
-    copy_source_if_match_miss_proceeds, copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate,
-    evaluate_range, format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag,
-    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_input as resolve_acl_input,
-    resolve_location_constraint, resolve_part, resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document,
-    validate_accelerate, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
-    validate_lock_configuration, validate_logging, validate_notification, validate_policy, validate_public_access_block,
-    validate_replication, validate_request_payment, validate_restore, validate_retention, validate_select, validate_tag_set,
-    validate_versioning, validate_website,
+    CopyRange, CopySourceRejection, ETag, ErrorCode, EventSequence, GranteeType, Handler, HandlerError, HandlerErrorContext,
+    HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators, Operation, PRECONDITION_FAILED_MESSAGE,
+    PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors, RecordedUpload, RegionLabel,
+    RegionSet, Req, RequestKind, ResolvedUploadId, ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope,
+    TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee, collect, completion_failure_retains_upload,
+    conditional_write_guards_before_mutation, copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds,
+    copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate, evaluate_range,
+    format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag, parse_tagging_header,
+    permanent_redirect_for, resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint, resolve_part,
+    resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate, validate_cors,
+    validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
+    validate_notification, validate_policy, validate_public_access_block, validate_replication, validate_request_payment,
+    validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
 mod handlers_bucket;
 mod handlers_object;
+#[cfg(test)]
+mod list_allocations;
+#[cfg(test)]
+mod pagination_properties;
 
 /// The canonical user id every listing reports as the owner.
 ///
@@ -138,19 +144,10 @@ pub const OWNER_ID: &str = "3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d
 
 /// The display name that accompanies [`OWNER_ID`].
 pub const OWNER_DISPLAY_NAME: &str = "conformance";
+use crate::token::TokenScope;
 
 /// The version id of a key in a bucket that was never versioned. S3's own spelling.
 pub const UNVERSIONED: &str = "null";
-
-/// The cursor contract every listing in this fixture reads a client-supplied position through.
-///
-/// [`CursorSpec::accept`] is the exported rule — the ceiling ([`rustfs_gateway::MAX_CURSOR_BYTES`])
-/// and the refusal of a byte that cannot be written back into a response document — and it is a
-/// call rather than a second copy for the reason `c-list-0030` exists: a ceiling written twice is a
-/// ceiling two implementations can hold at two different values, and this file had it at 2304 while
-/// the contract held 2048. Refusing at the ceiling rather than after decoding is the whole point of
-/// the case, and the contract is where that ordering is stated.
-const CONTINUATION_CURSOR: CursorSpec = CursorSpec::opaque("continuation-token");
 
 /// The smallest a non-final part of a multipart upload may be: 5 MiB, AWS's published floor.
 ///
@@ -499,6 +496,13 @@ pub struct Fixture {
     pub home_region: String,
     /// The failure `[setup.fault]` armed, if the case armed one.
     committed_fault: Option<CommittedFault>,
+    /// The key this instance's continuation tokens are authenticated under.
+    ///
+    /// Per fixture, and per process. A token minted by one run of the suite is not a token for the
+    /// next one and not a token for the fixture beside it, which is the only version of "a value
+    /// this service issued" that means anything: the alternative is a value anybody who has read
+    /// this file can issue too. See [`crate::token`].
+    token_secret: crate::token::TokenSecret,
 }
 
 /// A failure a case declared for the point *after* an operation has committed its response head.
@@ -1193,6 +1197,32 @@ impl Fixture {
             .collect()
     }
 
+    /// The live keys of a bucket that a page could start with, lazily and in order.
+    ///
+    /// The one difference from [`Fixture::keys_in`] that matters is that this borrows the map's
+    /// own ordering instead of building a list: it starts the walk at the first key that could
+    /// belong on the page and stops at the first one past the prefix, so a caller that takes a
+    /// hundred keys touches a hundred keys and allocates nothing per key it did not take.
+    /// [`list_allocations`] is what holds that property; before it the listing enumerated
+    /// and sorted the whole bucket, and one page out of a 64,000-key bucket cost 64,661 heap
+    /// blocks against a 1,000-key bucket's 1,649.
+    ///
+    /// `after` is the position the previous page ended on. Starting the walk past it is sound
+    /// rather than an optimisation: an entry is either a key or a prefix *of* that key, so an
+    /// entry greater than `after` can only come from a key greater than `after`, and no key that
+    /// belongs on this page is skipped by starting there.
+    fn live_keys_from<'a>(&'a self, bucket: &'a str, prefix: &'a str, after: Option<&str>) -> impl Iterator<Item = &'a str> {
+        let start = match after {
+            Some(marker) if marker >= prefix => Bound::Excluded((bucket.to_owned(), marker.to_owned())),
+            _ => Bound::Included((bucket.to_owned(), prefix.to_owned())),
+        };
+        self.objects
+            .range((start, Bound::Unbounded))
+            .take_while(move |((name, key), _)| name == bucket && key.starts_with(prefix))
+            .filter(|(_, versions)| versions.last().is_some_and(|version| version.object.is_some()))
+            .map(|((_, key), _)| key.as_str())
+    }
+
     /// Every version of every key in a bucket: keys ascending, versions newest first.
     ///
     /// That is S3's own order, and it is the order a key marker plus a version marker resume in.
@@ -1249,46 +1279,6 @@ fn owner() -> dto::Owner {
         id: Some(OWNER_ID.to_owned()),
         display_name: Some(OWNER_DISPLAY_NAME.to_owned()),
     }
-}
-
-/// Mints a continuation token that resumes after `marker`.
-///
-/// Hex plus eight bytes of a digest over the same value. Opaque, so no client can construct one by
-/// reasoning about keys; verifiable, so one that was altered is *known* to be altered rather than
-/// read as a different position. Both properties are what `c-list-0029` … `c-list-0032` assert,
-/// and a token that was simply the marker in the clear can satisfy neither.
-fn mint_token(marker: &str) -> String {
-    let digest = crate::sha256::hex_digest(marker.as_bytes());
-    format!("{}-{}", encode_hex(marker.as_bytes()), digest.get(..8).unwrap_or_default())
-}
-
-/// Reads a token back, or `None` for anything this stub did not mint.
-///
-/// The ceiling is applied first and it is the contract's, not this file's: a cursor over
-/// [`rustfs_gateway::MAX_CURSOR_BYTES`] is refused *before* the hex body is decoded, so the work the
-/// ceiling exists to prevent is never done. `c-list-0030` is the case that separates the two
-/// orderings, by bounding the response time.
-fn read_token(token: &str) -> Option<String> {
-    let token = CONTINUATION_CURSOR.accept(token).ok()?;
-    let (body, checksum) = token.rsplit_once('-')?;
-    let marker = String::from_utf8(decode_hex(body)?).ok()?;
-    if crate::sha256::hex_digest(marker.as_bytes()).get(..8)? != checksum {
-        return None;
-    }
-    Some(marker)
-}
-
-fn encode_hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(hex_digit(byte >> 4));
-        out.push(hex_digit(byte & 0x0f));
-    }
-    out
-}
-
-fn hex_digit(value: u8) -> char {
-    char::from_digit(u32::from(value), 16).unwrap_or('0')
 }
 
 /// Standard base64 (RFC 4648 §4), which is the alphabet `Content-MD5` is written in.
@@ -1363,19 +1353,6 @@ fn is_base64_of_sixteen_bytes(value: &str) -> bool {
     bytes[..22]
         .iter()
         .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'+' || *byte == b'/')
-}
-
-fn decode_hex(text: &str) -> Option<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
-        return None;
-    }
-    let mut out = Vec::with_capacity(text.len() / 2);
-    for pair in text.as_bytes().chunks_exact(2) {
-        let high = char::from(*pair.first()?).to_digit(16)?;
-        let low = char::from(*pair.get(1)?).to_digit(16)?;
-        out.push(((high * 16) + low) as u8);
-    }
-    Some(out)
 }
 
 /// `InvalidArgument`, in AWS's own wording for a cursor the service did not issue.
@@ -4664,11 +4641,14 @@ impl Stub {
 
     fn list_buckets(&self, input: &dto::ListBucketsInput) -> HandlerResult<dto::ListBuckets> {
         let fixture = self.borrow()?;
+        let prefix = input.prefix.clone().unwrap_or_default();
+        // The scope is built before the token is read, from the request's *own* parameters, so a
+        // token minted for a different prefix fails its tag rather than resuming this listing.
+        let scope = TokenScope::account_listing("ListBuckets", &prefix);
         let after = match input.continuation_token.as_ref() {
             None => None,
-            Some(token) => Some(read_token(token.as_str()).ok_or_else(bad_token)?),
+            Some(token) => Some(fixture.token_secret.read(&scope, token.as_str()).ok_or_else(bad_token)?),
         };
-        let prefix = input.prefix.clone().unwrap_or_default();
         // `bucket-region` is accepted and not applied: this fixture models one deployment and no
         // region at all, so filtering on it would be a decision made out of nothing. A filter that
         // is ignored can only over-return, which no case can mistake for a correct answer it asked
@@ -4681,7 +4661,9 @@ impl Stub {
             .collect();
         let max_buckets = input.max_buckets.unwrap_or(10_000);
         let truncated = truncate_to(&mut names, max_buckets);
-        let next = truncated.then(|| names.last().map(|name| mint_token(name))).flatten();
+        let next = truncated
+            .then(|| names.last().map(|name| fixture.token_secret.mint(&scope, name)))
+            .flatten();
 
         let mut buckets = Vec::new();
         for name in names {
@@ -4739,19 +4721,18 @@ impl Stub {
         require_bucket(&fixture, &input.bucket)?;
         // A continuation token decides the page on its own; `start-after` is read only when there
         // is no token to read. Both arriving together is `c-list-0007`.
+        let prefix = input.prefix.as_deref().unwrap_or("");
+        let delimiter = delimiter_of(input.delimiter.as_deref());
+        // Built from this request's own bucket, prefix and delimiter, so a token issued for any
+        // other listing does not verify here. `start-after` is not in the scope: it is a position,
+        // not a listing, and a client is entitled to page past one it chose itself.
+        let scope = TokenScope::bucket_listing("ListObjectsV2", input.bucket.as_str(), prefix, delimiter);
         let start = match input.continuation_token.as_ref() {
-            Some(token) => Some(read_token(token.as_str()).ok_or_else(bad_token)?),
+            Some(token) => Some(fixture.token_secret.read(&scope, token.as_str()).ok_or_else(bad_token)?),
             None => input.start_after.clone(),
         };
         let max_keys = input.max_keys.unwrap_or(1000);
-        let page = paginate(
-            &fixture,
-            input.bucket.as_str(),
-            input.prefix.as_deref().unwrap_or(""),
-            delimiter_of(input.delimiter.as_deref()),
-            start.as_deref(),
-            max_keys,
-        );
+        let page = paginate(&fixture, input.bucket.as_str(), prefix, delimiter, start.as_deref(), max_keys);
         let contents = page.contents(&fixture, input.bucket.as_str(), input.fetch_owner.unwrap_or(false))?;
         Ok(Resp::new(dto::ListObjectsV2Output {
             name: input.bucket.clone(),
@@ -4761,7 +4742,10 @@ impl Stub {
             max_keys,
             key_count: page.count(),
             is_truncated: page.truncated,
-            next_continuation_token: page.next.as_deref().map(|marker| mint_token(marker).into()),
+            next_continuation_token: page
+                .next
+                .as_deref()
+                .map(|marker| fixture.token_secret.mint(&scope, marker).into()),
             contents,
             common_prefixes: page.common_prefixes(),
             continuation_token: input.continuation_token.clone(),
@@ -4998,28 +4982,46 @@ impl Page {
 /// is the sequence a continuation token has to resume: paging the two lists independently makes a
 /// resumed listing skip or repeat entries, which is invisible to any single-response assertion.
 fn paginate(fixture: &Fixture, bucket: &str, prefix: &str, delimiter: Option<&str>, after: Option<&str>, max: i32) -> Page {
+    let limit = usize::try_from(max.max(0)).unwrap_or(usize::MAX);
     let mut entries: Vec<(String, bool)> = Vec::new();
-    for key in fixture.keys_in(bucket) {
-        if !key.starts_with(prefix) {
-            continue;
+    let mut truncated = false;
+    // `max-keys=0` is a page of nothing and it is *not* truncated: AWS answers `IsTruncated`
+    // false, and `c-list-0027` is the case that says so. Falling into the loop would report the
+    // first entry it saw as proof that more was waiting, which is the one answer that makes a
+    // client ask for a page it will never be given.
+    if limit > 0 {
+        for key in fixture.live_keys_from(bucket, prefix, after) {
+            // The marker is compared against the *entry*, not against the key: with a delimiter in
+            // play, the last thing page one emitted may have been a folded prefix, and resuming after
+            // `b/` has to drop every key underneath it rather than only the one that spelled it.
+            let entry = match fold(key, prefix, delimiter) {
+                Some(folded) => (folded, true),
+                None => (key.to_owned(), false),
+            };
+            if after.is_some_and(|marker| entry.0.as_str() <= marker) {
+                continue;
+            }
+            // Only the previous entry is consulted, not the whole page. Folding is monotone — a key's
+            // folded prefix never sorts before an earlier key's — so every key that folds onto one
+            // prefix is contiguous in this walk, and the duplicates are always adjacent. Scanning the
+            // page instead would be the same answer at a cost that grows with the page.
+            if entry.1
+                && entries
+                    .last()
+                    .is_some_and(|(value, is_prefix)| *is_prefix && *value == entry.0)
+            {
+                continue;
+            }
+            // Checked after the duplicate is dropped and before the entry is kept: a key folded onto a
+            // prefix already on the page is not a further entry, so it must not make the page look
+            // truncated when nothing follows it.
+            if entries.len() >= limit {
+                truncated = true;
+                break;
+            }
+            entries.push(entry);
         }
-        // The marker is compared against the *entry*, not against the key: with a delimiter in
-        // play, the last thing page one emitted may have been a folded prefix, and resuming after
-        // `b/` has to drop every key underneath it rather than only the one that spelled it.
-        let entry = match fold(key, prefix, delimiter) {
-            Some(folded) => (folded, true),
-            None => (key.to_owned(), false),
-        };
-        if after.is_some_and(|marker| entry.0.as_str() <= marker) {
-            continue;
-        }
-        if entry.1 && entries.iter().any(|(value, is_prefix)| *is_prefix && *value == entry.0) {
-            continue;
-        }
-        entries.push(entry);
     }
-    entries.sort();
-    let truncated = truncate_to(&mut entries, max);
     let next = truncated.then(|| entries.last().map(|(value, _)| value.clone())).flatten();
     Page {
         keys: entries
@@ -5772,20 +5774,35 @@ mod tests {
         assert_eq!(page.next, None);
     }
 
-    /// The cursor round-trips, and every spelling this stub did not mint is refused rather than
-    /// read as some other position.
+    /// The cursor this *fixture instance* mints round-trips, and every spelling it did not mint is
+    /// refused rather than read as some other position.
+    ///
+    /// The codec's own contract is asserted in [`crate::token`]; what this adds is that the
+    /// fixture holds a key of its own, so two fixtures do not share one. A fixture whose secret
+    /// were a constant would pass every assertion in `crate::token` and still be forgeable by
+    /// anybody who has read this file.
     #[test]
     fn a_continuation_token_round_trips_and_refuses_everything_else() {
-        let token = mint_token("a/2.txt");
+        let fixture = Fixture::at(0);
+        let scope = TokenScope::bucket_listing("ListObjectsV2", "b", "", None);
+        let token = fixture.token_secret.mint(&scope, "a/2.txt");
         assert_ne!(token, "a/2.txt", "a cursor a client can read is a cursor a client can forge");
-        assert_eq!(read_token(&token).as_deref(), Some("a/2.txt"));
-        assert_eq!(read_token(&format!("{token}X")), None);
-        assert_eq!(read_token("../../etc/passwd"), None);
-        assert_eq!(read_token("\u{ff}\u{fe}\u{0}\u{1}"), None);
+        assert_eq!(fixture.token_secret.read(&scope, &token).as_deref(), Some("a/2.txt"));
+        assert_eq!(fixture.token_secret.read(&scope, &format!("{token}X")), None);
+        assert_eq!(fixture.token_secret.read(&scope, "../../etc/passwd"), None);
+        assert_eq!(fixture.token_secret.read(&scope, "\u{ff}\u{fe}\u{0}\u{1}"), None);
         // The ceiling is the contract's, and one byte over it is refused before anything decodes.
-        assert_eq!(read_token(&"A".repeat(rustfs_gateway::MAX_CURSOR_BYTES + 1)), None);
+        let over = "A".repeat(rustfs_gateway::MAX_CURSOR_BYTES + 1);
+        assert_eq!(fixture.token_secret.read(&scope, &over), None);
         // The first page of an empty prefix resumes from the empty marker, which must survive too.
-        assert_eq!(read_token(&mint_token("")).as_deref(), Some(""));
+        let empty = fixture.token_secret.mint(&scope, "");
+        assert_eq!(fixture.token_secret.read(&scope, &empty).as_deref(), Some(""));
+
+        // Negative: the token belongs to this fixture and to no other. Two fixtures in one process
+        // hold two keys, which is what makes a captured token useless anywhere but where it came
+        // from.
+        let other = Fixture::at(0);
+        assert_eq!(other.token_secret.read(&scope, &token), None, "a token crossed fixtures");
     }
 
     /// A versioned bucket keeps what `[setup]` declared, in the order it declared it; an
