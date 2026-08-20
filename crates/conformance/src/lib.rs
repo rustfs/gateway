@@ -81,6 +81,7 @@ pub mod sha256;
 pub mod socket;
 pub mod sut;
 pub mod time;
+pub mod token;
 pub mod toml;
 pub mod value;
 pub mod xml;
