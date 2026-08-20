@@ -456,3 +456,171 @@ fn shares_one_namespace_across_every_attribute_that_resolves_through_it() {
     };
     assert!(std::sync::Arc::ptr_eq(&one, &two), "the namespace is shared, not copied per attribute");
 }
+
+// ---------------------------------------------------------------------------------------------
+// The XML 1.0 character range, in both directions (rustfs/gateway#256)
+// ---------------------------------------------------------------------------------------------
+
+/// The characters XML 1.0 excludes from a document entirely, one per class of the exclusion.
+///
+/// Not an exhaustive list of C0 — one from each end and each interesting middle is what a
+/// per-character predicate can be wrong about. `U+FFFE` and `U+FFFF` are here because the
+/// exclusion is not "control characters": it is a range, and the top two code points of the BMP
+/// are outside it for reasons that have nothing to do with C0.
+const FORBIDDEN: &[char] = &['\u{0}', '\u{1}', '\u{8}', '\u{b}', '\u{c}', '\u{1f}', '\u{fffe}', '\u{ffff}'];
+
+/// The characters that look like they should be forbidden and are not.
+///
+/// Tab, newline and carriage return are the three C0 controls XML 1.0 admits. `U+007F` is the one
+/// that catches an implementation written against XML 1.1, which requires DEL to be escaped;
+/// XML 1.0, which is what S3 speaks, admits it raw. Measured against `expat`: `<v>a\u{7f}b</v>`
+/// is well-formed and `<v>a\u{1}b</v>` is not.
+const PERMITTED: &[char] = &[
+    '\t',
+    '\n',
+    '\r',
+    '\u{7f}',
+    '\u{20}',
+    '\u{d7ff}',
+    '\u{e000}',
+    '\u{fffd}',
+    '\u{10000}',
+];
+
+/// Negative — the predicate answers the `Char` production of XML 1.0 and not "no control
+/// characters".
+#[test]
+fn n_the_character_predicate_is_the_xml_range_and_not_a_control_blocklist() {
+    for character in FORBIDDEN {
+        assert!(
+            !crate::is_xml_char(*character),
+            "U+{:04X} is outside XML 1.0's Char production",
+            *character as u32
+        );
+        let value = format!("a{character}b");
+        assert!(!crate::is_xml_representable(&value), "U+{:04X}", *character as u32);
+    }
+    for character in PERMITTED {
+        assert!(
+            crate::is_xml_char(*character),
+            "U+{:04X} is inside XML 1.0's Char production",
+            *character as u32
+        );
+        let value = format!("a{character}b");
+        assert!(crate::is_xml_representable(&value), "U+{:04X}", *character as u32);
+    }
+}
+
+/// Negative — the reader refuses element text carrying a character XML 1.0 cannot represent.
+///
+/// This is the ingress. `quick-xml` does not validate the character range, so without this the
+/// value is read, handed to a decoder as an ordinary string member, stored, and echoed into a
+/// response no conforming parser will accept.
+#[test]
+fn n_refuses_element_text_carrying_a_character_xml_cannot_represent() {
+    for character in FORBIDDEN {
+        let body = format!("<Root><Value>a{character}b</Value></Root>");
+        assert_eq!(
+            parse(body.as_bytes()),
+            Err(XmlError::ForbiddenCharacter),
+            "U+{:04X} in element text",
+            *character as u32
+        );
+    }
+}
+
+/// Negative — the three spellings of the same character are one refusal.
+///
+/// A reader that refused only the raw byte would be trivially bypassed: `&#1;` and `&#x1;` are
+/// resolved by this crate, by name, and both produce the same `U+0001`. XML 1.0 makes a character
+/// reference to a character outside the `Char` production a fatal error for exactly this reason.
+/// CDATA is the fourth spelling and the one a blocklist over the escaped forms would miss.
+#[test]
+fn n_refuses_every_spelling_of_a_character_xml_cannot_represent() {
+    for body in [
+        "<Root><Value>a&#1;b</Value></Root>",
+        "<Root><Value>a&#x1;b</Value></Root>",
+        "<Root><Value>a&#xB;b</Value></Root>",
+        "<Root><Value>a&#xFFFE;b</Value></Root>",
+        "<Root><Value><![CDATA[a\u{1}b]]></Value></Root>",
+    ] {
+        assert_eq!(parse(body.as_bytes()), Err(XmlError::ForbiddenCharacter), "{body:?}");
+    }
+}
+
+/// Negative — an attribute value and an element name are refused on the same rule.
+///
+/// The `<Grantee>` discriminator is read from an attribute, and a namespace binding is an
+/// attribute value that this crate stores and shares. A rule applied to text alone would leave
+/// three stored strings outside it.
+#[test]
+fn n_refuses_a_forbidden_character_in_an_attribute_value_or_a_name() {
+    let attribute = "<Grantee xmlns:xsi=\"urn:x\" xsi:type=\"Grou\u{1}p\"></Grantee>";
+    assert_eq!(parse(attribute.as_bytes()), Err(XmlError::ForbiddenCharacter));
+
+    let declaration = "<Grantee xmlns:xsi=\"urn:\u{1}x\"></Grantee>";
+    assert_eq!(parse(declaration.as_bytes()), Err(XmlError::ForbiddenCharacter));
+
+    let name = "<Ro\u{1}ot></Ro\u{1}ot>";
+    assert_eq!(parse(name.as_bytes()), Err(XmlError::ForbiddenCharacter));
+}
+
+/// Positive — the three C0 controls XML 1.0 admits, and DEL, still reach a decoder.
+///
+/// The control that keeps the refusal from widening into "no control characters". A tag value
+/// holding a newline is legal on this wire and a rule that refused it would break every caller
+/// that stores one.
+#[test]
+fn the_three_admitted_controls_and_del_still_reach_a_decoder() {
+    let body = "<Root><Value>a\tb\nc\u{7f}d</Value><Second>e&#13;f</Second></Root>";
+    let root = parse(body.as_bytes()).expect("tab, newline, DEL and a carriage-return reference are legal XML 1.0");
+    assert_eq!(root.child_text("Value"), Some("a\tb\nc\u{7f}d"));
+    assert_eq!(root.child_text("Second"), Some("e\rf"));
+}
+
+/// Negative — the writer cannot emit a character the reader refuses.
+///
+/// The two halves are one predicate, so the refused set and the un-writable set are the same set.
+/// Without this the reader's refusal would be the only guard, and the reader never sees a value a
+/// backend already held: `GetBucketLifecycleConfiguration` answers from the store, not from the
+/// request, so a value written through some other channel would still produce a document that is
+/// not well-formed.
+#[test]
+fn n_the_writer_cannot_emit_a_character_the_reader_refuses() {
+    for character in FORBIDDEN {
+        let mut writer = XmlWriter::fragment();
+        writer.open("Root", None);
+        writer.element("Value", &format!("a{character}b"));
+        writer.element_quoting("Quoted", &format!("a{character}b"));
+        writer.open_with("Grantee", &[("type", &format!("a{character}b"))]);
+        writer.close();
+        writer.close();
+        let document = writer.finish();
+
+        assert!(
+            !document.contains(*character),
+            "the writer emitted U+{:04X}, which makes the whole document unparseable",
+            *character as u32
+        );
+        assert!(
+            document.contains(crate::UNREPRESENTABLE),
+            "the substitute is visible, not a silent deletion"
+        );
+        // The bytes the writer produced are readable by the reader that refuses the input. A
+        // writer whose output its own reader rejects is the round trip this crate exists to keep.
+        parse(document.as_bytes()).expect("what the writer wrote is well-formed");
+    }
+}
+
+/// Positive — a legal value is written byte for byte, escaping unchanged.
+///
+/// The two-directional half of the test above: without it, a writer that replaced *every*
+/// character would satisfy "emits nothing forbidden" perfectly.
+#[test]
+fn a_representable_value_is_written_unchanged_by_the_character_guard() {
+    let mut writer = XmlWriter::fragment();
+    writer.open("Root", None);
+    writer.element("Value", "a&b<c>d\"e\tf\ng\u{7f}h\u{e9}");
+    writer.close();
+    assert_eq!(writer.finish(), "<Root><Value>a&amp;b&lt;c&gt;d\"e\tf\ng\u{7f}h\u{e9}</Value></Root>");
+}

@@ -1,0 +1,74 @@
+# c-lifecycle-0037 — the rule is representability, not "no control characters".
+#
+# Schema dimensions exercised: the three C0 controls XML 1.0 admits, plus U+007F, surviving a
+# write and the read that follows it.
+
+[case]
+id = "c-lifecycle-0037"
+schema_version = 1
+title = "Tab, newline, carriage return and DEL stay legal in every body string member"
+rationale = """
+The four refusals beside this one are satisfied just as well by a rule that rejects every control character, and such a rule would break every caller who stores a tag value with a newline in it. XML 1.0 admits exactly tab, newline and carriage return out of C0, and admits U+007F outright — it is XML 1.1 that requires DEL to be escaped, and S3 speaks 1.0. This case is what stops the refusal widening into a blocklist: it fails if any of the four is refused, and it fails again if the read-back does not return the same bytes. The carriage return is written as a reference on both sides because an XML parser normalises a literal one on input, so the raw spelling would not be a round trip for any implementation."""
+polarity = "positive"
+operation = "GetBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "encoding"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://www.w3.org/TR/xml/#charsets"
+summary = "The XML specification admits tab, newline and carriage return out of the C0 controls, and admits every character from U+0020 upward through U+D7FF."
+kind = "other"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html"
+summary = "The rule identifier and the filter members are documented as free text with no character restriction of their own."
+kind = "aws-doc"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "write-the-admitted-controls"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "eBRJVXgPeRlugRSS0AUTkw==" }
+body = { utf8 = "<LifecycleConfiguration><Rule><ID>tab\u0009and\u000Anewline</ID><Status>Enabled</Status><Filter><And><Prefix>logs\u007F/</Prefix><Tag><Key>team</Key><Value>carriage&#13;return</Value></Tag></And></Filter><Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-them-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+contains_utf8 = [
+    "<ID>tab\u0009and\u000Anewline</ID>",
+    "<Prefix>logs\u007F/</Prefix>",
+    "<Value>carriage&#13;return</Value>",
+]
+not_contains_utf8 = ["\uFFFD"]
+
+[exchanges.expect.body.xml]
+root = "LifecycleConfiguration"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+declaration = true
