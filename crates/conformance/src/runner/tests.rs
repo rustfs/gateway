@@ -211,6 +211,40 @@ fn a_scripted_target_that_answers_correctly_makes_a_case_pass() {
     assert_eq!(report.outcomes[0].verdict, Verdict::Passed, "{:?}", report.outcomes[0].diagnostics);
 }
 
+/// Negative — `Validated` belongs to `validate` alone and must never appear over an execution.
+///
+/// The distinction is only worth having in one direction as well as the other: a runner that
+/// reached for the new verdict on a run that *did* measure something would understate a real pass
+/// and, through `improvements`, quietly stop the baseline ratchet from tightening.
+#[test]
+fn a_run_that_executes_records_a_pass_not_a_validation() {
+    let corpus = corpus();
+    let body = b"hello world".to_vec();
+    let headers = vec![
+        ("content-type".to_owned(), "text/plain; charset=utf-8".to_owned()),
+        ("content-length".to_owned(), "11".to_owned()),
+        ("etag".to_owned(), "\"5eb63bbbe01eeed093cb22bb8f5acdc3\"".to_owned()),
+        ("last-modified".to_owned(), "Fri, 02 Jan 2026 03:04:05 GMT".to_owned()),
+        ("accept-ranges".to_owned(), "bytes".to_owned()),
+    ];
+    let mut observation = Observation::response(200, headers, body);
+    observation.connection_after = Some(crate::observation::ConnectionState::Open);
+    let mut sut = Scripted::new().with("c-object-0001", 0, observation);
+    let options = RunOptions {
+        filter: Some("c-object-0001".to_owned()),
+        ..RunOptions::default()
+    };
+    let report = run(&corpus, &mut sut, &options);
+    assert!(!report.validate_only, "this run is not a corpus check");
+    let outcome = report.outcomes.first().expect("c-object-0001 is selected");
+    assert_ne!(
+        outcome.verdict,
+        Verdict::Validated,
+        "a case that a target answered is recorded as merely validated"
+    );
+    assert_eq!(outcome.verdict, Verdict::Passed, "{:?}", outcome.diagnostics);
+}
+
 #[test]
 fn a_scripted_target_that_answers_wrongly_makes_the_same_case_fail() {
     let corpus = corpus();
