@@ -165,7 +165,7 @@ pub use rustfs_gateway_core::{
     Answer, ArnForm, AuthRequirement, Authorized, BodyPolicy, BoxFuture, CodecError, CommitOutcome, CommitWork,
     DerivedResourceError, ELEMENT_ORDER, EncodedResponse, ErrorContext, ErrorDetail, ErrorHeader, ErrorResolution, Handler,
     HandlerCancellation, HandlerContext, HandlerDeadlineClass, HandlerError, HandlerErrorContext, HandlerResult, HasOperation,
-    InvalidErrorContext, MetaView, MissingHandlers, MissingObject, NoDerived, Operation, OperationCodec, OperationSet,
+    HttpDate, InvalidErrorContext, MetaView, MissingHandlers, MissingObject, NoDerived, Operation, OperationCodec, OperationSet,
     OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req,
     RequestBody, RequiredParam, ResourceIdentity, ResourceShape, ResourceVisibility, Resp, ResponseBody, ResponseKind,
     ResponseOverride, RouteEntry, RouteSelector, RouterBuilder, TargetKind, resolve,

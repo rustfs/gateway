@@ -66,15 +66,94 @@ fn c_err_n003_delete_missing_key_does_not_hide_a_missing_bucket() {
     assert_eq!(missing_bucket.code(), Some(&ErrorCode::NO_SUCH_BUCKET));
 }
 
+/// c-err-0008 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
 #[test]
 fn c_err_n004_only_an_explicit_versioned_delete_marker_is_method_not_allowed() {
-    assert!(ErrorContext::versioned_delete_marker("").is_err());
+    assert!(ErrorContext::versioned_delete_marker("", MARKER_INSTANT).is_err());
     let resolution = resolve(
-        ErrorContext::versioned_delete_marker("version-1").expect("a non-empty bounded version id"),
+        ErrorContext::versioned_delete_marker("version-1", MARKER_INSTANT).expect("a non-empty bounded version id"),
         ResponseKind::Other,
     );
     assert_eq!(resolution.status(), StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(resolution.code(), Some(&ErrorCode::METHOD_NOT_ALLOWED));
+    // The refusal is only usable because of these two. Without the marker header a client cannot
+    // tell this from a version id that names nothing, and without the instant it cannot tell the
+    // marker it just created from an older one.
+    assert_eq!(
+        header_values(&resolution),
+        vec![
+            ("x-amz-delete-marker".to_owned(), "true".to_owned()),
+            ("last-modified".to_owned(), MARKER_HTTP_DATE.to_owned()),
+        ]
+    );
+}
+
+/// c-err-0007 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
+#[test]
+fn n_a_current_delete_marker_is_a_not_found_that_still_says_it_is_a_marker() {
+    // One backend fact, two answers. Naming the version asks for a representation that is not
+    // there; naming no version asks for the key, which is not there either — but a 405 would tell
+    // the client the method is the problem, and it is not.
+    let key = ObjectKey::new("versioned/current.txt".to_owned()).expect("a valid key");
+    let resolution = resolve(
+        ErrorContext::current_delete_marker(ResourceVisibility::Visible, Some(key), MARKER_INSTANT)
+            .expect("a renderable instant"),
+        ResponseKind::Other,
+    );
+    assert_eq!(resolution.status(), StatusCode::NOT_FOUND);
+    assert_eq!(resolution.code(), Some(&ErrorCode::NO_SUCH_KEY));
+    assert_eq!(
+        header_values(&resolution),
+        vec![
+            ("x-amz-delete-marker".to_owned(), "true".to_owned()),
+            ("last-modified".to_owned(), MARKER_HTTP_DATE.to_owned()),
+        ]
+    );
+}
+
+/// c-err-1006 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
+///
+/// The delete-marker arm of it. A caller who may not list the bucket is told nothing, not even
+/// that the key was once written: the marker header on a 404 would be a sharper existence oracle
+/// than the status it rides on.
+#[test]
+fn n_a_hidden_delete_marker_says_nothing_about_the_key_it_replaced() {
+    let key = ObjectKey::new("versioned/current.txt".to_owned()).expect("a valid key");
+    let resolution = resolve(
+        ErrorContext::current_delete_marker(ResourceVisibility::Hidden, Some(key), MARKER_INSTANT).expect("a renderable instant"),
+        ResponseKind::Other,
+    );
+    assert_eq!(resolution.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resolution.code(), Some(&ErrorCode::ACCESS_DENIED));
+    assert!(header_values(&resolution).is_empty(), "{:?}", header_values(&resolution));
+    let rendered = format!("{resolution:?}");
+    for probe in ["versioned/current.txt", MARKER_HTTP_DATE] {
+        assert!(!rendered.contains(probe), "the refusal leaks {probe:?}:\n{rendered}");
+    }
+}
+
+/// The instant both delete-marker refusals report, and its rendering. Written out rather than
+/// computed, so a change to the renderer is visible here as a diff rather than as agreement
+/// between two calls to the same function.
+const MARKER_INSTANT: i64 = 1_767_236_645;
+const MARKER_HTTP_DATE: &str = "Thu, 01 Jan 2026 03:04:05 GMT";
+
+/// The headers a resolution selected, as `(name, value)` pairs in order.
+fn header_values(resolution: &rustfs_gateway_core::ErrorResolution) -> Vec<(String, String)> {
+    resolution
+        .headers()
+        .iter()
+        .map(|header| (header.name().as_str().to_owned(), header.value()))
+        .collect()
+}
+
+/// A negative control on the pair: an instant outside the range `Last-Modified` can express is
+/// refused at construction rather than rendered as something a cache would misparse.
+#[test]
+fn n_an_unrenderable_instant_is_refused_rather_than_approximated() {
+    assert!(ErrorContext::versioned_delete_marker("version-1", i64::MAX).is_err());
+    assert!(ErrorContext::current_delete_marker(ResourceVisibility::Visible, None, i64::MIN).is_err());
+    assert!(rustfs_gateway_core::HttpDate::from_unix_seconds(i64::MAX).is_err());
 }
 
 #[test]

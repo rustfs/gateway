@@ -1,0 +1,91 @@
+# c-object-0037 — the same delete marker, read without naming a version.
+#
+# Schema dimensions exercised: a versioned bucket, a read that names no version, and the header
+# that separates a deletion from a key that was never written.
+
+[case]
+id = "c-object-0037"
+schema_version = 1
+title = "A get that names no version answers 404 for a delete marker, and says it is one"
+rationale = """
+One backend fact, two answers, and which one a client gets depends only on whether it named a \
+version. Without a version id the object is not there, so 404 NoSuchKey is right and 405 would be \
+wrong — the method is perfectly allowed against the key, there is simply nothing under it. What \
+the 404 must still carry is x-amz-delete-marker, because a client that cannot tell "deleted" from \
+"never written" cannot decide whether a restore is possible, and it is the same header the 405 in \
+c-object-0036 uses to say the opposite thing. An implementation that sets the header on one and \
+not the other leaves the client with no way to read either."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html"
+summary = "A read that does not name a version and finds a delete marker as the current version is answered 404 with x-amz-delete-marker set."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The read that names no version returns the current version, and a delete marker as the current version is a not-found."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "versioned/current.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[[exchanges]]
+name = "delete-the-key"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-object/versioned/current.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-delete-marker" = "true"
+
+[[exchanges]]
+name = "the-current-version-is-a-deletion"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/versioned/current.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag", "accept-ranges", "content-range"]
+
+[exchanges.expect.headers_present]
+"x-amz-delete-marker" = "true"
+"last-modified" = "*"
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>NoSuchKey</Code>", "<Key>versioned/current.txt</Key>"]
+not_contains_utf8 = ["hello world", "<Code>MethodNotAllowed</Code>"]

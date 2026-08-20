@@ -1158,6 +1158,18 @@ impl Fixture {
             .find(|version| version.version_id == version_id)
     }
 
+    /// The newest version of a key, whatever it holds.
+    ///
+    /// The twin of [`Fixture::object`] for a reader that has to tell "nothing was ever here" from
+    /// "a deletion was recorded here": [`Fixture::object`] answers `None` for both, and those are
+    /// two different responses on the wire.
+    #[must_use]
+    pub fn newest_version(&self, bucket: &str, key: &str) -> Option<&StoredVersion> {
+        self.objects
+            .get(&(bucket.to_owned(), key.to_owned()))
+            .and_then(|versions| versions.last())
+    }
+
     /// The id of the newest version of a key, whatever it holds.
     #[must_use]
     pub fn newest_version_id(&self, bucket: &str, key: &str) -> Option<&str> {
@@ -1844,6 +1856,72 @@ fn refuse_versioned_lock_state(version_id: Option<&str>) -> Result<(), HandlerEr
     ))
 }
 
+/// What a read found under a key, before any precondition is evaluated.
+///
+/// Three states rather than an `Option`, because "there is nothing here" and "there is a deletion
+/// recorded here" are different answers on the wire: the second carries `x-amz-delete-marker`, and
+/// that header is the only thing that lets a client tell a key it deleted from one it never wrote.
+#[derive(Debug, Clone, Copy)]
+enum Selected<'a> {
+    /// A representation the read may serve.
+    Object(&'a StoredObject),
+    /// No version of this key exists.
+    Absent,
+    /// The newest version is a delete marker, recorded at this instant in Unix seconds.
+    Deleted(i64),
+}
+
+impl<'a> Selected<'a> {
+    /// The representation, for the precondition evaluation that runs before the refusal is chosen.
+    const fn object(self) -> Option<&'a StoredObject> {
+        match self {
+            Self::Object(object) => Some(object),
+            Self::Absent | Self::Deleted(_) => None,
+        }
+    }
+}
+
+/// What a read with no `versionId` finds: the newest version, or the deletion that replaced it.
+fn select_current<'a>(fixture: &'a Fixture, bucket: &str, key: &str) -> Selected<'a> {
+    match fixture.newest_version(bucket, key) {
+        None => Selected::Absent,
+        Some(version) => match version.object.as_ref() {
+            Some(object) => Selected::Object(object),
+            None => Selected::Deleted(version.last_modified),
+        },
+    }
+}
+
+/// What a read that named a `versionId` finds, or the refusal that version earns.
+///
+/// The two refusals are not interchangeable and the distinction is the whole point of the pair:
+/// `NoSuchVersion` says the id names nothing, `MethodNotAllowed` says it names a deletion. It is
+/// the same split [`read_copy_source`] draws for a copy source.
+fn select_named<'a>(fixture: &'a Fixture, bucket: &str, key: &str, version_id: &str) -> Result<&'a StoredObject, HandlerError> {
+    let version = fixture.version(bucket, key, version_id).ok_or_else(|| {
+        HandlerError::from(HandlerErrorContext::missing_object(MissingObject::Version, ResourceVisibility::Visible))
+    })?;
+    version
+        .object
+        .as_ref()
+        .ok_or_else(|| versioned_delete_marker(version_id, version.last_modified))
+}
+
+/// The `405` a read of a named delete marker gets, with the two headers it must carry.
+fn versioned_delete_marker(version_id: &str, last_modified: i64) -> HandlerError {
+    HandlerErrorContext::versioned_delete_marker(version_id, last_modified)
+        .map(HandlerError::from)
+        .unwrap_or_else(|_| HandlerError::internal_error("a fixture version id is not valid"))
+}
+
+/// The `404` a read with no `versionId` gets when the newest version is a delete marker.
+fn deleted_by_marker(key: &str, last_modified: i64) -> HandlerError {
+    let named = ObjectKey::new(key.to_owned()).ok();
+    HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, named, last_modified)
+        .map(HandlerError::from)
+        .unwrap_or_else(|_| HandlerError::internal_error("a fixture delete marker has no renderable instant"))
+}
+
 fn no_such_key(key: &str) -> HandlerError {
     match ObjectKey::new(key.to_owned()) {
         Ok(key) => HandlerErrorContext::missing_object_for(key, MissingObject::Key, ResourceVisibility::Visible).into(),
@@ -2422,10 +2500,8 @@ fn tag_pairs(document: &dto::Tagging, scope: TagScope) -> Result<Vec<(String, St
 /// write — and `NoSuchKey` would be the wrong sentence for it, because the version is right there
 /// in the history. It is the same distinction [`read_copy_source`] draws for a copy source, and it
 /// is drawn here for the same reason: a client branches on the two answers.
-fn tagging_delete_marker(version_id: &str) -> HandlerError {
-    HandlerErrorContext::versioned_delete_marker(version_id)
-        .map(HandlerError::from)
-        .unwrap_or_else(|_| HandlerError::internal_error("a fixture version id is not valid"))
+fn tagging_delete_marker(version_id: &str, last_modified: i64) -> HandlerError {
+    versioned_delete_marker(version_id, last_modified)
 }
 
 /// The version id a tagging answer reports, for the version it actually acted on.
@@ -2547,14 +2623,7 @@ fn read_copy_source(fixture: &Fixture, source: &CopySource) -> Result<(StoredObj
             .flatten();
         return Ok((object, reported));
     };
-    let version = fixture.version(bucket, key, requested).ok_or_else(|| {
-        HandlerError::from(HandlerErrorContext::missing_object(MissingObject::Version, ResourceVisibility::Visible))
-    })?;
-    let object = version.object.as_ref().ok_or_else(|| {
-        HandlerErrorContext::versioned_delete_marker(requested)
-            .map(HandlerError::from)
-            .unwrap_or_else(|_| HandlerError::internal_error("a fixture version id is not valid"))
-    })?;
+    let object = select_named(fixture, bucket, key, requested)?;
     Ok((object.clone(), Some(requested.to_owned())))
 }
 
@@ -2680,7 +2749,15 @@ impl Stub {
         refuse_conflicting_selectors(input.range.as_ref().map(|range| range.as_str()), input.part_number)?;
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        let found = fixture.object(input.bucket.as_str(), input.key.as_str());
+        // A named version is resolved before anything conditional: a precondition evaluated against
+        // a representation the request cannot reach is not a question, and the two refusals a
+        // version id earns — the id names nothing, the id names a deletion — are decided by the
+        // version alone.
+        let selected = match input.version_id.as_deref() {
+            Some(version_id) => Selected::Object(select_named(&fixture, input.bucket.as_str(), input.key.as_str(), version_id)?),
+            None => select_current(&fixture, input.bucket.as_str(), input.key.as_str()),
+        };
+        let found = selected.object();
         let condition = guard_read(
             found,
             input.if_match.as_deref(),
@@ -2689,7 +2766,11 @@ impl Stub {
             input.if_modified_since.as_ref().map(|stamp| stamp.secs()),
             fixture.now,
         )?;
-        let Some(object) = found else { return Err(no_such_key(input.key.as_str())) };
+        let object = match selected {
+            Selected::Object(object) => object,
+            Selected::Absent => return Err(no_such_key(input.key.as_str())),
+            Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
+        };
         if condition == ConditionalOutcome::NotModified {
             let e_tag = if condition.includes_selected_etag() {
                 Some(entity_tag(&object.etag)?)
@@ -2763,7 +2844,15 @@ impl Stub {
         refuse_conflicting_selectors(input.range.as_ref().map(|range| range.as_str()), input.part_number)?;
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        let found = fixture.object(input.bucket.as_str(), input.key.as_str());
+        // A named version is resolved before anything conditional: a precondition evaluated against
+        // a representation the request cannot reach is not a question, and the two refusals a
+        // version id earns — the id names nothing, the id names a deletion — are decided by the
+        // version alone.
+        let selected = match input.version_id.as_deref() {
+            Some(version_id) => Selected::Object(select_named(&fixture, input.bucket.as_str(), input.key.as_str(), version_id)?),
+            None => select_current(&fixture, input.bucket.as_str(), input.key.as_str()),
+        };
+        let found = selected.object();
         let condition = guard_read(
             found,
             input.if_match.as_deref(),
@@ -2772,7 +2861,11 @@ impl Stub {
             input.if_modified_since.as_ref().map(|stamp| stamp.secs()),
             fixture.now,
         )?;
-        let Some(object) = found else { return Err(no_such_key(input.key.as_str())) };
+        let object = match selected {
+            Selected::Object(object) => object,
+            Selected::Absent => return Err(no_such_key(input.key.as_str())),
+            Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
+        };
         if condition == ConditionalOutcome::NotModified {
             let e_tag = if condition.includes_selected_etag() {
                 Some(entity_tag(&object.etag)?)
@@ -3069,12 +3162,16 @@ impl Stub {
             None => fixture
                 .object(input.bucket.as_str(), input.key.as_str())
                 .ok_or_else(|| no_such_key(input.key.as_str()))?,
-            Some(version_id) => fixture
-                .version(input.bucket.as_str(), input.key.as_str(), version_id)
-                .ok_or_else(no_such_version)?
-                .object
-                .as_ref()
-                .ok_or_else(|| tagging_delete_marker(version_id))?,
+            Some(version_id) => {
+                let version = fixture
+                    .version(input.bucket.as_str(), input.key.as_str(), version_id)
+                    .ok_or_else(no_such_version)?;
+                let last_modified = version.last_modified;
+                version
+                    .object
+                    .as_ref()
+                    .ok_or_else(|| tagging_delete_marker(version_id, last_modified))?
+            }
         };
         Ok(Resp::new(dto::GetObjectTaggingOutput {
             tag_set: tag_elements(&object.tags)?,
@@ -3101,12 +3198,16 @@ impl Stub {
             None => fixture
                 .object_mut(input.bucket.as_str(), input.key.as_str())
                 .ok_or_else(|| no_such_key(input.key.as_str()))?,
-            Some(version_id) => fixture
-                .version_mut(input.bucket.as_str(), input.key.as_str(), version_id)
-                .ok_or_else(no_such_version)?
-                .object
-                .as_mut()
-                .ok_or_else(|| tagging_delete_marker(version_id))?,
+            Some(version_id) => {
+                let version = fixture
+                    .version_mut(input.bucket.as_str(), input.key.as_str(), version_id)
+                    .ok_or_else(no_such_version)?;
+                let last_modified = version.last_modified;
+                version
+                    .object
+                    .as_mut()
+                    .ok_or_else(|| tagging_delete_marker(version_id, last_modified))?
+            }
         };
         object.tags = pairs;
         Ok(Resp::new(dto::PutObjectTaggingOutput { version_id: reported }))
@@ -3127,12 +3228,16 @@ impl Stub {
             None => fixture
                 .object_mut(input.bucket.as_str(), input.key.as_str())
                 .ok_or_else(|| no_such_key(input.key.as_str()))?,
-            Some(version_id) => fixture
-                .version_mut(input.bucket.as_str(), input.key.as_str(), version_id)
-                .ok_or_else(no_such_version)?
-                .object
-                .as_mut()
-                .ok_or_else(|| tagging_delete_marker(version_id))?,
+            Some(version_id) => {
+                let version = fixture
+                    .version_mut(input.bucket.as_str(), input.key.as_str(), version_id)
+                    .ok_or_else(no_such_version)?;
+                let last_modified = version.last_modified;
+                version
+                    .object
+                    .as_mut()
+                    .ok_or_else(|| tagging_delete_marker(version_id, last_modified))?
+            }
         };
         object.tags.clear();
         Ok(Resp::new(dto::DeleteObjectTaggingOutput { version_id: reported }))

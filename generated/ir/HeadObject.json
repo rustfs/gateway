@@ -638,7 +638,16 @@
   "errors": {
               "not_configured": null,
               "allows_error_after_200": false,
-              "codes": ["NoSuchBucket", "NoSuchKey", "AccessDenied", "NotFound", "PreconditionFailed", "NotModified"]
+              "codes": [
+                         "NoSuchBucket",
+                         "NoSuchKey",
+                         "AccessDenied",
+                         "NotFound",
+                         "PreconditionFailed",
+                         "NotModified",
+                         "MethodNotAllowed",
+                         "NoSuchVersion"
+                       ]
             },
   "derived_resources": [],
   "head_mirrors": "GetObject",

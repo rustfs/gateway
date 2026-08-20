@@ -61,6 +61,7 @@
 use std::borrow::Cow;
 
 use http::HeaderName;
+use rustfs_gateway_types::{Timestamp, TimestampFormat};
 
 /// The message AWS answers a range it cannot satisfy with.
 ///
@@ -143,7 +144,44 @@ impl RedirectTarget {
     }
 }
 
-/// A value refused by [`RegionLabel::new`] or [`RedirectTarget::new`].
+/// An instant a refusal may state, rendered once at construction.
+///
+/// Carried by [`ErrorHeader::LastModified`]. The stored value is the rendered RFC 9110 §5.6.7
+/// `IMF-fixdate`, not the reading it came from, for the reason [`RegionLabel`] stores a validated
+/// name: [`ErrorHeader::value`] is infallible, so a reading the wire format cannot express has to
+/// be refused here rather than papered over there. A fallback date on a refusal is worse than no
+/// header — SDKs and caches parse this field, and a value they cannot parse is one they may
+/// substitute their own for.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HttpDate(Box<str>);
+
+impl HttpDate {
+    /// Renders a Unix second reading as an `IMF-fixdate`.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidWireLabel`] when the reading falls outside the four-digit year range the wire
+    /// format can express.
+    pub fn from_unix_seconds(seconds: i64) -> Result<Self, InvalidWireLabel> {
+        let text = Timestamp::from_secs(seconds)
+            .render(TimestampFormat::HttpDate)
+            .map_err(|_| InvalidWireLabel)?;
+        // Belt and braces against the one property `value()` promises: the renderer is this
+        // repository's own and emits ASCII, and the assertion is what keeps that true if it changes.
+        if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_graphic() || byte == b' ') {
+            return Err(InvalidWireLabel);
+        }
+        Ok(Self(Box::from(text.as_str())))
+    }
+
+    /// The rendered date.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A value refused by [`RegionLabel::new`], [`RedirectTarget::new`] or [`HttpDate::from_unix_seconds`].
 ///
 /// Carries nothing on purpose: echoing the refused bytes back would hand the caller of a
 /// diagnostic path the very bytes the validation exists to keep out of a header.
@@ -206,6 +244,23 @@ pub enum ErrorHeader {
         /// The endpoint the client should retry against.
         target: RedirectTarget,
     },
+    /// `x-amz-delete-marker: true` — the version the read selected is a deletion, not data.
+    ///
+    /// The whole difference between the `405` a read of a delete marker gets and the `404` that
+    /// means the version id is unknown: without it a client cannot tell a marker it should remove
+    /// from a version id it should stop using, and a versioned restore cannot be driven. Only the
+    /// backend knows a version is a marker, and the value is this module's literal `true`, never a
+    /// reading of anything the caller sent.
+    DeleteMarker,
+    /// `Last-Modified: <IMF-fixdate>` — when the selected version was written.
+    ///
+    /// AWS answers it on the refusal a delete-marker read gets, and it is what lets a client
+    /// decide whether the marker is the one it just created. Only the backend knows the instant;
+    /// [`HttpDate`] fixes the syntax.
+    LastModified {
+        /// The instant the selected version was written.
+        at: HttpDate,
+    },
 }
 
 impl ErrorHeader {
@@ -217,6 +272,8 @@ impl ErrorHeader {
             Self::RetryAfter { .. } => HeaderName::from_static("retry-after"),
             Self::BucketRegion { .. } => HeaderName::from_static("x-amz-bucket-region"),
             Self::RedirectLocation { .. } => HeaderName::from_static("location"),
+            Self::DeleteMarker => HeaderName::from_static("x-amz-delete-marker"),
+            Self::LastModified { .. } => HeaderName::from_static("last-modified"),
         }
     }
 
@@ -234,6 +291,8 @@ impl ErrorHeader {
             Self::RetryAfter { seconds } => seconds.to_string(),
             Self::BucketRegion { region } => region.as_str().to_owned(),
             Self::RedirectLocation { target } => target.as_str().to_owned(),
+            Self::DeleteMarker => "true".to_owned(),
+            Self::LastModified { at } => at.as_str().to_owned(),
         }
     }
 }
@@ -343,13 +402,19 @@ mod tests {
             ErrorHeader::RedirectLocation {
                 target: RedirectTarget::new("https://b.s3.eu-west-1.example.com").expect("a valid target"),
             },
+            ErrorHeader::DeleteMarker,
+            ErrorHeader::LastModified {
+                at: HttpDate::from_unix_seconds(1_767_236_645).expect("a renderable instant"),
+            },
         ];
         for header in &all {
             match header {
                 ErrorHeader::UnsatisfiedRange { .. }
                 | ErrorHeader::RetryAfter { .. }
                 | ErrorHeader::BucketRegion { .. }
-                | ErrorHeader::RedirectLocation { .. } => {}
+                | ErrorHeader::RedirectLocation { .. }
+                | ErrorHeader::DeleteMarker
+                | ErrorHeader::LastModified { .. } => {}
             }
         }
         all
