@@ -320,6 +320,7 @@ where
                 request_stats: Arc::clone(&request_stats),
                 request_capacity: Arc::clone(&request_capacity),
                 header_deadline,
+                metrics: Arc::clone(&metrics.inner),
                 #[cfg(test)]
                 deadline_observer: deadline_observer
                     .as_ref()
@@ -370,6 +371,8 @@ struct ConnectionState {
     request_stats: Arc<RequestStats>,
     request_capacity: Arc<RequestCapacity>,
     header_deadline: tokio::time::Instant,
+    /// The listener's counters, so the lingering drain can report the octets it discards.
+    metrics: Arc<MetricsInner>,
     #[cfg(test)]
     deadline_observer: Option<deadline_test::DeadlineArmObserver>,
     _active: ActiveConnection,
@@ -392,6 +395,7 @@ where
         request_stats,
         request_capacity,
         header_deadline,
+        metrics,
         #[cfg(test)]
         deadline_observer,
         _active,
@@ -439,7 +443,8 @@ where
         config.keep_alive_idle,
         config.write_progress_timeout,
         config.lingering_close_time,
-    );
+    )
+    .count_octets_into(Arc::clone(&metrics.transport_read), Arc::clone(&metrics.lingering_drained));
     #[cfg(test)]
     let io = match &deadline_observer {
         Some(observer) => io.observe_header_pending(observer.progress_callback()),

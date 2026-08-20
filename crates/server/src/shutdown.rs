@@ -20,7 +20,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use tokio::sync::oneshot;
@@ -70,6 +70,10 @@ pub(crate) struct MetricsInner {
     pub(crate) accepted: AtomicUsize,
     pub(crate) active: AtomicUsize,
     pub(crate) per_ip_rejected: AtomicUsize,
+    /// Shared with every connection's `ProgressIo`, which is where the octets are discarded.
+    pub(crate) lingering_drained: Arc<AtomicU64>,
+    /// Shared with every connection's `ProgressIo`; counts every octet it reads, drain included.
+    pub(crate) transport_read: Arc<AtomicU64>,
 }
 
 impl ServerMetrics {
@@ -89,6 +93,32 @@ impl ServerMetrics {
     #[must_use]
     pub fn per_ip_rejections(&self) -> usize {
         self.inner.per_ip_rejected.load(Ordering::Relaxed)
+    }
+
+    /// Octets read and discarded by the lingering close, summed over every connection.
+    ///
+    /// This is the *server's* count of what the drain accepted, and it exists because nothing
+    /// else here is. A client's own `write()` returns once the octets are in its send buffer, not
+    /// once this process has read them, and a send buffer the kernel auto-tunes into the megabytes
+    /// can absorb a whole body while the drain reads nothing — so "the peer got its body out" is
+    /// not an observation of the drain, in either direction. See rustfs/gateway#274.
+    ///
+    /// Counted where the octets are discarded, so it excludes everything the request parser read
+    /// before the refusal was written: it is what the linger accepted and nothing else.
+    #[must_use]
+    pub fn lingering_octets_drained(&self) -> u64 {
+        self.inner.lingering_drained.load(Ordering::Relaxed)
+    }
+
+    /// Octets read off accepted transports, summed over every connection.
+    ///
+    /// Everything [`ServerMetrics::lingering_octets_drained`] counts, plus everything the request
+    /// parser read before it. The pair is what makes "the peer's whole request was accepted" an
+    /// exact statement without having to know how much of a body the parser happened to buffer
+    /// alongside a head.
+    #[must_use]
+    pub fn transport_octets_read(&self) -> u64 {
+        self.inner.transport_read.load(Ordering::Relaxed)
     }
 }
 
