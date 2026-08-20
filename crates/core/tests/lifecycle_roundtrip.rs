@@ -738,15 +738,20 @@ fn n_an_element_this_codec_does_not_know_is_gone_after_a_re_encode() {
 /// writes a document it will not read, and since the write path is parse-then-reserialise, a rule
 /// scoped by such a key is one no operator can install at all.
 ///
-/// rustfs/gateway#227 pinned the same divergence in the tagging round-trip; lifecycle reaches it by
-/// a narrower door, since that alphabet carries `/` and this one does not, leaving `..` alone as the
-/// single spelling [`tag`] can generate — about 3% of runs, hence the intermittent red. The keys
-/// below are deliberately not all reachable from it: they are the shape of the rule, not a sample.
+/// This family's instance is rustfs/gateway#226, and it is the third of three: rustfs/gateway#227
+/// pinned it in the tagging round-trip and rustfs/gateway#251 in the replication one, as
+/// `a_filter_tag_key_naming_a_traversal_segment_is_written_and_then_refused` (rustfs/gateway#247).
+/// Lifecycle reaches it by a narrower door than either — that alphabet carries `/` and this one does
+/// not, leaving `..` alone as the single spelling [`tag`] can generate, about 3% of runs, which is
+/// why this is the family that stayed intermittently red instead of being caught on the way in. The
+/// keys below are deliberately not all reachable from [`tag`]: they are the shape of the rule, not a
+/// sample of it.
 ///
 /// Pinned rather than fixed: the repair is a tag-key type that is not the object-key type, a model
 /// and codegen change with its own blast radius, and the floor and its double-slash policy are
-/// rustfs/backlog#1750's subject. This is what makes the narrowing in [`tag`] honest — it goes red
-/// the day that lands, and whoever lands it deletes this and its tagging twin together.
+/// rustfs/backlog#1750's subject — so it has to move all three families at once and does not belong
+/// in a test PR. This is what makes the narrowing in [`tag`] honest: it goes red the day that lands,
+/// and whoever lands it deletes this and its two siblings together.
 #[test]
 fn n_a_tag_key_the_object_key_floor_refuses_is_a_known_divergence() {
     // Both positions a tag can occupy, because both are fed by the one narrowed generator: a
