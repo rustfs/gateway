@@ -97,10 +97,10 @@ fn cost(len: usize, sha256: &str) -> (u64, u64) {
     (stats.total_blocks, stats.total_bytes)
 }
 
-/// Runs one isolated probe process at `len` and reads back the two numbers it measured.
-fn measure(len: usize) -> (u64, u64) {
-    let numbers = support::allocations::measure(PROBE_TEST, PROBE_ENV, PROBE_SENTINEL, len, 2);
-    (numbers[0], numbers[1])
+/// Runs one isolated probe process measuring both sizes, and reads back what it measured.
+fn measure() -> ((u64, u64), (u64, u64)) {
+    let rows = support::allocations::measure(PROBE_TEST, PROBE_ENV, PROBE_SENTINEL, &[SMALL, LARGE], 2);
+    ((rows[0][0], rows[0][1]), (rows[1][0], rows[1][1]))
 }
 
 /// How many more heap *blocks* the larger request may allocate than the smaller one.
@@ -192,16 +192,16 @@ const MEASURED_BYTES_FLOOR: u64 = 4096;
 /// their difference.
 #[test]
 fn a_requests_heap_does_not_grow_with_its_body() {
-    if let Some(len) = std::env::var_os(PROBE_ENV) {
-        let len: usize = len.to_string_lossy().parse().expect("a body size");
-        let sha256 = if len == SMALL { SMALL_SHA256 } else { LARGE_SHA256 };
-        let (blocks, bytes) = cost(len, sha256);
-        println!("{PROBE_SENTINEL}{blocks} {bytes}");
+    if let Some(sizes) = support::allocations::requested_sizes(PROBE_ENV) {
+        for len in sizes {
+            let sha256 = if len == SMALL { SMALL_SHA256 } else { LARGE_SHA256 };
+            let (blocks, bytes) = cost(len, sha256);
+            println!("{PROBE_SENTINEL}{blocks} {bytes}");
+        }
         return;
     }
 
-    let (small_blocks, small_bytes) = measure(SMALL);
-    let (large_blocks, large_bytes) = measure(LARGE);
+    let ((small_blocks, small_bytes), (large_blocks, large_bytes)) = measure();
     println!("small body {SMALL}: {small_blocks} blocks, {small_bytes} bytes");
     println!("large body {LARGE}: {large_blocks} blocks, {large_bytes} bytes");
 

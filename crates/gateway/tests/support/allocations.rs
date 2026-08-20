@@ -23,13 +23,31 @@
 //! Upstream: `rustfs-gateway`. Downstream: `tests/request_allocations.rs`,
 //! `tests/chunked_allocations.rs`.
 //!
-//! # Why a second process and not a second window
+//! # Why a separate process, and how many
 //!
 //! `dhat` profiles a whole process, and the tests in this binary run in parallel threads, so a
-//! window opened in-place would count whatever the tests beside it were allocating at the time. A
-//! second window opened after the first has been dropped is a question about `dhat`'s own
-//! bookkeeping that a gate should not have to answer. One process per size, each measuring one
-//! thing, is the arrangement with no such question in it.
+//! window opened in place would count whatever the tests beside it were allocating at the time.
+//! That is why the measurement is exiled to a process of its own, and it is not negotiable.
+//!
+//! *How many* processes is a different question, and rustfs/gateway#225 left it unanswered by
+//! taking one per input size — a second window opened after the first was dropped being "a
+//! question about `dhat`'s own bookkeeping that a gate should not have to answer". It is answered
+//! now, because the answer is worth about twenty seconds of CI per gate. Measured both ways on the
+//! `aws-chunked` probe at 64 KiB and 1 MiB:
+//!
+//! | | blocks | total bytes | peak bytes |
+//! | --- | --- | --- | --- |
+//! | two processes, difference between the sizes | 125 | 2,951,866 | 999,160 |
+//! | two windows in one process, same difference | 125 | 2,951,962 | 999,160 |
+//!
+//! The block and peak differences are identical and the byte difference moves by 96 — allocator
+//! state the second window inherits, four parts per hundred thousand of the quantity being
+//! compared. Every gate here asserts on differences between sizes, never on an absolute, so a
+//! probe may measure several sizes in one process. It must still be its own process.
+//!
+//! What does *not* follow is that two different gates may share one: each opens its own window
+//! around its own exchange, and interleaving them would put one gate's allocations inside the
+//! other's window.
 
 use std::process::Command;
 use std::sync::Arc;
@@ -50,38 +68,63 @@ pub fn probe_service() -> S3Service {
         .expect("a complete assembly")
 }
 
-/// Runs `test` as an isolated process with `env` set to `len`, and returns the `fields` numbers it
-/// printed after `sentinel`.
+/// Runs `test` as an isolated process with `env` set to `sizes`, and returns the `fields` numbers
+/// from each line it printed after `sentinel` — one line per size, in order.
 ///
 /// # Panics
 ///
-/// When the probe process fails, prints no sentinel line, or prints something after it that is not
-/// `fields` whitespace-separated numbers. Every one of those is the shape that would otherwise turn
-/// a gate into two zeroes compared against each other: a probe that crashed before it measured
-/// anything, or one whose name no longer selects a test, exits successfully with no line to find.
+/// When the probe process fails, prints a different number of sentinel lines than there were
+/// sizes, or prints something after one that is not `fields` whitespace-separated numbers. Every
+/// one of those is the shape that would otherwise turn a gate into two zeroes compared against
+/// each other: a probe that crashed before it measured anything, or one whose name no longer
+/// selects a test, exits successfully with no line to find.
 #[must_use]
-pub fn measure(test: &str, env: &str, sentinel: &str, len: usize, fields: usize) -> Vec<u64> {
+pub fn measure(test: &str, env: &str, sentinel: &str, sizes: &[usize], fields: usize) -> Vec<Vec<u64>> {
     let executable = std::env::current_exe().expect("the active test binary has a path");
+    let request = sizes.iter().map(usize::to_string).collect::<Vec<_>>().join(",");
     let output = Command::new(executable)
         .args(["--exact", test, "--nocapture"])
-        .env(env, len.to_string())
+        .env(env, &request)
         .output()
         .expect("the isolated allocation probe starts");
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     assert!(
         output.status.success(),
-        "the {len}-byte allocation probe failed:\n{stdout}{}",
+        "the allocation probe for {request} failed:\n{stdout}{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let line = stdout
+    let rows: Vec<Vec<u64>> = stdout
         .lines()
-        .find_map(|line| line.strip_prefix(sentinel))
-        .unwrap_or_else(|| panic!("the {len}-byte allocation probe measured nothing:\n{stdout}"));
-    let numbers: Vec<u64> = line.split_whitespace().filter_map(|text| text.parse().ok()).collect();
+        .filter_map(|line| line.strip_prefix(sentinel))
+        .map(|line| line.split_whitespace().filter_map(|text| text.parse().ok()).collect())
+        .collect();
     assert_eq!(
-        numbers.len(),
-        fields,
-        "the {len}-byte allocation probe printed `{line}`, which is not {fields} numbers"
+        rows.len(),
+        sizes.len(),
+        "the allocation probe for {request} printed {} measured lines, not {}:\n{stdout}",
+        rows.len(),
+        sizes.len()
     );
-    numbers
+    for row in &rows {
+        assert_eq!(
+            row.len(),
+            fields,
+            "the allocation probe for {request} printed a line that is not {fields} numbers:\n{stdout}"
+        );
+    }
+    rows
+}
+
+/// Parses the comma-separated sizes a probe process was asked for.
+///
+/// `None` when the variable is absent, which is how a probe test tells the two roles apart.
+#[must_use]
+pub fn requested_sizes(env: &str) -> Option<Vec<usize>> {
+    let raw = std::env::var_os(env)?;
+    Some(
+        raw.to_string_lossy()
+            .split(',')
+            .map(|text| text.trim().parse().expect("a body size"))
+            .collect(),
+    )
 }

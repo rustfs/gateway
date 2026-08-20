@@ -194,10 +194,33 @@ fn cost(len: usize) -> (u64, u64, u64, u64) {
     (stats.total_blocks, stats.total_bytes, stats.max_bytes as u64, frames)
 }
 
-/// Runs one isolated probe process at `len` and reads back the four numbers it measured.
-fn measure(len: usize) -> (u64, u64, u64, u64) {
-    let numbers = support::allocations::measure(PROBE_TEST, PROBE_ENV, PROBE_SENTINEL, len, 4);
-    (numbers[0], numbers[1], numbers[2], numbers[3])
+/// Runs one isolated probe process measuring both sizes, and reads back what it measured.
+///
+/// One process for two sizes, not two: `support::allocations` records why that is sound, and the
+/// difference on this binary's CI runner is about twenty seconds.
+fn measure() -> (Cost, Cost) {
+    let rows = support::allocations::measure(PROBE_TEST, PROBE_ENV, PROBE_SENTINEL, &[SMALL, LARGE], 4);
+    (Cost::from_row(&rows[0]), Cost::from_row(&rows[1]))
+}
+
+/// What one upload cost, as the four numbers the probe prints.
+#[derive(Clone, Copy)]
+struct Cost {
+    blocks: u64,
+    bytes: u64,
+    peak: u64,
+    frames: u64,
+}
+
+impl Cost {
+    fn from_row(row: &[u64]) -> Self {
+        Self {
+            blocks: row[0],
+            bytes: row[1],
+            peak: row[2],
+            frames: row[3],
+        }
+    }
 }
 
 /// How many copies of the body may be **resident at once** at the peak of an upload.
@@ -288,21 +311,27 @@ const MEASURED_BYTES_FLOOR: u64 = 4096;
 /// object plus the framing it arrived in*.
 #[test]
 fn c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body() {
-    if let Some(len) = std::env::var_os(PROBE_ENV) {
-        let len: usize = len.to_string_lossy().parse().expect("a body size");
-        let (blocks, bytes, peak, frames) = cost(len);
-        println!("{PROBE_SENTINEL}{blocks} {bytes} {peak} {frames}");
+    if let Some(sizes) = support::allocations::requested_sizes(PROBE_ENV) {
+        for len in sizes {
+            let (blocks, bytes, peak, frames) = cost(len);
+            println!("{PROBE_SENTINEL}{blocks} {bytes} {peak} {frames}");
+        }
         return;
     }
 
-    let (small_blocks, small_bytes, small_peak, small_frames) = measure(SMALL);
-    let (large_blocks, large_bytes, large_peak, large_frames) = measure(LARGE);
-    println!("small body {SMALL}: {small_blocks} blocks, {small_bytes} bytes, {small_peak} peak, {small_frames} frames");
-    println!("large body {LARGE}: {large_blocks} blocks, {large_bytes} bytes, {large_peak} peak, {large_frames} frames");
+    let (small, large) = measure();
+    println!(
+        "small body {SMALL}: {} blocks, {} bytes, {} peak, {} frames",
+        small.blocks, small.bytes, small.peak, small.frames
+    );
+    println!(
+        "large body {LARGE}: {} blocks, {} bytes, {} peak, {} frames",
+        large.blocks, large.bytes, large.peak, large.frames
+    );
 
     // First: that anything was measured at all. Everything below is a statement about the
     // difference between two numbers, and two zeroes have no difference.
-    for (label, blocks, bytes) in [("small", small_blocks, small_bytes), ("large", large_blocks, large_bytes)] {
+    for (label, blocks, bytes) in [("small", small.blocks, small.bytes), ("large", large.blocks, large.bytes)] {
         assert!(
             blocks >= MEASURED_BLOCKS_FLOOR && bytes >= MEASURED_BYTES_FLOOR,
             "the {label} probe recorded {blocks} blocks and {bytes} bytes, which is less than a \
@@ -315,37 +344,45 @@ fn c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body() {
     // stated against. Two equal frame counts would make that bound a flat sixteen without saying
     // so, and would mean `FRAME` had stopped being the constant this file holds fixed.
     assert!(
-        large_frames > small_frames,
-        "both runs arrived in {small_frames} and {large_frames} frames; the larger body must be \
-         fed in more frames than the smaller one for the per-frame bound below to mean anything"
+        large.frames > small.frames,
+        "both runs arrived in {} and {} frames; the larger body must be fed in more frames than \
+         the smaller one for the per-frame bound below to mean anything",
+        small.frames,
+        large.frames
     );
 
     let payload_growth = (LARGE - SMALL) as u64;
-    let frame_growth = large_frames - small_frames;
-    let block_growth = large_blocks.saturating_sub(small_blocks);
-    let byte_growth = large_bytes.saturating_sub(small_bytes);
-    let peak_growth = large_peak.saturating_sub(small_peak);
+    let frame_growth = large.frames - small.frames;
+    let block_growth = large.blocks.saturating_sub(small.blocks);
+    let byte_growth = large.bytes.saturating_sub(small.bytes);
+    let peak_growth = large.peak.saturating_sub(small.peak);
 
     assert!(
         peak_growth <= payload_growth * COPIES_HELD + BYTES_HEADROOM,
-        "a body {}x larger held {peak_growth} more bytes at its peak ({small_peak} -> {large_peak}) \
-         for {payload_growth} more body, which is more than the {COPIES_HELD} copy this gate \
-         allows. Something on the framed path is holding the wire body beside the decoded one, and \
-         the ingest window is bounding only half of what the request costs.",
-        LARGE / SMALL
+        "a body {}x larger held {peak_growth} more bytes at its peak ({} -> {}) for \
+         {payload_growth} more body, which is more than the {COPIES_HELD} copy this gate allows. \
+         Something on the framed path is holding the wire body beside the decoded one, and the \
+         ingest window is bounding only half of what the request costs.",
+        LARGE / SMALL,
+        small.peak,
+        large.peak
     );
     assert!(
         byte_growth <= payload_growth * COPIES_ALLOCATED + BYTES_HEADROOM,
         "the aws-chunked path allocated {byte_growth} more bytes for {payload_growth} more body \
-         ({small_bytes} -> {large_bytes}), which is more than the {COPIES_ALLOCATED} copies one \
-         doubling collector and the harness's own per-frame allocation cost"
+         ({} -> {}), which is more than the {COPIES_ALLOCATED} copies one doubling collector and \
+         the harness's own per-frame allocation cost",
+        small.bytes,
+        large.bytes
     );
     let block_allowance = frame_growth * HARNESS_BLOCKS_PER_FRAME + BLOCK_HEADROOM;
     assert!(
         block_growth <= block_allowance,
-        "a body {}x larger cost {block_growth} more allocations ({small_blocks} -> {large_blocks}) \
-         for {frame_growth} more frames, not at most {block_allowance}: something on the streaming \
-         path allocates per frame or per chunk on top of the one the harness spends",
-        LARGE / SMALL
+        "a body {}x larger cost {block_growth} more allocations ({} -> {}) for {frame_growth} \
+         more frames, not at most {block_allowance}: something on the streaming path allocates per \
+         frame or per chunk on top of the one the harness spends",
+        LARGE / SMALL,
+        small.blocks,
+        large.blocks
     );
 }
