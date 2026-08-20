@@ -14,8 +14,7 @@
 
 //! Whether any member of the pinned surface drops its own empty value.
 //!
-//! Responsible for: the census of `omit`-on-empty members across every lowered operation, and the
-//! declaration list that is allowed to hold one.
+//! Responsible for: the census of `omit`-on-empty members across every lowered operation.
 //! NOT responsible for: what the emitter does with the policy once it has it, which is
 //! `codegen_tests` and the generated goldens; or whether a document survives the trip out and
 //! back, which is `crates/core/tests/*_roundtrip.rs`.
@@ -41,14 +40,6 @@ use rustfs_gateway_model::ir::{EmptyValue, OperationIr};
 
 use super::codegen_tests::artifacts;
 
-/// Members an overlay declares `omit` for, as `(operation, shape, member)` with an empty shape
-/// name for an operation-level member. Each row owes the `q-empty-*` record that carries the
-/// evidence for it, named in the comment beside it.
-///
-/// Empty today: no overlay in the tree declares one. A row added here without a quirk beside it
-/// is the default coming back one member at a time, which is the shape rustfs/gateway#231 filed.
-const DECLARED_OMIT: &[(&str, &str, &str)] = &[];
-
 /// Every `(operation, shape, member)` whose empty value the encoder drops.
 ///
 /// A shared reader rather than a loop inside one test, so the negative below measures the same
@@ -73,28 +64,29 @@ fn omit_members(operations: &[OperationIr]) -> Vec<(String, String, String)> {
     found
 }
 
-/// No member of the pinned surface is `omit`-on-empty unless an overlay says so.
+/// No member of the pinned surface drops its own empty value.
 ///
 /// This is the whole empty-element half of rustfs/gateway#231, asserted once over all 72
 /// operations rather than three times in three families. It fails the moment the lossy default
-/// returns: reverting `empty_value_policy`'s fallback to "an optional member is dropped" puts
-/// 203 members on this list.
+/// returns: reverting `empty_value_policy`'s fallback to "an optional member is dropped" puts 203
+/// members on this list.
+///
+/// It is stated as "none" rather than as an allow-list because no overlay declares an `omit`
+/// today, and an allow-list with no entries is a filter that cannot filter. The day a member
+/// earns one — a capture showing AWS omitting the element — this assertion has to be edited to
+/// name it, which is the review step the silent default never had.
 #[test]
-fn no_member_is_omit_on_empty_without_a_declaration() {
+fn no_member_drops_its_own_empty_value() {
     let operations = artifacts().operations;
     assert!(operations.len() > 60, "the census must run over the whole surface");
 
-    let declared: Vec<(String, String, String)> = DECLARED_OMIT
-        .iter()
-        .map(|(op, shape, member)| ((*op).to_owned(), (*shape).to_owned(), (*member).to_owned()))
-        .collect();
     let found = omit_members(&operations);
-    let undeclared: Vec<&(String, String, String)> = found.iter().filter(|row| !declared.contains(row)).collect();
     assert!(
-        undeclared.is_empty(),
-        "{} member(s) drop their own empty value with no overlay declaring it; each is a value \
-         this service writes and then reads back as something else: {undeclared:?}",
-        undeclared.len()
+        found.is_empty(),
+        "{} member(s) drop their own empty value; each is a value this service writes and then \
+         reads back as something else, so each owes a `q-empty-*` record and a row in this \
+         assertion: {found:?}",
+        found.len()
     );
 }
 

@@ -249,16 +249,18 @@ fn status() -> impl Strategy<Value = dto::Status> {
     prop_oneof![Just(dto::Status::ENABLED), Just(dto::Status::DISABLED)]
 }
 
-/// A rule identifier. The alphabet deliberately includes the five characters XML has to escape
+/// A rule identifier, the empty one included. The alphabet deliberately includes the five
+/// characters XML has to escape
 /// plus two outside ASCII: an identifier is opaque text, and a writer that emitted `&` raw would
 /// produce a document its own reader could not parse, while one that escaped on the way out and
 /// forgot to unescape on the way in would hand the caller back `&amp;`. Length stays well under
 /// the 255-character cap, which is a refusal `ops::shared::replication` owns.
+///
+/// The empty identifier had to be excluded while an optional member's empty value was dropped
+/// on the way out — it came back absent rather than as itself — and the narrowing comes out with
+/// the defect (rustfs/gateway#221).
 fn rule_id() -> impl Strategy<Value = String> {
-    "[a-zA-Z0-9&<>\"'éü _-]{1,40}".prop_map(|value| value.trim().to_owned()).prop_filter(
-        "an identifier that is empty or only spaces is the `omit`-on-empty case, which decodes as absent rather than as itself",
-        |value| !value.is_empty(),
-    )
+    "[a-zA-Z0-9&<>\"'éü _-]{0,40}".prop_map(|value| value.trim().to_owned())
 }
 
 /// A key prefix, including the empty one.
