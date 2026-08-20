@@ -1,0 +1,48 @@
+# c-location-0004 — the read resolves the bucket before it answers about a region.
+#
+# 0003 is skipped on purpose: `model/overlays/quirks/bucket.toml` already reserves that identifier
+# for `q-region-0003`, the legacy `EU` alias row, which is a CreateBucket rule and not this one.
+#
+# Schema dimensions exercised: an error code on a subresource read whose target does not exist.
+
+[case]
+id = "c-location-0004"
+schema_version = 1
+title = "GetBucketLocation on a bucket that does not exist is NoSuchBucket"
+rationale = """
+`?location` is the subresource a client reads precisely when it does not yet know where a bucket is, so the failure mode worth pinning is the one where the bucket is not anywhere: the answer is `404 NoSuchBucket`, not a 200 carrying an empty constraint. The empty constraint is a real answer in this family — it is how us-east-1 is spelled, and `c-location-0002` pins it — which is exactly why a missing bucket must not be able to produce the same bytes."""
+polarity = "negative"
+operation = "GetBucketLocation"
+tags = ["region", "error-shape"]
+# Empty on purpose: no quirk row in model/overlays/quirks/bucket.toml states the bucket-resolution
+# order for this read, and adding a backlink to one that does not is how a ledger starts overstating
+# what it covers.
+quirks = []
+timeout_ms = 10000
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+summary = "The operation is scoped to a named bucket, so a name that resolves to nothing is the bucket-level not-found rather than a successful read of an unknown region."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-location-gone"
+absent = true
+
+[request]
+method = "GET"
+target = "/conf-location-gone?location"
+headers = { }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchBucket"
+request_id_present = true
+
+[expect.body]
+not_contains_utf8 = ["<LocationConstraint"]

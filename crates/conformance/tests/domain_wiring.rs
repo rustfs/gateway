@@ -121,6 +121,7 @@ const GATES: &[(&str, Wiring)] = &[
     ("host", Wiring::Runs(&[])),
     ("lifecycle", Wiring::Runs(&[])),
     ("list", Wiring::Runs(&[])),
+    ("location", Wiring::Runs(&[])),
     ("lock", Wiring::Runs(&[])),
     // The four in `multipart_family.rs`'s `KNOWN_SKIPS`: two want a fresh connection per exchange,
     // one a stalled chunk, one a malformed request head. All four execute over a socket.

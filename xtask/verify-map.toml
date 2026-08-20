@@ -90,7 +90,7 @@ cases = "c-lifecycle-0002,c-lifecycle-0003,c-lifecycle-0004,c-lifecycle-0005,c-l
 
 [[operation]]
 name = "GetBucketLocation"
-cases = ""
+cases = "c-location-0001,c-location-0002,c-location-0004"
 
 [[operation]]
 name = "GetBucketLogging"
