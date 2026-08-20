@@ -89,6 +89,12 @@ pub struct ServerConfig {
     pub write_progress_timeout: Duration,
     /// Maximum no-I/O gap between requests. Increasing preserves reuse; decreasing releases idle connections sooner.
     pub keep_alive_idle: Duration,
+    /// Total time a closing connection spends reading and discarding what the peer is still
+    /// sending, so that the drop is a close and not a reset. Increasing tolerates peers with more
+    /// left to send; decreasing releases the connection slot sooner. Zero is invalid — a drain
+    /// that cannot read is the abortive close RFC 9112 §9.6 warns about. See `src/io.rs` for why
+    /// this is a duration rather than a byte budget.
+    pub lingering_close_time: Duration,
     /// Optional total connection lifetime. Increasing permits longer sessions; decreasing bounds leaked connections sooner. Zero is invalid.
     pub connection_lifetime: Option<Duration>,
     /// HTTP/1 parser buffer ceiling. Increasing admits larger heads; decreasing caps connection memory more tightly. The minimum is 8192.
@@ -139,6 +145,7 @@ impl Default for ServerConfig {
             header_read_timeout: Duration::from_secs(10),
             write_progress_timeout: Duration::from_secs(30),
             keep_alive_idle: Duration::from_secs(65),
+            lingering_close_time: Duration::from_secs(2),
             connection_lifetime: None,
             h1_max_buf_size: 64 * 1024,
             h1_keep_alive: true,
@@ -195,6 +202,7 @@ impl ServerConfig {
             ("header_read_timeout", self.header_read_timeout),
             ("write_progress_timeout", self.write_progress_timeout),
             ("keep_alive_idle", self.keep_alive_idle),
+            ("lingering_close_time", self.lingering_close_time),
             ("h2_keep_alive_timeout", self.h2_keep_alive_timeout),
         ] {
             if duration.is_zero() {

@@ -14,8 +14,11 @@
 
 //! Progress-sensitive transport I/O.
 //!
-//! Responsible for: write-stall and connection-idle deadlines that reset on successful I/O.
-//! NOT responsible for: request-body or handler progress, which belong above the transport.
+//! Responsible for: write-stall and connection-idle deadlines that reset on successful I/O, and
+//! the lingering read that ends a connection with a close rather than a reset.
+//! NOT responsible for: request-body or handler progress, which belong above the transport; and
+//! not for deciding *that* a connection ends — Hyper does that, from the `Connection: close` the
+//! service above it wrote.
 //! Upstream: a plaintext or TLS stream. Downstream: Hyper's Tokio adapter.
 
 use std::io;
@@ -27,6 +30,44 @@ use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::time::{Instant, Sleep, sleep};
+
+/// How long the drain waits for the *next* block once it has started reading.
+///
+/// `ServerConfig::lingering_close_time` alone would let a peer that pauses mid-body hold a
+/// connection slot for the whole budget. This is nginx's `lingering_timeout` in the same role: it
+/// is reset by every block that arrives, so a peer that keeps sending is bounded by the outer
+/// budget and a peer that stops sending is bounded by this. A block arriving in the last instant
+/// of the outer budget can therefore extend the drain by one more grace: the effective bound is
+/// the budget plus this, and it is left that way rather than clamped so that the budget is
+/// expressed in exactly one place — a second expression of the same bound is a second place for it
+/// to be wrong, and one no test could reach. It is a constant and the outer bound
+/// is not, because the outer bound is the one a deployment has a reason to argue about: it is how
+/// patient the service is with a peer that still owes it a body.
+///
+/// Both are *times* and neither is a byte count, and that distinction is the substance of
+/// rustfs/gateway#211. What the ceilings above this layer refuse to spend is **memory** —
+/// aggregating a body before deciding about it is the out-of-memory condition — and reading a
+/// block into a stack buffer and dropping it costs no memory at all, so the resource a drain has
+/// to be bounded in is time. A byte budget has the opposite of the wanted effect: a refusal that
+/// fires *because* a body is too large leaves more than any such budget in flight by construction,
+/// so the drain would stop early on exactly the connections it exists for.
+///
+/// These are deliberately **not** `rustfs_gateway_http::MAX_LINGER_DRAIN_BYTES` and deliberately
+/// not `rustfs-gateway-conformance`'s own linger constants. That crate's numbers bound a blocking
+/// thread per connection in a test harness; these bound a Tokio task on a listener that may be
+/// holding ten thousand connections, and the two may disagree without either being wrong.
+const LINGER_QUIET: Duration = Duration::from_millis(100);
+
+/// Blocks discarded in one `poll_shutdown` before the drain yields to the runtime.
+///
+/// A peer sending as fast as this loop reads would otherwise own a worker thread until the outer
+/// budget expired. The yield is a self-wake, so the drain resumes on the next poll and the bound
+/// is unaffected.
+const LINGER_BLOCKS_PER_POLL: usize = 16;
+
+/// One discarded block. Stack-allocated per poll, never retained: a drain that grew with the
+/// remainder would be the memory cost the refusal was avoiding.
+const LINGER_BLOCK: usize = 8 * 1024;
 
 pub(crate) fn deadline_after(timeout: Duration) -> Instant {
     Instant::now() + timeout
@@ -61,8 +102,24 @@ pub(crate) struct ProgressIo<I> {
     write_sleep: Pin<Box<Sleep>>,
     write_waiting: bool,
     first_request_observed: bool,
+    linger: Linger,
     #[cfg(test)]
     header_pending_observer: Option<HeaderPendingObserver>,
+}
+
+/// State of the lingering read, which exists only between the half-close and the drop.
+struct Linger {
+    /// `ServerConfig::lingering_close_time`, the outer bound on the whole drain.
+    budget: Duration,
+    /// Whether the write side has already been shut down. `poll_shutdown` is re-entrant.
+    write_shut: bool,
+    /// When the whole drain gives up, armed at the half-close from [`Linger::budget`].
+    deadline: Instant,
+    /// Rearmed by every block that arrives; see [`LINGER_QUIET`].
+    quiet: Pin<Box<Sleep>>,
+    /// Whether any block was ever ready. See [`ProgressIo::poll_drain`] for why this gates the
+    /// drain rather than merely reporting on it.
+    started: bool,
 }
 
 impl<I> ProgressIo<I> {
@@ -73,6 +130,7 @@ impl<I> ProgressIo<I> {
         header_deadline: Instant,
         idle_timeout: Duration,
         write_timeout: Duration,
+        lingering_close_time: Duration,
     ) -> Self {
         Self {
             inner,
@@ -84,6 +142,13 @@ impl<I> ProgressIo<I> {
             write_sleep: Box::pin(sleep(write_timeout)),
             write_waiting: false,
             first_request_observed: false,
+            linger: Linger {
+                budget: lingering_close_time,
+                write_shut: false,
+                deadline: Instant::now(),
+                quiet: Box::pin(sleep(LINGER_QUIET)),
+                started: false,
+            },
             #[cfg(test)]
             header_pending_observer: None,
         }
@@ -146,6 +211,64 @@ impl<I> ProgressIo<I> {
     }
 }
 
+impl<I: AsyncRead + Unpin> ProgressIo<I> {
+    /// Reads what the peer is still sending and throws it away, so that the drop that follows is a
+    /// close and not a reset.
+    ///
+    /// # Why this is here at all
+    ///
+    /// Dropping a socket that still holds unread received octets sends `RST` instead of finishing
+    /// the `FIN` exchange, and RFC 9112 §9.6 says what that costs: the reset can discard the
+    /// peer's receive buffer before its HTTP parser has read it, so a client that was about to
+    /// learn *why* it was refused gets `ECONNRESET` instead of the refusal. Every refusal this
+    /// runtime makes before draining the body — an over-cap body, an authentication failure, a
+    /// framing verdict — is by construction a refusal with octets still arriving, so this is the
+    /// ordinary case and not the exotic one. Measured on a real socket before it was fixed: a
+    /// `400` answered over a one-mebibyte body that the service never read reached the client, and
+    /// the next read on that socket returned `ECONNRESET` rather than end of stream.
+    ///
+    /// # Why a read that is not ready ends it
+    ///
+    /// The first poll decides whether there is a drain at all. This is nginx's `lingering_close
+    /// on` default, whose condition is that the connection's read event is already ready (or that
+    /// a body discard is known to be unfinished, which is a signal this layer does not have): a
+    /// close with nothing in flight has nothing to linger over, and lingering anyway would hold a
+    /// connection slot — and its `active_connections()` seat — for a budget it cannot spend. Every
+    /// keep-alive expiry and every graceful shutdown reaches this function, so the common path has
+    /// to cost nothing.
+    fn poll_drain(&mut self, context: &mut Context<'_>) -> Poll<()> {
+        let mut buffer = [0_u8; LINGER_BLOCK];
+        for _ in 0..LINGER_BLOCKS_PER_POLL {
+            if Instant::now() >= self.linger.deadline {
+                return Poll::Ready(());
+            }
+            let mut read = ReadBuf::new(&mut buffer);
+            match Pin::new(&mut self.inner).poll_read(context, &mut read) {
+                // End of stream, or a transport that will not talk to us any more. Either way
+                // there is nothing left to be reset over.
+                Poll::Ready(Err(_)) => return Poll::Ready(()),
+                Poll::Ready(Ok(())) if read.filled().is_empty() => return Poll::Ready(()),
+                Poll::Ready(Ok(())) => {
+                    self.linger.started = true;
+                    self.linger.quiet.as_mut().reset(Instant::now() + LINGER_QUIET);
+                }
+                Poll::Pending => {
+                    if !self.linger.started {
+                        return Poll::Ready(());
+                    }
+                    return if self.linger.quiet.as_mut().poll(context).is_ready() {
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    };
+                }
+            }
+        }
+        context.waker().wake_by_ref();
+        Poll::Pending
+    }
+}
+
 impl<I: AsyncRead + Unpin> AsyncRead for ProgressIo<I> {
     fn poll_read(self: Pin<&mut Self>, context: &mut Context<'_>, buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
@@ -161,7 +284,7 @@ impl<I: AsyncRead + Unpin> AsyncRead for ProgressIo<I> {
     }
 }
 
-impl<I: AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
+impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
     fn poll_write(self: Pin<&mut Self>, context: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
         let this = self.get_mut();
         match Pin::new(&mut this.inner).poll_write(context, bytes) {
@@ -196,8 +319,28 @@ impl<I: AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
         }
     }
 
+    /// Half-closes, then lingers.
+    ///
+    /// The order is the whole of it: `FIN` first, so the peer learns there is no more to read and
+    /// stops pipelining, and only then the read that keeps the drop from becoming a reset. The
+    /// drain never fails the shutdown — a peer that went silent, a peer that keeps writing past
+    /// its budget, and a transport that errors are all "we are done here", and reporting them
+    /// as a shutdown error would only turn a finished connection into a logged one.
+    ///
+    /// What a drain in progress holds is the connection: its `max_connections` permit, its per-IP
+    /// lease, and its seat in `ServerMetrics::active_connections`. It does **not** hold a request
+    /// permit — `RequestPermitBody` releases that when the response body ends, which is before
+    /// anything here runs — so a lingering close cannot starve the global in-flight ceiling.
     fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut().inner).poll_shutdown(context)
+        let this = self.get_mut();
+        if !this.linger.write_shut {
+            ready!(Pin::new(&mut this.inner).poll_shutdown(context))?;
+            this.linger.write_shut = true;
+            this.linger.deadline = Instant::now() + this.linger.budget;
+            this.linger.quiet.as_mut().reset(this.linger.deadline);
+        }
+        ready!(this.poll_drain(context));
+        Poll::Ready(Ok(()))
     }
 
     fn is_write_vectored(&self) -> bool {
@@ -235,6 +378,21 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     struct StalledWriter;
+
+    /// Neither writer below has a peer, so "the peer sent nothing and never will" is the honest
+    /// read side for both: end of stream. It also keeps the drain out of the way of the cases
+    /// below, which are about the write-progress deadline.
+    impl AsyncRead for StalledWriter {
+        fn poll_read(self: Pin<&mut Self>, _context: &mut Context<'_>, _buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl AsyncRead for PacedWriter {
+        fn poll_read(self: Pin<&mut Self>, _context: &mut Context<'_>, _buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
 
     impl AsyncWrite for StalledWriter {
         fn poll_write(self: Pin<&mut Self>, _context: &mut Context<'_>, _bytes: &[u8]) -> Poll<io::Result<usize>> {
@@ -299,6 +457,7 @@ mod tests {
             deadline_after(Duration::from_secs(60)),
             Duration::from_secs(60),
             Duration::from_millis(10),
+            Duration::from_secs(2),
         );
         let write = tokio::spawn(async move { io.write_all(b"x").await });
         tokio::task::yield_now().await;
@@ -324,6 +483,7 @@ mod tests {
             deadline_after(Duration::from_secs(60)),
             Duration::from_secs(60),
             Duration::from_millis(10),
+            Duration::from_secs(2),
         );
         let started = Instant::now();
         io.write_all(&vec![b'x'; BODY_LEN])

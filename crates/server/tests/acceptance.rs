@@ -58,6 +58,7 @@ fn a_srv_0024_tuning_defaults_are_bounded() {
     assert_eq!(config.header_read_timeout, Duration::from_secs(10));
     assert_eq!(config.write_progress_timeout, Duration::from_secs(30));
     assert_eq!(config.keep_alive_idle, Duration::from_secs(65));
+    assert_eq!(config.lingering_close_time, Duration::from_secs(2));
     assert_eq!(config.connection_lifetime, None);
     assert_eq!(config.write_strategy, WriteStrategy::Auto);
     assert!(config.max_connections > 0);
@@ -127,6 +128,27 @@ fn h2_initial_windows_enforce_the_protocol_maximum() {
         ..ServerConfig::default()
     };
     assert!(maximum.validate(true).is_ok());
+}
+
+/// Negative — a lingering close that may not read is the abortive close it exists to prevent.
+///
+/// Zero is the one value that would turn `ServerConfig::lingering_close_time` into an off switch
+/// for RFC 9112 §9.6, and it would do it silently: every refusal would still be written, and every
+/// peer still sending when it arrived would get `RST` over it. So it is refused at validation, and
+/// the boundary beside it is asserted too — a nanosecond is a configuration this server will start
+/// under, which is what makes the rejection a bound rather than a blanket.
+#[test]
+fn a_srv_0211_a_zero_lingering_close_is_rejected() {
+    let zero = ServerConfig {
+        lingering_close_time: Duration::ZERO,
+        ..ServerConfig::default()
+    };
+    assert_eq!(zero.validate(true), Err(ConfigError::Zero("lingering_close_time")));
+    let smallest = ServerConfig {
+        lingering_close_time: Duration::from_nanos(1),
+        ..ServerConfig::default()
+    };
+    assert!(smallest.validate(true).is_ok());
 }
 
 #[test]
