@@ -85,10 +85,10 @@ fn write_object_lock_retention(
     value: &dto::ObjectLockRetention,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.mode.as_ref() {
-        writer.element_if_present("Mode", v.as_str());
+        writer.element("Mode", v.as_str());
     }
     if let Some(v) = value.retain_until_date.as_ref() {
-        writer.element_if_present("RetainUntilDate", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+        writer.element("RetainUntilDate", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
     }
     Ok(())
 }

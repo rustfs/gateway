@@ -159,7 +159,13 @@ except (OSError, tomllib.TOMLDecodeError) as error:
 package = manifest.get("package")
 if not isinstance(package, dict) or package.get("autotests") is not False:
     fail(f"{crate_name} must set package.autotests = false")
+if crate_name == "xtask":
+    for setting in ("autobins", "autoexamples", "autobenches"):
+        if package.get(setting) is not False:
+            fail(f"{crate_name} must set package.{setting} = false")
 build = package.get("build")
+if crate_name == "xtask" and build is not False:
+    fail("xtask must set package.build = false")
 if build not in (None, False):
     if not isinstance(build, str) or not build or "\\" in build:
         fail(f"{crate_name} package build target must be false, absent, or a resolvable path")
@@ -173,8 +179,16 @@ targets = manifest.get("test")
 if not isinstance(targets, list) or len(targets) != 1 or not isinstance(targets[0], dict):
     fail(f"{crate_name} must declare exactly one explicit [[test]] target")
 target = targets[0]
-if target != {"name": "integration", "path": "tests/integration.rs"}:
-    fail(f"{crate_name} test target must be exactly integration at tests/integration.rs")
+target_name = "xtask-integration" if crate_name == "xtask" else "integration"
+if target != {"name": target_name, "path": "tests/integration.rs"}:
+    fail(f"{crate_name} test target must be exactly {target_name} at tests/integration.rs")
+if crate_name == "xtask":
+    if manifest.get("bin") != [{"name": "xtask", "path": "src/main.rs"}]:
+        fail("xtask must declare exactly one explicit bin target at src/main.rs")
+    if manifest.get("lib") is not None or manifest.get("example") not in (None, []) or manifest.get("bench") not in (None, []):
+        fail("xtask may not declare lib, example, or bench targets")
+    if (crate / "src/lib.rs").exists():
+        fail("xtask may not implicitly discover a library target")
 
 try:
     test_entries = tuple(tests.rglob("*"))

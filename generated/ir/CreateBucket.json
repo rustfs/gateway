@@ -214,7 +214,7 @@
                                                        ],
                                              "xml": {
                                                       "element_order": ["LocationConstraint"],
-                                                      "empty_value_policy": { "LocationConstraint": "omit" },
+                                                      "empty_value_policy": { "LocationConstraint": "emit" },
                                                       "attributes": []
                                                     }
                                            }

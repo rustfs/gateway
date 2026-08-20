@@ -98,7 +98,7 @@
                                                      ],
                                            "xml": {
                                                     "element_order": ["Status"],
-                                                    "empty_value_policy": { "Status": "omit" },
+                                                    "empty_value_policy": { "Status": "emit" },
                                                     "attributes": []
                                                   }
                                          },
@@ -198,12 +198,12 @@
                                                          ],
                                         "empty_value_policy": {
                                                                 "Bucket": "emit",
-                                                                "Account": "omit",
-                                                                "StorageClass": "omit",
-                                                                "AccessControlTranslation": "omit",
-                                                                "EncryptionConfiguration": "omit",
-                                                                "ReplicationTime": "omit",
-                                                                "Metrics": "omit"
+                                                                "Account": "emit",
+                                                                "StorageClass": "emit",
+                                                                "AccessControlTranslation": "emit",
+                                                                "EncryptionConfiguration": "emit",
+                                                                "ReplicationTime": "emit",
+                                                                "Metrics": "emit"
                                                               },
                                         "attributes": []
                                       }
@@ -223,7 +223,7 @@
                                                      ],
                                            "xml": {
                                                     "element_order": ["ReplicaKmsKeyID"],
-                                                    "empty_value_policy": { "ReplicaKmsKeyID": "omit" },
+                                                    "empty_value_policy": { "ReplicaKmsKeyID": "emit" },
                                                     "attributes": []
                                                   }
                                          },
@@ -273,7 +273,7 @@
                                      ],
                            "xml": {
                                     "element_order": ["Status", "EventThreshold"],
-                                    "empty_value_policy": { "Status": "emit", "EventThreshold": "omit" },
+                                    "empty_value_policy": { "Status": "emit", "EventThreshold": "emit" },
                                     "attributes": []
                                   }
                          },
@@ -433,15 +433,15 @@
                                                                "DeleteMarkerReplication"
                                                              ],
                                             "empty_value_policy": {
-                                                                    "ID": "omit",
-                                                                    "Priority": "omit",
-                                                                    "Prefix": "omit",
-                                                                    "Filter": "omit",
+                                                                    "ID": "emit",
+                                                                    "Priority": "emit",
+                                                                    "Prefix": "emit",
+                                                                    "Filter": "emit",
                                                                     "Status": "emit",
-                                                                    "SourceSelectionCriteria": "omit",
-                                                                    "ExistingObjectReplication": "omit",
+                                                                    "SourceSelectionCriteria": "emit",
+                                                                    "ExistingObjectReplication": "emit",
                                                                     "Destination": "emit",
-                                                                    "DeleteMarkerReplication": "omit"
+                                                                    "DeleteMarkerReplication": "emit"
                                                                   },
                                             "attributes": []
                                           }
@@ -475,7 +475,7 @@
                                                         ],
                                               "xml": {
                                                        "element_order": ["Prefix", "Tags"],
-                                                       "empty_value_policy": { "Prefix": "omit", "Tags": "omit" },
+                                                       "empty_value_policy": { "Prefix": "emit", "Tags": "emit" },
                                                        "attributes": []
                                                      }
                                             },
@@ -516,9 +516,9 @@
                                          "xml": {
                                                   "element_order": ["Prefix", "Tag", "And"],
                                                   "empty_value_policy": {
-                                                                          "Prefix": "omit",
-                                                                          "Tag": "omit",
-                                                                          "And": "omit"
+                                                                          "Prefix": "emit",
+                                                                          "Tag": "emit",
+                                                                          "And": "emit"
                                                                         },
                                                   "attributes": []
                                                 }
@@ -566,7 +566,7 @@
                                                   ],
                                         "xml": {
                                                  "element_order": ["Minutes"],
-                                                 "empty_value_policy": { "Minutes": "omit" },
+                                                 "empty_value_policy": { "Minutes": "emit" },
                                                  "attributes": []
                                                }
                                       },
@@ -601,8 +601,8 @@
                                            "xml": {
                                                     "element_order": ["SseKmsEncryptedObjects", "ReplicaModifications"],
                                                     "empty_value_policy": {
-                                                                            "SseKmsEncryptedObjects": "omit",
-                                                                            "ReplicaModifications": "omit"
+                                                                            "SseKmsEncryptedObjects": "emit",
+                                                                            "ReplicaModifications": "emit"
                                                                           },
                                                     "attributes": []
                                                   }

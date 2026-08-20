@@ -7,6 +7,7 @@ set -euo pipefail
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 LOCK="$ROOT/spec/third-party/aws-signing-test-suite.lock"
+RUNNER="$ROOT/xtask/src/sigsuite.rs"
 
 fail() {
     printf 'check_signing_suite_lock: %s\n' "$*" >&2
@@ -15,6 +16,7 @@ fail() {
 
 command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
 [[ -f "$LOCK" ]] || fail 'protected signing-suite lock is missing'
+[[ -f "$RUNNER" ]] || fail 'signing-suite runner is missing'
 
 python3 - "$ROOT" "${1:-}" "${2:-}" <<'PY'
 from __future__ import annotations
@@ -28,11 +30,27 @@ root = Path(sys.argv[1])
 mode = sys.argv[2]
 checkout_arg = sys.argv[3]
 lock_path = root / "spec/third-party/aws-signing-test-suite.lock"
+runner_path = root / "xtask/src/sigsuite.rs"
 
 
 def fail(message: str) -> None:
     print(f"check_signing_suite_lock: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+try:
+    runner = runner_path.read_text(encoding="utf-8")
+except (OSError, UnicodeError) as error:
+    fail(f"cannot read signing-suite runner: {error}")
+repository_cargo = '''fn suite_cargo_command() -> Command {
+    Command::new("cargo")
+}'''
+if runner.count(repository_cargo) != 1:
+    fail("signing-suite runner must launch Cargo through the repository-selected rustup proxy")
+if runner.count("let status = suite_cargo_command()") != 1:
+    fail("signing-suite run must use the repository-selected Cargo command exactly once")
+if 'env!("CARGO")' in runner:
+    fail("signing-suite runner must not capture a toolchain-specific Cargo path at build time")
 
 
 try:

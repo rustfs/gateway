@@ -213,13 +213,13 @@
                                                         "AllowQuotedRecordDelimiter"
                                                       ],
                                      "empty_value_policy": {
-                                                             "FileHeaderInfo": "omit",
-                                                             "Comments": "omit",
-                                                             "QuoteEscapeCharacter": "omit",
-                                                             "RecordDelimiter": "omit",
-                                                             "FieldDelimiter": "omit",
-                                                             "QuoteCharacter": "omit",
-                                                             "AllowQuotedRecordDelimiter": "omit"
+                                                             "FileHeaderInfo": "emit",
+                                                             "Comments": "emit",
+                                                             "QuoteEscapeCharacter": "emit",
+                                                             "RecordDelimiter": "emit",
+                                                             "FieldDelimiter": "emit",
+                                                             "QuoteCharacter": "emit",
+                                                             "AllowQuotedRecordDelimiter": "emit"
                                                            },
                                      "attributes": []
                                    }
@@ -282,11 +282,11 @@
                                                          "QuoteCharacter"
                                                        ],
                                       "empty_value_policy": {
-                                                              "QuoteFields": "omit",
-                                                              "QuoteEscapeCharacter": "omit",
-                                                              "RecordDelimiter": "omit",
-                                                              "FieldDelimiter": "omit",
-                                                              "QuoteCharacter": "omit"
+                                                              "QuoteFields": "emit",
+                                                              "QuoteEscapeCharacter": "emit",
+                                                              "RecordDelimiter": "emit",
+                                                              "FieldDelimiter": "emit",
+                                                              "QuoteCharacter": "emit"
                                                             },
                                       "attributes": []
                                     }
@@ -337,10 +337,10 @@
                                       "xml": {
                                                "element_order": ["CSV", "CompressionType", "JSON", "Parquet"],
                                                "empty_value_policy": {
-                                                                       "CSV": "omit",
-                                                                       "CompressionType": "omit",
-                                                                       "JSON": "omit",
-                                                                       "Parquet": "omit"
+                                                                       "CSV": "emit",
+                                                                       "CompressionType": "emit",
+                                                                       "JSON": "emit",
+                                                                       "Parquet": "emit"
                                                                      },
                                                "attributes": []
                                              }
@@ -360,7 +360,7 @@
                                        ],
                              "xml": {
                                       "element_order": ["Type"],
-                                      "empty_value_policy": { "Type": "omit" },
+                                      "empty_value_policy": { "Type": "emit" },
                                       "attributes": []
                                     }
                            },
@@ -379,7 +379,7 @@
                                         ],
                               "xml": {
                                        "element_order": ["RecordDelimiter"],
-                                       "empty_value_policy": { "RecordDelimiter": "omit" },
+                                       "empty_value_policy": { "RecordDelimiter": "emit" },
                                        "attributes": []
                                      }
                             },
@@ -407,7 +407,7 @@
                                                  ],
                                        "xml": {
                                                 "element_order": ["CSV", "JSON"],
-                                                "empty_value_policy": { "CSV": "omit", "JSON": "omit" },
+                                                "empty_value_policy": { "CSV": "emit", "JSON": "emit" },
                                                 "attributes": []
                                               }
                                      },
@@ -431,7 +431,7 @@
                                              ],
                                    "xml": {
                                             "element_order": ["Enabled"],
-                                            "empty_value_policy": { "Enabled": "omit" },
+                                            "empty_value_policy": { "Enabled": "emit" },
                                             "attributes": []
                                           }
                                  },
@@ -459,7 +459,7 @@
                                        ],
                              "xml": {
                                       "element_order": ["Start", "End"],
-                                      "empty_value_policy": { "Start": "omit", "End": "omit" },
+                                      "empty_value_policy": { "Start": "emit", "End": "emit" },
                                       "attributes": []
                                     }
                            }

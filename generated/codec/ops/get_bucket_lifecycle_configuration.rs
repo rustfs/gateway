@@ -79,7 +79,7 @@ fn write_abort_incomplete_multipart_upload(
     value: &dto::AbortIncompleteMultipartUpload,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.days_after_initiation.as_ref() {
-        writer.element_if_present("DaysAfterInitiation", &v.to_string());
+        writer.element("DaysAfterInitiation", &v.to_string());
     }
     Ok(())
 }
@@ -90,13 +90,13 @@ fn write_lifecycle_expiration(
     value: &dto::LifecycleExpiration,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.date.as_ref() {
-        writer.element_if_present("Date", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+        writer.element("Date", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
     }
     if let Some(v) = value.days.as_ref() {
-        writer.element_if_present("Days", &v.to_string());
+        writer.element("Days", &v.to_string());
     }
     if let Some(v) = value.expired_object_delete_marker.as_ref() {
-        writer.element_if_present("ExpiredObjectDeleteMarker", if *v { "true" } else { "false" });
+        writer.element("ExpiredObjectDeleteMarker", if *v { "true" } else { "false" });
     }
     Ok(())
 }
@@ -109,10 +109,10 @@ fn write_lifecycle_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto:
         writer.close();
     }
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("ID", v.as_str());
+        writer.element("ID", v.as_str());
     }
     if let Some(v) = value.prefix.as_ref() {
-        writer.element_if_present("Prefix", v.as_str());
+        writer.element("Prefix", v.as_str());
     }
     if let Some(v) = value.filter.as_ref() {
         writer.open("Filter", None);
@@ -152,7 +152,7 @@ fn write_lifecycle_rule_and_operator(
     value: &dto::LifecycleRuleAndOperator,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.prefix.as_ref() {
-        writer.element_if_present("Prefix", v.as_str());
+        writer.element("Prefix", v.as_str());
     }
     for item in &value.tags {
         writer.open("Tag", None);
@@ -160,10 +160,10 @@ fn write_lifecycle_rule_and_operator(
         writer.close();
     }
     if let Some(v) = value.object_size_greater_than.as_ref() {
-        writer.element_if_present("ObjectSizeGreaterThan", &v.to_string());
+        writer.element("ObjectSizeGreaterThan", &v.to_string());
     }
     if let Some(v) = value.object_size_less_than.as_ref() {
-        writer.element_if_present("ObjectSizeLessThan", &v.to_string());
+        writer.element("ObjectSizeLessThan", &v.to_string());
     }
     Ok(())
 }
@@ -174,7 +174,7 @@ fn write_lifecycle_rule_filter(
     value: &dto::LifecycleRuleFilter,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.prefix.as_ref() {
-        writer.element_if_present("Prefix", v.as_str());
+        writer.element("Prefix", v.as_str());
     }
     if let Some(v) = value.tag.as_ref() {
         writer.open("Tag", None);
@@ -182,10 +182,10 @@ fn write_lifecycle_rule_filter(
         writer.close();
     }
     if let Some(v) = value.object_size_greater_than.as_ref() {
-        writer.element_if_present("ObjectSizeGreaterThan", &v.to_string());
+        writer.element("ObjectSizeGreaterThan", &v.to_string());
     }
     if let Some(v) = value.object_size_less_than.as_ref() {
-        writer.element_if_present("ObjectSizeLessThan", &v.to_string());
+        writer.element("ObjectSizeLessThan", &v.to_string());
     }
     if let Some(v) = value.and.as_ref() {
         writer.open("And", None);
@@ -201,10 +201,10 @@ fn write_noncurrent_version_expiration(
     value: &dto::NoncurrentVersionExpiration,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.noncurrent_days.as_ref() {
-        writer.element_if_present("NoncurrentDays", &v.to_string());
+        writer.element("NoncurrentDays", &v.to_string());
     }
     if let Some(v) = value.newer_noncurrent_versions.as_ref() {
-        writer.element_if_present("NewerNoncurrentVersions", &v.to_string());
+        writer.element("NewerNoncurrentVersions", &v.to_string());
     }
     Ok(())
 }
@@ -215,13 +215,13 @@ fn write_noncurrent_version_transition(
     value: &dto::NoncurrentVersionTransition,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.noncurrent_days.as_ref() {
-        writer.element_if_present("NoncurrentDays", &v.to_string());
+        writer.element("NoncurrentDays", &v.to_string());
     }
     if let Some(v) = value.storage_class.as_ref() {
-        writer.element_if_present("StorageClass", v.as_str());
+        writer.element("StorageClass", v.as_str());
     }
     if let Some(v) = value.newer_noncurrent_versions.as_ref() {
-        writer.element_if_present("NewerNoncurrentVersions", &v.to_string());
+        writer.element("NewerNoncurrentVersions", &v.to_string());
     }
     Ok(())
 }
@@ -242,13 +242,13 @@ fn write_tag(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Tag) -> Re
 /// Writes one `Transition` element's children, in the wire order the IR records.
 fn write_transition(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Transition) -> Result<(), CodecError> {
     if let Some(v) = value.date.as_ref() {
-        writer.element_if_present("Date", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+        writer.element("Date", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
     }
     if let Some(v) = value.days.as_ref() {
-        writer.element_if_present("Days", &v.to_string());
+        writer.element("Days", &v.to_string());
     }
     if let Some(v) = value.storage_class.as_ref() {
-        writer.element_if_present("StorageClass", v.as_str());
+        writer.element("StorageClass", v.as_str());
     }
     Ok(())
 }

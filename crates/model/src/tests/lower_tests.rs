@@ -144,7 +144,12 @@ fn derives_route_bindings_and_shapes_from_the_model() {
         ("Name".into(), EmptyValue::Emit),
         "required members emit when empty"
     );
-    assert_eq!(ir.xml.empty_value_policy[1], ("Items".into(), EmptyValue::Omit));
+    assert_eq!(
+        ir.xml.empty_value_policy[1],
+        ("Items".into(), EmptyValue::Emit),
+        "an optional member emits when empty too: absence is `Option::None`, so dropping an empty \
+         value as well collapses two values the decoder tells apart (rustfs/gateway#221)"
+    );
 }
 
 #[test]

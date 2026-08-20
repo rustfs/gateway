@@ -124,10 +124,10 @@ impl OperationCodec for dto::ListParts {
             writer.element("UploadId", v.as_str());
         }
         if let Some(v) = output.part_number_marker.as_ref() {
-            writer.element_if_present("PartNumberMarker", v.as_str());
+            writer.element("PartNumberMarker", v.as_str());
         }
         if let Some(v) = output.next_part_number_marker.as_ref() {
-            writer.element_if_present("NextPartNumberMarker", v.as_str());
+            writer.element("NextPartNumberMarker", v.as_str());
         }
         {
             let v = &output.max_parts;
@@ -153,13 +153,13 @@ impl OperationCodec for dto::ListParts {
             writer.close();
         }
         if let Some(v) = output.storage_class.as_ref() {
-            writer.element_if_present("StorageClass", v.as_str());
+            writer.element("StorageClass", v.as_str());
         }
         if let Some(v) = output.checksum_algorithm.as_ref() {
-            writer.element_if_present("ChecksumAlgorithm", v.as_str());
+            writer.element("ChecksumAlgorithm", v.as_str());
         }
         if let Some(v) = output.checksum_type.as_ref() {
-            writer.element_if_present("ChecksumType", v.as_str());
+            writer.element("ChecksumType", v.as_str());
         }
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -175,10 +175,10 @@ impl OperationCodec for dto::ListParts {
 /// Writes one `Initiator` element's children, in the wire order the IR records.
 fn write_initiator(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Initiator) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("ID", v.as_str());
+        writer.element("ID", v.as_str());
     }
     if let Some(v) = value.display_name.as_ref() {
-        writer.element_if_present("DisplayName", v.as_str());
+        writer.element("DisplayName", v.as_str());
     }
     Ok(())
 }
@@ -186,10 +186,10 @@ fn write_initiator(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Init
 /// Writes one `Owner` element's children, in the wire order the IR records.
 fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("ID", v.as_str());
+        writer.element("ID", v.as_str());
     }
     if let Some(v) = value.display_name.as_ref() {
-        writer.element_if_present("DisplayName", v.as_str());
+        writer.element("DisplayName", v.as_str());
     }
     Ok(())
 }
@@ -201,7 +201,7 @@ fn write_part(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Part) -> 
         writer.element("PartNumber", &v.to_string());
     }
     if let Some(v) = value.last_modified.as_ref() {
-        writer.element_if_present("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+        writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
     }
     {
         let v = &value.e_tag;
@@ -212,34 +212,34 @@ fn write_part(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Part) -> 
         writer.element("Size", &v.to_string());
     }
     if let Some(v) = value.checksum_crc32.as_ref() {
-        writer.element_if_present("ChecksumCRC32", v.as_str());
+        writer.element("ChecksumCRC32", v.as_str());
     }
     if let Some(v) = value.checksum_crc32c.as_ref() {
-        writer.element_if_present("ChecksumCRC32C", v.as_str());
+        writer.element("ChecksumCRC32C", v.as_str());
     }
     if let Some(v) = value.checksum_crc64nvme.as_ref() {
-        writer.element_if_present("ChecksumCRC64NVME", v.as_str());
+        writer.element("ChecksumCRC64NVME", v.as_str());
     }
     if let Some(v) = value.checksum_sha1.as_ref() {
-        writer.element_if_present("ChecksumSHA1", v.as_str());
+        writer.element("ChecksumSHA1", v.as_str());
     }
     if let Some(v) = value.checksum_sha256.as_ref() {
-        writer.element_if_present("ChecksumSHA256", v.as_str());
+        writer.element("ChecksumSHA256", v.as_str());
     }
     if let Some(v) = value.checksum_sha512.as_ref() {
-        writer.element_if_present("ChecksumSHA512", v.as_str());
+        writer.element("ChecksumSHA512", v.as_str());
     }
     if let Some(v) = value.checksum_md5.as_ref() {
-        writer.element_if_present("ChecksumMD5", v.as_str());
+        writer.element("ChecksumMD5", v.as_str());
     }
     if let Some(v) = value.checksum_xxhash64.as_ref() {
-        writer.element_if_present("ChecksumXXHASH64", v.as_str());
+        writer.element("ChecksumXXHASH64", v.as_str());
     }
     if let Some(v) = value.checksum_xxhash3.as_ref() {
-        writer.element_if_present("ChecksumXXHASH3", v.as_str());
+        writer.element("ChecksumXXHASH3", v.as_str());
     }
     if let Some(v) = value.checksum_xxhash128.as_ref() {
-        writer.element_if_present("ChecksumXXHASH128", v.as_str());
+        writer.element("ChecksumXXHASH128", v.as_str());
     }
     Ok(())
 }

@@ -201,12 +201,12 @@
                                                         "MaxAgeSeconds"
                                                       ],
                                      "empty_value_policy": {
-                                                             "ID": "omit",
-                                                             "AllowedHeaders": "omit",
+                                                             "ID": "emit",
+                                                             "AllowedHeaders": "emit",
                                                              "AllowedMethods": "emit",
                                                              "AllowedOrigins": "emit",
-                                                             "ExposeHeaders": "omit",
-                                                             "MaxAgeSeconds": "omit"
+                                                             "ExposeHeaders": "emit",
+                                                             "MaxAgeSeconds": "emit"
                                                            },
                                      "attributes": []
                                    }

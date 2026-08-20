@@ -125,7 +125,7 @@ kind = "Structure"
 element_order = ["Status"]
 
 [shape.DeleteMarkerReplication.empty_value]
-Status = "omit"
+Status = "emit"
 
 [[shape.DeleteMarkerReplication.field]]
 name = "Status"
@@ -143,12 +143,12 @@ element_order = ["Bucket", "Account", "StorageClass", "AccessControlTranslation"
 
 [shape.Destination.empty_value]
 Bucket = "emit"
-Account = "omit"
-StorageClass = "omit"
-AccessControlTranslation = "omit"
-EncryptionConfiguration = "omit"
-ReplicationTime = "omit"
-Metrics = "omit"
+Account = "emit"
+StorageClass = "emit"
+AccessControlTranslation = "emit"
+EncryptionConfiguration = "emit"
+ReplicationTime = "emit"
+Metrics = "emit"
 
 [[shape.Destination.field]]
 name = "Bucket"
@@ -219,7 +219,7 @@ kind = "Structure"
 element_order = ["ReplicaKmsKeyID"]
 
 [shape.EncryptionConfiguration.empty_value]
-ReplicaKmsKeyID = "omit"
+ReplicaKmsKeyID = "emit"
 
 [[shape.EncryptionConfiguration.field]]
 name = "ReplicaKmsKeyID"
@@ -253,7 +253,7 @@ element_order = ["Status", "EventThreshold"]
 
 [shape.Metrics.empty_value]
 Status = "emit"
-EventThreshold = "omit"
+EventThreshold = "emit"
 
 [[shape.Metrics.field]]
 name = "Status"
@@ -322,15 +322,15 @@ kind = "Structure"
 element_order = ["ID", "Priority", "Prefix", "Filter", "Status", "SourceSelectionCriteria", "ExistingObjectReplication", "Destination", "DeleteMarkerReplication"]
 
 [shape.ReplicationRule.empty_value]
-ID = "omit"
-Priority = "omit"
-Prefix = "omit"
-Filter = "omit"
+ID = "emit"
+Priority = "emit"
+Prefix = "emit"
+Filter = "emit"
 Status = "emit"
-SourceSelectionCriteria = "omit"
-ExistingObjectReplication = "omit"
+SourceSelectionCriteria = "emit"
+ExistingObjectReplication = "emit"
 Destination = "emit"
-DeleteMarkerReplication = "omit"
+DeleteMarkerReplication = "emit"
 
 [[shape.ReplicationRule.field]]
 name = "ID"
@@ -419,8 +419,8 @@ kind = "Structure"
 element_order = ["Prefix", "Tags"]
 
 [shape.ReplicationRuleAndOperator.empty_value]
-Prefix = "omit"
-Tags = "omit"
+Prefix = "emit"
+Tags = "emit"
 
 [[shape.ReplicationRuleAndOperator.field]]
 name = "Prefix"
@@ -445,9 +445,9 @@ kind = "Structure"
 element_order = ["Prefix", "Tag", "And"]
 
 [shape.ReplicationRuleFilter.empty_value]
-Prefix = "omit"
-Tag = "omit"
-And = "omit"
+Prefix = "emit"
+Tag = "emit"
+And = "emit"
 
 [[shape.ReplicationRuleFilter.field]]
 name = "Prefix"
@@ -508,7 +508,7 @@ kind = "Structure"
 element_order = ["Minutes"]
 
 [shape.ReplicationTimeValue.empty_value]
-Minutes = "omit"
+Minutes = "emit"
 
 [[shape.ReplicationTimeValue.field]]
 name = "Minutes"
@@ -524,8 +524,8 @@ kind = "Structure"
 element_order = ["SseKmsEncryptedObjects", "ReplicaModifications"]
 
 [shape.SourceSelectionCriteria.empty_value]
-SseKmsEncryptedObjects = "omit"
-ReplicaModifications = "omit"
+SseKmsEncryptedObjects = "emit"
+ReplicaModifications = "emit"
 
 [[shape.SourceSelectionCriteria.field]]
 name = "SseKmsEncryptedObjects"

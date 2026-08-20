@@ -100,7 +100,7 @@ kind = "Structure"
 element_order = ["LoggingEnabled"]
 
 [shape.BucketLoggingStatus.empty_value]
-LoggingEnabled = "omit"
+LoggingEnabled = "emit"
 
 [[shape.BucketLoggingStatus.field]]
 name = "LoggingEnabled"
@@ -116,11 +116,11 @@ kind = "Structure"
 element_order = ["ID", "DisplayName", "EmailAddress", "URI"]
 
 [shape.Grantee.empty_value]
-DisplayName = "omit"
-EmailAddress = "omit"
-ID = "omit"
-URI = "omit"
-Type = "omit"
+DisplayName = "emit"
+EmailAddress = "emit"
+ID = "emit"
+URI = "emit"
+Type = "emit"
 
 [[shape.Grantee.attribute]]
 element = "Grantee"
@@ -186,9 +186,9 @@ element_order = ["TargetBucket", "TargetPrefix", "TargetGrants", "TargetObjectKe
 
 [shape.LoggingEnabled.empty_value]
 TargetBucket = "emit"
-TargetGrants = "omit"
+TargetGrants = "emit"
 TargetPrefix = "emit"
-TargetObjectKeyFormat = "omit"
+TargetObjectKeyFormat = "emit"
 
 [[shape.LoggingEnabled.field]]
 name = "TargetBucket"
@@ -231,7 +231,7 @@ kind = "Structure"
 element_order = ["PartitionDateSource"]
 
 [shape.PartitionedPrefix.empty_value]
-PartitionDateSource = "omit"
+PartitionDateSource = "emit"
 
 [[shape.PartitionedPrefix.field]]
 name = "PartitionDateSource"
@@ -252,8 +252,8 @@ kind = "Structure"
 element_order = ["Grantee", "Permission"]
 
 [shape.TargetGrant.empty_value]
-Grantee = "omit"
-Permission = "omit"
+Grantee = "emit"
+Permission = "emit"
 
 [[shape.TargetGrant.field]]
 name = "Grantee"
@@ -279,8 +279,8 @@ kind = "Structure"
 element_order = ["SimplePrefix", "PartitionedPrefix"]
 
 [shape.TargetObjectKeyFormat.empty_value]
-SimplePrefix = "omit"
-PartitionedPrefix = "omit"
+SimplePrefix = "emit"
+PartitionedPrefix = "emit"
 
 [[shape.TargetObjectKeyFormat.field]]
 name = "SimplePrefix"

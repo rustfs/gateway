@@ -143,49 +143,49 @@ impl OperationCodec for dto::CompleteMultipartUpload {
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.open("CompleteMultipartUploadResult", Some(rustfs_gateway_xml::S3_XMLNS));
         if let Some(v) = output.location.as_ref() {
-            writer.element_if_present("Location", v.as_str());
+            writer.element("Location", v.as_str());
         }
         if let Some(v) = output.bucket.as_ref() {
-            writer.element_if_present("Bucket", v.as_str());
+            writer.element("Bucket", v.as_str());
         }
         if let Some(v) = output.key.as_ref() {
-            writer.element_if_present("Key", v.as_str());
+            writer.element("Key", v.as_str());
         }
         if let Some(v) = output.e_tag.as_ref() {
-            writer.element_quoting_if_present("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+            writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
         }
         if let Some(v) = output.checksum_crc32.as_ref() {
-            writer.element_if_present("ChecksumCRC32", v.as_str());
+            writer.element("ChecksumCRC32", v.as_str());
         }
         if let Some(v) = output.checksum_crc32c.as_ref() {
-            writer.element_if_present("ChecksumCRC32C", v.as_str());
+            writer.element("ChecksumCRC32C", v.as_str());
         }
         if let Some(v) = output.checksum_crc64nvme.as_ref() {
-            writer.element_if_present("ChecksumCRC64NVME", v.as_str());
+            writer.element("ChecksumCRC64NVME", v.as_str());
         }
         if let Some(v) = output.checksum_sha1.as_ref() {
-            writer.element_if_present("ChecksumSHA1", v.as_str());
+            writer.element("ChecksumSHA1", v.as_str());
         }
         if let Some(v) = output.checksum_sha256.as_ref() {
-            writer.element_if_present("ChecksumSHA256", v.as_str());
+            writer.element("ChecksumSHA256", v.as_str());
         }
         if let Some(v) = output.checksum_sha512.as_ref() {
-            writer.element_if_present("ChecksumSHA512", v.as_str());
+            writer.element("ChecksumSHA512", v.as_str());
         }
         if let Some(v) = output.checksum_md5.as_ref() {
-            writer.element_if_present("ChecksumMD5", v.as_str());
+            writer.element("ChecksumMD5", v.as_str());
         }
         if let Some(v) = output.checksum_xxhash64.as_ref() {
-            writer.element_if_present("ChecksumXXHASH64", v.as_str());
+            writer.element("ChecksumXXHASH64", v.as_str());
         }
         if let Some(v) = output.checksum_xxhash3.as_ref() {
-            writer.element_if_present("ChecksumXXHASH3", v.as_str());
+            writer.element("ChecksumXXHASH3", v.as_str());
         }
         if let Some(v) = output.checksum_xxhash128.as_ref() {
-            writer.element_if_present("ChecksumXXHASH128", v.as_str());
+            writer.element("ChecksumXXHASH128", v.as_str());
         }
         if let Some(v) = output.checksum_type.as_ref() {
-            writer.element_if_present("ChecksumType", v.as_str());
+            writer.element("ChecksumType", v.as_str());
         }
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());

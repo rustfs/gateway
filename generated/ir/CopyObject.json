@@ -573,7 +573,7 @@
            "xmlns": "emit",
            "unwrapped_output": false,
            "element_order": ["ETag", "LastModified"],
-           "empty_value_policy": { "ETag": "emit", "LastModified": "omit" },
+           "empty_value_policy": { "ETag": "emit", "LastModified": "emit" },
            "url_encoded_fields": [],
            "attributes": [],
            "body_literal": false

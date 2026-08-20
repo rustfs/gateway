@@ -45,21 +45,21 @@ element_order = ["Location", "Bucket", "Key", "ETag", "ChecksumCRC32", "Checksum
 url_encoded_fields = []
 
 [xml.empty_value]
-Location = "omit"
-Bucket = "omit"
-Key = "omit"
-ETag = "omit"
-ChecksumCRC32 = "omit"
-ChecksumCRC32C = "omit"
-ChecksumCRC64NVME = "omit"
-ChecksumSHA1 = "omit"
-ChecksumSHA256 = "omit"
-ChecksumSHA512 = "omit"
-ChecksumMD5 = "omit"
-ChecksumXXHASH64 = "omit"
-ChecksumXXHASH3 = "omit"
-ChecksumXXHASH128 = "omit"
-ChecksumType = "omit"
+Location = "emit"
+Bucket = "emit"
+Key = "emit"
+ETag = "emit"
+ChecksumCRC32 = "emit"
+ChecksumCRC32C = "emit"
+ChecksumCRC64NVME = "emit"
+ChecksumSHA1 = "emit"
+ChecksumSHA256 = "emit"
+ChecksumSHA512 = "emit"
+ChecksumMD5 = "emit"
+ChecksumXXHASH64 = "emit"
+ChecksumXXHASH3 = "emit"
+ChecksumXXHASH128 = "emit"
+ChecksumType = "emit"
 
 [errors]
 not_configured = ""
@@ -391,7 +391,7 @@ kind = "Structure"
 element_order = ["Parts"]
 
 [shape.CompletedMultipartUpload.empty_value]
-Parts = "omit"
+Parts = "emit"
 
 [[shape.CompletedMultipartUpload.field]]
 name = "Parts"
@@ -407,17 +407,17 @@ kind = "Structure"
 element_order = ["ETag", "ChecksumCRC32", "ChecksumCRC32C", "ChecksumCRC64NVME", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512", "ChecksumMD5", "ChecksumXXHASH64", "ChecksumXXHASH3", "ChecksumXXHASH128", "PartNumber"]
 
 [shape.CompletedPart.empty_value]
-ETag = "omit"
-ChecksumCRC32 = "omit"
-ChecksumCRC32C = "omit"
-ChecksumCRC64NVME = "omit"
-ChecksumSHA1 = "omit"
-ChecksumSHA256 = "omit"
-ChecksumSHA512 = "omit"
-ChecksumMD5 = "omit"
-ChecksumXXHASH64 = "omit"
-ChecksumXXHASH3 = "omit"
-ChecksumXXHASH128 = "omit"
+ETag = "emit"
+ChecksumCRC32 = "emit"
+ChecksumCRC32C = "emit"
+ChecksumCRC64NVME = "emit"
+ChecksumSHA1 = "emit"
+ChecksumSHA256 = "emit"
+ChecksumSHA512 = "emit"
+ChecksumMD5 = "emit"
+ChecksumXXHASH64 = "emit"
+ChecksumXXHASH3 = "emit"
+ChecksumXXHASH128 = "emit"
 PartNumber = "emit"
 
 [[shape.CompletedPart.field]]

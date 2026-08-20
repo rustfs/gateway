@@ -148,8 +148,8 @@
                                    "empty_value_policy": {
                                                            "Name": "emit",
                                                            "CreationDate": "emit",
-                                                           "BucketRegion": "omit",
-                                                           "BucketArn": "omit"
+                                                           "BucketRegion": "emit",
+                                                           "BucketArn": "emit"
                                                          },
                                    "attributes": []
                                  }
@@ -178,7 +178,7 @@
                                    ],
                          "xml": {
                                   "element_order": ["ID", "DisplayName"],
-                                  "empty_value_policy": { "DisplayName": "omit", "ID": "omit" },
+                                  "empty_value_policy": { "DisplayName": "emit", "ID": "emit" },
                                   "attributes": []
                                 }
                        }
@@ -190,7 +190,7 @@
            "xmlns": "emit",
            "unwrapped_output": false,
            "element_order": ["Owner", "Buckets", "ContinuationToken", "Prefix"],
-           "empty_value_policy": { "Buckets": "emit", "Owner": "emit", "ContinuationToken": "omit", "Prefix": "omit" },
+           "empty_value_policy": { "Buckets": "emit", "Owner": "emit", "ContinuationToken": "emit", "Prefix": "emit" },
            "url_encoded_fields": [],
            "attributes": [],
            "body_literal": false

@@ -87,10 +87,10 @@ impl OperationCodec for dto::GetBucketWebsite {
 /// Writes one `Condition` element's children, in the wire order the IR records.
 fn write_condition(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Condition) -> Result<(), CodecError> {
     if let Some(v) = value.http_error_code_returned_equals.as_ref() {
-        writer.element_if_present("HttpErrorCodeReturnedEquals", v.as_str());
+        writer.element("HttpErrorCodeReturnedEquals", v.as_str());
     }
     if let Some(v) = value.key_prefix_equals.as_ref() {
-        writer.element_if_present("KeyPrefixEquals", v.as_str());
+        writer.element("KeyPrefixEquals", v.as_str());
     }
     Ok(())
 }
@@ -116,19 +116,19 @@ fn write_index_document(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto:
 /// Writes one `Redirect` element's children, in the wire order the IR records.
 fn write_redirect(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Redirect) -> Result<(), CodecError> {
     if let Some(v) = value.host_name.as_ref() {
-        writer.element_if_present("HostName", v.as_str());
+        writer.element("HostName", v.as_str());
     }
     if let Some(v) = value.http_redirect_code.as_ref() {
-        writer.element_if_present("HttpRedirectCode", v.as_str());
+        writer.element("HttpRedirectCode", v.as_str());
     }
     if let Some(v) = value.protocol.as_ref() {
-        writer.element_if_present("Protocol", v.as_str());
+        writer.element("Protocol", v.as_str());
     }
     if let Some(v) = value.replace_key_prefix_with.as_ref() {
-        writer.element_if_present("ReplaceKeyPrefixWith", v.as_str());
+        writer.element("ReplaceKeyPrefixWith", v.as_str());
     }
     if let Some(v) = value.replace_key_with.as_ref() {
-        writer.element_if_present("ReplaceKeyWith", v.as_str());
+        writer.element("ReplaceKeyWith", v.as_str());
     }
     Ok(())
 }
@@ -143,7 +143,7 @@ fn write_redirect_all_requests_to(
         writer.element("HostName", v.as_str());
     }
     if let Some(v) = value.protocol.as_ref() {
-        writer.element_if_present("Protocol", v.as_str());
+        writer.element("Protocol", v.as_str());
     }
     Ok(())
 }

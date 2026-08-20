@@ -193,8 +193,8 @@ kind = "Structure"
 element_order = ["Owner", "Grants"]
 
 [shape.AccessControlPolicy.empty_value]
-Grants = "omit"
-Owner = "omit"
+Grants = "emit"
+Owner = "emit"
 
 [[shape.AccessControlPolicy.field]]
 name = "Grants"
@@ -219,8 +219,8 @@ kind = "Structure"
 element_order = ["Grantee", "Permission"]
 
 [shape.Grant.empty_value]
-Grantee = "omit"
-Permission = "omit"
+Grantee = "emit"
+Permission = "emit"
 
 [[shape.Grant.field]]
 name = "Grantee"
@@ -246,11 +246,11 @@ kind = "Structure"
 element_order = ["ID", "DisplayName", "EmailAddress", "URI"]
 
 [shape.Grantee.empty_value]
-DisplayName = "omit"
-EmailAddress = "omit"
-ID = "omit"
-URI = "omit"
-Type = "omit"
+DisplayName = "emit"
+EmailAddress = "emit"
+ID = "emit"
+URI = "emit"
+Type = "emit"
 
 [[shape.Grantee.attribute]]
 element = "Grantee"
@@ -315,8 +315,8 @@ kind = "Structure"
 element_order = ["ID", "DisplayName"]
 
 [shape.Owner.empty_value]
-DisplayName = "omit"
-ID = "omit"
+DisplayName = "emit"
+ID = "emit"
 
 [[shape.Owner.field]]
 name = "DisplayName"

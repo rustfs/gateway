@@ -313,7 +313,7 @@ impl OperationCodec for dto::CopyObject {
             writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
         }
         if let Some(v) = output.last_modified.as_ref() {
-            writer.element_if_present("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+            writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
         }
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());

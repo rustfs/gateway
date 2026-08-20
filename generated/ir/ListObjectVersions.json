@@ -323,7 +323,7 @@
                                      "xml": {
                                               "element_order": ["Key", "VersionId", "IsLatest", "LastModified", "Owner"],
                                               "empty_value_policy": {
-                                                                      "Owner": "omit",
+                                                                      "Owner": "emit",
                                                                       "Key": "emit",
                                                                       "VersionId": "emit",
                                                                       "IsLatest": "emit",
@@ -470,16 +470,16 @@
                                                            ],
                                           "empty_value_policy": {
                                                                   "ETag": "emit",
-                                                                  "ChecksumAlgorithm": "omit",
-                                                                  "ChecksumType": "omit",
+                                                                  "ChecksumAlgorithm": "emit",
+                                                                  "ChecksumType": "emit",
                                                                   "Size": "emit",
                                                                   "StorageClass": "emit",
                                                                   "Key": "emit",
                                                                   "VersionId": "emit",
                                                                   "IsLatest": "emit",
                                                                   "LastModified": "emit",
-                                                                  "Owner": "omit",
-                                                                  "RestoreStatus": "omit"
+                                                                  "Owner": "emit",
+                                                                  "RestoreStatus": "emit"
                                                                 },
                                           "attributes": []
                                         }
@@ -508,7 +508,7 @@
                                    ],
                          "xml": {
                                   "element_order": ["ID", "DisplayName"],
-                                  "empty_value_policy": { "DisplayName": "omit", "ID": "omit" },
+                                  "empty_value_policy": { "DisplayName": "emit", "ID": "emit" },
                                   "attributes": []
                                 }
                        },
@@ -537,8 +537,8 @@
                                  "xml": {
                                           "element_order": ["IsRestoreInProgress", "RestoreExpiryDate"],
                                           "empty_value_policy": {
-                                                                  "IsRestoreInProgress": "omit",
-                                                                  "RestoreExpiryDate": "omit"
+                                                                  "IsRestoreInProgress": "emit",
+                                                                  "RestoreExpiryDate": "emit"
                                                                 },
                                           "attributes": []
                                         }
@@ -569,16 +569,16 @@
                                    "IsTruncated": "emit",
                                    "KeyMarker": "emit",
                                    "VersionIdMarker": "emit",
-                                   "NextKeyMarker": "omit",
-                                   "NextVersionIdMarker": "omit",
-                                   "Versions": "omit",
-                                   "DeleteMarkers": "omit",
+                                   "NextKeyMarker": "emit",
+                                   "NextVersionIdMarker": "emit",
+                                   "Versions": "emit",
+                                   "DeleteMarkers": "emit",
                                    "Name": "emit",
                                    "Prefix": "emit",
-                                   "Delimiter": "omit",
+                                   "Delimiter": "emit",
                                    "MaxKeys": "emit",
-                                   "CommonPrefixes": "omit",
-                                   "EncodingType": "omit"
+                                   "CommonPrefixes": "emit",
+                                   "EncodingType": "emit"
                                  },
            "url_encoded_fields": [
                                    "Prefix",
