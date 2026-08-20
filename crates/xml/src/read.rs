@@ -48,6 +48,7 @@ use std::sync::Arc;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 
+use crate::chars::{is_xml_char, is_xml_representable};
 use crate::error::XmlError;
 
 /// How many buffered bytes one XML request body may hold.
@@ -335,14 +336,14 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
                     continue;
                 };
                 let decoded = chunk.decode().map_err(|_| XmlError::UnsupportedEntity)?;
-                node.text.push_str(decoded.as_ref());
+                node.text.push_str(representable(decoded.as_ref())?);
             }
             Ok(Event::CData(chunk)) => {
                 let Some(node) = stack.last_mut() else {
                     continue;
                 };
                 let decoded = core::str::from_utf8(chunk.as_ref()).map_err(|_| XmlError::NotUtf8)?;
-                node.text.push_str(decoded);
+                node.text.push_str(representable(decoded)?);
             }
             // `quick-xml` hands every `&…;` back verbatim instead of expanding it. That is the
             // property this crate relies on: the five XML predefines and numeric character
@@ -360,6 +361,9 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
                     }
                     Err(_) => return Err(XmlError::UnsupportedEntity),
                 };
+                if !is_xml_char(resolved) {
+                    return Err(XmlError::ForbiddenCharacter);
+                }
                 node.text.push(resolved);
             }
             Ok(_) => {}
@@ -397,7 +401,7 @@ fn declarations(start: &BytesStart<'_>, limits: XmlLimits) -> Result<Vec<(String
             let value = attribute
                 .normalized_value(XmlVersion::Implicit1_0)
                 .map_err(|_| XmlError::UnsupportedEntity)?;
-            declared.push((local, Arc::from(value.as_ref())));
+            declared.push((local, Arc::from(representable(value.as_ref())?)));
         }
     }
     Ok(declared)
@@ -433,6 +437,7 @@ fn read_attributes(
         let value = attribute
             .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|_| XmlError::UnsupportedEntity)?;
+        representable(value.as_ref())?;
         out.push(XmlAttribute {
             name,
             namespace,
@@ -454,7 +459,7 @@ fn resolve(scopes: &[Vec<(String, Arc<str>)>], prefix: &str) -> Option<Arc<str>>
 
 /// An attribute name split into its prefix, when it has one, and its local part.
 fn split_name(raw: &[u8]) -> Result<(Option<String>, String), XmlError> {
-    let name = core::str::from_utf8(raw).map_err(|_| XmlError::NotUtf8)?;
+    let name = representable(core::str::from_utf8(raw).map_err(|_| XmlError::NotUtf8)?)?;
     match name.split_once(':') {
         Some((prefix, local)) => Ok((Some(prefix.to_owned()), local.to_owned())),
         None => Ok((None, name.to_owned())),
@@ -478,6 +483,31 @@ fn predefined_entity(name: &str) -> Option<char> {
 /// S3 clients send both the prefixed and the unprefixed spelling of the same body, and a decoder
 /// that matched on the full name would accept one and refuse the other.
 fn local_name(raw: &[u8]) -> Result<String, XmlError> {
-    let name = core::str::from_utf8(raw).map_err(|_| XmlError::NotUtf8)?;
+    let name = representable(core::str::from_utf8(raw).map_err(|_| XmlError::NotUtf8)?)?;
     Ok(name.rsplit(':').next().unwrap_or(name).to_owned())
+}
+
+/// The text, unless it carries a character XML 1.0 cannot represent.
+///
+/// The reader is the ingress for this rule, and it is the ingress for a reason: `quick-xml` does
+/// not validate the `Char` production, so a raw `U+0001` inside an element is parsed happily,
+/// reaches a decoder as an ordinary string member, and is stored. Whatever writes it back out then
+/// produces a document that is not well-formed, and a conforming client rejects the whole
+/// response — one such value hides every other value in the same document.
+///
+/// Refusing here rather than per member is what makes the rule uniform: every generated decoder of
+/// an XML body already funnels through [`parse_with_limits`], so an operation that gains a string
+/// member gains the refusal with it, and there is no per-operation call an author can forget. The
+/// same predicate is what [`crate::write`] cannot emit, so the refused set and the un-writable set
+/// are the same set by construction.
+///
+/// Borrowing rather than rewriting: the value is either usable as it stands or refused. A reader
+/// that silently repaired the document would accept a request whose echo does not match what was
+/// sent.
+fn representable(text: &str) -> Result<&str, XmlError> {
+    if is_xml_representable(text) {
+        Ok(text)
+    } else {
+        Err(XmlError::ForbiddenCharacter)
+    }
 }

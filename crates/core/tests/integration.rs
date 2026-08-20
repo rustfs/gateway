@@ -103,3 +103,6 @@ mod tolerant_conditions;
 
 #[path = "upload_capability.rs"]
 mod upload_capability;
+
+#[path = "xml_character_range.rs"]
+mod xml_character_range;
