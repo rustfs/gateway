@@ -1,0 +1,87 @@
+# c-object-0038 — the delete-marker refusal a head request gets.
+#
+# Schema dimensions exercised: byte-empty body on an error status, headers carrying the whole
+# answer.
+
+[case]
+id = "c-object-0038"
+schema_version = 1
+title = "A head naming a delete marker is a bodyless 405 that still carries the marker header"
+rationale = """
+A head response never carries content, so every fact this refusal states has to be in the head or \
+it is not stated at all. That makes the pairing load-bearing rather than decorative: the status \
+says the method cannot produce bytes, and x-amz-delete-marker is the only thing that says why. An \
+implementation that puts the reason in the error document — which is the natural thing to do, \
+because the same renderer produces it for a get — answers a head with a Content-Length promising \
+a body the client will never receive, and the client either hangs or drops the keep-alive."""
+polarity = "negative"
+operation = "HeadObject"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2"
+summary = "A response to a head request never carries content, whatever the status line says."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html"
+summary = "A head whose version id names a delete marker answers 405 with x-amz-delete-marker set and no body to read it from."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "versioned/head.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[[exchanges]]
+name = "delete-the-key-and-capture-the-marker"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-object/versioned/head.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[exchanges.expect.capture]
+marker = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "heading-the-marker-says-everything-in-the-head"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object/versioned/head.txt?versionId=${capture.marker}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 405
+connection_after = "open"
+headers_absent = ["etag"]
+
+[exchanges.expect.headers_present]
+"x-amz-delete-marker" = "true"
+"last-modified" = "*"
+
+# Not one byte. The reason travels in the status line and the marker header, never in a body a
+# head response is forbidden to have.
+[exchanges.expect.body]
+size = 0
+exact_utf8 = ""

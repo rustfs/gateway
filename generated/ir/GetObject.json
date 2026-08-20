@@ -655,7 +655,9 @@
                          "InvalidArgument",
                          "InvalidRange",
                          "PreconditionFailed",
-                         "NotModified"
+                         "NotModified",
+                         "MethodNotAllowed",
+                         "NoSuchVersion"
                        ]
             },
   "derived_resources": [],

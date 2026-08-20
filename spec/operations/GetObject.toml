@@ -47,7 +47,7 @@ url_encoded_fields = []
 [errors]
 not_configured = ""
 allows_error_after_200 = false
-codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidObjectState", "InvalidArgument", "InvalidRange", "PreconditionFailed", "NotModified"]
+codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidObjectState", "InvalidArgument", "InvalidRange", "PreconditionFailed", "NotModified", "MethodNotAllowed", "NoSuchVersion"]
 
 [[input]]
 name = "Bucket"

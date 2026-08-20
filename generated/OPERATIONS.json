@@ -429,7 +429,9 @@
                                                   "InvalidArgument",
                                                   "InvalidRange",
                                                   "PreconditionFailed",
-                                                  "NotModified"
+                                                  "NotModified",
+                                                  "MethodNotAllowed",
+                                                  "NoSuchVersion"
                                                 ],
                                  "precedence": 900
                                },
@@ -549,7 +551,9 @@
                                                    "AccessDenied",
                                                    "NotFound",
                                                    "PreconditionFailed",
-                                                   "NotModified"
+                                                   "NotModified",
+                                                   "MethodNotAllowed",
+                                                   "NoSuchVersion"
                                                  ],
                                   "precedence": 950
                                 },
@@ -1583,7 +1587,7 @@
                                        "RestoreObject",
                                        "SelectObjectContent"
                                      ],
-                     "MethodNotAllowed": ["CopyObject", "UploadPartCopy"],
+                     "MethodNotAllowed": ["CopyObject", "GetObject", "HeadObject", "UploadPartCopy"],
                      "MissingContentLength": ["PutObject", "UploadPart"],
                      "NoSuchBucket": [
                                        "AbortMultipartUpload",
@@ -1688,6 +1692,7 @@
                                        "UploadPart",
                                        "UploadPartCopy"
                                      ],
+                     "NoSuchVersion": ["GetObject", "HeadObject"],
                      "NoSuchWebsiteConfiguration": ["GetBucketWebsite"],
                      "NotFound": ["HeadBucket", "HeadObject"],
                      "NotModified": ["GetObject", "HeadObject"],

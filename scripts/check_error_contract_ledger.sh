@@ -73,8 +73,8 @@ requirements=(
     'c-err-0004|positive|bound|conformance/cases/object/c-object-0003.toml::/expect/status=204;conformance/cases/object/c-object-0003.toml::/expect/body/size=0'
     'c-err-0005|positive|bound|conformance/cases/bkt/c-bkt-0027.toml::/expect/status=301;conformance/cases/bkt/c-bkt-0027.toml::/expect/headers_present/x-amz-bucket-region=eu-west-1'
     'c-err-0006|positive|bound|crates/core/tests/params_and_dispatch.rs::fn an_unconfigured_subresource_has_its_own_code'
-    'c-err-0007|positive|blocked|rustfs/backlog#1694::the read form of the delete-marker 404 needs a version stack the in-process fixture does not expose to a case; rustfs/backlog#1680 tracks the same gap as c-obj-0050, and a case that cannot mint the marker asserts the unversioned 404 instead'
-    'c-err-0008|positive|blocked|rustfs/backlog#1694::c-copy-0035 and c-tagging-0024 pin the 405 for a copy source and a tagging read; the GET form needs a delete-marker version id the fixture does not mint, which rustfs/backlog#1680 tracks as c-obj-0049'
+    'c-err-0007|positive|bound|conformance/cases/object/c-object-0037.toml::/exchanges/1/expect/error/code=NoSuchKey;conformance/cases/object/c-object-0037.toml::/exchanges/1/expect/headers_present/x-amz-delete-marker=true;crates/core/tests/error_resolution.rs::fn n_a_current_delete_marker_is_a_not_found_that_still_says_it_is_a_marker'
+    'c-err-0008|positive|bound|conformance/cases/object/c-object-0036.toml::/exchanges/1/expect/status=405;conformance/cases/object/c-object-0036.toml::/exchanges/1/expect/headers_present/last-modified=*;crates/core/tests/error_resolution.rs::fn c_err_n004_only_an_explicit_versioned_delete_marker_is_method_not_allowed'
     'c-err-0009|positive|bound|crates/core/tests/params_and_dispatch.rs::fn the_delete_family_succeeds_with_204'
     'c-param-1001|negative|bound|crates/core/tests/params_and_dispatch.rs::fn a_missing_required_query_parameter_is_a_400_not_a_501;crates/core/tests/params_and_dispatch.rs::fn the_route_still_resolves_when_a_required_parameter_is_missing'
     'c-param-1002|negative|bound|crates/core/tests/params_and_dispatch.rs::fn a_missing_parameter_error_echoes_nothing_from_the_request'
@@ -82,7 +82,7 @@ requirements=(
     'c-route-1004|negative|bound|crates/core/tests/params_and_dispatch.rs::fn the_unrouted_message_says_what_to_check'
     'c-route-1005|negative|bound|crates/core/tests/params_and_dispatch.rs::fn the_two_not_implemented_messages_are_different;crates/core/tests/params_and_dispatch.rs::fn an_empty_registry_answers_the_second_not_implemented'
     'c-err-1006|negative|bound|crates/core/tests/error_resolution.rs::fn a_missing_key_is_hidden_from_a_caller_who_may_not_list;crates/core/tests/error_resolution.rs::fn a_masked_missing_object_reveals_nothing_through_its_message'
-    'c-err-1007|negative|bound|conformance/cases/object/c-object-0008.toml::/expect/body/size=0;crates/core/tests/error_resolution.rs::fn c_err_n007_head_removes_body_and_framing_without_changing_status'
+    'c-err-1007|negative|bound|conformance/cases/object/c-object-0008.toml::/expect/body/size=0;conformance/cases/object/c-object-0038.toml::/exchanges/1/expect/body/size=0;crates/core/tests/error_resolution.rs::fn c_err_n007_head_removes_body_and_framing_without_changing_status'
     'c-err-1008|negative|bound|conformance/cases/cond/c-cond-0023.toml::/exchanges/0/expect/body/not_contains_utf8/0=xmlns'
     'c-err-1009|negative|bound|scripts/test_guard_scripts.sh::fn mut_error_status_unflagged_5xx;scripts/test_guard_scripts.sh::fn mut_error_status_server_fault_on_a_client_error'
     'c-err-1010|negative|bound|crates/core/tests/compile_fail/c_err_1010_custom_code_without_a_status.rs::text ErrorCode::custom("Foo");crates/core/tests/compile_fail.rs::text cases.compile_fail("tests/compile_fail/c_err_1010_*.rs")'
@@ -110,6 +110,9 @@ case_polarity=(
     'conformance/cases/object/c-object-0008.toml|negative'
     'conformance/cases/object/c-object-0011.toml|negative'
     'conformance/cases/object/c-object-0025.toml|negative'
+    'conformance/cases/object/c-object-0036.toml|negative'
+    'conformance/cases/object/c-object-0037.toml|negative'
+    'conformance/cases/object/c-object-0038.toml|negative'
 )
 
 command -v python3 >/dev/null 2>&1 || {

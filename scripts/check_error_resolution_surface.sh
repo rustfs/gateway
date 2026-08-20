@@ -466,7 +466,8 @@ allowed_items = {
     "pubfnpermanent_redirect_for(bucket:BucketName,region:RegionLabel)->Self",
     "pubfntemporary_redirect(region:RegionLabel,target:RedirectTarget)->Self",
     "pubconstfnowned_bucket_recreation()->Self",
-    "pubfnversioned_delete_marker(version_id:&str)->Result<Self,InvalidErrorContext>",
+    "pubfnversioned_delete_marker(version_id:&str,last_modified:i64)->Result<Self,InvalidErrorContext>",
+    "pubfncurrent_delete_marker(visibility:ResourceVisibility,key:Option<ObjectKey>,last_modified:i64,)->Result<Self,InvalidErrorContext>",
     "pubfnnot_modified(etag:ETag)->Self",
     "pub(crate)fninto_error_context(self)->ErrorContext",
 }

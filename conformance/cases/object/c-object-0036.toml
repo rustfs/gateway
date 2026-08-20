@@ -1,0 +1,96 @@
+# c-object-0036 — a read that names a delete marker's version id.
+#
+# Schema dimensions exercised: a versioned bucket, a captured delete-marker version id, and the
+# read that names it.
+
+[case]
+id = "c-object-0036"
+schema_version = 1
+title = "A get naming the version id of a delete marker is refused with 405, not 404"
+rationale = """
+A delete marker is a version that exists and has no representation, so the two answers a reader \
+can get are not interchangeable: 404 says the version id is unknown and a client is entitled to \
+conclude the object was never written under it, while 405 says the version is there and this \
+method cannot produce bytes for it. Writing 404 here is the intuitive mistake, and it makes a \
+versioned restore impossible to drive from a client, because the client cannot tell a marker it \
+should delete from a version id it should stop using. The x-amz-delete-marker header is what \
+carries that distinction on the wire, and a refusal that omits it forces the client to guess."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html"
+summary = "A delete marker is a version with no data behind it, and a read that names one is answered with a method-not-allowed rather than with bytes."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "A read whose version id names a delete marker answers 405 and sets x-amz-delete-marker on the response."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "versioned/read.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[[exchanges]]
+name = "delete-the-key-and-capture-the-marker"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-object/versioned/read.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-delete-marker" = "true"
+
+[exchanges.expect.capture]
+marker = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "reading-the-marker-is-not-allowed"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/versioned/read.txt?versionId=${capture.marker}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 405
+connection_after = "open"
+headers_absent = ["etag", "content-range", "accept-ranges"]
+
+# The two headers the refusal must carry: the marker flag, which is the whole distinction from a
+# 404, and the modification time, which is what a client uses to decide whether to remove it.
+[exchanges.expect.headers_present]
+"x-amz-delete-marker" = "true"
+"last-modified" = "*"
+
+[exchanges.expect.error]
+code = "MethodNotAllowed"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>MethodNotAllowed</Code>"]
+not_contains_utf8 = ["hello world"]

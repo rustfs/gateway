@@ -37,6 +37,12 @@ error_codes = [
   "InvalidRange",
   "PreconditionFailed",
   "NotModified",
+  # A `versionId` that names a delete marker. Not a not-found: the version is in the history and
+  # holds no representation, so a client is told the method cannot serve it rather than that the
+  # version is unknown — the two answers lead to different next requests. See `c-object-0031`.
+  "MethodNotAllowed",
+  # A `versionId` that names nothing at all, which is the other half of that pair.
+  "NoSuchVersion",
 ]
 quirk_refs = ["q-response-0023", "q-storageclass-0024", "q-tag-count-omit-0095"]
 input_hot = ["Range", "IfMatch", "IfNoneMatch", "IfModifiedSince", "IfUnmodifiedSince"]
@@ -165,7 +171,17 @@ quirks = ["q-range-0058"]
 precedence = 950
 auth_action = "s3:GetObject"
 head_mirrors = "GetObject"
-error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "NotFound", "PreconditionFailed", "NotModified"]
+error_codes = [
+  "NoSuchBucket",
+  "NoSuchKey",
+  "AccessDenied",
+  "NotFound",
+  "PreconditionFailed",
+  "NotModified",
+  # The same two version-specific answers `GetObject` gives, with no body to explain either.
+  "MethodNotAllowed",
+  "NoSuchVersion",
+]
 quirk_refs = ["q-head-0025", "q-storageclass-0024"]
 output_hot = ["ETag", "ContentLength", "ContentType", "LastModified"]
 
