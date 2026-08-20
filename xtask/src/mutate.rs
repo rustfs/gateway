@@ -41,10 +41,34 @@
 //! 3. The mutated run must return a verdict for at least as many cases as the baseline run. A run
 //!    that measured fewer cases has not shown that the surviving cases survived.
 //!
-//! Only after all three does a green run get called `SURVIVED`. A mutated tree that does not
-//! compile is `KILLED_BY_COMPILE` and is counted separately: the compiler noticing is not the
-//! corpus noticing, and this repository has been burned before by a check whose green came from
-//! somewhere other than the thing it claimed to measure.
+//! Only after all three does a green run get called `SURVIVED` — and only when at least one case
+//! the rule's ledger row names could have gone red; see the `UNWITNESSED` section below. A mutated
+//! tree that does not compile is `KILLED_BY_COMPILE` and is counted separately: the compiler
+//! noticing is not the corpus noticing, and this repository has been burned before by a check whose
+//! green came from somewhere other than the thing it claimed to measure. "Does not compile" means
+//! the whole set of crates the measurement needs, not the gateway alone: a flip that changes a
+//! dto's optionality leaves `rustfs-gateway --lib` building and breaks the conformance crate's own
+//! fixture, and reporting that as "no report" hides a compile kill behind a label that reads like a
+//! broken harness.
+//!
+//! # `UNWITNESSED`: the rows that certify nothing
+//!
+//! A green suite is a finding about the corpus only when some case in the corpus could have gone
+//! red. `scripts/check_quirk_ledger.sh` is a static join and cannot check that, so two shapes of
+//! ledger row reached the matrix looking exactly like coverage:
+//!
+//! - a declared case that is **not green at baseline**, `failed` or `skipped` — it cannot go from
+//!   green to red, so it can never kill anything (`q-attributes-root-0087`, whose one case
+//!   `c-etag-0001` fails because the fixture answers `501` for `GetObjectAttributes`);
+//! - a declared "case" that **this run does not measure** — the ledger also admits a Rust unit test
+//!   as direct evidence, and one of them passes the format under mutation as a literal argument, so
+//!   nothing about it depends on the rule (`q-timestamp-0011` and `c-objectlock-0001`).
+//!
+//! Both used to report `SURVIVED`, which invites writing more assertions into cases that cannot
+//! run. They are now `UNWITNESSED`, and the defect they name is the ledger row. One live case is
+//! enough to make the row a witness: `q-mpu-attributes-etag-0036` names two green cases and stays
+//! `SURVIVED`, which is the control that this outcome did not swallow the finding it was carved out
+//! of.
 //!
 //! # What `SURVIVED` still cannot separate
 //!
@@ -57,6 +81,15 @@
 //! the rule's source path and asking who reads it; rustfs/gateway#242 records why this control
 //! cannot answer that on its own, and that the tractable fix is to shrink the generated surface
 //! until `dead_code` can answer it, not to add a fourth control here.
+//!
+//! # Warming
+//!
+//! The run is reproducible on a **warm** tree and misreports its first rule on a cold one: the
+//! baseline corpus run is a second cargo invocation that leaves the gateway stale, so the first
+//! mutation reads `library_rebuilt` whatever it touched. [`run`] warms and settles both the gateway
+//! library and the corpus binary before the loop and refuses outright if freshness has not settled,
+//! so a cold tree is a refusal rather than a matrix of unsupported survivors. Run it sequentially in
+//! one worktree; two passes sharing a target directory answer each other's freshness questions.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -83,10 +116,15 @@ pub(crate) enum Outcome {
         /// Whether at least one of them is a case the quirk's ledger row names.
         declared: bool,
     },
-    /// The mutated tree does not compile. Real, but not evidence about the corpus.
-    KilledByCompile,
-    /// Applied, built, measured — and every case stayed green. This is the finding.
+    /// The mutated tree does not compile, naming the unit that failed. Real, but not evidence
+    /// about the corpus.
+    KilledByCompile(String),
+    /// Applied, built, measured — and every case stayed green, with at least one case that could
+    /// have gone red. This is the finding.
     Survived,
+    /// Applied, built, measured — and this rule's ledger row names no case that could have gone
+    /// red, so the green suite certifies nothing about it either way.
+    Unwitnessed(String),
     /// The mutation changed nothing the running gateway reads, so nothing was measured.
     Inert(String),
     /// No flip could be planned for this rule's shape.
@@ -101,8 +139,9 @@ impl Outcome {
     fn label(&self) -> &'static str {
         match self {
             Outcome::Killed { .. } => "KILLED",
-            Outcome::KilledByCompile => "KILLED_BY_COMPILE",
+            Outcome::KilledByCompile(_) => "KILLED_BY_COMPILE",
             Outcome::Survived => "SURVIVED",
+            Outcome::Unwitnessed(_) => "UNWITNESSED",
             Outcome::Inert(_) => "INERT",
             Outcome::Unplannable(_) => "UNPLANNABLE",
             Outcome::Unsupported(_) => "UNSUPPORTED",
@@ -124,8 +163,14 @@ impl Outcome {
 pub(crate) struct Measurement {
     /// Whether regeneration produced different artefact bytes.
     pub(crate) artifacts_changed: bool,
-    /// Whether the mutated tree compiled.
-    pub(crate) compiled: bool,
+    /// The unit that failed to compile under the mutation, or `None` when the whole run built.
+    ///
+    /// Named rather than boolean because the two units that can fail are different findings: the
+    /// gateway itself failing is the compiler catching a protocol flip, and a *downstream* crate
+    /// failing is the same event one crate later. Before this was distinguished, only the first
+    /// reached `KILLED_BY_COMPILE` and the second fell through to "no report" — four rules read
+    /// `NOT_MEASURED`, which is the label that looks like a broken harness (rustfs/backlog#1761).
+    pub(crate) compile_failure: Option<String>,
     /// Whether cargo recompiled the gateway library for the mutated tree.
     pub(crate) library_rebuilt: bool,
     /// Case id to verdict, or `None` when the run produced no report at all.
@@ -133,6 +178,13 @@ pub(crate) struct Measurement {
 }
 
 const PASSED: &str = "passed";
+
+/// The library the in-process conformance target is assembled from.
+const GATEWAY: &str = "rustfs-gateway";
+
+/// The crate whose binary runs the corpus, and whose hand-written fixture is a second consumer of
+/// the generated dto shapes.
+const CONFORMANCE: &str = "rustfs-gateway-conformance";
 
 /// Judges one measurement against the baseline verdicts.
 ///
@@ -143,8 +195,8 @@ pub(crate) fn classify(baseline: &BTreeMap<String, String>, declared: &[String],
     if !observed.artifacts_changed {
         return Outcome::Inert("regenerating with the mutation produced byte-identical artefacts".to_owned());
     }
-    if !observed.compiled {
-        return Outcome::KilledByCompile;
+    if let Some(unit) = &observed.compile_failure {
+        return Outcome::KilledByCompile(unit.clone());
     }
     if !observed.library_rebuilt {
         return Outcome::Inert(
@@ -181,13 +233,49 @@ pub(crate) fn classify(baseline: &BTreeMap<String, String>, declared: &[String],
         }
     }
     if by.is_empty() {
-        return Outcome::Survived;
+        // A green suite is only a corpus gap when something in the corpus could have gone red for
+        // this rule. When nothing could, the row certifies nothing and saying `SURVIVED` invites
+        // the one repair that cannot work.
+        return match witness(baseline, declared) {
+            Ok(()) => Outcome::Survived,
+            Err(why) => Outcome::Unwitnessed(why),
+        };
     }
     let declared_hit = by.iter().any(|id| declared.iter().any(|case| case == id));
     Outcome::Killed {
         by,
         declared: declared_hit,
     }
+}
+
+/// Whether at least one case this rule's ledger row names could have gone red in this run.
+///
+/// Two ways a ledger row can name evidence that proves nothing, both found by the 96-rule sweep on
+/// rustfs/backlog#1761 and both invisible to the classifier before this:
+///
+/// - the case is in the corpus but **not green at baseline** — `failed` or `skipped` — so it cannot
+///   go from green to red (`q-attributes-root-0087` and its only case `c-etag-0001`);
+/// - the "case" is not a case this run measures at all — `scripts/check_quirk_ledger.sh` also
+///   admits a Rust unit test as direct evidence, and one of them hard-codes the very value under
+///   mutation (`q-timestamp-0011` and `c-objectlock-0001`).
+///
+/// The judgement is deliberately per-rule and not per-case: **one** live case is enough to make a
+/// green suite a finding about the corpus, however many dead rows sit beside it.
+fn witness(baseline: &BTreeMap<String, String>, declared: &[String]) -> Result<(), String> {
+    if declared.is_empty() {
+        return Err("this rule's ledger row names no case, so no case could have caught it".to_owned());
+    }
+    let mut dead: Vec<String> = Vec::new();
+    for id in declared {
+        match baseline.get(id).map(String::as_str) {
+            Some(PASSED) => return Ok(()),
+            // `skipped` as well as `failed`: a case the baseline did not run cannot stop running,
+            // and calling that "red" would misdescribe the one case a reader has to go and look at.
+            Some(verdict) => dead.push(format!("`{id}` is `{verdict}`, not green at baseline")),
+            None => dead.push(format!("`{id}` is not a case this run measured")),
+        }
+    }
+    Err(format!("no case this rule's ledger row names could have gone red: {}", dead.join("; ")))
 }
 
 struct Options {
@@ -292,6 +380,12 @@ fn run(options: &Options) -> Result<bool, String> {
             .map_or_else(|| "every case".to_owned(), |filter| format!("filter `{filter}`"))
     );
     build(&root)?.require_success("the unmutated tree does not build")?;
+    // Warm the corpus binary before it is timed and before its freshness matters. A cold target
+    // directory is the documented way this command misreports its first rule, and the two builds
+    // that settle the gateway below cannot settle a crate they never build.
+    if !target(&root)? {
+        return Err(format!("the unmutated tree does not build `{CONFORMANCE}`"));
+    }
     let baseline_verdicts =
         corpus(&root, options.filter.as_deref())?.ok_or_else(|| "the unmutated corpus run produced no report".to_owned())?;
     println!(
@@ -340,6 +434,9 @@ fn run(options: &Options) -> Result<bool, String> {
     restore(&baseline_artifacts)?;
     rustfs_gateway_codegen::verify(&input, &out).map_err(|e| format!("the mutation loop did not put the tree back\n{e}"))?;
     build(&root)?.require_success("the restored tree does not build")?;
+    if !target(&root)? {
+        return Err(format!("the restored tree does not build `{CONFORMANCE}`"));
+    }
 
     print!("{}", summary(&results));
     Ok(results.iter().all(|(_, _, outcome)| outcome.is_pass()))
@@ -351,11 +448,17 @@ fn describe(outcome: &Outcome) -> String {
         Outcome::Killed { by, declared: false } => {
             format!("KILLED by {} — none of them is a case this rule's ledger row names", by.join(", "))
         }
-        Outcome::KilledByCompile => "KILLED_BY_COMPILE — the mutated tree does not build; no case was consulted".to_owned(),
-        Outcome::Survived => "SURVIVED — the mutation reached a file the gateway compiles and no case noticed; \
-             that is a corpus gap OR a lowered value nothing reads, and the freshness control cannot tell them \
-             apart (rustfs/gateway#242)"
+        Outcome::KilledByCompile(unit) => {
+            format!("KILLED_BY_COMPILE — `{unit}` does not build under the mutation; no case was consulted")
+        }
+        Outcome::Survived => "SURVIVED — the mutation reached a file the gateway compiles, a case that could have \
+             gone red did not, and that is a corpus gap OR a lowered value nothing reads, which the freshness \
+             control cannot tell apart (rustfs/gateway#242)"
             .to_owned(),
+        Outcome::Unwitnessed(why) => format!(
+            "UNWITNESSED — {why}; this is a defect in the rule's ledger row, not a gap a new assertion in \
+             those cases would close"
+        ),
         Outcome::Inert(why) | Outcome::Unplannable(why) | Outcome::Unsupported(why) | Outcome::NotMeasured(why) => {
             format!("{} — {why}", outcome.label())
         }
@@ -458,7 +561,7 @@ fn measure(
     if !artifacts_changed {
         return Ok(Measurement {
             artifacts_changed: false,
-            compiled: false,
+            compile_failure: None,
             library_rebuilt: false,
             verdicts: None,
         });
@@ -471,7 +574,7 @@ fn measure(
     if !built.ok {
         return Ok(Measurement {
             artifacts_changed: true,
-            compiled: false,
+            compile_failure: Some(GATEWAY.to_owned()),
             library_rebuilt: false,
             verdicts: None,
         });
@@ -487,6 +590,20 @@ fn measure(
             built.digest
         ));
     }
+    // The library building is not the run building. A mutation that flips a field's optionality
+    // changes a dto's shape, and the crate that destructures it is the conformance crate, not the
+    // gateway — so `rustfs-gateway --lib` compiles, the freshness control passes, and the corpus
+    // subprocess then dies at `crates/conformance/src/fixture.rs` before writing a report. Judged
+    // on the library alone that is "no report"; judged on what the run actually needs it is the
+    // compiler catching the mutation one crate later, and the two must not share a label.
+    if built.rebuilt && !target(root)? {
+        return Ok(Measurement {
+            artifacts_changed: true,
+            compile_failure: Some(CONFORMANCE.to_owned()),
+            library_rebuilt: true,
+            verdicts: None,
+        });
+    }
     let verdicts = if built.rebuilt {
         corpus(root, options.filter.as_deref())?
     } else {
@@ -494,7 +611,7 @@ fn measure(
     };
     Ok(Measurement {
         artifacts_changed: true,
-        compiled: true,
+        compile_failure: None,
         library_rebuilt: built.rebuilt,
         verdicts,
     })
@@ -546,7 +663,7 @@ impl Built {
 fn build(root: &Path) -> Result<Built, String> {
     let output = Command::new(env!("CARGO"))
         .current_dir(root)
-        .args(["build", "--package", "rustfs-gateway", "--lib", "--message-format", "json"])
+        .args(["build", "--package", GATEWAY, "--lib", "--message-format", "json"])
         .stderr(Stdio::null())
         .output()
         .map_err(|e| format!("failed to run cargo build: {e}"))?;
@@ -590,7 +707,7 @@ fn build(root: &Path) -> Result<Built, String> {
     // A successful build that named no artefact would leave every later comparison unanchored, so
     // refusing is the only honest answer.
     let (fresh, rlib) =
-        found.ok_or_else(|| "cargo reported no rlib for `rustfs-gateway`; there is nothing to fingerprint".to_owned())?;
+        found.ok_or_else(|| format!("cargo reported no rlib for `{GATEWAY}`; there is nothing to fingerprint"))?;
     let digest = digest(&rlib)?;
     Ok(Built {
         ok: true,
@@ -598,6 +715,22 @@ fn build(root: &Path) -> Result<Built, String> {
         rlib,
         digest,
     })
+}
+
+/// Builds the binary the corpus run executes, and reports whether it compiled.
+///
+/// Separate from [`build`] on purpose: [`build`]'s answer is *freshness*, and it has to stay about
+/// the gateway alone or the "did the mutation reach production code" control stops meaning that.
+/// This one's answer is only *did it compile*, for the whole set of crates the measurement needs.
+fn target(root: &Path) -> Result<bool, String> {
+    let status = Command::new(env!("CARGO"))
+        .current_dir(root)
+        .args(["build", "--package", CONFORMANCE, "--bin", CONFORMANCE])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|e| format!("failed to run cargo build for `{CONFORMANCE}`: {e}"))?;
+    Ok(status.success())
 }
 
 /// Runs the corpus and returns case id to verdict, or `None` when no report was produced.
