@@ -20,6 +20,9 @@ ADRs; this map only selects files.
 | `src/sign.rs` | Request signing for corpus inputs. | A signed case sends the wrong request. |
 | `src/fixture.rs` | Deterministic fixture backend used by local runs. | Setup state or a fixture operation behaves wrongly. |
 | `src/fixture/handlers_bucket.rs` | Bucket Handler entries for the deterministic fixture. | A bucket operation stops reaching existing fixture behavior. |
+| `src/token.rs` | The continuation-token codec: an HMAC-authenticated page position bound to its listing. | A cursor is honoured that this service did not issue, or a real one is refused. |
+| `src/fixture/pagination_properties.rs` | Generated set semantics for the fixture's paging. | A resumed page skips or repeats an entry. |
+| `src/fixture/list_allocations.rs` | What one page of a listing costs, under a heap profiler. | A listing allocates in proportion to the bucket rather than the page. |
 | `src/fixture/handlers_object.rs` | Object, multipart, listing, and event Handler entries for the deterministic fixture. | An object-family operation stops reaching existing fixture behavior. |
 | `src/keys/` | Schema-key consumption audit. | A declared case key is parsed but ignored. |
 | `src/report.rs` | Human, JSON and JUnit reports. | A verdict is rendered or grouped wrongly. |
