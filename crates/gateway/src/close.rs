@@ -53,6 +53,15 @@
 //! | `411 MissingContentLength` | close | **RFC 9112 §11.2** — see [`after_undeclared_length`] |
 //! | any other decode, condition or handler refusal | may keep | **RFC 9112 §9.3** — the body was read to its end before the refusal could be reached |
 //!
+//! One note on the `ChunkReject` row, because the reason it holds moved. The decoder used to be
+//! handed the whole wire body, already collected, so a `may keep` verdict was true by
+//! construction: the remainder had been read before the refusal could be reached. Since
+//! rustfs/gateway#229 the decoder pulls frames as it needs them and stops at the refusal, so the
+//! remainder is still on the socket and it is the transport's lingering read that drains it. The
+//! basis is unchanged — `Content-Length` fixes the extent, so the remainder is bounded and
+//! drainable — but [`rustfs_gateway_http::MAX_LINGER_DRAIN_BYTES`] now decides this family too: a
+//! refusal early in a body larger than that budget closes rather than keeps.
+//!
 //! # What is guessed, said plainly
 //!
 //! Four rows are not derivable from RFC 9112 §9.3 alone and are marked as such wherever they are

@@ -329,6 +329,56 @@ fn c_ing_0033_bytes_after_the_terminal_chunk_are_refused() {
     assert_eq!(pipeline.reject(), Some(ChunkReject::ZeroSizedNonTerminalChunk));
 }
 
+/// Negative: bytes after a terminal chunk that lands exactly on the window boundary are refused
+/// too, which the case above cannot show.
+///
+/// The window starts at 65,536 bytes. A body whose terminal chunk ends on exactly that offset
+/// leaves the pipeline with a full window and therefore an empty buffer for its "was that really
+/// terminal?" read — and a pull-model reader handed an empty buffer answers `Filled(0)`, which is
+/// indistinguishable from "the body is over" unless somebody makes room first. Without that, this
+/// body commits its payload and leaves `4\r\nmore\r\n` unread on a connection the service is about
+/// to reuse: two different bodies depending on who is reading, which is what `c-ing-0033` exists to
+/// refuse. The boundary is asserted rather than assumed, so a change to the window size that left
+/// this case behind goes red here instead of passing for the wrong reason.
+#[test]
+fn c_ing_0033_bytes_after_a_terminal_chunk_on_the_window_boundary_are_refused() {
+    const WINDOW: usize = 64 * 1024;
+    // A four-digit hexadecimal size line and its CRLF, the payload's own CRLF, and the five bytes
+    // of `0\r\n\r\n` that terminate the body.
+    const OVERHEAD: usize = 4 + 2 + 2 + 5;
+    let payload = vec![b'd'; WINDOW - OVERHEAD];
+    let mut body = unsigned_body(&[&payload]);
+    assert_eq!(body.len(), WINDOW, "the terminal chunk must end on the window boundary");
+    body.extend_from_slice(b"4\r\nmore\r\n");
+
+    let mut pipeline = unsigned_pipeline(body, 4096, (WINDOW - OVERHEAD) as u64, no_observers(), ChunkLimits::default());
+    let _ = drain_pipeline(&mut pipeline, 64).expect_err("nothing follows the terminal chunk");
+    assert_eq!(pipeline.reject(), Some(ChunkReject::ZeroSizedNonTerminalChunk));
+    assert!(!pipeline.commit_allowed());
+}
+
+/// Positive: the same window-boundary body with nothing after it still arrives byte for byte.
+///
+/// The counterpart to the case above, and the one that makes the compaction it added checkable.
+/// `finalize` now calls `make_room` before its confirming read, which rebases the decoder's cursor
+/// and every run still pending — so "the probe is a real read" and "nothing was rebased out from
+/// under a run the consumer had not been shown yet" are two different claims, and only this one
+/// tests the second. A compaction that dropped or shifted the tail of the body would refuse
+/// nothing and report nothing; it would just hand back different bytes.
+#[test]
+fn a_terminal_chunk_on_the_window_boundary_still_delivers_every_byte() {
+    const WINDOW: usize = 64 * 1024;
+    const OVERHEAD: usize = 4 + 2 + 2 + 5;
+    let payload: Vec<u8> = (0..WINDOW - OVERHEAD).map(|index| (index % 251) as u8).collect();
+    let body = unsigned_body(&[&payload]);
+    assert_eq!(body.len(), WINDOW, "the terminal chunk must end on the window boundary");
+
+    let mut pipeline = unsigned_pipeline(body, 4096, payload.len() as u64, no_observers(), ChunkLimits::default());
+    let out = drain_pipeline(&mut pipeline, 1024).expect("a well formed body");
+    assert_eq!(out, payload, "compaction before the terminal probe moved the body");
+    assert!(pipeline.commit_allowed());
+}
+
 /// Negative: every refusal is a 400 except the signature one, which is a 403 — and no refusal is
 /// ever committable.
 #[test]

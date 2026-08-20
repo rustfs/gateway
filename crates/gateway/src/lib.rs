@@ -104,6 +104,7 @@ mod stamp;
 mod trace;
 mod transport;
 mod wire;
+mod wire_read;
 
 pub mod sig;
 
