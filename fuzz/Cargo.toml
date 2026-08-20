@@ -11,6 +11,8 @@ cargo-fuzz = true
 bytes = "1"
 http = "1"
 libfuzzer-sys = "0.4"
+rustfs-gateway = { path = "../crates/gateway" }
+rustfs-gateway-conformance = { path = "../crates/conformance" }
 rustfs-gateway-core = { path = "../crates/core" }
 rustfs-gateway-http = { path = "../crates/http" }
 rustfs-gateway-sig = { path = "../crates/sig" }
@@ -58,6 +60,13 @@ bench = false
 [[bin]]
 name = "route_disjoint"
 path = "fuzz_targets/route_disjoint.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "opaque_token"
+path = "fuzz_targets/opaque_token.rs"
 test = false
 doc = false
 bench = false
