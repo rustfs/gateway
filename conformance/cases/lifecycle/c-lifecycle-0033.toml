@@ -1,0 +1,54 @@
+# c-lifecycle-0033 — a character XML 1.0 cannot represent is refused at the body boundary.
+#
+# Schema dimensions exercised: U+0001, raw, in the rule identifier, in ID.
+
+[case]
+id = "c-lifecycle-0033"
+schema_version = 1
+title = "A raw U+0001 in <ID> is refused rather than stored and echoed"
+rationale = """
+XML 1.0 admits tab, newline and carriage return out of the C0 controls and excludes the rest entirely, so a document carrying one is not well formed and no conforming parser accepts it. A gateway that stores such a value answers every later read with a document the client's own parser rejects in full, which hides every other rule in the configuration behind a syntax failure rather than losing one member. The identifier is a plain string member with no validation of its own, so nothing but the character range stands between the caller and that outcome."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "encoding", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://www.w3.org/TR/xml/#charsets"
+summary = "The XML specification excludes most C0 control characters from documents entirely, escaped or not."
+kind = "other"
+
+[[case.evidence]]
+url = "https://github.com/aws/aws-sdk-java/issues/333"
+summary = "A captured DeleteObjects request body carrying the same class of character was answered by real S3 with MalformedXML and 400, in both the raw and the character-reference spelling."
+kind = "observed"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "tYNgffyd7FuDbSU3WiGQ3Q==" }
+body = { utf8 = "<LifecycleConfiguration><Rule><ID>logs\u0001rule</ID><Status>Enabled</Status><Filter><And><Prefix>logs/</Prefix><Tag><Key>team</Key><Value>ops</Value></Tag></And></Filter><Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the request body is not the XML this operation accepts</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
