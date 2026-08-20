@@ -485,11 +485,26 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
         }
         // One more read, to establish that the terminal chunk really was terminal. Bytes after it
         // mean the peer treated a zero-sized chunk as an ordinary one.
+        //
+        // The room is made first, and that is not tidiness. A body whose terminal chunk ends
+        // exactly on the window boundary leaves no tail at all, and a reader handed an empty
+        // buffer answers `Filled(0)` — which the arm below reads as "the body is over". So a wire
+        // body of exactly 65,536 bytes could carry anything it liked after its terminal chunk and
+        // be committed, with the trailing octets left unread on a connection this service was
+        // about to reuse. `make_room` compacts the consumed window back to nothing, so the probe
+        // below is always a real read. rustfs/gateway#229.
+        if let Err(reject) = self.make_room() {
+            return Poll::Ready(Err(self.fail(reject)));
+        }
         let filled = self.filled;
-        let Some(tail) = self.window.get_mut(filled..) else {
-            self.finished = true;
-            self.commit_allowed = true;
-            return Poll::Ready(Ok(()));
+        // One guard rather than two, and it fails closed. Both halves are unreachable — `filled`
+        // never exceeds the window's length, and `make_room` returning `Ok` leaves room in it —
+        // but the arm this replaces answered "no buffer" with `commit_allowed = true`, which is
+        // the same "nobody looked, so nothing follows" inference the empty tail above is the
+        // reason for. Two adjacent unreachable arms that disagree about which way to fail is one
+        // refactor away from the reachable one being the wrong one.
+        let Some(tail) = self.window.get_mut(filled..).filter(|tail| !tail.is_empty()) else {
+            return Poll::Ready(Err(self.fail(ChunkReject::ChunkMetaTooLong)));
         };
         match Pin::new(&mut self.inner).poll_fill(cx, tail) {
             Poll::Pending => Poll::Pending,
