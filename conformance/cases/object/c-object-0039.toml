@@ -1,0 +1,66 @@
+# c-object-0039 — the one member of this class with a captured answer from real S3.
+#
+# Schema dimensions exercised: U+0002, raw, in the <Key> of a multi-object delete body.
+
+[case]
+id = "c-object-0039"
+schema_version = 1
+title = "A raw U+0002 in a DeleteObjects Key is refused, not silently taken as a different key"
+rationale = """
+This is the one member of this class whose answer from real S3 has been captured rather than inferred, which is why it is pinned separately from the lifecycle rows that share its rule. The captured behaviour is a refusal, and the alternative that capture also rules out is the dangerous one: a server that accepts the body and matches nothing answers 200 with a result document listing neither an error nor a deletion, so the caller is told the batch succeeded while the object is still there. An object key may legally hold this byte on the storage side; a request body is where it has no spelling, and the two facts are why the refusal belongs to the body boundary rather than to the key type."""
+polarity = "negative"
+operation = "DeleteObjects"
+tags = ["xml", "encoding", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/aws/aws-sdk-java/issues/333"
+summary = "A captured multi-object delete against real S3 carrying this byte in a Key was answered MalformedXML with status 400, in the raw and the escaped spelling alike, and an AWS engineer reproduced it."
+kind = "observed"
+
+[[case.evidence]]
+url = "https://github.com/boto/boto3/issues/2005"
+summary = "An independent capture of the same operation and the same class of byte, reproduced against real S3 by an AWS maintainer, was likewise answered MalformedXML."
+kind = "observed"
+
+[[case.evidence]]
+url = "https://www.w3.org/TR/xml/#charsets"
+summary = "The XML specification excludes most C0 control characters from documents entirely, escaped or not."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "batch/one"
+body = { utf8 = "hello world" }
+
+[request]
+method = "POST"
+target = "/conf-object?delete"
+headers = { "content-type" = "application/xml", "content-md5" = "7S5vbc0JAFYd5mCmtOPIbw==" }
+body = { utf8 = "<Delete><Object><Key>batch\u0002one</Key></Object></Delete>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the request body is not the XML this operation accepts</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

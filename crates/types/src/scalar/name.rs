@@ -178,21 +178,15 @@ impl ObjectKey {
 
 /// Whether every character of a value can appear in an XML 1.0 document at all.
 ///
-/// XML 1.0 admits tab, newline and carriage return out of the C0 controls and excludes the rest
-/// entirely — escaped or not, `&#1;` is as illegal as the raw byte. A value carrying one has no
-/// XML spelling, so the only answer that leaves the response parseable is to percent-encode it.
+/// Re-exported from `rustfs-gateway-xml` rather than spelled a second time here. The set this
+/// predicate answers for is the set the XML reader refuses on the way in and the set the XML
+/// writer cannot emit on the way out; a second definition in this crate is a second place for the
+/// three to disagree, and the direction that matters — accepting on the way in what the writer
+/// then writes raw — is exactly the defect `rustfs/gateway#256` reported.
 ///
 /// This is about *representability*, not about escaping: `&`, `<`, `>` and `"` are all
 /// representable and are the writer's business, not this predicate's.
-#[must_use]
-pub fn is_xml_representable(value: &str) -> bool {
-    value.chars().all(|character| {
-        matches!(
-            character,
-            '\t' | '\n' | '\r' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}'
-        )
-    })
-}
+pub use rustfs_gateway_xml::is_xml_representable;
 
 impl Default for ObjectKey {
     /// The empty key — a placeholder that is **invalid on the wire**, and exists for one reason.

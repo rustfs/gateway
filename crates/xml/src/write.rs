@@ -39,6 +39,8 @@
 
 use core::fmt::Write as _;
 
+use crate::chars::{UNREPRESENTABLE, is_xml_char};
+
 /// The XML declaration S3 puts at the head of every response body.
 pub const DECLARATION: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
 
@@ -233,7 +235,7 @@ pub fn escape_text(text: &str, out: &mut String) {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '\r' => out.push_str("&#13;"),
-            other => out.push(other),
+            other => out.push(representable(other)),
         }
     }
 }
@@ -251,7 +253,7 @@ pub fn escape_text_and_quotes(text: &str, out: &mut String) {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\r' => out.push_str("&#13;"),
-            other => out.push(other),
+            other => out.push(representable(other)),
         }
     }
 }
@@ -269,7 +271,24 @@ pub fn escape_attribute(value: &str, out: &mut String) {
             '\r' => out.push_str("&#13;"),
             '\n' => out.push_str("&#10;"),
             '\t' => out.push_str("&#9;"),
-            other => out.push(other),
+            other => out.push(representable(other)),
         }
     }
+}
+
+/// The character itself, unless XML 1.0 cannot represent it at all.
+///
+/// The three escaping passes above answer "how is this character spelled"; this answers the prior
+/// question of whether it has a spelling. A character that does not is replaced by
+/// [`UNREPRESENTABLE`] rather than written raw, because writing it raw produces a document that is
+/// not well-formed — and a client's parser rejects the whole document, so one such character in
+/// one member hides every other value in the response behind a syntax error.
+///
+/// This is the writer half of one predicate. [`crate::read`] refuses a *request* carrying such a
+/// character, so no caller-supplied value reaches this function; what does reach it is a value a
+/// backend already holds, which the gateway did not choose and cannot refuse without hiding the
+/// siblings. The listing path never reaches it either: a stored key that fails the predicate is
+/// percent-encoded before it is escaped (`ObjectKey::needs_url_encoding`, `c-list-0035`).
+fn representable(character: char) -> char {
+    if is_xml_char(character) { character } else { UNREPRESENTABLE }
 }

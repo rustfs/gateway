@@ -1,0 +1,54 @@
+# c-lifecycle-0036 — a character XML 1.0 cannot represent is refused at the body boundary.
+#
+# Schema dimensions exercised: U+0001, written as a character reference, in the tag value, in Filter.And.Tag.Value.
+
+[case]
+id = "c-lifecycle-0036"
+schema_version = 1
+title = "The escaped spelling of U+0001 in <Value> is refused with the raw byte"
+rationale = """
+A guard written against the raw byte alone is bypassed by writing the same character as a reference. This reader resolves the five predefined entities and numeric character references by name, so the escaped form and the raw byte arrive at a decoder as one value; XML 1.0 makes a reference to a character outside its Char production a fatal failure for exactly that reason. The refusal has to cover the spelling, not the byte."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "encoding", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://www.w3.org/TR/xml/#charsets"
+summary = "The XML specification excludes most C0 control characters from documents entirely, escaped or not."
+kind = "other"
+
+[[case.evidence]]
+url = "https://github.com/aws/aws-sdk-java/issues/333"
+summary = "A captured DeleteObjects request body carrying the same class of character was answered by real S3 with MalformedXML and 400, in both the raw and the character-reference spelling."
+kind = "observed"
+
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "oR59Y7M37IRtTmm5t5orcw==" }
+body = { utf8 = "<LifecycleConfiguration><Rule><ID>logs</ID><Status>Enabled</Status><Filter><And><Prefix>logs/</Prefix><Tag><Key>team</Key><Value>o&#x1;ps</Value></Tag></And></Filter><Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>the request body is not the XML this operation accepts</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
