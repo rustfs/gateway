@@ -497,16 +497,15 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
             return Poll::Ready(Err(self.fail(reject)));
         }
         let filled = self.filled;
-        let Some(tail) = self.window.get_mut(filled..) else {
-            self.finished = true;
-            self.commit_allowed = true;
-            return Poll::Ready(Ok(()));
-        };
-        if tail.is_empty() {
-            // Unreachable after `make_room`, and refused rather than accepted if it ever is: an
-            // empty probe cannot distinguish "nothing follows" from "nobody looked".
+        // One guard rather than two, and it fails closed. Both halves are unreachable — `filled`
+        // never exceeds the window's length, and `make_room` returning `Ok` leaves room in it —
+        // but the arm this replaces answered "no buffer" with `commit_allowed = true`, which is
+        // the same "nobody looked, so nothing follows" inference the empty tail above is the
+        // reason for. Two adjacent unreachable arms that disagree about which way to fail is one
+        // refactor away from the reachable one being the wrong one.
+        let Some(tail) = self.window.get_mut(filled..).filter(|tail| !tail.is_empty()) else {
             return Poll::Ready(Err(self.fail(ChunkReject::ChunkMetaTooLong)));
-        }
+        };
         match Pin::new(&mut self.inner).poll_fill(cx, tail) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(err)) => {

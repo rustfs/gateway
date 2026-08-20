@@ -21,8 +21,6 @@
 
 use crate::support;
 
-use std::collections::VecDeque;
-
 use bytes::Bytes;
 use rustfs_gateway::S3Service;
 
@@ -41,9 +39,34 @@ const PROBE_ENV: &str = "RUSTFS_GATEWAY_CHUNKED_ALLOCATION_PROBE";
 const PROBE_SENTINEL: &str = "rustfs-gateway chunked allocation probe: ";
 const PROBE_TEST: &str = "chunked_allocations::c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body";
 
-/// A body that hands over pre-sliced frames and allocates nothing while it is being read.
+/// A body that hands each frame over as **its own allocation**, made while the profiler is
+/// watching.
+///
+/// The obvious producer hands out `Bytes::slice` views of one buffer built before the window
+/// opens. That producer makes this gate measure the wrong thing, and it was caught measuring it:
+/// a reader that kept every frame it was given for the whole request — the wire body resident
+/// beside the decoded one, which is the defect this file exists to refuse — cost 16 bytes per
+/// retained refcount and the peak assertion stayed **green**. What that producer bounds is
+/// *copying*, and copying is not the claim.
+///
+/// So each frame is a real allocation the consumer owns and drops. Retaining one now costs its
+/// bytes, and the peak is a statement about residency. The price is one allocation and one copy of
+/// the body added to every run, which is why [`COPIES_ALLOCATED`] is three rather than two and why
+/// the block bound below is stated per frame; both cancel between the two runs except for the
+/// frames the larger one has more of, which is exactly what [`HARNESS_BLOCKS_PER_FRAME`] accounts
+/// for.
 struct FramedBody {
-    frames: VecDeque<Bytes>,
+    /// The wire body, allocated before the window and therefore not counted. Only the slices cut
+    /// from it inside `poll_frame` are.
+    wire: Bytes,
+    cursor: usize,
+}
+
+impl FramedBody {
+    /// How many frames a `wire`-byte body is delivered in.
+    const fn frame_count(wire: usize) -> u64 {
+        wire.div_ceil(FRAME) as u64
+    }
 }
 
 impl http_body::Body for FramedBody {
@@ -55,10 +78,16 @@ impl http_body::Body for FramedBody {
         _context: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Option<Result<http_body::Frame<Bytes>, Self::Error>>> {
         let this = self.get_mut();
-        match this.frames.pop_front() {
-            Some(bytes) => core::task::Poll::Ready(Some(Ok(http_body::Frame::data(bytes)))),
-            None => core::task::Poll::Ready(None),
+        if this.cursor >= this.wire.len() {
+            return core::task::Poll::Ready(None);
         }
+        let take = FRAME.min(this.wire.len() - this.cursor);
+        let frame = match this.wire.get(this.cursor..this.cursor + take) {
+            Some(slice) => Bytes::copy_from_slice(slice),
+            None => return core::task::Poll::Ready(None),
+        };
+        this.cursor += take;
+        core::task::Poll::Ready(Some(Ok(http_body::Frame::data(frame))))
     }
 }
 
@@ -128,9 +157,9 @@ fn exchange(
     service: &S3Service,
     runtime: &tokio::runtime::Runtime,
     parts: http::request::Parts,
-    frames: VecDeque<Bytes>,
+    wire: Bytes,
 ) -> http::StatusCode {
-    let request = http::Request::from_parts(parts, FramedBody { frames });
+    let request = http::Request::from_parts(parts, FramedBody { wire, cursor: 0 });
     runtime.block_on(async {
         let response = service.call(request).await;
         let collected = rustfs_gateway::collect(response).await.expect("an in-memory body");
@@ -138,20 +167,13 @@ fn exchange(
     })
 }
 
-/// Splits the wire body into fixed-size frames, before the profiler exists.
-fn frames(wire: &Bytes) -> VecDeque<Bytes> {
-    let mut frames = VecDeque::with_capacity(wire.len().div_ceil(FRAME));
-    let mut cursor = 0;
-    while cursor < wire.len() {
-        let take = FRAME.min(wire.len() - cursor);
-        frames.push_back(wire.slice(cursor..cursor + take));
-        cursor += take;
-    }
-    frames
-}
-
-/// What one `len`-byte upload costs: blocks, bytes allocated, and peak bytes held.
-fn cost(len: usize) -> (u64, u64, u64) {
+/// What one `len`-byte upload costs: blocks, bytes allocated, peak bytes held, and the number of
+/// wire frames it arrived in.
+///
+/// Everything that is not the measured exchange — the service, the runtime, the signed request,
+/// the wire body, and one warm-up exchange at the same size — happens before the profiler exists,
+/// so the window holds one upload and nothing else.
+fn cost(len: usize) -> (u64, u64, u64, u64) {
     let service = support::allocations::probe_service();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -159,61 +181,77 @@ fn cost(len: usize) -> (u64, u64, u64) {
         .expect("a current-thread runtime");
     let (parts, wire) = request(len);
 
-    let warm = exchange(&service, &runtime, parts.clone(), frames(&wire));
+    let warm = exchange(&service, &runtime, parts.clone(), wire.clone());
     assert_eq!(warm, http::StatusCode::OK, "the {len}-byte upload was not accepted");
 
-    let ready = frames(&wire);
+    let frames = FramedBody::frame_count(wire.len());
     let profiler = dhat::Profiler::builder().testing().build();
-    let status = exchange(&service, &runtime, parts, ready);
+    let status = exchange(&service, &runtime, parts, wire);
     let stats = dhat::HeapStats::get();
     drop(profiler);
 
     assert_eq!(status, http::StatusCode::OK, "the measured {len}-byte upload was not accepted");
-    (stats.total_blocks, stats.total_bytes, stats.max_bytes as u64)
+    (stats.total_blocks, stats.total_bytes, stats.max_bytes as u64, frames)
 }
 
-/// Runs one isolated probe process at `len` and reads back the three numbers it measured.
-fn measure(len: usize) -> (u64, u64, u64) {
-    let numbers = support::allocations::measure(PROBE_TEST, PROBE_ENV, PROBE_SENTINEL, len, 3);
-    (numbers[0], numbers[1], numbers[2])
+/// Runs one isolated probe process at `len` and reads back the four numbers it measured.
+fn measure(len: usize) -> (u64, u64, u64, u64) {
+    let numbers = support::allocations::measure(PROBE_TEST, PROBE_ENV, PROBE_SENTINEL, len, 4);
+    (numbers[0], numbers[1], numbers[2], numbers[3])
 }
 
 /// How many copies of the body may be **resident at once** at the peak of an upload.
 ///
 /// One: the decoded body, which is what the caller is handed. The wire body is not a second one —
-/// it is pulled frame by frame into the pipeline's window, so the octets a frame carried are gone
-/// before the next frame arrives.
+/// it is pulled frame by frame into the pipeline's window, and each frame is dropped as it is
+/// consumed. [`FramedBody`] is what makes that a measurement rather than a hope: every frame is
+/// its own allocation, so a reader that held on to them would be holding the wire body and the
+/// peak would say so.
 ///
 /// Before rustfs/gateway#229 this was three. The whole wire body was collected into a `BytesMut`
 /// first and the decode ran over it, so at the moment the decoded collector last grew the process
-/// held the wire body, the decoded body and the decoded body's replacement buffer: the same probe
-/// read a peak growth of 2,981,888 bytes for 983,040 bytes of extra body. Reinstating that
-/// collect-then-decode is the mutation the pull request records against this line.
+/// held the wire body, the decoded body and the decoded body's replacement buffer. Reinstating
+/// that collect-then-decode, and separately retaining every frame in the reader, are two of the
+/// mutations the pull request records against this line.
 const COPIES_HELD: u64 = 1;
 
 /// How many copies of the body the whole upload may **allocate**, resident or not.
 ///
-/// Two, and the second one is not a copy of the body: a `BytesMut` that grows by doubling
-/// allocates a little under twice its final size across the growth steps that get it there, and
-/// the decoded collector is the one buffer left that grows. Before #229 this read 6.03.
-const COPIES_ALLOCATED: u64 = 2;
+/// Three, and none of them is a spare copy of the object. One is [`FramedBody`]'s per-frame
+/// allocation, which is the harness paying for the residency measurement above. The other two are
+/// one buffer: a `BytesMut` that grows by doubling allocates a little under twice its final size
+/// across the growth steps that get it there, and the decoded collector is the one buffer left
+/// that grows. Before #229 the same probe read 6.03 without the harness copy, because the wire
+/// collector was a second such buffer.
+///
+/// The doubling is the `bytes` crate's growth policy rather than anything this repository decides,
+/// so [`BYTES_HEADROOM`] deliberately leaves room above three for a policy that is less tight than
+/// two — but not enough room for a fourth copy of the body, which is what the defect looks like.
+const COPIES_ALLOCATED: u64 = 3;
 
-/// Allocator and per-request bookkeeping that does not scale with the body, so it cancels between
-/// the two runs but not exactly. Small next to a single copy of even the smaller body, and smaller
-/// than the pipeline's own 64 KiB window is not required — the window is the same size in both
-/// runs, so it cancels.
-const BYTES_HEADROOM: u64 = 64 * 1024;
+/// Allocator and per-request bookkeeping that does not scale with the body, plus slack for a
+/// `bytes` growth policy other than doubling.
+///
+/// The pipeline's own 64 KiB window is the same size in both runs, so it cancels rather than
+/// needing room here.
+const BYTES_HEADROOM: u64 = 512 * 1024;
 
-/// How many more heap *blocks* the larger upload may take than the smaller one.
+/// How many heap blocks the harness itself spends per wire frame.
+///
+/// One: [`FramedBody::poll_frame`] allocates each frame. The larger run has more frames than the
+/// smaller one — that is the point of holding [`FRAME`] constant — so the bound below is stated
+/// per frame rather than as a flat number, which also stops it rotting if [`LARGE`] is raised.
+///
+/// One, not two. An allocation taken *inside* the read path is a second block per frame and puts
+/// the larger run one whole frame-count above this line, which is the mutation the pull request
+/// records.
+const HARNESS_BLOCKS_PER_FRAME: u64 = 1;
+
+/// Heap blocks that do not scale with the body at all.
 ///
 /// Reasoned rather than measured. Both runs allocate the same fixed set — the window, the drain
-/// buffer, the decoded collector's growth steps, the response — and nothing in the frame loop is
-/// supposed to allocate at all. Sixteen is slack for the growth steps a sixteen-times-larger
-/// collector takes and for bookkeeping that does not cancel exactly.
-///
-/// What sixteen does not leave room for is the thing this line exists to catch. The larger run
-/// pulls 129 frames against the smaller run's 9, so one allocation per frame puts it 124 blocks
-/// above; that is the second mutation the pull request records.
+/// buffer, the response — and the only thing that legitimately grows is the decoded collector's
+/// doubling steps, of which the larger run takes four more.
 const BLOCK_HEADROOM: u64 = 16;
 
 /// What a run that measured nothing looks like, and the floor that refuses it.
@@ -252,15 +290,15 @@ const MEASURED_BYTES_FLOOR: u64 = 4096;
 fn c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body() {
     if let Some(len) = std::env::var_os(PROBE_ENV) {
         let len: usize = len.to_string_lossy().parse().expect("a body size");
-        let (blocks, bytes, peak) = cost(len);
-        println!("{PROBE_SENTINEL}{blocks} {bytes} {peak}");
+        let (blocks, bytes, peak, frames) = cost(len);
+        println!("{PROBE_SENTINEL}{blocks} {bytes} {peak} {frames}");
         return;
     }
 
-    let (small_blocks, small_bytes, small_peak) = measure(SMALL);
-    let (large_blocks, large_bytes, large_peak) = measure(LARGE);
-    println!("small body {SMALL}: {small_blocks} blocks, {small_bytes} bytes, {small_peak} peak");
-    println!("large body {LARGE}: {large_blocks} blocks, {large_bytes} bytes, {large_peak} peak");
+    let (small_blocks, small_bytes, small_peak, small_frames) = measure(SMALL);
+    let (large_blocks, large_bytes, large_peak, large_frames) = measure(LARGE);
+    println!("small body {SMALL}: {small_blocks} blocks, {small_bytes} bytes, {small_peak} peak, {small_frames} frames");
+    println!("large body {LARGE}: {large_blocks} blocks, {large_bytes} bytes, {large_peak} peak, {large_frames} frames");
 
     // First: that anything was measured at all. Everything below is a statement about the
     // difference between two numbers, and two zeroes have no difference.
@@ -273,8 +311,17 @@ fn c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body() {
              `#[global_allocator]` of `dhat::Alloc` is still declared somewhere in this test binary."
         );
     }
+    // And that the larger run really was fed in more frames, which is what the block bound is
+    // stated against. Two equal frame counts would make that bound a flat sixteen without saying
+    // so, and would mean `FRAME` had stopped being the constant this file holds fixed.
+    assert!(
+        large_frames > small_frames,
+        "both runs arrived in {small_frames} and {large_frames} frames; the larger body must be \
+         fed in more frames than the smaller one for the per-frame bound below to mean anything"
+    );
 
     let payload_growth = (LARGE - SMALL) as u64;
+    let frame_growth = large_frames - small_frames;
     let block_growth = large_blocks.saturating_sub(small_blocks);
     let byte_growth = large_bytes.saturating_sub(small_bytes);
     let peak_growth = large_peak.saturating_sub(small_peak);
@@ -283,21 +330,22 @@ fn c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body() {
         peak_growth <= payload_growth * COPIES_HELD + BYTES_HEADROOM,
         "a body {}x larger held {peak_growth} more bytes at its peak ({small_peak} -> {large_peak}) \
          for {payload_growth} more body, which is more than the {COPIES_HELD} copy this gate \
-         allows. The wire body is resident beside the decoded one again, and the ingest window is \
-         bounding only half of what the request costs.",
+         allows. Something on the framed path is holding the wire body beside the decoded one, and \
+         the ingest window is bounding only half of what the request costs.",
         LARGE / SMALL
     );
     assert!(
         byte_growth <= payload_growth * COPIES_ALLOCATED + BYTES_HEADROOM,
         "the aws-chunked path allocated {byte_growth} more bytes for {payload_growth} more body \
-         ({small_bytes} -> {large_bytes}), which is more than the {COPIES_ALLOCATED} copies a \
-         single doubling collector costs"
+         ({small_bytes} -> {large_bytes}), which is more than the {COPIES_ALLOCATED} copies one \
+         doubling collector and the harness's own per-frame allocation cost"
     );
+    let block_allowance = frame_growth * HARNESS_BLOCKS_PER_FRAME + BLOCK_HEADROOM;
     assert!(
-        block_growth <= BLOCK_HEADROOM,
-        "a body {}x larger cost {block_growth} more allocations ({small_blocks} -> {large_blocks}), \
-         not at most {BLOCK_HEADROOM}: something on the streaming path allocates per frame or per \
-         chunk",
+        block_growth <= block_allowance,
+        "a body {}x larger cost {block_growth} more allocations ({small_blocks} -> {large_blocks}) \
+         for {frame_growth} more frames, not at most {block_allowance}: something on the streaming \
+         path allocates per frame or per chunk on top of the one the harness spends",
         LARGE / SMALL
     );
 }
