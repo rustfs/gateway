@@ -4480,8 +4480,30 @@ expect_fail check_layer_dependencies.sh \
     'a workspace-inherited renamed reverse internal dependency' \
     mut_reverse_edge_workspace_inherited
 
+# Adds one dependency line to `crates/conformance/Cargo.toml`'s `[dependencies]` table.
+#
+# Not `>>` onto the end of the file. An append lands in whichever table happens to be last, and a
+# `[dev-dependencies]` section there turns every mutation below into a dev-dependency — which the
+# guards are right to permit, so the cases stop proving anything. That is not hypothetical: it is
+# how three cases in this file went dark at once. The manifest keeps `[dependencies]` last and says
+# why, and this function does not rely on it.
+add_conformance_dependency() {
+    GATEWAY_MUTATION_DEPENDENCY="$1" python3 - <<'PYEOF'
+import os
+from pathlib import Path
+
+manifest = Path("crates/conformance/Cargo.toml")
+text = manifest.read_text()
+marker = "[dependencies]\n"
+if text.count(marker) != 1:
+    raise SystemExit("crates/conformance/Cargo.toml has no unique [dependencies] table to mutate")
+line = os.environ["GATEWAY_MUTATION_DEPENDENCY"] + "\n"
+manifest.write_text(text.replace(marker, marker + line, 1))
+PYEOF
+}
+
 mut_conformance_internal() {
-    printf 'rustfs-gateway-core = { workspace = true }\n' >>crates/conformance/Cargo.toml
+    add_conformance_dependency 'rustfs-gateway-core = { workspace = true }'
 }
 expect_fail check_layer_dependencies.sh \
     'conformance reaching past the facade into rustfs-gateway-core' mut_conformance_internal
@@ -10969,7 +10991,7 @@ expect_fail check_baseline_ratchet.sh \
     "the guard's baseline input deleted, which must fail rather than skip" mut_baseline_deleted
 
 mut_runner_sdk_dependency() {
-    printf 'aws-sdk-s3 = "1"\n' >>crates/conformance/Cargo.toml
+    add_conformance_dependency 'aws-sdk-s3 = "1"'
 }
 expect_fail check_runner_raw_bytes.sh \
     'an S3 SDK dependency added to the conformance runner' mut_runner_sdk_dependency
@@ -11047,7 +11069,7 @@ expect_fail check_runner_raw_bytes.sh \
     'Connection::open ignoring the selected raw socket address' mut_runner_raw_connect_bypassed
 
 mut_runner_unlisted_client_dependency() {
-    printf 'ureq = "3"\n' >>crates/conformance/Cargo.toml
+    add_conformance_dependency 'ureq = "3"'
 }
 expect_fail check_runner_raw_bytes.sh \
     'an unlisted HTTP client dependency bypassing a name deny-list' mut_runner_unlisted_client_dependency

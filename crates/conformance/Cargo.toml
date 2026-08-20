@@ -1,7 +1,7 @@
 [package]
 name = "rustfs-gateway-conformance"
 description = "Data-driven S3 conformance suite runnable against any implementation"
-version = "0.4.0"   # independent version: this is a product other S3 implementations run against themselves
+version = "0.5.0"   # independent version: this is a product other S3 implementations run against themselves
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -29,6 +29,23 @@ workspace = true
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+# Ahead of `[dependencies]`, and not at the end of the file where it would naturally go.
+# `scripts/test_guard_scripts.sh` proves `check_layer_dependencies.sh` can fail by appending
+# `rustfs-gateway-core = { workspace = true }` to this file — a line that means "conformance
+# reached past the facade" only if it lands in `[dependencies]`. A `[dev-dependencies]` table at
+# the end catches that append instead, the guard correctly permits it, and a negative case that
+# has proved this guard could fail since P0 quietly stops proving anything. Keep `[dependencies]`
+# last.
+[dev-dependencies]
+# The allocation instrument. `src/fixture/list_allocations.rs` installs `dhat::Alloc` as the
+# global allocator of the library's own test executable, under `#[cfg(test)]`, so nothing in the
+# shipped library reaches it and a dev-dependency is not inherited by an implementation that runs
+# this suite against itself.
+dhat = { workspace = true }
+# The pagination property test's generator. Same reasoning: dev-only, and the properties it states
+# are about the reference backend rather than about the corpus.
+proptest = { workspace = true }
 
 [dependencies]
 rustfs-gateway = { workspace = true }
