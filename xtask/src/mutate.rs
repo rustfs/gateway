@@ -45,6 +45,18 @@
 //! compile is `KILLED_BY_COMPILE` and is counted separately: the compiler noticing is not the
 //! corpus noticing, and this repository has been burned before by a check whose green came from
 //! somewhere other than the thing it claimed to measure.
+//!
+//! # What `SURVIVED` still cannot separate
+//!
+//! Control 2 is at **file** granularity and the claim it supports — "running code reads this rule"
+//! — is at **read** granularity. A generated constant that no code reads still sits in a file the
+//! gateway compiles, so changing it makes cargo rebuild and the row reports `SURVIVED` exactly as a
+//! real corpus gap does. `q-bkt-0001` was that shape: `RouteRow::success_status` was dropped by
+//! `generated_entries`, and the repair that `SURVIVED` invites — write two cases — could not have
+//! worked, because no response was built from the value. The two verdicts are told apart by reading
+//! the rule's source path and asking who reads it; rustfs/gateway#242 records why this control
+//! cannot answer that on its own, and that the tractable fix is to shrink the generated surface
+//! until `dead_code` can answer it, not to add a fourth control here.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -340,7 +352,10 @@ fn describe(outcome: &Outcome) -> String {
             format!("KILLED by {} — none of them is a case this rule's ledger row names", by.join(", "))
         }
         Outcome::KilledByCompile => "KILLED_BY_COMPILE — the mutated tree does not build; no case was consulted".to_owned(),
-        Outcome::Survived => "SURVIVED — the mutation reached the gateway and no case noticed".to_owned(),
+        Outcome::Survived => "SURVIVED — the mutation reached a file the gateway compiles and no case noticed; \
+             that is a corpus gap OR a lowered value nothing reads, and the freshness control cannot tell them \
+             apart (rustfs/gateway#242)"
+            .to_owned(),
         Outcome::Inert(why) | Outcome::Unplannable(why) | Outcome::Unsupported(why) | Outcome::NotMeasured(why) => {
             format!("{} — {why}", outcome.label())
         }
