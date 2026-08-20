@@ -201,8 +201,14 @@ guard_runs = (0...4).map do |group|
     scripts/ci_budget.sh 300 "guard mutations #{group + 1}/4" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=4 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
   RUN
 end
+# Two suites, two budgets, one runner. They share a runner because the pair costs about twenty
+# seconds of a three-minute job and a second runner would cost more in spin-up than it saves; they
+# keep separate ci_budget.sh lines because a shared budget reports one margin for two suites and
+# hides which of them is the one growing. 120 + 45 stays inside the job's own three-minute timeout,
+# so an overrun is diagnosed by ci_budget.sh rather than killed at exit 124.
 target_run = <<~'RUN'
   scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh
+  scripts/ci_budget.sh 45 "test target coverage self-test" bash scripts/test_test_target_coverage.sh
 RUN
 quirk_ledger_run = <<~'RUN'
   scripts/ci_budget.sh 60 "quirk ledger self-test" env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh

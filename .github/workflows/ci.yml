@@ -388,6 +388,7 @@ jobs:
       - name: Target consolidation mutations (maximum 2 minutes after setup)
         run: |
           scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh
+          scripts/ci_budget.sh 45 "test target coverage self-test" bash scripts/test_test_target_coverage.sh
 
   quirk-ledger-self-test:
     name: Quirk ledger self-test
