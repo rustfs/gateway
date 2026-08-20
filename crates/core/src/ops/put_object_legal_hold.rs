@@ -46,7 +46,7 @@ use crate::registry::OperationSpec;
 /// The `LegalHold` document is a required *member*, refused by the decoder with `MalformedXML`
 /// when the body is absent or wrongly rooted — not a required *parameter*, which is a check on
 /// the request head. Nothing on the head is required beyond the routing discriminator.
-static SPEC: OperationSpec = OperationSpec::builder("PutObjectLegalHold", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutObjectLegalHold")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutObjectLegalHold", ResourceShape::Object))
     .build();

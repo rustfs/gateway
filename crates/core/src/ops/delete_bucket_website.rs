@@ -53,7 +53,7 @@ use crate::registry::OperationSpec;
 ///
 /// `website` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("DeleteBucketWebsite", 204, None)
+static SPEC: OperationSpec = OperationSpec::standard("DeleteBucketWebsite")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:DeleteBucketWebsite", ResourceShape::Bucket))
     .build();

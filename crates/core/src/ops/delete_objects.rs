@@ -78,7 +78,7 @@ impl crate::DerivedResourceSet for DeleteObjectResources {
 }
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec::builder("DeleteObjects", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("DeleteObjects")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:DeleteObject", ResourceShape::Object))
     .build();

@@ -45,7 +45,7 @@ use crate::registry::OperationSpec;
 pub static REGION_HEADER_DUTY: RegionHeaderDuty = RegionHeaderDuty::SuccessAndRedirect;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec::builder("HeadBucket", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("HeadBucket")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket))
     .build();

@@ -53,7 +53,7 @@ mod table;
 
 pub use self::compiled::{CompiledRouter, OpId, RouteBucket};
 pub use self::explain::{Explained, Explanation};
-pub use self::generated::{ROUTES, RoutePredicate, RouteRow, RowError, generated_entries};
+pub use self::generated::{ROUTES, RoutePredicate, RouteRow, RowError, generated_entries, row_of};
 pub use self::lattice::{Contradiction, OverlapError};
 pub use self::mask::{CompileError, MAX_SUBRESOURCE_KEYS, SubresourceBits};
 pub use self::selector::{ArnForm, HostClass, Predicate, RouteEntry, RouteRequestParts, RouteSelector, TargetKind};

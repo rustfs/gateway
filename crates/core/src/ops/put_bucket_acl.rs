@@ -61,7 +61,7 @@ pub static ACL_TARGET: AclTarget = AclTarget::Bucket;
 /// is read — not a required *parameter*, which is a check on the request head alone. Nothing on
 /// the head is required beyond the routing discriminator: an ACL write may legitimately carry no
 /// body at all, because the header channel is the other way of saying the same thing.
-static SPEC: OperationSpec = OperationSpec::builder("PutBucketAcl", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutBucketAcl")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutBucketAcl", ResourceShape::Bucket))
     .build();

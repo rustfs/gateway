@@ -52,7 +52,6 @@
 //! any bucket `GET` row behind it is unreachable.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
-use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{GetBucketPolicy, GetBucketPolicyInput, GetBucketPolicyOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
@@ -62,7 +61,7 @@ use crate::registry::OperationSpec;
 ///
 /// `policy` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("GetBucketPolicy", 200, Some(ErrorCode::NO_SUCH_BUCKET_POLICY))
+static SPEC: OperationSpec = OperationSpec::standard("GetBucketPolicy")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:GetBucketPolicy", ResourceShape::Bucket))
     .build();

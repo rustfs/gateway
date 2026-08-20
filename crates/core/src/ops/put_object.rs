@@ -56,7 +56,7 @@ pub static CONDITION_KIND: RequestKind = RequestKind::Write;
 pub static CONDITIONS: [ConditionalHeader; 2] = [ConditionalHeader::IfMatch, ConditionalHeader::IfNoneMatch];
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec::builder("PutObject", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutObject")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
     .build();

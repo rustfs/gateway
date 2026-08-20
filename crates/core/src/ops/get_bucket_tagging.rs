@@ -37,7 +37,6 @@
 //! keys.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
-use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{GetBucketTagging, GetBucketTaggingInput, GetBucketTaggingOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
@@ -51,7 +50,7 @@ pub static TAG_SCOPE: TagScope = TagScope::Bucket;
 ///
 /// `tagging` is a routing discriminator, not a required parameter: a `GET` on a bucket without it
 /// is a listing. What this spec does declare is the unconfigured answer — see the module docs.
-static SPEC: OperationSpec = OperationSpec::builder("GetBucketTagging", 200, Some(ErrorCode::NO_SUCH_TAG_SET))
+static SPEC: OperationSpec = OperationSpec::standard("GetBucketTagging")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:GetBucketTagging", ResourceShape::Bucket))
     .build();

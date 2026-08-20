@@ -44,7 +44,7 @@ use crate::registry::OperationSpec;
 pub static TAG_SCOPE: TagScope = TagScope::Object;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec::builder("DeleteObjectTagging", 204, None)
+static SPEC: OperationSpec = OperationSpec::standard("DeleteObjectTagging")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:DeleteObjectTagging", ResourceShape::Object))
     .build();

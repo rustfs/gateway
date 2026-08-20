@@ -47,7 +47,6 @@
 //! any bucket `GET` row behind it is unreachable.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
-use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{GetBucketWebsite, GetBucketWebsiteInput, GetBucketWebsiteOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
@@ -57,7 +56,7 @@ use crate::registry::OperationSpec;
 ///
 /// `website` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("GetBucketWebsite", 200, Some(ErrorCode::NO_SUCH_WEBSITE_CONFIGURATION))
+static SPEC: OperationSpec = OperationSpec::standard("GetBucketWebsite")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:GetBucketWebsite", ResourceShape::Bucket))
     .build();

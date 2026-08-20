@@ -39,7 +39,6 @@
 //! `ObjectLockConfigurationNotFoundError` (`q-lock-0002`).
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
-use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{GetObjectRetention, GetObjectRetentionInput, GetObjectRetentionOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
@@ -50,11 +49,10 @@ use crate::registry::OperationSpec;
 /// `retention` is a routing discriminator, not a required parameter: a `GET` on an object key
 /// without it is `GetObject`. Nothing else is required — `versionId` selects a version and its
 /// absence selects the current one.
-static SPEC: OperationSpec =
-    OperationSpec::builder("GetObjectRetention", 200, Some(ErrorCode::NO_SUCH_OBJECT_LOCK_CONFIGURATION))
-        .required_params(&[])
-        .auth(AuthRequirement::new("s3:GetObjectRetention", ResourceShape::Object))
-        .build();
+static SPEC: OperationSpec = OperationSpec::standard("GetObjectRetention")
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetObjectRetention", ResourceShape::Object))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetObjectRetention", SigService::S3);

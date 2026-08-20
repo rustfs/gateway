@@ -53,7 +53,7 @@ use crate::registry::OperationSpec;
 ///
 /// `policy` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("DeleteBucketPolicy", 204, None)
+static SPEC: OperationSpec = OperationSpec::standard("DeleteBucketPolicy")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:DeleteBucketPolicy", ResourceShape::Bucket))
     .build();

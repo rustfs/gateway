@@ -57,7 +57,7 @@ pub static CONDITION_KIND: RequestKind = RequestKind::Read;
 pub static CONDITIONS: [ConditionalHeader; 2] = [ConditionalHeader::IfMatch, ConditionalHeader::IfNoneMatch];
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec::builder("HeadObject", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("HeadObject")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
     .build();

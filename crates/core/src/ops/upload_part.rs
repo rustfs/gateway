@@ -50,7 +50,7 @@ use crate::registry::OperationSpec;
 /// The 411 for a missing `Content-Length` is not expressible here: the pre-authentication status
 /// set is `{400, 403, 501}`, so the refusal belongs to the decoder, where the IR carries
 /// `missing_error = "MissingContentLength"` for the field.
-static SPEC: OperationSpec = OperationSpec::builder("UploadPart", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("UploadPart")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
     .build();

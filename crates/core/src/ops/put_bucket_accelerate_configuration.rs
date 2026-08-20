@@ -59,7 +59,7 @@ use crate::registry::OperationSpec;
 ///
 /// `accelerate` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("PutBucketAccelerateConfiguration", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutBucketAccelerateConfiguration")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutAccelerateConfiguration", ResourceShape::Bucket))
     .build();

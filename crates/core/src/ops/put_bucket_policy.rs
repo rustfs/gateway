@@ -61,7 +61,7 @@ use crate::registry::OperationSpec;
 ///
 /// `policy` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("PutBucketPolicy", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutBucketPolicy")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutBucketPolicy", ResourceShape::Bucket))
     .build();

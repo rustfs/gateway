@@ -327,10 +327,14 @@ wrong_standard = sorted(name for name in operations - {"CompleteMultipartUpload"
 if wrong_standard:
     fail(f"standard handler deadline drifted for: {wrong_standard}")
 
-builder_pattern = re.compile(r"OperationSpec::builder\(.*?\.build\(\)", re.DOTALL)
+# gateway#242: a standard operation constructs its specification with `OperationSpec::standard`,
+# which reads the success status and the unconfigured code out of the generated route table instead
+# of taking them as arguments. The census is about the deadline class, which neither constructor
+# carries, so both spellings enter it and the counts below are unchanged.
+builder_pattern = re.compile(r"OperationSpec::(?:builder|standard)\(.*?\.build\(\)", re.DOTALL)
 authority_builders = [match.group(0) for match in builder_pattern.finditer(source)]
 authority_builder_names = [
-    re.findall(r'OperationSpec::builder\(\s*"([A-Za-z0-9:]+)"', chain) for chain in authority_builders
+    re.findall(r'OperationSpec::(?:builder|standard)\(\s*"([A-Za-z0-9:]+)"', chain) for chain in authority_builders
 ]
 authority_explicit_classes = [
     chain.count(".handler_deadline_class(HandlerDeadlineClass::Standard)") for chain in authority_builders
@@ -359,21 +363,25 @@ for path in sorted((root / "crates").rglob("*.rs")):
     if re.search(r"\bOperationSpec\s+as\s+\w+|\btype\s+\w+\s*=\s*[^;]*\bOperationSpec\b", text):
         fail(f"OperationSpec aliases are forbidden from the deadline-class census: {relative}")
     builders = list(builder_pattern.finditer(text))
-    if "OperationSpec::builder" in text and not builders:
+    # Rustdoc that links a constructor is prose, not a construction site. `OperationSpec::standard`
+    # is referenced from `route/generated.rs`, which builds no specification at all, so the
+    # inventory question is asked of code lines only.
+    code_text = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("//"))
+    if ("OperationSpec::builder" in code_text or "OperationSpec::standard" in code_text) and not builders:
         fail(f"OperationSpec builder cannot be inventoried: {relative}")
     in_standard_source = path.parent == ops_dir and path.name != "mod.rs"
     if in_standard_source and len(builders) != 1:
-        fail(f"standard operation source has {len(builders)} builders instead of one: {relative}")
+        fail(f"standard operation source has {len(builders)} specification builders instead of one: {relative}")
     for builder in builders:
         chain = builder.group(0)
-        names = re.findall(r'OperationSpec::builder\(\s*"([A-Za-z0-9:]+)"', chain)
+        names = re.findall(r'OperationSpec::(?:builder|standard)\(\s*"([A-Za-z0-9:]+)"', chain)
         standard = chain.count(".handler_deadline_class(HandlerDeadlineClass::Standard)")
         extended = chain.count(".handler_deadline_class(HandlerDeadlineClass::Extended)")
         if standard + extended > 1:
             fail(f"OperationSpec builder declares multiple deadline classes: {relative}")
         if in_standard_source:
             if len(names) != 1 or names[0] not in operations or standard or extended:
-                fail(f"standard operation builder bypasses the central deadline authority: {relative}")
+                fail(f"standard operation specification bypasses the central deadline authority: {relative}")
             central_builders += 1
         elif len(names) == 1 and names[0] in operations:
             if standard or extended:

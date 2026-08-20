@@ -49,7 +49,7 @@ use crate::registry::{OperationSpec, ParamKind, RequiredParam};
 /// required, it selects which of the five attribute groups the response carries, and a request
 /// that omits it names no attributes at all. It is checked here rather than in the decoder so the
 /// refusal happens on the request head, before a body is read.
-static SPEC: OperationSpec = OperationSpec::builder("GetObjectAttributes", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("GetObjectAttributes")
     .required_params(&[RequiredParam {
         kind: ParamKind::Header,
         name: "x-amz-object-attributes",

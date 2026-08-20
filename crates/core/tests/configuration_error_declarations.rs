@@ -25,9 +25,10 @@ use rustfs_gateway_types::ErrorCode;
 /// The encryption read declares its own unconfigured code, and its two siblings declare none.
 ///
 /// The declaration is what a backend outside this workspace reads to learn which 404 an
-/// unconfigured bucket owes; the conformance fixture answers the code from its own constant, so
-/// without this test the spec field could be deleted and every encryption case would still pass —
-/// a value declared and never observed, which is the defect the Measurement rules exist for.
+/// unconfigured bucket owes, and since gateway#242 the conformance fixture answers from that
+/// declaration rather than from a constant of its own. This test holds the near end of that chain:
+/// the field is what `OperationSpec::standard` lowered out of `model/overlays/ops/encryption.toml`,
+/// and an encryption case observes the far end.
 ///
 /// Both directions are asserted deliberately. A spec field stuck on `Some(..)` would satisfy the
 /// first assertion alone, and the write and the delete are exactly the operations that must carry

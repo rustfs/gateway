@@ -46,7 +46,6 @@
 //! any bucket `GET` row behind it is unreachable.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
-use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{GetPublicAccessBlock, GetPublicAccessBlockInput, GetPublicAccessBlockOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
@@ -56,11 +55,10 @@ use crate::registry::OperationSpec;
 ///
 /// `publicAccessBlock` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec =
-    OperationSpec::builder("GetPublicAccessBlock", 200, Some(ErrorCode::NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION))
-        .required_params(&[])
-        .auth(AuthRequirement::new("s3:GetBucketPublicAccessBlock", ResourceShape::Bucket))
-        .build();
+static SPEC: OperationSpec = OperationSpec::standard("GetPublicAccessBlock")
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetBucketPublicAccessBlock", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetPublicAccessBlock", SigService::S3);

@@ -50,7 +50,7 @@ use crate::registry::OperationSpec;
 /// No required parameter, and that is the point: this operation is what a `GET` on a bucket means
 /// when no other bucket route claimed it, so it sits last in the bucket band rather than asserting
 /// anything about the query string.
-static SPEC: OperationSpec = OperationSpec::builder("ListObjects", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("ListObjects")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket))
     .build();

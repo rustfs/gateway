@@ -60,7 +60,7 @@ use crate::registry::OperationSpec;
 ///
 /// `website` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("PutBucketWebsite", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutBucketWebsite")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutBucketWebsite", ResourceShape::Bucket))
     .build();

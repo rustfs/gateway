@@ -45,7 +45,6 @@
 //! operation and what `q-repl-0001` records.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
-use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{GetBucketReplication, GetBucketReplicationInput, GetBucketReplicationOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
@@ -55,11 +54,10 @@ use crate::registry::OperationSpec;
 ///
 /// `replication` is a routing discriminator, not a required parameter: a `GET` on a bucket
 /// without it is the key listing. Nothing else is required.
-static SPEC: OperationSpec =
-    OperationSpec::builder("GetBucketReplication", 200, Some(ErrorCode::REPLICATION_CONFIGURATION_NOT_FOUND))
-        .required_params(&[])
-        .auth(AuthRequirement::new("s3:GetReplicationConfiguration", ResourceShape::Bucket))
-        .build();
+static SPEC: OperationSpec = OperationSpec::standard("GetBucketReplication")
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetReplicationConfiguration", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketReplication", SigService::S3);

@@ -112,18 +112,19 @@ use rustfs_gateway::dto;
 use rustfs_gateway::{
     AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome,
     CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, EventSequence, GranteeType, Handler, HandlerError,
-    HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE,
-    PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors, RecordedUpload, RegionLabel,
-    RegionSet, Req, RequestKind, ResolvedUploadId, ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope,
-    TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee, collect, completion_failure_retains_upload,
-    conditional_write_guards_before_mutation, copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds,
-    copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate, evaluate_range,
-    format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag, parse_tagging_header,
-    permanent_redirect_for, resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint, resolve_part,
-    resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate, validate_cors,
-    validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
-    validate_notification, validate_policy, validate_public_access_block, validate_replication, validate_request_payment,
-    validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
+    HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators, Operation,
+    PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors,
+    RecordedUpload, RegionLabel, RegionSet, Req, RequestKind, ResolvedUploadId, ResourceVisibility, Resp, RestoreState,
+    RestoreStatus, TagScope, TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee, collect,
+    completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_source_guards_before_target_write,
+    copy_source_if_match_miss_proceeds, copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate,
+    evaluate_range, format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag,
+    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_input as resolve_acl_input,
+    resolve_location_constraint, resolve_part, resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document,
+    validate_accelerate, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
+    validate_lock_configuration, validate_logging, validate_notification, validate_policy, validate_public_access_block,
+    validate_replication, validate_request_payment, validate_restore, validate_retention, validate_select, validate_tag_set,
+    validate_versioning, validate_website,
 };
 
 mod handlers_bucket;
@@ -1731,21 +1732,34 @@ fn guard_read(
     }
 }
 
-/// `NoSuchKey`, raised only once every condition has been evaluated against the absence.
+/// The unconfigured answer for a bucket subresource read, taken from the operation's declaration.
 ///
-/// The document carries `<Key>`, which is the only element in it that says *which* read missed —
-/// a client batching reads on one connection cannot tell two 404s apart without it. The key is the
-/// one the request named, so it is an echo to a caller already authenticated and authorised, and
-/// the writer escapes it: see `rustfs_gateway`'s renderer.
+/// `model/overlays/ops/**` is the one authority for which `404` an unconfigured subresource owes;
+/// `OperationSpec::not_configured_error` is that value lowered into Rust through
+/// `generated/routes.rs`. A backend that writes the code out again here is a second copy that can
+/// disagree with the overlay without anything noticing, which is what gateway#242 recorded: before
+/// this, flipping `GetBucketLifecycleConfiguration.errors.not_configured` in the overlay changed
+/// no served byte and `q-lc-0001` reported `INERT`.
+///
+/// When the operation declares no code the fixture has none to answer with, and it says exactly
+/// that rather than substituting one — a substituted `404` would keep every case green and put the
+/// declaration back out of reach of the mutation gate.
+fn not_configured<O: Operation>(message: &'static str) -> HandlerError {
+    match O::spec().not_configured_error.clone() {
+        Some(code) => HandlerError::new(code, message),
+        None => HandlerError::new(ErrorCode::NOT_IMPLEMENTED, "this operation declares no unconfigured-subresource error"),
+    }
+}
+
 /// `NoSuchCORSConfiguration`, in AWS's own wording for a bucket that never had a CORS document.
 fn no_such_cors_configuration() -> HandlerError {
-    HandlerError::new(ErrorCode::NO_SUCH_CORS_CONFIGURATION, "The CORS configuration does not exist")
+    not_configured::<dto::GetBucketCors>("The CORS configuration does not exist")
 }
 
 /// `NoSuchLifecycleConfiguration`, in AWS's own wording for a bucket that never had a lifecycle
 /// document.
 fn no_such_lifecycle_configuration() -> HandlerError {
-    HandlerError::new(ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION, "The lifecycle configuration does not exist")
+    not_configured::<dto::GetBucketLifecycleConfiguration>("The lifecycle configuration does not exist")
 }
 
 /// `NoSuchWebsiteConfiguration`, for a bucket that never had a website document.
@@ -1754,49 +1768,43 @@ fn no_such_lifecycle_configuration() -> HandlerError {
 /// interchangeable with the other two: a client tearing configuration down branches on which one
 /// it got.
 fn no_such_website_configuration() -> HandlerError {
-    HandlerError::new(
-        ErrorCode::NO_SUCH_WEBSITE_CONFIGURATION,
-        "The specified bucket does not have a website configuration",
-    )
+    not_configured::<dto::GetBucketWebsite>("The specified bucket does not have a website configuration")
 }
 
 /// `NoSuchBucketPolicy`, for a bucket that never had a policy — answered by the policy read and,
 /// because it is the same missing document, by the policy-status read beside it.
 fn no_such_bucket_policy() -> HandlerError {
-    HandlerError::new(ErrorCode::NO_SUCH_BUCKET_POLICY, "The bucket policy does not exist")
+    not_configured::<dto::GetBucketPolicy>("The bucket policy does not exist")
+}
+
+/// The same missing document as [`no_such_bucket_policy`], read through the status operation.
+///
+/// Two helpers rather than one because the two operations carry the declaration separately: a
+/// shared helper would answer the policy read's declared code for a status read whose own
+/// declaration had been removed, and the removal would go unobserved.
+fn no_such_bucket_policy_status() -> HandlerError {
+    not_configured::<dto::GetBucketPolicyStatus>("The bucket policy does not exist")
 }
 
 /// `NoSuchPublicAccessBlockConfiguration`, for a bucket with no public-access block.
 fn no_such_public_access_block() -> HandlerError {
-    HandlerError::new(
-        ErrorCode::NO_SUCH_PUBLIC_ACCESS_BLOCK_CONFIGURATION,
-        "The public access block configuration was not found",
-    )
+    not_configured::<dto::GetPublicAccessBlock>("The public access block configuration was not found")
 }
 
 /// `ServerSideEncryptionConfigurationNotFoundError`, in AWS's own wording for a bucket that
 /// never had a default-encryption document.
 fn no_such_replication_configuration() -> HandlerError {
-    HandlerError::new(
-        ErrorCode::REPLICATION_CONFIGURATION_NOT_FOUND,
-        "The replication configuration was not found",
-    )
+    not_configured::<dto::GetBucketReplication>("The replication configuration was not found")
 }
 
 fn no_such_encryption_configuration() -> HandlerError {
-    HandlerError::new(
-        ErrorCode::SERVER_SIDE_ENCRYPTION_CONFIGURATION_NOT_FOUND,
-        "The server side encryption configuration was not found",
-    )
+    not_configured::<dto::GetBucketEncryption>("The server side encryption configuration was not found")
 }
 
 /// `ObjectLockConfigurationNotFoundError`: the **bucket-level** unconfigured answer, for a
 /// bucket that never enabled object lock.
 fn object_lock_configuration_not_found() -> HandlerError {
-    HandlerError::new(
-        ErrorCode::OBJECT_LOCK_CONFIGURATION_NOT_FOUND,
-        "Object Lock configuration does not exist for this bucket",
-    )
+    not_configured::<dto::GetObjectLockConfiguration>("Object Lock configuration does not exist for this bucket")
 }
 
 /// `NoSuchObjectLockConfiguration`: the **object-level** unconfigured answer, for an object with
@@ -1805,11 +1813,16 @@ fn object_lock_configuration_not_found() -> HandlerError {
 /// Deliberately a different code from the bucket read's, and deliberately not a `200` with an
 /// empty document: a compliance audit reads "no lock state" and "a lock state that permits
 /// everything" as opposite findings.
-fn no_such_lock_configuration() -> HandlerError {
-    HandlerError::new(
-        ErrorCode::NO_SUCH_OBJECT_LOCK_CONFIGURATION,
-        "The specified object does not have an ObjectLock configuration",
-    )
+fn no_such_retention() -> HandlerError {
+    not_configured::<dto::GetObjectRetention>("The specified object does not have an ObjectLock configuration")
+}
+
+/// The legal-hold read's own spelling of the same object-level absence.
+///
+/// Split from [`no_such_retention`] for the reason the two policy helpers are split: each read
+/// declares the code separately, so each has to answer from its own declaration.
+fn no_such_legal_hold() -> HandlerError {
+    not_configured::<dto::GetObjectLegalHold>("The specified object does not have an ObjectLock configuration")
 }
 
 /// Refuses a lock-state write on a bucket that never enabled object lock (`q-lock-0015`).
@@ -1922,6 +1935,12 @@ fn deleted_by_marker(key: &str, last_modified: i64) -> HandlerError {
         .unwrap_or_else(|_| HandlerError::internal_error("a fixture delete marker has no renderable instant"))
 }
 
+/// `NoSuchKey`, raised only once every condition has been evaluated against the absence.
+///
+/// The document carries `<Key>`, which is the only element in it that says *which* read missed —
+/// a client batching reads on one connection cannot tell two 404s apart without it. The key is the
+/// one the request named, so it is an echo to a caller already authenticated and authorised, and
+/// the writer escapes it: see `rustfs_gateway`'s renderer.
 fn no_such_key(key: &str) -> HandlerError {
     match ObjectKey::new(key.to_owned()) {
         Ok(key) => HandlerErrorContext::missing_object_for(key, MissingObject::Key, ResourceVisibility::Visible).into(),
@@ -3341,7 +3360,7 @@ impl Stub {
         require_bucket(&fixture, &input.bucket)?;
         let tags = fixture
             .bucket_tags(input.bucket.as_str())
-            .ok_or_else(|| HandlerError::new(ErrorCode::NO_SUCH_TAG_SET, "The TagSet does not exist"))?;
+            .ok_or_else(|| not_configured::<dto::GetBucketTagging>("The TagSet does not exist"))?;
         Ok(Resp::new(dto::GetBucketTaggingOutput {
             tag_set: tag_elements(tags),
         }))
@@ -3990,7 +4009,7 @@ impl Stub {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         if fixture.policy(input.bucket.as_str()).is_none() {
-            return Err(no_such_bucket_policy());
+            return Err(no_such_bucket_policy_status());
         }
         Ok(Resp::new(dto::GetBucketPolicyStatusOutput {
             policy_status: Some(dto::PolicyStatus {
@@ -4098,7 +4117,7 @@ impl Stub {
         let object = fixture
             .object(input.bucket.as_str(), input.key.as_str())
             .ok_or_else(|| no_such_key(input.key.as_str()))?;
-        let retention = object.retention.clone().ok_or_else(no_such_lock_configuration)?;
+        let retention = object.retention.clone().ok_or_else(no_such_retention)?;
         Ok(Resp::new(dto::GetObjectRetentionOutput {
             retention: Some(retention),
         }))
@@ -4139,7 +4158,7 @@ impl Stub {
         let object = fixture
             .object(input.bucket.as_str(), input.key.as_str())
             .ok_or_else(|| no_such_key(input.key.as_str()))?;
-        let legal_hold = object.legal_hold.clone().ok_or_else(no_such_lock_configuration)?;
+        let legal_hold = object.legal_hold.clone().ok_or_else(no_such_legal_hold)?;
         Ok(Resp::new(dto::GetObjectLegalHoldOutput {
             legal_hold: Some(legal_hold),
         }))

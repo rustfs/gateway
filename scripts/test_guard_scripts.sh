@@ -14515,7 +14515,7 @@ mut_quirk_ledger_typed_contract_proof_removed	ledger typed_contracts: expected 1
 mut_quirk_ledger_dimension_count	ledger dimensions: expected 174, found 173
 mut_quirk_ledger_misbound_emitter_dimension	q-restore-header-absence-0127: expected one declared emitter binding, found 0
 mut_quirk_ledger_capability_exclusion	capability exclusions must remain typed contract sources
-mut_quirk_ledger_mutable_consumer	q-empty-0002: mutable source has no parsed operation consumer
+mut_quirk_ledger_mutable_consumer	q-empty-0002: mutable source is claimed by no operation overlay
 mut_quirk_ledger_runtime_consumer	q-restore-header-absence-0127: emitted constants lack one production consumer identity
 mut_quirk_ledger_cfg_disabled_consumer	q-restore-header-absence-0127: emitted constants lack one production consumer identity
 mut_quirk_ledger_cfg_attr_disabled_consumer	q-restore-header-absence-0127: emitted constants lack one production consumer identity
@@ -15324,6 +15324,49 @@ PYEOF
 expect_fail check_operation_spec_builder.sh \
     'a grouped and chained namespace alias hiding an OperationSpec literal' \
     mut_operation_spec_builder_bypassed_by_chained_grouped_namespace_alias
+
+# gateway#242: a standard operation that names its success status and unconfigured code by hand is
+# a second authority for two values `model/overlays/**` already declares. The generated copy was the
+# one nothing read, so the overlay could be flipped without changing a served byte.
+mut_operation_spec_builder_restated_in_an_operation_file() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/ops/create_bucket.rs")
+path.write_text(
+    path.read_text().replace(
+        'OperationSpec::standard("CreateBucket")',
+        'OperationSpec::builder("CreateBucket", 200, None)',
+    )
+)
+PYEOF
+}
+expect_fail check_operation_spec_builder.sh \
+    'a standard operation restating its IR facts through the builder' \
+    mut_operation_spec_builder_restated_in_an_operation_file
+
+# The other direction: the builder is still the only constructor a dialect's vendor operation has,
+# and a rule that refused it everywhere would be a rule nobody could satisfy.
+mut_operation_spec_builder_used_outside_the_operation_directory() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/core/src/dialect/mod.rs")
+path.write_text(
+    path.read_text()
+    + '''
+
+#[cfg(test)]
+fn review_vendor_specification() -> crate::registry::OperationSpec {
+    crate::registry::OperationSpec::builder("review:Mutation", 200, None)
+}
+'''
+)
+PYEOF
+}
+expect_guard_pass check_operation_spec_builder.sh \
+    'a vendor operation outside crates/core/src/ops using the builder' \
+    mut_operation_spec_builder_used_outside_the_operation_directory
 
 fi
 

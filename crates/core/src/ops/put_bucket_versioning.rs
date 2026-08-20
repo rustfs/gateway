@@ -61,7 +61,7 @@ use crate::registry::OperationSpec;
 ///
 /// `versioning` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("PutBucketVersioning", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutBucketVersioning")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutBucketVersioning", ResourceShape::Bucket))
     .build();

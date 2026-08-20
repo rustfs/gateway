@@ -96,18 +96,39 @@ impl ErrorCode {
     /// it has no `ErrorCode` either. A caller that means to answer with an undeclared code says so
     /// with [`ErrorCode::custom`] and names the status.
     ///
+    /// A `const fn`, because an operation's `OperationSpec` is a `static` built at compile time and
+    /// has to reach the authority from there. Written as a `while` rather than an iterator chain for
+    /// that reason alone — it is the same table and the same answer at run time. Without it the
+    /// unconfigured-subresource code has to be written out a second time by hand beside the
+    /// generated one, which is the divergence recorded as rustfs/gateway#242.
+    ///
     /// ```
     /// use rustfs_gateway_types::ErrorCode;
     ///
     /// assert_eq!(ErrorCode::known("NoSuchKey"), Some(ErrorCode::NO_SUCH_KEY));
     /// assert_eq!(ErrorCode::known("NoSuchThing"), None);
+    ///
+    /// const CODE: Option<ErrorCode> = ErrorCode::known("NoSuchLifecycleConfiguration");
+    /// assert_eq!(CODE, Some(ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION));
     /// ```
     #[must_use]
-    pub fn known(code: &str) -> Option<Self> {
-        CODE_TABLE.iter().find(|(name, _)| *name == code).map(|(name, status)| Self {
-            name: Cow::Borrowed(name),
-            status: *status,
-        })
+    // Const context only: `<[T]>::get` is not a `const fn` on this toolchain, and every index here
+    // is bounded by the `while` above it, so an out-of-range read is a compile-time evaluation
+    // failure rather than a panic a request can reach.
+    #[allow(clippy::indexing_slicing, reason = "const-evaluated bounds; see the comment above")]
+    pub const fn known(code: &str) -> Option<Self> {
+        let mut index = 0;
+        while index < CODE_TABLE.len() {
+            let (name, status) = CODE_TABLE[index];
+            if const_str_eq(name, code) {
+                return Some(Self {
+                    name: Cow::Borrowed(name),
+                    status,
+                });
+            }
+            index += 1;
+        }
+        None
     }
 
     /// The wire spelling.
@@ -140,6 +161,28 @@ impl fmt::Display for ErrorCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.name)
     }
+}
+
+/// Byte equality of two strings in const context.
+///
+/// `str::eq` is not a `const fn`, and neither is any comparison in the standard library that would
+/// serve. `rustfs-gateway-core` carries the same twelve lines for the same reason and against a
+/// different table; the shim is a language gap, not a rule, so there is nothing here that two
+/// copies could come to disagree about.
+const fn const_str_eq(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 include!("../../../../generated/error_status.rs");

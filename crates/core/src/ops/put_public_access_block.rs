@@ -57,7 +57,7 @@ use crate::registry::OperationSpec;
 ///
 /// `publicAccessBlock` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("PutPublicAccessBlock", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutPublicAccessBlock")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutBucketPublicAccessBlock", ResourceShape::Bucket))
     .build();

@@ -55,7 +55,7 @@ pub static TAG_SCOPE: TagScope = TagScope::Object;
 /// `tagging` is a routing discriminator, not a required parameter: a `GET` on an object key without
 /// it is `GetObject`. Nothing else is required — `versionId` selects a version and its absence
 /// selects the current one.
-static SPEC: OperationSpec = OperationSpec::builder("GetObjectTagging", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("GetObjectTagging")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:GetObjectTagging", ResourceShape::Object))
     .build();

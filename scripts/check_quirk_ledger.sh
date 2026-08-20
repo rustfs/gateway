@@ -5,6 +5,18 @@ set -euo pipefail
 # overlay and every typed source reaches both a production consumer and bilateral case evidence.
 # Generated Rust is deliberately excluded: a checked-in generated file is an output, not proof
 # that the hand-written source is wired.
+#
+# What "wired" means here, exactly, because gateway#242 was read out of this word:
+#   * for a TYPED CONTRACT it is a join to an executable emitter binding that declares a constant;
+#   * for a MUTABLE rule it is a join to a `quirk_refs` entry in `model/overlays/ops/*.toml`.
+# The second is a declaration by one hand-written overlay that another hand-written overlay's rule
+# belongs to an operation. It is NOT evidence that any running code reads the lowered value, and it
+# cannot be: this guard never builds anything. Three of the ids it counted as wired had a lowered
+# value with no reader at all — `q-lc-0001`, `q-bkt-0001`, `q-bkt-0007` — and the corpus could not
+# have noticed, because nothing built a response from them.
+# The dynamic proof is `cargo xtask conformance mutate`, which flips the rule, rebuilds, and reports
+# whether a case caught it. A row this guard calls wired and that command calls INERT is the exact
+# gap; read the two together, never this one alone.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
@@ -493,6 +505,8 @@ if not CAPABILITY_BLOCKS.issubset(typed_contracts):
 
 # Mutable sources join to parsed operation-overlay values, never to raw TOML text. This excludes
 # comments while retaining deliberate sharing across operations inside the one codec resolver.
+# The join proves the rule is CLAIMED by an operation, not that its lowered value is read — see the
+# note at the top of this file, and `cargo xtask conformance mutate` for the claim this cannot make.
 operation_overlays = [(path, toml_quirk_refs(load_toml(path))) for path in sorted(ops_dir.glob("*.toml"))]
 mutable_wired: set[str] = set()
 for quirk_id in sorted(mutable):
@@ -500,7 +514,7 @@ for quirk_id in sorted(mutable):
     if consumers:
         mutable_wired.add(quirk_id)
     else:
-        fail(f"{quirk_id}: mutable source has no parsed operation consumer")
+        fail(f"{quirk_id}: mutable source is claimed by no operation overlay")
 
 # Parse each family emitter as Rust tokens. Each typed contract must join to one executable emitter
 # binding, and that binding must declare at least one constant. The discriminator is needed for the
