@@ -45,11 +45,11 @@ element_order = ["ETag", "Checksum", "ObjectParts", "StorageClass", "ObjectSize"
 url_encoded_fields = []
 
 [xml.empty_value]
-ETag = "omit"
-Checksum = "omit"
-ObjectParts = "omit"
-StorageClass = "omit"
-ObjectSize = "omit"
+ETag = "emit"
+Checksum = "emit"
+ObjectParts = "emit"
+StorageClass = "emit"
+ObjectSize = "emit"
 
 [errors]
 not_configured = ""
@@ -245,17 +245,17 @@ kind = "Structure"
 element_order = ["ChecksumCRC32", "ChecksumCRC32C", "ChecksumCRC64NVME", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512", "ChecksumMD5", "ChecksumXXHASH64", "ChecksumXXHASH3", "ChecksumXXHASH128", "ChecksumType"]
 
 [shape.Checksum.empty_value]
-ChecksumCRC32 = "omit"
-ChecksumCRC32C = "omit"
-ChecksumCRC64NVME = "omit"
-ChecksumSHA1 = "omit"
-ChecksumSHA256 = "omit"
-ChecksumSHA512 = "omit"
-ChecksumMD5 = "omit"
-ChecksumXXHASH64 = "omit"
-ChecksumXXHASH3 = "omit"
-ChecksumXXHASH128 = "omit"
-ChecksumType = "omit"
+ChecksumCRC32 = "emit"
+ChecksumCRC32C = "emit"
+ChecksumCRC64NVME = "emit"
+ChecksumSHA1 = "emit"
+ChecksumSHA256 = "emit"
+ChecksumSHA512 = "emit"
+ChecksumMD5 = "emit"
+ChecksumXXHASH64 = "emit"
+ChecksumXXHASH3 = "emit"
+ChecksumXXHASH128 = "emit"
+ChecksumType = "emit"
 
 [[shape.Checksum.field]]
 name = "ChecksumCRC32"
@@ -363,11 +363,11 @@ element_order = ["TotalPartsCount", "PartNumberMarker", "NextPartNumberMarker", 
 
 [shape.GetObjectAttributesParts.empty_value]
 TotalPartsCount = "emit"
-PartNumberMarker = "omit"
-NextPartNumberMarker = "omit"
+PartNumberMarker = "emit"
+NextPartNumberMarker = "emit"
 MaxParts = "emit"
 IsTruncated = "emit"
-Parts = "omit"
+Parts = "emit"
 
 [[shape.GetObjectAttributesParts.field]]
 name = "TotalPartsCount"
@@ -430,16 +430,16 @@ element_order = ["PartNumber", "Size", "ChecksumCRC32", "ChecksumCRC32C", "Check
 [shape.ObjectPart.empty_value]
 PartNumber = "emit"
 Size = "emit"
-ChecksumCRC32 = "omit"
-ChecksumCRC32C = "omit"
-ChecksumCRC64NVME = "omit"
-ChecksumSHA1 = "omit"
-ChecksumSHA256 = "omit"
-ChecksumSHA512 = "omit"
-ChecksumMD5 = "omit"
-ChecksumXXHASH64 = "omit"
-ChecksumXXHASH3 = "omit"
-ChecksumXXHASH128 = "omit"
+ChecksumCRC32 = "emit"
+ChecksumCRC32C = "emit"
+ChecksumCRC64NVME = "emit"
+ChecksumSHA1 = "emit"
+ChecksumSHA256 = "emit"
+ChecksumSHA512 = "emit"
+ChecksumMD5 = "emit"
+ChecksumXXHASH64 = "emit"
+ChecksumXXHASH3 = "emit"
+ChecksumXXHASH128 = "emit"
 
 [[shape.ObjectPart.field]]
 name = "PartNumber"

@@ -46,17 +46,17 @@ url_encoded_fields = ["Prefix", "Delimiter", "StartAfter", "ContinuationToken", 
 
 [xml.empty_value]
 IsTruncated = "emit"
-Contents = "omit"
+Contents = "emit"
 Name = "emit"
 Prefix = "emit"
-Delimiter = "omit"
+Delimiter = "emit"
 MaxKeys = "emit"
-CommonPrefixes = "omit"
-EncodingType = "omit"
+CommonPrefixes = "emit"
+EncodingType = "emit"
 KeyCount = "emit"
-ContinuationToken = "omit"
-NextContinuationToken = "omit"
-StartAfter = "omit"
+ContinuationToken = "emit"
+NextContinuationToken = "emit"
+StartAfter = "emit"
 
 [errors]
 not_configured = ""
@@ -300,12 +300,12 @@ element_order = ["Key", "LastModified", "ETag", "ChecksumAlgorithm", "ChecksumTy
 Key = "emit"
 LastModified = "emit"
 ETag = "emit"
-ChecksumAlgorithm = "omit"
-ChecksumType = "omit"
+ChecksumAlgorithm = "emit"
+ChecksumType = "emit"
 Size = "emit"
 StorageClass = "emit"
-Owner = "omit"
-RestoreStatus = "omit"
+Owner = "emit"
+RestoreStatus = "emit"
 
 [[shape.Object.field]]
 name = "Key"
@@ -396,8 +396,8 @@ kind = "Structure"
 element_order = ["ID", "DisplayName"]
 
 [shape.Owner.empty_value]
-DisplayName = "omit"
-ID = "omit"
+DisplayName = "emit"
+ID = "emit"
 
 [[shape.Owner.field]]
 name = "DisplayName"
@@ -422,8 +422,8 @@ kind = "Structure"
 element_order = ["IsRestoreInProgress", "RestoreExpiryDate"]
 
 [shape.RestoreStatus.empty_value]
-IsRestoreInProgress = "omit"
-RestoreExpiryDate = "omit"
+IsRestoreInProgress = "emit"
+RestoreExpiryDate = "emit"
 
 [[shape.RestoreStatus.field]]
 name = "IsRestoreInProgress"

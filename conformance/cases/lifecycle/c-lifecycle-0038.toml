@@ -1,0 +1,79 @@
+# c-lifecycle-0038 — the legacy empty prefix survives a read-modify-write.
+#
+# Schema dimensions exercised: a multi-exchange cycle whose assertion is the third request, over an
+# element that is present and empty rather than absent.
+
+[case]
+id = "c-lifecycle-0038"
+schema_version = 1
+title = "A rule scoped by an empty legacy Prefix is written back with that element and accepted again"
+rationale = """
+The pre-Filter revision puts the scope on the rule, and an empty Prefix element is how it says every object; AWS's own v1 examples carry it. The decoder always kept it, and an optional member defaulted to dropping its own empty text on the way out, so the read returned a rule with no scope at all and the next write of that same document was refused ScopeMissing. RustFS persists configuration by parsing and re-serialising, so the third exchange is the assertion: an installed rule an operator reads and puts straight back must still be accepted, and it is that cycle rather than any single response that destroys the rule."""
+polarity = "positive"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["lifecycle", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRule.html"
+summary = "The rule carries a Prefix member of its own, kept for the revision that predates Filter, and documents it as the object-name scope."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/intro-lifecycle-rules.html"
+summary = "Describes a rule whose scope is every object in the bucket, which the pre-Filter spelling expresses with an empty prefix."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "put-legacy-empty-prefix"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "vwba777gf69YwN3GwqJJUQ==" }
+body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>7</Days></Expiration><ID>legacy-scope</ID><Prefix></Prefix><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+golden = "goldens/c-lifecycle-0038.xml"
+
+[[exchanges]]
+name = "put-what-was-read"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "I279UH5c5cPDtB5Dga1Lvg==" }
+body = { utf8 = '''<?xml version="1.0" encoding="UTF-8"?>
+<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><Expiration><Days>7</Days></Expiration><ID>legacy-scope</ID><Prefix></Prefix><Status>Enabled</Status></Rule></LifecycleConfiguration>''' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"

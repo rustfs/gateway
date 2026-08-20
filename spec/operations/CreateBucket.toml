@@ -155,7 +155,7 @@ kind = "Structure"
 element_order = ["LocationConstraint"]
 
 [shape.CreateBucketConfiguration.empty_value]
-LocationConstraint = "omit"
+LocationConstraint = "emit"
 
 [[shape.CreateBucketConfiguration.field]]
 name = "LocationConstraint"

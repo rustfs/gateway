@@ -110,7 +110,7 @@
                                                  ],
                                        "xml": {
                                                 "element_order": ["Mode", "RetainUntilDate"],
-                                                "empty_value_policy": { "Mode": "omit", "RetainUntilDate": "omit" },
+                                                "empty_value_policy": { "Mode": "emit", "RetainUntilDate": "emit" },
                                                 "attributes": []
                                               }
                                      }

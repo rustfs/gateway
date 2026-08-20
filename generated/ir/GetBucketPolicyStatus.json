@@ -76,7 +76,7 @@
                                           ],
                                 "xml": {
                                          "element_order": ["IsPublic"],
-                                         "empty_value_policy": { "IsPublic": "omit" },
+                                         "empty_value_policy": { "IsPublic": "emit" },
                                          "attributes": []
                                        }
                               }

@@ -111,11 +111,11 @@
                            "xml": {
                                     "element_order": ["ID", "DisplayName", "EmailAddress", "URI"],
                                     "empty_value_policy": {
-                                                            "DisplayName": "omit",
-                                                            "EmailAddress": "omit",
-                                                            "ID": "omit",
-                                                            "URI": "omit",
-                                                            "Type": "omit"
+                                                            "DisplayName": "emit",
+                                                            "EmailAddress": "emit",
+                                                            "ID": "emit",
+                                                            "URI": "emit",
+                                                            "Type": "emit"
                                                           },
                                     "attributes": [
                                                     {
@@ -188,9 +188,9 @@
                                                             ],
                                            "empty_value_policy": {
                                                                    "TargetBucket": "emit",
-                                                                   "TargetGrants": "omit",
+                                                                   "TargetGrants": "emit",
                                                                    "TargetPrefix": "emit",
-                                                                   "TargetObjectKeyFormat": "omit"
+                                                                   "TargetObjectKeyFormat": "emit"
                                                                  },
                                            "attributes": []
                                          }
@@ -213,7 +213,7 @@
                                                ],
                                      "xml": {
                                               "element_order": ["PartitionDateSource"],
-                                              "empty_value_policy": { "PartitionDateSource": "omit" },
+                                              "empty_value_policy": { "PartitionDateSource": "emit" },
                                               "attributes": []
                                             }
                                    },
@@ -249,7 +249,7 @@
                                          ],
                                "xml": {
                                         "element_order": ["Grantee", "Permission"],
-                                        "empty_value_policy": { "Grantee": "omit", "Permission": "omit" },
+                                        "empty_value_policy": { "Grantee": "emit", "Permission": "emit" },
                                         "attributes": []
                                       }
                              },
@@ -278,8 +278,8 @@
                                          "xml": {
                                                   "element_order": ["SimplePrefix", "PartitionedPrefix"],
                                                   "empty_value_policy": {
-                                                                          "SimplePrefix": "omit",
-                                                                          "PartitionedPrefix": "omit"
+                                                                          "SimplePrefix": "emit",
+                                                                          "PartitionedPrefix": "emit"
                                                                         },
                                                   "attributes": []
                                                 }
@@ -292,7 +292,7 @@
            "xmlns": "emit",
            "unwrapped_output": false,
            "element_order": ["LoggingEnabled"],
-           "empty_value_policy": { "LoggingEnabled": "omit" },
+           "empty_value_policy": { "LoggingEnabled": "emit" },
            "url_encoded_fields": [],
            "attributes": [],
            "body_literal": false

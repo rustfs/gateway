@@ -91,7 +91,7 @@ kind = "Structure"
 element_order = ["Status"]
 
 [shape.AccelerateConfiguration.empty_value]
-Status = "omit"
+Status = "emit"
 
 [[shape.AccelerateConfiguration.field]]
 name = "Status"

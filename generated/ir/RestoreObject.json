@@ -206,13 +206,13 @@
                                                         "AllowQuotedRecordDelimiter"
                                                       ],
                                      "empty_value_policy": {
-                                                             "FileHeaderInfo": "omit",
-                                                             "Comments": "omit",
-                                                             "QuoteEscapeCharacter": "omit",
-                                                             "RecordDelimiter": "omit",
-                                                             "FieldDelimiter": "omit",
-                                                             "QuoteCharacter": "omit",
-                                                             "AllowQuotedRecordDelimiter": "omit"
+                                                             "FileHeaderInfo": "emit",
+                                                             "Comments": "emit",
+                                                             "QuoteEscapeCharacter": "emit",
+                                                             "RecordDelimiter": "emit",
+                                                             "FieldDelimiter": "emit",
+                                                             "QuoteCharacter": "emit",
+                                                             "AllowQuotedRecordDelimiter": "emit"
                                                            },
                                      "attributes": []
                                    }
@@ -275,11 +275,11 @@
                                                          "QuoteCharacter"
                                                        ],
                                       "empty_value_policy": {
-                                                              "QuoteFields": "omit",
-                                                              "QuoteEscapeCharacter": "omit",
-                                                              "RecordDelimiter": "omit",
-                                                              "FieldDelimiter": "omit",
-                                                              "QuoteCharacter": "omit"
+                                                              "QuoteFields": "emit",
+                                                              "QuoteEscapeCharacter": "emit",
+                                                              "RecordDelimiter": "emit",
+                                                              "FieldDelimiter": "emit",
+                                                              "QuoteCharacter": "emit"
                                                             },
                                       "attributes": []
                                     }
@@ -322,8 +322,8 @@
                                        "element_order": ["EncryptionType", "KMSKeyId", "KMSContext"],
                                        "empty_value_policy": {
                                                                "EncryptionType": "emit",
-                                                               "KMSKeyId": "omit",
-                                                               "KMSContext": "omit"
+                                                               "KMSKeyId": "emit",
+                                                               "KMSContext": "emit"
                                                              },
                                        "attributes": []
                                      }
@@ -377,7 +377,7 @@
                                    ],
                          "xml": {
                                   "element_order": ["Grantee", "Permission"],
-                                  "empty_value_policy": { "Grantee": "omit", "Permission": "omit" },
+                                  "empty_value_policy": { "Grantee": "emit", "Permission": "emit" },
                                   "attributes": []
                                 }
                        },
@@ -436,11 +436,11 @@
                            "xml": {
                                     "element_order": ["ID", "DisplayName", "EmailAddress", "URI"],
                                     "empty_value_policy": {
-                                                            "DisplayName": "omit",
-                                                            "EmailAddress": "omit",
-                                                            "ID": "omit",
-                                                            "URI": "omit",
-                                                            "Type": "omit"
+                                                            "DisplayName": "emit",
+                                                            "EmailAddress": "emit",
+                                                            "ID": "emit",
+                                                            "URI": "emit",
+                                                            "Type": "emit"
                                                           },
                                     "attributes": [
                                                     {
@@ -505,10 +505,10 @@
                                       "xml": {
                                                "element_order": ["CSV", "CompressionType", "JSON", "Parquet"],
                                                "empty_value_policy": {
-                                                                       "CSV": "omit",
-                                                                       "CompressionType": "omit",
-                                                                       "JSON": "omit",
-                                                                       "Parquet": "omit"
+                                                                       "CSV": "emit",
+                                                                       "CompressionType": "emit",
+                                                                       "JSON": "emit",
+                                                                       "Parquet": "emit"
                                                                      },
                                                "attributes": []
                                              }
@@ -528,7 +528,7 @@
                                        ],
                              "xml": {
                                       "element_order": ["Type"],
-                                      "empty_value_policy": { "Type": "omit" },
+                                      "empty_value_policy": { "Type": "emit" },
                                       "attributes": []
                                     }
                            },
@@ -547,7 +547,7 @@
                                         ],
                               "xml": {
                                        "element_order": ["RecordDelimiter"],
-                                       "empty_value_policy": { "RecordDelimiter": "omit" },
+                                       "empty_value_policy": { "RecordDelimiter": "emit" },
                                        "attributes": []
                                      }
                             },
@@ -575,7 +575,7 @@
                                            ],
                                  "xml": {
                                           "element_order": ["Name", "Value"],
-                                          "empty_value_policy": { "Name": "omit", "Value": "omit" },
+                                          "empty_value_policy": { "Name": "emit", "Value": "emit" },
                                           "attributes": []
                                         }
                                },
@@ -594,7 +594,7 @@
                                             ],
                                   "xml": {
                                            "element_order": ["S3"],
-                                           "empty_value_policy": { "S3": "omit" },
+                                           "empty_value_policy": { "S3": "emit" },
                                            "attributes": []
                                          }
                                 },
@@ -622,7 +622,7 @@
                                                  ],
                                        "xml": {
                                                 "element_order": ["CSV", "JSON"],
-                                                "empty_value_policy": { "CSV": "omit", "JSON": "omit" },
+                                                "empty_value_policy": { "CSV": "emit", "JSON": "emit" },
                                                 "attributes": []
                                               }
                                      },
@@ -712,13 +712,13 @@
                                                               "OutputLocation"
                                                             ],
                                            "empty_value_policy": {
-                                                                   "Days": "omit",
-                                                                   "GlacierJobParameters": "omit",
-                                                                   "Type": "omit",
-                                                                   "Tier": "omit",
-                                                                   "Description": "omit",
-                                                                   "SelectParameters": "omit",
-                                                                   "OutputLocation": "omit"
+                                                                   "Days": "emit",
+                                                                   "GlacierJobParameters": "emit",
+                                                                   "Type": "emit",
+                                                                   "Tier": "emit",
+                                                                   "Description": "emit",
+                                                                   "SelectParameters": "emit",
+                                                                   "OutputLocation": "emit"
                                                                  },
                                            "attributes": []
                                          }
@@ -851,12 +851,12 @@
                                        "empty_value_policy": {
                                                                "BucketName": "emit",
                                                                "Prefix": "emit",
-                                                               "Encryption": "omit",
-                                                               "CannedACL": "omit",
-                                                               "AccessControlList": "omit",
-                                                               "Tagging": "omit",
-                                                               "UserMetadata": "omit",
-                                                               "StorageClass": "omit"
+                                                               "Encryption": "emit",
+                                                               "CannedACL": "emit",
+                                                               "AccessControlList": "emit",
+                                                               "Tagging": "emit",
+                                                               "UserMetadata": "emit",
+                                                               "StorageClass": "emit"
                                                              },
                                        "attributes": []
                                      }

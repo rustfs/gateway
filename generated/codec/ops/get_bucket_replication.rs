@@ -84,7 +84,7 @@ fn write_delete_marker_replication(
     value: &dto::DeleteMarkerReplication,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.status.as_ref() {
-        writer.element_if_present("Status", v.as_str());
+        writer.element("Status", v.as_str());
     }
     Ok(())
 }
@@ -96,10 +96,10 @@ fn write_destination(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::De
         writer.element("Bucket", v.as_str());
     }
     if let Some(v) = value.account.as_ref() {
-        writer.element_if_present("Account", v.as_str());
+        writer.element("Account", v.as_str());
     }
     if let Some(v) = value.storage_class.as_ref() {
-        writer.element_if_present("StorageClass", v.as_str());
+        writer.element("StorageClass", v.as_str());
     }
     if let Some(v) = value.access_control_translation.as_ref() {
         writer.open("AccessControlTranslation", None);
@@ -130,7 +130,7 @@ fn write_encryption_configuration(
     value: &dto::EncryptionConfiguration,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.replica_kms_key_id.as_ref() {
-        writer.element_if_present("ReplicaKmsKeyID", v.as_str());
+        writer.element("ReplicaKmsKeyID", v.as_str());
     }
     Ok(())
 }
@@ -193,13 +193,13 @@ fn write_replication_configuration(
 /// Writes one `ReplicationRule` element's children, in the wire order the IR records.
 fn write_replication_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::ReplicationRule) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("ID", v.as_str());
+        writer.element("ID", v.as_str());
     }
     if let Some(v) = value.priority.as_ref() {
-        writer.element_if_present("Priority", &v.to_string());
+        writer.element("Priority", &v.to_string());
     }
     if let Some(v) = value.prefix.as_ref() {
-        writer.element_if_present("Prefix", v.as_str());
+        writer.element("Prefix", v.as_str());
     }
     if let Some(v) = value.filter.as_ref() {
         writer.open("Filter", None);
@@ -240,7 +240,7 @@ fn write_replication_rule_and_operator(
     value: &dto::ReplicationRuleAndOperator,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.prefix.as_ref() {
-        writer.element_if_present("Prefix", v.as_str());
+        writer.element("Prefix", v.as_str());
     }
     for item in &value.tags {
         writer.open("Tag", None);
@@ -256,7 +256,7 @@ fn write_replication_rule_filter(
     value: &dto::ReplicationRuleFilter,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.prefix.as_ref() {
-        writer.element_if_present("Prefix", v.as_str());
+        writer.element("Prefix", v.as_str());
     }
     if let Some(v) = value.tag.as_ref() {
         writer.open("Tag", None);
@@ -292,7 +292,7 @@ fn write_replication_time_value(
     value: &dto::ReplicationTimeValue,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.minutes.as_ref() {
-        writer.element_if_present("Minutes", &v.to_string());
+        writer.element("Minutes", &v.to_string());
     }
     Ok(())
 }

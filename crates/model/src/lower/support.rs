@@ -157,8 +157,21 @@ pub(super) fn body_members(fields: &[Field]) -> Vec<String> {
         .collect()
 }
 
-/// A required member is always written, even when empty; an optional one is dropped. The overlay
-/// overrides individual members, which is what `q-empty-*` quirks are for.
+/// Every body member is written as an element when it has a value, empty text included. The
+/// overlay overrides individual members, which is what `q-empty-*` quirks are for.
+///
+/// The default used to be "a required member emits, an optional one is dropped", and that second
+/// half discarded information the DTO carries: absence for an optional member is `Option::None`,
+/// so dropping `Some("")` as well collapses two values the *decoder* tells apart. The gateway
+/// therefore wrote documents it would not read back as themselves — an empty legacy `<Prefix>`
+/// arrived, was stored, and came back absent, which the lifecycle validator then refused as
+/// `ScopeMissing` (rustfs/gateway#221, rustfs/gateway#248). Since RustFS persists configuration
+/// by parse-then-reserialise, that turned one read-modify-write on an unrelated member into a
+/// stored document the next read rejected.
+///
+/// So the encoder's rule is derived from what the decoder can represent, rather than being a
+/// second, looser opinion beside it. Every deviation from it is now a declaration an overlay
+/// makes with evidence, and `empty_value_policy_is_never_omit_by_default` is what keeps it one.
 pub(super) fn empty_value_policy(fields: &[Field], overrides: &[(String, EmptyValue)]) -> Vec<(String, EmptyValue)> {
     let mut out: Vec<(String, EmptyValue)> = fields
         .iter()
@@ -168,7 +181,7 @@ pub(super) fn empty_value_policy(fields: &[Field], overrides: &[(String, EmptyVa
                 .iter()
                 .find(|(name, _)| *name == f.name)
                 .map(|(_, p)| *p)
-                .unwrap_or(if f.required { EmptyValue::Emit } else { EmptyValue::Omit });
+                .unwrap_or(EmptyValue::Emit);
             (f.name.clone(), policy)
         })
         .collect();

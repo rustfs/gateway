@@ -70,7 +70,7 @@ impl OperationCodec for dto::GetBucketCors {
 /// Writes one `CORSRule` element's children, in the wire order the IR records.
 fn write_cors_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::CorsRule) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("ID", v.as_str());
+        writer.element("ID", v.as_str());
     }
     for v in &value.allowed_headers {
         writer.element("AllowedHeader", v.as_str());
@@ -85,7 +85,7 @@ fn write_cors_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Cors
         writer.element("ExposeHeader", v.as_str());
     }
     if let Some(v) = value.max_age_seconds.as_ref() {
-        writer.element_if_present("MaxAgeSeconds", &v.to_string());
+        writer.element("MaxAgeSeconds", &v.to_string());
     }
     Ok(())
 }

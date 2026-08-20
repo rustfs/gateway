@@ -1364,6 +1364,12 @@ fn bad_token() -> HandlerError {
 ///
 /// `?delimiter=` arrives as `Some("")`, and folding on an empty string would put every key under
 /// the same common prefix. S3 treats it as absent; `c-list-0039` is the case that says so.
+///
+/// The listings echo *this* value rather than the raw input, so a response reports the delimiter
+/// it actually grouped on. That used to make no difference on the wire, because the encoder
+/// dropped an optional member's empty text anyway; now that an empty member is written as an
+/// empty element (rustfs/gateway#221), echoing the raw `Some("")` would answer `?delimiter=`
+/// with a `<Delimiter></Delimiter>` the listing never applied.
 fn delimiter_of(value: Option<&str>) -> Option<&str> {
     value.filter(|text| !text.is_empty())
 }
@@ -4576,7 +4582,7 @@ impl Stub {
         Ok(Resp::new(dto::ListMultipartUploadsOutput {
             bucket: input.bucket.clone(),
             prefix: input.prefix.clone(),
-            delimiter: input.delimiter.clone(),
+            delimiter: delimiter_of(input.delimiter.as_deref()).map(ToOwned::to_owned),
             encoding_type: input.encoding_type.clone(),
             key_marker: input.key_marker.clone(),
             upload_id_marker: input.upload_id_marker.clone(),
@@ -4703,7 +4709,7 @@ impl Stub {
             name: input.bucket.clone(),
             prefix: input.prefix.clone().unwrap_or_default(),
             marker: input.marker.clone().unwrap_or_default(),
-            delimiter: input.delimiter.clone(),
+            delimiter: delimiter_of(input.delimiter.as_deref()).map(ToOwned::to_owned),
             encoding_type: input.encoding_type.clone(),
             max_keys,
             is_truncated: page.truncated,
@@ -4737,7 +4743,7 @@ impl Stub {
         Ok(Resp::new(dto::ListObjectsV2Output {
             name: input.bucket.clone(),
             prefix: input.prefix.clone().unwrap_or_default(),
-            delimiter: input.delimiter.clone(),
+            delimiter: delimiter_of(input.delimiter.as_deref()).map(ToOwned::to_owned),
             encoding_type: input.encoding_type.clone(),
             max_keys,
             key_count: page.count(),
@@ -4849,7 +4855,7 @@ impl Stub {
         Ok(Resp::new(dto::ListObjectVersionsOutput {
             name: input.bucket.clone(),
             prefix: input.prefix.clone().unwrap_or_default(),
-            delimiter: input.delimiter.clone(),
+            delimiter: delimiter_of(input.delimiter.as_deref()).map(ToOwned::to_owned),
             encoding_type: input.encoding_type.clone(),
             key_marker: input.key_marker.clone().unwrap_or_default(),
             version_id_marker: input.version_id_marker.clone().unwrap_or_default(),

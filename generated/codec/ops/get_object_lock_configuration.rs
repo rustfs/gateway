@@ -69,13 +69,13 @@ impl OperationCodec for dto::GetObjectLockConfiguration {
 /// Writes one `DefaultRetention` element's children, in the wire order the IR records.
 fn write_default_retention(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::DefaultRetention) -> Result<(), CodecError> {
     if let Some(v) = value.mode.as_ref() {
-        writer.element_if_present("Mode", v.as_str());
+        writer.element("Mode", v.as_str());
     }
     if let Some(v) = value.days.as_ref() {
-        writer.element_if_present("Days", &v.to_string());
+        writer.element("Days", &v.to_string());
     }
     if let Some(v) = value.years.as_ref() {
-        writer.element_if_present("Years", &v.to_string());
+        writer.element("Years", &v.to_string());
     }
     Ok(())
 }
@@ -86,7 +86,7 @@ fn write_object_lock_configuration(
     value: &dto::ObjectLockConfiguration,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.object_lock_enabled.as_ref() {
-        writer.element_if_present("ObjectLockEnabled", v.as_str());
+        writer.element("ObjectLockEnabled", v.as_str());
     }
     if let Some(v) = value.rule.as_ref() {
         writer.open("Rule", None);

@@ -96,7 +96,7 @@
                                         ],
                               "xml": {
                                        "element_order": ["Name", "Value"],
-                                       "empty_value_policy": { "Name": "omit", "Value": "omit" },
+                                       "empty_value_policy": { "Name": "emit", "Value": "emit" },
                                        "attributes": []
                                      }
                             },
@@ -185,10 +185,10 @@
                                                "xml": {
                                                         "element_order": ["Id", "LambdaFunctionArn", "Events", "Filter"],
                                                         "empty_value_policy": {
-                                                                                "Id": "omit",
+                                                                                "Id": "emit",
                                                                                 "LambdaFunctionArn": "emit",
                                                                                 "Events": "emit",
-                                                                                "Filter": "omit"
+                                                                                "Filter": "emit"
                                                                               },
                                                         "attributes": []
                                                       }
@@ -268,10 +268,10 @@
                                                                          "EventBridgeConfiguration"
                                                                        ],
                                                       "empty_value_policy": {
-                                                                              "TopicConfigurations": "omit",
-                                                                              "QueueConfigurations": "omit",
-                                                                              "LambdaFunctionConfigurations": "omit",
-                                                                              "EventBridgeConfiguration": "omit"
+                                                                              "TopicConfigurations": "emit",
+                                                                              "QueueConfigurations": "emit",
+                                                                              "LambdaFunctionConfigurations": "emit",
+                                                                              "EventBridgeConfiguration": "emit"
                                                                             },
                                                       "attributes": []
                                                     }
@@ -291,7 +291,7 @@
                                                              ],
                                                    "xml": {
                                                             "element_order": ["Key"],
-                                                            "empty_value_policy": { "Key": "omit" },
+                                                            "empty_value_policy": { "Key": "emit" },
                                                             "attributes": []
                                                           }
                                                  },
@@ -380,10 +380,10 @@
                                       "xml": {
                                                "element_order": ["Id", "QueueArn", "Events", "Filter"],
                                                "empty_value_policy": {
-                                                                       "Id": "omit",
+                                                                       "Id": "emit",
                                                                        "QueueArn": "emit",
                                                                        "Events": "emit",
-                                                                       "Filter": "omit"
+                                                                       "Filter": "emit"
                                                                      },
                                                "attributes": []
                                              }
@@ -408,7 +408,7 @@
                                          ],
                                "xml": {
                                         "element_order": ["FilterRules"],
-                                        "empty_value_policy": { "FilterRules": "omit" },
+                                        "empty_value_policy": { "FilterRules": "emit" },
                                         "attributes": []
                                       }
                              },
@@ -497,10 +497,10 @@
                                       "xml": {
                                                "element_order": ["Id", "TopicArn", "Events", "Filter"],
                                                "empty_value_policy": {
-                                                                       "Id": "omit",
+                                                                       "Id": "emit",
                                                                        "TopicArn": "emit",
                                                                        "Events": "emit",
-                                                                       "Filter": "omit"
+                                                                       "Filter": "emit"
                                                                      },
                                                "attributes": []
                                              }

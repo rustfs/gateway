@@ -128,7 +128,7 @@
                                                      ],
                                            "xml": {
                                                     "element_order": ["MFADelete", "Status"],
-                                                    "empty_value_policy": { "MFADelete": "omit", "Status": "omit" },
+                                                    "empty_value_policy": { "MFADelete": "emit", "Status": "emit" },
                                                     "attributes": []
                                                   }
                                          }

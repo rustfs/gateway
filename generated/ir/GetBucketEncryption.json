@@ -84,7 +84,7 @@
                                                     ],
                                           "xml": {
                                                    "element_order": ["EncryptionType"],
-                                                   "empty_value_policy": { "EncryptionType": "omit" },
+                                                   "empty_value_policy": { "EncryptionType": "emit" },
                                                    "attributes": []
                                                  }
                                         },
@@ -122,7 +122,7 @@
                                                           "element_order": ["SSEAlgorithm", "KMSMasterKeyID"],
                                                           "empty_value_policy": {
                                                                                   "SSEAlgorithm": "emit",
-                                                                                  "KMSMasterKeyID": "omit"
+                                                                                  "KMSMasterKeyID": "emit"
                                                                                 },
                                                           "attributes": []
                                                         }
@@ -198,9 +198,9 @@
                                                                         "BlockedEncryptionTypes"
                                                                       ],
                                                      "empty_value_policy": {
-                                                                             "ApplyServerSideEncryptionByDefault": "omit",
-                                                                             "BucketKeyEnabled": "omit",
-                                                                             "BlockedEncryptionTypes": "omit"
+                                                                             "ApplyServerSideEncryptionByDefault": "emit",
+                                                                             "BucketKeyEnabled": "emit",
+                                                                             "BlockedEncryptionTypes": "emit"
                                                                            },
                                                      "attributes": []
                                                    }

@@ -81,10 +81,10 @@ kind = "Structure"
 element_order = ["BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"]
 
 [shape.PublicAccessBlockConfiguration.empty_value]
-BlockPublicAcls = "omit"
-IgnorePublicAcls = "omit"
-BlockPublicPolicy = "omit"
-RestrictPublicBuckets = "omit"
+BlockPublicAcls = "emit"
+IgnorePublicAcls = "emit"
+BlockPublicPolicy = "emit"
+RestrictPublicBuckets = "emit"
 
 [[shape.PublicAccessBlockConfiguration.field]]
 name = "BlockPublicAcls"

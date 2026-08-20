@@ -368,12 +368,12 @@
                                                            "Key": "emit",
                                                            "LastModified": "emit",
                                                            "ETag": "emit",
-                                                           "ChecksumAlgorithm": "omit",
-                                                           "ChecksumType": "omit",
+                                                           "ChecksumAlgorithm": "emit",
+                                                           "ChecksumType": "emit",
                                                            "Size": "emit",
                                                            "StorageClass": "emit",
-                                                           "Owner": "omit",
-                                                           "RestoreStatus": "omit"
+                                                           "Owner": "emit",
+                                                           "RestoreStatus": "emit"
                                                          },
                                    "attributes": []
                                  }
@@ -402,7 +402,7 @@
                                    ],
                          "xml": {
                                   "element_order": ["ID", "DisplayName"],
-                                  "empty_value_policy": { "DisplayName": "omit", "ID": "omit" },
+                                  "empty_value_policy": { "DisplayName": "emit", "ID": "emit" },
                                   "attributes": []
                                 }
                        },
@@ -431,8 +431,8 @@
                                  "xml": {
                                           "element_order": ["IsRestoreInProgress", "RestoreExpiryDate"],
                                           "empty_value_policy": {
-                                                                  "IsRestoreInProgress": "omit",
-                                                                  "RestoreExpiryDate": "omit"
+                                                                  "IsRestoreInProgress": "emit",
+                                                                  "RestoreExpiryDate": "emit"
                                                                 },
                                           "attributes": []
                                         }
@@ -459,14 +459,14 @@
            "empty_value_policy": {
                                    "IsTruncated": "emit",
                                    "Marker": "emit",
-                                   "NextMarker": "omit",
-                                   "Contents": "omit",
+                                   "NextMarker": "emit",
+                                   "Contents": "emit",
                                    "Name": "emit",
                                    "Prefix": "emit",
-                                   "Delimiter": "omit",
+                                   "Delimiter": "emit",
                                    "MaxKeys": "emit",
-                                   "CommonPrefixes": "omit",
-                                   "EncodingType": "omit"
+                                   "CommonPrefixes": "emit",
+                                   "EncodingType": "emit"
                                  },
            "url_encoded_fields": [
                                    "Prefix",

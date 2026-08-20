@@ -286,7 +286,7 @@
                                        ],
                              "xml": {
                                       "element_order": ["ID", "DisplayName"],
-                                      "empty_value_policy": { "ID": "omit", "DisplayName": "omit" },
+                                      "empty_value_policy": { "ID": "emit", "DisplayName": "emit" },
                                       "attributes": []
                                     }
                            },
@@ -412,14 +412,14 @@
                                                                "ChecksumType"
                                                              ],
                                             "empty_value_policy": {
-                                                                    "UploadId": "omit",
-                                                                    "Key": "omit",
-                                                                    "Initiated": "omit",
-                                                                    "StorageClass": "omit",
-                                                                    "Owner": "omit",
-                                                                    "Initiator": "omit",
-                                                                    "ChecksumAlgorithm": "omit",
-                                                                    "ChecksumType": "omit"
+                                                                    "UploadId": "emit",
+                                                                    "Key": "emit",
+                                                                    "Initiated": "emit",
+                                                                    "StorageClass": "emit",
+                                                                    "Owner": "emit",
+                                                                    "Initiator": "emit",
+                                                                    "ChecksumAlgorithm": "emit",
+                                                                    "ChecksumType": "emit"
                                                                   },
                                             "attributes": []
                                           }
@@ -448,7 +448,7 @@
                                    ],
                          "xml": {
                                   "element_order": ["ID", "DisplayName"],
-                                  "empty_value_policy": { "DisplayName": "omit", "ID": "omit" },
+                                  "empty_value_policy": { "DisplayName": "emit", "ID": "emit" },
                                   "attributes": []
                                 }
                        }
@@ -475,17 +475,17 @@
                             ],
            "empty_value_policy": {
                                    "Bucket": "emit",
-                                   "KeyMarker": "omit",
-                                   "UploadIdMarker": "omit",
-                                   "NextKeyMarker": "omit",
-                                   "Prefix": "omit",
-                                   "Delimiter": "omit",
-                                   "NextUploadIdMarker": "omit",
+                                   "KeyMarker": "emit",
+                                   "UploadIdMarker": "emit",
+                                   "NextKeyMarker": "emit",
+                                   "Prefix": "emit",
+                                   "Delimiter": "emit",
+                                   "NextUploadIdMarker": "emit",
                                    "MaxUploads": "emit",
                                    "IsTruncated": "emit",
-                                   "Uploads": "omit",
-                                   "CommonPrefixes": "omit",
-                                   "EncodingType": "omit"
+                                   "Uploads": "emit",
+                                   "CommonPrefixes": "emit",
+                                   "EncodingType": "emit"
                                  },
            "url_encoded_fields": [
                                    "Prefix",

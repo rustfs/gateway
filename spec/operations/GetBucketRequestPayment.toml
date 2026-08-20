@@ -45,7 +45,7 @@ element_order = ["Payer"]
 url_encoded_fields = []
 
 [xml.empty_value]
-Payer = "omit"
+Payer = "emit"
 
 [errors]
 not_configured = ""
