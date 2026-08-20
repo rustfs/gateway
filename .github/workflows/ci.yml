@@ -40,9 +40,39 @@ name: CI
 # If they ever disagree, fix this file to match AGENTS.md — AGENTS.md is the
 # source of truth.
 #
-# The toolchain is pinned by rust-toolchain.toml. Do NOT pass `with: toolchain:`
-# here: dtolnay/rust-toolchain reads that file, so CI and local builds cannot
-# drift, and a new rustc release cannot turn every open PR red overnight.
+# TOOLCHAIN — every job installs the compiler rust-toolchain.toml names.
+#
+# dtolnay/rust-toolchain does NOT read rust-toolchain.toml. Its `toolchain`
+# input defaults to `stable`, so the pinned revision below installs whatever
+# stable is on the day the job runs and makes it the rustup default. That was
+# documented here as the opposite, and on 2026-08-20 the difference turned main
+# red: rustc 1.98.0 shipped, `rustup default stable` moved to it, and every
+# cargo invocation that does not resolve this repository's directory override
+# (the signing suite runs one) compiled 1.98.0 objects into a target/ directory
+# full of 1.97.1 ones -- error[E0514]. Installing a second toolchain also
+# changed the rustc set Swatinem/rust-cache hashes into its restore key, so
+# every cache missed at once and the cold rebuilds blew their ci_budget.sh
+# budgets at exit 124.
+#
+# So every job names the compiler, and rust-toolchain.toml stays the one
+# authority: scripts/check_rust_toolchain_msrv.sh fails the build unless every
+# `toolchain:` below is byte-identical to that file's channel. A job that omits
+# `with:` and takes the action's `stable` default is the shape that broke, and
+# the guard rejects it by name. The one deliberate exception is the
+# ThreadSanitizer job, which needs the unstable -Zbuild-std and pins a dated
+# nightly.
+#
+# The version is written out per job rather than held in a workflow `env:` var
+# on purpose. Swatinem/rust-cache hashes every environment variable whose name
+# begins with CARGO, CC, CFLAGS, CXX, CMAKE or RUST into its restore key, so a
+# `RUST_TOOLCHAIN: 1.97.1` here would change that key for every job at once --
+# measured, and it costs a full cold rebuild. A job that then exceeds its
+# ci_budget.sh budget fails, and a failed job does not save a cache, so the
+# miss never heals. Do not add a workflow env var under those prefixes.
+#
+# Swatinem/rust-cache already keys on the compiler too: it hashes `rustc -vV`
+# of every installed toolchain into the same restore key, which is why the
+# extra 1.98.0 toolchain caused a miss rather than a poisoned hit.
 
 on:
   push:
@@ -83,7 +113,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - run: cargo fmt --all --check
       # Pinned models must match their recorded checksums before anything is generated from them.
       - name: Model integrity
@@ -167,7 +199,9 @@ jobs:
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -177,7 +211,9 @@ jobs:
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build documentation without warnings
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
@@ -190,7 +226,9 @@ jobs:
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       # No cargo cache: the five-minute measurement includes compiling xtask itself.
       - name: Bootstrap from a cold checkout (maximum 5 minutes)
         run: |
@@ -205,7 +243,9 @@ jobs:
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Prebuild operation verification targets
         run: |
@@ -224,7 +264,9 @@ jobs:
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Workspace tests (maximum 8 minutes after setup)
         run: |
@@ -237,7 +279,9 @@ jobs:
     timeout-minutes: 4
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Pinned smithy-rs signing suite
         run: |
@@ -279,7 +323,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Guard mutations 1 of 4 (maximum 5 minutes after setup)
         run: |
@@ -293,7 +339,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Guard mutations 2 of 4 (maximum 5 minutes after setup)
         run: |
@@ -307,7 +355,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Guard mutations 3 of 4 (maximum 5 minutes after setup)
         run: |
@@ -321,7 +371,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Guard mutations 4 of 4 (maximum 5 minutes after setup)
         run: |
@@ -353,7 +405,9 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: DTO compiler mutations (maximum 1 minute after setup)
         run: |
@@ -365,7 +419,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build-backed guards (maximum 4.5 minutes after setup)
         run: |
