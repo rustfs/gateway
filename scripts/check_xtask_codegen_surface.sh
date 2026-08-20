@@ -15,7 +15,7 @@ fail() {
 
 command -v python3 >/dev/null 2>&1 || fail 'python3 is required'
 for required in .cargo/config.toml Cargo.toml xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs \
-    crates/conformance/src/cli.rs crates/gateway/tests/cors_runtime.rs; do
+    crates/conformance/src/cli.rs crates/gateway/tests/cors_runtime.rs crates/server/tests/server_load.rs; do
     [[ -f "${ROOT}/${required}" ]] || fail "required input is missing: ${required}"
 done
 
@@ -510,9 +510,17 @@ verify_comments, verify_syntax = rust_views(verify_source)
 for relative, test_name in (
     ("crates/conformance/src/cli.rs", "feedback_case_c_object_0001"),
     ("crates/gateway/tests/cors_runtime.rs", "a_million_unique_keys_keep_rss_within_the_entry_budget"),
+    ("crates/server/tests/server_load.rs", "c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget"),
+    (
+        "crates/server/tests/server_load.rs",
+        "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic",
+    ),
 ):
     _, test_syntax = rust_views((root / relative).read_text())
-    pattern = re.compile(rf"#\s*\[\s*test\s*\]\s*fn\s+{re.escape(test_name)}\s*\(")
+    pattern = re.compile(
+        rf"#\s*\[\s*(?:test|tokio\s*::\s*test(?:\s*\([^]]*\))?)\s*\]\s*(?:async\s+)?fn\s+"
+        rf"{re.escape(test_name)}\s*\("
+    )
     if len(pattern.findall(test_syntax)) != 1:
         fail(f"workspace-only fast-scope contract is missing or inactive: {test_name}")
 comments_removed, syntax = verify_comments, verify_syntax
@@ -569,6 +577,8 @@ let subject = if package == "rustfs-gateway" {
     format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
 } else if package == "rustfs-gateway-conformance" {
     format!("crate {package} library scope; integration contracts remain in cargo test --workspace")
+} else if package == "rustfs-gateway-server" {
+    format!("crate {package} runtime scope; thousand-connection load contracts remain in cargo test --workspace")
 } else {
     format!("crate {package}")
 };
@@ -662,10 +672,24 @@ expected_gateway_batch = compact('''
 let mut test = steps.remove(0);
 test.extend(["--skip".to_owned(), GATEWAY_RSS_TEST.to_owned()]);
 let clippy = steps.remove(0);
-vec![vec![test, clippy]]
+return vec![vec![test, clippy]];
 ''')
 if compact(crate_step_batches_items[0][1]).count(expected_gateway_batch) != 1:
     fail("gateway fast verification must retain ordinary runtime tests and all-target Clippy")
+expected_server_batch = compact('''
+let mut test = steps.remove(0);
+test.extend([
+    "--".to_owned(),
+    "--skip".to_owned(),
+    "c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget".to_owned(),
+    "--skip".to_owned(),
+    "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic".to_owned(),
+]);
+let clippy = steps.remove(0);
+return vec![vec![test, clippy]];
+''')
+if compact(crate_step_batches_items[0][1]).count(expected_server_batch) != 1:
+    fail("server fast verification must retain ordinary runtime tests and defer only the two workspace load contracts")
 standalone_case_items = functions_named("standalone_crate_case", syntax, comments_removed)
 expected_standalone_case = compact('''
 (package != "rustfs-gateway").then(|| crate_case(package)).flatten()

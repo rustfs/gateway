@@ -192,6 +192,41 @@ fn facade_fast_scope_keeps_heavy_contracts_in_the_workspace_gate() {
 }
 
 #[test]
+fn server_fast_scope_keeps_thousand_connection_load_in_the_workspace_gate() {
+    let batches = crate_step_batches("rustfs-gateway-server");
+
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].len(), 2);
+    assert_eq!(
+        batches[0][0],
+        [
+            "test",
+            "-p",
+            "rustfs-gateway-server",
+            "--",
+            "--skip",
+            "c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget",
+            "--skip",
+            "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+    );
+    assert_eq!(batches[0][1][0], "clippy");
+    assert!(
+        include_str!("../../../crates/server/tests/server_load.rs")
+            .contains("fn c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget()"),
+        "the workspace-only c-lim-0006 load contract must remain active"
+    );
+    assert!(
+        include_str!("../../../crates/server/tests/server_load.rs")
+            .contains("fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic()"),
+        "the workspace-only c-lim-0061 load contract must remain active"
+    );
+}
+
+#[test]
 fn facade_case_does_not_start_a_nested_cargo_process() {
     let steps = crate_steps("rustfs-gateway");
 

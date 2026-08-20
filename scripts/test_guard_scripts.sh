@@ -2021,6 +2021,38 @@ expect_fail check_xtask_codegen_surface.sh \
     'the gateway fast scope rerunning its million-key workspace stress contract' \
     mut_xtask_gateway_fast_scope_runs_rss_stress
 
+mut_xtask_server_fast_scope_runs_c_lim_0006() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+subject = '            "c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget".to_owned(),\n'
+if text.count(subject) != 1:
+    raise SystemExit("server c-lim-0006 fast-scope exclusion is not unique")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the server fast scope rerunning the c-lim-0006 thousand-connection load contract' \
+    mut_xtask_server_fast_scope_runs_c_lim_0006
+
+mut_xtask_server_fast_scope_runs_c_lim_0061() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+subject = '            "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic".to_owned(),\n'
+if text.count(subject) != 1:
+    raise SystemExit("server c-lim-0061 fast-scope exclusion is not unique")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the server fast scope rerunning the c-lim-0061 thousand-reader load contract' \
+    mut_xtask_server_fast_scope_runs_c_lim_0061
+
 mut_xtask_gateway_conformance_runs_twice() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -6291,6 +6323,79 @@ PYEOF
 expect_fail check_timeout_layer_ownership.sh \
     'c-lim-0062 losing its healthy recovery direction' mut_server_c_lim_0062_recovery_removed
 
+mut_server_c_lim_0006_instrument_control_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = (
+    '    eprintln!("c-lim-0006 instrument: ballast_bytes={BALLAST_BYTES} seen_bytes={ballast_seen}");\n'
+    "    if ballast_seen < BALLAST_BYTES / BALLAST_SHARE_SEEN {\n"
+)
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0006 instrument gate is not unique")
+path.write_text(text.replace(subject, subject.replace("if ballast_seen < BALLAST_BYTES / BALLAST_SHARE_SEEN", "if false"), 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0006 asserting reuse on a host whose ps cannot see retained memory' \
+    mut_server_c_lim_0006_instrument_control_removed
+
+mut_server_c_lim_0006_single_tail_wave() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = "    let mut previous = loaded;\n    for _ in 1..WAVES {\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0006 wave loop is not unique")
+path.write_text(text.replace(subject, "    let mut previous = loaded;\n    for _ in 1..2 {\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0006 collapsing its wave trend back to one later reading' \
+    mut_server_c_lim_0006_single_tail_wave
+
+mut_server_c_lim_0006_reuse_ceiling_hardcoded() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = (
+    "        let reuse_ceiling = first_growth / TAIL_SHARE_OF_FIRST;\n"
+    '        eprintln!("c-lim-0006 reuse: tail_mean={tail_mean} ceiling_bytes={reuse_ceiling}");\n'
+)
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0006 derived reuse ceiling is not unique")
+path.write_text(text.replace(subject, subject.replace("first_growth / TAIL_SHARE_OF_FIRST", "8 * 1024 * 1024"), 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0006 deriving its reuse ceiling from a constant instead of the first wave' \
+    mut_server_c_lim_0006_reuse_ceiling_hardcoded
+
+mut_server_c_lim_0006_reuse_assertion_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load.rs")
+text = path.read_text()
+subject = (
+    '        eprintln!("c-lim-0006 reuse: tail_mean={tail_mean} ceiling_bytes={reuse_ceiling}");\n'
+    "        assert!(\n"
+    "            tail_mean <= reuse_ceiling,\n"
+)
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0006 reuse assertion is not unique")
+path.write_text(text.replace(subject, subject.replace("tail_mean <= reuse_ceiling", "tail_mean <= usize::MAX"), 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0006 losing its multi-wave reuse direction' mut_server_c_lim_0006_reuse_assertion_removed
+
 mut_server_c_lim_0061_case_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -6400,10 +6505,14 @@ from pathlib import Path
 
 path = Path("crates/server/tests/server_load.rs")
 text = path.read_text()
-subject = "            tail_mean <= reuse_ceiling,\n"
+subject = (
+    '        eprintln!("c-lim-0061 reuse: tail_mean={tail_mean} ceiling_bytes={reuse_ceiling}");\n'
+    "        assert!(\n"
+    "            tail_mean <= reuse_ceiling,\n"
+)
 if text.count(subject) != 1:
     raise SystemExit("c-lim-0061 multi-wave reuse assertion is not unique")
-path.write_text(text.replace(subject, "            tail_mean <= usize::MAX,\n", 1))
+path.write_text(text.replace(subject, subject.replace("tail_mean <= reuse_ceiling", "tail_mean <= usize::MAX"), 1))
 PYEOF
 }
 expect_fail check_timeout_layer_ownership.sh \
@@ -6415,10 +6524,13 @@ from pathlib import Path
 
 path = Path("crates/server/tests/server_load.rs")
 text = path.read_text()
-subject = "        let reuse_ceiling = first_growth / TAIL_SHARE_OF_FIRST;\n"
+subject = (
+    "        let reuse_ceiling = first_growth / TAIL_SHARE_OF_FIRST;\n"
+    '        eprintln!("c-lim-0061 reuse: tail_mean={tail_mean} ceiling_bytes={reuse_ceiling}");\n'
+)
 if text.count(subject) != 1:
     raise SystemExit("c-lim-0061 derived reuse ceiling is not unique")
-path.write_text(text.replace(subject, "        let reuse_ceiling = 8 * 1024 * 1024;\n", 1))
+path.write_text(text.replace(subject, subject.replace("first_growth / TAIL_SHARE_OF_FIRST", "8 * 1024 * 1024"), 1))
 PYEOF
 }
 expect_fail check_timeout_layer_ownership.sh \
@@ -6463,10 +6575,13 @@ from pathlib import Path
 
 path = Path("crates/server/tests/server_load.rs")
 text = path.read_text()
-subject = "    if ballast_seen < BALLAST_BYTES / BALLAST_SHARE_SEEN {\n"
+subject = (
+    '    eprintln!("c-lim-0061 instrument: ballast_bytes={BALLAST_BYTES} seen_bytes={ballast_seen}");\n\n'
+    "    if ballast_seen < BALLAST_BYTES / BALLAST_SHARE_SEEN {\n"
+)
 if text.count(subject) != 1:
     raise SystemExit("c-lim-0061 instrument gate is not unique")
-path.write_text(text.replace(subject, "    if false {\n", 1))
+path.write_text(text.replace(subject, subject.replace("if ballast_seen < BALLAST_BYTES / BALLAST_SHARE_SEEN", "if false"), 1))
 PYEOF
 }
 expect_fail check_timeout_layer_ownership.sh \
@@ -6479,10 +6594,10 @@ from pathlib import Path
 
 path = Path("crates/server/tests/server_load.rs")
 text = path.read_text()
-subject = "    for _ in 1..WAVES {\n"
+subject = "    let mut previous = after_first;\n    for _ in 1..WAVES {\n"
 if text.count(subject) != 1:
     raise SystemExit("c-lim-0061 wave loop is not unique")
-path.write_text(text.replace(subject, "    for _ in 1..2 {\n", 1))
+path.write_text(text.replace(subject, "    let mut previous = after_first;\n    for _ in 1..2 {\n", 1))
 PYEOF
 }
 expect_fail check_timeout_layer_ownership.sh \
