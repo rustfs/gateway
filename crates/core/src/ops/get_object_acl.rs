@@ -50,7 +50,7 @@ use crate::registry::OperationSpec;
 pub static ACL_TARGET: AclTarget = AclTarget::Object;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec::builder("GetObjectAcl", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("GetObjectAcl")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:GetObjectAcl", ResourceShape::Object))
     .build();

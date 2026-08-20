@@ -59,7 +59,7 @@ use crate::registry::OperationSpec;
 /// The source's `s3:GetObject` is the second stage and is carried by the type state in
 /// [`shared::copy_source`](super::shared::copy_source), not by this field — see the note on
 /// `CopyObject`'s spec for why.
-static SPEC: OperationSpec = OperationSpec::builder("UploadPartCopy", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("UploadPartCopy")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
     .build();

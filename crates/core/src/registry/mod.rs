@@ -140,6 +140,11 @@ pub struct OperationSpec {
     /// A code-to-status table cannot express this: `GetBucketLifecycleConfiguration` on an
     /// unconfigured bucket is `NoSuchLifecycleConfiguration`, not a generic not-found, and a client
     /// that branches on the specific code sees a different outcome.
+    ///
+    /// For a standard operation this is not written by hand: [`Self::standard`] reads it from
+    /// `RouteRow::not_configured`, which `model/overlays/ops/**` lowers through the IR. It is the
+    /// value a backend answers with — the reference backend in `rustfs-gateway-conformance` reads
+    /// exactly this field — so flipping the overlay changes what reaches the wire.
     pub not_configured_error: Option<ErrorCode>,
     /// The action this operation is authorised against.
     ///
@@ -152,10 +157,17 @@ pub struct OperationSpec {
 }
 
 impl OperationSpec {
-    /// Starts an operation specification with no parameters or authorization requirement.
+    /// Starts an operation specification with no parameters or authorization requirement, naming
+    /// both IR facts by hand.
     ///
     /// `not_configured_error` carries the operation-specific error for an absent bucket
     /// subresource; most operations pass `None`.
+    ///
+    /// **A standard operation must not call this.** Its success status and unconfigured code are
+    /// `model/overlays/**` values with a generated row, so writing them out here makes this file a
+    /// second authority — see [`Self::standard`], and `scripts/check_operation_spec_builder.sh`,
+    /// which refuses this call inside `crates/core/src/ops/**`. What is left for the builder is a
+    /// dialect's vendor operation, which is not in the pinned model and has no generated row.
     ///
     /// The registry rejects a built specification until [`Self::auth`] supplies the authorization
     /// requirement. Keeping that validation at registration lets tests exercise the fail-closed
@@ -165,6 +177,49 @@ impl OperationSpec {
         Self {
             name,
             success_status,
+            required_params: &[],
+            not_configured_error,
+            auth: None,
+            handler_deadline_class: None,
+        }
+    }
+
+    /// Starts the specification of a **standard** operation, reading both IR-lowered facts from
+    /// the generated table instead of taking them as arguments.
+    ///
+    /// `success_status` and `not_configured_error` are `model/overlays/**` values: they are lowered
+    /// through the IR into `generated/routes.rs`, and this is the only place Rust reads them.
+    /// Writing either one out by hand beside the generated copy is what gateway#242 recorded — the
+    /// generated constant was dead, the hand-written literal answered, and flipping the overlay
+    /// changed nothing on the wire. Deriving is preferred to comparing because a comparison can
+    /// only report a divergence that has already been written.
+    ///
+    /// [`Self::builder`] remains for a vendor operation added through a
+    /// [`crate::dialect::Dialect`]: it is not in the pinned AWS model, so it has no generated row
+    /// and its two facts are genuinely hand-written.
+    ///
+    /// # Panics
+    ///
+    /// At compile time, when `name` has no row in the generated route table. That is the whole
+    /// point of the panic: a standard operation with no generated row has no authority to derive
+    /// from, and the failure is at the `static` that asked for it.
+    #[must_use]
+    // The panic is a compile-time evaluation failure for every caller this constructor has: a
+    // standard operation's specification is a `static`, and its name is a literal that the same
+    // pinned model generated the route table from. Answering with an invented status instead would
+    // be the silent default this whole change removes.
+    #[allow(clippy::panic, reason = "const-evaluated; see the comment above")]
+    pub const fn standard(name: &'static str) -> Self {
+        let Some(row) = crate::route::row_of(name) else {
+            panic!("this operation has no row in the generated route table; see `generated/routes.rs`")
+        };
+        let not_configured_error = match row.not_configured {
+            Some(code) => Some(ErrorCode::not_configured(code)),
+            None => None,
+        };
+        Self {
+            name,
+            success_status: row.success_status,
             required_params: &[],
             not_configured_error,
             auth: None,

@@ -60,7 +60,7 @@ use crate::registry::OperationSpec;
 ///
 /// `notification` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("PutBucketNotificationConfiguration", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutBucketNotificationConfiguration")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutBucketNotification", ResourceShape::Bucket))
     .build();

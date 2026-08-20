@@ -65,6 +65,14 @@ pub struct RouteRow {
     pub path_shape: &'static str,
     /// The default success status.
     pub success_status: u16,
+    /// The operation-specific `404` code for a bucket subresource that was never configured, as a
+    /// wire spelling, or `None` when the operation has no such condition.
+    ///
+    /// Not routing, and neither is `success_status` above: both are per-operation facts, and this
+    /// table is the one generated per-operation table `rustfs-gateway-core` compiles. The code
+    /// used to be rendered into `generated/error_codes.rs`, which nothing outside a `#[cfg(test)]`
+    /// module ever included — a lowered rule with no reader, recorded as gateway#242.
+    pub not_configured: Option<&'static str>,
     /// The routing conjunction.
     pub predicates: &'static [RoutePredicate],
 }
@@ -93,9 +101,9 @@ pub enum RoutePredicate {
 /// The generated table. Data only; the types above are its vocabulary.
 ///
 /// Mounted in a module of its own so that the crate-wide `missing_docs = "deny"` can be lifted for
-/// exactly one item — the generated `ROUTES` static, which the emitter does not write a doc comment
-/// for and which this task may not edit. Lifting it at the crate root would silence the lint for
-/// every hand-written item too.
+/// exactly one item — the generated `ROUTES` constant, which the emitter does not write a doc
+/// comment for and which this task may not edit. Lifting it at the crate root would silence the
+/// lint for every hand-written item too.
 #[allow(missing_docs, reason = "the emitter writes data, not rustdoc; see the module docs")]
 mod data {
     use super::{RoutePredicate, RouteRow};
@@ -194,6 +202,50 @@ impl RouteRow {
             path_shape: self.path_shape,
         })
     }
+}
+
+/// The generated row for one operation, or `None` when the table has no row for that name.
+///
+/// A `const fn` on purpose: [`crate::registry::OperationSpec::standard`] is how a standard
+/// operation reads its own facts, and an operation's specification is a `static` built at compile
+/// time. A run-time accessor would have left the hand-written literal in place, which is the
+/// duplication this lookup exists to remove.
+#[must_use]
+// Const context only: `<[T]>::get` is not a `const fn` on this toolchain, and an out-of-range index
+// here is a compile-time evaluation failure, never a panic a request can reach.
+#[allow(clippy::indexing_slicing, reason = "const-evaluated bounds; see the comment above")]
+pub const fn row_of(operation: &str) -> Option<&'static RouteRow> {
+    let mut index = 0;
+    while index < ROUTES.len() {
+        let row = &ROUTES[index];
+        if str_eq(row.operation, operation) {
+            return Some(row);
+        }
+        index += 1;
+    }
+    None
+}
+
+/// Byte equality of two strings in const context.
+///
+/// `str::eq` is not `const`, and the alternative — passing the status as a literal and comparing it
+/// later — is the second copy this module is removing.
+// Same reason as `row_of`: every index is const-evaluated and guarded by the length check above it.
+#[allow(clippy::indexing_slicing, reason = "const-evaluated bounds; see the comment above")]
+const fn str_eq(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 /// Every generated row as a typed entry.

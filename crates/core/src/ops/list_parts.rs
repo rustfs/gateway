@@ -42,7 +42,7 @@ use crate::registry::OperationSpec;
 ///
 /// `uploadId` is a routing discriminator, not a required parameter: a `GET` on an object key
 /// without it is `GetObject`.
-static SPEC: OperationSpec = OperationSpec::builder("ListParts", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("ListParts")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:ListMultipartUploadParts", ResourceShape::Object))
     .build();

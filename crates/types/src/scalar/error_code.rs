@@ -90,6 +90,34 @@ impl ErrorCode {
         }
     }
 
+    /// The operation-specific `404` for an unconfigured bucket subresource, in const context.
+    ///
+    /// The status is not a parameter because every code this constructor is for is a `404`: the
+    /// condition it names is "the document does not exist". `rustfs-gateway-core` proves that
+    /// against the authority — `crates/core/tests/not_configured_declarations.rs` asserts that
+    /// every spelling the IR lowers into `RouteRow::not_configured` has a `404` row in
+    /// `model/overlays/error-status.toml` — so a code whose status the overlay changes fails there
+    /// rather than being silently re-statused here.
+    ///
+    /// Why it exists at all: [`ErrorCode::known`] scans a `static` table and cannot run in a
+    /// `const` initializer, and an operation's `OperationSpec` is a `static` built at compile time.
+    /// Without a `const` constructor the code has to be written out a second time by hand beside
+    /// the generated one, which is the divergence recorded as gateway#242.
+    ///
+    /// ```
+    /// use rustfs_gateway_types::ErrorCode;
+    ///
+    /// const CODE: ErrorCode = ErrorCode::not_configured("NoSuchLifecycleConfiguration");
+    /// assert_eq!(CODE, ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION);
+    /// ```
+    #[must_use]
+    pub const fn not_configured(code: &'static str) -> Self {
+        Self {
+            name: Cow::Borrowed(code),
+            status: StatusCode::NOT_FOUND,
+        }
+    }
+
     /// The declared code with this wire spelling, or `None`.
     ///
     /// The replacement for the old `From<&'static str>`: a spelling with no row has no status, so

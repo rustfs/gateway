@@ -59,6 +59,9 @@ mod lifecycle_roundtrip;
 #[path = "limit_layering.rs"]
 mod limit_layering;
 
+#[path = "not_configured_declarations.rs"]
+mod not_configured_declarations;
+
 #[path = "operation_spec_semver.rs"]
 mod operation_spec_semver;
 

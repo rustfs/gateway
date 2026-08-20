@@ -70,17 +70,31 @@ use crate::registry::OperationSpec;
 /// every other member of the request is in the body, where the decoder refuses a missing
 /// required element with `MalformedXML`. The success status is the `200` the head carries before
 /// the first frame exists — see the module note on why no frame follows it yet.
-static SPEC: OperationSpec = OperationSpec::builder(
-    "SelectObjectContent",
-    match SELECT_EVENT_STATUS {
+static SPEC: OperationSpec = OperationSpec::standard("SelectObjectContent")
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
+    .build();
+
+/// The event-stream status policy and the lowered IR name the same head status.
+///
+/// The status used to be written here as a `match` on [`SELECT_EVENT_STATUS`], which made this
+/// file a second authority for a value `model/overlays/` already declares — the shape gateway#242
+/// recorded. The contract switch still exists, because a deployment that moves to the deferred
+/// `202` posture has to move both; this assertion is what makes "both" enforced rather than
+/// remembered, and it fails the build at this line rather than serving a status no case expects.
+const _: () = {
+    let expected = match SELECT_EVENT_STATUS {
         SelectEventStatusPolicy::Success200 => 200,
         SelectEventStatusPolicy::Success202 => 202,
-    },
-    None,
-)
-.required_params(&[])
-.auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
-.build();
+    };
+    match crate::route::row_of("SelectObjectContent") {
+        Some(row) => assert!(
+            row.success_status == expected,
+            "SELECT_EVENT_STATUS and the generated success status for SelectObjectContent disagree"
+        ),
+        None => panic!("SelectObjectContent has no row in the generated route table"),
+    }
+};
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("SelectObjectContent", SigService::S3);

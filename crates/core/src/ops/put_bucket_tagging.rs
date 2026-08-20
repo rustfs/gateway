@@ -48,7 +48,7 @@ pub static TAG_SCOPE: TagScope = TagScope::Bucket;
 /// The `Tagging` document is a required *member*, refused by the decoder with `MalformedXML` when
 /// the body is absent or wrongly rooted — not a required *parameter*, which is a check on the
 /// request head. The integrity header is likewise the decoder's check, from the IR.
-static SPEC: OperationSpec = OperationSpec::builder("PutBucketTagging", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutBucketTagging")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutBucketTagging", ResourceShape::Bucket))
     .build();

@@ -47,7 +47,7 @@ use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, Resou
 use crate::registry::OperationSpec;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec::builder("DeleteBucketReplication", 204, None)
+static SPEC: OperationSpec = OperationSpec::standard("DeleteBucketReplication")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutReplicationConfiguration", ResourceShape::Bucket))
     .build();

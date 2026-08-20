@@ -760,9 +760,9 @@ fn the_lock_reads_declare_their_two_distinct_not_configured_codes() {
 /// The replication read declares its own unconfigured code, and its two siblings declare none.
 ///
 /// The declaration is what a backend outside this workspace reads to learn which 404 an
-/// unconfigured bucket owes; the conformance fixture answers the code from its own constant, so
-/// without this test the spec field could be deleted and every replication case would still pass
-/// — a value declared and never observed, which is the defect the Measurement rules exist for.
+/// unconfigured bucket owes, and since gateway#242 the conformance fixture answers from that
+/// declaration rather than from a constant of its own. This test holds the near end of that chain;
+/// a replication case observes the far end.
 ///
 /// Both directions are asserted deliberately. A spec field stuck on `Some(..)` would satisfy the
 /// first assertion alone, and the write and the delete are exactly the operations that must
@@ -1017,11 +1017,12 @@ fn n_an_unhandled_bucket_configuration_read_is_refused_rather_than_answered_by_t
 /// The band's nine unconfigured answers are declared, not improvised — and the declaration is
 /// what an external backend reads.
 ///
-/// This test exists because the equivalent claim in the replication family could be **deleted
-/// outright** and the whole workspace stayed green: the conformance 404 comes from the fixture's
-/// own constant, so `not_configured_error` was decoration. It is asserted here in both
-/// directions, because a field stuck on `Some(..)` satisfies only the first half and a field
-/// stuck on `None` satisfies only the second:
+/// This test was written because the equivalent claim in the replication family could once be
+/// **deleted outright** and the whole workspace stayed green: the conformance 404 came from the
+/// fixture's own constant, so `not_configured_error` was decoration. gateway#242 removed that
+/// second constant — the fixture now answers from this field — and the shape below is still what
+/// makes the claim two-directional, because a field stuck on `Some(..)` satisfies only the first
+/// half and a field stuck on `None` satisfies only the second:
 ///
 /// * three reads declare a code, and no two of them declare the same one;
 /// * six reads declare **none**, because their unconfigured answer is a `200` — five an empty

@@ -44,7 +44,7 @@ use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, Resou
 use crate::registry::OperationSpec;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec::builder("DeleteBucketCors", 204, None)
+static SPEC: OperationSpec = OperationSpec::standard("DeleteBucketCors")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutBucketCORS", ResourceShape::Bucket))
     .build();

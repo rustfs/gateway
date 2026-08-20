@@ -41,7 +41,6 @@
 //! `q-cors-0001` records.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
-use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{GetBucketCors, GetBucketCorsInput, GetBucketCorsOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
@@ -51,7 +50,7 @@ use crate::registry::OperationSpec;
 ///
 /// `cors` is a routing discriminator, not a required parameter: a `GET` on a bucket without it is
 /// the key listing. Nothing else is required.
-static SPEC: OperationSpec = OperationSpec::builder("GetBucketCors", 200, Some(ErrorCode::NO_SUCH_CORS_CONFIGURATION))
+static SPEC: OperationSpec = OperationSpec::standard("GetBucketCors")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:GetBucketCORS", ResourceShape::Bucket))
     .build();

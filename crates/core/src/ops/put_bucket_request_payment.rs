@@ -59,7 +59,7 @@ use crate::registry::OperationSpec;
 ///
 /// `requestPayment` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("PutBucketRequestPayment", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutBucketRequestPayment")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutBucketRequestPayment", ResourceShape::Bucket))
     .build();

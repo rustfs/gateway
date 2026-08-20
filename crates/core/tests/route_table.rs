@@ -2010,6 +2010,7 @@ fn a_generated_row_whose_method_contradicts_its_predicate_is_refused() {
         target: "Object",
         path_shape: "/{Bucket}/{Key+}",
         success_status: 200,
+        not_configured: None,
         predicates: &[RoutePredicate::Method("PUT"), RoutePredicate::Target("Object")],
     };
     let error = row.to_entry().expect_err("the row contradicts itself");
@@ -2028,6 +2029,7 @@ fn a_generated_row_with_an_unknown_method_is_refused() {
         target: "Object",
         path_shape: "/{Bucket}/{Key+}",
         success_status: 200,
+        not_configured: None,
         predicates: &[RoutePredicate::Target("Object")],
     };
     let error = row.to_entry().expect_err("BREW is not an S3 method");

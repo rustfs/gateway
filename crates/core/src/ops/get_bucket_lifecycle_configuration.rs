@@ -40,11 +40,13 @@
 //!
 //! A bucket that never had a lifecycle document is a **404 `NoSuchLifecycleConfiguration`**, the
 //! operation-specific code — not a generic not-found, and not a `200` with an empty document.
-//! That is what [`OperationSpec::not_configured_error`] carries for this operation and what
-//! `q-lc-0001` records.
+//! `q-lc-0001` records that rule, `model/overlays/ops/lifecycle.toml` declares it, and
+//! [`OperationSpec::standard`] reads it back out of the generated route row into
+//! [`OperationSpec::not_configured_error`]. The code is deliberately **not** written here: it used
+//! to be, beside a generated copy nothing read, which is what gateway#242 recorded — flipping the
+//! overlay regenerated artefacts and changed no served byte.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
-use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{
     GetBucketLifecycleConfiguration, GetBucketLifecycleConfigurationInput, GetBucketLifecycleConfigurationOutput,
 };
@@ -56,11 +58,10 @@ use crate::registry::OperationSpec;
 ///
 /// `lifecycle` is a routing discriminator, not a required parameter: a `GET` on a bucket without
 /// it is the key listing. Nothing else is required.
-static SPEC: OperationSpec =
-    OperationSpec::builder("GetBucketLifecycleConfiguration", 200, Some(ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION))
-        .required_params(&[])
-        .auth(AuthRequirement::new("s3:GetLifecycleConfiguration", ResourceShape::Bucket))
-        .build();
+static SPEC: OperationSpec = OperationSpec::standard("GetBucketLifecycleConfiguration")
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:GetLifecycleConfiguration", ResourceShape::Bucket))
+    .build();
 
 /// Header signatures only, and not privileged.
 static FLOOR: OperationFloor = OperationFloor::builtin("GetBucketLifecycleConfiguration", SigService::S3);

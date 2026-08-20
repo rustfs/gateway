@@ -55,7 +55,7 @@ use crate::registry::OperationSpec;
 ///
 /// `logging` is a routing discriminator, not a required parameter: nothing on the request head is
 /// required beyond it.
-static SPEC: OperationSpec = OperationSpec::builder("PutBucketLogging", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("PutBucketLogging")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutBucketLogging", ResourceShape::Bucket))
     .build();

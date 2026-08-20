@@ -44,7 +44,7 @@ use crate::registry::OperationSpec;
 pub static REGION_HEADER_DUTY: RegionHeaderDuty = RegionHeaderDuty::RedirectOnly;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec::builder("DeleteBucket", 204, None)
+static SPEC: OperationSpec = OperationSpec::standard("DeleteBucket")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:DeleteBucket", ResourceShape::Bucket))
     .build();

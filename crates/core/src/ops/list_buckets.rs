@@ -54,7 +54,7 @@ use crate::ops::shared::pagination::CursorSpec;
 use crate::registry::OperationSpec;
 
 /// What this operation requires of a request once routing has chosen it.
-static SPEC: OperationSpec = OperationSpec::builder("ListBuckets", 200, None)
+static SPEC: OperationSpec = OperationSpec::standard("ListBuckets")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:ListAllMyBuckets", ResourceShape::Service))
     .build();
