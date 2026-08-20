@@ -357,6 +357,28 @@ fn c_ing_0033_bytes_after_a_terminal_chunk_on_the_window_boundary_are_refused() 
     assert!(!pipeline.commit_allowed());
 }
 
+/// Positive: the same window-boundary body with nothing after it still arrives byte for byte.
+///
+/// The counterpart to the case above, and the one that makes the compaction it added checkable.
+/// `finalize` now calls `make_room` before its confirming read, which rebases the decoder's cursor
+/// and every run still pending — so "the probe is a real read" and "nothing was rebased out from
+/// under a run the consumer had not been shown yet" are two different claims, and only this one
+/// tests the second. A compaction that dropped or shifted the tail of the body would refuse
+/// nothing and report nothing; it would just hand back different bytes.
+#[test]
+fn a_terminal_chunk_on_the_window_boundary_still_delivers_every_byte() {
+    const WINDOW: usize = 64 * 1024;
+    const OVERHEAD: usize = 4 + 2 + 2 + 5;
+    let payload: Vec<u8> = (0..WINDOW - OVERHEAD).map(|index| (index % 251) as u8).collect();
+    let body = unsigned_body(&[&payload]);
+    assert_eq!(body.len(), WINDOW, "the terminal chunk must end on the window boundary");
+
+    let mut pipeline = unsigned_pipeline(body, 4096, payload.len() as u64, no_observers(), ChunkLimits::default());
+    let out = drain_pipeline(&mut pipeline, 1024).expect("a well formed body");
+    assert_eq!(out, payload, "compaction before the terminal probe moved the body");
+    assert!(pipeline.commit_allowed());
+}
+
 /// Negative: every refusal is a 400 except the signature one, which is a 403 — and no refusal is
 /// ever committable.
 #[test]
