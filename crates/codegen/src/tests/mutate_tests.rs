@@ -236,3 +236,34 @@ fn n_a_write_the_reader_cannot_express_stops_the_run() {
         .expect_err("a write the reader cannot express must stop the run");
     assert!(error.to_string().contains("does not read back"), "{error}");
 }
+
+#[test]
+fn an_empty_element_rule_is_planned_in_the_irs_own_spelling() {
+    // The IR spells these `emit`/`omit`. Matching them capitalised made every empty-element rule
+    // report UNPLANNABLE — a rule the executor silently declines to test reads, in a matrix, very
+    // much like a rule with nothing to test.
+    let mut operations = lowered();
+    let path = "GetBucketLocation.xml.empty_value.LocationConstraint";
+    let current = resolve_at(&operations, path).expect("the location constraint has an empty-value policy");
+    assert_eq!(current, SourceValue::Text("emit".to_owned()));
+    let mutation = plan("q-empty-0002", MutationDimension::EmptyElementRender, &source(path, current))
+        .expect("an empty-element rule has exactly one opposite");
+
+    apply(&mut operations, &mutation).expect("the writer accepts its own plan");
+
+    assert_eq!(
+        resolve_at(&operations, path).expect("still resolves"),
+        SourceValue::Text("omit".to_owned())
+    );
+}
+
+#[test]
+fn n_an_empty_element_spelling_the_ir_does_not_define_is_refused() {
+    let error = plan(
+        "q-empty-0002",
+        MutationDimension::EmptyElementRender,
+        &source("Op.xml.empty_value.X", SourceValue::Text("Emit".to_owned())),
+    )
+    .expect_err("a capitalised spelling is not an IR spelling");
+    assert!(error.contains("does not define"), "{error}");
+}

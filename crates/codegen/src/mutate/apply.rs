@@ -134,11 +134,9 @@ fn write_empty_value(policy: &mut [(String, EmptyValue)], field: &str, value: &S
         .iter_mut()
         .find(|(name, _)| name == field)
         .ok_or_else(|| format!("mutation source `{path}` has no empty-value policy"))?;
-    entry.1 = match text(value, path)?.as_str() {
-        "Emit" => EmptyValue::Emit,
-        "Omit" => EmptyValue::Omit,
-        other => return Err(format!("mutation source `{path}` cannot hold empty-value policy `{other}`")),
-    };
+    let spelling = text(value, path)?;
+    entry.1 = EmptyValue::parse(&spelling)
+        .ok_or_else(|| format!("mutation source `{path}` cannot hold empty-value policy `{spelling}`"))?;
     Ok(())
 }
 
