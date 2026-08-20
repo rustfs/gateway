@@ -214,7 +214,17 @@ impl OperationSpec {
             panic!("this operation has no row in the generated route table; see `generated/routes.rs`")
         };
         let not_configured_error = match row.not_configured {
-            Some(code) => Some(ErrorCode::not_configured(code)),
+            Some(code) => {
+                let declared = ErrorCode::declared(code);
+                // A lowered spelling with no row in `model/overlays/error-status.toml` has no
+                // status, so it has no answer either. Refusing at compile time is the only reading
+                // that does not quietly turn the rule into `None`.
+                assert!(
+                    declared.is_some(),
+                    "the lowered unconfigured code has no row in the error-status authority"
+                );
+                declared
+            }
             None => None,
         };
         Self {

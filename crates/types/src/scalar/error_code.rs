@@ -90,32 +90,41 @@ impl ErrorCode {
         }
     }
 
-    /// The operation-specific `404` for an unconfigured bucket subresource, in const context.
+    /// The declared code with this wire spelling, in const context, or `None`.
     ///
-    /// The status is not a parameter because every code this constructor is for is a `404`: the
-    /// condition it names is "the document does not exist". `rustfs-gateway-core` proves that
-    /// against the authority — `crates/core/tests/not_configured_declarations.rs` asserts that
-    /// every spelling the IR lowers into `RouteRow::not_configured` has a `404` row in
-    /// `model/overlays/error-status.toml` — so a code whose status the overlay changes fails there
-    /// rather than being silently re-statused here.
+    /// The `const` counterpart of [`ErrorCode::known`], and the same authority: both read
+    /// `CODE_TABLE`, which `model/overlays/error-status.toml` generates. Nothing here names a
+    /// status — a code's status is the overlay's answer alone.
     ///
-    /// Why it exists at all: [`ErrorCode::known`] scans a `static` table and cannot run in a
-    /// `const` initializer, and an operation's `OperationSpec` is a `static` built at compile time.
-    /// Without a `const` constructor the code has to be written out a second time by hand beside
-    /// the generated one, which is the divergence recorded as gateway#242.
+    /// It exists because an operation's `OperationSpec` is a `static` built at compile time, where
+    /// an iterator chain cannot run. Without it the code has to be written out a second time by
+    /// hand beside the generated one, which is the divergence recorded as rustfs/gateway#242.
     ///
     /// ```
     /// use rustfs_gateway_types::ErrorCode;
     ///
-    /// const CODE: ErrorCode = ErrorCode::not_configured("NoSuchLifecycleConfiguration");
-    /// assert_eq!(CODE, ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION);
+    /// const CODE: Option<ErrorCode> = ErrorCode::declared("NoSuchLifecycleConfiguration");
+    /// assert_eq!(CODE, Some(ErrorCode::NO_SUCH_LIFECYCLE_CONFIGURATION));
+    /// assert!(ErrorCode::declared("NoSuchThing").is_none());
     /// ```
     #[must_use]
-    pub const fn not_configured(code: &'static str) -> Self {
-        Self {
-            name: Cow::Borrowed(code),
-            status: StatusCode::NOT_FOUND,
+    // Const context only: `<[T]>::get` is not a `const fn` on this toolchain, and every index here
+    // is bounded by the `while` above it, so an out-of-range read is a compile-time evaluation
+    // failure rather than a panic a request can reach.
+    #[allow(clippy::indexing_slicing, reason = "const-evaluated bounds; see the comment above")]
+    pub const fn declared(code: &str) -> Option<Self> {
+        let mut index = 0;
+        while index < CODE_TABLE.len() {
+            let (name, status) = CODE_TABLE[index];
+            if const_str_eq(name, code) {
+                return Some(Self {
+                    name: Cow::Borrowed(name),
+                    status,
+                });
+            }
+            index += 1;
         }
+        None
     }
 
     /// The declared code with this wire spelling, or `None`.
@@ -168,6 +177,28 @@ impl fmt::Display for ErrorCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.name)
     }
+}
+
+/// Byte equality of two strings in const context.
+///
+/// `str::eq` is not a `const fn`, and neither is any comparison in the standard library that would
+/// serve. `rustfs-gateway-core` carries the same twelve lines for the same reason and against a
+/// different table; the shim is a language gap, not a rule, so there is nothing here that two
+/// copies could come to disagree about.
+const fn const_str_eq(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 include!("../../../../generated/error_status.rs");

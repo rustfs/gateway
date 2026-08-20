@@ -15,8 +15,8 @@
 //! The lowered unconfigured-subresource codes, against the error-status authority.
 //!
 //! Responsible for: proving that every spelling `generated/routes.rs` carries in
-//! `RouteRow::not_configured` is a code `model/overlays/error-status.toml` declares, and that its
-//! status there is the `404` `ErrorCode::not_configured` bakes in.
+//! `RouteRow::not_configured` is a code `model/overlays/error-status.toml` declares, and that the
+//! status the authority gives it is a `404`.
 //! NOT responsible for: which operation owes which code — that is
 //! `configuration_error_declarations.rs` — or what a backend answers, which the lifecycle, CORS and
 //! encryption conformance cases observe.
@@ -24,11 +24,12 @@
 //!
 //! # Why this is not a restatement of the table
 //!
-//! `ErrorCode::not_configured` is a `const fn`, so it cannot consult the status table the way
-//! `ErrorCode::known` does; it writes `404` in. That is sound only while every lowered spelling is
-//! a declared `404`, and this file is where that stops being an assumption. Without it, changing a
-//! code's row in `error-status.toml` to a non-404 would leave `OperationSpec` carrying a value that
-//! renders the old status and compares unequal to the constant of the same name.
+//! Nothing here decides a status: `OperationSpec::standard` reads the code back out of the
+//! error-status authority through `ErrorCode::declared`, so a row changed in `error-status.toml`
+//! flows through on its own. What is asserted is the protocol claim the two tables have to agree
+//! on and neither states — that an unconfigured bucket subresource is a **not-found**. A lowered
+//! code that the authority gives some other status to is a rule two overlays disagree about, and
+//! it fails here rather than reaching a client as a `409` nobody chose.
 
 use http::StatusCode;
 use rustfs_gateway_core::route::ROUTES;
@@ -51,13 +52,14 @@ fn every_lowered_unconfigured_code_is_a_declared_404() {
         assert_eq!(
             declared.default_status(),
             StatusCode::NOT_FOUND,
-            "{}: `{spelling}` is not a 404, so `ErrorCode::not_configured` may not be used for it",
-            row.operation
+            "{}: the authority gives `{spelling}` a {} — an unconfigured subresource is a not-found",
+            row.operation,
+            declared.default_status()
         );
         assert_eq!(
-            ErrorCode::not_configured(spelling),
-            declared,
-            "{}: the const constructor and the authority disagree about `{spelling}`",
+            ErrorCode::declared(spelling),
+            Some(declared),
+            "{}: the const lookup and the iterator lookup disagree about `{spelling}`",
             row.operation
         );
     }
