@@ -110,11 +110,28 @@ async fn observe<R: AsyncRead + Unpin>(reader: &mut R, ceiling: Duration) -> Con
 /// One function rather than a literal per case: the claim each case makes is about the close, and
 /// two configuration literals side by side is how a case quietly starts measuring a timer instead.
 ///
-/// `so_rcvbuf` is pinned small on purpose. The refusals below never read their request body, so
-/// what makes a socket *hold* unread octets at the moment it is dropped is a receive buffer the
-/// peer can fill faster than nothing drains it; with a buffer the kernel auto-tunes into the
-/// megabytes the whole body can land in it and still be gone before the close, and the case would
-/// be measuring the buffer rather than the drain.
+/// `so_rcvbuf` is *pinned*, and its value sits between two other constants in this file. Both
+/// relations are load-bearing, and getting the lower one wrong is what rustfs/gateway#274 turned
+/// out to be:
+///
+/// - **[`SLAB`] < `so_rcvbuf`.** The refusals below never read their request body, so the only
+///   thing that makes a socket *hold* unread octets at the moment it is dropped is a receive
+///   buffer holding more than the request parser took out of it in one read. The parser reads
+///   once — the head is complete, and nothing above it ever polls the body — so a receive buffer
+///   the parser can *empty* leaves an empty receive queue behind, the drain correctly declines
+///   (there is nothing left to be reset over), and the case is measuring a race between one read
+///   and one `poll_shutdown` rather than measuring a drain. Observed on a hosted runner with this
+///   buffer pinned to 8 KiB: the parser took 12353 octets, the receive queue was empty, the drain
+///   accepted 0, and the connection retired in 1.302µs. Pinning the buffer above the slab the
+///   peer queues before the refusal is what makes "the socket holds unread octets" true rather
+///   than likely.
+/// - **`so_rcvbuf` < the body.** A buffer the kernel auto-tunes into the megabytes swallows the
+///   whole body, and then the case is measuring the buffer rather than the drain.
+///
+/// That the failure was a race in both directions is also the whole of #274's flake history: the
+/// same case sometimes lost the race and read *nothing* — passing, because the assertion it had
+/// was on a client-side count — and sometimes won it and ran out of clock partway through a
+/// mebibyte. One cause, two symptoms, opposite colours.
 fn plaintext_config() -> ServerConfig {
     ServerConfig {
         bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
@@ -123,7 +140,7 @@ fn plaintext_config() -> ServerConfig {
         keep_alive_idle: Duration::from_secs(60),
         write_progress_timeout: Duration::from_secs(30),
         max_connections_per_ip: None,
-        so_rcvbuf: Some(8 * 1024),
+        so_rcvbuf: Some(128 * 1024),
         lingering_close_time: PATIENT_BUDGET,
         ..ServerConfig::default()
     }
@@ -203,8 +220,9 @@ async fn wait_retired(metrics: &ServerMetrics, ceiling: Duration) -> Option<Dura
 /// Observed: two cases here did exactly that, and one of them was the case about the *bound*,
 /// which reported a connection retired in 2.375µs against a two-second budget it never spent.
 ///
-/// Eight times the pinned receive buffer, so the listener's first read cannot take the whole slab
-/// and the buffer is refilled from the peer's own queue before the drain looks at it.
+/// Four times the largest read the request parser has been observed to take, and half the pinned
+/// receive buffer, so the whole slab reaches the listener's receive queue and one parser read
+/// cannot empty it. See `plaintext_config` for why both halves of that sandwich matter.
 const SLAB: usize = 64 * 1024;
 
 /// How long each block of the slab may take to leave. Reached only when nothing is draining, which
@@ -212,8 +230,8 @@ const SLAB: usize = 64 * 1024;
 /// ends the slab and the case goes on to report what it observes.
 const SLAB_BLOCK_CEILING: Duration = Duration::from_secs(2);
 
-/// One block of a streamed body. The same size as the pinned receive buffer, so a peer blocked on
-/// the window is blocked one block at a time.
+/// One block of a streamed body, and the same size as the drain's own `LINGER_BLOCK`, so a short
+/// count reported by a case here is a whole number of the reads the drain actually makes.
 const BLOCK: usize = 8 * 1024;
 
 /// Writes up to `slab` octets of body, counting exactly what the peer accepted.
@@ -310,11 +328,22 @@ async fn shut_down(server: RunningServer) {
 /// body is sized so that the slowest rate any runner has been observed to deliver (3.9 blocks of
 /// 8 KiB per second) drains it in about a fifth of this case's budget, and the budget is stated
 /// here rather than inherited so the bound under test is a number this case chose.
+///
+/// # Why the receive buffer moved
+///
+/// Sizing the body was not enough on its own, and the counters above are what showed it. On a
+/// hosted runner this case reported `server accepted 12353 of 262209 and drained 0`: the request
+/// parser's single read had emptied an 8 KiB receive buffer, so the socket the runtime dropped
+/// held no unread octets, the drain correctly declined — there was nothing to be reset over — and
+/// the case's own premise had quietly stopped holding. `plaintext_config` now pins the buffer
+/// above [`SLAB`], and the assertion on `queued` below states that arrangement instead of
+/// assuming it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_refusal_over_an_undrained_body_ends_in_a_close_and_not_a_reset() {
-    /// Four times the 64 KiB byte budget the conformance transport's drain used to stop at, and
-    /// four times the slab already queued when the refusal is written, so a byte-bounded drain
-    /// cannot pass this case and neither can one that only empties what was already buffered.
+    /// Four times the 64 KiB byte budget the conformance transport's drain used to stop at, four
+    /// times the slab already queued when the refusal is written, and twice the pinned receive
+    /// buffer — so a byte-bounded drain cannot pass this case, neither can one that only empties
+    /// what was already buffered, and the buffer cannot swallow the body whole.
     const BODY: usize = 256 * 1024;
     /// The least the drain may have accepted, and the assertion that it was the *drain* that took
     /// the body rather than the request parser.
@@ -341,6 +370,14 @@ async fn a_refusal_over_an_undrained_body_ends_in_a_close_and_not_a_reset() {
     });
     let started = Instant::now();
     let (mut reader, mut writer, queued) = open_refused(server.local_addr, BODY).await;
+    // The arrangement, stated as an assertion rather than assumed. The whole slab has to reach the
+    // listener before the refusal is written, because one parser read is all this connection gets
+    // and the octets it leaves behind are the ones the drain exists to accept. A receive buffer
+    // that stopped fitting the slab would silently turn every assertion below into a race.
+    assert_eq!(
+        queued, SLAB,
+        "the peer could not queue its slab, so the refusal will not be answered over unread octets"
+    );
     // Tolerated rather than expected: a runtime that abandoned the connection makes this stop
     // short, and that is a finding for the assertions below to report rather than a panic here.
     let sender = tokio::spawn(async move { queued + queue_body(&mut writer, BODY - queued).await });
