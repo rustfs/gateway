@@ -33,6 +33,7 @@ require_equal(workflow.fetch("concurrency", nil), {
 abort("ERROR: workflow defaults may not override command failure propagation") if workflow.key?("defaults")
 workflow_env_keys = %w[
   CARGO_TERM_COLOR
+  RUST_TOOLCHAIN
   CARGO_SEMVER_CHECKS_TOOL
   CARGO_HACK_TOOL
   CARGO_LLVM_COV_TOOL
@@ -92,7 +93,7 @@ exact_commands.each do |job_id, command|
 end
 
 static_steps = jobs.fetch("static").fetch("steps")
-require_equal(static_steps.first(3).map(&:keys), [["uses", "with"], ["uses"], ["run"]],
+require_equal(static_steps.first(3).map(&:keys), [["uses", "with"], ["uses", "with"], ["run"]],
               "static setup or command order changed")
 require_equal(static_steps.first(2).map { |step| step.fetch("uses") }, [
                 "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
@@ -102,7 +103,7 @@ require_equal(static_steps.first.fetch("with"), {"fetch-depth" => 0},
               "static must retain the branch graph for merge-base guards")
 
 clippy_steps = jobs.fetch("clippy").fetch("steps")
-require_equal(clippy_steps.map(&:keys), [["uses"], ["uses"], ["uses"], ["run"]],
+require_equal(clippy_steps.map(&:keys), [["uses"], ["uses", "with"], ["uses"], ["run"]],
               "clippy setup or command can alter failure propagation")
 require_equal(clippy_steps.first(3).map { |step| step.fetch("uses") }, [
                 "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",

@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WHAT: Keep the Cargo MSRV, exact development toolchain, documentation and MSRV CI job aligned.
+# WHAT: Keep the Cargo MSRV, exact development toolchain, documentation and the CI workflow
+#       aligned -- including that every CI job installs the compiler rust-toolchain.toml names.
 # WHY:  rustfs/backlog#1713 makes the compiler floor and build toolchain reviewable inputs.
+#       dtolnay/rust-toolchain does not read rust-toolchain.toml: its `toolchain` input defaults
+#       to `stable`. A comment in ci.yml claimed the opposite, nothing enforced it, and when
+#       rustc 1.98.0 shipped on 2026-08-20 every cache-backed job on main went red at once.
+#       So the workflow names the compiler exactly once, in RUST_TOOLCHAIN, and this guard binds
+#       that name to rust-toolchain.toml and to every toolchain step in the workflow.
 # HOW TO EXEMPT: There are no exemptions; change all compiler contracts in one reviewed PR.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -93,9 +99,62 @@ begin
     abort("check_rust_toolchain_msrv: critical CI msrv steps must always run and fail closed") unless (step.keys & forbidden).empty?
   end
 
+  # One authority for the compiler, named once in the workflow environment and bound here to
+  # rust-toolchain.toml. Every job then references it, so no job can carry a second version.
+  env = workflow.fetch("env", {})
+  abort("check_rust_toolchain_msrv: CI workflow env must be a mapping") unless env.is_a?(Hash)
+  pinned = env["RUST_TOOLCHAIN"]
+  unless pinned == ARGV.fetch(1)
+    abort("check_rust_toolchain_msrv: CI RUST_TOOLCHAIN #{pinned.inspect} must exactly match " \
+          "the rust-toolchain.toml channel #{ARGV.fetch(1).inspect}")
+  end
+  reference = "${{ env.RUST_TOOLCHAIN }}"
+
   with = toolchain_steps.first.fetch("with")
   abort("check_rust_toolchain_msrv: rust-toolchain inputs must be a mapping") unless with.is_a?(Hash)
-  abort("check_rust_toolchain_msrv: CI msrv job does not install the exact workspace MSRV") unless with["toolchain"] == ARGV.fetch(1)
+  abort("check_rust_toolchain_msrv: CI msrv job does not install the exact workspace MSRV") unless with["toolchain"] == reference
+
+  # The defect this guard exists to make impossible: a job that installs `stable` -- by naming it,
+  # or by omitting `with:` and taking the action's default -- while rust-toolchain.toml names an
+  # exact release. Both compilers then exist on the runner, the rustup default is the wrong one,
+  # and any cargo invocation that does not resolve the directory override builds against it.
+  # The ThreadSanitizer job is the one declared exception: -Zbuild-std is unstable, so it pins a
+  # dated nightly, which is still an exact compiler rather than a moving channel.
+  #
+  # A job that runs cargo must install exactly one toolchain, so dropping or renaming the step
+  # cannot leave this loop with nothing to inspect and still read green.
+  nightly_only = "gateway-tsan"
+  installed = 0
+  jobs.each do |job_id, job|
+    next unless job.is_a?(Hash)
+    steps = job["steps"]
+    next unless steps.is_a?(Array)
+    steps = steps.select { |step| step.is_a?(Hash) }
+    toolchain_steps = steps.select { |step| step.fetch("uses", "").match?(%r{\Adtolnay/rust-toolchain@}) }
+    if steps.any? { |step| step["run"].to_s.include?("cargo") } && toolchain_steps.length != 1
+      abort("check_rust_toolchain_msrv: CI job #{job_id} runs cargo but installs " \
+            "#{toolchain_steps.length} toolchains, so the compiler it uses is not declared")
+    end
+    toolchain_steps.each do |step|
+      installed += 1
+      inputs = step["with"]
+      unless inputs.is_a?(Hash) && inputs.key?("toolchain")
+        abort("check_rust_toolchain_msrv: CI job #{job_id} installs a rust toolchain without " \
+              "naming one, so it takes the action's moving `stable` default")
+      end
+      requested = inputs.fetch("toolchain")
+      if job_id == nightly_only
+        unless requested.is_a?(String) && requested.match?(/\Anightly-[0-9]{4}-[0-9]{2}-[0-9]{2}\z/)
+          abort("check_rust_toolchain_msrv: CI job #{job_id} must pin a dated nightly, found " \
+                "#{requested.inspect}")
+        end
+      elsif requested != reference
+        abort("check_rust_toolchain_msrv: CI job #{job_id} installs #{requested.inspect} instead " \
+              "of the pinned #{reference}")
+      end
+    end
+  end
+  abort("check_rust_toolchain_msrv: CI installs no rust toolchain at all") if installed.zero?
 rescue KeyError, Psych::Exception => error
   abort("check_rust_toolchain_msrv: invalid CI workflow: #{error.message}")
 end

@@ -31,6 +31,7 @@ end
 abort("ERROR: workflow defaults may not override split-job failure propagation") if workflow.key?("defaults")
 workflow_env_keys = [
   "CARGO_TERM_COLOR",
+  "RUST_TOOLCHAIN",
   "CARGO_SEMVER_CHECKS_TOOL",
   "CARGO_HACK_TOOL",
   "CARGO_LLVM_COV_TOOL",
@@ -111,7 +112,7 @@ require_equal(error_status.values_at("name", "runs-on", "timeout-minutes"),
   require_equal(steps.last.keys, ["name", "run"], "a split worker command can skip or hide failure")
 end
 
-require_equal(workspace.fetch("steps").first(3).map(&:keys), [["uses"], ["uses"], ["uses"]],
+require_equal(workspace.fetch("steps").first(3).map(&:keys), [["uses"], ["uses", "with"], ["uses"]],
               "workspace-tests setup gained executable control")
 signing_suite_steps = signing_suite.fetch("steps")
 require_equal(signing_suite_steps.length, 4, "signing-suite changed its setup or command step count")
@@ -120,13 +121,13 @@ require_equal(signing_suite_steps.first(3).map { |step| step.fetch("uses") }, [
   "dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30",
   "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32"
 ], "signing-suite setup action or pin changed")
-require_equal(signing_suite_steps.first(3).map(&:keys), [["uses"], ["uses"], ["uses"]],
+require_equal(signing_suite_steps.first(3).map(&:keys), [["uses"], ["uses", "with"], ["uses"]],
               "signing-suite setup gained executable control")
 require_equal(signing_suite_steps.last.keys, ["name", "run"],
               "signing-suite command can skip or hide failure")
 guard_groups.each_with_index do |job, index|
   steps = job.fetch("steps")
-  require_equal(steps.first(3).map(&:keys), [["uses", "with"], ["uses"], ["uses"]],
+  require_equal(steps.first(3).map(&:keys), [["uses", "with"], ["uses", "with"], ["uses"]],
                 "#{guard_group_ids[index]} setup changed its parent-fetch contract")
   require_equal(steps.first.fetch("with"), {"fetch-depth" => 0},
                 "#{guard_group_ids[index]} cannot resolve the branch merge base")
@@ -155,7 +156,7 @@ require_equal(dto_compiler_steps.first(3).map { |step| step.fetch("uses") }, [
   "dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30",
   "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32"
 ], "dto-compiler-self-test setup action or pin changed")
-require_equal(dto_compiler_steps.first(3).map(&:keys), [["uses"], ["uses"], ["uses"]],
+require_equal(dto_compiler_steps.first(3).map(&:keys), [["uses"], ["uses", "with"], ["uses"]],
               "dto-compiler-self-test setup gained executable control")
 require_equal(dto_compiler_steps.last.keys, ["name", "run"],
               "dto-compiler-self-test command can skip or hide failure")
@@ -167,7 +168,7 @@ require_equal(build_guard_steps.first(3).map { |step| step.fetch("uses") }, [
   "dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30",
   "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32"
 ], "build-guard-self-test setup action or pin changed")
-require_equal(build_guard_steps.first(3).map(&:keys), [["uses"], ["uses"], ["uses"]],
+require_equal(build_guard_steps.first(3).map(&:keys), [["uses"], ["uses", "with"], ["uses"]],
               "build-guard-self-test setup gained executable control")
 require_equal(build_guard_steps.last.keys, ["name", "run"],
               "build-guard-self-test command can skip or hide failure")
