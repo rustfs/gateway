@@ -10,3 +10,4 @@ crates/core/tests/registration.rs 850 https://github.com/rustfs/backlog/issues/1
 crates/model/src/lower/mod.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing lowering module; split in a dedicated behavior-reviewed task.
 crates/gateway/tests/authz_contract.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing authorization matrix; split in a dedicated behavior-reviewed task.
 crates/core/tests/lifecycle_roundtrip.rs 900 https://github.com/rustfs/backlog/issues/1742 Property, its generators and its boundary tests in one file; split the boundaries out in a dedicated behavior-reviewed task.
+crates/core/tests/replication_roundtrip.rs 900 https://github.com/rustfs/backlog/issues/1742 Property, its generators and its boundary tests in one file, as in the lifecycle sibling; split the boundaries out in a dedicated behavior-reviewed task.

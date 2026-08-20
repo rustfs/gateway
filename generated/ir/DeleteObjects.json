@@ -176,7 +176,7 @@
                                     ],
                           "xml": {
                                    "element_order": ["Objects", "Quiet"],
-                                   "empty_value_policy": { "Objects": "emit", "Quiet": "omit" },
+                                   "empty_value_policy": { "Objects": "emit", "Quiet": "emit" },
                                    "attributes": []
                                  }
                         },
@@ -223,10 +223,10 @@
                                  "xml": {
                                           "element_order": ["Key", "VersionId", "DeleteMarker", "DeleteMarkerVersionId"],
                                           "empty_value_policy": {
-                                                                  "Key": "omit",
-                                                                  "VersionId": "omit",
-                                                                  "DeleteMarker": "omit",
-                                                                  "DeleteMarkerVersionId": "omit"
+                                                                  "Key": "emit",
+                                                                  "VersionId": "emit",
+                                                                  "DeleteMarker": "emit",
+                                                                  "DeleteMarkerVersionId": "emit"
                                                                 },
                                           "attributes": []
                                         }
@@ -274,10 +274,10 @@
                          "xml": {
                                   "element_order": ["Key", "VersionId", "Code", "Message"],
                                   "empty_value_policy": {
-                                                          "Key": "omit",
-                                                          "VersionId": "omit",
-                                                          "Code": "omit",
-                                                          "Message": "omit"
+                                                          "Key": "emit",
+                                                          "VersionId": "emit",
+                                                          "Code": "emit",
+                                                          "Message": "emit"
                                                         },
                                   "attributes": []
                                 }
@@ -335,10 +335,10 @@
                                              "element_order": ["Key", "VersionId", "ETag", "LastModifiedTime", "Size"],
                                              "empty_value_policy": {
                                                                      "Key": "emit",
-                                                                     "VersionId": "omit",
-                                                                     "ETag": "omit",
-                                                                     "LastModifiedTime": "omit",
-                                                                     "Size": "omit"
+                                                                     "VersionId": "emit",
+                                                                     "ETag": "emit",
+                                                                     "LastModifiedTime": "emit",
+                                                                     "Size": "emit"
                                                                    },
                                              "attributes": []
                                            }
@@ -351,7 +351,7 @@
            "xmlns": "emit",
            "unwrapped_output": false,
            "element_order": ["Deleted", "Errors"],
-           "empty_value_policy": { "Deleted": "omit", "Errors": "omit" },
+           "empty_value_policy": { "Deleted": "emit", "Errors": "emit" },
            "url_encoded_fields": [],
            "attributes": [],
            "body_literal": false

@@ -95,10 +95,10 @@ fn write_event_bridge_configuration(
 /// Writes one `FilterRule` element's children, in the wire order the IR records.
 fn write_filter_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::FilterRule) -> Result<(), CodecError> {
     if let Some(v) = value.name.as_ref() {
-        writer.element_if_present("Name", v.as_str());
+        writer.element("Name", v.as_str());
     }
     if let Some(v) = value.value.as_ref() {
-        writer.element_if_present("Value", v.as_str());
+        writer.element("Value", v.as_str());
     }
     Ok(())
 }
@@ -109,7 +109,7 @@ fn write_lambda_function_configuration(
     value: &dto::LambdaFunctionConfiguration,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("Id", v.as_str());
+        writer.element("Id", v.as_str());
     }
     {
         let v = &value.lambda_function_arn;
@@ -145,7 +145,7 @@ fn write_queue_configuration(
     value: &dto::QueueConfiguration,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("Id", v.as_str());
+        writer.element("Id", v.as_str());
     }
     {
         let v = &value.queue_arn;
@@ -178,7 +178,7 @@ fn write_topic_configuration(
     value: &dto::TopicConfiguration,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.id.as_ref() {
-        writer.element_if_present("Id", v.as_str());
+        writer.element("Id", v.as_str());
     }
     {
         let v = &value.topic_arn;

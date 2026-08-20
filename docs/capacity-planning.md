@@ -76,7 +76,7 @@ Hyper's HTTP/1 read-buffer ceiling, `8 KiB + 4 KiB x 100`, which is what one con
 open at the parser alone; ten thousand connections is therefore a four-gibibyte planning number,
 not a four-gibibyte allocation.
 
-The budget is measured, not asserted. Two cases in `crates/server/tests/server_runtime.rs` read the
+The budget is measured, not asserted. Two cases in `crates/server/tests/server_load.rs` read the
 process resident set through `ps` in an isolated child:
 
 | Case | Load | Observed growth | Budget |
@@ -84,11 +84,14 @@ process resident set through `ps` in an isolated child:
 | `c-lim-0006` / `a-srv-0008` | 1,000 open connections, one in ten mid-request | ~19 MiB | 408 MiB |
 | `c-lim-0061` / `a-srv-0026` | 1,000 readers parked on a stalled response | ~39 MiB | 408 MiB |
 
-Both cases then run a second identical wave and require it to cost a fraction of the first. That is
-deliberately a *reuse* measurement and not a return-to-baseline one: a freed allocation is not a
-shrinking resident set, since the allocator may keep the pages — and on macOS it does. "Resident
-memory came back down" is a claim that harness cannot make honestly, while "a second wave is nearly
-free" is one it can, and it is the claim an unbounded-growth defect actually fails.
+Both cases then run three further identical waves and require their average cost to stay below a
+fraction of the first. That is deliberately a *reuse* measurement and not a return-to-baseline one:
+a freed allocation is not a shrinking resident set, since the allocator may keep the pages — and
+on macOS it does. "Resident memory came back down" is a claim that harness cannot make honestly,
+while "later waves keep getting cheaper" is one it can, and it is the claim an unbounded-growth
+defect actually fails. A retained, incompressible ballast first proves that the host's RSS
+instrument can see accumulation; otherwise the reuse result is reported as unmeasurable instead
+of passing.
 
 What the slow-reader case additionally observes is that the parked wave is not paid for by the
 traffic beside it: a healthy connection's p99 is sampled with the wave parked and without it, and

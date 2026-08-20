@@ -72,16 +72,16 @@ fn write_public_access_block_configuration(
     value: &dto::PublicAccessBlockConfiguration,
 ) -> Result<(), CodecError> {
     if let Some(v) = value.block_public_acls.as_ref() {
-        writer.element_if_present("BlockPublicAcls", if *v { "true" } else { "false" });
+        writer.element("BlockPublicAcls", if *v { "true" } else { "false" });
     }
     if let Some(v) = value.ignore_public_acls.as_ref() {
-        writer.element_if_present("IgnorePublicAcls", if *v { "true" } else { "false" });
+        writer.element("IgnorePublicAcls", if *v { "true" } else { "false" });
     }
     if let Some(v) = value.block_public_policy.as_ref() {
-        writer.element_if_present("BlockPublicPolicy", if *v { "true" } else { "false" });
+        writer.element("BlockPublicPolicy", if *v { "true" } else { "false" });
     }
     if let Some(v) = value.restrict_public_buckets.as_ref() {
-        writer.element_if_present("RestrictPublicBuckets", if *v { "true" } else { "false" });
+        writer.element("RestrictPublicBuckets", if *v { "true" } else { "false" });
     }
     Ok(())
 }

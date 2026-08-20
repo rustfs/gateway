@@ -111,7 +111,7 @@ kind = "Structure"
 element_order = ["DaysAfterInitiation"]
 
 [shape.AbortIncompleteMultipartUpload.empty_value]
-DaysAfterInitiation = "omit"
+DaysAfterInitiation = "emit"
 
 [[shape.AbortIncompleteMultipartUpload.field]]
 name = "DaysAfterInitiation"
@@ -143,9 +143,9 @@ kind = "Structure"
 element_order = ["Date", "Days", "ExpiredObjectDeleteMarker"]
 
 [shape.LifecycleExpiration.empty_value]
-Date = "omit"
-Days = "omit"
-ExpiredObjectDeleteMarker = "omit"
+Date = "emit"
+Days = "emit"
+ExpiredObjectDeleteMarker = "emit"
 
 [[shape.LifecycleExpiration.field]]
 name = "Date"
@@ -179,15 +179,15 @@ kind = "Structure"
 element_order = ["Expiration", "ID", "Prefix", "Filter", "Status", "Transitions", "NoncurrentVersionTransitions", "NoncurrentVersionExpiration", "AbortIncompleteMultipartUpload"]
 
 [shape.LifecycleRule.empty_value]
-Expiration = "omit"
-ID = "omit"
-Prefix = "omit"
-Filter = "omit"
+Expiration = "emit"
+ID = "emit"
+Prefix = "emit"
+Filter = "emit"
 Status = "emit"
-Transitions = "omit"
-NoncurrentVersionTransitions = "omit"
-NoncurrentVersionExpiration = "omit"
-AbortIncompleteMultipartUpload = "omit"
+Transitions = "emit"
+NoncurrentVersionTransitions = "emit"
+NoncurrentVersionExpiration = "emit"
+AbortIncompleteMultipartUpload = "emit"
 
 [[shape.LifecycleRule.field]]
 name = "Expiration"
@@ -276,10 +276,10 @@ kind = "Structure"
 element_order = ["Prefix", "Tags", "ObjectSizeGreaterThan", "ObjectSizeLessThan"]
 
 [shape.LifecycleRuleAndOperator.empty_value]
-Prefix = "omit"
-Tags = "omit"
-ObjectSizeGreaterThan = "omit"
-ObjectSizeLessThan = "omit"
+Prefix = "emit"
+Tags = "emit"
+ObjectSizeGreaterThan = "emit"
+ObjectSizeLessThan = "emit"
 
 [[shape.LifecycleRuleAndOperator.field]]
 name = "Prefix"
@@ -322,11 +322,11 @@ kind = "Structure"
 element_order = ["Prefix", "Tag", "ObjectSizeGreaterThan", "ObjectSizeLessThan", "And"]
 
 [shape.LifecycleRuleFilter.empty_value]
-Prefix = "omit"
-Tag = "omit"
-ObjectSizeGreaterThan = "omit"
-ObjectSizeLessThan = "omit"
-And = "omit"
+Prefix = "emit"
+Tag = "emit"
+ObjectSizeGreaterThan = "emit"
+ObjectSizeLessThan = "emit"
+And = "emit"
 
 [[shape.LifecycleRuleFilter.field]]
 name = "Prefix"
@@ -378,8 +378,8 @@ kind = "Structure"
 element_order = ["NoncurrentDays", "NewerNoncurrentVersions"]
 
 [shape.NoncurrentVersionExpiration.empty_value]
-NoncurrentDays = "omit"
-NewerNoncurrentVersions = "omit"
+NoncurrentDays = "emit"
+NewerNoncurrentVersions = "emit"
 
 [[shape.NoncurrentVersionExpiration.field]]
 name = "NoncurrentDays"
@@ -404,9 +404,9 @@ kind = "Structure"
 element_order = ["NoncurrentDays", "StorageClass", "NewerNoncurrentVersions"]
 
 [shape.NoncurrentVersionTransition.empty_value]
-NoncurrentDays = "omit"
-StorageClass = "omit"
-NewerNoncurrentVersions = "omit"
+NoncurrentDays = "emit"
+StorageClass = "emit"
+NewerNoncurrentVersions = "emit"
 
 [[shape.NoncurrentVersionTransition.field]]
 name = "NoncurrentDays"
@@ -467,9 +467,9 @@ kind = "Structure"
 element_order = ["Date", "Days", "StorageClass"]
 
 [shape.Transition.empty_value]
-Date = "omit"
-Days = "omit"
-StorageClass = "omit"
+Date = "emit"
+Days = "emit"
+StorageClass = "emit"
 
 [[shape.Transition.field]]
 name = "Date"

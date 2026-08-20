@@ -72,7 +72,7 @@
            "xmlns": "emit",
            "unwrapped_output": false,
            "element_order": ["Status", "MFADelete"],
-           "empty_value_policy": { "Status": "omit", "MFADelete": "omit" },
+           "empty_value_policy": { "Status": "emit", "MFADelete": "emit" },
            "url_encoded_fields": [],
            "attributes": [],
            "body_literal": false

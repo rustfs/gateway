@@ -101,6 +101,42 @@ import sys
 from pathlib import Path
 
 source = Path(sys.argv[1]).read_text(encoding="utf-8")
+mixed_match = re.search(
+    r"#\[tokio::test\]\s+"
+    r"async fn c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget\(\)\s*\{",
+    source,
+)
+if mixed_match is None:
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0006 executable load evidence is missing")
+depth = 1
+cursor = mixed_match.end()
+while cursor < len(source) and depth:
+    depth += (source[cursor] == "{") - (source[cursor] == "}")
+    cursor += 1
+if depth:
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0006 test body is unterminated")
+mixed_body = source[mixed_match.end() : cursor - 1]
+if re.search(r"#\s*\[\s*cfg(?:_attr)?\b", mixed_body):
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0006 evidence is conditionally disabled")
+mixed_required = (
+    "growth <= budget + budget / 2,",
+    "for _ in 1..WAVES {",
+    "let tail_mean = tail_growth / (WAVES - 1);",
+    "let ballast_seen = resident_growth_ps_can_see()",
+    "if ballast_seen < BALLAST_BYTES / BALLAST_SHARE_SEEN {",
+    "if first_growth < MIN_SCALE {",
+    "let reuse_ceiling = first_growth / TAIL_SHARE_OF_FIRST;",
+    "tail_mean <= reuse_ceiling,",
+)
+mixed_missing = [fragment for fragment in mixed_required if fragment not in mixed_body]
+if mixed_missing:
+    raise SystemExit(
+        "check_timeout_layer_ownership: c-lim-0006 does not prove bounded multi-wave reuse with a working RSS instrument: "
+        + ", ".join(mixed_missing)
+    )
+if "REUSE_SLACK" in mixed_body:
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0006 returned to a hardcoded single-wave RSS ceiling")
+
 match = re.search(
     r'#\[tokio::test\(flavor = "multi_thread", worker_threads = 4\)\]\s+'
     r"async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic\(\)\s*\{",
@@ -223,4 +259,5 @@ if "new_multi_thread()" not in builder.group(1):
 PY
 
 printf 'OK: 3/6 timeout layers owned by rustfs-gateway-server; connection lifetime is an extra safety valve\n'
+printf 'OK: c-lim-0006 observes bounded multi-wave connection memory with a working RSS instrument\n'
 printf 'OK: c-lim-0061 observes write-progress closure, healthy p99 against a concurrently sampled control, and resident memory under a thousand slow readers\n'

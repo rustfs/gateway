@@ -45,7 +45,7 @@ element_order = ["CORSRules"]
 url_encoded_fields = []
 
 [xml.empty_value]
-CORSRules = "omit"
+CORSRules = "emit"
 
 [errors]
 not_configured = "NoSuchCORSConfiguration"
@@ -84,12 +84,12 @@ kind = "Structure"
 element_order = ["ID", "AllowedHeaders", "AllowedMethods", "AllowedOrigins", "ExposeHeaders", "MaxAgeSeconds"]
 
 [shape.CORSRule.empty_value]
-ID = "omit"
-AllowedHeaders = "omit"
+ID = "emit"
+AllowedHeaders = "emit"
 AllowedMethods = "emit"
 AllowedOrigins = "emit"
-ExposeHeaders = "omit"
-MaxAgeSeconds = "omit"
+ExposeHeaders = "emit"
+MaxAgeSeconds = "emit"
 
 [[shape.CORSRule.field]]
 name = "ID"

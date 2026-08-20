@@ -100,7 +100,7 @@ kind = "Structure"
 element_order = ["EncryptionType"]
 
 [shape.BlockedEncryptionTypes.empty_value]
-EncryptionType = "omit"
+EncryptionType = "emit"
 
 [[shape.BlockedEncryptionTypes.field]]
 name = "EncryptionType"
@@ -117,7 +117,7 @@ element_order = ["SSEAlgorithm", "KMSMasterKeyID"]
 
 [shape.ServerSideEncryptionByDefault.empty_value]
 SSEAlgorithm = "emit"
-KMSMasterKeyID = "omit"
+KMSMasterKeyID = "emit"
 
 [[shape.ServerSideEncryptionByDefault.field]]
 name = "SSEAlgorithm"
@@ -159,9 +159,9 @@ kind = "Structure"
 element_order = ["ApplyServerSideEncryptionByDefault", "BucketKeyEnabled", "BlockedEncryptionTypes"]
 
 [shape.ServerSideEncryptionRule.empty_value]
-ApplyServerSideEncryptionByDefault = "omit"
-BucketKeyEnabled = "omit"
-BlockedEncryptionTypes = "omit"
+ApplyServerSideEncryptionByDefault = "emit"
+BucketKeyEnabled = "emit"
+BlockedEncryptionTypes = "emit"
 
 [[shape.ServerSideEncryptionRule.field]]
 name = "ApplyServerSideEncryptionByDefault"

@@ -47,8 +47,8 @@ url_encoded_fields = []
 [xml.empty_value]
 Buckets = "emit"
 Owner = "emit"
-ContinuationToken = "omit"
-Prefix = "omit"
+ContinuationToken = "emit"
+Prefix = "emit"
 
 [errors]
 not_configured = ""
@@ -135,8 +135,8 @@ element_order = ["Name", "CreationDate", "BucketRegion", "BucketArn"]
 [shape.Bucket.empty_value]
 Name = "emit"
 CreationDate = "emit"
-BucketRegion = "omit"
-BucketArn = "omit"
+BucketRegion = "emit"
+BucketArn = "emit"
 
 [[shape.Bucket.field]]
 name = "Name"
@@ -179,8 +179,8 @@ kind = "Structure"
 element_order = ["ID", "DisplayName"]
 
 [shape.Owner.empty_value]
-DisplayName = "omit"
-ID = "omit"
+DisplayName = "emit"
+ID = "emit"
 
 [[shape.Owner.field]]
 name = "DisplayName"

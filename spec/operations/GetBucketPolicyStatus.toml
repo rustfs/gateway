@@ -81,7 +81,7 @@ kind = "Structure"
 element_order = ["IsPublic"]
 
 [shape.PolicyStatus.empty_value]
-IsPublic = "omit"
+IsPublic = "emit"
 
 [[shape.PolicyStatus.field]]
 name = "IsPublic"

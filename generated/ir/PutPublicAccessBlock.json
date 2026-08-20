@@ -142,10 +142,10 @@
                                                                               "RestrictPublicBuckets"
                                                                             ],
                                                            "empty_value_policy": {
-                                                                                   "BlockPublicAcls": "omit",
-                                                                                   "IgnorePublicAcls": "omit",
-                                                                                   "BlockPublicPolicy": "omit",
-                                                                                   "RestrictPublicBuckets": "omit"
+                                                                                   "BlockPublicAcls": "emit",
+                                                                                   "IgnorePublicAcls": "emit",
+                                                                                   "BlockPublicPolicy": "emit",
+                                                                                   "RestrictPublicBuckets": "emit"
                                                                                  },
                                                            "attributes": []
                                                          }

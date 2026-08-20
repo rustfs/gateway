@@ -138,13 +138,13 @@ kind = "Structure"
 element_order = ["FileHeaderInfo", "Comments", "QuoteEscapeCharacter", "RecordDelimiter", "FieldDelimiter", "QuoteCharacter", "AllowQuotedRecordDelimiter"]
 
 [shape.CSVInput.empty_value]
-FileHeaderInfo = "omit"
-Comments = "omit"
-QuoteEscapeCharacter = "omit"
-RecordDelimiter = "omit"
-FieldDelimiter = "omit"
-QuoteCharacter = "omit"
-AllowQuotedRecordDelimiter = "omit"
+FileHeaderInfo = "emit"
+Comments = "emit"
+QuoteEscapeCharacter = "emit"
+RecordDelimiter = "emit"
+FieldDelimiter = "emit"
+QuoteCharacter = "emit"
+AllowQuotedRecordDelimiter = "emit"
 
 [[shape.CSVInput.field]]
 name = "FileHeaderInfo"
@@ -215,11 +215,11 @@ kind = "Structure"
 element_order = ["QuoteFields", "QuoteEscapeCharacter", "RecordDelimiter", "FieldDelimiter", "QuoteCharacter"]
 
 [shape.CSVOutput.empty_value]
-QuoteFields = "omit"
-QuoteEscapeCharacter = "omit"
-RecordDelimiter = "omit"
-FieldDelimiter = "omit"
-QuoteCharacter = "omit"
+QuoteFields = "emit"
+QuoteEscapeCharacter = "emit"
+RecordDelimiter = "emit"
+FieldDelimiter = "emit"
+QuoteCharacter = "emit"
 
 [[shape.CSVOutput.field]]
 name = "QuoteFields"
@@ -273,8 +273,8 @@ element_order = ["EncryptionType", "KMSKeyId", "KMSContext"]
 
 [shape.Encryption.empty_value]
 EncryptionType = "emit"
-KMSKeyId = "omit"
-KMSContext = "omit"
+KMSKeyId = "emit"
+KMSContext = "emit"
 
 [[shape.Encryption.field]]
 name = "EncryptionType"
@@ -326,8 +326,8 @@ kind = "Structure"
 element_order = ["Grantee", "Permission"]
 
 [shape.Grant.empty_value]
-Grantee = "omit"
-Permission = "omit"
+Grantee = "emit"
+Permission = "emit"
 
 [[shape.Grant.field]]
 name = "Grantee"
@@ -353,11 +353,11 @@ kind = "Structure"
 element_order = ["ID", "DisplayName", "EmailAddress", "URI"]
 
 [shape.Grantee.empty_value]
-DisplayName = "omit"
-EmailAddress = "omit"
-ID = "omit"
-URI = "omit"
-Type = "omit"
+DisplayName = "emit"
+EmailAddress = "emit"
+ID = "emit"
+URI = "emit"
+Type = "emit"
 
 [[shape.Grantee.attribute]]
 element = "Grantee"
@@ -422,10 +422,10 @@ kind = "Structure"
 element_order = ["CSV", "CompressionType", "JSON", "Parquet"]
 
 [shape.InputSerialization.empty_value]
-CSV = "omit"
-CompressionType = "omit"
-JSON = "omit"
-Parquet = "omit"
+CSV = "emit"
+CompressionType = "emit"
+JSON = "emit"
+Parquet = "emit"
 
 [[shape.InputSerialization.field]]
 name = "CSV"
@@ -469,7 +469,7 @@ kind = "Structure"
 element_order = ["Type"]
 
 [shape.JSONInput.empty_value]
-Type = "omit"
+Type = "emit"
 
 [[shape.JSONInput.field]]
 name = "Type"
@@ -486,7 +486,7 @@ kind = "Structure"
 element_order = ["RecordDelimiter"]
 
 [shape.JSONOutput.empty_value]
-RecordDelimiter = "omit"
+RecordDelimiter = "emit"
 
 [[shape.JSONOutput.field]]
 name = "RecordDelimiter"
@@ -502,8 +502,8 @@ kind = "Structure"
 element_order = ["Name", "Value"]
 
 [shape.MetadataEntry.empty_value]
-Name = "omit"
-Value = "omit"
+Name = "emit"
+Value = "emit"
 
 [[shape.MetadataEntry.field]]
 name = "Name"
@@ -528,7 +528,7 @@ kind = "Structure"
 element_order = ["S3"]
 
 [shape.OutputLocation.empty_value]
-S3 = "omit"
+S3 = "emit"
 
 [[shape.OutputLocation.field]]
 name = "S3"
@@ -544,8 +544,8 @@ kind = "Structure"
 element_order = ["CSV", "JSON"]
 
 [shape.OutputSerialization.empty_value]
-CSV = "omit"
-JSON = "omit"
+CSV = "emit"
+JSON = "emit"
 
 [[shape.OutputSerialization.field]]
 name = "CSV"
@@ -574,13 +574,13 @@ kind = "Structure"
 element_order = ["Days", "GlacierJobParameters", "Type", "Tier", "Description", "SelectParameters", "OutputLocation"]
 
 [shape.RestoreRequest.empty_value]
-Days = "omit"
-GlacierJobParameters = "omit"
-Type = "omit"
-Tier = "omit"
-Description = "omit"
-SelectParameters = "omit"
-OutputLocation = "omit"
+Days = "emit"
+GlacierJobParameters = "emit"
+Type = "emit"
+Tier = "emit"
+Description = "emit"
+SelectParameters = "emit"
+OutputLocation = "emit"
 
 [[shape.RestoreRequest.field]]
 name = "Days"
@@ -654,12 +654,12 @@ element_order = ["BucketName", "Prefix", "Encryption", "CannedACL", "AccessContr
 [shape.S3Location.empty_value]
 BucketName = "emit"
 Prefix = "emit"
-Encryption = "omit"
-CannedACL = "omit"
-AccessControlList = "omit"
-Tagging = "omit"
-UserMetadata = "omit"
-StorageClass = "omit"
+Encryption = "emit"
+CannedACL = "emit"
+AccessControlList = "emit"
+Tagging = "emit"
+UserMetadata = "emit"
+StorageClass = "emit"
 
 [[shape.S3Location.field]]
 name = "BucketName"

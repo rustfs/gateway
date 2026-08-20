@@ -163,13 +163,13 @@ kind = "Structure"
 element_order = ["FileHeaderInfo", "Comments", "QuoteEscapeCharacter", "RecordDelimiter", "FieldDelimiter", "QuoteCharacter", "AllowQuotedRecordDelimiter"]
 
 [shape.CSVInput.empty_value]
-FileHeaderInfo = "omit"
-Comments = "omit"
-QuoteEscapeCharacter = "omit"
-RecordDelimiter = "omit"
-FieldDelimiter = "omit"
-QuoteCharacter = "omit"
-AllowQuotedRecordDelimiter = "omit"
+FileHeaderInfo = "emit"
+Comments = "emit"
+QuoteEscapeCharacter = "emit"
+RecordDelimiter = "emit"
+FieldDelimiter = "emit"
+QuoteCharacter = "emit"
+AllowQuotedRecordDelimiter = "emit"
 
 [[shape.CSVInput.field]]
 name = "FileHeaderInfo"
@@ -240,11 +240,11 @@ kind = "Structure"
 element_order = ["QuoteFields", "QuoteEscapeCharacter", "RecordDelimiter", "FieldDelimiter", "QuoteCharacter"]
 
 [shape.CSVOutput.empty_value]
-QuoteFields = "omit"
-QuoteEscapeCharacter = "omit"
-RecordDelimiter = "omit"
-FieldDelimiter = "omit"
-QuoteCharacter = "omit"
+QuoteFields = "emit"
+QuoteEscapeCharacter = "emit"
+RecordDelimiter = "emit"
+FieldDelimiter = "emit"
+QuoteCharacter = "emit"
 
 [[shape.CSVOutput.field]]
 name = "QuoteFields"
@@ -297,10 +297,10 @@ kind = "Structure"
 element_order = ["CSV", "CompressionType", "JSON", "Parquet"]
 
 [shape.InputSerialization.empty_value]
-CSV = "omit"
-CompressionType = "omit"
-JSON = "omit"
-Parquet = "omit"
+CSV = "emit"
+CompressionType = "emit"
+JSON = "emit"
+Parquet = "emit"
 
 [[shape.InputSerialization.field]]
 name = "CSV"
@@ -344,7 +344,7 @@ kind = "Structure"
 element_order = ["Type"]
 
 [shape.JSONInput.empty_value]
-Type = "omit"
+Type = "emit"
 
 [[shape.JSONInput.field]]
 name = "Type"
@@ -361,7 +361,7 @@ kind = "Structure"
 element_order = ["RecordDelimiter"]
 
 [shape.JSONOutput.empty_value]
-RecordDelimiter = "omit"
+RecordDelimiter = "emit"
 
 [[shape.JSONOutput.field]]
 name = "RecordDelimiter"
@@ -377,8 +377,8 @@ kind = "Structure"
 element_order = ["CSV", "JSON"]
 
 [shape.OutputSerialization.empty_value]
-CSV = "omit"
-JSON = "omit"
+CSV = "emit"
+JSON = "emit"
 
 [[shape.OutputSerialization.field]]
 name = "CSV"
@@ -407,7 +407,7 @@ kind = "Structure"
 element_order = ["Enabled"]
 
 [shape.RequestProgress.empty_value]
-Enabled = "omit"
+Enabled = "emit"
 
 [[shape.RequestProgress.field]]
 name = "Enabled"
@@ -423,8 +423,8 @@ kind = "Structure"
 element_order = ["Start", "End"]
 
 [shape.ScanRange.empty_value]
-Start = "omit"
-End = "omit"
+Start = "emit"
+End = "emit"
 
 [[shape.ScanRange.field]]
 name = "Start"

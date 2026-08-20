@@ -114,8 +114,8 @@
                              "xml": {
                                       "element_order": ["HttpErrorCodeReturnedEquals", "KeyPrefixEquals"],
                                       "empty_value_policy": {
-                                                              "HttpErrorCodeReturnedEquals": "omit",
-                                                              "KeyPrefixEquals": "omit"
+                                                              "HttpErrorCodeReturnedEquals": "emit",
+                                                              "KeyPrefixEquals": "emit"
                                                             },
                                       "attributes": []
                                     }
@@ -216,11 +216,11 @@
                                                         "ReplaceKeyWith"
                                                       ],
                                      "empty_value_policy": {
-                                                             "HostName": "omit",
-                                                             "HttpRedirectCode": "omit",
-                                                             "Protocol": "omit",
-                                                             "ReplaceKeyPrefixWith": "omit",
-                                                             "ReplaceKeyWith": "omit"
+                                                             "HostName": "emit",
+                                                             "HttpRedirectCode": "emit",
+                                                             "Protocol": "emit",
+                                                             "ReplaceKeyPrefixWith": "emit",
+                                                             "ReplaceKeyWith": "emit"
                                                            },
                                      "attributes": []
                                    }
@@ -249,7 +249,7 @@
                                                    ],
                                          "xml": {
                                                   "element_order": ["HostName", "Protocol"],
-                                                  "empty_value_policy": { "HostName": "emit", "Protocol": "omit" },
+                                                  "empty_value_policy": { "HostName": "emit", "Protocol": "emit" },
                                                   "attributes": []
                                                 }
                                        },
@@ -277,7 +277,7 @@
                                          ],
                                "xml": {
                                         "element_order": ["Condition", "Redirect"],
-                                        "empty_value_policy": { "Condition": "omit", "Redirect": "emit" },
+                                        "empty_value_policy": { "Condition": "emit", "Redirect": "emit" },
                                         "attributes": []
                                       }
                              },
@@ -337,10 +337,10 @@
                                                                     "RoutingRules"
                                                                   ],
                                                  "empty_value_policy": {
-                                                                         "ErrorDocument": "omit",
-                                                                         "IndexDocument": "omit",
-                                                                         "RedirectAllRequestsTo": "omit",
-                                                                         "RoutingRules": "omit"
+                                                                         "ErrorDocument": "emit",
+                                                                         "IndexDocument": "emit",
+                                                                         "RedirectAllRequestsTo": "emit",
+                                                                         "RoutingRules": "emit"
                                                                        },
                                                  "attributes": []
                                                }

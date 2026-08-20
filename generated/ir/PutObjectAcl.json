@@ -222,7 +222,7 @@
                                                  ],
                                        "xml": {
                                                 "element_order": ["Owner", "Grants"],
-                                                "empty_value_policy": { "Grants": "omit", "Owner": "omit" },
+                                                "empty_value_policy": { "Grants": "emit", "Owner": "emit" },
                                                 "attributes": []
                                               }
                                      },
@@ -253,7 +253,7 @@
                                    ],
                          "xml": {
                                   "element_order": ["Grantee", "Permission"],
-                                  "empty_value_policy": { "Grantee": "omit", "Permission": "omit" },
+                                  "empty_value_policy": { "Grantee": "emit", "Permission": "emit" },
                                   "attributes": []
                                 }
                        },
@@ -312,11 +312,11 @@
                            "xml": {
                                     "element_order": ["ID", "DisplayName", "EmailAddress", "URI"],
                                     "empty_value_policy": {
-                                                            "DisplayName": "omit",
-                                                            "EmailAddress": "omit",
-                                                            "ID": "omit",
-                                                            "URI": "omit",
-                                                            "Type": "omit"
+                                                            "DisplayName": "emit",
+                                                            "EmailAddress": "emit",
+                                                            "ID": "emit",
+                                                            "URI": "emit",
+                                                            "Type": "emit"
                                                           },
                                     "attributes": [
                                                     {
@@ -359,7 +359,7 @@
                                    ],
                          "xml": {
                                   "element_order": ["ID", "DisplayName"],
-                                  "empty_value_policy": { "DisplayName": "omit", "ID": "omit" },
+                                  "empty_value_policy": { "DisplayName": "emit", "ID": "emit" },
                                   "attributes": []
                                 }
                        }

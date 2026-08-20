@@ -345,17 +345,17 @@
                                                         "ChecksumType"
                                                       ],
                                      "empty_value_policy": {
-                                                             "ChecksumCRC32": "omit",
-                                                             "ChecksumCRC32C": "omit",
-                                                             "ChecksumCRC64NVME": "omit",
-                                                             "ChecksumSHA1": "omit",
-                                                             "ChecksumSHA256": "omit",
-                                                             "ChecksumSHA512": "omit",
-                                                             "ChecksumMD5": "omit",
-                                                             "ChecksumXXHASH64": "omit",
-                                                             "ChecksumXXHASH3": "omit",
-                                                             "ChecksumXXHASH128": "omit",
-                                                             "ChecksumType": "omit"
+                                                             "ChecksumCRC32": "emit",
+                                                             "ChecksumCRC32C": "emit",
+                                                             "ChecksumCRC64NVME": "emit",
+                                                             "ChecksumSHA1": "emit",
+                                                             "ChecksumSHA256": "emit",
+                                                             "ChecksumSHA512": "emit",
+                                                             "ChecksumMD5": "emit",
+                                                             "ChecksumXXHASH64": "emit",
+                                                             "ChecksumXXHASH3": "emit",
+                                                             "ChecksumXXHASH128": "emit",
+                                                             "ChecksumType": "emit"
                                                            },
                                      "attributes": []
                                    }
@@ -437,11 +437,11 @@
                                                                       ],
                                                      "empty_value_policy": {
                                                                              "TotalPartsCount": "emit",
-                                                                             "PartNumberMarker": "omit",
-                                                                             "NextPartNumberMarker": "omit",
+                                                                             "PartNumberMarker": "emit",
+                                                                             "NextPartNumberMarker": "emit",
                                                                              "MaxParts": "emit",
                                                                              "IsTruncated": "emit",
-                                                                             "Parts": "omit"
+                                                                             "Parts": "emit"
                                                                            },
                                                      "attributes": []
                                                    }
@@ -576,16 +576,16 @@
                                        "empty_value_policy": {
                                                                "PartNumber": "emit",
                                                                "Size": "emit",
-                                                               "ChecksumCRC32": "omit",
-                                                               "ChecksumCRC32C": "omit",
-                                                               "ChecksumCRC64NVME": "omit",
-                                                               "ChecksumSHA1": "omit",
-                                                               "ChecksumSHA256": "omit",
-                                                               "ChecksumSHA512": "omit",
-                                                               "ChecksumMD5": "omit",
-                                                               "ChecksumXXHASH64": "omit",
-                                                               "ChecksumXXHASH3": "omit",
-                                                               "ChecksumXXHASH128": "omit"
+                                                               "ChecksumCRC32": "emit",
+                                                               "ChecksumCRC32C": "emit",
+                                                               "ChecksumCRC64NVME": "emit",
+                                                               "ChecksumSHA1": "emit",
+                                                               "ChecksumSHA256": "emit",
+                                                               "ChecksumSHA512": "emit",
+                                                               "ChecksumMD5": "emit",
+                                                               "ChecksumXXHASH64": "emit",
+                                                               "ChecksumXXHASH3": "emit",
+                                                               "ChecksumXXHASH128": "emit"
                                                              },
                                        "attributes": []
                                      }
@@ -599,11 +599,11 @@
            "unwrapped_output": false,
            "element_order": ["ETag", "Checksum", "ObjectParts", "StorageClass", "ObjectSize"],
            "empty_value_policy": {
-                                   "ETag": "omit",
-                                   "Checksum": "omit",
-                                   "ObjectParts": "omit",
-                                   "StorageClass": "omit",
-                                   "ObjectSize": "omit"
+                                   "ETag": "emit",
+                                   "Checksum": "emit",
+                                   "ObjectParts": "emit",
+                                   "StorageClass": "emit",
+                                   "ObjectSize": "emit"
                                  },
            "url_encoded_fields": [],
            "attributes": [],

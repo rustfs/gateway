@@ -46,17 +46,17 @@ url_encoded_fields = ["Prefix", "Delimiter", "KeyMarker", "NextKeyMarker", "Uplo
 
 [xml.empty_value]
 Bucket = "emit"
-KeyMarker = "omit"
-UploadIdMarker = "omit"
-NextKeyMarker = "omit"
-Prefix = "omit"
-Delimiter = "omit"
-NextUploadIdMarker = "omit"
+KeyMarker = "emit"
+UploadIdMarker = "emit"
+NextKeyMarker = "emit"
+Prefix = "emit"
+Delimiter = "emit"
+NextUploadIdMarker = "emit"
 MaxUploads = "emit"
 IsTruncated = "emit"
-Uploads = "omit"
-CommonPrefixes = "omit"
-EncodingType = "omit"
+Uploads = "emit"
+CommonPrefixes = "emit"
+EncodingType = "emit"
 
 [errors]
 not_configured = ""
@@ -287,8 +287,8 @@ kind = "Structure"
 element_order = ["ID", "DisplayName"]
 
 [shape.Initiator.empty_value]
-ID = "omit"
-DisplayName = "omit"
+ID = "emit"
+DisplayName = "emit"
 
 [[shape.Initiator.field]]
 name = "ID"
@@ -313,14 +313,14 @@ kind = "Structure"
 element_order = ["UploadId", "Key", "Initiated", "StorageClass", "Owner", "Initiator", "ChecksumAlgorithm", "ChecksumType"]
 
 [shape.MultipartUpload.empty_value]
-UploadId = "omit"
-Key = "omit"
-Initiated = "omit"
-StorageClass = "omit"
-Owner = "omit"
-Initiator = "omit"
-ChecksumAlgorithm = "omit"
-ChecksumType = "omit"
+UploadId = "emit"
+Key = "emit"
+Initiated = "emit"
+StorageClass = "emit"
+Owner = "emit"
+Initiator = "emit"
+ChecksumAlgorithm = "emit"
+ChecksumType = "emit"
 
 [[shape.MultipartUpload.field]]
 name = "UploadId"
@@ -402,8 +402,8 @@ kind = "Structure"
 element_order = ["ID", "DisplayName"]
 
 [shape.Owner.empty_value]
-DisplayName = "omit"
-ID = "omit"
+DisplayName = "emit"
+ID = "emit"
 
 [[shape.Owner.field]]
 name = "DisplayName"

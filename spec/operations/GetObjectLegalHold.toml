@@ -109,7 +109,7 @@ kind = "Structure"
 element_order = ["Status"]
 
 [shape.ObjectLockLegalHold.empty_value]
-Status = "omit"
+Status = "emit"
 
 [[shape.ObjectLockLegalHold.field]]
 name = "Status"

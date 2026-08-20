@@ -109,8 +109,8 @@ kind = "Structure"
 element_order = ["Mode", "RetainUntilDate"]
 
 [shape.ObjectLockRetention.empty_value]
-Mode = "omit"
-RetainUntilDate = "omit"
+Mode = "emit"
+RetainUntilDate = "emit"
 
 [[shape.ObjectLockRetention.field]]
 name = "Mode"
