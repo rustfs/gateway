@@ -45,6 +45,23 @@ bucket = "conf-list"
 key = "top.txt"
 body = { utf8 = "top" }
 
+# A second bucket, so that a token issued for the first one has somewhere else to be pointed at.
+# `zz.txt` sits after `a/2.txt` in this bucket's own order, so a service that reads the token as a
+# bare position — rather than as a position belonging to the listing that issued it — answers this
+# listing with it and says so in the body.
+[[setup.buckets]]
+name = "conf-list-other"
+
+[[setup.objects]]
+bucket = "conf-list-other"
+key = "a/1.txt"
+body = { utf8 = "o1" }
+
+[[setup.objects]]
+bucket = "conf-list-other"
+key = "zz.txt"
+body = { utf8 = "oz" }
+
 [connection]
 reuse = true
 
@@ -81,3 +98,61 @@ status = 400
 [exchanges.expect.error]
 code = "InvalidArgument"
 message_present = true
+
+# ── forged from nothing: a token the client composed, not one the service issued ───────────────
+#
+# `612f322e747874-12d822ec` is `a/2.txt` hex-encoded, joined to the first eight hex digits of its
+# unkeyed SHA-256. Both halves are functions of the key alone, so any client that guesses the
+# construction can mint a *self-consistent* token for a position it was never given — and a
+# tampering check that only recomputes a digest over the value it just decoded accepts it, because
+# recomputation is exactly what the attacker did. This exchange is the difference between "the
+# token carries a checksum" and "the token is authenticated": the second exchange above alters an
+# issued token, which a checksum catches; this one never had an issued token to alter.
+[[exchanges]]
+name = "forge-one-from-scratch"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list?list-type=2&max-keys=2&continuation-token=612f322e747874-12d822ec"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+message_present = true
+
+# A refusal that already read the page is not a refusal. The two keys that sit after `a/2.txt` in
+# this bucket must not appear anywhere in the body.
+[exchanges.expect.body]
+not_contains_utf8 = ["b/1.txt", "top.txt"]
+
+# ── replayed into another listing: a real token, pointed somewhere it was never issued for ─────
+#
+# The value here is genuine — it is the one captured in the first exchange, byte for byte, so no
+# integrity check can object to it. What is wrong with it is the listing it is being spent on. A
+# token authenticated over the position alone is a *transferable* capability: obtain one from a
+# listing you are entitled to, then spend it steering a listing you are not. Binding the bucket,
+# the prefix and the delimiter into what the tag covers is what makes "a token this service issued"
+# mean "a token this service issued for this listing", and this exchange is the difference.
+[[exchanges]]
+name = "replay-it-into-another-bucket"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-list-other?list-type=2&max-keys=2&continuation-token=${capture.next_token}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+message_present = true
+
+# The key the replay would have resumed onto. Its absence is what says the listing did not happen.
+[exchanges.expect.body]
+not_contains_utf8 = ["zz.txt"]
