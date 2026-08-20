@@ -79,7 +79,7 @@ use rustfs_gateway_http::{
     IngestPipeline, IngestPolicy, PayloadFramingSource, validate_decoded_length,
 };
 use rustfs_gateway_sig::PayloadMode;
-use rustfs_gateway_stream::{AsyncPayloadRead, MemoryReader, ReadProgress, TrailingHeaders};
+use rustfs_gateway_stream::{AsyncPayloadRead, ReadProgress};
 use rustfs_gateway_types::ErrorCode;
 
 use crate::close::ConnectionIntent;
@@ -178,10 +178,13 @@ impl ChunkIngest {
 
     /// Runs the pass over the wire bytes and returns the decoded body.
     ///
-    /// The bytes are already resident — [`crate::gate::SealedBody::read`] collected them under the
-    /// ceilings — so the pipeline is driven over a [`MemoryReader`] and never actually waits. The
-    /// `poll_fn` is how a pull-model reader is consumed from an `async fn`; it is not a spin, and
-    /// [`MemoryReader`] returns `Pending` for nothing.
+    /// `wire` is pulled from, not handed over. [`crate::gate::SealedBody::read`] used to collect
+    /// the whole wire body under the ceilings and pass it here, which meant the process held the
+    /// request twice at peak — once as framing and once decoded — and the pipeline's bounded
+    /// window bounded only the half it could see. It now passes a reader over the transport's own
+    /// frames, so the wire octets are resident in the window and nowhere else
+    /// (rustfs/gateway#229). The `poll_fn` is how a pull-model reader is consumed from an
+    /// `async fn`; it is not a spin.
     ///
     /// `digests` is shown each run of **decoded** bytes as it is produced, in the same loop that
     /// copies it out, so the caller's checksum covers the object's own octets and not the chunk
@@ -194,10 +197,12 @@ impl ChunkIngest {
     /// pipeline finishes without permitting a commit — which can only happen for a shape this
     /// assembly declined to accept at [`Self::prepare`], and is refused again rather than
     /// delivered.
-    pub(crate) async fn run(self, wire_bytes: Bytes, digests: &mut BodyDigests) -> Result<Bytes, S3Error> {
-        let reader = MemoryReader::new([wire_bytes], TrailingHeaders::empty());
+    pub(crate) async fn run<R>(self, wire: R, digests: &mut BodyDigests) -> Result<Bytes, S3Error>
+    where
+        R: AsyncPayloadRead + Unpin,
+    {
         let mut pipeline = IngestPipeline::new(
-            reader,
+            wire,
             self.framing,
             self.declared,
             self.signer,
@@ -335,6 +340,16 @@ pub(crate) fn presented_signature_hex(headers: &HeaderMap, query: &str) -> Optio
 mod tests {
     use super::*;
 
+    use rustfs_gateway_stream::{MemoryReader, TrailingHeaders};
+
+    /// The wire body as a pull-model reader, which is what `run` takes now that it streams.
+    ///
+    /// One segment, so the pipeline's window is filled in one read: these cases are about the
+    /// framing verdicts, not about how the frames arrived.
+    fn resident(wire: &'static [u8]) -> MemoryReader {
+        MemoryReader::new([Bytes::from_static(wire)], TrailingHeaders::empty())
+    }
+
     /// A `Framing` announcing `length` bytes.
     ///
     /// Built through `Framing::classify` because that is the only constructor: the type has no
@@ -442,7 +457,7 @@ mod tests {
 
         let mut digests = rustfs_gateway_http::BodyIntegrity::NONE.begin();
         let decoded = ingest
-            .run(Bytes::from_static(b"b\r\nhello world\r\n0\r\n\r\n"), &mut digests)
+            .run(resident(b"b\r\nhello world\r\n0\r\n\r\n"), &mut digests)
             .await
             .expect("well-formed unsigned framing");
         assert_eq!(decoded, Bytes::from_static(b"hello world"));
@@ -489,7 +504,7 @@ mod tests {
         wire.extend_from_slice(b"\r\n0\r\n\r\n");
         let mut digests = rustfs_gateway_http::BodyIntegrity::NONE.begin();
         let decoded = framed
-            .run(Bytes::from(wire), &mut digests)
+            .run(MemoryReader::new([Bytes::from(wire)], TrailingHeaders::empty()), &mut digests)
             .await
             .expect("the framing is well formed; the payload is opaque");
         assert_eq!(decoded, Bytes::from_static(GZIP_HEADER), "the compressed bytes are the object");
@@ -569,7 +584,7 @@ mod tests {
     async fn the_digests_see_the_decoded_body_once_and_never_the_framing() {
         let mut digests = crc32_claim("DUoRhQ==");
         let decoded = unsigned_ingest("11")
-            .run(Bytes::from_static(b"b\r\nhello world\r\n0\r\n\r\n"), &mut digests)
+            .run(resident(b"b\r\nhello world\r\n0\r\n\r\n"), &mut digests)
             .await
             .expect("well-formed unsigned framing");
         assert_eq!(decoded, Bytes::from_static(b"hello world"));
@@ -586,7 +601,7 @@ mod tests {
     async fn a_checksum_of_the_wire_framing_does_not_satisfy_the_object_claim() {
         let mut digests = crc32_claim("zrwdEw==");
         unsigned_ingest("11")
-            .run(Bytes::from_static(b"b\r\nhello world\r\n0\r\n\r\n"), &mut digests)
+            .run(resident(b"b\r\nhello world\r\n0\r\n\r\n"), &mut digests)
             .await
             .expect("well-formed unsigned framing");
         assert_eq!(
@@ -658,7 +673,7 @@ mod tests {
         .expect("head-level checks pass")
         .expect("a framed mode");
         let error = ingest
-            .run(Bytes::from_static(b"hello world"), &mut rustfs_gateway_http::BodyIntegrity::NONE.begin())
+            .run(resident(b"hello world"), &mut rustfs_gateway_http::BodyIntegrity::NONE.begin())
             .await
             .expect_err("plain text is not aws-chunked framing");
         assert_eq!(error.status(), http::StatusCode::BAD_REQUEST);
@@ -690,7 +705,10 @@ mod tests {
             "c".repeat(64)
         );
         let error = ingest
-            .run(Bytes::from(body), &mut rustfs_gateway_http::BodyIntegrity::NONE.begin())
+            .run(
+                MemoryReader::new([Bytes::from(body)], TrailingHeaders::empty()),
+                &mut rustfs_gateway_http::BodyIntegrity::NONE.begin(),
+            )
             .await
             .expect_err("the chunk signature is not the one the chain derives");
         assert_eq!(error.status(), http::StatusCode::FORBIDDEN);

@@ -615,6 +615,7 @@ gateway_modules = (
     "authz_contract",
     "authz_implementations",
     "backend_reachability",
+    "chunked_allocations",
     "compat_aliases",
     "compile_fail",
     "connection_teardown",
