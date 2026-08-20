@@ -25,8 +25,8 @@ ADRs; this map only selects files.
 | `src/fixture/list_allocations.rs` | What one page of a listing costs, under a heap profiler. | A listing allocates in proportion to the bucket rather than the page. |
 | `src/fixture/handlers_object.rs` | Object, multipart, listing, and event Handler entries for the deterministic fixture. | An object-family operation stops reaching existing fixture behavior. |
 | `src/keys/` | Schema-key consumption audit. | A declared case key is parsed but ignored. |
-| `src/report.rs` | Human, JSON and JUnit reports. | A verdict is rendered or grouped wrongly. |
-| `src/baseline.rs` | Baseline comparison. | Known failures or regressions are classified wrongly. |
+| `src/report.rs` | Verdicts, the baseline table, and human/JSON/JUnit reports. | A verdict is rendered, grouped or compared against the baseline wrongly. |
+| `tests/corpus.rs` | Corpus-wide invariants and the whole-corpus baseline gate. | A case has no baseline row, or the corpus regressed against it. |
 | `src/lint.rs` | Corpus conventions beyond the JSON schema. | Case naming or evidence lint fails. |
 | `tests/` | Process and corpus integration contracts. | Change runner behavior or CLI output. |
 | `../../conformance/cases/**` | Executable S3 behavior cases. | Add or diagnose one protocol behavior. |

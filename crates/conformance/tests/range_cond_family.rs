@@ -180,20 +180,18 @@ fn both_families_keep_negatives_in_the_majority_by_a_written_down_margin() {
     }
 }
 
-/// The two cases the checked-in baseline does not name yet.
+/// Every case in both families reaches the ratchet.
 ///
-/// Both postdate the last baseline refresh, which is not this branch's to perform —
-/// `conformance/baseline.json` is regenerated on its own cadence, and widening it here is the exact
-/// move `scripts/check_baseline_ratchet.sh` exists to prevent.
-const NOT_YET_IN_THE_BASELINE: [&str; 2] = ["c-range-0019", "c-range-0022"];
-
-/// Every case in both families reaches the ratchet, except the two already written down above.
+/// A case the baseline does not name is a case nothing has ever written a verdict down for, and
+/// the ratchet only tightens over ids it already knows about.
 ///
-/// A case the baseline does not name is a case whose failure would be a *new* failure the first
-/// time anybody looked, and the ratchet only tightens over ids it already knows about. Asserted as
-/// a subset rather than an equality on purpose: a refresh that records the two is an improvement
-/// and must not turn this red, while a *third* unrecorded case — which is what adding a case and
-/// forgetting the baseline looks like — has nowhere to hide.
+/// This carried a two-id allowlist — `c-range-0019` and `c-range-0022`, both authored after the
+/// last refresh — on the reasoning that `conformance/baseline.json` was regenerated on somebody
+/// else's cadence and widening it here was the move `scripts/check_baseline_ratchet.sh` exists to
+/// prevent. rustfs/gateway#192 settled that: the baseline is complete, a row is written in the
+/// same commit as its case, and the corpus-wide guard in `tests/corpus.rs` now says so for all
+/// twenty-six domains. Both ids are recorded, so the allowlist is gone rather than empty — an
+/// allowlist nobody has to add to is one everybody adds to.
 #[test]
 fn every_conditional_and_range_case_carries_a_verdict_in_the_baseline() {
     let corpus = corpus();
@@ -203,7 +201,6 @@ fn every_conditional_and_range_case_carries_a_verdict_in_the_baseline() {
         .flat_map(|prefix| family(&corpus, prefix))
         .filter(|case| baseline.expected(&case.id).is_none())
         .map(|case| case.id.as_str())
-        .filter(|id| !NOT_YET_IN_THE_BASELINE.contains(id))
         .collect();
     assert!(unrecorded.is_empty(), "cases absent from the baseline: {unrecorded:?}");
 }
