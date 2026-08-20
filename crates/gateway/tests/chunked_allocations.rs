@@ -22,11 +22,9 @@
 use crate::support;
 
 use std::collections::VecDeque;
-use std::process::Command;
 
 use bytes::Bytes;
-use rustfs_gateway::{ClockSkewAck, S3Service};
-use support::{Ping, ping_route, wired};
+use rustfs_gateway::S3Service;
 
 /// The two decoded sizes, and the ratio between them is the instrument.
 const SMALL: usize = 64 * 1024;
@@ -41,7 +39,7 @@ const FRAME: usize = 8 * 1024;
 
 const PROBE_ENV: &str = "RUSTFS_GATEWAY_CHUNKED_ALLOCATION_PROBE";
 const PROBE_SENTINEL: &str = "rustfs-gateway chunked allocation probe: ";
-const PROBE_TEST: &str = "chunked_allocations::an_aws_chunked_upload_holds_one_copy_of_its_body";
+const PROBE_TEST: &str = "chunked_allocations::c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body";
 
 /// A body that hands over pre-sliced frames and allocates nothing while it is being read.
 struct FramedBody {
@@ -62,18 +60,6 @@ impl http_body::Body for FramedBody {
             None => core::task::Poll::Ready(None),
         }
     }
-}
-
-fn service() -> S3Service {
-    wired()
-        .clock_with_skew_ack(
-            support::fixed_clock(),
-            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
-        )
-        .register::<Ping, _>(std::sync::Arc::new(support::Backend))
-        .route(ping_route())
-        .build()
-        .expect("a complete assembly")
 }
 
 /// One signed `aws-chunked` request of `len` decoded bytes, and the wire body it carries.
@@ -166,7 +152,7 @@ fn frames(wire: &Bytes) -> VecDeque<Bytes> {
 
 /// What one `len`-byte upload costs: blocks, bytes allocated, and peak bytes held.
 fn cost(len: usize) -> (u64, u64, u64) {
-    let service = service();
+    let service = support::allocations::probe_service();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -186,32 +172,10 @@ fn cost(len: usize) -> (u64, u64, u64) {
     (stats.total_blocks, stats.total_bytes, stats.max_bytes as u64)
 }
 
-/// Runs one isolated probe process at `len` and reads back what it measured.
+/// Runs one isolated probe process at `len` and reads back the three numbers it measured.
 fn measure(len: usize) -> (u64, u64, u64) {
-    let executable = std::env::current_exe().expect("the active test binary has a path");
-    let output = Command::new(executable)
-        .args(["--exact", PROBE_TEST, "--nocapture"])
-        .env(PROBE_ENV, len.to_string())
-        .output()
-        .expect("the isolated allocation probe starts");
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    assert!(
-        output.status.success(),
-        "the {len}-byte allocation probe failed:\n{stdout}{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let line = stdout
-        .lines()
-        .find_map(|line| line.strip_prefix(PROBE_SENTINEL))
-        .unwrap_or_else(|| panic!("the {len}-byte allocation probe measured nothing:\n{stdout}"));
-    let mut parts = line.split_whitespace();
-    let blocks = parts.next().and_then(|text| text.parse().ok());
-    let bytes = parts.next().and_then(|text| text.parse().ok());
-    let peak = parts.next().and_then(|text| text.parse().ok());
-    match (blocks, bytes, peak) {
-        (Some(blocks), Some(bytes), Some(peak)) => (blocks, bytes, peak),
-        _ => panic!("the {len}-byte allocation probe printed `{line}`, which is not three numbers"),
-    }
+    let numbers = support::allocations::measure(PROBE_TEST, PROBE_ENV, PROBE_SENTINEL, len, 3);
+    (numbers[0], numbers[1], numbers[2])
 }
 
 /// How many copies of the body may be **resident at once** at the peak of an upload.
@@ -285,7 +249,7 @@ const MEASURED_BYTES_FLOOR: u64 = 4096;
 /// pinned is a shape: *the heap an `aws-chunked` upload holds is one copy of the object, not the
 /// object plus the framing it arrived in*.
 #[test]
-fn an_aws_chunked_upload_holds_one_copy_of_its_body() {
+fn c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body() {
     if let Some(len) = std::env::var_os(PROBE_ENV) {
         let len: usize = len.to_string_lossy().parse().expect("a body size");
         let (blocks, bytes, peak) = cost(len);

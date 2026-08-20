@@ -47,6 +47,15 @@
 //! | `WireReject::LimitExceeded(BodyBytes)` | close | **policy** — refused *for* the size; draining performs the transfer the refusal avoids. §9.3 then forces the close |
 //! | every other `WireReject` | may keep | **RFC 9112 §9.3** — framing intact, remainder bounded; drain and the connection survives |
 //! | `ChunkReject`, per [`rustfs_gateway_http::ChunkReject::must_close_connection`] | both | `aws-chunked` is a content encoding inside a wire body whose extent §6.3 already fixed |
+//!
+//! One note on the `ChunkReject` row, because the reason it holds moved. The decoder used to be
+//! handed the whole wire body, already collected, so a `may keep` verdict was true by
+//! construction: the remainder had been read before the refusal could be reached. Since
+//! rustfs/gateway#229 the decoder pulls frames as it needs them and stops at the refusal, so the
+//! remainder is still on the socket and it is the transport's lingering read that drains it. The
+//! basis is unchanged — `Content-Length` fixes the extent, so the remainder is bounded and
+//! drainable — but [`rustfs_gateway_http::MAX_LINGER_DRAIN_BYTES`] now decides this family too: a
+//! refusal early in a body larger than that budget closes rather than keeps.
 //! | an authentication failure | close | **policy** — see [`after_auth_failure`] |
 //! | an authorisation denial | may keep | **the corpus** — `c-copy-0019`, `c-copy-0020`, `c-copy-0021` all assert `connection_after = "open"` for a `403 AccessDenied` |
 //! | a body past the operation's cap or the assembly's ceiling | close | **policy**, the same shape as `BodyBytes`; `c-object-0015` |

@@ -22,11 +22,8 @@
 
 use crate::support;
 
-use std::process::Command;
-
 use bytes::Bytes;
-use rustfs_gateway::{ClockSkewAck, S3Service};
-use support::{Ping, ping_route, wired};
+use rustfs_gateway::S3Service;
 
 /// The two sizes, and the ratio between them is the instrument.
 ///
@@ -63,18 +60,6 @@ fn payload(len: usize) -> Bytes {
     Bytes::from((0..len).map(|index| (index % 251) as u8).collect::<Vec<u8>>())
 }
 
-fn service() -> S3Service {
-    wired()
-        .clock_with_skew_ack(
-            support::fixed_clock(),
-            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
-        )
-        .register::<Ping, _>(std::sync::Arc::new(support::Backend))
-        .route(ping_route())
-        .build()
-        .expect("a complete assembly")
-}
-
 /// One accepted exchange whose payload digest is verified over every byte sent.
 fn exchange(service: &S3Service, runtime: &tokio::runtime::Runtime, body: Bytes, sha256: &str) -> http::StatusCode {
     let payload_mode =
@@ -93,7 +78,7 @@ fn exchange(service: &S3Service, runtime: &tokio::runtime::Runtime, body: Bytes,
 /// exchange at the same size — happens before the profiler exists, so what the window holds is the
 /// request and nothing else.
 fn cost(len: usize, sha256: &str) -> (u64, u64) {
-    let service = service();
+    let service = support::allocations::probe_service();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -112,34 +97,10 @@ fn cost(len: usize, sha256: &str) -> (u64, u64) {
     (stats.total_blocks, stats.total_bytes)
 }
 
-/// Runs one isolated probe process at `len` and reads back what it measured.
+/// Runs one isolated probe process at `len` and reads back the two numbers it measured.
 fn measure(len: usize) -> (u64, u64) {
-    let executable = std::env::current_exe().expect("the active test binary has a path");
-    let output = Command::new(executable)
-        .args(["--exact", PROBE_TEST, "--nocapture"])
-        .env(PROBE_ENV, len.to_string())
-        .output()
-        .expect("the isolated allocation probe starts");
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    assert!(
-        output.status.success(),
-        "the {len}-byte allocation probe failed:\n{stdout}{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    // Parsed rather than assumed. A probe that crashed before it measured anything, or one whose
-    // name no longer selects a test, exits successfully with no line to find — which is the shape
-    // that would turn this whole file into two zeroes compared against each other.
-    let line = stdout
-        .lines()
-        .find_map(|line| line.strip_prefix(PROBE_SENTINEL))
-        .unwrap_or_else(|| panic!("the {len}-byte allocation probe measured nothing:\n{stdout}"));
-    let mut parts = line.split_whitespace();
-    let blocks = parts.next().and_then(|text| text.parse().ok());
-    let bytes = parts.next().and_then(|text| text.parse().ok());
-    match (blocks, bytes) {
-        (Some(blocks), Some(bytes)) => (blocks, bytes),
-        _ => panic!("the {len}-byte allocation probe printed `{line}`, which is not two numbers"),
-    }
+    let numbers = support::allocations::measure(PROBE_TEST, PROBE_ENV, PROBE_SENTINEL, len, 2);
+    (numbers[0], numbers[1])
 }
 
 /// How many more heap *blocks* the larger request may allocate than the smaller one.

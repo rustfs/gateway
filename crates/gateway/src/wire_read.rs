@@ -60,15 +60,27 @@ use crate::render::S3Error;
 /// stopped the read — lives here and is borrowed rather than owned by the reader.
 pub(crate) struct WireProgress {
     seen: u64,
+    /// The obligation and the hasher opened for it, held together so that the value compared is
+    /// necessarily the value the hasher was opened for. Two parameters, one at construction and
+    /// one at comparison, is a rule stated in two places and therefore a rule that can drift.
+    digest: BodyDigestObligation,
     sha256: Option<Sha256>,
     refusal: Option<S3Error>,
 }
 
 impl WireProgress {
     /// Opens the accounting for one body, hashing only when a digest was actually promised.
+    ///
+    /// The hash is fed on both paths even though only the unframed one can carry an obligation
+    /// today — `presigned_body_obligation` refuses a presigned streaming request outright, and it
+    /// is the only place a [`BodyDigestObligation::Sha256`] is minted. Feeding it here rather than
+    /// in the unframed branch is the fail-safe arrangement: the day a header-signed request's
+    /// payload hash is compared — the P2 gap `crate::gate` records — the framed path gets the
+    /// comparison rather than silently skipping it.
     pub(crate) fn new(digest: BodyDigestObligation) -> Self {
         Self {
             seen: 0,
+            digest,
             sha256: match digest {
                 BodyDigestObligation::None => None,
                 BodyDigestObligation::Sha256(_) => Some(Sha256::new()),
@@ -85,8 +97,8 @@ impl WireProgress {
     /// Whether the wire bytes that arrived match the digest the request was signed with.
     ///
     /// `true` when nothing was promised: an obligation nobody made cannot be broken.
-    pub(crate) fn digest_matches(&mut self, digest: BodyDigestObligation) -> bool {
-        if let (BodyDigestObligation::Sha256(expected), Some(hasher)) = (digest, self.sha256.take()) {
+    pub(crate) fn digest_matches(&mut self) -> bool {
+        if let (BodyDigestObligation::Sha256(expected), Some(hasher)) = (self.digest, self.sha256.take()) {
             let actual: [u8; 32] = hasher.finalize().into();
             return actual == expected;
         }
@@ -106,6 +118,11 @@ pub(crate) struct WireFrames<'a, B> {
     timeouts: BodyTimeouts,
     /// The deadline for the frame currently being waited on; `None` before the first poll of one.
     delay: Option<Delay>,
+    /// A fuse, not a state anything branches on today. Both callers stop on the first `None` —
+    /// `crate::gate`'s collector is a `while let Some`, and [`WireReader`] guards with
+    /// `eof_emitted` — so nothing reaches the early return below. It stays because
+    /// `http_body::Body` says nothing about polling a body that has already answered `None`, and
+    /// "whoever adds the third caller will remember" is not a guarantee.
     ended: bool,
 }
 
@@ -148,6 +165,9 @@ where
                 }
                 Poll::Ready(Ok(Some(frame))) => frame,
             };
+            // A trailer frame carries no payload. This assembly does not verify trailers, so it
+            // neither counts nor keeps one; the framing layer is where a trailer is judged.
+            // Neither this skip nor the empty-frame skip below is bounded — rustfs/gateway#263.
             let Ok(mut data) = frame.into_data() else {
                 continue;
             };
@@ -168,9 +188,11 @@ where
                 // zero-length read would tell a pull consumer it made progress when it did not.
                 continue;
             }
-            // Taken whole rather than walked into a collector: `Buf::copy_to_bytes` over a whole
-            // `Bytes` is a split of the same allocation, so a body that arrives as one frame is
-            // passed on as the memory it arrived in. `tests/request_allocations.rs` keeps it so.
+            // Taken whole rather than walked run by run. `Buf::copy_to_bytes` over a `Bytes` is a
+            // split of the same allocation, which is what lets the unframed caller hand the frame
+            // to its collector without copying it — `tests/request_allocations.rs` keeps that at
+            // zero copies. The framed caller copies it into the pipeline's window either way, as
+            // any pull-model consumer must; `tests/chunked_allocations.rs` is what bounds that.
             let bytes = data.copy_to_bytes(length);
             if let Some(hasher) = self.progress.sha256.as_mut() {
                 hasher.update(&bytes);
@@ -294,9 +316,11 @@ where
         Poll::Ready(Ok(ReadProgress::Filled(take)))
     }
 
+    /// Trait obligations. `IngestPipeline` reads neither, so these answer as narrowly as the
+    /// contract allows rather than reasoning about a value nothing consumes: no `KNOWN_LENGTH`,
+    /// because what is left is a number of *wire* bytes while the only length this request
+    /// declared is the decoded one.
     fn caps(&self) -> PayloadCaps {
-        // No `KNOWN_LENGTH`: what is left is a number of *wire* bytes, and the only length this
-        // request declared is the decoded one. Announcing the wrong one is worse than none.
         PayloadCaps::PULL
     }
 
