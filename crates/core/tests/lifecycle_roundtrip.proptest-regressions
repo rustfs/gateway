@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc eec90bc2c3edf91a5f83a616c8e24afbb60e8ca0fc083afd55654d0c27aa85ec # shrinks to rules = [LifecycleRule { expiration: None, id: None, prefix: None, filter: Some(LifecycleRuleFilter { prefix: None, tag: Some(Tag { key: ObjectKey { key: "..", encoded: None }, value: "" }), object_size_greater_than: None, object_size_less_than: None, and: None }), status: Status("Enabled"), transitions: [], noncurrent_version_transitions: [], noncurrent_version_expiration: None, abort_incomplete_multipart_upload: None }]

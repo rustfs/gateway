@@ -52,6 +52,18 @@ pub enum XmlError {
     AttributeTooLong,
     /// The document has no root element.
     Empty,
+    /// A character XML 1.0 cannot represent appears in the document.
+    ///
+    /// Not a lenience question. XML 1.0 admits tab, newline and carriage return out of the C0
+    /// controls and excludes the rest entirely, so a document carrying one is not well-formed and
+    /// a conforming parser refuses it. `quick-xml` does not check the character range, which is
+    /// why this variant exists: without it the value is read, stored and echoed into a response
+    /// that the client's own parser then rejects in full.
+    ///
+    /// The three spellings are one refusal: the raw byte, `&#1;` and `&#x1;` all name a character
+    /// outside the `Char` production, and a character reference to such a character is itself a
+    /// fatal error.
+    ForbiddenCharacter,
 }
 
 impl fmt::Display for XmlError {
@@ -67,6 +79,7 @@ impl fmt::Display for XmlError {
             Self::TooManyAttributes => "an element holds more attributes than the parser accepts",
             Self::AttributeTooLong => "an attribute value is larger than the parser accepts",
             Self::Empty => "the body has no root element",
+            Self::ForbiddenCharacter => "the body carries a character XML cannot represent",
         };
         f.write_str(text)
     }
