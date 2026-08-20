@@ -66,8 +66,25 @@ pub const KEEPALIVE_BYTE: u8 = b' ';
 ///
 /// Part of the observable contract, not a tuning knob: SDKs bound the gap between bytes, so a
 /// deployment that changed this would change when its clients give up. Declared here so that the
-/// number has one home; see the gap recorded in `MAP.md` for why nothing drives it yet.
+/// number has one home.
+///
+/// It is also the quantum of [`crate::DEFAULT_COMMIT_PROGRESS_DEADLINE`], which is
+/// [`crate::KEEPALIVE_INTERVALS_WITHOUT_PROGRESS`] of these. Writing the byte and giving up on the
+/// outcome are the two ends of one question — *how long may a client be told "still working"* —
+/// and two independent numbers could answer it inconsistently. What is still missing is the
+/// writing: nothing emits [`KEEPALIVE_BYTE`] on a wire yet, because doing so needs the head frozen
+/// before the work runs (`P3-06` §4.2) and today the head is built from the output.
 pub const KEEPALIVE_INTERVAL_SECONDS: u64 = 5;
+
+/// What a committed continuation reports when it stopped making progress.
+///
+/// A message rather than a distinct code, because the wire vocabulary is closed and no S3 code
+/// means this. `InternalError` is the honest one — the operation did not report, and the gateway
+/// does not know whether it happened — and the message is what tells the two `InternalError`s a
+/// committed response can carry apart: a backend that reported an internal failure, and a backend
+/// that reported nothing at all. Pinned by `c-mpu-0040`, which would otherwise be satisfied by the
+/// first when it is written about the second.
+pub const COMMIT_PROGRESS_EXPIRED: &str = "the committed continuation reported no outcome inside the progress deadline";
 
 /// Writes a committed response whose outcome turned out to be a refusal.
 ///

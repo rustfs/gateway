@@ -97,3 +97,64 @@ fn the_reports_a_ci_system_consumes_are_well_formed() {
     let cases = parsed.path("cases").and_then(|value| value.as_array().map(<[_]>::len));
     assert_eq!(cases, Some(report.outcomes.len()));
 }
+
+/// **Negative — the frozen schema pairs each fault point with the fields that point can carry.**
+///
+/// `code` is what a continuation reports. A continuation that stops making progress reports
+/// nothing, so a case naming a code for one would be naming a code no implementation could ever
+/// produce — and it would sit in the corpus reading like an assertion. The schema is where that is
+/// caught, because it is the only check that runs before the case is loaded at all.
+///
+/// Both directions, over the real `conformance/case.schema.json` rather than a fragment: the
+/// dropped `required: ["code"]` that widening the `at` enum needed is exactly the kind of edit that
+/// silently makes the *other* point's code optional, after which `c-mpu-0001` could lose its
+/// `InvalidPart` and still load.
+#[test]
+fn a_fault_point_may_only_carry_the_fields_that_point_has() {
+    let root = Corpus::discover_root().expect("a corpus sits next to this crate");
+    let source = std::fs::read_to_string(root.join("case.schema.json")).expect("the frozen schema is checked in");
+    let schema = rustfs_gateway_conformance::schema::Schema::compile(&source).expect("the frozen schema compiles");
+
+    let case = |fault: &str| {
+        format!(
+            "[case]\nid = \"c-x-0001\"\nschema_version = 1\ntitle = \"a fault point carries its own fields\"\n\
+             rationale = \"The point named by a fault decides which other fields exist, and this document is \
+             here only to be measured against the frozen schema.\"\npolarity = \"negative\"\nquirks = []\n\
+             [[case.evidence]]\nurl = \"https://example.invalid/\"\nsummary = \"a synthetic document\"\nkind = \"aws-doc\"\n\
+             [setup.fault]\n{fault}\n\
+             [request]\nmethod = \"POST\"\ntarget = \"/b?uploads\"\n[expect]\nkind = \"response\"\nstatus = 200\n"
+        )
+    };
+    let violations = |fault: &str| {
+        let document = rustfs_gateway_conformance::toml::parse(&case(fault)).expect("valid TOML");
+        schema
+            .validate(&document)
+            .into_iter()
+            .map(|violation| format!("{}: {}", violation.pointer, violation.message))
+            .collect::<Vec<_>>()
+    };
+
+    const OP: &str = "operation = \"CompleteMultipartUpload\"\n";
+    for (fault, admitted, why) in [
+        // The two legal shapes.
+        ("at = \"after_commit\"\ncode = \"InvalidPart\"", true, "a reported failure with its code"),
+        ("at = \"no_progress_after_commit\"", true, "a stall with no code"),
+        // A reported failure with no code to report.
+        (
+            "at = \"after_commit\"",
+            false,
+            "`after_commit` without a code: the case would arm a fault that reports nothing",
+        ),
+        // A stall carrying a code nothing will ever report.
+        (
+            "at = \"no_progress_after_commit\"\ncode = \"InvalidPart\"",
+            false,
+            "`no_progress_after_commit` with a code: the case would name a code no implementation can produce",
+        ),
+        // And a point that does not exist at all.
+        ("at = \"before_commit\"\ncode = \"InvalidPart\"", false, "an undeclared fault point"),
+    ] {
+        let found = violations(&format!("{OP}{fault}"));
+        assert_eq!(found.is_empty(), admitted, "{why}: {found:?}");
+    }
+}

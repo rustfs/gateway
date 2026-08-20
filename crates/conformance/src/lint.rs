@@ -212,12 +212,20 @@ fn check_identity(case: &Case, out: &mut Vec<Diagnostic>) {
 /// cannot fail.
 pub const COMMITS_HEAD_EARLY: &[&str] = &["CompleteMultipartUpload", "CopyObject", "UploadPartCopy"];
 
+/// The `setup.fault.at` points that exist only below a committed head.
+///
+/// Both of them: a continuation that reports a failure, and a continuation that reports nothing.
+/// Listed rather than matched one at a time, because the operation check below is the same check
+/// for both and a second `at` value added without a row here would silently stop being checked —
+/// which is how a case ends up declaring a scenario its target cannot produce.
+const POINTS_BELOW_THE_COMMIT: &[&str] = &["after_commit", "no_progress_after_commit"];
+
 /// A fault declared after a commit must name an operation that commits.
 ///
-/// The point named by `setup.fault.at = "after_commit"` exists only for an operation that sends its
-/// head before it knows the outcome. For any other, the failure would be discovered while a status
-/// was still choosable and delivered as an ordinary refusal — the case would run, it would be given
-/// the refusal it did not ask for, and whether it noticed would depend on what else it happened to
+/// The points named by [`POINTS_BELOW_THE_COMMIT`] exist only for an operation that sends its head
+/// before it knows the outcome. For any other, the failure would be discovered while a status was
+/// still choosable and delivered as an ordinary refusal — the case would run, it would be given the
+/// refusal it did not ask for, and whether it noticed would depend on what else it happened to
 /// assert. This denies instead: a case whose scenario cannot occur is unusable, not merely drifting.
 fn check_committed_fault(case: &Case, out: &mut Vec<Diagnostic>) {
     let Some(document) = case.document.as_ref() else { return };
@@ -225,8 +233,8 @@ fn check_committed_fault(case: &Case, out: &mut Vec<Diagnostic>) {
     // one location claiming two keys is how this audit would be made vacuous.
     let Some(setup) = document.read("setup") else { return };
     let Some(fault) = setup.read("setup.fault") else { return };
-    let at = fault.read("setup.fault.at").and_then(Value::as_str);
-    if at != Some("after_commit") {
+    let at = fault.read("setup.fault.at").and_then(Value::as_str).unwrap_or_default();
+    if !POINTS_BELOW_THE_COMMIT.contains(&at) {
         return;
     }
     let operation = fault
@@ -239,7 +247,7 @@ fn check_committed_fault(case: &Case, out: &mut Vec<Diagnostic>) {
             "/setup/fault/operation",
             format!(
                 "`{operation}` does not commit its response head before it knows the outcome, so there \
-                 is no point in it at which `after_commit` could happen; the operations that do are {}",
+                 is no point in it at which `{at}` could happen; the operations that do are {}",
                 COMMITS_HEAD_EARLY.join(", ")
             ),
         ));

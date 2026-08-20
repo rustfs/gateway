@@ -28,12 +28,35 @@ pub const DEFAULT_STANDARD_HANDLER_DEADLINE: Duration = Duration::from_secs(30);
 pub const DEFAULT_EXTENDED_HANDLER_DEADLINE: Duration = Duration::from_secs(15 * 60);
 const DEFAULT_HANDLER_CLEANUP_GRACE: Duration = Duration::from_secs(1);
 
+/// How many keep-alive intervals may pass with no outcome before a committed response is ended.
+///
+/// The quantum is [`crate::commit::KEEPALIVE_INTERVAL_SECONDS`] rather than a number of seconds of
+/// its own, because the two are the same clock seen from either side. That interval is how often a
+/// committed response says "still working" to a client that has been told `200` and cannot see
+/// anything else; this is how many of those a client may be told before the framework concludes
+/// that nothing is working and stops saying it. A bound expressed in seconds would let the two
+/// drift, and a deployment whose keep-alive cadence was slower than its own progress bound would
+/// terminate every committed response before it ever wrote a second byte.
+pub const KEEPALIVE_INTERVALS_WITHOUT_PROGRESS: u64 = 12;
+
+/// Default bound on the time a committed continuation may go without producing its outcome.
+///
+/// A committed response has spent its status line: `200` is already on the wire and the only thing
+/// left that can carry a verdict is the body. Nothing below the framework bounds how long that
+/// takes — `crates/server`'s connection-idle deadline resets while a request is in flight, and its
+/// write-progress deadline arms only when a write returns `Pending`, which a continuation that
+/// writes nothing never does. So without this, a continuation that stops making progress holds the
+/// request until the client's own timeout, and the retry that follows starts another one.
+pub const DEFAULT_COMMIT_PROGRESS_DEADLINE: Duration =
+    Duration::from_secs(crate::commit::KEEPALIVE_INTERVAL_SECONDS * KEEPALIVE_INTERVALS_WITHOUT_PROGRESS);
+
 /// Validated durations for the closed handler deadline classes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HandlerDeadlineConfig {
     standard: Duration,
     extended: Duration,
     cleanup_grace: Duration,
+    commit_progress: Duration,
 }
 
 impl HandlerDeadlineConfig {
@@ -54,6 +77,7 @@ impl HandlerDeadlineConfig {
             standard,
             extended,
             cleanup_grace: DEFAULT_HANDLER_CLEANUP_GRACE,
+            commit_progress: DEFAULT_COMMIT_PROGRESS_DEADLINE,
         })
     }
 
@@ -75,6 +99,26 @@ impl HandlerDeadlineConfig {
         self.cleanup_grace
     }
 
+    /// Replaces the bound on time between progress inside a committed continuation.
+    ///
+    /// Returns `None` when `commit_progress` is zero, for the same reason as the two class
+    /// durations: zero is never an alias for unlimited. A deployment that wanted no bound would be
+    /// asking for the behaviour this value exists to remove.
+    #[must_use]
+    pub const fn try_with_commit_progress(mut self, commit_progress: Duration) -> Option<Self> {
+        if commit_progress.is_zero() {
+            return None;
+        }
+        self.commit_progress = commit_progress;
+        Some(self)
+    }
+
+    /// Returns the bound on time between progress inside a committed continuation.
+    #[must_use]
+    pub const fn commit_progress(self) -> Duration {
+        self.commit_progress
+    }
+
     /// Returns the configured duration for one closed operation class.
     #[must_use]
     pub const fn duration_for(self, class: HandlerDeadlineClass) -> Duration {
@@ -91,6 +135,7 @@ impl Default for HandlerDeadlineConfig {
             standard: DEFAULT_STANDARD_HANDLER_DEADLINE,
             extended: DEFAULT_EXTENDED_HANDLER_DEADLINE,
             cleanup_grace: DEFAULT_HANDLER_CLEANUP_GRACE,
+            commit_progress: DEFAULT_COMMIT_PROGRESS_DEADLINE,
         }
     }
 }
@@ -134,6 +179,7 @@ impl ServiceConfig {
                 standard: DEFAULT_STANDARD_HANDLER_DEADLINE,
                 extended: DEFAULT_EXTENDED_HANDLER_DEADLINE,
                 cleanup_grace: DEFAULT_HANDLER_CLEANUP_GRACE,
+                commit_progress: DEFAULT_COMMIT_PROGRESS_DEADLINE,
             },
         }
     }
@@ -207,6 +253,12 @@ impl ServiceConfig {
     pub const fn handler_cleanup_grace(&self) -> Duration {
         self.handler_deadlines.cleanup_grace()
     }
+
+    /// Returns the bound on time between progress inside a committed continuation.
+    #[must_use]
+    pub const fn commit_progress_deadline(&self) -> Duration {
+        self.handler_deadlines.commit_progress()
+    }
 }
 
 #[cfg(test)]
@@ -244,6 +296,7 @@ mod tests {
             standard: std::time::Duration::from_secs(3),
             extended: std::time::Duration::from_secs(90),
             cleanup_grace: DEFAULT_HANDLER_CLEANUP_GRACE,
+            commit_progress: DEFAULT_COMMIT_PROGRESS_DEADLINE,
         };
         assert_eq!(
             HandlerDeadlineConfig::new(std::time::Duration::from_secs(3), std::time::Duration::from_secs(90)),
@@ -289,6 +342,50 @@ mod tests {
 
         let service = ServiceConfig::new(8).with_handler_deadlines(configured);
         assert_eq!(service.handler_cleanup_grace(), std::time::Duration::from_millis(75));
+    }
+
+    /// Positive — the shipped bound is the keep-alive cadence counted, and it reaches a service.
+    ///
+    /// Written as the product of the two published constants rather than as `60`, so a change to
+    /// either is a change to the relationship: how often a client is told "still working" and how
+    /// many times it may be told are the same question read from either end.
+    #[test]
+    fn the_commit_progress_bound_is_the_keepalive_cadence_counted() {
+        assert_eq!(
+            DEFAULT_COMMIT_PROGRESS_DEADLINE,
+            Duration::from_secs(crate::commit::KEEPALIVE_INTERVAL_SECONDS * KEEPALIVE_INTERVALS_WITHOUT_PROGRESS)
+        );
+        assert_eq!(HandlerDeadlineConfig::default().commit_progress(), DEFAULT_COMMIT_PROGRESS_DEADLINE);
+        assert_eq!(
+            ServiceConfig::new(8).commit_progress_deadline(),
+            DEFAULT_COMMIT_PROGRESS_DEADLINE,
+            "a configuration built without naming the bound did not get the default"
+        );
+    }
+
+    /// Negative — a replaced bound reaches the service, and zero is refused.
+    ///
+    /// Zero is not an alias for unlimited here any more than it is for the two class durations: a
+    /// deployment that set it would be asking for exactly the behaviour the bound removes, and
+    /// would get it silently.
+    #[test]
+    fn a_replaced_commit_progress_bound_reaches_the_service_and_zero_is_refused() {
+        let replaced = HandlerDeadlineConfig::default().try_with_commit_progress(Duration::from_millis(250));
+        assert!(replaced.is_some(), "a non-zero bound was refused");
+        let configured = replaced.unwrap_or_default();
+        assert_eq!(configured.commit_progress(), Duration::from_millis(250));
+        assert_eq!(
+            ServiceConfig::new(8)
+                .with_handler_deadlines(configured)
+                .commit_progress_deadline(),
+            Duration::from_millis(250)
+        );
+        assert_eq!(HandlerDeadlineConfig::default().try_with_commit_progress(Duration::ZERO), None);
+        // The other three durations are untouched by naming this one. A builder that reset them
+        // would silently shorten every handler in the deployment.
+        assert_eq!(configured.duration_for(HandlerDeadlineClass::Standard), DEFAULT_STANDARD_HANDLER_DEADLINE);
+        assert_eq!(configured.duration_for(HandlerDeadlineClass::Extended), DEFAULT_EXTENDED_HANDLER_DEADLINE);
+        assert_eq!(configured.cleanup_grace(), DEFAULT_HANDLER_CLEANUP_GRACE);
     }
 
     // a-asm-0006: stable load anchors prove replacement cannot split the entry snapshot.

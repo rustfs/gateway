@@ -156,3 +156,64 @@ async fn a_routed_identity_mismatch_is_fail_closed() {
     assert!(matches!(result, Err(StaticDispatchError::OperationMismatch { .. })));
     assert!(trail.lock().expect("trail lock").is_empty());
 }
+
+// ── the wrapper the framework puts around a committed continuation ───────────────────────────────
+//
+// `Resp::map_commit_work` lives in `crates/core/src/handler.rs`, and these two tests live here
+// rather than beside it because `crates/core/tests/purity_guard.rs` counts `.await` and `Box::pin`
+// over that crate's whole `src` tree — test code included. A continuation is a boxed future and
+// driving one needs an await, so a unit test of this would have raised the routing path's async
+// count and the framework's pin count, and the honest place for it is a test target the guard does
+// not scan.
+
+/// **Negative — a wrapper for continuations is not a wrapper for everything.**
+///
+/// `map_commit_work` exists so the framework can put a bound around the work a backend committed
+/// to. The failure mode is that it runs for the other two answer shapes as well: an event stream
+/// would then be rebuilt through a closure written for a document continuation. Both non-committed
+/// shapes are checked, and the closure records whether it ran rather than being trusted not to.
+#[test]
+fn mapping_a_commit_leaves_a_settled_answer_and_an_event_stream_alone() {
+    let mut called = false;
+    let settled = Resp::<StaticProbe>::with_status((), 299).map_commit_work(|work| {
+        called = true;
+        work
+    });
+    assert!(!called, "the continuation wrapper ran on a settled answer");
+    assert_eq!(settled.status(), 299);
+    assert!(settled.output().is_some());
+
+    let mut called = false;
+    let stream = Resp::<StaticProbe>::event_stream(rustfs_gateway_stream::ByteStream::from_bytes(Bytes::from_static(b"f")))
+        .map_commit_work(|work| {
+            called = true;
+            work
+        });
+    assert!(!called, "the continuation wrapper ran on an event stream");
+    assert!(stream.is_event_stream());
+    assert_eq!(stream.status(), 200);
+}
+
+/// **Positive — it does run for a continuation, and the status the head went out with survives.**
+///
+/// The second half is the one a rebuild at the call site would lose: `Answer` has three variants and
+/// only `commit_with_status` can carry an arbitrary status, so an implementation that destructured
+/// and reassembled would quietly move this back to the operation's declared `200`.
+#[tokio::test]
+async fn mapping_a_commit_replaces_the_work_and_keeps_the_committed_status() {
+    let response = Resp::<StaticProbe>::commit_with_status(
+        Box::pin(async { Err(rustfs_gateway_core::HandlerError::internal_error("the original")) }),
+        206,
+    )
+    .map_commit_work(|_original| Box::pin(async { Err(rustfs_gateway_core::HandlerError::internal_error("the replacement")) }));
+    assert_eq!(response.status(), 206);
+    assert!(response.is_committed());
+    let (answer, _status) = response.into_parts();
+    let rustfs_gateway_core::Answer::Committed(work) = answer else {
+        panic!("a committed answer stopped being one");
+    };
+    assert_eq!(
+        work.await.err().map(|error| error.message().to_owned()),
+        Some("the replacement".to_owned())
+    );
+}

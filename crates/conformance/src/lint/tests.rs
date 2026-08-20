@@ -339,6 +339,66 @@ fn a_fault_after_a_commit_on_an_operation_that_does_not_commit_is_denied() {
     );
 }
 
+/// **Negative — the stall point is checked by the same rule, and not by accident.**
+///
+/// `no_progress_after_commit` was added after `after_commit`, and the way that goes wrong is
+/// silently: a rule written as `at != Some("after_commit")` returns early for the new value, the
+/// operation is never measured against [`COMMITS_HEAD_EARLY`], and a case can declare a stall in
+/// an operation that has nothing to stall. `c-mpu-0040` is the case that carries the new point, so
+/// it is the one this drives.
+#[test]
+fn a_stall_after_a_commit_on_an_operation_that_does_not_commit_is_denied() {
+    let root = Corpus::discover_root().expect("the repository corpus");
+    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    for case in corpus.cases_mut() {
+        if case.id != "c-mpu-0040" {
+            continue;
+        }
+        if let Some(document) = case.document.as_mut()
+            && let Some(fault) = document.get_mut("setup").and_then(|setup| setup.get_mut("fault"))
+        {
+            assert_eq!(
+                fault.get("at").and_then(Value::as_str),
+                Some("no_progress_after_commit"),
+                "c-mpu-0040 no longer carries the point this test is about"
+            );
+            fault.insert("operation", Value::String("PutObject".to_owned()));
+        }
+    }
+    lint(&mut corpus);
+    let case = corpus
+        .cases()
+        .iter()
+        .find(|case| case.id == "c-mpu-0040")
+        .expect("c-mpu-0040");
+    assert!(
+        case.diagnostics.iter().any(|d| d.rule == "lint/fault-after-commit"),
+        "{:?}",
+        case.diagnostics
+    );
+}
+
+/// Positive — the control for the one above: unmodified, `c-mpu-0040` is not denied.
+///
+/// `CompleteMultipartUpload` does commit its head, so the stall it declares has a point to happen
+/// at. Without this, the test above would be satisfied by a rule that denied every stall.
+#[test]
+fn the_stall_the_corpus_declares_is_not_denied() {
+    let root = Corpus::discover_root().expect("the repository corpus");
+    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    lint(&mut corpus);
+    let case = corpus
+        .cases()
+        .iter()
+        .find(|case| case.id == "c-mpu-0040")
+        .expect("c-mpu-0040");
+    assert!(
+        !case.diagnostics.iter().any(|d| d.rule == "lint/fault-after-commit"),
+        "{:?}",
+        case.diagnostics
+    );
+}
+
 /// Negative — the rule fires on the point, not on the presence of a fault.
 ///
 /// The same operation with no `after_commit` is not denied, because the denial is about a moment
