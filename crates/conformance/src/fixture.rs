@@ -113,17 +113,17 @@ use rustfs_gateway::{
     AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome,
     CopyRange, CopySourceRejection, CursorSpec, ETag, ErrorCode, EventSequence, GranteeType, Handler, HandlerError,
     HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators, PRECONDITION_FAILED_MESSAGE,
-    PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors, RegionLabel, RegionSet, Req,
-    RequestKind, ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp,
-    canonicalize_grantee, collect, completion_failure_retains_upload, conditional_write_guards_before_mutation,
-    copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, copy_target_uses_source_validators,
-    encryption_delete_absent_succeeds, evaluate, evaluate_range, format_optional_restore_status,
-    object_lock_requires_enabled_bucket, parse_conditional_etag, parse_tagging_header, permanent_redirect_for,
-    resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint, resolve_part, select_scan_bytes,
-    select_uses_event_stream, stats_document, validate_accelerate, validate_cors, validate_encryption, validate_legal_hold,
-    validate_lifecycle, validate_lock_configuration, validate_logging, validate_notification, validate_policy,
-    validate_public_access_block, validate_replication, validate_request_payment, validate_restore, validate_retention,
-    validate_select, validate_tag_set, validate_versioning, validate_website,
+    PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors, RecordedUpload, RegionLabel,
+    RegionSet, Req, RequestKind, ResolvedUploadId, ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope,
+    TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee, collect, completion_failure_retains_upload,
+    conditional_write_guards_before_mutation, copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds,
+    copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate, evaluate_range,
+    format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag, parse_tagging_header,
+    permanent_redirect_for, resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint, resolve_part,
+    resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate, validate_cors,
+    validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
+    validate_notification, validate_policy, validate_public_access_block, validate_replication, validate_request_payment,
+    validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
 mod handlers_bucket;
@@ -1443,39 +1443,39 @@ fn require_bucket(fixture: &Fixture, bucket: &BucketName) -> Result<(), HandlerE
     Err(HandlerErrorContext::missing_bucket().into())
 }
 
-/// AWS's own wording for an upload id that names nothing this caller may act on.
-///
-/// One function rather than five literals: the five multipart operations have to be
-/// indistinguishable here, because a caller who can tell "wrong bucket" from "no such id" apart by
-/// the `<Message>` element has been told the id is genuine.
-fn no_such_upload() -> HandlerError {
-    HandlerError::new(
-        ErrorCode::NO_SUCH_UPLOAD,
-        "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
-    )
+/// The pair an upload was created for, read by the exported exchange rather than by this file.
+impl RecordedUpload for StoredUpload {
+    fn bucket(&self) -> &str {
+        &self.bucket
+    }
+
+    fn key(&self) -> &str {
+        &self.key
+    }
 }
 
-/// Resolves an upload id **against the bucket and the key of the request that named it**.
+/// Spends the upload id a request carried, and hands back the right to act on the upload it names.
 ///
-/// An upload id is a bearer token in every implementation that looks it up on its own, and s3s#51
-/// is what that costs: knowing an id was enough to push a part into somebody else's upload, and the
-/// owner completed it without ever learning that a stranger had contributed bytes. Neither half of
-/// the check is optional — `c-mpu-0029` carries a genuine id from another bucket and `c-mpu-0030`
-/// carries a genuine id from another key in the *same* bucket, so an implementation that scoped by
-/// bucket alone would still pass the first and fail the second.
+/// This backend does not decide anything here. Every rule that used to live in this file — that
+/// the id is resolved against the bucket **and** the key of the request that named it, that an id
+/// no upload could have been minted with never reaches the store at all, and that all three
+/// refusals render one indistinguishable document — is [`rustfs_gateway::resolve_upload`]'s. What
+/// is left is the lookup, which is the one part of the exchange only a backend can perform, and
+/// turning its rejection into this fixture's error type.
 ///
-/// The refusal is [`no_such_upload`] rather than an access-denied: an id the caller does not own
-/// must not be confirmed to exist.
-fn require_upload<'a>(
-    fixture: &'a Fixture,
-    upload_id: &str,
+/// The two values come back separately on purpose. The record borrows the fixture and is released
+/// as soon as the handler has read what it needs; the [`rustfs_gateway::ResolvedUploadId`] borrows the
+/// request instead, so it survives into the `&mut` half of the handler and is the value every
+/// mutation of an upload in this file is keyed by. A handler that skipped the exchange would have
+/// no handle to key one with.
+fn require_upload<'i, 'f>(
+    fixture: &'f Fixture,
+    upload_id: &'i str,
     bucket: &BucketName,
     key: &ObjectKey,
-) -> Result<&'a StoredUpload, HandlerError> {
-    match fixture.upload(upload_id) {
-        Some(upload) if upload.bucket == bucket.as_str() && upload.key == key.as_str() => Ok(upload),
-        _ => Err(no_such_upload()),
-    }
+) -> Result<(ResolvedUploadId<'i>, &'f StoredUpload), HandlerError> {
+    resolve_upload(&UploadIdClaim::from_wire(upload_id), bucket, key, |id| fixture.upload(id))
+        .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))
 }
 
 /// The four conditional headers, read into the shape the exported contract evaluates.
@@ -2720,7 +2720,7 @@ async fn upload_part(state: &Arc<Mutex<Fixture>>, input: dto::UploadPartInput) -
         .lock()
         .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
     require_bucket(&fixture, &input.bucket)?;
-    let upload = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
+    let (handle, upload) = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
     // Before a single byte is recorded: a part that failed its own integrity claim must not be
     // reachable by the completion that follows.
     require_content_md5(input.content_md5.as_deref(), &bytes)?;
@@ -2731,7 +2731,7 @@ async fn upload_part(state: &Arc<Mutex<Fixture>>, input: dto::UploadPartInput) -
         None => None,
         Some(checksum) => Some(checksum_of(&checksum, &bytes)?),
     };
-    let etag = fixture.put_part(&input.upload_id, input.part_number, bytes);
+    let etag = fixture.put_part(handle.id(), input.part_number, bytes);
     Ok(Resp::new(dto::UploadPartOutput {
         checksum_spec,
         // Required, like `PutObject`'s. Nine multipart cases capture this header and quote it back
@@ -3095,7 +3095,7 @@ impl Stub {
 
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
+        let (handle, _) = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
         let (found, source_version) = read_copy_source(&fixture, &source)?;
         guard_copy_source(
             &found,
@@ -3117,7 +3117,7 @@ impl Stub {
             }
         };
         let now = fixture.now;
-        let etag = fixture.put_part(&input.upload_id, input.part_number, bytes);
+        let etag = fixture.put_part(handle.id(), input.part_number, bytes);
 
         Ok(Resp::new(dto::UploadPartCopyOutput {
             e_tag: entity_tag(&etag)?,
@@ -4310,8 +4310,8 @@ impl Stub {
         require_bucket(&fixture, &input.bucket)?;
         // Resolved before it is removed: an abort that dropped an upload it did not own would let a
         // stranger destroy work in progress, and the caller would see the same 204 either way.
-        require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
-        fixture.uploads.remove(&input.upload_id);
+        let (handle, _) = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
+        fixture.uploads.remove(handle.id());
         Ok(Resp::new(dto::AbortMultipartUploadOutput::default()))
     }
 
@@ -4336,7 +4336,8 @@ impl Stub {
     ) -> HandlerResult<dto::CompleteMultipartUpload> {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        let upload = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?.clone();
+        let (handle, upload) = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
+        let upload = upload.clone();
         let named = &input.multipart_upload.parts;
         if named.is_empty() {
             return Err(HandlerError::new(
@@ -4359,7 +4360,7 @@ impl Stub {
         if let Err(error) = guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), fixture.now)
         {
             if !completion_failure_retains_upload() {
-                fixture.uploads.remove(&input.upload_id);
+                fixture.uploads.remove(handle.id());
             }
             return Err(error);
         }
@@ -4407,7 +4408,7 @@ impl Stub {
         drop(fixture);
 
         let state = Arc::clone(&self.state);
-        let upload_id = input.upload_id.clone();
+        let upload_id = handle.id().to_owned();
         let bucket = input.bucket.clone();
         let key = input.key.clone();
         let location = format!("/{}/{}", input.bucket.as_str(), input.key.as_str());
@@ -4597,7 +4598,7 @@ impl Stub {
                 )
             })?,
         };
-        let upload = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
+        let (handle, upload) = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
 
         // `BTreeMap` already holds the parts in ascending part-number order, which is the order
         // `ListParts` answers in and the order a marker resumes.
@@ -4621,7 +4622,7 @@ impl Stub {
         Ok(Resp::new(dto::ListPartsOutput {
             bucket: input.bucket.clone(),
             key: input.key.clone(),
-            upload_id: input.upload_id.clone(),
+            upload_id: handle.id().to_owned(),
             part_number_marker: input.part_number_marker.clone(),
             next_part_number_marker: next_marker,
             max_parts,
@@ -5621,6 +5622,12 @@ mod tests {
     /// The s3s#51 check, in the two shapes the corpus separates: a genuine id from another bucket
     /// and a genuine id from another key in the same bucket. Both are `NoSuchUpload`, and a
     /// resolver that only compared the bucket would let the second through.
+    ///
+    /// The rule itself is proved in `rustfs-gateway-core`, against the exchange every backend
+    /// calls. What this proves is the wiring: that *this* backend reaches it, and that the document
+    /// the four refusals render is one document. The last assertion is the one that would catch a
+    /// fixture quietly regrowing a message of its own — a caller able to tell "wrong bucket" from
+    /// "no such id" apart has been told the id it guessed is genuine.
     #[test]
     fn an_upload_id_resolves_only_against_the_bucket_and_key_that_own_it() {
         let mut fixture = Fixture::at(0);
@@ -5641,6 +5648,30 @@ mod tests {
         // An id nothing minted.
         let invented = require_upload(&fixture, "conformance-upload-9999", &bucket("theirs"), &key("someone-elses-object"));
         assert_eq!(invented.err().map(|error| error.code().clone()), Some(ErrorCode::NO_SUCH_UPLOAD));
+        // A shape no minted id can have. It never reaches the store, and it is refused as the
+        // other three are.
+        let traversal = require_upload(&fixture, "../../etc/passwd", &bucket("theirs"), &key("someone-elses-object"));
+        assert_eq!(traversal.err().map(|error| error.code().clone()), Some(ErrorCode::NO_SUCH_UPLOAD));
+
+        let rendered: Vec<String> = ["conformance-upload-9999", "../../etc/passwd"]
+            .into_iter()
+            .map(|spent| {
+                require_upload(&fixture, spent, &bucket("mine"), &key("someone-elses-object"))
+                    .err()
+                    .map(|error| error.message().to_owned())
+                    .unwrap_or_else(|| panic!("{spent} names no upload in mine/someone-elses-object"))
+            })
+            .chain(std::iter::once(
+                require_upload(&fixture, &id, &bucket("mine"), &key("someone-elses-object"))
+                    .err()
+                    .map(|error| error.message().to_owned())
+                    .expect("a genuine id from another bucket is refused"),
+            ))
+            .collect();
+        let first = rendered.first().expect("three refusals were collected");
+        for message in &rendered {
+            assert_eq!(message, first, "two upload-id refusals are distinguishable by their message");
+        }
     }
 
     /// The alphabet and the padding, against values whose encodings are fixed by RFC 4648 §10.

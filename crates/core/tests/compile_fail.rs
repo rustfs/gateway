@@ -14,8 +14,9 @@
 
 //! Compile-time authorization and signature-secret boundaries.
 //!
-//! Responsible for: proving omitted resource declarations, forged proofs, and serialization of a
-//! signature session token do not compile, using one shared trybuild project.
+//! Responsible for: proving omitted resource declarations, forged proofs, a forged upload
+//! handle, and serialization of a signature session token do not compile, using one shared
+//! trybuild project.
 //! NOT responsible for: runtime policy outcomes or signature verification.
 //! Upstream: `rustfs_gateway_core::authz`, `rustfs_gateway_sig::SessionToken`. Downstream: public
 //! extension implementors and serialization callers.
@@ -29,4 +30,5 @@ fn compile_time_contracts_are_not_openable() {
     cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");
     cases.compile_fail("tests/compile_fail/c_sig_0123_*.rs");
     cases.compile_fail("tests/compile_fail/error_resolution_*.rs");
+    cases.compile_fail("tests/compile_fail/upload_*.rs");
 }

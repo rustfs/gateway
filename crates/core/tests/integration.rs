@@ -94,3 +94,6 @@ mod tagging_roundtrip;
 
 #[path = "tolerant_conditions.rs"]
 mod tolerant_conditions;
+
+#[path = "upload_capability.rs"]
+mod upload_capability;
