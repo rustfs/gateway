@@ -10,7 +10,7 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/tls.rs` | Atomic TLS config and fail-closed reload | New handshakes see the wrong certificate |
 | `src/io.rs` | Write-progress and connection-idle timers, and the lingering read on close | A slow reader is killed or never released, or a peer sees `ECONNRESET` where a close was due |
 | `src/conn.rs` | Admission, Hyper driving and connection lifecycle | Accept, h1/h2 or shutdown sequencing fails |
-| `src/request_capacity.rs` | Global request permits and accept-loop capacity notification | H1/H2 exceed the shared request ceiling or listener acceptance fails to pause |
+| `src/request_capacity.rs` | Global request permits, accept-loop capacity notification and request cancellation | H1/H2 exceed the shared request ceiling, listener acceptance fails to pause or peer loss does not reach service cleanup |
 | `src/shutdown.rs` | Trigger, report and metrics | Drain or abort counts are wrong |
 | `src/dispatch.rs` | Generic path-prefix selection | A route reaches the fallback unexpectedly |
 | `src/layers.rs` | General tower layer attachment points | Wiring panic, request ID, trace or compression |

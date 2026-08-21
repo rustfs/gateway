@@ -24,14 +24,17 @@ use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 #[cfg(target_os = "linux")]
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
 use http::{Request, Response, StatusCode};
 use http_body_util::Full;
-use rustfs_gateway_server::{ConnectionInfo, Listener, RunningServer, Server, ServerConfig, ShutdownReport};
+use rustfs_gateway_server::{ConnectionInfo, Listener, RequestCancellation, RunningServer, Server, ServerConfig, ShutdownReport};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::Notify;
 use tower::service_fn;
 
 fn plaintext_config() -> ServerConfig {
@@ -667,6 +670,81 @@ async fn a_srv_0019_client_reset_releases_the_connection_permit() {
     })
     .await
     .expect("connection permit is released");
+    let _ = shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(task.await.expect("server task joins").is_ok());
+}
+
+#[tokio::test]
+async fn a_client_reset_signals_request_cancellation_before_the_permit_is_reused() {
+    let entered = Arc::new(Notify::new());
+    let rollback = Arc::new(AtomicBool::new(false));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let service = service_fn({
+        let entered = Arc::clone(&entered);
+        let rollback = Arc::clone(&rollback);
+        let calls = Arc::clone(&calls);
+        move |request: Request<hyper::body::Incoming>| {
+            let entered = Arc::clone(&entered);
+            let rollback = Arc::clone(&rollback);
+            let calls = Arc::clone(&calls);
+            async move {
+                if calls.fetch_add(1, Ordering::AcqRel) == 0 {
+                    let mut cancellation = request
+                        .extensions()
+                        .get::<RequestCancellation>()
+                        .cloned()
+                        .expect("the server inserts request cancellation");
+                    entered.notify_one();
+                    while !*cancellation.borrow() {
+                        if cancellation.changed().await.is_err() {
+                            core::future::pending::<()>().await;
+                        }
+                    }
+                    rollback.store(true, Ordering::Release);
+                }
+                Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(b"ok"))))
+            }
+        }
+    });
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        ..
+    } = Server::new(
+        ServerConfig {
+            max_global_inflight_requests: 1,
+            ..plaintext_config()
+        },
+        service,
+    )
+    .serve()
+    .expect("server starts");
+
+    let mut reset = TcpStream::connect(local_addr).await.expect("first connection succeeds");
+    reset
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .expect("first request writes");
+    tokio::time::timeout(Duration::from_secs(1), entered.notified())
+        .await
+        .expect("the first request enters the service");
+    let socket = socket2::Socket::from(reset.into_std().expect("stream converts"));
+    socket.set_linger(Some(Duration::ZERO)).expect("RST linger configures");
+    drop(socket);
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !rollback.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("request cancellation reaches cleanup after reset");
+    let response = tokio::time::timeout(Duration::from_secs(1), get(local_addr))
+        .await
+        .expect("the released permit admits another request");
+    assert!(String::from_utf8_lossy(&response).starts_with("HTTP/1.1 200 "));
+
     let _ = shutdown.trigger(Duration::from_secs(1)).await;
     assert!(task.await.expect("server task joins").is_ok());
 }

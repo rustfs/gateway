@@ -34,7 +34,7 @@ mod shutdown;
 mod tls;
 
 pub use config::{ConfigError, ServerConfig, WriteStrategy, conn_memory_budget};
-pub use conn::{ConnectionInfo, Server, ServerError, TransportKind};
+pub use conn::{ConnectionInfo, RequestCancellation, Server, ServerError, TransportKind};
 pub use dispatch::PrefixDispatch;
 pub use listener::{Listener, ListenerOptions};
 pub use shutdown::{RunningServer, ServerMetrics, ShutdownReport, ShutdownTrigger};
