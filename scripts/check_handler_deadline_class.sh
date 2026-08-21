@@ -159,7 +159,8 @@ for required in (
     "O::spec()\n                .deadline_class()",
     "request_config.config().handler_deadline(deadline_class)",
     "request_config.config().handler_cleanup_grace()",
-    "handler_with_deadline(call, deadline_cancellation, deadline, cleanup_grace)",
+    "let request_cancellation = request_config.request_cancellation();",
+    "handler_with_request_cancellation(",
 ):
     if invoke_body.count(required) != 1:
         fail("dynamic dispatch does not consume one request snapshot's handler deadline configuration")
@@ -168,26 +169,51 @@ if invoke_body.count("handler deadline exceeded after cleanup completed") != 1:
 if invoke_body.count("handler deadline exceeded before cleanup completed") != 1:
     fail("dynamic dispatch does not distinguish an exhausted cleanup grace")
 
-runtime_body = function_body(runtime_source, "pub(crate) async fn handler_with_deadline<T>", "handler deadline race")
+runtime_body = function_body(runtime_source, "pub(crate) async fn handler_with_request_cancellation<T>", "handler deadline race")
 deadline_poll = "if deadline.as_mut().poll(context).is_ready()"
 handler_output_poll = "if let Poll::Ready(output) = handler.as_mut().poll(context)"
-cancel = "cancellation.cancel(HandlerCancellation::Deadline);"
+request_cancel = "return Poll::Ready(Err(HandlerCancellation::RequestAborted));"
+cancel = "cancellation.cancel(reason);"
 grace_poll = "if grace.as_mut().poll(context).is_ready()"
 cleanup_poll = "if handler.as_mut().poll(context).is_ready()"
-for required in (deadline_poll, handler_output_poll, cancel, grace_poll, cleanup_poll):
+for required in (deadline_poll, handler_output_poll, request_cancel, cancel, grace_poll, cleanup_poll):
     if runtime_body.count(required) != 1:
         fail("handler deadline race is missing a required poll or cancellation signal")
 if runtime_body.find(deadline_poll) > runtime_body.find(handler_output_poll):
     fail("handler completion wins a simultaneous deadline race")
+if runtime_body.find(request_cancel) > runtime_body.find(handler_output_poll):
+    fail("handler completion wins after the transport has already cancelled the request")
 if runtime_body.find(cancel) > runtime_body.find(grace_poll):
     fail("handler cleanup grace starts before the deadline cancellation signal")
 if runtime_body.find(grace_poll) > runtime_body.find(cleanup_poll):
     fail("handler cleanup completion wins an exhausted grace race")
 after_cancel = runtime_body.partition(cancel)[2]
-if handler_output_poll in after_cancel or "HandlerDeadlineOutcome::Completed(handler.await)" in after_cancel:
+if handler_output_poll in after_cancel or "HandlerCancellationOutcome::Completed(handler.await)" in after_cancel:
     fail("a handler result completed after its deadline can be committed")
-if runtime_body.count("HandlerDeadlineOutcome::Expired { cleanup_completed }") != 1:
+if runtime_body.count("HandlerCancellationOutcome::RequestAborted { cleanup_completed }") != 1:
+    fail("request cancellation does not report bounded cleanup completion")
+if runtime_body.count("HandlerCancellationOutcome::Expired { cleanup_completed }") != 1:
     fail("handler deadline race does not report bounded cleanup completion")
+
+for required in (
+    "request_cancellation: Option<tokio::sync::watch::Receiver<bool>>,",
+    "request_cancellation: self.request_cancellation,",
+    "pub(crate) fn request_cancellation(&self) -> Option<tokio::sync::watch::Receiver<bool>>",
+):
+    if request_config_source.count(required) != 1:
+        fail("request cancellation is not carried through the typed request snapshot")
+request_cancellation_extract = (
+    "request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned()"
+)
+if service_source.count(request_cancellation_extract) != 1:
+    fail("the service does not extract the server request-cancellation signal")
+for required in (
+    "HandlerCancellationOutcome::RequestAborted { cleanup_completed }",
+    "request ended after handler cleanup completed",
+    "request ended before handler cleanup completed",
+):
+    if invoke_body.count(required) != 1:
+        fail("dynamic dispatch does not classify bounded request-abort cleanup")
 
 if request_config_source.count("self.handler_deadline_report.record(cleanup_completed);") != 1:
     fail("request config does not record the handler cleanup acknowledgement")

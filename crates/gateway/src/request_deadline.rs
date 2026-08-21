@@ -21,6 +21,7 @@
 
 use std::future::Future;
 use std::future::poll_fn;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,28 +39,66 @@ pub(crate) enum HandlerDeadlineOutcome<T> {
     Expired { cleanup_completed: bool },
 }
 
+pub(crate) enum HandlerCancellationOutcome<T> {
+    Completed(T),
+    Expired { cleanup_completed: bool },
+    RequestAborted { cleanup_completed: bool },
+}
+
 pub(crate) async fn handler_with_deadline<T>(
-    mut handler: BoxFuture<'static, T>,
+    handler: BoxFuture<'static, T>,
     cancellation: HandlerCancellationSource,
     deadline: Duration,
     cleanup_grace: Duration,
 ) -> HandlerDeadlineOutcome<T> {
+    match handler_with_request_cancellation(handler, cancellation, deadline, cleanup_grace, None).await {
+        HandlerCancellationOutcome::Completed(output) => HandlerDeadlineOutcome::Completed(output),
+        HandlerCancellationOutcome::Expired { cleanup_completed }
+        | HandlerCancellationOutcome::RequestAborted { cleanup_completed } => {
+            HandlerDeadlineOutcome::Expired { cleanup_completed }
+        }
+    }
+}
+
+pub(crate) async fn handler_with_request_cancellation<T>(
+    mut handler: BoxFuture<'static, T>,
+    cancellation: HandlerCancellationSource,
+    deadline: Duration,
+    cleanup_grace: Duration,
+    request_cancellation: Option<tokio::sync::watch::Receiver<bool>>,
+) -> HandlerCancellationOutcome<T> {
     let mut deadline = Box::pin(futures_timer::Delay::new(deadline));
-    let completed = poll_fn(|context| {
+    let mut request_cancellation = request_cancellation.map(|mut cancellation| {
+        Box::pin(async move {
+            while !*cancellation.borrow() {
+                if cancellation.changed().await.is_err() {
+                    core::future::pending::<()>().await;
+                }
+            }
+        }) as Pin<Box<dyn Future<Output = ()> + Send>>
+    });
+    let stopped = poll_fn(|context| {
         if deadline.as_mut().poll(context).is_ready() {
-            return Poll::Ready(None);
+            return Poll::Ready(Err(HandlerCancellation::Deadline));
+        }
+        if request_cancellation
+            .as_mut()
+            .is_some_and(|cancelled| cancelled.as_mut().poll(context).is_ready())
+        {
+            return Poll::Ready(Err(HandlerCancellation::RequestAborted));
         }
         if let Poll::Ready(output) = handler.as_mut().poll(context) {
-            return Poll::Ready(Some(output));
+            return Poll::Ready(Ok(output));
         }
         Poll::Pending
     })
     .await;
-    if let Some(output) = completed {
-        return HandlerDeadlineOutcome::Completed(output);
-    }
+    let reason = match stopped {
+        Ok(output) => return HandlerCancellationOutcome::Completed(output),
+        Err(reason) => reason,
+    };
 
-    cancellation.cancel(HandlerCancellation::Deadline);
+    cancellation.cancel(reason);
     let mut grace = Box::pin(futures_timer::Delay::new(cleanup_grace));
     let cleanup_completed = poll_fn(|context| {
         if grace.as_mut().poll(context).is_ready() {
@@ -71,7 +110,10 @@ pub(crate) async fn handler_with_deadline<T>(
         Poll::Pending
     })
     .await;
-    HandlerDeadlineOutcome::Expired { cleanup_completed }
+    match reason {
+        HandlerCancellation::Deadline => HandlerCancellationOutcome::Expired { cleanup_completed },
+        _ => HandlerCancellationOutcome::RequestAborted { cleanup_completed },
+    }
 }
 
 /// Bounds the time a committed continuation may go without producing its outcome.

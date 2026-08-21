@@ -77,7 +77,7 @@ use rustfs_gateway_types::ErrorCode;
 
 use crate::ext::{Next, OpLayer, Terminal};
 use crate::request_config::{InputAuthorized, RequestConfig};
-use crate::request_deadline::{HandlerDeadlineOutcome, commit_with_progress_deadline, handler_with_deadline};
+use crate::request_deadline::{HandlerCancellationOutcome, commit_with_progress_deadline, handler_with_request_cancellation};
 
 /// A `Resp<O>`'s output whose `O` this table has forgotten.
 type ErasedOutput = Box<dyn std::any::Any + Send>;
@@ -181,6 +181,7 @@ impl OperationDispatch {
             let deadline = request_config.config().handler_deadline(deadline_class);
             let cleanup_grace = request_config.config().handler_cleanup_grace();
             let commit_progress = request_config.config().commit_progress_deadline();
+            let request_cancellation = request_config.request_cancellation();
             let deadline_cancellation = cancellation.clone();
             Ok(Invocation {
                 _cancellation: cancellation,
@@ -188,17 +189,33 @@ impl OperationDispatch {
                     // Keep the request's one configuration snapshot alive through the backend call.
                     // No dispatch implementation can load or substitute another snapshot.
                     let _request_config = request_config;
-                    let response = match handler_with_deadline(call, deadline_cancellation, deadline, cleanup_grace).await {
-                        HandlerDeadlineOutcome::Completed(response) => response?,
-                        HandlerDeadlineOutcome::Expired { cleanup_completed: true } => {
+                    let response = match handler_with_request_cancellation(
+                        call,
+                        deadline_cancellation,
+                        deadline,
+                        cleanup_grace,
+                        request_cancellation,
+                    )
+                    .await
+                    {
+                        HandlerCancellationOutcome::Completed(response) => response?,
+                        HandlerCancellationOutcome::Expired { cleanup_completed: true } => {
                             _request_config.record_handler_deadline(true);
                             return Err(HandlerError::internal_error("handler deadline exceeded after cleanup completed"));
                         }
-                        HandlerDeadlineOutcome::Expired {
+                        HandlerCancellationOutcome::Expired {
                             cleanup_completed: false,
                         } => {
                             _request_config.record_handler_deadline(false);
                             return Err(HandlerError::internal_error("handler deadline exceeded before cleanup completed"));
+                        }
+                        HandlerCancellationOutcome::RequestAborted { cleanup_completed } => {
+                            let message = if cleanup_completed {
+                                "request ended after handler cleanup completed"
+                            } else {
+                                "request ended before handler cleanup completed"
+                            };
+                            return Err(HandlerError::internal_error(message));
                         }
                     };
                     let response = response.downcast::<Resp<O>>().map_err(|_| {

@@ -144,6 +144,10 @@ impl<S> RequestConfig<S> {
         self.handler_deadline_report.record(cleanup_completed);
     }
 
+    pub(crate) fn request_cancellation(&self) -> Option<tokio::sync::watch::Receiver<bool>> {
+        self.request_cancellation.clone()
+    }
+
     fn advance<N>(self) -> RequestConfig<N> {
         RequestConfig {
             snapshot: self.snapshot,
