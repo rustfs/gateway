@@ -146,7 +146,11 @@ fn crate_steps(package: &str) -> Vec<Vec<String>> {
         "clippy".to_owned(),
         "-p".to_owned(),
         package.to_owned(),
-        "--all-targets".to_owned(),
+        match package {
+            "rustfs-gateway-conformance" => "--lib",
+            _ => "--all-targets",
+        }
+        .to_owned(),
         "--".to_owned(),
         "-D".to_owned(),
         "warnings".to_owned(),

@@ -149,8 +149,19 @@ fn xtask_fast_scope_reuses_the_workspace_feature_graph_for_every_target() {
 fn conformance_fast_scope_keeps_integration_contracts_in_the_workspace_gate() {
     let steps = crate_steps("rustfs-gateway-conformance");
 
-    assert!(steps[0].iter().any(|arg| arg == "--lib"));
-    assert!(steps[1].iter().any(|arg| arg == "--all-targets"));
+    assert_eq!(
+        steps,
+        vec![
+            ["test", "-p", "rustfs-gateway-conformance", "--lib"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>(),
+            ["clippy", "-p", "rustfs-gateway-conformance", "--lib", "--", "-D", "warnings"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>(),
+        ]
+    );
 }
 
 #[test]

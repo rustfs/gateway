@@ -2213,21 +2213,22 @@ expect_fail check_xtask_codegen_surface.sh \
     'the conformance fast scope losing its library-only test limit' \
     mut_xtask_conformance_fast_scope_loses_library_limit
 
-mut_xtask_conformance_scope_weakens_all_target_clippy() {
+mut_xtask_conformance_scope_restores_all_target_clippy() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '        "--all-targets".to_owned(),'
+old = '            "rustfs-gateway-conformance" => "--lib",'
+new = '            "rustfs-gateway-conformance-disabled" => "--lib",'
 if text.count(old) != 1:
-    raise SystemExit("all-target clippy scope is missing")
-path.write_text(text.replace(old, "", 1))
+    raise SystemExit("conformance library-only clippy scope is missing")
+path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'crate verification weakening all-target clippy' \
-    mut_xtask_conformance_scope_weakens_all_target_clippy
+    'the conformance fast scope restoring all-target clippy' \
+    mut_xtask_conformance_scope_restores_all_target_clippy
 
 mut_xtask_workspace_target_reuse_removed() {
     python3 - <<'PYEOF'
