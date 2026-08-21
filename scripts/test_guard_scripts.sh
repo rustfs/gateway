@@ -8785,6 +8785,51 @@ PYEOF
 expect_fail check_sig_case_coverage.sh \
     'c-sig-0019 evidence being disabled at its statement boundary' mut_sig_family_evidence_disabled_by_cfg
 
+# P3-01 raw-request boundary (rustfs/backlog#1689). The three ways to undo the type boundary are to
+# return the raw head, accept it by reference so it survives, or reconstruct it downstream.
+mut_wire_boundary_raw_accessor() {
+    cat >>crates/http/src/wire.rs <<'RUST'
+
+pub fn raw_headers(request: &WireRequest<()>) -> &http::HeaderMap {
+    &request.headers
+}
+RUST
+}
+expect_fail check_wire_boundary.sh \
+    'the wire layer returning its raw HeaderMap through a public accessor' \
+    mut_wire_boundary_raw_accessor \
+    'public API returns a raw request capability'
+
+mut_wire_boundary_borrowed_accept() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/src/wire.rs")
+text = path.read_text()
+old = "pub fn accept(request: Request<B>, limits: &Limits) -> Result<Self, WireReject>"
+new = "pub fn accept(request: &mut Request<B>, limits: &Limits) -> Result<Self, WireReject>"
+if text.count(old) != 1:
+    raise SystemExit("wire accept mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_wire_boundary.sh \
+    'WireRequest acceptance borrowing the raw request instead of consuming it' \
+    mut_wire_boundary_borrowed_accept \
+    'no longer consumes exactly one Request<B> by value'
+
+mut_wire_boundary_downstream_request() {
+    cat >>crates/core/src/lib.rs <<'RUST'
+
+fn bypass_wire_acceptance(request: http::Request<()>) {
+    let _ = request;
+}
+RUST
+}
+expect_fail check_wire_boundary.sh \
+    'core production code regaining a raw http::Request' \
+    mut_wire_boundary_downstream_request \
+    'downstream production code regains a raw request'
+
 # P3-01 wire case coverage (rustfs/backlog#1689). Three failure modes, one mutation each: a mapping
 # can be deleted, it can point at a function nobody wrote, and the assertion it points at can be
 # replaced by something that reads like an assertion and cannot fail.
