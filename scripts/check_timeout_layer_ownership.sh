@@ -12,6 +12,7 @@ CONFIG="${ROOT_DIR}/crates/server/src/config.rs"
 SOURCE_DIR="${ROOT_DIR}/crates/server/src"
 TLS_EVIDENCE="${ROOT_DIR}/crates/server/tests/tls_h2.rs"
 LOAD_EVIDENCE="${ROOT_DIR}/crates/server/tests/server_load.rs"
+HEADER_EVIDENCE="${ROOT_DIR}/crates/server/src/conn/deadline_test.rs"
 
 if [[ ! -f "$CONFIG" ]]; then
     printf 'check_timeout_layer_ownership: required config is missing: %s\n' "$CONFIG" >&2
@@ -25,6 +26,11 @@ fi
 
 if [[ ! -f "$LOAD_EVIDENCE" || -L "$LOAD_EVIDENCE" ]]; then
     printf 'check_timeout_layer_ownership: c-lim-0061 load evidence is missing or not a regular file\n' >&2
+    exit 1
+fi
+
+if [[ ! -f "$HEADER_EVIDENCE" || -L "$HEADER_EVIDENCE" ]]; then
+    printf 'check_timeout_layer_ownership: c-lim-0032 header-timeout evidence is missing or not a regular file\n' >&2
     exit 1
 fi
 
@@ -45,6 +51,45 @@ if ! grep -q -E 'pub connection_lifetime:' "$CONFIG"; then
     printf 'check_timeout_layer_ownership: missing extra connection-lifetime safety valve\n' >&2
     exit 1
 fi
+
+python3 - "$HEADER_EVIDENCE" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+match = re.search(
+    r"#\[tokio::test\(start_paused = true\)\]\s+"
+    r"async fn c_lim_0032_a_srv_0010_one_byte_per_second_header_closes_at_ten_seconds\(\)\s*\{",
+    source,
+)
+if match is None:
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0032 executable header-timeout evidence is missing")
+depth = 1
+cursor = match.end()
+while cursor < len(source) and depth:
+    depth += (source[cursor] == "{") - (source[cursor] == "}")
+    cursor += 1
+if depth:
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0032 test body is unterminated")
+body = source[match.end():cursor - 1]
+if re.search(r"#\s*\[\s*cfg(?:_attr)?\b", body):
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0032 evidence is conditionally disabled")
+required = (
+    "header_read_timeout: Duration::from_secs(10),",
+    'for byte in b"ET / HTTP" {\n        tokio::time::advance(Duration::from_secs(1)).await;',
+    'assert_eq!(started.elapsed(), Duration::from_secs(9), "nine paced bytes do not close early");',
+    "std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted",
+    'assert!(disconnected, "the socket closes at the header deadline");',
+    'started.elapsed() >= Duration::from_secs(10)',
+)
+missing = [fragment for fragment in required if fragment not in body]
+if missing:
+    raise SystemExit(
+        "check_timeout_layer_ownership: c-lim-0032 does not prove one-byte pacing and the ten-second close: "
+        + ", ".join(missing)
+    )
+PY
 
 if grep -R -n -i -E --include='*.rs' \
     '(first_body_byte_(timeout|idle|interval)|body_read_(timeout|idle|interval)|handler(_progress)?_(timeout|deadline)|handler_deadline)' \
