@@ -210,6 +210,46 @@ Every case must be red or green for a stated reason. A case that cannot run yet 
 a case that fails because the behaviour is unimplemented is useful, and a case that is missing
 because the behaviour is unimplemented is how a gap becomes permanent.
 
+## The baseline is complete, and a row is a claim
+
+`baseline.json` holds one row per case — `"c-cond-0027": "passed"` — and **every case in the corpus
+must have one**. That is a ruling, not an accident, and it is enforced by
+`every_case_in_the_corpus_carries_a_baseline_row` in `crates/conformance/tests/corpus.rs`. Adding a
+case means adding its row in the same commit; there is no allowlist.
+
+The alternative — a curated file recording only the known-red cases — was rejected because it is
+what the repository had, and it is unreadable. On `119570e` the file held 245 rows against 711
+cases, and nothing anywhere said whether the other 466 were a deliberate omission or an oversight.
+Four family ledgers had each grown a private copy of this same completeness check for their own
+directory; twenty-one domains had none.
+
+What a row does:
+
+| row | meaning |
+| --- | --- |
+| `passed` | this case executes and holds. A run in which it **fails or skips** is a regression. |
+| `skipped` | this case does not execute yet, and that is known. A run in which it fails is a regression; one in which it passes is an improvement. |
+| `failed` | a tolerated known failure. Only this row excuses anything, and `scripts/check_baseline_ratchet.sh` refuses to let the set of them grow. |
+| *(absent)* | read as `passed`, so forgetting a row is never quieter than writing one. |
+
+The `passed` row is the one that had to be made load-bearing before completeness was worth
+enforcing. Until rustfs/gateway#192 a skip could not be a regression, so a failing case with a
+`passed` row and a failing case with no row took the identical branch: recording a case bought
+nothing at all, and the file was a list of excuses wearing the shape of a table of expectations.
+It also left the hole rustfs/gateway#203 and #214 both fell into — a domain that stops executing
+turns into skips, and skips were free.
+
+Refreshing it:
+
+```bash
+cargo xtask conformance baseline > conformance/baseline.json
+scripts/check_baseline_ratchet.sh
+```
+
+The ratchet only ever tightens: the `failed` set may shrink and never grow, and a case recorded
+`passed` may not be re-recorded as `skipped`. A refresh that would violate either is a regression
+being written down instead of fixed.
+
 ## Evidence and compliance
 
 `case.evidence[]` records where a behavioural fact was observed: a URL plus one original sentence

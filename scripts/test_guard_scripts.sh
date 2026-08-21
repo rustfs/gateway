@@ -11354,6 +11354,23 @@ PYEOF
 expect_fail check_baseline_ratchet.sh \
     'a newly failing case added to the baseline' mut_baseline_regression
 
+# The other way to buy silence, and the cheaper one: a skip carries no diagnosis to argue with.
+# Until rustfs/gateway#192 the runner could not call a skip a regression at all, so this shape was
+# free — #203's `object/` domain and #214's thirty-nine `acl` cases both went quiet underneath a
+# green ratchet.
+mut_baseline_downgraded_to_a_skip() {
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("conformance/baseline.json")
+baseline = json.loads(path.read_text())
+case = next(case for case, verdict in baseline["cases"].items() if verdict == "passed")
+baseline["cases"][case] = "skipped"
+path.write_text(json.dumps(baseline, indent=2) + "\n")
+PYEOF
+}
+expect_fail check_baseline_ratchet.sh \
+    'a passing case downgraded to a skip in the baseline' mut_baseline_downgraded_to_a_skip
+
 mut_baseline_deleted() {
     rm -f conformance/baseline.json
 }

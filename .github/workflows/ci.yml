@@ -34,6 +34,22 @@ name: CI
 #   fuzz                            -> alongside the rustfs-gateway-sig / rustfs-gateway-http parsers
 #   client matrix / s3-tests / mint -> P8 at the earliest, and on cron, never on PRs
 #
+# CONFORMANCE BASELINE — it is here, and it is required.
+#
+# rustfs/gateway#192 was filed because the word `baseline` appeared nowhere in
+# this directory: `cargo xtask conformance run --baseline conformance/baseline.json`
+# was treated everywhere as the no-regression gate and CI never executed it, so
+# six real regressions from fb06bbd lived fifteen days behind four green merges.
+#
+# The whole corpus now runs against conformance/baseline.json inside
+# `cargo test --workspace` — `corpus::the_whole_corpus_holds_the_verdicts_the_baseline_records`
+# in crates/conformance/tests/corpus.rs — which is the `workspace-tests` job
+# below, inside its 480-second ci_budget.sh budget, behind the branch-protected
+# `Test` check. Deliberately not a separate job: rule 4 above says a job that
+# does not block the merge is not a gate, and the suite this one replaces went
+# wrong exactly there (`e2e` was never a required check). A `#[test]` inherits
+# the requiredness of the check it already sits behind.
+#
 # The jobs below cover the four-command gate in AGENTS.md. Formatting and
 # clippy remain separate parallel jobs; workspace tests and guard mutations also
 # use separate runners, then report through a one-minute branch-protected Test check.

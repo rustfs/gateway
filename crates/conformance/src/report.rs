@@ -49,6 +49,21 @@ impl Verdict {
             Verdict::Skipped => "skipped",
         }
     }
+
+    /// How much evidence this verdict is, on the ladder the ratchet moves along.
+    ///
+    /// A pass is evidence the behaviour holds. A skip is the absence of evidence. A failure is
+    /// evidence the behaviour does not hold, and it is the bottom rung because it is the one a
+    /// reader must act on. Deliberately not the derived `Ord`, whose order is the declaration
+    /// order of the variants and means nothing.
+    #[must_use]
+    pub fn rank(self) -> u8 {
+        match self {
+            Verdict::Failed => 0,
+            Verdict::Skipped => 1,
+            Verdict::Passed => 2,
+        }
+    }
 }
 
 /// How far a case got.
@@ -114,6 +129,22 @@ impl CaseOutcome {
     pub fn warnings(&self) -> Vec<&Diagnostic> {
         self.diagnostics.iter().filter(|d| d.severity == Severity::Warn).collect()
     }
+
+    /// Whether this case skipped because it declares it does not apply to *this run*.
+    ///
+    /// `case.applies_to` gates on the profile, the HTTP version and TLS, and `crate::runner`
+    /// answers such a case with a skip at [`Phase::Convention`] — before a target is touched at
+    /// all. Every other skip happens at [`Phase::Execute`], where the target was asked and could
+    /// not answer.
+    ///
+    /// The distinction only matters because a skip can now be a regression. Without it, running a
+    /// baseline recorded under `--profile aws` against `--profile minio` would report every
+    /// `aws`-only case as a regression, which is the run's own options manufacturing findings
+    /// about an implementation they never reached.
+    #[must_use]
+    pub fn declared_inapplicable(&self) -> bool {
+        self.verdict == Verdict::Skipped && self.phase == Phase::Convention
+    }
 }
 
 /// The result of a run.
@@ -160,30 +191,59 @@ impl Report {
         grouped
     }
 
-    /// Cases that fail now and did not fail in the baseline.
+    /// Cases whose conclusion is worse than the one the baseline records.
     ///
-    /// With no baseline every failure is a regression, which is the right default for this
-    /// repository and the wrong one for a first run against a foreign server — hence the file.
+    /// The comparison is over the whole ladder [`Verdict::rank`] defines, not over failure alone.
+    /// A case the baseline records as `passed` and that now *skips* has stopped being evidence
+    /// just as completely as one that fails: rustfs/gateway#203 found the whole `object/` domain
+    /// running against `Unwired` in `cargo test`, so every case in it was a skip, and
+    /// rustfs/gateway#214's mutation lost all thirty-nine `acl` cases with the ratchet still
+    /// reporting `0 regression(s)` and exit 0. While a skip could not regress, every `passed` row
+    /// in the baseline was inert — a failing case with a `passed` row and a failing case with no
+    /// row at all took the identical branch — so recording a case bought nothing and the file was
+    /// a list of excuses rather than a table of expectations.
+    ///
+    /// A case the baseline does not name is therefore read as `passed`: the baseline is complete
+    /// by policy for this repository (`conformance/README.md`, and the corpus-wide guard in
+    /// `tests/corpus.rs` that refuses a case with no row), so an absent row is a case that ought
+    /// to have one and not a case nothing has an opinion about.
+    ///
+    /// With no baseline *at all* only a failure is a regression. That is the first run against a
+    /// foreign server: nothing has yet claimed any case ever ran, so a skip has nothing to be
+    /// worse than — and being red on every skip is exactly the welcome that stops anyone running
+    /// a foreign suite twice.
+    ///
+    /// One skip is exempt in both directions: [`CaseOutcome::declared_inapplicable`]. A case that
+    /// declares `applies_to.profiles = ["aws"]` skips under `--profile minio` because the case
+    /// says so, not because the target lost anything, and a run's own options must not be able to
+    /// manufacture regressions in a baseline recorded under different ones.
     #[must_use]
     pub fn regressions<'a>(&'a self, baseline: Option<&Baseline>) -> Vec<&'a CaseOutcome> {
         self.outcomes
             .iter()
-            .filter(|outcome| outcome.verdict == Verdict::Failed)
+            .filter(|outcome| !outcome.declared_inapplicable())
             .filter(|outcome| match baseline {
-                None => true,
-                Some(baseline) => baseline.expected(&outcome.id) != Some(Verdict::Failed),
+                None => outcome.verdict == Verdict::Failed,
+                Some(baseline) => {
+                    let expected = baseline.expected(&outcome.id).unwrap_or(Verdict::Passed);
+                    outcome.verdict.rank() < expected.rank()
+                }
             })
             .collect()
     }
 
-    /// Cases the baseline records as failing that now pass — the ratchet's other end.
+    /// Cases whose conclusion is better than the one the baseline records — the ratchet's other
+    /// end, and the same ladder read upwards.
     #[must_use]
     pub fn improvements<'a>(&'a self, baseline: Option<&Baseline>) -> Vec<&'a CaseOutcome> {
         let Some(baseline) = baseline else { return Vec::new() };
         self.outcomes
             .iter()
-            .filter(|outcome| outcome.verdict == Verdict::Passed)
-            .filter(|outcome| baseline.expected(&outcome.id) == Some(Verdict::Failed))
+            .filter(|outcome| !outcome.declared_inapplicable())
+            .filter(|outcome| {
+                let expected = baseline.expected(&outcome.id).unwrap_or(Verdict::Passed);
+                outcome.verdict.rank() > expected.rank()
+            })
             .collect()
     }
 
@@ -270,7 +330,15 @@ impl Report {
             ));
         }
         for outcome in &regressions {
-            out.push_str(&format!("regression: {} ({})\n", outcome.id, outcome.relative));
+            // The verdict is named because a regression is no longer always a failure: a case the
+            // baseline records as passing that now *skips* is one, and "regression: c-acl-0001"
+            // with no verdict reads as a failed assertion the reader will then go looking for.
+            out.push_str(&format!(
+                "regression: {} is {} ({})\n",
+                outcome.id,
+                outcome.verdict.as_str(),
+                outcome.relative
+            ));
         }
         out
     }
@@ -379,6 +447,15 @@ impl Baseline {
     #[must_use]
     pub fn expected(&self, id: &str) -> Option<Verdict> {
         self.entries.get(id).copied()
+    }
+
+    /// Every case id the baseline names, in id order.
+    ///
+    /// The table has to be readable in both directions to be checked in both directions: a row
+    /// naming a case the corpus no longer holds is a tolerance nothing can spend, and
+    /// [`Baseline::expected`] alone can only ever ask about ids somebody already thought of.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.entries.keys().map(String::as_str)
     }
 
     /// Renders the current report as a baseline document, for the maintainer to check in.
@@ -490,16 +567,130 @@ mod tests {
         assert_eq!(report().regressions(None).len(), 1);
     }
 
+    /// The baseline that records exactly what [`report`] concludes, which is the shape the
+    /// repository's own `conformance/baseline.json` is required to have: a row per case.
+    fn matching_baseline() -> Baseline {
+        Baseline::from_json(r#"{"cases": {"c-etag-0001": "passed", "c-sig-0001": "failed", "c-mpu-0001": "skipped"}}"#)
+            .expect("valid baseline")
+    }
+
     #[test]
     fn a_baseline_tolerates_a_recorded_failure() {
-        let baseline = Baseline::from_json(r#"{"cases": {"c-sig-0001": "failed"}}"#).expect("valid baseline");
-        assert!(report().regressions(Some(&baseline)).is_empty());
+        assert!(report().regressions(Some(&matching_baseline())).is_empty());
     }
 
     #[test]
     fn a_baseline_does_not_tolerate_a_new_failure() {
-        let baseline = Baseline::from_json(r#"{"cases": {"c-etag-0001": "failed"}}"#).expect("valid baseline");
-        assert_eq!(report().regressions(Some(&baseline)).len(), 1);
+        let baseline =
+            Baseline::from_json(r#"{"cases": {"c-etag-0001": "failed", "c-sig-0001": "passed", "c-mpu-0001": "skipped"}}"#)
+                .expect("valid baseline");
+        let subject = report();
+        let regressions = subject.regressions(Some(&baseline));
+        assert_eq!(regressions.len(), 1);
+        assert_eq!(regressions[0].id, "c-sig-0001");
+    }
+
+    /// The rule that makes a `passed` row worth writing down.
+    ///
+    /// Under the previous comparison this read green: only a failure could regress, so a family
+    /// that stopped executing altogether — rustfs/gateway#203's `object/` domain against
+    /// `Unwired`, rustfs/gateway#214's thirty-nine lost `acl` cases — was indistinguishable from
+    /// a family that ran and passed.
+    #[test]
+    fn a_recorded_pass_that_now_skips_is_a_regression() {
+        let baseline =
+            Baseline::from_json(r#"{"cases": {"c-etag-0001": "passed", "c-sig-0001": "failed", "c-mpu-0001": "passed"}}"#)
+                .expect("valid baseline");
+        let subject = report();
+        let regressions = subject.regressions(Some(&baseline));
+        assert_eq!(regressions.len(), 1);
+        assert_eq!(regressions[0].id, "c-mpu-0001");
+    }
+
+    /// A skip the baseline already records is not news, and neither is one that turns into a pass.
+    #[test]
+    fn a_recorded_skip_may_keep_skipping_and_may_improve() {
+        assert!(report().regressions(Some(&matching_baseline())).is_empty());
+        let recovered =
+            Baseline::from_json(r#"{"cases": {"c-etag-0001": "skipped", "c-sig-0001": "failed", "c-mpu-0001": "skipped"}}"#)
+                .expect("valid baseline");
+        let subject = report();
+        let improvements = subject.improvements(Some(&recovered));
+        assert_eq!(improvements.len(), 1);
+        assert_eq!(improvements[0].id, "c-etag-0001");
+    }
+
+    /// A case with no row is read as one that ought to pass, so forgetting the row cannot buy
+    /// silence for a case that skips.
+    ///
+    /// This is the half that makes the completeness policy enforceable rather than decorative:
+    /// without it, deleting a row is strictly weaker than editing one, and
+    /// `scripts/check_baseline_ratchet.sh` only ever looked at the rows that were there.
+    #[test]
+    fn a_case_with_no_row_is_expected_to_pass() {
+        let baseline = Baseline::from_json(r#"{"cases": {"c-sig-0001": "failed"}}"#).expect("valid baseline");
+        let subject = report();
+        let regressions = subject.regressions(Some(&baseline));
+        assert_eq!(regressions.len(), 1);
+        assert_eq!(regressions[0].id, "c-mpu-0001", "an unrecorded skip is a regression");
+    }
+
+    /// A case that declares it does not apply to this run is not evidence about the target, in
+    /// either direction.
+    ///
+    /// The shape this stops: a baseline recorded under `--profile aws` replayed under
+    /// `--profile minio` would otherwise report every `aws`-only case as a regression, because
+    /// the *run's own options* turned it into a skip before any request went out.
+    #[test]
+    fn a_case_that_does_not_apply_to_this_run_is_neither_a_regression_nor_an_improvement() {
+        let mut subject = report();
+        subject.outcomes[2].phase = Phase::Convention;
+        subject.outcomes[2].skip_reason = Some("case.applies_to.profiles is [aws]".to_owned());
+        let baseline =
+            Baseline::from_json(r#"{"cases": {"c-etag-0001": "passed", "c-sig-0001": "failed", "c-mpu-0001": "passed"}}"#)
+                .expect("valid baseline");
+        assert!(
+            subject.regressions(Some(&baseline)).is_empty(),
+            "a profile-gated skip is the run's own doing, not the target's"
+        );
+        assert!(subject.improvements(Some(&baseline)).is_empty());
+    }
+
+    /// The control for the case above: the same verdict reached at [`Phase::Execute`] — the target
+    /// was asked and could not answer — is a regression.
+    #[test]
+    fn a_skip_the_target_caused_is_still_a_regression() {
+        let subject = report();
+        assert_eq!(subject.outcomes[2].phase, Phase::Execute);
+        let baseline =
+            Baseline::from_json(r#"{"cases": {"c-etag-0001": "passed", "c-sig-0001": "failed", "c-mpu-0001": "passed"}}"#)
+                .expect("valid baseline");
+        let regressions = subject.regressions(Some(&baseline));
+        assert_eq!(regressions.len(), 1);
+        assert_eq!(regressions[0].id, "c-mpu-0001");
+    }
+
+    /// A regression line names the verdict, because a regression is no longer always a failure.
+    ///
+    /// Without it a reader who sees `regression: c-mpu-0001` goes looking for a failed assertion
+    /// that does not exist, and the actual finding — the case stopped running at all — is the one
+    /// thing the line does not say.
+    #[test]
+    fn a_regression_line_says_which_verdict_it_is() {
+        let baseline =
+            Baseline::from_json(r#"{"cases": {"c-etag-0001": "passed", "c-sig-0001": "failed", "c-mpu-0001": "passed"}}"#)
+                .expect("valid baseline");
+        let rendered = report().render_text(Some(&baseline));
+        assert!(
+            rendered.contains("regression: c-mpu-0001 is skipped (cases/mpu/c-mpu-0001.toml)"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn the_verdict_ladder_puts_a_skip_between_a_failure_and_a_pass() {
+        assert!(Verdict::Failed.rank() < Verdict::Skipped.rank());
+        assert!(Verdict::Skipped.rank() < Verdict::Passed.rank());
     }
 
     #[test]

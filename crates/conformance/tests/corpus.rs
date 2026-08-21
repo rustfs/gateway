@@ -18,17 +18,126 @@
 //! satisfies the conventions, and reaches a stated conclusion — through the public API only, the
 //! same way a foreign implementation would use this crate. The unit tests can reach internals;
 //! this one deliberately cannot, so a refactor that breaks the product surface breaks here.
-//! NOT responsible for: any individual assertion; those are unit-tested next to the engine.
-//! Upstream: the published API of `rustfs_gateway_conformance`. Downstream: nothing.
+//! Also the home of the corpus-wide half of the baseline contract: every case carries a row, and
+//! the whole corpus is run against those rows on the assembled service.
+//! NOT responsible for: any individual assertion; those are unit-tested next to the engine. Nor
+//! for per-domain wiring (`tests/domain_wiring.rs`) or a family's own size, polarity and
+//! known-red set (the family ledgers).
+//! Upstream: the published API of `rustfs_gateway_conformance`, and `conformance/baseline.json`.
+//! Downstream: nothing.
+//!
+//! # Why the baseline gate lives here and not only in a CI shell step
+//!
+//! rustfs/gateway#192: `cargo xtask conformance run --baseline conformance/baseline.json` is
+//! treated throughout this repository as the no-regression gate, and CI never ran it — the word
+//! `baseline` did not appear anywhere in `.github/`. Six real regressions from `fb06bbd` lived
+//! fifteen days behind four green merges. A `#[test]` is the cheapest place to fix that for good:
+//! it is inside `cargo test --workspace`, which is behind the branch-protected `Test` check and
+//! already budgeted, so the gate cannot be added to CI and then quietly not required — which is
+//! how `e2e` ended up non-blocking in the repository this suite was written to replace.
 
 use rustfs_gateway_conformance::corpus::Corpus;
-use rustfs_gateway_conformance::report::Verdict;
+use rustfs_gateway_conformance::inprocess::InProcess;
+use rustfs_gateway_conformance::report::{Baseline, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
 use rustfs_gateway_conformance::sut::Unwired;
 
 fn corpus() -> Corpus {
     let root = Corpus::discover_root().expect("a corpus sits next to this crate");
     runner::prepare_corpus(&root).expect("the corpus loads")
+}
+
+fn baseline() -> Baseline {
+    let root = Corpus::discover_root().expect("a corpus sits next to this crate");
+    let source = std::fs::read_to_string(root.join("baseline.json")).expect("the baseline is checked in");
+    Baseline::from_json(&source).expect("the baseline parses")
+}
+
+/// **The baseline is complete: every case in the corpus carries a row.**
+///
+/// The ruling rustfs/gateway#192 asks for, written as an assertion rather than as prose. When this
+/// was measured on `119570e` the corpus held 711 cases and the baseline 245 rows, and four family
+/// ledgers — copy, list, multipart, conditional/range — each carried a private copy of this same
+/// check for their own directory while the other twenty-one domains had none. Those four keep
+/// theirs, because a family ledger is meant to stand on its own; this is the one that covers the
+/// domains no ledger speaks for. It takes no allowlist: the one allowlist that existed
+/// (`NOT_YET_IN_THE_BASELINE` in `range_cond_family.rs`) is how "not this branch's to refresh"
+/// became 466 unrecorded cases.
+///
+/// It is worth enforcing only because a row now does something. Until
+/// [`rustfs_gateway_conformance::report::Report::regressions`] compared the whole verdict ladder,
+/// a `passed` row and a missing row took the identical branch, and backfilling would have been
+/// bookkeeping. Now a recorded `passed` that turns into a skip is a regression, so the row is the
+/// claim that the case executes.
+#[test]
+fn every_case_in_the_corpus_carries_a_baseline_row() {
+    let corpus = corpus();
+    let baseline = baseline();
+    let unrecorded: Vec<&str> = corpus
+        .cases()
+        .iter()
+        .filter(|case| baseline.expected(&case.id).is_none())
+        .map(|case| case.id.as_str())
+        .collect();
+    assert!(
+        unrecorded.is_empty(),
+        "{} case(s) have no row in conformance/baseline.json. Add one per case — a case with no \
+         row is a case whose verdict nothing has ever written down: {unrecorded:?}",
+        unrecorded.len()
+    );
+}
+
+/// **No row in the baseline names a case the corpus no longer has.**
+///
+/// The other direction of the same table. A row for a deleted case is a tolerance nothing can
+/// spend, and a `failed` row for a deleted case is worse than useless: re-adding the id later
+/// silently inherits permission to fail.
+#[test]
+fn no_baseline_row_names_a_case_the_corpus_does_not_have() {
+    let corpus = corpus();
+    let held: std::collections::BTreeSet<&str> = corpus.cases().iter().map(|case| case.id.as_str()).collect();
+    let baseline = baseline();
+    let orphans: Vec<&str> = baseline.ids().filter(|id| !held.contains(id)).collect();
+    assert!(orphans.is_empty(), "baseline rows for cases that no longer exist: {orphans:?}");
+}
+
+/// **The whole corpus runs against the assembled service and regresses against nothing.**
+///
+/// This is the gate rustfs/gateway#192 says CI never ran. Two assertions, because either alone is
+/// satisfiable by an accident: a run in which nothing executed has no regressions either, so the
+/// executed count is asserted first and against a floor derived from the corpus itself rather
+/// than a number that would need editing every time a case is added.
+#[test]
+fn the_whole_corpus_holds_the_verdicts_the_baseline_records() {
+    let corpus = corpus();
+    let root = Corpus::discover_root().expect("a corpus sits next to this crate");
+    let mut sut = InProcess::new(root);
+    let report = runner::run(&corpus, &mut sut, &RunOptions::default());
+
+    let executed = report
+        .outcomes
+        .iter()
+        .filter(|outcome| outcome.verdict != Verdict::Skipped)
+        .count();
+    assert!(
+        executed * 10 >= report.outcomes.len() * 9,
+        "only {executed} of {} cases reached a verdict; a run that stopped executing has no \
+         regressions either",
+        report.outcomes.len()
+    );
+
+    let baseline = baseline();
+    let regressions: Vec<String> = report
+        .regressions(Some(&baseline))
+        .iter()
+        .map(|outcome| format!("{} ({}) is {}", outcome.id, outcome.relative, outcome.verdict.as_str()))
+        .collect();
+    assert!(
+        regressions.is_empty(),
+        "{} case(s) regressed against conformance/baseline.json:\n{}",
+        regressions.len(),
+        regressions.join("\n")
+    );
 }
 
 #[test]
