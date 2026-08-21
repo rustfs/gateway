@@ -365,6 +365,29 @@ impl<R> IngestPipeline<R> {
     /// window's worth of input. A body that fits in the window is never moved at all, even though
     /// every one of its chunk headers has been stripped: headers are skipped by advancing the
     /// cursor, never by moving the bytes around them.
+    ///
+    /// # What that bound is worth, as a number
+    ///
+    /// The sentence above is true and reads smaller than it is. One compaction moves the retained
+    /// span and buys `window - span` bytes of room, so the movement per body byte is
+    /// `span / (window - span)` — a **function of the chunk-size-to-window ratio**, not a
+    /// constant. At an eighth of the window it is 0.13 of the body; at exactly half it is ~1.0,
+    /// because the span and the room it buys are then the same size and every chunk is moved
+    /// once. `crates/http/tests/ingest_perf_gates.rs` measures the curve and bounds it at both
+    /// ends: never more than one retained span per window's worth of room, never a *full* second
+    /// pass, and under half the body wherever the window is at least three times the chunk.
+    ///
+    /// The peak is a knife edge — at half the window the ratio reaches 0.9986, and a chunk 5%
+    /// either side of it costs a third of that — but a peer picks its own chunk size, so treat it
+    /// as reachable rather than as an accident.
+    ///
+    /// **The window is deliberately not grown to flatten that peak** (rustfs/gateway#265).
+    /// Growing to three times the chunk would hold the movement under half the body everywhere,
+    /// and it would triple what one connection is resident for. What that buys is one memcpy of
+    /// the body, against the socket read, the SHA-256 and the per-chunk HMAC it sits beside; what
+    /// it costs is the per-connection residency bound `c-ing-0063` and rustfs/gateway#229 are
+    /// about. Residency is the scarcer of the two, so the ratio is written down here and asserted
+    /// over its range instead of being engineered away.
     fn make_room(&mut self) -> Result<(), ChunkReject> {
         if self.filled < self.window.len() {
             return Ok(());
