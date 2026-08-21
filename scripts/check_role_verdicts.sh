@@ -17,7 +17,15 @@ fail() {
 command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
 command -v git >/dev/null 2>&1 || fail 'required command is missing: git'
 [[ -f "${ROOT_DIR}/AGENTS.md" ]] || fail 'rule input is missing: AGENTS.md'
-[[ -n "${GATEWAY_PR_BODY+x}" ]] || fail 'required input is missing: GATEWAY_PR_BODY'
+[[ -n "${GATEWAY_PR_BODY_JSON+x}" ]] || fail 'required input is missing: GATEWAY_PR_BODY_JSON'
+# The pull-request body arrives JSON-encoded because the workflow prints this step's env
+# block into the CI log, where the runner reads a line beginning `::` as a workflow
+# command (rustfs/gateway#224). A raw newline here means the encoding did not happen, so
+# the body could be forging or suppressing annotations already. Fail closed.
+[[ "$GATEWAY_PR_BODY_JSON" != *$'\n'* ]] ||
+    fail 'GATEWAY_PR_BODY_JSON must be a single-line JSON string (rule: rustfs/gateway#224)'
+[[ "$GATEWAY_PR_BODY_JSON" != *$'\r'* ]] ||
+    fail 'GATEWAY_PR_BODY_JSON must be a single-line JSON string (rule: rustfs/gateway#224)'
 
 if [[ -z "${GATEWAY_CHANGED_FILES+x}" ]]; then
     [[ -n "${GATEWAY_ROLE_BASE:-}" ]] || fail 'required input is missing: GATEWAY_ROLE_BASE'
@@ -27,6 +35,7 @@ fi
 python3 - "$ROOT_DIR" <<'PY'
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -34,7 +43,25 @@ import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
-body = os.environ["GATEWAY_PR_BODY"]
+try:
+    _decoded = json.loads(os.environ["GATEWAY_PR_BODY_JSON"])
+except ValueError as error:
+    print(
+        f"check_role_verdicts: GATEWAY_PR_BODY_JSON is not JSON (rule: rustfs/gateway#224): {error}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+# A pull request with no description arrives as JSON null.
+if _decoded is None:
+    _decoded = ""
+if not isinstance(_decoded, str):
+    print(
+        "check_role_verdicts: GATEWAY_PR_BODY_JSON must decode to a string, got "
+        f"{type(_decoded).__name__}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+body = _decoded
 
 table_rows = [
     "| `docs/**`, `.github/**`, Markdown-only changes | none | no role |",
