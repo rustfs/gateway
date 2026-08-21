@@ -33,21 +33,26 @@ use std::task::{Poll, Waker};
 pub enum HandlerCancellation {
     /// The operation-specific handler deadline expired.
     Deadline,
+    /// The transport stopped waiting for this request, for example after a client reset.
+    RequestAborted,
 }
 
 impl HandlerCancellation {
     const NONE: u8 = 0;
     const DEADLINE: u8 = 1;
+    const REQUEST_ABORTED: u8 = 2;
 
     const fn code(self) -> u8 {
         match self {
             Self::Deadline => Self::DEADLINE,
+            Self::RequestAborted => Self::REQUEST_ABORTED,
         }
     }
 
     const fn from_code(code: u8) -> Option<Self> {
         match code {
             Self::DEADLINE => Some(Self::Deadline),
+            Self::REQUEST_ABORTED => Some(Self::RequestAborted),
             _ => None,
         }
     }
