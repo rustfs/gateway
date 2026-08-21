@@ -20,7 +20,7 @@
 //! comparison.
 //! NOT responsible for: admitting the request (that is `SecurityFloor::admit`, which already ran),
 //! the string-to-sign's contents (that is `rustfs-gateway-sig`'s `sig_v2::string_to_sign`), or the
-//! POST-form SigV2 shape, which the floor refuses.
+//! POST-policy field parsing, which stays in `rustfs_gateway_sig::post_policy`.
 //! Upstream: `rustfs_gateway_sig::SealedSigV2`. Downstream: `crate::service`'s authentication
 //! stage.
 //!
@@ -44,7 +44,8 @@
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::sig_v2::{SigV2Mode, SigV2StringToSignSpec, verify_presented};
 use rustfs_gateway_sig::{
-    AuthError, AuthScheme, SealedSigV2, SigIdentity, SignatureMatch, Verdict, X_AMZ_SECURITY_TOKEN_HEADER, timing,
+    AuthError, AuthScheme, PostPolicyError, PostPolicyLimits, SealedSigV2, SigFamily, SigIdentity, SigV2PostPolicy,
+    SignatureMatch, Verdict, X_AMZ_SECURITY_TOKEN_HEADER, timing,
 };
 
 use super::credentials::{CredentialLookup, CredentialProvider};
@@ -152,39 +153,48 @@ impl SigV4Authenticator {
         // the same reason: a session rule answered early is an expired token distinguishable from
         // a wrong secret by the clock alone.
         //
-        // The header spelling only. SigV2's `CanonicalizedResource` covers 35 sub-resources and
-        // `x-amz-security-token` is not one of them, so a session token in the *query* of a
-        // presigned SigV2 URL is unsigned — anyone could attach one. A temporary credential
-        // presented that way therefore finds no token here and is refused, which is the
-        // fail-closed answer: SigV2 presigned cannot carry STS credentials safely, and the
-        // deployment that wants them should use SigV4. In the header form the token is an
-        // `x-amz-*` header and is inside the signature.
         let refusal = match &resolved {
-            Ok(CredentialLookup::Found(credentials)) => credentials
-                .admit(
-                    view.headers()
+            Ok(CredentialLookup::Found(credentials)) => {
+                let token = match sealed.mode() {
+                    SigV2Mode::PostPolicy => view.form_value("x-amz-security-token").map(str::as_bytes),
+                    SigV2Mode::HeaderAuth => view
+                        .headers()
                         .get(X_AMZ_SECURITY_TOKEN_HEADER)
                         .map(http::HeaderValue::as_bytes),
-                    sealed.now(),
-                )
-                .err(),
+                    // SigV2's canonical resource does not cover the session-token query field, so
+                    // accepting one would bind a temporary credential to unsigned material.
+                    SigV2Mode::PresignedUrl => None,
+                    _ => None,
+                };
+                credentials.admit(token, sealed.now()).err()
+            }
             Ok(CredentialLookup::NotFound) | Err(_) => None,
         };
 
-        let query = view.query();
-        let spec = SigV2StringToSignSpec::new(
-            sealed.mode(),
-            request.method(),
-            request.raw_path(),
-            &query,
-            view.headers(),
-            request.virtual_host_bucket(),
-        );
-        let expected = spec.build_for_verification()?.sign(&key);
-        // The one comparison. `verify_presented` is a wrapper over `Signature::ct_verify`, and
-        // there is no second one anywhere in the SigV2 path — `scripts/check_ct_eq.sh` rule 9
-        // fails the build if one appears.
-        let proof: Option<SignatureMatch> = verify_presented(sealed.presented(), &expected).ok();
+        let proof: Option<SignatureMatch> = match sealed.mode() {
+            SigV2Mode::PostPolicy => {
+                let fields = view.form_fields().ok_or(AuthError::AuthorizationHeaderMalformed)?;
+                let policy = SigV2PostPolicy::parse(fields, "", PostPolicyLimits::default(), sealed.now())
+                    .map_err(PostPolicyError::auth_error)?;
+                policy.verify(&key, sealed.presented()).ok()
+            }
+            SigV2Mode::HeaderAuth | SigV2Mode::PresignedUrl => {
+                let query = view.query();
+                let spec = SigV2StringToSignSpec::new(
+                    sealed.mode(),
+                    request.method(),
+                    request.raw_path(),
+                    &query,
+                    view.headers(),
+                    request.virtual_host_bucket(),
+                );
+                let expected = spec.build_for_verification()?.sign(&key);
+                // The one comparison. `verify_presented` is a wrapper over
+                // `Signature::ct_verify`; `scripts/check_ct_eq.sh` rejects a second one.
+                verify_presented(sealed.presented(), &expected).ok()
+            }
+            _ => return Err(AuthError::AuthorizationHeaderMalformed),
+        };
 
         // The unknown-key branch has now paid for the same derivation a known key does. Only
         // after that is the uniform credential rejection answered.
@@ -217,9 +227,9 @@ impl SigV4Authenticator {
         };
         let scheme = match sealed.mode() {
             SigV2Mode::PresignedUrl => AuthScheme::sigv2_presigned(identity_axis, sealed.expected_service()),
-            // `SigV2Mode` is `#[non_exhaustive]`; header authentication is the named arm and a
-            // location added later must not silently borrow the header scheme's meaning.
-            _ => AuthScheme::sigv2_header(identity_axis, sealed.expected_service()),
+            SigV2Mode::PostPolicy => AuthScheme::post_policy(SigFamily::V2, identity_axis, sealed.expected_service()),
+            SigV2Mode::HeaderAuth => AuthScheme::sigv2_header(identity_axis, sealed.expected_service()),
+            _ => return Err(AuthError::AuthorizationHeaderMalformed),
         };
         Ok(Some(Verdict::authenticated(credentials.identity().clone(), scheme, proof)))
     }

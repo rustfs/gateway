@@ -139,6 +139,11 @@ pub enum SigV2Mode {
     HeaderAuth,
     /// `?AWSAccessKeyId=…&Expires=…&Signature=…`.
     PresignedUrl,
+    /// Browser POST fields `AWSAccessKeyId`, `signature`, and `policy`.
+    ///
+    /// This location signs the base64 policy directly, so [`SigV2StringToSignSpec`] refuses it;
+    /// use [`SigV2StringToSign::from_post_policy`] instead.
+    PostPolicy,
 }
 
 /// A finished SigV2 string-to-sign, and the only thing that can be signed with HMAC-SHA1 here.
@@ -151,6 +156,14 @@ pub struct SigV2StringToSign {
 }
 
 impl SigV2StringToSign {
+    /// Wraps the base64 POST policy, which is the complete SigV2 browser-POST preimage.
+    #[must_use]
+    pub fn from_post_policy(encoded_policy: &str) -> Self {
+        Self {
+            text: encoded_policy.to_owned(),
+        }
+    }
+
     /// The string-to-sign text, exactly as it is fed to the HMAC.
     #[must_use]
     pub fn text(&self) -> &str {
@@ -314,6 +327,7 @@ impl<'r> SigV2StringToSignSpec<'r> {
                 super::parse_expires_digits(&raw)?;
                 Ok(raw)
             }
+            SigV2Mode::PostPolicy => Err(AuthError::AuthorizationHeaderMalformed),
         }
     }
 
