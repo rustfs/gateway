@@ -17,8 +17,8 @@
 //! Responsible for: flipping one declared protocol rule at a time, rebuilding the gateway from the
 //! mutated rule, running the corpus against it, and reporting for each rule whether a case caught
 //! it — separating that from the two ways a green run means nothing.
-//! NOT responsible for: choosing the flip (that is `rustfs_gateway_codegen::mutate`), writing it
-//! into the IR (that is `rustfs_gateway_codegen::mutate::apply`), or any assertion in the corpus.
+//! NOT responsible for: choosing or applying the flip (that is
+//! `rustfs_gateway_codegen::mutate`), or any assertion in the corpus.
 //! Upstream: `spec/quirks/*.toml` by way of the overlay. Downstream: the operator reading the
 //! matrix and the issues that ask for it.
 //!
@@ -523,6 +523,12 @@ fn select(
                     .map(|source| mutate::plan(&id, rule.mutation_dimension, source))
                     .collect();
                 (dimension, planned.map_err(Outcome::Unplannable))
+            }
+            None if overlay.contract_rules.contains_key(&id) => {
+                let rule = overlay.contract_rules.get(&id).expect("the key was just checked");
+                let dimension = rule.mutation_dimension.as_str().to_owned();
+                let plan = mutate::plan_contract(&id, rule).map(|mutation| vec![mutation]);
+                (dimension, plan.map_err(Outcome::Unplannable))
             }
             None => {
                 let dimension = overlay

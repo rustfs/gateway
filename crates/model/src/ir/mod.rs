@@ -629,7 +629,7 @@ pub struct DerivedResource {
 /// One hand-written protocol exception, resolved into the IR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Quirk {
-    /// Stable id, `q-<slug>-NNNN`.
+    /// Stable id, `q-<kebab-slug>`.
     pub id: String,
     /// Category. Not an enum: new AWS behaviour must not require a schema bump.
     pub kind: String,
@@ -675,11 +675,10 @@ pub struct ExtPoint {
     pub cfg_feature: Option<String>,
 }
 
-/// Sort key for a quirk id: the four-digit counter first, the whole id as the tie-break.
+/// Sort key for a quirk id: a numeric suffix first, then the whole id as the tie-break.
 ///
-/// Ids are allocated in discovery order, so ordering by the counter keeps a document's quirk list
-/// in the order the behaviours were found — which reads far better than the lexicographic order of
-/// their slugs, and is just as deterministic.
+/// Existing numbered ids stay in discovery order. Descriptive ids have no numeric suffix and sort
+/// afterwards, lexicographically, so widening the accepted grammar does not reorder the ledger.
 pub fn quirk_order_key(id: &str) -> (u32, &str) {
     let number = id
         .rsplit('-')

@@ -28,6 +28,7 @@
 use http::Method;
 use http::header::{CONTENT_TYPE, DATE, HeaderMap, HeaderName};
 
+use crate::contracts::{SIGV2_EMPTY_DATE_ON_AMZ_DATE, SIGV2_INCLUDED_QUERY};
 use crate::query::RawQuery;
 use crate::secret::SecretBytes;
 use crate::signature::{CtBytes, Signature};
@@ -39,6 +40,22 @@ use hmac::{Hmac, Mac};
 use sha1::Sha1;
 
 type HmacSha1 = Hmac<Sha1>;
+
+#[derive(Clone, Copy)]
+struct CanonicalizationPolicy {
+    included_query: bool,
+    empty_date_on_amz_date: bool,
+}
+
+const CLIENT_POLICY: CanonicalizationPolicy = CanonicalizationPolicy {
+    included_query: true,
+    empty_date_on_amz_date: true,
+};
+
+const VERIFICATION_POLICY: CanonicalizationPolicy = CanonicalizationPolicy {
+    included_query: SIGV2_INCLUDED_QUERY,
+    empty_date_on_amz_date: SIGV2_EMPTY_DATE_ON_AMZ_DATE,
+};
 
 /// The `Content-MD5` header, lowercased. `http::header` has no constant for it.
 const CONTENT_MD5: HeaderName = HeaderName::from_static("content-md5");
@@ -221,11 +238,28 @@ impl<'r> SigV2StringToSignSpec<'r> {
     /// * [`AuthError::AuthorizationQueryParametersError`] in [`SigV2Mode::PresignedUrl`] when
     ///   `Expires` is missing, repeated, or not a strict unsigned decimal.
     pub fn build(&self) -> Result<SigV2StringToSign, AuthError> {
+        self.build_with(CLIENT_POLICY)
+    }
+
+    /// Builds the server-side string-to-sign from the generated protocol contracts.
+    ///
+    /// The ordinary [`Self::build`] remains the AWS client baseline. Keeping these entry points
+    /// distinct lets the conformance mutation runner flip one verifier rule without teaching the
+    /// client signer the same defect and producing a false green round trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::build`].
+    pub fn build_for_verification(&self) -> Result<SigV2StringToSign, AuthError> {
+        self.build_with(VERIFICATION_POLICY)
+    }
+
+    fn build_with(&self, policy: CanonicalizationPolicy) -> Result<SigV2StringToSign, AuthError> {
         let content_md5 = single_header(self.headers, &CONTENT_MD5)?;
         let content_type = single_header(self.headers, &CONTENT_TYPE)?;
-        let date = self.date_slot()?;
+        let date = self.date_slot(policy)?;
         let amz_headers = self.canonicalized_amz_headers()?;
-        let resource = self.canonicalized_resource()?;
+        let resource = self.canonicalized_resource(policy)?;
 
         let mut text = String::with_capacity(
             self.method.as_str().len()
@@ -257,10 +291,10 @@ impl<'r> SigV2StringToSignSpec<'r> {
     /// rule fails every client that sends `x-amz-date`, which is most of them.
     ///
     /// Presigned: the `Expires` query parameter verbatim — an absolute Unix second.
-    fn date_slot(&self) -> Result<String, AuthError> {
+    fn date_slot(&self, policy: CanonicalizationPolicy) -> Result<String, AuthError> {
         match self.mode {
             SigV2Mode::HeaderAuth => {
-                if self.headers.contains_key(&X_AMZ_DATE) {
+                if policy.empty_date_on_amz_date && self.headers.contains_key(&X_AMZ_DATE) {
                     return Ok(String::new());
                 }
                 Ok(single_header(self.headers, &DATE)?.to_owned())
@@ -328,7 +362,7 @@ impl<'r> SigV2StringToSignSpec<'r> {
     /// `?acl=x%26versionId%3Dy` and `?acl=x&versionId=y` canonicalise to one string. botocore
     /// computes the same collision, so closing it unilaterally would reject requests AWS's own
     /// SDK signs. Both facts are recorded in `docs/security-model.md`.
-    fn canonicalized_resource(&self) -> Result<String, AuthError> {
+    fn canonicalized_resource(&self, policy: CanonicalizationPolicy) -> Result<String, AuthError> {
         let mut out = String::new();
         if let Some(bucket) = self.virtual_host_bucket {
             if bucket.is_empty() {
@@ -339,17 +373,19 @@ impl<'r> SigV2StringToSignSpec<'r> {
         }
         out.push_str(self.uri_path);
 
-        let mut separator = '?';
-        for name in INCLUDED_QUERY {
-            let Some(value) = self.query.decoded_value(name)? else {
-                continue;
-            };
-            out.push(separator);
-            separator = '&';
-            out.push_str(name);
-            if !value.is_empty() {
-                out.push('=');
-                out.push_str(&value);
+        if policy.included_query {
+            let mut separator = '?';
+            for name in INCLUDED_QUERY {
+                let Some(value) = self.query.decoded_value(name)? else {
+                    continue;
+                };
+                out.push(separator);
+                separator = '&';
+                out.push_str(name);
+                if !value.is_empty() {
+                    out.push('=');
+                    out.push_str(&value);
+                }
             }
         }
         Ok(out)

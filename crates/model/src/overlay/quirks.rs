@@ -48,12 +48,14 @@ impl Overlay {
                     )));
                 }
             };
-            let mutable_rule_count = usize::from(codec_rule.is_some()) + usize::from(source_rule.is_some());
-            match (classification, mutable_rule_count, contract_rule.is_some()) {
-                (RuleClassification::Mutable, 0, _) => {
+            let source_rule_count = usize::from(codec_rule.is_some()) + usize::from(source_rule.is_some());
+            match (classification, source_rule_count, contract_rule.is_some()) {
+                (RuleClassification::Mutable, 0, false) => {
                     return Err(Error::Overlay(format!("quirk `{id}` is mutable but has no typed rule")));
                 }
-                (RuleClassification::Mutable, 1, false) | (RuleClassification::Contract, 0, _) => {}
+                (RuleClassification::Mutable, 0, true)
+                | (RuleClassification::Mutable, 1, false)
+                | (RuleClassification::Contract, 0, _) => {}
                 (RuleClassification::Contract, _, _) => {
                     return Err(Error::Overlay(format!("quirk `{id}` is a contract but carries mutable input")));
                 }

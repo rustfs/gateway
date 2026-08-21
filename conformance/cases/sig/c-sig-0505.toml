@@ -1,0 +1,52 @@
+# c-sig-0505 — SigV2 signs a covered bucket subresource.
+
+[case]
+id = "c-sig-0505"
+schema_version = 1
+title = "A SigV2 request signs the cors subresource before reaching GetBucketCors"
+rationale = "An unconfigured bucket deliberately answers NoSuchCORSConfiguration only after authentication and routing. A verifier that omits cors from CanonicalizedResource instead answers SignatureDoesNotMatch, so the two responses distinguish the signed subresource rule from a handler-only check."
+polarity = "positive"
+operation = "GetBucketCors"
+tags = ["signature", "sigv2", "security", "cors"]
+timeout_ms = 10000
+quirks = ["q-sig-v2-included-query"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/517"
+summary = "Upstream restored omitted S3 subresources after botocore-generated SigV2 requests failed verification."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTAuthentication.html"
+summary = "SigV2 CanonicalizedResource includes selected S3 subresources such as cors."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig-v2-cors"
+
+[request]
+method = "GET"
+target = "/conf-sig-v2-cors?cors"
+headers = { "date" = "Fri, 02 Jan 2026 03:04:05 GMT" }
+sign = { mode = "sigv2_header", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchCORSConfiguration"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>NoSuchCORSConfiguration</Code>"]
+not_contains_utf8 = ["SignatureDoesNotMatch", "StringToSign", "SignatureProvided"]

@@ -481,7 +481,7 @@ impl Overlay {
         }
         for (id, quirk) in &self.quirks {
             if !is_quirk_id(id) {
-                return Err(Error::Overlay(format!("quirk id `{id}` does not match q-<slug>-NNNN")));
+                return Err(Error::Overlay(format!("quirk id `{id}` does not match q-<kebab-slug>")));
             }
             if quirk.evidence.is_empty() {
                 return Err(Error::Overlay(format!("quirk `{id}` has no evidence")));
@@ -504,27 +504,25 @@ impl Overlay {
 
 /// Whether a string is a well-formed quirk id.
 pub fn is_quirk_id(id: &str) -> bool {
-    matches_id(id, "q-")
+    id.strip_prefix("q-").is_some_and(matches_kebab)
 }
 
 /// Whether a string is a well-formed conformance case id.
 pub fn is_case_id(id: &str) -> bool {
-    matches_id(id, "c-")
-}
-
-fn matches_id(id: &str, prefix: &str) -> bool {
-    let Some(rest) = id.strip_prefix(prefix) else {
+    let Some(rest) = id.strip_prefix("c-") else {
         return false;
     };
     let Some((slug, number)) = rest.rsplit_once('-') else {
         return false;
     };
-    let slug_ok = !slug.is_empty()
-        && slug
+    matches_kebab(slug) && number.len() == 4 && number.chars().all(|c| c.is_ascii_digit())
+}
+
+fn matches_kebab(value: &str) -> bool {
+    !value.is_empty()
+        && value
             .split('-')
-            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
-    let number_ok = number.len() == 4 && number.chars().all(|c| c.is_ascii_digit());
-    slug_ok && number_ok
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()))
 }
 
 pub(super) fn read(path: &Path) -> Result<String> {

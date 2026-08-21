@@ -293,6 +293,12 @@ pub fn render(
             Some(rustfs_gateway_model::MutationDimension::SignaturePayloadTokenPolicy) => {
                 out.push_str("contract_value = \"verbatim_payload_token\"\n")
             }
+            Some(rustfs_gateway_model::MutationDimension::SigV2IncludedQueryPolicy) => {
+                out.push_str("contract_value = \"include_subresources\"\n")
+            }
+            Some(rustfs_gateway_model::MutationDimension::SigV2DateSlotPolicy) => {
+                out.push_str("contract_value = \"empty_on_amz_date\"\n")
+            }
             _ => {}
         },
         Some(ContractValue::SignaturePolicy(false)) => match contract_rule.map(|rule| rule.mutation_dimension) {
@@ -304,6 +310,12 @@ pub fn render(
             }
             Some(rustfs_gateway_model::MutationDimension::SignaturePayloadTokenPolicy) => {
                 out.push_str("contract_value = \"digest_hex\"\n")
+            }
+            Some(rustfs_gateway_model::MutationDimension::SigV2IncludedQueryPolicy) => {
+                out.push_str("contract_value = \"omit_subresources\"\n")
+            }
+            Some(rustfs_gateway_model::MutationDimension::SigV2DateSlotPolicy) => {
+                out.push_str("contract_value = \"date_header_on_amz_date\"\n")
             }
             _ => {}
         },

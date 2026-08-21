@@ -2,8 +2,8 @@ c-sig-0501|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0501_a_virtual_hosted_ob
 c-sig-0502|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0502_an_object_put_carries_md5_content_type_and_the_amz_block|
 c-sig-0503|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0503_a_bucket_listing_signs_its_trailing_slash|
 c-sig-0504|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0504_a_correct_signature_verifies_against_an_independent_vector|verify_presented(presented.presented(), &expected)
-c-sig-0505|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0505_the_cors_subresource_is_covered|
-c-sig-0506|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0506_x_amz_date_empties_the_date_line|
+c-sig-0505|positive|conformance/cases/sig/c-sig-0505.toml|q-sig-v2-included-query|code = "NoSuchCORSConfiguration"
+c-sig-0506|positive|conformance/cases/sig/c-sig-0506.toml|q-sig-v2-empty-date-on-amz-date|status = 200
 c-sig-0507|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0507_without_x_amz_date_the_date_header_is_used|
 c-sig-0508|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0508_repeated_amz_values_are_trimmed_and_comma_joined|
 c-sig-0509|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0509_amz_headers_are_sorted_and_each_line_is_terminated|

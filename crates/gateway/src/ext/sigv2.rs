@@ -180,7 +180,7 @@ impl SigV4Authenticator {
             view.headers(),
             request.virtual_host_bucket(),
         );
-        let expected = spec.build()?.sign(&key);
+        let expected = spec.build_for_verification()?.sign(&key);
         // The one comparison. `verify_presented` is a wrapper over `Signature::ct_verify`, and
         // there is no second one anywhere in the SigV2 path — `scripts/check_ct_eq.sh` rule 9
         // fails the build if one appears.

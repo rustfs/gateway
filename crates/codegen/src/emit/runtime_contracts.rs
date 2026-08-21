@@ -520,6 +520,26 @@ pub fn render_signature(rules: &BTreeMap<String, ContractRule>) -> Result<String
         "/// Whether canonical signing keeps the client's accepted payload token spelling.\npub(crate) const SIGNATURE_PAYLOAD_TOKEN_VERBATIM: bool = {payload};"
     )
     .expect("writing to String cannot fail");
+
+    let included_query = unique(rules, MutationDimension::SigV2IncludedQueryPolicy)?;
+    let ContractValue::SignaturePolicy(included_query) = included_query else {
+        return Err(wrong_type(MutationDimension::SigV2IncludedQueryPolicy));
+    };
+    writeln!(
+        out,
+        "/// Whether SigV2 canonical resources include the reviewed subresource allowlist.\npub(crate) const SIGV2_INCLUDED_QUERY: bool = {included_query};"
+    )
+    .expect("writing to String cannot fail");
+
+    let empty_date = unique(rules, MutationDimension::SigV2DateSlotPolicy)?;
+    let ContractValue::SignaturePolicy(empty_date) = empty_date else {
+        return Err(wrong_type(MutationDimension::SigV2DateSlotPolicy));
+    };
+    writeln!(
+        out,
+        "/// Whether SigV2 empties the Date slot when x-amz-date is present.\npub(crate) const SIGV2_EMPTY_DATE_ON_AMZ_DATE: bool = {empty_date};"
+    )
+    .expect("writing to String cannot fail");
     Ok(out)
 }
 

@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Planning one mutation of a mutable quirk's lowered-IR source.
+//! Planning one mutation of a mutable quirk's lowered-IR or runtime-contract source.
 //!
 //! Responsible for: choosing the single alternative value a mutation dimension admits, and
 //! grouping quirk ids by the overlay family file that declares them.
-//! NOT responsible for: writing the value into the IR (that is [`apply`]), regenerating, building,
-//! or judging whether a case caught the mutation — the command in `xtask` owns the loop.
+//! NOT responsible for: regenerating, building, or judging whether a case caught the mutation —
+//! the command in `xtask` owns the loop.
 //! Upstream: [`crate::emit::quirk_toml::resolve_sources`], which reads the same path grammar this
 //! module writes. Downstream: `xtask conformance mutate`.
 //!
@@ -34,19 +34,19 @@ pub mod apply;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use rustfs_gateway_model::MutationDimension;
 use rustfs_gateway_model::ir::{EmptyValue, TimestampFormat};
 use rustfs_gateway_model::toml_lite::{self, Toml};
+use rustfs_gateway_model::{ContractRule, ContractValue, MutationDimension};
 
 use crate::emit::quirk_toml::{ResolvedSource, SourceValue};
 use crate::{Error, Result, io};
 
-/// One planned flip of one lowered-IR mutation source.
+/// One planned flip of one typed mutation source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mutation {
     /// The quirk whose rule this source carries.
     pub quirk: String,
-    /// The lowered-IR path, in the grammar `crate::emit::quirk_toml` resolves.
+    /// The lowered-IR path, or an `@contract.` path for a runtime contract.
     pub path: String,
     /// The value the unmutated IR carries at that path.
     pub from: SourceValue,
@@ -100,6 +100,9 @@ pub const ABSENT_NOT_CONFIGURED_MUTANT: &str = "NoSuchLifecycleConfiguration";
 /// The lowered-IR path suffix whose absence is itself the rule.
 const NOT_CONFIGURED_SUFFIX: &str = ".errors.not_configured";
 
+/// Prefix for a mutation that targets a typed runtime contract instead of lowered operation IR.
+const CONTRACT_PATH_PREFIX: &str = "@contract.";
+
 /// Plans the flip for one resolved source under one mutation dimension.
 ///
 /// Every dimension gets the one alternative that a client would actually observe: a boolean is
@@ -115,6 +118,69 @@ const NOT_CONFIGURED_SUFFIX: &str = ".errors.not_configured";
 pub fn plan(quirk: &str, dimension: MutationDimension, source: &ResolvedSource) -> std::result::Result<Mutation, String> {
     let to = alternative(dimension, &source.current, &source.path)?;
     Mutation::new(quirk, &source.path, source.current.clone(), to)
+}
+
+/// Plans the boolean flip for one typed runtime contract.
+///
+/// # Errors
+///
+/// Returns the reason when the contract has no reviewed mechanical opposite.
+pub fn plan_contract(quirk: &str, rule: &ContractRule) -> std::result::Result<Mutation, String> {
+    let current = contract_source(&rule.current)?;
+    let to = alternative(rule.mutation_dimension, &current, &format!("{CONTRACT_PATH_PREFIX}{quirk}"))?;
+    Mutation::new(quirk, &format!("{CONTRACT_PATH_PREFIX}{quirk}"), current, to)
+}
+
+/// Applies a typed runtime-contract mutation, returning whether the path named that namespace.
+///
+/// # Errors
+///
+/// Returns the reason when the id is stale, the current value changed, or the replacement has the
+/// wrong value shape.
+pub(crate) fn apply_contract(
+    rules: &mut BTreeMap<String, ContractRule>,
+    mutation: &Mutation,
+) -> std::result::Result<bool, String> {
+    let Some(id) = mutation.path.strip_prefix(CONTRACT_PATH_PREFIX) else {
+        return Ok(false);
+    };
+    if id != mutation.quirk {
+        return Err(format!(
+            "contract path `{}` names `{id}`, but the mutation belongs to `{}`",
+            mutation.path, mutation.quirk
+        ));
+    }
+    let rule = rules
+        .get_mut(id)
+        .ok_or_else(|| format!("contract mutation names unknown rule `{id}`"))?;
+    let found = contract_source(&rule.current)?;
+    if found != mutation.from {
+        return Err(format!(
+            "contract `{id}` carries {found:?}, but the mutation plan replaces {:?}; the ledger and \
+             generated input disagree",
+            mutation.from
+        ));
+    }
+    rule.current = contract_value(&mutation.to)?;
+    let written = contract_source(&rule.current)?;
+    if written != mutation.to {
+        return Err(format!("contract `{id}` does not read back as {:?}; found {written:?}", mutation.to));
+    }
+    Ok(true)
+}
+
+fn contract_source(value: &ContractValue) -> std::result::Result<SourceValue, String> {
+    match value {
+        ContractValue::SignaturePolicy(value) => Ok(SourceValue::Bool(*value)),
+        _ => Err("this typed runtime contract has no mechanical mutation writer".to_owned()),
+    }
+}
+
+fn contract_value(value: &SourceValue) -> std::result::Result<ContractValue, String> {
+    match value {
+        SourceValue::Bool(value) => Ok(ContractValue::SignaturePolicy(*value)),
+        _ => Err("a signature runtime contract requires a boolean replacement".to_owned()),
+    }
 }
 
 fn alternative(dimension: MutationDimension, current: &SourceValue, path: &str) -> std::result::Result<SourceValue, String> {

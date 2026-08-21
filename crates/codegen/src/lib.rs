@@ -228,17 +228,16 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
     generate_mutated(input, out, &[])
 }
 
-/// Renders every artefact from a lowered IR with `mutations` written into it first.
+/// Renders every artefact with `mutations` written into its lowered IR or runtime contracts first.
 ///
 /// This is the whole of what makes a mutation run a measurement rather than an opinion: the
-/// mutation is applied to the same IR document code generation consumes, so whatever the mutated
+/// mutation is applied to the same typed input code generation consumes, so whatever the mutated
 /// artefacts do is what the built gateway does. Nothing on disk is touched — the caller decides
 /// whether to write the result, and is responsible for putting the unmutated bytes back.
 ///
-/// Each write is read back afterwards through [`emit::quirk_toml::resolve_at`], the reader that
-/// produced the current value in the first place. A writer that silently addressed a different
-/// field would otherwise produce a run in which every mutant survives, which is indistinguishable
-/// from a corpus that checks nothing.
+/// Each write is read back afterwards through the reader that produced the current value. A writer
+/// that silently addressed a different field would otherwise produce a run in which every mutant
+/// survives, which is indistinguishable from a corpus that checks nothing.
 ///
 /// # Errors
 ///
@@ -246,9 +245,14 @@ pub fn generate(input: &CodegenInput, out: &CodegenOutput) -> Result<Artifacts> 
 /// that is not the one found there, or does not read back as written.
 pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[mutate::Mutation]) -> Result<Artifacts> {
     let model = Model::load(&input.model)?;
-    let overlay = Overlay::load(&input.overlays)?;
+    let mut overlay = Overlay::load(&input.overlays)?;
     let mut lowered = lower(&model, &overlay)?;
     for mutation in mutations {
+        if mutate::apply_contract(&mut overlay.contract_rules, mutation)
+            .map_err(|message| Error::Policy(format!("quirk `{}`: {message}", mutation.quirk)))?
+        {
+            continue;
+        }
         mutate::apply::apply(&mut lowered.operations, mutation)
             .map_err(|message| Error::Policy(format!("quirk `{}`: {message}", mutation.quirk)))?;
         match emit::quirk_toml::resolve_at(&lowered.operations, &mutation.path) {
