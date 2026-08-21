@@ -46,8 +46,9 @@ use std::time::{Duration, Instant};
 use rustfs_gateway_sig::timing::{CredentialLookup, FailureFloor, placeholder_secret};
 use rustfs_gateway_sig::{CtBytes, SecretBytes, Signature};
 
-/// Comparisons per timed sample. Large enough that one sample is far above clock resolution.
-const BATCH: usize = 2_000;
+/// Comparisons per timed sample. The batch spans scheduler and CPU-frequency noise so adjacent
+/// samples measure the comparison rather than a short-lived clock-rate transition.
+const BATCH: usize = 10_000;
 /// Samples per side. The two sides are interleaved, so drift affects both equally.
 const SAMPLES: usize = 201;
 /// Rounds; the best (most symmetric) round wins, which absorbs a scheduler hiccup without
