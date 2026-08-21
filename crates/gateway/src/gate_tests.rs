@@ -15,7 +15,8 @@
 //! What the bounded body read does, asserted where the ceilings and the deadlines are enforced.
 //!
 //! Responsible for: [`super::SealedBody::read`]'s two ceilings, its two idle deadlines, the
-//! per-operation body cap table, and the framed path's refusal codes.
+//! per-operation body cap table, the bound on frames that carry no payload, and the framed path's
+//! refusal codes.
 //! NOT responsible for: the framing rules themselves (`rustfs_gateway_http::ingest` owns them), or
 //! what a request does to the assembled pipeline (`crates/gateway/tests/`).
 //! Upstream: `super`, plus `rustfs-gateway-server` for the cases that need a real socket.
@@ -466,6 +467,240 @@ async fn c_lim_0001_allows_a_long_socket_body_that_keeps_making_progress() {
     let text = String::from_utf8(response).expect("HTTP response is text");
     assert!(text.starts_with("HTTP/1.1 200"), "{text}");
     assert_eq!(reached.fetch_add(0, Ordering::SeqCst), 1, "the progressing request missed the handler");
+    stop_server(running).await;
+}
+
+/// The two frame shapes that carry no payload, and which `WireFrames::poll_next` skips.
+#[derive(Clone, Copy, Debug)]
+enum PayloadFree {
+    /// A data frame of zero bytes.
+    EmptyData,
+    /// A trailer section, which `http_body::Frame::into_data` refuses.
+    Trailers,
+}
+
+/// A body that answers every poll with a frame carrying no payload, for ever.
+///
+/// The instrument rustfs/gateway#263 needs and `crate::probe::ObservedBody` cannot be: the
+/// defect is a body that never *ends*, and a body assembled from a finite list of frames always
+/// does. It counts its polls, so the bound can be read as a number rather than as "it returned".
+struct EndlessPayloadFreeBody {
+    shape: PayloadFree,
+    polls: Arc<AtomicUsize>,
+}
+
+impl http_body::Body for EndlessPayloadFreeBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        self: core::pin::Pin<&mut Self>,
+        _context: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Option<Result<http_body::Frame<Bytes>, Self::Error>>> {
+        self.polls.fetch_add(1, Ordering::SeqCst);
+        let frame = match self.shape {
+            PayloadFree::EmptyData => http_body::Frame::data(Bytes::new()),
+            PayloadFree::Trailers => http_body::Frame::trailers(http::HeaderMap::new()),
+        };
+        core::task::Poll::Ready(Some(Ok(frame)))
+    }
+}
+
+/// Reads `body` on a thread of its own and gives up after `PATIENCE`.
+///
+/// The deadline has to be outside the future. A body that answers `Ready` for ever never returns
+/// `Poll::Pending`, so nothing on the same thread — not `tokio::time::timeout`, not the reader's
+/// own between-frame `Delay` — ever gets to run: the spin is synchronous. Without this, a
+/// regression here does not fail the suite, it hangs it, and a hung job reads as infrastructure.
+fn read_off_thread<B>(body: B, ingest: Option<crate::chunked::ChunkIngest>) -> Result<Bytes, S3Error>
+where
+    B: http_body::Body + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    /// Long enough that a slow shared runner is never the reason, short enough to fail a job
+    /// rather than time it out. It is a hang detector and never the assertion.
+    const PATIENCE: Duration = Duration::from_secs(30);
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a current-thread runtime");
+        let outcome = runtime.block_on(async move {
+            let proof = Authenticated::granted_for_test();
+            SealedBody::seal(Some(body), None)
+                .read(&proof, roomy(), BodyTimeouts::S3, ingest, BodyDigestObligation::None, BodyIntegrity::NONE)
+                .await
+        });
+        let _ = sender.send(outcome);
+    });
+    receiver
+        .recv_timeout(PATIENCE)
+        .expect("the reader spun on a body that carries no payload instead of refusing it")
+}
+
+/// Negative — a body that yields nothing but payload-free frames is refused, on both shapes.
+///
+/// Neither shape advances `WireProgress::seen`, so neither is charged against a ceiling, and each
+/// one is a frame *arriving*, so each one resets the between-frame deadline rather than expiring
+/// it. Before the run bound this loop had no exit: unbounded work for a peer that transfers no
+/// bytes, which is a resource-exhaustion path open to anyone who can open a connection.
+/// rustfs/gateway#263.
+///
+/// The poll count is the sharp end. "It returned an error" would also be satisfied by a reader
+/// that spun ten million times first.
+#[test]
+fn a_body_of_payload_free_frames_is_refused_rather_than_spun_on() {
+    for shape in [PayloadFree::EmptyData, PayloadFree::Trailers] {
+        let polls = Arc::new(AtomicUsize::new(0));
+        let body = EndlessPayloadFreeBody {
+            shape,
+            polls: Arc::clone(&polls),
+        };
+        let error = read_off_thread(body, None).expect_err("a body that never carries payload is not a body");
+        assert_eq!(error.code(), Some(&ErrorCode::REQUEST_TIMEOUT), "{shape:?}");
+        assert_eq!(error.status(), StatusCode::REQUEST_TIMEOUT, "{shape:?}");
+        assert_eq!(
+            polls.fetch_add(0, Ordering::SeqCst),
+            crate::wire_read::MAX_PAYLOAD_FREE_FRAME_RUN as usize + 1,
+            "{shape:?}: the refusal fires on the frame that crosses the run, and not one later"
+        );
+        // A body abandoned mid-stream leaves no synchronisation point on the connection, so the
+        // refusal has to end it — RFC 9112 §9.3.
+        assert!(error.must_close_connection(), "{shape:?}");
+    }
+    // The control for the line above: the accessor is not stuck on `true`. A refusal that does
+    // not force the close reads `false` through the same call.
+    assert!(!content_sha256_mismatch().must_close_connection());
+}
+
+/// Negative — the framed path is bounded by the same rule, and by the same reader.
+///
+/// `ChunkIngest::run` pulls its wire octets through `WireReader`, so a payload-free spin reaches
+/// it as a stalled `poll_fill` rather than as a decode error. If the bound lived in the unframed
+/// collector instead of in `WireFrames`, this case would hang while its sibling passed.
+#[test]
+fn a_framed_body_of_payload_free_frames_is_refused_by_the_same_bound() {
+    let polls = Arc::new(AtomicUsize::new(0));
+    let body = EndlessPayloadFreeBody {
+        shape: PayloadFree::EmptyData,
+        polls: Arc::clone(&polls),
+    };
+    let error = read_off_thread(body, Some(unsigned_ingest(11, 21))).expect_err("no chunk header ever arrives");
+    assert_eq!(error.code(), Some(&ErrorCode::REQUEST_TIMEOUT));
+    assert_eq!(
+        polls.fetch_add(0, Ordering::SeqCst),
+        crate::wire_read::MAX_PAYLOAD_FREE_FRAME_RUN as usize + 1
+    );
+}
+
+/// Negative — a peer that pays for its payload-free frames one byte at a time is bounded by the
+/// ceiling it is now spending, and is refused there.
+///
+/// This is what the run bound buys, and why it is a run rather than a per-body total: every
+/// `MAX_PAYLOAD_FREE_FRAME_RUN + 1` frames at least one carried a byte, so the reader's work is a
+/// function of `BodyCeilings` — which is bounded — instead of a function of what the peer feels
+/// like sending. The refusal here is `413`, from the ceiling, and never the run bound.
+#[test]
+fn payload_free_frames_paid_for_a_byte_at_a_time_are_bounded_by_the_ceiling() {
+    /// A body that pads every payload byte with a full legal run of empty frames.
+    struct PaddedBody {
+        emitted: usize,
+        budget: usize,
+    }
+
+    impl http_body::Body for PaddedBody {
+        type Data = Bytes;
+        type Error = Infallible;
+
+        fn poll_frame(
+            self: core::pin::Pin<&mut Self>,
+            _context: &mut core::task::Context<'_>,
+        ) -> core::task::Poll<Option<Result<http_body::Frame<Bytes>, Self::Error>>> {
+            let this = self.get_mut();
+            this.emitted = this.emitted.saturating_add(1);
+            assert!(this.emitted <= this.budget, "the ceiling did not stop a padded body");
+            let period = crate::wire_read::MAX_PAYLOAD_FREE_FRAME_RUN as usize + 1;
+            let frame = if this.emitted.is_multiple_of(period) {
+                http_body::Frame::data(Bytes::from_static(b"x"))
+            } else {
+                http_body::Frame::data(Bytes::new())
+            };
+            core::task::Poll::Ready(Some(Ok(frame)))
+        }
+    }
+
+    // `roomy()` is a 1 MiB ceiling, so a byte per period bounds the whole read at
+    // (1 MiB + 1) periods of frames — reached, and refused, well inside the patience above.
+    let budget = ((1_usize << 20) + 2) * (crate::wire_read::MAX_PAYLOAD_FREE_FRAME_RUN as usize + 1);
+    let error = read_off_thread(PaddedBody { emitted: 0, budget }, None).expect_err("over the ceiling");
+    assert_eq!(error.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
+    assert_eq!(error.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+/// Positive — a legal run of payload-free frames is not a refusal, and the run resets.
+///
+/// The green half of the boundary, and the one that says the counter is a *run*: three full legal
+/// runs separated by one payload byte each is `3 * MAX + 2` payload-free frames in one body, and
+/// a per-body total of any size below that would refuse a body every transport in this workspace
+/// can legitimately produce.
+#[tokio::test]
+async fn a_legal_run_of_payload_free_frames_still_delivers_the_body() {
+    let proof = Authenticated::granted_for_test();
+    let run = crate::wire_read::MAX_PAYLOAD_FREE_FRAME_RUN as usize;
+    let mut frames = Vec::new();
+    for payload in [Bytes::from_static(b"a"), Bytes::from_static(b"b"), Bytes::new()] {
+        frames.extend(core::iter::repeat_n(Bytes::new(), run));
+        if !payload.is_empty() {
+            frames.push(payload);
+        }
+    }
+    let payload_free = frames.iter().filter(|frame| frame.is_empty()).count();
+    assert_eq!(payload_free, 3 * run, "the fixture must carry more empties than any per-body total");
+
+    let (body, read) = crate::probe::ObservedBody::new(frames);
+    let bytes = SealedBody::seal(Some(body), None)
+        .read(&proof, roomy(), BodyTimeouts::S3, None, BodyDigestObligation::None, BodyIntegrity::NONE)
+        .await
+        .expect("a legal run of empty frames is not a refusal");
+    assert_eq!(bytes, Bytes::from_static(b"ab"));
+    assert!(read.is_exhausted(), "the body was refused instead of being read to its end");
+}
+
+/// Positive — a real hyper connection whose chunked body ends in a trailer section is still read
+/// whole, over a socket.
+///
+/// The bound above is a rule about what the *transport* is allowed to hand over, so the case that
+/// says it does not refuse conforming traffic has to be one where hyper does the framing rather
+/// than a fixture that decides for itself what a frame is. A trailer section is the one
+/// payload-free frame an ordinary HTTP/1.1 request produces, and RFC 9112 §7.1.2 allows a chunked
+/// body exactly one — which is the floor `MAX_PAYLOAD_FREE_FRAME_RUN` is derived from, measured
+/// here rather than assumed.
+#[tokio::test]
+async fn a_real_chunked_body_with_a_trailer_section_is_still_read_whole() {
+    let timeouts = BodyTimeouts::new(Duration::from_secs(5), Duration::from_secs(5)).expect("non-zero timeouts");
+    let (running, reached) = body_timeout_server(timeouts);
+    let mut stream = TcpStream::connect(running.local_addr).await.expect("connection succeeds");
+    stream
+        .write_all(
+            b"POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nTrailer: x-probe\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .expect("head writes");
+    stream
+        .write_all(b"4\r\nbody\r\n0\r\nx-probe: 1\r\n\r\n")
+        .await
+        .expect("a chunked body with a trailer section writes");
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response))
+        .await
+        .expect("the response completes")
+        .expect("response reads to EOF");
+    let text = String::from_utf8(response).expect("HTTP response is text");
+    assert!(text.starts_with("HTTP/1.1 200"), "{text}");
+    assert_eq!(reached.fetch_add(0, Ordering::SeqCst), 1, "the trailered body never reached the handler");
     stop_server(running).await;
 }
 
