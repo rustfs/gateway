@@ -1,0 +1,44 @@
+# c-sig-0548 — SigV2 does not cover arbitrary query parameters.
+
+[case]
+id = "c-sig-0548"
+schema_version = 1
+title = "A SigV2 presigned request leaves an arbitrary query parameter unsigned"
+rationale = "The client signs a request carrying foo=1, which is not a covered S3 subresource. The authenticated GetObject response proves the verifier preserves SigV2's documented weak query coverage instead of silently applying SigV4-style all-query coverage."
+polarity = "negative"
+operation = "GetObject"
+tags = ["signature", "sigv2", "presigned", "security"]
+timeout_ms = 10000
+quirks = ["q-sig-v2-query-not-covered"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTAuthentication.html"
+summary = "AWS limits SigV2 CanonicalizedResource query coverage to named S3 subresources rather than arbitrary parameters."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "presigned-query.txt"
+content_type = "text/plain"
+body = { utf8 = "uncovered query" }
+
+[request]
+method = "GET"
+target = "/conf-sig/presigned-query.txt?foo=1"
+headers = {}
+sign = { mode = "presigned_v2", credential = "valid", expires_s = 60 }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = "uncovered query"

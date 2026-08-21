@@ -28,7 +28,7 @@
 use http::Method;
 use http::header::{CONTENT_TYPE, DATE, HeaderMap, HeaderName};
 
-use crate::contracts::{SIGV2_EMPTY_DATE_ON_AMZ_DATE, SIGV2_INCLUDED_QUERY};
+use crate::contracts::{SIGV2_EMPTY_DATE_ON_AMZ_DATE, SIGV2_INCLUDED_QUERY, SIGV2_QUERY_NOT_COVERED};
 use crate::query::RawQuery;
 use crate::secret::SecretBytes;
 use crate::signature::{CtBytes, Signature};
@@ -45,16 +45,19 @@ type HmacSha1 = Hmac<Sha1>;
 struct CanonicalizationPolicy {
     included_query: bool,
     empty_date_on_amz_date: bool,
+    query_not_covered: bool,
 }
 
 const CLIENT_POLICY: CanonicalizationPolicy = CanonicalizationPolicy {
     included_query: true,
     empty_date_on_amz_date: true,
+    query_not_covered: true,
 };
 
 const VERIFICATION_POLICY: CanonicalizationPolicy = CanonicalizationPolicy {
     included_query: SIGV2_INCLUDED_QUERY,
     empty_date_on_amz_date: SIGV2_EMPTY_DATE_ON_AMZ_DATE,
+    query_not_covered: SIGV2_QUERY_NOT_COVERED,
 };
 
 /// The `Content-MD5` header, lowercased. `http::header` has no constant for it.
@@ -387,8 +390,36 @@ impl<'r> SigV2StringToSignSpec<'r> {
                     out.push_str(&value);
                 }
             }
+            if !policy.query_not_covered {
+                for (name, value) in self.uncovered_query_pairs()? {
+                    out.push(separator);
+                    separator = '&';
+                    out.push_str(&name);
+                    if let Some(value) = value {
+                        out.push('=');
+                        out.push_str(&value);
+                    }
+                }
+            }
         }
         Ok(out)
+    }
+
+    fn uncovered_query_pairs(&self) -> Result<Vec<(String, Option<String>)>, AuthError> {
+        let mut pairs: Vec<(String, Option<String>)> = Vec::new();
+        for (name, value) in self.query.decoded_pairs()? {
+            if INCLUDED_QUERY.contains(&name.as_str())
+                || matches!(name.as_str(), "AWSAccessKeyId" | SIGV2_EXPIRES_PARAM | "Signature")
+            {
+                continue;
+            }
+            if pairs.iter().any(|(existing, _)| existing.eq(&name)) {
+                return Err(AuthError::AuthorizationHeaderMalformed);
+            }
+            pairs.push((name, value));
+        }
+        pairs.sort_unstable();
+        Ok(pairs)
     }
 }
 
