@@ -15,7 +15,8 @@ fail() {
 
 command -v python3 >/dev/null 2>&1 || fail 'python3 is required'
 for required in .cargo/config.toml Cargo.toml xtask-launcher/Cargo.toml xtask-launcher/src/main.rs xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs xtask/src/verify/launcher.rs \
-    crates/conformance/src/cli.rs crates/gateway/tests/cors_runtime.rs crates/server/tests/server_load.rs; do
+    crates/conformance/src/cli.rs crates/gateway/tests/cors_runtime.rs crates/server/tests/server_load.rs \
+    crates/server/tests/server_load/per_ip.rs; do
     [[ -f "${ROOT}/${required}" ]] || fail "required input is missing: ${required}"
 done
 
@@ -540,6 +541,10 @@ for relative, test_name in (
         "crates/server/tests/server_load.rs",
         "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic",
     ),
+    (
+        "crates/server/tests/server_load/per_ip.rs",
+        "c_lim_0037_ten_thousand_half_open_connections_preserve_other_ip_p99",
+    ),
 ):
     _, test_syntax = rust_views((root / relative).read_text())
     pattern = re.compile(
@@ -728,12 +733,14 @@ test.extend([
     "c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget".to_owned(),
     "--skip".to_owned(),
     "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic".to_owned(),
+    "--skip".to_owned(),
+    "c_lim_0037_ten_thousand_half_open_connections_preserve_other_ip_p99".to_owned(),
 ]);
 let clippy = steps.remove(0);
 return vec![vec![test, clippy]];
 ''')
 if compact(crate_step_batches_items[0][1]).count(expected_server_batch) != 1:
-    fail("server fast verification must retain ordinary runtime tests and defer only the two workspace load contracts")
+    fail("server fast verification must retain ordinary runtime tests and defer only the three workspace load contracts")
 standalone_case_items = functions_named("standalone_crate_case", syntax, comments_removed)
 expected_standalone_case = compact('''
 (package != "rustfs-gateway").then(|| crate_case(package)).flatten()

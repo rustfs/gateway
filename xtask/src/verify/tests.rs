@@ -241,6 +241,8 @@ fn server_fast_scope_keeps_thousand_connection_load_in_the_workspace_gate() {
             "c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget",
             "--skip",
             "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic",
+            "--skip",
+            "c_lim_0037_ten_thousand_half_open_connections_preserve_other_ip_p99",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -256,6 +258,11 @@ fn server_fast_scope_keeps_thousand_connection_load_in_the_workspace_gate() {
         include_str!("../../../crates/server/tests/server_load.rs")
             .contains("fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic()"),
         "the workspace-only c-lim-0061 load contract must remain active"
+    );
+    assert!(
+        include_str!("../../../crates/server/tests/server_load/per_ip.rs")
+            .contains("fn c_lim_0037_ten_thousand_half_open_connections_preserve_other_ip_p99()"),
+        "the workspace-only c-lim-0037 load contract must remain active"
     );
 }
 

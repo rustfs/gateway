@@ -6526,6 +6526,171 @@ PYEOF
 expect_fail check_timeout_layer_ownership.sh \
     'c-lim-0032 losing its one-byte-per-second pacing' mut_server_c_lim_0032_pacing_removed
 
+mut_server_c_lim_0037_case_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load/per_ip.rs")
+text = path.read_text()
+subject = "async fn c_lim_0037_ten_thousand_half_open_connections_preserve_other_ip_p99() {"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0037 test name is not unique")
+path.write_text(text.replace(subject, "async fn ten_thousand_half_open_connections_preserve_other_ip_p99() {", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0037 losing its executable load evidence' mut_server_c_lim_0037_case_removed
+
+mut_server_c_lim_0037_scale_reduced() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load/per_ip.rs")
+text = path.read_text()
+subject = "    const ATTEMPTS: usize = 10_000;\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0037 attempt count is not unique")
+path.write_text(text.replace(subject, "    const ATTEMPTS: usize = 1_000;\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0037 shrinking below ten thousand connections' mut_server_c_lim_0037_scale_reduced
+
+mut_server_c_lim_0037_per_ip_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load/per_ip.rs")
+text = path.read_text()
+subject = "    config.max_connections_per_ip = Some(HALF_OPEN_LIMIT);\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0037 per-IP setup is not unique")
+path.write_text(text.replace(subject, "    config.max_connections_per_ip = None;\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0037 losing its per-IP ceiling' mut_server_c_lim_0037_per_ip_removed
+
+mut_server_c_lim_0037_dual_stack_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load/per_ip.rs")
+text = path.read_text()
+subject = "    config.dual_stack = true;\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0037 dual-stack setup is not unique")
+path.write_text(text.replace(subject, "    config.dual_stack = false;\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0037 losing the two-address-family listener' mut_server_c_lim_0037_dual_stack_removed
+
+mut_server_c_lim_0037_global_capacity_confounds_per_ip() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load/per_ip.rs")
+text = path.read_text()
+subject = "    config.max_connections = ATTEMPTS + HALF_OPEN_LIMIT;\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0037 global capacity setup is not unique")
+path.write_text(text.replace(subject, "    config.max_connections = HALF_OPEN_LIMIT;\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0037 letting the global ceiling hide per-IP rejection' mut_server_c_lim_0037_global_capacity_confounds_per_ip
+
+mut_server_c_lim_0037_dedicated_runtime_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load/per_ip.rs")
+text = path.read_text()
+subject = "server_on_own_runtime(config.clone(), Bytes::new())"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0037 loaded runtime call is not unique")
+path.write_text(text.replace(subject, "echo_server(config.clone())", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0037 sharing the loaded listener with the probe runtime' mut_server_c_lim_0037_dedicated_runtime_removed
+
+mut_server_c_lim_0037_source_coalesced() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load/per_ip.rs")
+text = path.read_text()
+subject = "let loaded_v6 = SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0037 healthy source family is not unique")
+path.write_text(text.replace(subject, "let loaded_v6 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST)", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0037 coalescing attack and healthy source IPs' mut_server_c_lim_0037_source_coalesced
+
+mut_server_c_lim_0037_attack_serialized() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load/per_ip.rs")
+text = path.read_text()
+subject = "    let attack = tokio::spawn(async move {\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0037 attack task is not unique")
+path.write_text(text.replace(subject, "    let attack = async move {\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0037 serializing the attack after latency probes' mut_server_c_lim_0037_attack_serialized
+
+mut_server_c_lim_0037_rejection_accounting_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load/per_ip.rs")
+text = path.read_text()
+subject = "loaded.metrics.per_ip_rejections() != ATTEMPTS - HALF_OPEN_LIMIT"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0037 rejection accounting is not unique")
+path.write_text(text.replace(subject, "loaded.metrics.per_ip_rejections() != 0", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0037 losing exact rejection accounting' mut_server_c_lim_0037_rejection_accounting_removed
+
+mut_server_c_lim_0037_control_gate_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load/per_ip.rs")
+text = path.read_text()
+subject = "    if control_probes.stalled > 0 {\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0037 control gate is not unique")
+path.write_text(text.replace(subject, "    if false {\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0037 passing on a saturated latency control' mut_server_c_lim_0037_control_gate_removed
+
+mut_server_c_lim_0037_p99_comparison_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/tests/server_load/per_ip.rs")
+text = path.read_text()
+subject = "            loaded_probes.p99 <= ceiling,\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0037 p99 comparison is not unique")
+path.write_text(text.replace(subject, "            control_probes.p99 <= ceiling,\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0037 losing its loaded p99 comparison' mut_server_c_lim_0037_p99_comparison_removed
+
 mut_server_c_lim_0062_case_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
