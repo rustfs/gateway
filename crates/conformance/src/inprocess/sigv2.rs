@@ -162,16 +162,20 @@ pub(super) fn sign_presigned(
         secret,
         token,
     } = input;
-    for (path, description) in [
-        ("signSpec.signed_headers", "an explicit signed-header set"),
-        ("signSpec.payload_hash", "a SigV4 payload hash"),
-        ("signSpec.tamper", "post-signing tampering"),
-        ("signSpec.service", "a SigV4 service scope"),
-        ("signSpec.region", "a SigV4 region scope"),
-    ] {
-        if sign.read(path).is_some() {
-            return Err(unsupported("presigned_v2", description));
-        }
+    if sign.read("signSpec.signed_headers").is_some() {
+        return Err(unsupported("presigned_v2", "an explicit signed-header set"));
+    }
+    if sign.read("signSpec.payload_hash").is_some() {
+        return Err(unsupported("presigned_v2", "a SigV4 payload hash"));
+    }
+    if sign.read("signSpec.tamper").is_some() {
+        return Err(unsupported("presigned_v2", "post-signing tampering"));
+    }
+    if sign.read("signSpec.service").is_some() {
+        return Err(unsupported("presigned_v2", "a SigV4 service scope"));
+    }
+    if sign.read("signSpec.region").is_some() {
+        return Err(unsupported("presigned_v2", "a SigV4 region scope"));
     }
     if token.is_some() {
         return Err(unsupported("presigned_v2", "temporary credentials"));
