@@ -129,3 +129,192 @@ async fn c_lim_0037_ten_thousand_half_open_connections_preserve_other_ip_p99() {
     shut_down(control, control_runtime, "the control listener").await;
     shut_down(loaded, loaded_runtime, "the loaded listener").await;
 }
+
+async fn open_partial_headers(addr: SocketAddr, count: usize) -> Vec<TcpStream> {
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..count {
+        tasks.spawn(async move {
+            let mut stream = TcpStream::connect(addr)
+                .await
+                .expect("a slow connection reaches the listener");
+            stream
+                .write_all(b"GET / HTTP/1.1\r\nHost: x")
+                .await
+                .expect("the partial request head writes");
+            stream
+        });
+    }
+    let mut streams = Vec::with_capacity(count);
+    while let Some(result) = tasks.join_next().await {
+        streams.push(result.expect("the slow-connection task joins"));
+    }
+    streams
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn c_wire_0061_slow_headers_expire_without_rss_or_healthy_p99_growth() {
+    const TEST_NAME: &str = "per_ip::c_wire_0061_slow_headers_expire_without_rss_or_healthy_p99_growth";
+    const SLOW_HEADERS: usize = 100;
+    const PROBES: usize = 200;
+    const PROBE_CEILING: Duration = Duration::from_secs(2);
+    if !run_isolated(TEST_NAME) {
+        return;
+    }
+
+    let mut slow_config = plaintext_config();
+    slow_config.bind_addr = "[::]:0".parse().expect("fixture address");
+    slow_config.dual_stack = true;
+    slow_config.header_read_timeout = Duration::from_secs(3);
+    slow_config.keep_alive_idle = Duration::from_secs(60);
+    slow_config.max_connections = SLOW_HEADERS + PROBES;
+    slow_config.max_connections_per_ip = None;
+    if rustfs_gateway_server::Listener::bind(&slow_config).is_err() {
+        eprintln!("SKIP c-wire-0061: this host has no dual-stack loopback listener");
+        return;
+    }
+    let control_config = slow_config.clone();
+    let (loaded_runtime, loaded) = server_on_own_runtime(slow_config, Bytes::new());
+    let (control_runtime, control) = server_on_own_runtime(control_config, Bytes::new());
+    let slow_v4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), loaded.local_addr.port());
+    let healthy_loaded_v6 = SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), loaded.local_addr.port());
+    let healthy_control_v6 = SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), control.local_addr.port());
+    warm_up(healthy_control_v6, 20, PROBE_CEILING).await;
+    warm_up(healthy_loaded_v6, 20, PROBE_CEILING).await;
+
+    let before = rss_bytes();
+    let mut slow = open_partial_headers(slow_v4, SLOW_HEADERS).await;
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while loaded.metrics.active_connections() != SLOW_HEADERS {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("all slow headers are parked before the deadline");
+    for _ in 0..3 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        for stream in &mut slow {
+            stream.write_all(b"x").await.expect("one slow header byte writes");
+        }
+    }
+    if let (Some(before), Some(parked)) = (before, rss_bytes()) {
+        let growth = parked.saturating_sub(before);
+        let budget = rustfs_gateway_server::conn_memory_budget(SLOW_HEADERS);
+        assert!(growth <= budget + budget / 2, "slow-header RSS growth {growth} exceeded {budget}");
+    } else {
+        eprintln!("SKIP c-wire-0061 RSS: this runner cannot report RSS through ps");
+    }
+
+    let (control_probes, loaded_probes) = paired_probe_p99(healthy_control_v6, healthy_loaded_v6, PROBES, PROBE_CEILING).await;
+    match control_probes.stalled {
+        0 => {
+            assert_eq!(loaded_probes.stalled, 0, "slow headers stalled healthy peers");
+            let ceiling = control_probes.p99.saturating_mul(8) + Duration::from_millis(100);
+            let within_ceiling = loaded_probes.p99 <= ceiling;
+            assert!(
+                within_ceiling,
+                "healthy p99 {:?} exceeded the {:?} control-derived ceiling",
+                loaded_probes.p99, ceiling
+            );
+        }
+        stalled => eprintln!("SKIP c-wire-0061 latency: the idle control stalled {stalled} of {PROBES} probes"),
+    }
+
+    tokio::time::timeout(Duration::from_secs(4), async {
+        for stream in &mut slow {
+            let mut byte = [0_u8; 1];
+            assert_eq!(stream.read(&mut byte).await.expect("the deadline close is observable"), 0);
+        }
+    })
+    .await
+    .expect("the absolute header deadline closes peers that keep making partial progress");
+    assert_eq!(loaded.metrics.active_connections(), 0);
+
+    shut_down(control, control_runtime, "the control listener").await;
+    shut_down(loaded, loaded_runtime, "the loaded listener").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn c_wire_0064_one_thousand_half_open_connections_are_bounded_and_reused() {
+    const TEST_NAME: &str = "per_ip::c_wire_0064_one_thousand_half_open_connections_are_bounded_and_reused";
+    const ATTEMPTS: usize = 1_000;
+    const PER_IP_LIMIT: usize = 64;
+    const GLOBAL_LIMIT: usize = PER_IP_LIMIT * 2;
+    if !run_isolated(TEST_NAME) {
+        return;
+    }
+
+    let mut wave_config = plaintext_config();
+    wave_config.bind_addr = "[::]:0".parse().expect("fixture address");
+    wave_config.dual_stack = true;
+    wave_config.header_read_timeout = Duration::from_secs(60);
+    wave_config.keep_alive_idle = Duration::from_secs(60);
+    wave_config.max_connections = GLOBAL_LIMIT;
+    wave_config.max_connections_per_ip = Some(PER_IP_LIMIT);
+    if rustfs_gateway_server::Listener::bind(&wave_config).is_err() {
+        eprintln!("SKIP c-wire-0064: this host has no dual-stack loopback listener");
+        return;
+    }
+    let (runtime, running) = server_on_own_runtime(wave_config, Bytes::new());
+    let v4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), running.local_addr.port());
+    let v6 = SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), running.local_addr.port());
+
+    let v4_streams = open_partial_headers(v4, ATTEMPTS).await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while running.metrics.per_ip_rejections() != ATTEMPTS - PER_IP_LIMIT
+            || running.metrics.active_connections() != PER_IP_LIMIT
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the per-IP ceiling refuses every excess slow header");
+
+    let mut v6_streams = open_partial_headers(v6, PER_IP_LIMIT).await;
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while running.metrics.active_connections() != GLOBAL_LIMIT {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("both source-IP allowances fill the global admission ceiling");
+    let accepted_at_ceiling = running.metrics.accepted_connections();
+    let mut queued = TcpStream::connect(v6)
+        .await
+        .expect("one connection reaches the listen backlog");
+    queued
+        .write_all(b"GET / HTTP/1.1\r\nHost: x")
+        .await
+        .expect("the queued partial head writes");
+    let first_rss = rss_bytes();
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert_eq!(
+        running.metrics.accepted_connections(),
+        accepted_at_ceiling,
+        "the accept loop must pause instead of accepting work behind a full admission gate"
+    );
+    assert_eq!(running.metrics.active_connections(), GLOBAL_LIMIT);
+    if let (Some(first), Some(later)) = (first_rss, rss_bytes()) {
+        let growth = later.saturating_sub(first);
+        let ceiling = rustfs_gateway_server::conn_memory_budget(32);
+        assert!(growth <= ceiling, "half-open RSS grew by {growth} bytes while the census was flat");
+    } else {
+        eprintln!("SKIP c-wire-0064 RSS: this runner cannot report RSS through ps");
+    }
+
+    v6_streams.pop();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while running.metrics.accepted_connections() == accepted_at_ceiling
+            || running.metrics.active_connections() != GLOBAL_LIMIT
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("releasing one permit wakes the paused accept loop");
+    assert_eq!(running.metrics.active_connections(), GLOBAL_LIMIT);
+
+    drop(queued);
+    drop(v6_streams);
+    drop(v4_streams);
+    shut_down(running, runtime, "the loaded listener").await;
+}

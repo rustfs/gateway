@@ -52,11 +52,11 @@ cases=(
     'c-wire-0043|negative|bound|crates/http/tests/header_and_query.rs::c_wire_0043_a_signed_or_significant_header_with_non_utf8_bytes_is_rejected'
     'c-wire-0044|negative|bound|crates/http/tests/header_and_query.rs::c_wire_0044_a_metadata_value_that_decodes_to_crlf_is_rejected'
     'c-wire-0045|negative|bound|crates/http/tests/header_and_query.rs::c_wire_0045_a_metadata_key_that_is_not_a_token_is_rejected'
-    'c-wire-0060|negative|blocked|rustfs/backlog#1689::a client reset must cancel the handler, and HandlerCancellation has one variant (Deadline); the new cross-crate cancellation contract needs a merged ADR first'
-    'c-wire-0061|negative|blocked|rustfs/backlog#1699::the header deadline closing a half-open connection is observed, but no harness measures resident memory or a healthy peer p99 while slow *headers* are parked; the slow-reader harness measures the write side'
-    'c-wire-0062|negative|blocked|rustfs/backlog#1699::no head-to-first-body-byte deadline exists; ProgressIo::check_idle resets the idle deadline while a request is in flight, so a peer that never sends a declared body is retired by nothing'
+    'c-wire-0060|negative|bound|crates/gateway/tests/connection_teardown.rs::c_wire_0060_c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit'
+    'c-wire-0061|negative|bound|crates/server/tests/server_load/per_ip.rs::c_wire_0061_slow_headers_expire_without_rss_or_healthy_p99_growth'
+    'c-wire-0062|negative|bound|crates/gateway/src/gate_tests.rs::c_wire_0062_c_lim_0033_closes_a_socket_when_the_first_body_byte_never_arrives'
     'c-wire-0063|negative|bound|crates/http/tests/framing_smuggling.rs::c_wire_0063_an_over_large_declared_body_is_400_entity_too_large_and_never_drained;crates/gateway/tests/connection_teardown.rs::c_wire_0063_c_lim_0021_an_over_large_body_is_refused_on_the_socket_before_it_is_sent'
-    'c-wire-0064|negative|blocked|rustfs/backlog#1699::the per-IP half-open ceiling, accept backpressure and the thousand-connection memory budget are each observed by a different test; none of them observes the three together at the scale the case names'
+    'c-wire-0064|negative|bound|crates/server/tests/server_load/per_ip.rs::c_wire_0064_one_thousand_half_open_connections_are_bounded_and_reused'
 )
 
 # The ids whose evidence must be plural: an intention read inside one crate and an observation made
@@ -65,7 +65,7 @@ plural_evidence=('c-wire-0063')
 
 # Editing this set is the only way a case becomes blocked, so a case cannot quietly stop being
 # evidence-backed. Each id here must also carry an owning issue in the table above.
-blocked_ids=('c-wire-0060' 'c-wire-0061' 'c-wire-0062' 'c-wire-0064')
+blocked_ids=("")
 
 command -v python3 >/dev/null 2>&1 || {
     printf 'check_wire_case_coverage: required command is missing: python3\n' >&2
@@ -108,6 +108,9 @@ REFUSAL_TOKENS = (
     "reject_of",
     "host_error",
     "ENTITY_TOO_LARGE",
+    "RequestAborted",
+    "timeout_response",
+    "per_ip_rejections",
 )
 ACCEPTANCE_TOKENS = (".expect(", "is_ok(", ".unwrap()")
 ASSERTION_TOKENS = ("assert!", "assert_eq!", "assert_ne!", "assert_matches!")
