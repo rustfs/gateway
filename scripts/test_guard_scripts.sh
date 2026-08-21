@@ -17978,6 +17978,78 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'handler deadline connection evidence is missing or duplicated' \
     mut_handler_deadline_socket_evidence_removed
 
+mut_reset_cancellation_uses_orderly_close() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+subject = "socket.set_linger(Some(Duration::ZERO))"
+replacement = "socket.set_linger(None)"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique reset linger mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'c-lim-0060 replacing the TCP reset with an orderly close' \
+    'c-lim-0060 does not prove reset cancellation, rollback, and permit reuse' \
+    mut_reset_cancellation_uses_orderly_close
+
+mut_reset_cancellation_loses_rollback_observation() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+subject = "backend.rollback_completed.load(Ordering::Acquire)"
+replacement = "true"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique reset rollback mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'c-lim-0060 no longer observing rollback completion' \
+    'c-lim-0060 does not prove reset cancellation, rollback, and permit reuse' \
+    mut_reset_cancellation_loses_rollback_observation
+
+mut_reset_cancellation_loses_permit_reuse() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+subject = 'String::from_utf8_lossy(&response).starts_with("HTTP/1.1 200 ")'
+replacement = "!response.is_empty()"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique reset permit reuse mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'c-lim-0060 no longer proving the released permit admits a successful request' \
+    'c-lim-0060 does not prove reset cancellation, rollback, and permit reuse' \
+    mut_reset_cancellation_loses_permit_reuse
+
+mut_reset_cancellation_reason_collapsed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+subject = "[HandlerCancellation::RequestAborted]"
+replacement = "[HandlerCancellation::Deadline]"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique reset reason mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'c-lim-0060 collapsing request abort into deadline cancellation' \
+    'c-lim-0060 does not prove reset cancellation, rollback, and permit reuse' \
+    mut_reset_cancellation_reason_collapsed
+
 mut_handler_deadline_report_not_public() {
     python3 - <<'PYEOF'
 from pathlib import Path

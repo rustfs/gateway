@@ -253,9 +253,24 @@ for test_name in (
     "an_acknowledged_handler_deadline_keeps_the_observed_socket_reusable",
     "a_monomorphic_unacknowledged_handler_deadline_carries_close_intent",
     "a_completed_handler_reports_no_deadline",
+    "c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit",
 ):
     if connection_test_source.count(f"async fn {test_name}()") != 1:
         fail("handler deadline connection evidence is missing or duplicated")
+reset_body = function_body(
+    connection_test_source,
+    "async fn c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit()",
+    "c-lim-0060 reset cancellation evidence",
+)
+for required in (
+    "max_global_inflight_requests: 1,",
+    "socket.set_linger(Some(Duration::ZERO))",
+    "backend.rollback_completed.load(Ordering::Acquire)",
+    'String::from_utf8_lossy(&response).starts_with("HTTP/1.1 200 ")',
+    "[HandlerCancellation::RequestAborted]",
+):
+    if reset_body.count(required) != 1:
+        fail("c-lim-0060 does not prove reset cancellation, rollback, and permit reuse")
 if connection_test_source.count("seen.push(event.handler_deadline);") != 1:
     fail("handler deadline observer evidence does not record the live event")
 for report, expected in (

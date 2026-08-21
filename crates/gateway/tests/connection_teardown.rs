@@ -49,6 +49,7 @@
 use crate::support;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -62,6 +63,7 @@ use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ShutdownReport}
 use support::{Backend, Failing, Ping, PingOutput, ping_route, plain, service, wired, wired_denying};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::Notify;
 
 async fn refusal(service: &S3Service, request: http::Request<Bytes>) -> http::Response<rustfs_gateway::Body> {
     service.call_bytes(request).await
@@ -126,13 +128,19 @@ fn deadline_service(acknowledges_cleanup: bool) -> (S3Service, Arc<DeadlineBacke
 }
 
 fn live_server(service: S3Service) -> RunningServer {
-    let config = ServerConfig {
-        bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-        plaintext: true,
-        header_read_timeout: Duration::from_secs(1),
-        keep_alive_idle: Duration::from_secs(2),
-        ..ServerConfig::default()
-    };
+    live_server_with_config(
+        service,
+        ServerConfig {
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            plaintext: true,
+            header_read_timeout: Duration::from_secs(1),
+            keep_alive_idle: Duration::from_secs(2),
+            ..ServerConfig::default()
+        },
+    )
+}
+
+fn live_server_with_config(service: S3Service, config: ServerConfig) -> RunningServer {
     let service = tower::service_fn(move |request| {
         let mut service = service.clone();
         async move {
@@ -150,6 +158,45 @@ fn live_server(service: S3Service) -> RunningServer {
         }
     });
     Server::new(config, service).serve().expect("server starts")
+}
+
+struct ResetBackend {
+    calls: AtomicUsize,
+    entered: Notify,
+    cancellations: Mutex<Vec<HandlerCancellation>>,
+    rollback_completed: AtomicBool,
+}
+
+impl ResetBackend {
+    fn new() -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+            entered: Notify::new(),
+            cancellations: Mutex::new(Vec::new()),
+            rollback_completed: AtomicBool::new(false),
+        }
+    }
+}
+
+impl Handler<Ping> for ResetBackend {
+    async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
+        Err(rustfs_gateway::HandlerError::internal_error(
+            "the context-aware handler entry was bypassed",
+        ))
+    }
+
+    async fn call_with_context(&self, _request: Req<Ping>, context: rustfs_gateway::HandlerContext) -> HandlerResult<Ping> {
+        if self.calls.fetch_add(1, Ordering::AcqRel) == 0 {
+            self.entered.notify_one();
+            let reason = context.cancelled().await;
+            self.cancellations.lock().expect("not poisoned").push(reason);
+            self.rollback_completed.store(true, Ordering::Release);
+            return Err(rustfs_gateway::HandlerError::internal_error("the cancelled request rolled back"));
+        }
+        Ok(Resp::new(PingOutput {
+            message: "the released permit admitted the next request".to_owned(),
+        }))
+    }
 }
 
 async fn pipelined_response_count(service: S3Service) -> (usize, String) {
@@ -298,6 +345,75 @@ async fn an_acknowledged_handler_deadline_keeps_the_observed_socket_reusable() {
             Some(HandlerDeadlineReport::Acknowledged),
         ]
     );
+}
+
+/// `c-lim-0060`. Negative — resetting a request while its one global request permit is held
+/// signals the handler, lets it finish rollback, and releases the permit for another connection.
+#[tokio::test]
+async fn c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit() {
+    let backend = Arc::new(ResetBackend::new());
+    let service = wired()
+        .register::<Ping, _>(Arc::clone(&backend))
+        .route(ping_route())
+        .build()
+        .expect("a complete assembly");
+    let server = live_server_with_config(
+        service,
+        ServerConfig {
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            plaintext: true,
+            max_global_inflight_requests: 1,
+            header_read_timeout: Duration::from_secs(1),
+            keep_alive_idle: Duration::from_secs(2),
+            ..ServerConfig::default()
+        },
+    );
+
+    let mut reset = TcpStream::connect(server.local_addr)
+        .await
+        .expect("first connection succeeds");
+    reset
+        .write_all(b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n")
+        .await
+        .expect("first request writes");
+    tokio::time::timeout(Duration::from_secs(1), backend.entered.notified())
+        .await
+        .expect("the first handler owns the request permit");
+    let socket = socket2::Socket::from(reset.into_std().expect("stream converts"));
+    socket.set_linger(Some(Duration::ZERO)).expect("RST linger configures");
+    drop(socket);
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !backend.rollback_completed.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the reset explicitly reaches the handler and rollback completes");
+
+    let mut next = TcpStream::connect(server.local_addr)
+        .await
+        .expect("second connection succeeds");
+    next.write_all(b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        .await
+        .expect("second request writes");
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(1), next.read_to_end(&mut response))
+        .await
+        .expect("the released permit admits the next request")
+        .expect("second response reads");
+    assert!(
+        String::from_utf8_lossy(&response).starts_with("HTTP/1.1 200 "),
+        "the next request was not admitted: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert_eq!(
+        backend.cancellations.lock().expect("not poisoned").as_slice(),
+        [HandlerCancellation::RequestAborted]
+    );
+
+    let _ = server.shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(server.task.await.expect("server task joins").is_ok());
 }
 
 /// Negative — the monomorphic path records the same unacknowledged cancellation verdict before

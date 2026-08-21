@@ -1439,6 +1439,7 @@ dependencies = [
  "rustfs-gateway-types",
  "rustfs-gateway-xml",
  "sha2",
+ "socket2",
  "tokio",
  "tower",
  "trybuild",
