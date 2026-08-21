@@ -12583,6 +12583,192 @@ PYEOF
 expect_fail check_chunk_limits.sh \
     'c-lim-0042 replacing the OS peak-RSS observation with a constant' mut_chunk_limit_rss_observer_constant \
     "c-lim-0042 RSS instrument lost 'parse_peak_rss(&String::from_utf8_lossy(&output.stderr))'"
+
+mut_missing_length_identity_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = "# c-lim-0020 / c-object-0030"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 identity anchor drifted")
+path.write_text(text.replace(old, "# c-object-0030", 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 losing its corpus identity' mut_missing_length_identity_removed \
+    'c-lim-0020 corpus identity is missing or duplicated'
+
+mut_missing_length_case_id_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = 'id = "c-object-0030"'
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 case-ID anchor drifted")
+path.write_text(text.replace(old, 'id = "c-object-0099"', 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 drifting to a different corpus case' mut_missing_length_case_id_changed \
+    'c-lim-0020 corpus case ID drifted'
+
+mut_missing_length_operation_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = 'operation = "PutObject"'
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 operation anchor drifted")
+path.write_text(text.replace(old, 'operation = "UploadPart"', 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 binding to a different operation' mut_missing_length_operation_changed \
+    'c-lim-0020 is not bound to PutObject'
+
+mut_missing_length_method_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = 'raw_head_utf8 = "PUT /conf-object/no-length-write HTTP/1.1'
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 method anchor drifted")
+path.write_text(text.replace(old, 'raw_head_utf8 = "POST /conf-object/no-length-write HTTP/1.1', 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 replacing the raw PUT with another method' mut_missing_length_method_changed \
+    'c-lim-0020 no longer sends a raw PUT request head'
+
+mut_missing_length_request_gains_length() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = "x-amz-content-sha256: UNSIGNED-PAYLOAD\\r\\n\\r\\n\""
+new = "x-amz-content-sha256: UNSIGNED-PAYLOAD\\r\\ncontent-length: 0\\r\\n\\r\\n\""
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 raw-head anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 gaining a declared zero-length body' mut_missing_length_request_gains_length \
+    'c-lim-0020 request gained declared or chunked framing'
+
+mut_missing_length_signing_mode_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = 'sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }'
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 signing-mode anchor drifted")
+path.write_text(text.replace(old, old.replace("sigv4_unsigned_payload", "sigv4_streaming_payload"), 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 replacing the plain payload mode with streaming' mut_missing_length_signing_mode_changed \
+    'c-lim-0020 is no longer the plain non-streaming PutObject form'
+
+mut_missing_length_status_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = '''\
+[expect]
+kind = "response"
+status = 411
+connection_after = "closed"
+'''
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 status anchor drifted")
+path.write_text(text.replace(old, old.replace("status = 411", "status = 400"), 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 accepting a generic 400 response' mut_missing_length_status_changed \
+    'c-lim-0020 no longer requires status 411'
+
+mut_missing_length_code_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = 'code = "MissingContentLength"'
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 error-code anchor drifted")
+path.write_text(text.replace(old, 'code = "InvalidRequest"', 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 losing its dedicated error code' mut_missing_length_code_changed \
+    'c-lim-0020 no longer requires MissingContentLength'
+
+mut_missing_length_connection_kept() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = 'connection_after = "closed"'
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 connection anchor drifted")
+path.write_text(text.replace(old, 'connection_after = "open"', 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 keeping a desynchronised connection alive' mut_missing_length_connection_kept \
+    'c-lim-0020 no longer requires the connection to close'
+
+mut_missing_length_socket_case_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/conformance/tests/wired.rs")
+text = path.read_text()
+old = '["c-object-0015", "c-mpu-0045", "c-object-0030"]'
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 socket-case anchor drifted")
+path.write_text(text.replace(old, '["c-object-0015", "c-mpu-0045"]', 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 disappearing from the real socket runner' mut_missing_length_socket_case_removed \
+    'c-lim-0020 socket evidence lost the corpus case'
+
+mut_missing_length_socket_runner_replaced() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/conformance/tests/wired.rs")
+text = path.read_text()
+old = "        let report = run_over_a_socket(id);"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 socket-runner anchor drifted")
+path.write_text(text.replace(old, "        let report = run(id);", 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 replacing the socket observer with in-process execution' mut_missing_length_socket_runner_replaced \
+    "c-lim-0020 socket evidence lost 'run_over_a_socket(id)'"
+
+mut_missing_length_socket_verdict_weakened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/conformance/tests/wired.rs")
+text = path.read_text()
+old = '        assert_eq!(outcome.verdict, Verdict::Passed, "{id}: {:?}", failures(outcome));'
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0020 socket-verdict anchor drifted")
+path.write_text(text.replace(old, old.replace("Verdict::Passed", "Verdict::Skipped"), 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0020 allowing the socket case to skip' mut_missing_length_socket_verdict_weakened \
+    "c-lim-0020 socket evidence lost 'outcome.verdict, Verdict::Passed'"
 # check_secret_hygiene.sh has six rules over the credential containers in crates/gateway/src/ext/,
 # which is outside the path scope of check_ct_eq.sh rules 3-6. Each is mutated separately, because
 # one case would leave the other five as prose. rustfs/backlog#1736 is the task, and

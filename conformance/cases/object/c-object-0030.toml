@@ -1,4 +1,4 @@
-# c-object-0030 — a plain object write with no declared length.
+# c-lim-0020 / c-object-0030 — a plain object write with no declared length.
 #
 # Schema dimensions exercised: raw request head, dedicated status, connection verdict.
 
