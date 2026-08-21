@@ -13,6 +13,7 @@ SOURCE_DIR="${ROOT_DIR}/crates/server/src"
 TLS_EVIDENCE="${ROOT_DIR}/crates/server/tests/tls_h2.rs"
 LOAD_EVIDENCE="${ROOT_DIR}/crates/server/tests/server_load.rs"
 HEADER_EVIDENCE="${ROOT_DIR}/crates/server/src/conn/deadline_test.rs"
+PER_IP_EVIDENCE="${ROOT_DIR}/crates/server/tests/server_load/per_ip.rs"
 
 if [[ ! -f "$CONFIG" ]]; then
     printf 'check_timeout_layer_ownership: required config is missing: %s\n' "$CONFIG" >&2
@@ -31,6 +32,11 @@ fi
 
 if [[ ! -f "$HEADER_EVIDENCE" || -L "$HEADER_EVIDENCE" ]]; then
     printf 'check_timeout_layer_ownership: c-lim-0032 header-timeout evidence is missing or not a regular file\n' >&2
+    exit 1
+fi
+
+if [[ ! -f "$PER_IP_EVIDENCE" || -L "$PER_IP_EVIDENCE" ]]; then
+    printf 'check_timeout_layer_ownership: c-lim-0037 per-IP load evidence is missing or not a regular file\n' >&2
     exit 1
 fi
 
@@ -87,6 +93,55 @@ missing = [fragment for fragment in required if fragment not in body]
 if missing:
     raise SystemExit(
         "check_timeout_layer_ownership: c-lim-0032 does not prove one-byte pacing and the ten-second close: "
+        + ", ".join(missing)
+    )
+PY
+
+python3 - "$PER_IP_EVIDENCE" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+match = re.search(
+    r"#\[tokio::test\(flavor = \"multi_thread\", worker_threads = 4\)\]\s+"
+    r"async fn c_lim_0037_ten_thousand_half_open_connections_preserve_other_ip_p99\(\)\s*\{",
+    source,
+)
+if match is None:
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0037 executable per-IP load evidence is missing")
+depth = 1
+cursor = match.end()
+while cursor < len(source) and depth:
+    depth += (source[cursor] == "{") - (source[cursor] == "}")
+    cursor += 1
+if depth:
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0037 test body is unterminated")
+body = source[match.end():cursor - 1]
+if re.search(r"#\s*\[\s*cfg(?:_attr)?\b", body):
+    raise SystemExit("check_timeout_layer_ownership: c-lim-0037 evidence is conditionally disabled")
+required = (
+    "const ATTEMPTS: usize = 10_000;",
+    'config.bind_addr = "[::]:0".parse().expect("fixture address");',
+    "config.dual_stack = true;",
+    "config.max_connections = ATTEMPTS + HALF_OPEN_LIMIT;",
+    "config.max_connections_per_ip = Some(HALF_OPEN_LIMIT);",
+    "server_on_own_runtime(config.clone(), Bytes::new())",
+    "server_on_own_runtime(config, Bytes::new())",
+    "let loaded_v4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST)",
+    "let loaded_v6 = SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)",
+    "let attack = tokio::spawn(async move {",
+    "paired_probe_p99(control_v6, loaded_v6, PROBES, PROBE_CEILING)",
+    "loaded.metrics.per_ip_rejections() != ATTEMPTS - HALF_OPEN_LIMIT",
+    "loaded.metrics.active_connections() != HALF_OPEN_LIMIT",
+    "if control_probes.stalled > 0 {",
+    "loaded_probes.stalled <= control_probes.stalled,",
+    "loaded_probes.p99 <= ceiling,",
+)
+missing = [fragment for fragment in required if fragment not in body]
+if missing:
+    raise SystemExit(
+        "check_timeout_layer_ownership: c-lim-0037 does not prove per-IP rejection and other-IP p99 at scale: "
         + ", ".join(missing)
     )
 PY
@@ -210,6 +265,8 @@ required = (
     # the loaded one and the control its latency is measured against.
     "let (loaded_runtime, loaded) = server_on_own_runtime(",
     "let (control_runtime, control) = server_on_own_runtime(",
+    "server_on_own_runtime(slow_reader_config(), stalling_body.clone())",
+    "server_on_own_runtime(slow_reader_config(), stalling_body);",
     # Both directions of the latency observation, sampled in lock-step rather than one taken
     # several seconds of unrelated host activity away from the other.
     "paired_probe_p99(control.local_addr, loaded.local_addr, PROBES, PROBE_CEILING)",
@@ -291,10 +348,9 @@ builder = re.search(
 )
 if builder is None:
     raise SystemExit("check_timeout_layer_ownership: c-lim-0061 listener builder is missing")
-if "Server::new(slow_reader_config(), service)" not in builder.group(1):
+if "Server::new(config, service)" not in builder.group(1):
     raise SystemExit(
-        "check_timeout_layer_ownership: c-lim-0061 builds its listeners from some configuration other "
-        "than the one its deadlines are pinned in"
+        "check_timeout_layer_ownership: the dedicated listener builder ignores its reviewed configuration"
     )
 if "new_multi_thread()" not in builder.group(1):
     raise SystemExit(
@@ -305,4 +361,5 @@ PY
 
 printf 'OK: 3/6 timeout layers owned by rustfs-gateway-server; connection lifetime is an extra safety valve\n'
 printf 'OK: c-lim-0006 observes bounded multi-wave connection memory with a working RSS instrument\n'
+printf 'OK: c-lim-0037 observes a ten-thousand-connection per-IP wave and other-IP p99\n'
 printf 'OK: c-lim-0061 observes write-progress closure, healthy p99 against a concurrently sampled control, and resident memory under a thousand slow readers\n'

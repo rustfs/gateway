@@ -38,6 +38,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream};
 use tower::service_fn;
 
+#[path = "server_load/per_ip.rs"]
+mod per_ip;
+
 fn plaintext_config() -> ServerConfig {
     ServerConfig {
         bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
@@ -517,7 +520,7 @@ fn slow_reader_config() -> ServerConfig {
 /// it was written to catch. With a runtime each, and the test's own runtime left to the probes and
 /// the parked sockets, the only thing the two listeners still share is the machine, which is
 /// exactly the term that has to cancel.
-fn server_on_own_runtime(stalling_body: Bytes) -> (tokio::runtime::Runtime, RunningServer) {
+fn server_on_own_runtime(config: ServerConfig, stalling_body: Bytes) -> (tokio::runtime::Runtime, RunningServer) {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
         .enable_all()
@@ -532,7 +535,7 @@ fn server_on_own_runtime(stalling_body: Bytes) -> (tokio::runtime::Runtime, Runn
         };
         async move { Ok::<_, Infallible>(Response::new(Full::new(body))) }
     });
-    let server = Server::new(slow_reader_config(), service).serve().expect("server starts");
+    let server = Server::new(config, service).serve().expect("server starts");
     drop(guard);
     (runtime, server)
 }
@@ -632,8 +635,8 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
         return;
     }
     let stalling_body = Bytes::from(vec![b'x'; RESPONSE_LEN]);
-    let (loaded_runtime, loaded) = server_on_own_runtime(stalling_body.clone());
-    let (control_runtime, control) = server_on_own_runtime(stalling_body);
+    let (loaded_runtime, loaded) = server_on_own_runtime(slow_reader_config(), stalling_body.clone());
+    let (control_runtime, control) = server_on_own_runtime(slow_reader_config(), stalling_body);
     warm_up(control.local_addr, WARMUP_PROBES, PROBE_CEILING).await;
     warm_up(loaded.local_addr, WARMUP_PROBES, PROBE_CEILING).await;
     let Some(before) = rss_bytes() else {

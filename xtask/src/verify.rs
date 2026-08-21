@@ -117,6 +117,8 @@ fn crate_step_batches(package: &str) -> Vec<Vec<Vec<String>>> {
             "c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget".to_owned(),
             "--skip".to_owned(),
             "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic".to_owned(),
+            "--skip".to_owned(),
+            "c_lim_0037_ten_thousand_half_open_connections_preserve_other_ip_p99".to_owned(),
         ]);
         let clippy = steps.remove(0);
         return vec![vec![test, clippy]];
