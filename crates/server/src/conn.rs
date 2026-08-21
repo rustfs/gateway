@@ -50,7 +50,8 @@ use crate::tls::TlsHandle;
 
 #[path = "request_capacity.rs"]
 mod request_capacity;
-use request_capacity::{RequestCapacity, RequestPermitBody};
+pub use request_capacity::RequestCancellation;
+use request_capacity::{RequestCancellationFuture, RequestCancellationSource, RequestCapacity, RequestPermitBody};
 
 #[cfg(test)]
 #[allow(clippy::expect_used)] // Test-only synchronization failures terminate the scenario; no value comes from external input.
@@ -451,6 +452,7 @@ where
         None => io,
     };
     let io = TokioIo::new(io);
+    let force_abort = Arc::clone(&request_stats.force_abort);
     let tracked = TrackedService::new(CatchPanic::new(service), request_stats, per_connection);
     let service = TowerToHyper {
         inner: tracked,
@@ -461,6 +463,7 @@ where
         },
         request_seen,
         request_capacity,
+        force_abort,
     };
     let mut builder = auto::Builder::new(TokioExecutor::new());
     #[cfg(test)]
@@ -526,6 +529,7 @@ struct TowerToHyper<S> {
     connection: ConnectionInfo,
     request_seen: Arc<AtomicBool>,
     request_capacity: Arc<RequestCapacity>,
+    force_abort: Arc<AtomicBool>,
 }
 
 impl<S, RequestBody, ResponseBody> hyper::service::Service<Request<RequestBody>> for TowerToHyper<S>
@@ -543,15 +547,20 @@ where
     fn call(&self, mut request: Request<RequestBody>) -> Self::Future {
         self.request_seen.store(true, Ordering::Release);
         request.extensions_mut().insert(self.connection);
+        let (cancellation_source, cancellation) = RequestCancellationSource::pair();
+        request.extensions_mut().insert(cancellation);
         let mut service = self.inner.clone();
         let request_capacity = Arc::clone(&self.request_capacity);
+        let force_abort = Arc::clone(&self.force_abort);
         Box::pin(async move {
             let permit = request_capacity
                 .acquire()
                 .await
                 .map_err(|error| Box::new(error) as BoxError)?;
             poll_fn(|context| service.poll_ready(context)).await.map_err(Into::into)?;
-            let response = service.call(request).await.map_err(Into::into)?;
+            let response = RequestCancellationFuture::new(service.call(request), cancellation_source, force_abort)
+                .await
+                .map_err(Into::into)?;
             Ok(response.map(|body| RequestPermitBody::new(body, permit)))
         })
     }
@@ -560,7 +569,7 @@ where
 #[derive(Default)]
 struct RequestStats {
     shutting_down: AtomicBool,
-    force_abort: AtomicBool,
+    force_abort: Arc<AtomicBool>,
     drained: AtomicUsize,
     aborted: AtomicUsize,
 }
