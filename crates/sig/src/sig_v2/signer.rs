@@ -82,7 +82,7 @@ impl SigV2Signer {
     /// Whatever [`SigV2StringToSignSpec::build`] reports — the preimage cannot be built, so there
     /// is nothing to sign.
     pub fn authorization(&self, spec: &SigV2StringToSignSpec<'_>) -> Result<String, AuthError> {
-        let rendered = self.render(&spec.build()?)?;
+        let rendered = self.render(&spec.build()?);
         let id = self.access_key_id.access_key_id();
         Ok(format!("AWS {id}:{rendered}"))
     }
@@ -97,7 +97,13 @@ impl SigV2Signer {
     ///
     /// Whatever [`SigV2StringToSignSpec::build`] reports.
     pub fn presigned_signature(&self, spec: &SigV2StringToSignSpec<'_>) -> Result<String, AuthError> {
-        self.render(&spec.build()?)
+        Ok(self.render(&spec.build()?))
+    }
+
+    /// The browser-POST `signature` field over the base64 policy itself.
+    #[must_use]
+    pub fn post_policy_signature(&self, encoded_policy: &str) -> String {
+        self.render(&SigV2StringToSign::from_post_policy(encoded_policy))
     }
 
     /// Standard base64 of the twenty HMAC-SHA1 bytes.
@@ -105,10 +111,10 @@ impl SigV2Signer {
     /// A client's signature over its own request travels in the clear, so rendering it is the
     /// protocol rather than a leak. Nothing here renders a *computed expectation*, which is the
     /// value that would turn a diagnostic into a signing oracle.
-    fn render(&self, preimage: &SigV2StringToSign) -> Result<String, AuthError> {
+    fn render(&self, preimage: &SigV2StringToSign) -> String {
         match preimage.sign(&self.key) {
-            Signature::HmacSha1(bytes) => Ok(encode_base64_exact(bytes.as_array())),
-            _ => Err(AuthError::SignatureDoesNotMatch),
+            Signature::HmacSha1(bytes) => encode_base64_exact(bytes.as_array()),
+            _ => unreachable!("SigV2StringToSign always produces HMAC-SHA1"),
         }
     }
 }

@@ -27,7 +27,7 @@ use sha2::Sha256;
 
 use crate::post_policy_json::{JsonParser, JsonValue};
 use crate::{
-    AmzDate, AuthError, CredentialScope, CtBytes, RequestNow, SessionToken, Signature, SignatureMatch, SigningKey,
+    AmzDate, AuthError, CredentialScope, CtBytes, RequestNow, SecretBytes, SessionToken, Signature, SignatureMatch, SigningKey,
     VerifyRejection,
 };
 
@@ -171,18 +171,7 @@ impl PostPolicy {
         if fields.required("x-amz-algorithm")? != ALGORITHM {
             return Err(PostPolicyError::Malformed);
         }
-
-        let encoded = fields.required("policy")?;
-        if encoded.is_empty() || encoded.len() > limits.max_encoded_bytes {
-            return Err(PostPolicyError::Malformed);
-        }
-        let decoded = decode_base64(encoded, limits.max_decoded_bytes)?;
-        let root = JsonParser::parse(&decoded, limits.max_json_depth, limits.max_json_elements)?;
-        let (expiration, conditions) = parse_policy(root)?;
-        let expiry = parse_expiration(&expiration)?;
-        if now.unix_seconds() >= crate::clock::unix_seconds(&expiry).ok_or(PostPolicyError::Malformed)? {
-            return Err(PostPolicyError::Expired);
-        }
+        let (encoded, conditions) = parse_policy_document(&fields, limits, now)?;
 
         let credential = fields.required("x-amz-credential")?;
         let scope = CredentialScope::parse(credential).map_err(|_| PostPolicyError::Malformed)?;
@@ -191,50 +180,10 @@ impl PostPolicy {
             return Err(PostPolicyError::Malformed);
         }
         let signature = parse_signature(fields.required("x-amz-signature")?)?;
-        let filename = if raw_filename.is_empty() {
-            None
-        } else {
-            Some(clean_filename(raw_filename)?)
-        };
-        let final_key = substitute_filename(fields.required("key")?, filename.as_deref())?;
-
-        let mut mentioned = BTreeSet::new();
-        let mut minimum_file_bytes = 0;
-        let mut maximum_file_bytes = limits.max_file_bytes;
-        for condition in &conditions {
-            match condition {
-                Condition::Exact(name, expected) => {
-                    mentioned.insert(name.clone());
-                    if condition_value(&fields, name, &final_key)? != expected {
-                        return Err(PostPolicyError::ConditionFailed);
-                    }
-                }
-                Condition::StartsWith(name, prefix) => {
-                    mentioned.insert(name.clone());
-                    if !condition_value(&fields, name, &final_key)?.starts_with(prefix) {
-                        return Err(PostPolicyError::ConditionFailed);
-                    }
-                }
-                Condition::ContentLengthRange(minimum, maximum) => {
-                    if minimum > maximum {
-                        return Err(PostPolicyError::Malformed);
-                    }
-                    minimum_file_bytes = minimum_file_bytes.max(*minimum);
-                    maximum_file_bytes = maximum_file_bytes.min(*maximum);
-                }
-            }
-        }
-        if minimum_file_bytes > maximum_file_bytes {
-            return Err(PostPolicyError::ConditionFailed);
-        }
-        for name in fields.names() {
-            if !EXEMPT_FIELDS.contains(&name.as_str()) && !mentioned.contains(name) {
-                return Err(PostPolicyError::ConditionFailed);
-            }
-        }
+        let common = enforce_policy_fields(&fields, raw_filename, limits, encoded, &conditions)?;
 
         Ok(Self {
-            encoded: encoded.to_owned(),
+            encoded: common.encoded,
             scope,
             signed_at,
             signature,
@@ -243,10 +192,10 @@ impl PostPolicy {
                 .map(SessionToken::new)
                 .transpose()
                 .map_err(|_| PostPolicyError::Malformed)?,
-            bucket: fields.required("bucket")?.to_owned(),
-            final_key,
-            minimum_file_bytes,
-            maximum_file_bytes,
+            bucket: common.bucket,
+            final_key: common.final_key,
+            minimum_file_bytes: common.minimum_file_bytes,
+            maximum_file_bytes: common.maximum_file_bytes,
         })
     }
 
@@ -298,17 +247,102 @@ impl PostPolicy {
     ///
     /// Returns [`PostPolicyError`] when bucket, key, or size does not satisfy the parsed policy.
     pub fn enforce_final(&self, bucket: &str, key: &str, file_bytes: u64) -> Result<PostPolicyEnforcement, PostPolicyError> {
-        if bucket != self.bucket || key != self.final_key {
-            return Err(PostPolicyError::ConditionFailed);
-        }
-        if file_bytes < self.minimum_file_bytes {
-            return Err(PostPolicyError::EntityTooSmall);
-        }
-        if file_bytes > self.maximum_file_bytes {
-            return Err(PostPolicyError::EntityTooLarge);
-        }
-        Ok(PostPolicyEnforcement(()))
+        enforce_final_values(
+            &self.bucket,
+            &self.final_key,
+            self.minimum_file_bytes,
+            self.maximum_file_bytes,
+            bucket,
+            key,
+            file_bytes,
+        )
     }
+}
+
+/// A SigV2 browser POST policy using [`PostPolicy`]'s field, JSON, and size authority.
+pub struct SigV2PostPolicy {
+    encoded: String,
+    bucket: String,
+    final_key: String,
+    minimum_file_bytes: u64,
+    maximum_file_bytes: u64,
+}
+
+impl fmt::Debug for SigV2PostPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SigV2PostPolicy")
+            .field("read_ceiling", &self.maximum_file_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SigV2PostPolicy {
+    /// Parses and enforces the shared pre-file POST-policy conditions for a SigV2 form.
+    /// # Errors
+    /// Returns [`PostPolicyError`] for malformed or expired policies and failed conditions.
+    pub fn parse(
+        fields: &[(&str, &str)],
+        raw_filename: &str,
+        limits: PostPolicyLimits,
+        now: RequestNow,
+    ) -> Result<Self, PostPolicyError> {
+        let fields = FieldSet::parse(fields)?;
+        fields.required("awsaccesskeyid")?;
+        fields.required("signature")?;
+        let (encoded, conditions) = parse_policy_document(&fields, limits, now)?;
+        let common = enforce_policy_fields(&fields, raw_filename, limits, encoded, &conditions)?;
+        Ok(Self {
+            encoded: common.encoded,
+            bucket: common.bucket,
+            final_key: common.final_key,
+            minimum_file_bytes: common.minimum_file_bytes,
+            maximum_file_bytes: common.maximum_file_bytes,
+        })
+    }
+
+    /// The final key after safe filename substitution.
+    #[must_use]
+    pub fn final_key(&self) -> &str {
+        &self.final_key
+    }
+
+    /// Maximum bytes the multipart reader may accept before stopping.
+    #[must_use]
+    pub const fn read_ceiling(&self) -> u64 {
+        self.maximum_file_bytes
+    }
+
+    /// Compares the SigV2 policy signature through the one constant-time SigV2 entry point.
+    /// # Errors
+    /// Returns [`PostPolicyError::SignatureMismatch`] when comparison fails.
+    pub fn verify(&self, secret: &SecretBytes, presented: &Signature) -> Result<SignatureMatch, PostPolicyError> {
+        let preimage = crate::sig_v2::SigV2StringToSign::from_post_policy(&self.encoded);
+        let expected = preimage.sign(secret);
+        crate::sig_v2::verify_presented(presented, &expected).map_err(|_| PostPolicyError::SignatureMismatch)
+    }
+
+    /// Rechecks final routing values and the observed file size.
+    /// # Errors
+    /// Returns [`PostPolicyError`] when bucket, key, or size does not satisfy the parsed policy.
+    pub fn enforce_final(&self, bucket: &str, key: &str, file_bytes: u64) -> Result<PostPolicyEnforcement, PostPolicyError> {
+        enforce_final_values(
+            &self.bucket,
+            &self.final_key,
+            self.minimum_file_bytes,
+            self.maximum_file_bytes,
+            bucket,
+            key,
+            file_bytes,
+        )
+    }
+}
+
+struct CommonPolicy {
+    encoded: String,
+    bucket: String,
+    final_key: String,
+    minimum_file_bytes: u64,
+    maximum_file_bytes: u64,
 }
 
 struct FieldSet<'a>(BTreeMap<String, &'a str>);
@@ -338,6 +372,103 @@ impl<'a> FieldSet<'a> {
     fn names(&self) -> impl Iterator<Item = &String> {
         self.0.keys()
     }
+}
+
+fn parse_policy_document(
+    fields: &FieldSet<'_>,
+    limits: PostPolicyLimits,
+    now: RequestNow,
+) -> Result<(String, Vec<Condition>), PostPolicyError> {
+    let encoded = fields.required("policy")?;
+    if encoded.is_empty() || encoded.len() > limits.max_encoded_bytes {
+        return Err(PostPolicyError::Malformed);
+    }
+    let decoded = decode_base64(encoded, limits.max_decoded_bytes)?;
+    let root = JsonParser::parse(&decoded, limits.max_json_depth, limits.max_json_elements)?;
+    let (expiration, conditions) = parse_policy(root)?;
+    let expiry = parse_expiration(&expiration)?;
+    if now.unix_seconds() >= crate::clock::unix_seconds(&expiry).ok_or(PostPolicyError::Malformed)? {
+        return Err(PostPolicyError::Expired);
+    }
+    Ok((encoded.to_owned(), conditions))
+}
+
+fn enforce_policy_fields(
+    fields: &FieldSet<'_>,
+    raw_filename: &str,
+    limits: PostPolicyLimits,
+    encoded: String,
+    conditions: &[Condition],
+) -> Result<CommonPolicy, PostPolicyError> {
+    let filename = if raw_filename.is_empty() {
+        None
+    } else {
+        Some(clean_filename(raw_filename)?)
+    };
+    let final_key = substitute_filename(fields.required("key")?, filename.as_deref())?;
+    let mut mentioned = BTreeSet::new();
+    let mut minimum_file_bytes = 0;
+    let mut maximum_file_bytes = limits.max_file_bytes;
+    for condition in conditions {
+        match condition {
+            Condition::Exact(name, expected) => {
+                mentioned.insert(name.clone());
+                if condition_value(fields, name, &final_key)? != expected {
+                    return Err(PostPolicyError::ConditionFailed);
+                }
+            }
+            Condition::StartsWith(name, prefix) => {
+                mentioned.insert(name.clone());
+                if !condition_value(fields, name, &final_key)?.starts_with(prefix) {
+                    return Err(PostPolicyError::ConditionFailed);
+                }
+            }
+            Condition::ContentLengthRange(minimum, maximum) => {
+                if minimum > maximum {
+                    return Err(PostPolicyError::Malformed);
+                }
+                minimum_file_bytes = minimum_file_bytes.max(*minimum);
+                maximum_file_bytes = maximum_file_bytes.min(*maximum);
+            }
+        }
+    }
+    if minimum_file_bytes > maximum_file_bytes {
+        return Err(PostPolicyError::ConditionFailed);
+    }
+    for name in fields.names() {
+        if !EXEMPT_FIELDS.contains(&name.as_str()) && !mentioned.contains(name) {
+            return Err(PostPolicyError::ConditionFailed);
+        }
+    }
+
+    Ok(CommonPolicy {
+        encoded,
+        bucket: fields.required("bucket")?.to_owned(),
+        final_key,
+        minimum_file_bytes,
+        maximum_file_bytes,
+    })
+}
+
+fn enforce_final_values(
+    expected_bucket: &str,
+    expected_key: &str,
+    minimum_file_bytes: u64,
+    maximum_file_bytes: u64,
+    bucket: &str,
+    key: &str,
+    file_bytes: u64,
+) -> Result<PostPolicyEnforcement, PostPolicyError> {
+    if bucket != expected_bucket || key != expected_key {
+        return Err(PostPolicyError::ConditionFailed);
+    }
+    if file_bytes < minimum_file_bytes {
+        return Err(PostPolicyError::EntityTooSmall);
+    }
+    if file_bytes > maximum_file_bytes {
+        return Err(PostPolicyError::EntityTooLarge);
+    }
+    Ok(PostPolicyEnforcement(()))
 }
 
 enum Condition {
@@ -541,135 +672,5 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const POLICY: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LFsic3RhcnRzLXdpdGgiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9XX0=";
-
-    #[test]
-    fn c_sig_0417_valid_policy_produces_a_proof_and_final_receipt() {
-        let key = SigningKey::from_array([7u8; 32]);
-        let signature = hex_encode(&hmac_sha256(key.expose(), POLICY.as_bytes()));
-        let fields = valid_fields(&signature);
-        let policy = parse(&fields, "../report.txt").expect("valid policy");
-        assert_eq!(policy.final_key(), "uploads/report.txt");
-        assert!(policy.verify(&key).is_ok());
-        assert!(policy.enforce_final("example-bucket", "uploads/report.txt", 1).is_ok());
-    }
-
-    #[test]
-    fn c_sig_0418_case_only_duplicate_fields_are_rejected() {
-        let signature = "0".repeat(64);
-        let mut fields = valid_fields(&signature);
-        fields.push(("X-Amz-Date", "20150830T123600Z"));
-        assert_eq!(parse(&fields, "report.txt").err(), Some(PostPolicyError::Malformed));
-    }
-
-    #[test]
-    fn c_sig_0419_missing_filename_for_a_template_is_rejected() {
-        let signature = "0".repeat(64);
-        assert_eq!(parse(&valid_fields(&signature), "").err(), Some(PostPolicyError::ConditionFailed));
-    }
-
-    #[test]
-    fn c_sig_0420_control_character_in_filename_is_rejected() {
-        let signature = "0".repeat(64);
-        assert_eq!(parse(&valid_fields(&signature), "bad\0name").err(), Some(PostPolicyError::Malformed));
-    }
-
-    #[test]
-    fn c_sig_0421_wrong_field_value_is_rejected() {
-        let signature = "0".repeat(64);
-        let mut fields = valid_fields(&signature);
-        fields[1].1 = "other-bucket";
-        assert_eq!(parse(&fields, "report.txt").err(), Some(PostPolicyError::ConditionFailed));
-    }
-
-    #[test]
-    fn c_sig_0422_bad_base64_padding_is_rejected() {
-        let signature = "0".repeat(64);
-        let mut fields = valid_fields(&signature);
-        fields[6].1 = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LFsic3RhcnRzLXdpdGgiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9XX0gIB==";
-        assert_eq!(parse(&fields, "report.txt").err(), Some(PostPolicyError::Malformed));
-    }
-
-    #[test]
-    fn c_sig_0423_duplicate_json_keys_are_rejected() {
-        let signature = "0".repeat(64);
-        let mut fields = valid_fields(&signature);
-        fields[6].1 = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LFsic3RhcnRzLXdpdGgiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9XX0=";
-        assert_eq!(parse(&fields, "report.txt").err(), Some(PostPolicyError::Malformed));
-    }
-
-    #[test]
-    fn c_sig_0424_unknown_condition_operators_are_rejected() {
-        let signature = "0".repeat(64);
-        let mut fields = valid_fields(&signature);
-        fields[6].1 = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LFsiY29udGFpbnMiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9XX0=";
-        assert_eq!(parse(&fields, "report.txt").err(), Some(PostPolicyError::Malformed));
-    }
-
-    #[test]
-    fn c_sig_0425_expired_policy_is_rejected() {
-        let signature = "0".repeat(64);
-        let fields = valid_fields(&signature);
-        let result = PostPolicy::parse(
-            &fields,
-            "report.txt",
-            PostPolicyLimits::default(),
-            RequestNow::from_unix_seconds(1_440_941_761),
-        );
-        assert_eq!(result.err(), Some(PostPolicyError::Expired));
-    }
-
-    #[test]
-    fn c_sig_0426_wrong_signature_is_rejected() {
-        let signature = "0".repeat(64);
-        let policy = parse(&valid_fields(&signature), "report.txt").expect("policy shape is valid");
-        assert_eq!(
-            policy.verify(&SigningKey::from_array([7u8; 32])).err(),
-            Some(PostPolicyError::SignatureMismatch)
-        );
-    }
-
-    #[test]
-    fn c_sig_0427_final_size_bounds_are_enforced_both_ways() {
-        let signature = "0".repeat(64);
-        let mut policy = parse(&valid_fields(&signature), "report.txt").expect("policy shape is valid");
-        policy.minimum_file_bytes = 2;
-        policy.maximum_file_bytes = 3;
-        assert_eq!(
-            policy.enforce_final("example-bucket", "uploads/report.txt", 1).err(),
-            Some(PostPolicyError::EntityTooSmall)
-        );
-        assert_eq!(
-            policy.enforce_final("example-bucket", "uploads/report.txt", 4).err(),
-            Some(PostPolicyError::EntityTooLarge)
-        );
-    }
-
-    fn parse(fields: &[(&str, &str)], filename: &str) -> Result<PostPolicy, PostPolicyError> {
-        PostPolicy::parse(
-            fields,
-            filename,
-            PostPolicyLimits::default(),
-            RequestNow::from_unix_seconds(1_440_938_160),
-        )
-    }
-
-    fn valid_fields(signature: &str) -> Vec<(&str, &str)> {
-        vec![
-            ("key", "uploads/${filename}"),
-            ("bucket", "example-bucket"),
-            ("x-amz-algorithm", ALGORITHM),
-            ("x-amz-credential", "AKIDEXAMPLE/20150830/us-east-1/s3/aws4_request"),
-            ("x-amz-date", "20150830T123600Z"),
-            ("x-amz-signature", signature),
-            ("policy", POLICY),
-        ]
-    }
-
-    fn hex_encode(bytes: &[u8]) -> String {
-        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-    }
-}
+#[path = "post_policy_tests.rs"]
+mod tests;

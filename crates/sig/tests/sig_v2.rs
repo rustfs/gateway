@@ -59,6 +59,16 @@ fn header_sts(method: &Method, path: &str, query: &str, pairs: &[(&str, &str)], 
         .to_owned()
 }
 
+fn verification_header_sts(method: &Method, path: &str, query: &str, pairs: &[(&str, &str)], bucket: Option<&str>) -> String {
+    let map = headers(pairs);
+    let raw = RawQuery::new(query);
+    SigV2StringToSignSpec::new(SigV2Mode::HeaderAuth, method, path, &raw, &map, bucket)
+        .build_for_verification()
+        .expect("verification string-to-sign")
+        .text()
+        .to_owned()
+}
+
 // ---------------------------------------------------------------------------------------------
 // Positive
 // ---------------------------------------------------------------------------------------------
@@ -157,6 +167,16 @@ fn c_sig_0505_the_cors_subresource_is_covered() {
         Some("johnsmith"),
     );
     assert!(text.ends_with("/johnsmith/?cors"), "{text}");
+    assert_eq!(
+        verification_header_sts(
+            &Method::PUT,
+            "/",
+            "cors",
+            &[("Date", "Tue, 27 Mar 2007 19:36:42 +0000")],
+            Some("johnsmith"),
+        ),
+        text
+    );
 }
 
 /// Positive — c-sig-0506: an `x-amz-date` header empties the `{Date}` line.
@@ -176,6 +196,19 @@ fn c_sig_0506_x_amz_date_empties_the_date_line() {
         None,
     );
     assert_eq!(text, "GET\n\n\n\nx-amz-date:Tue, 27 Mar 2007 19:36:42 +0000\n/photos/puppy.jpg");
+    assert_eq!(
+        verification_header_sts(
+            &Method::GET,
+            "/photos/puppy.jpg",
+            "",
+            &[
+                ("Date", "Tue, 27 Mar 2007 19:36:42 +0000"),
+                ("x-amz-date", "Tue, 27 Mar 2007 19:36:42 +0000"),
+            ],
+            None,
+        ),
+        text
+    );
 }
 
 /// Positive — c-sig-0507: without `x-amz-date`, the `Date` header's value is the `{Date}` line.

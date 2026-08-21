@@ -253,13 +253,13 @@ for test_name in (
     "an_acknowledged_handler_deadline_keeps_the_observed_socket_reusable",
     "a_monomorphic_unacknowledged_handler_deadline_carries_close_intent",
     "a_completed_handler_reports_no_deadline",
-    "c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit",
+    "c_wire_0060_c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit",
 ):
     if connection_test_source.count(f"async fn {test_name}()") != 1:
         fail("handler deadline connection evidence is missing or duplicated")
 reset_body = function_body(
     connection_test_source,
-    "async fn c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit()",
+    "async fn c_wire_0060_c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit()",
     "c-lim-0060 reset cancellation evidence",
 )
 for required in (

@@ -28,6 +28,7 @@
 use http::Method;
 use http::header::{CONTENT_TYPE, DATE, HeaderMap, HeaderName};
 
+use crate::contracts::{SIGV2_EMPTY_DATE_ON_AMZ_DATE, SIGV2_INCLUDED_QUERY, SIGV2_QUERY_NOT_COVERED};
 use crate::query::RawQuery;
 use crate::secret::SecretBytes;
 use crate::signature::{CtBytes, Signature};
@@ -39,6 +40,25 @@ use hmac::{Hmac, Mac};
 use sha1::Sha1;
 
 type HmacSha1 = Hmac<Sha1>;
+
+#[derive(Clone, Copy)]
+struct CanonicalizationPolicy {
+    included_query: bool,
+    empty_date_on_amz_date: bool,
+    query_not_covered: bool,
+}
+
+const CLIENT_POLICY: CanonicalizationPolicy = CanonicalizationPolicy {
+    included_query: true,
+    empty_date_on_amz_date: true,
+    query_not_covered: true,
+};
+
+const VERIFICATION_POLICY: CanonicalizationPolicy = CanonicalizationPolicy {
+    included_query: SIGV2_INCLUDED_QUERY,
+    empty_date_on_amz_date: SIGV2_EMPTY_DATE_ON_AMZ_DATE,
+    query_not_covered: SIGV2_QUERY_NOT_COVERED,
+};
 
 /// The `Content-MD5` header, lowercased. `http::header` has no constant for it.
 const CONTENT_MD5: HeaderName = HeaderName::from_static("content-md5");
@@ -119,6 +139,11 @@ pub enum SigV2Mode {
     HeaderAuth,
     /// `?AWSAccessKeyId=…&Expires=…&Signature=…`.
     PresignedUrl,
+    /// Browser POST fields `AWSAccessKeyId`, `signature`, and `policy`.
+    ///
+    /// This location signs the base64 policy directly, so [`SigV2StringToSignSpec`] refuses it;
+    /// use [`SigV2StringToSign::from_post_policy`] instead.
+    PostPolicy,
 }
 
 /// A finished SigV2 string-to-sign, and the only thing that can be signed with HMAC-SHA1 here.
@@ -131,6 +156,14 @@ pub struct SigV2StringToSign {
 }
 
 impl SigV2StringToSign {
+    /// Wraps the base64 POST policy, which is the complete SigV2 browser-POST preimage.
+    #[must_use]
+    pub fn from_post_policy(encoded_policy: &str) -> Self {
+        Self {
+            text: encoded_policy.to_owned(),
+        }
+    }
+
     /// The string-to-sign text, exactly as it is fed to the HMAC.
     #[must_use]
     pub fn text(&self) -> &str {
@@ -221,11 +254,28 @@ impl<'r> SigV2StringToSignSpec<'r> {
     /// * [`AuthError::AuthorizationQueryParametersError`] in [`SigV2Mode::PresignedUrl`] when
     ///   `Expires` is missing, repeated, or not a strict unsigned decimal.
     pub fn build(&self) -> Result<SigV2StringToSign, AuthError> {
+        self.build_with(CLIENT_POLICY)
+    }
+
+    /// Builds the server-side string-to-sign from the generated protocol contracts.
+    ///
+    /// The ordinary [`Self::build`] remains the AWS client baseline. Keeping these entry points
+    /// distinct lets the conformance mutation runner flip one verifier rule without teaching the
+    /// client signer the same defect and producing a false green round trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::build`].
+    pub fn build_for_verification(&self) -> Result<SigV2StringToSign, AuthError> {
+        self.build_with(VERIFICATION_POLICY)
+    }
+
+    fn build_with(&self, policy: CanonicalizationPolicy) -> Result<SigV2StringToSign, AuthError> {
         let content_md5 = single_header(self.headers, &CONTENT_MD5)?;
         let content_type = single_header(self.headers, &CONTENT_TYPE)?;
-        let date = self.date_slot()?;
+        let date = self.date_slot(policy)?;
         let amz_headers = self.canonicalized_amz_headers()?;
-        let resource = self.canonicalized_resource()?;
+        let resource = self.canonicalized_resource(policy)?;
 
         let mut text = String::with_capacity(
             self.method.as_str().len()
@@ -257,10 +307,10 @@ impl<'r> SigV2StringToSignSpec<'r> {
     /// rule fails every client that sends `x-amz-date`, which is most of them.
     ///
     /// Presigned: the `Expires` query parameter verbatim — an absolute Unix second.
-    fn date_slot(&self) -> Result<String, AuthError> {
+    fn date_slot(&self, policy: CanonicalizationPolicy) -> Result<String, AuthError> {
         match self.mode {
             SigV2Mode::HeaderAuth => {
-                if self.headers.contains_key(&X_AMZ_DATE) {
+                if policy.empty_date_on_amz_date && self.headers.contains_key(&X_AMZ_DATE) {
                     return Ok(String::new());
                 }
                 Ok(single_header(self.headers, &DATE)?.to_owned())
@@ -277,6 +327,7 @@ impl<'r> SigV2StringToSignSpec<'r> {
                 super::parse_expires_digits(&raw)?;
                 Ok(raw)
             }
+            SigV2Mode::PostPolicy => Err(AuthError::AuthorizationHeaderMalformed),
         }
     }
 
@@ -328,7 +379,7 @@ impl<'r> SigV2StringToSignSpec<'r> {
     /// `?acl=x%26versionId%3Dy` and `?acl=x&versionId=y` canonicalise to one string. botocore
     /// computes the same collision, so closing it unilaterally would reject requests AWS's own
     /// SDK signs. Both facts are recorded in `docs/security-model.md`.
-    fn canonicalized_resource(&self) -> Result<String, AuthError> {
+    fn canonicalized_resource(&self, policy: CanonicalizationPolicy) -> Result<String, AuthError> {
         let mut out = String::new();
         if let Some(bucket) = self.virtual_host_bucket {
             if bucket.is_empty() {
@@ -339,20 +390,50 @@ impl<'r> SigV2StringToSignSpec<'r> {
         }
         out.push_str(self.uri_path);
 
-        let mut separator = '?';
-        for name in INCLUDED_QUERY {
-            let Some(value) = self.query.decoded_value(name)? else {
-                continue;
-            };
-            out.push(separator);
-            separator = '&';
-            out.push_str(name);
-            if !value.is_empty() {
-                out.push('=');
-                out.push_str(&value);
+        if policy.included_query {
+            let mut separator = '?';
+            for name in INCLUDED_QUERY {
+                let Some(value) = self.query.decoded_value(name)? else {
+                    continue;
+                };
+                out.push(separator);
+                separator = '&';
+                out.push_str(name);
+                if !value.is_empty() {
+                    out.push('=');
+                    out.push_str(&value);
+                }
+            }
+            if !policy.query_not_covered {
+                for (name, value) in self.uncovered_query_pairs()? {
+                    out.push(separator);
+                    separator = '&';
+                    out.push_str(&name);
+                    if let Some(value) = value {
+                        out.push('=');
+                        out.push_str(&value);
+                    }
+                }
             }
         }
         Ok(out)
+    }
+
+    fn uncovered_query_pairs(&self) -> Result<Vec<(String, Option<String>)>, AuthError> {
+        let mut pairs: Vec<(String, Option<String>)> = Vec::new();
+        for (name, value) in self.query.decoded_pairs()? {
+            if INCLUDED_QUERY.contains(&name.as_str())
+                || matches!(name.as_str(), "AWSAccessKeyId" | SIGV2_EXPIRES_PARAM | "Signature")
+            {
+                continue;
+            }
+            if pairs.iter().any(|(existing, _)| existing.eq(&name)) {
+                return Err(AuthError::AuthorizationHeaderMalformed);
+            }
+            pairs.push((name, value));
+        }
+        pairs.sort_unstable();
+        Ok(pairs)
     }
 }
 

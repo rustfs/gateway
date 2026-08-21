@@ -112,6 +112,29 @@ impl<'a> SealedSigV2<'a> {
         }
     }
 
+    /// A browser POST form whose credential fields parsed and whose operation allows POST policy.
+    ///
+    /// Expiration and condition enforcement remain in the shared POST-policy authority; this
+    /// constructor only seals the authentication surface away from the SigV4 verifier.
+    pub(crate) const fn post_policy(
+        view: WireView<'a>,
+        presented: SigV2Authorization,
+        now: RequestNow,
+        presence: CredentialPresence,
+        expected_service: SigService,
+    ) -> Self {
+        Self {
+            view,
+            mode: SigV2Mode::PostPolicy,
+            presented,
+            clock: None,
+            now,
+            expires_at: None,
+            presence,
+            expected_service,
+        }
+    }
+
     /// The request as it arrived.
     #[must_use]
     pub const fn view(&self) -> WireView<'a> {
@@ -136,7 +159,7 @@ impl<'a> SealedSigV2<'a> {
         self.presented.presented()
     }
 
-    /// The skew receipt, for header authentication. `None` for a presigned URL.
+    /// The skew receipt, for header authentication. `None` for presigned and POST-policy forms.
     #[must_use]
     pub const fn clock(&self) -> Option<ClockChecked> {
         self.clock

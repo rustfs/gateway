@@ -27,6 +27,14 @@ pub enum MutationDimension {
     SignaturePathFallbackPolicy,
     /// Change whether the canonical payload line keeps the client's accepted token spelling.
     SignaturePayloadTokenPolicy,
+    /// Change whether SigV2 canonical resources include the subresource allowlist.
+    SigV2IncludedQueryPolicy,
+    /// Change whether SigV2 empties the Date slot when `x-amz-date` is present.
+    SigV2DateSlotPolicy,
+    /// Change whether SigV2 presigned expiry is an absolute Unix second.
+    SigV2ExpiresAbsolutePolicy,
+    /// Change whether SigV2 omits arbitrary query parameters from its signature.
+    SigV2QueryCoveragePolicy,
     /// Replace the grammar used to validate a wire string.
     WireForm,
     /// Move one or both inclusive integer bounds.
@@ -378,6 +386,10 @@ impl MutationDimension {
             Self::SignatureCanonicalHostPolicy => "signature_canonical_host_policy",
             Self::SignaturePathFallbackPolicy => "signature_path_fallback_policy",
             Self::SignaturePayloadTokenPolicy => "signature_payload_token_policy",
+            Self::SigV2IncludedQueryPolicy => "sigv2_included_query_policy",
+            Self::SigV2DateSlotPolicy => "sigv2_date_slot_policy",
+            Self::SigV2ExpiresAbsolutePolicy => "sigv2_expires_absolute_policy",
+            Self::SigV2QueryCoveragePolicy => "sigv2_query_coverage_policy",
             Self::WireForm => "wire_form",
             Self::IntegerRange => "integer_range",
             Self::MediaType => "media_type",

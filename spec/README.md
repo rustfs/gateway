@@ -71,7 +71,7 @@ the single member *is* the root); each shape's `element_order` covers exactly it
 ### Shared id conventions
 
 `quirk_id` and `case_id` use the same patterns as `conformance/case.schema.json`
-(`^q-…-NNNN$`, `^c-…-NNNN$`) so that the two directions of the reference close: a quirk
+(`^q-<kebab-slug>$`, `^c-…-NNNN$`) so that the two directions of the reference close: a quirk
 names the cases that would fail if it were flipped, and each case names the quirks it
 exercises. The mutation gate builds its coverage matrix from that pair, and a quirk no case
 references fails CI.

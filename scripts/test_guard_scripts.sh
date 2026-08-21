@@ -16164,7 +16164,7 @@ QUIRK_LEDGER_DIAGNOSTICS=$(cat <<'DIAGEOF'
 mut_quirk_ledger_classification_count	q-timestamp-0012: unknown classification
 mut_quirk_ledger_duplicate_source	q-restore-header-absence-0127: multiple typed sources
 mut_quirk_ledger_typed_contract_proof_removed	ledger typed_contracts: expected 160, found 159
-mut_quirk_ledger_dimension_count	ledger dimensions: expected 174, found 173
+mut_quirk_ledger_dimension_count	ledger dimensions: expected 178, found 177
 mut_quirk_ledger_misbound_emitter_dimension	q-restore-header-absence-0127: expected one declared emitter binding, found 0
 mut_quirk_ledger_capability_exclusion	capability exclusions must remain typed contract sources
 mut_quirk_ledger_mutable_consumer	q-empty-0002: mutable source is claimed by no operation overlay
@@ -16188,6 +16188,9 @@ mut_quirk_ledger_spec_id_set	spec/quirks id set drifted:
 mut_quirk_ledger_signature_host_consumer	q-sig-canonical-host-raw-0156: emitted constants lack one production consumer identity
 mut_quirk_ledger_signature_path_consumer	q-sig-raw-path-fallback-0157: emitted constants lack one production consumer identity
 mut_quirk_ledger_signature_payload_consumer	q-sig-payload-token-verbatim-0158: emitted constants lack one production consumer identity
+mut_quirk_ledger_sigv2_mutable_contract_consumer	q-sig-v2-included-query: emitted constants lack one production consumer identity
+mut_quirk_ledger_sigv2_expires_consumer	q-sig-v2-expires-absolute: emitted constants lack one production consumer identity
+mut_quirk_ledger_sigv2_query_consumer	q-sig-v2-query-not-covered: emitted constants lack one production consumer identity
 DIAGEOF
 )
 if ! python3 - "${GATEWAY_GUARD_SCRIPT_SOURCE:-$0}" <<'PYEOF'
@@ -16199,10 +16202,10 @@ text = pathlib.Path(sys.argv[1]).read_text()
 entries = re.findall(r"expect_fail check_quirk_ledger\.sh \\\n\s+'([^']+)' ([a-z0-9_]+)", text)
 diagnostics = re.findall(r"^(mut_quirk_ledger_[a-z0-9_]+)\t([^\n]+)$", text, re.MULTILINE)
 helpers = [helper for _, helper in entries]
-if len(entries) != 27 or len(set(entries)) != 27 or len(diagnostics) != 27 or len(set(diagnostics)) != 27:
-    raise SystemExit("quirk-ledger mutation manifest must contain 27 unique description/helper pairs")
+if len(entries) != 30 or len(set(entries)) != 30 or len(diagnostics) != 30 or len(set(diagnostics)) != 30:
+    raise SystemExit("quirk-ledger mutation manifest must contain 30 unique description/helper pairs")
 if set(helpers) != {helper for helper, _ in diagnostics}:
-    raise SystemExit("quirk-ledger diagnostic manifest does not match the 24 mutation helpers")
+    raise SystemExit("quirk-ledger diagnostic manifest does not match the 30 mutation helpers")
 PYEOF
 then
     fail_msg 'check_quirk_ledger.sh mutation manifest is missing or duplicated'
@@ -16253,7 +16256,7 @@ path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_quirk_ledger.sh \
-    'one protected record leaving the 96/160/88 classification ledger' mut_quirk_ledger_classification_count
+    'one protected record leaving the 100/160/88 classification ledger' mut_quirk_ledger_classification_count
 if ! python3 - "$QUIRK_LEDGER_PARSE_CACHE" "$SANDBOX/model/overlays/quirks/object.toml" <<'PYEOF'
 import hashlib
 import pathlib
@@ -16318,7 +16321,7 @@ path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_quirk_ledger.sh \
-    'the 174-dimension ledger collapsing one independent atom' mut_quirk_ledger_dimension_count
+    'the 178-dimension ledger collapsing one independent atom' mut_quirk_ledger_dimension_count
 
 mut_quirk_ledger_misbound_emitter_dimension() {
     python3 - <<'PYEOF'
@@ -16705,7 +16708,7 @@ mut_quirk_ledger_spec_id_set() {
     mv spec/quirks/q-empty-0002.toml spec/quirks/q-empty-0002.missing
 }
 expect_fail check_quirk_ledger.sh \
-    'one generated protected ID disappearing from the 96/160 typed set' mut_quirk_ledger_spec_id_set
+    'one generated protected ID disappearing from the 98/160 typed set' mut_quirk_ledger_spec_id_set
 
 mut_quirk_ledger_signature_host_consumer() {
     python3 - <<'PYEOF'
@@ -16752,8 +16755,53 @@ PYEOF
 expect_fail check_quirk_ledger.sh \
     'the payload-token contract losing its production consumer' mut_quirk_ledger_signature_payload_consumer
 
-if [[ $((cases - quirk_ledger_cases_before)) -ne 27 ]]; then
-    fail_msg 'check_quirk_ledger.sh mutation census is not exactly 27 cases'
+mut_quirk_ledger_sigv2_mutable_contract_consumer() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/sig/src/sig_v2/string_to_sign.rs")
+text = path.read_text()
+old = "included_query: SIGV2_INCLUDED_QUERY,"
+if text.count(old) != 1:
+    raise SystemExit("SigV2 included-query consumer mutation subject is not unique")
+path.write_text(text.replace(old, "included_query: true,", 1))
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'the SigV2 mutable contract losing its production consumer' mut_quirk_ledger_sigv2_mutable_contract_consumer
+
+mut_quirk_ledger_sigv2_expires_consumer() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/sig/src/sig_v2/mod.rs")
+text = path.read_text()
+old = "if !SIGV2_EXPIRES_ABSOLUTE {"
+if text.count(old) != 1:
+    raise SystemExit("SigV2 absolute-expiry consumer mutation subject is not unique")
+path.write_text(text.replace(old, "if false {", 1))
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'the SigV2 absolute-expiry contract losing its production consumer' mut_quirk_ledger_sigv2_expires_consumer
+
+mut_quirk_ledger_sigv2_query_consumer() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/sig/src/sig_v2/string_to_sign.rs")
+text = path.read_text()
+old = "query_not_covered: SIGV2_QUERY_NOT_COVERED,"
+if text.count(old) != 1:
+    raise SystemExit("SigV2 uncovered-query consumer mutation subject is not unique")
+path.write_text(text.replace(old, "query_not_covered: true,", 1))
+PYEOF
+}
+expect_fail check_quirk_ledger.sh \
+    'the SigV2 uncovered-query contract losing its production consumer' mut_quirk_ledger_sigv2_query_consumer
+
+if [[ $((cases - quirk_ledger_cases_before)) -ne 30 ]]; then
+    fail_msg 'check_quirk_ledger.sh mutation census is not exactly 30 cases'
 fi
 
 unset GATEWAY_QUIRK_LEDGER_PARSE_CACHE

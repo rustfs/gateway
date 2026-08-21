@@ -78,7 +78,7 @@ cases = "c-acl-0001,c-acl-0004,c-acl-0028,c-acl-0034"
 
 [[operation]]
 name = "GetBucketCors"
-cases = "c-cors-0002,c-cors-0012,c-cors-0025"
+cases = "c-cors-0002,c-cors-0012,c-cors-0025,c-sig-0505"
 
 [[operation]]
 name = "GetBucketEncryption"
@@ -130,7 +130,7 @@ cases = "c-bucketconfig-0013,c-bucketconfig-0028"
 
 [[operation]]
 name = "GetObject"
-cases = "c-authz-0003,c-cond-0002,c-cond-0003,c-cond-0005,c-cond-0007,c-cond-0008,c-cond-0010,c-cond-0014,c-cond-0015,c-cond-0016,c-cond-0017,c-cond-0019,c-cond-0020,c-cond-0021,c-cond-0022,c-cond-0023,c-cond-0028,c-cred-0001,c-cred-0002,c-cred-0003,c-cred-0004,c-cred-0005,c-cred-0006,c-cred-0007,c-cred-0008,c-cred-0009,c-cred-0010,c-cred-0011,c-cred-0012,c-cred-0013,c-cred-0014,c-cred-0015,c-cred-0016,c-cred-0017,c-cred-0018,c-cred-0019,c-cred-0020,c-cred-0021,c-cred-0022,c-cred-0023,c-cred-0024,c-cred-0025,c-cred-0026,c-cred-0027,c-cred-0028,c-cred-0029,c-cred-0030,c-host-0001,c-host-0002,c-host-0004,c-host-0006,c-host-0007,c-host-0009,c-host-0010,c-host-0011,c-naming-0001,c-naming-0002,c-naming-0003,c-naming-0004,c-naming-0005,c-naming-0006,c-naming-0007,c-naming-0008,c-naming-0009,c-naming-0010,c-naming-0011,c-naming-0012,c-naming-0013,c-naming-0015,c-naming-0017,c-naming-0018,c-naming-0021,c-object-0001,c-object-0005,c-object-0007,c-object-0009,c-object-0012,c-object-0014,c-object-0016,c-object-0017,c-object-0019,c-object-0020,c-object-0025,c-object-0029,c-object-0031,c-object-0032,c-object-0033,c-object-0034,c-object-0035,c-object-0036,c-object-0037,c-range-0001,c-range-0002,c-range-0003,c-range-0004,c-range-0005,c-range-0007,c-range-0008,c-range-0009,c-range-0010,c-range-0011,c-range-0012,c-range-0013,c-range-0014,c-range-0015,c-range-0016,c-range-0017,c-range-0018,c-range-0019,c-range-0022,c-ssec-0002,c-tagging-0019,c-tagging-0020"
+cases = "c-authz-0003,c-cond-0002,c-cond-0003,c-cond-0005,c-cond-0007,c-cond-0008,c-cond-0010,c-cond-0014,c-cond-0015,c-cond-0016,c-cond-0017,c-cond-0019,c-cond-0020,c-cond-0021,c-cond-0022,c-cond-0023,c-cond-0028,c-cred-0001,c-cred-0002,c-cred-0003,c-cred-0004,c-cred-0005,c-cred-0006,c-cred-0007,c-cred-0008,c-cred-0009,c-cred-0010,c-cred-0011,c-cred-0012,c-cred-0013,c-cred-0014,c-cred-0015,c-cred-0016,c-cred-0017,c-cred-0018,c-cred-0019,c-cred-0020,c-cred-0021,c-cred-0022,c-cred-0023,c-cred-0024,c-cred-0025,c-cred-0026,c-cred-0027,c-cred-0028,c-cred-0029,c-cred-0030,c-host-0001,c-host-0002,c-host-0004,c-host-0006,c-host-0007,c-host-0009,c-host-0010,c-host-0011,c-naming-0001,c-naming-0002,c-naming-0003,c-naming-0004,c-naming-0005,c-naming-0006,c-naming-0007,c-naming-0008,c-naming-0009,c-naming-0010,c-naming-0011,c-naming-0012,c-naming-0013,c-naming-0015,c-naming-0017,c-naming-0018,c-naming-0021,c-object-0001,c-object-0005,c-object-0007,c-object-0009,c-object-0012,c-object-0014,c-object-0016,c-object-0017,c-object-0019,c-object-0020,c-object-0025,c-object-0029,c-object-0031,c-object-0032,c-object-0033,c-object-0034,c-object-0035,c-object-0036,c-object-0037,c-range-0001,c-range-0002,c-range-0003,c-range-0004,c-range-0005,c-range-0007,c-range-0008,c-range-0009,c-range-0010,c-range-0011,c-range-0012,c-range-0013,c-range-0014,c-range-0015,c-range-0016,c-range-0017,c-range-0018,c-range-0019,c-range-0022,c-sig-0545,c-sig-0548,c-ssec-0002,c-tagging-0019,c-tagging-0020"
 
 [[operation]]
 name = "GetObjectAcl"
@@ -170,7 +170,7 @@ cases = "c-object-0002,c-object-0008,c-object-0018,c-object-0028,c-object-0038,c
 
 [[operation]]
 name = "ListBuckets"
-cases = "c-authz-0007,c-authz-1009,c-authz-1010,c-authz-1015,c-list-0015,c-list-0016,c-list-0044,c-naming-0014,c-sig-0582,c-sig-0583,c-sig-0584"
+cases = "c-authz-0007,c-authz-1009,c-authz-1010,c-authz-1015,c-list-0015,c-list-0016,c-list-0044,c-naming-0014,c-sig-0506,c-sig-0582,c-sig-0583,c-sig-0584"
 
 [[operation]]
 name = "ListMultipartUploads"

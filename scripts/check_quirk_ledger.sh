@@ -8,7 +8,8 @@ set -euo pipefail
 #
 # What "wired" means here, exactly, because gateway#242 was read out of this word:
 #   * for a TYPED CONTRACT it is a join to an executable emitter binding that declares a constant;
-#   * for a MUTABLE rule it is a join to a `quirk_refs` entry in `model/overlays/ops/*.toml`.
+#   * for a lowered-IR MUTABLE rule it is a join to `model/overlays/ops/*.toml`;
+#   * for a runtime-contract MUTABLE rule it is the same executable-emitter join as a contract.
 # The second is a declaration by one hand-written overlay that another hand-written overlay's rule
 # belongs to an operation. It is NOT evidence that any running code reads the lowered value, and it
 # cannot be: this guard never builds anything. Three of the ids it counted as wired had a lowered
@@ -40,14 +41,14 @@ ops_dir = root / "model/overlays/ops"
 case_dir = root / "conformance/cases"
 
 EXPECTED = {
-    "records": 344,
-    "mutable": 96,
+    "records": 348,
+    "mutable": 100,
     "typed_contracts": 160,
     "untyped_contracts": 88,
-    "typed_sources": 256,
-    "dimensions": 174,
-    "wired": 254,
-    "emitted_constants": 166,
+    "typed_sources": 260,
+    "dimensions": 178,
+    "wired": 258,
+    "emitted_constants": 170,
 }
 CAPABILITY_BLOCKS = {"q-cors-0006", "q-cors-0047"}
 
@@ -437,6 +438,7 @@ for path in sorted(overlay_dir.glob("*.toml")):
         records[quirk_id] = (record, path)
 
 mutable: set[str] = set()
+mutable_contracts: set[str] = set()
 typed_contracts: set[str] = set()
 untyped_contracts: set[str] = set()
 typed_sources: set[str] = set()
@@ -462,8 +464,10 @@ for quirk_id, (record, path) in records.items():
     typed = len(source_kinds) == 1
     if classification == "mutable":
         mutable.add(quirk_id)
-        if not typed or source_kinds == ["contract_value"]:
-            fail(f"{quirk_id}: mutable record has no unique codec or operation source")
+        if not typed:
+            fail(f"{quirk_id}: mutable record has no unique typed source")
+        elif source_kinds == ["contract_value"]:
+            mutable_contracts.add(quirk_id)
     elif classification == "contract":
         if typed:
             if source_kinds != ["contract_value"]:
@@ -509,7 +513,7 @@ if not CAPABILITY_BLOCKS.issubset(typed_contracts):
 # note at the top of this file, and `cargo xtask conformance mutate` for the claim this cannot make.
 operation_overlays = [(path, toml_quirk_refs(load_toml(path))) for path in sorted(ops_dir.glob("*.toml"))]
 mutable_wired: set[str] = set()
-for quirk_id in sorted(mutable):
+for quirk_id in sorted(mutable - mutable_contracts):
     consumers = [path for path, references in operation_overlays if quirk_id in references]
     if consumers:
         mutable_wired.add(quirk_id)
@@ -732,7 +736,7 @@ def consumer_identity(path: pathlib.Path) -> str:
 
 
 contract_joined: set[str] = set()
-for quirk_id in sorted(typed_contracts):
+for quirk_id in sorted(typed_contracts | mutable_contracts):
     record = records[quirk_id][0]
     dimension_name = record["mutation_dimension"]
     dimension_variant = name_to_variant.get(dimension_name)
@@ -758,7 +762,7 @@ for quirk_id in sorted(typed_contracts):
                     and (
                         path.relative_to(root).as_posix().startswith("crates/core/src/")
                         or (
-                            constant.startswith("SIGNATURE_")
+                            constant.startswith(("SIGNATURE_", "SIGV2_"))
                             and path.relative_to(root).as_posix().startswith("crates/sig/src/")
                         )
                     )
@@ -949,5 +953,5 @@ if errors:
         print(f"check_quirk_ledger: {error}", file=sys.stderr)
     raise SystemExit(1)
 
-print("OK: quirk ledger 344 overlay facts = 256 proven sources (96 mutable + 160 typed contracts) + 88 deferred; 174 dimensions; 254 wired; 2 capability blocks")
+print("OK: quirk ledger 348 overlay facts = 260 proven sources (100 mutable + 160 typed contracts) + 88 deferred; 178 dimensions; 258 wired; 2 capability blocks")
 PYEOF

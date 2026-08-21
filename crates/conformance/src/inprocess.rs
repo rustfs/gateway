@@ -514,6 +514,7 @@ impl InProcess {
                         && request.bucket.is_some_and(|bucket| bucket.as_str() == "authz-denied-source"))
             })),
         };
+        let builder = sigv2::configure_case(builder, &self.case_id);
         let backend_calls = Arc::clone(&self.authz_backend_calls);
         let copy_backend_calls = Arc::clone(&self.authz_backend_calls);
         builder
@@ -1479,12 +1480,12 @@ pub(crate) fn sign_request(
     let mode = sign.read("signSpec.mode").and_then(Value::as_str).unwrap_or("sigv4_header");
     match mode {
         "anonymous" | "none" => return Ok((headers.to_vec(), wire.target.clone())),
-        "sigv4_header" | "sigv4_unsigned_payload" | "presigned_v4" | "sigv2_header" => {}
+        "sigv4_header" | "sigv4_unsigned_payload" | "presigned_v4" | "sigv2_header" | "presigned_v2" => {}
         other => {
             return Err(SutError::Environment(format!(
                 "`sign.mode = \"{other}\"` is not wired: the in-process target signs SigV4 headers, \
-                 unsigned payloads and presigned URLs, plus SigV2 headers; streaming, presigned SigV2 \
-                 and POST-policy modes need their dedicated wire protocol"
+                 unsigned payloads and presigned URLs, plus SigV2 headers and presigned URLs; \
+                 streaming and POST-policy modes need their dedicated wire protocol"
             )));
         }
     }
@@ -1529,10 +1530,9 @@ pub(crate) fn sign_request(
     };
     let method = http::Method::from_bytes(wire.method.as_bytes())
         .map_err(|_| SutError::Environment(format!("`{}` is not a method", wire.method)))?;
-    if mode == "sigv2_header" {
-        let input =
-            sigv2::HeaderSignInput::new(sign, &method, path, query, &mut map, accepted.host(), (access_key, secret, token));
-        return Ok((sigv2::sign_header(input)?, wire.target.clone()));
+    if matches!(mode, "sigv2_header" | "presigned_v2") {
+        let input = sigv2::SignInput::new(sign, &method, path, query, &mut map, accepted.host(), (access_key, secret, token));
+        return sigv2::sign(mode, input, request_time, &wire.target);
     }
     let mut credentials = SigningCredentials::new(access_key, secret)
         .map_err(|error| SutError::Environment(format!("the signing credentials are not valid: {error}")))?;

@@ -2,13 +2,14 @@ c-sig-0501|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0501_a_virtual_hosted_ob
 c-sig-0502|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0502_an_object_put_carries_md5_content_type_and_the_amz_block|
 c-sig-0503|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0503_a_bucket_listing_signs_its_trailing_slash|
 c-sig-0504|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0504_a_correct_signature_verifies_against_an_independent_vector|verify_presented(presented.presented(), &expected)
-c-sig-0505|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0505_the_cors_subresource_is_covered|
-c-sig-0506|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0506_x_amz_date_empties_the_date_line|
+c-sig-0505|positive|conformance/cases/sig/c-sig-0505.toml|q-sig-v2-included-query|code = "NoSuchCORSConfiguration"
+c-sig-0506|positive|conformance/cases/sig/c-sig-0506.toml|q-sig-v2-empty-date-on-amz-date|status = 200
 c-sig-0507|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0507_without_x_amz_date_the_date_header_is_used|
 c-sig-0508|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0508_repeated_amz_values_are_trimmed_and_comma_joined|
 c-sig-0509|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0509_amz_headers_are_sorted_and_each_line_is_terminated|
 c-sig-0510|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0510_a_valueless_subresource_is_written_without_an_equals_sign|
 c-sig-0511|positive|crates/sig/tests/sig_v2.rs|fn c_sig_0511_multiple_subresources_are_emitted_in_ascending_order|
+c-sig-0512|positive|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0512_sigv2_post_policy_uses_the_shared_policy_authority|assert_eq!(sealed.mode(), SigV2Mode::PostPolicy)
 c-sig-0530|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0530_included_query_is_strictly_ascending|INCLUDED_QUERY.windows(2)
 c-sig-0531|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0531_included_query_is_exactly_the_botocore_set|assert_eq!(INCLUDED_QUERY.as_slice(), unique.as_slice())
 c-sig-0532|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0532_every_signed_component_changes_the_string_to_sign|assert_eq!(mutations.len(), 7)
@@ -24,13 +25,14 @@ c-sig-0541|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0541_the_default_policy_
 c-sig-0542|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0542_the_disabled_policy_refuses_both_locations|assert!(SigV2Policy::HeaderAndPresigned.allows(SigV2Mode::PresignedUrl))
 c-sig-0543|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0543_presigned_signs_the_expires_parameter_in_the_date_slot|
 c-sig-0544|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0544_expires_must_be_a_strict_unsigned_decimal|
-c-sig-0545|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0545_expires_beyond_seven_days_is_refused|
+c-sig-0545|negative|conformance/cases/sig/c-sig-0545.toml|q-sig-v2-expires-absolute|exact_utf8 = "absolute expiry"
 c-sig-0546|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0546_an_elapsed_expires_is_refused|
 c-sig-0547|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0547_an_expires_at_the_ceiling_is_checked_not_wrapped|
-c-sig-0548|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0548_query_outside_the_subresource_set_is_not_covered|assert_eq!(covered, tampered)
+c-sig-0548|negative|conformance/cases/sig/c-sig-0548.toml|q-sig-v2-query-not-covered|exact_utf8 = "uncovered query"
 c-sig-0549|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0549_a_repeated_subresource_is_refused|
 c-sig-0550|negative|crates/sig/tests/compile_fail/c_sig_0550_sigv2_signature_eq.rs|let _ = left == right;|
 c-sig-0551|negative|scripts/test_guard_scripts.sh|mut_c_sig_0551_signature_equality|
+c-sig-0552|negative|crates/sig/tests/timing.rs|fn c_sig_0552_sigv2_difference_position_does_not_change_the_latency|best_distribution_difference(&differs_first, &differs_last)
 c-sig-0553|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0553_no_virtual_host_bucket_means_no_prefix|
 c-sig-0554|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0554_ambiguous_header_input_is_refused|
 c-sig-0555|negative|crates/sig/tests/compile_fail/c_sig_0555_sigv2_authorization_debug.rs|println!|
@@ -41,7 +43,7 @@ c-sig-0559|positive|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0559_an_x_amz
 c-sig-0560|positive|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0560_presigned_sigv2_authenticates_when_the_deployment_opts_in|assert_eq!(reached.load(Ordering::SeqCst), 1
 c-sig-0561|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0561_a_sigv2_request_is_never_sealed_for_the_sigv4_verifier|let sealed_for_sigv2 = matches!(admitted, Admission::SealedSigV2(_));
 c-sig-0562|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0562_an_unparsable_sigv2_credential_is_never_admitted_anonymously|assert_eq!(refusal, AuthError::AuthorizationHeaderMalformed)
-c-sig-0563|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0563_the_sigv2_post_form_shape_is_refused|assert_eq!(refusal, AuthError::NotImplemented(rustfs_gateway_sig::Unimplemented::SigV2))
+c-sig-0563|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0563_the_default_policy_refuses_sigv2_post_policy|assert_eq!(refusal, AuthError::AccessDenied)
 c-sig-0564|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0564_a_repeated_sigv2_expires_is_refused_before_every_other_rule|assert_eq!(refusal, AuthError::AuthorizationQueryParametersError)
 c-sig-0565|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0565_the_disabled_policy_refuses_what_the_default_admits|assert_eq!(refusal, AuthError::AccessDenied)
 c-sig-0566|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0566_a_presigned_url_without_a_signature_is_refused|assert_eq!(refusal, AuthError::AuthorizationQueryParametersError)
@@ -63,3 +65,5 @@ c-sig-0581|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0581_an_authe
 c-sig-0582|positive|conformance/cases/sig/c-sig-0582.toml|mode = "sigv2_header"|status = 200
 c-sig-0583|negative|conformance/cases/sig/c-sig-0583.toml|credential = "wrong_secret"|code = "InvalidAccessKeyId"
 c-sig-0584|negative|conformance/cases/sig/c-sig-0584.toml|credential = "unknown_access_key"|code = "InvalidAccessKeyId"
+c-sig-0585|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0585_a_wrong_sigv2_post_policy_signature_is_refused|assert_eq!(
+c-sig-0586|positive|crates/gateway/src/ext/authenticator_tests.rs|fn c_sig_0586_sigv2_post_policy_reaches_the_builtin_authenticator|assert_eq!(scheme.location, SigLocation::FormField)

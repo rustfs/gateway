@@ -391,6 +391,18 @@ elif kind in ("runtime", "feature_runtime"):
         body_start, body_end = function_body(item)
         if not direct_occurrence(body_start, body_end, required_call):
             raise SystemExit(f"{path}: mapped runtime evidence is not active in the test body")
+elif kind == "split_runtime":
+    if not evidence.startswith("fn "):
+        raise SystemExit(f"{path}: split runtime evidence must name a function")
+    function = evidence.removeprefix("fn ")
+    item = top_level_function(function)
+    attributes = outer_attributes(item.start()) if item is not None else []
+    ordinary = len(attributes) == 1 and re.fullmatch(r"#\s*\[\s*(?:tokio::)?test\s*\]", attributes[0])
+    if not ordinary:
+        raise SystemExit(f"{path}: mapped split function is not a real #[test] item")
+    body_start, body_end = function_body(item)
+    if required_call and required_call not in code[body_start:body_end]:
+        raise SystemExit(f"{path}: mapped split test lost its required active evidence")
 elif kind == "nested_runtime":
     if not evidence.startswith("fn "):
         raise SystemExit(f"{path}: nested runtime evidence must name a function")
@@ -1061,6 +1073,15 @@ for index in "${!p2_05_cases[@]}"; do
             exit 1
         }
     fi
+    if [[ "$relative" == crates/sig/src/post_policy_tests.rs ]]; then
+        evidence_kind=split_runtime
+        declaring="$(tr '\n' '\001' <"${ROOT}/crates/sig/src/post_policy.rs")"
+        wanted="$(printf '#[cfg(test)]\001#[path = "post_policy_tests.rs"]\001mod tests;')"
+        grep -Fq "$wanted" <<<"$declaring" || {
+            printf 'check_sig_case_coverage: post_policy.rs does not declare its split unit suite under #[cfg(test)]\n' >&2
+            exit 1
+        }
+    fi
     validate_rust_evidence "$file" "$evidence_kind" "$evidence" "$required_call" \
         "check_sig_case_coverage: ${id} is not a named active P2-05 test in ${relative}"
     if [[ -n "${secondary_call:-}" ]]; then
@@ -1078,22 +1099,24 @@ done
     exit 1
 }
 
-[[ "${#p2_06_cases[@]}" -eq 65 ]] || {
-    printf 'check_sig_case_coverage: expected 65 P2-06 mappings, got %s\n' "${#p2_06_cases[@]}" >&2
+[[ "${#p2_06_cases[@]}" -eq 69 ]] || {
+    printf 'check_sig_case_coverage: expected 69 P2-06 mappings, got %s\n' "${#p2_06_cases[@]}" >&2
     exit 1
 }
 p2_06_expected_ids=(
     c-sig-0501 c-sig-0502 c-sig-0503 c-sig-0504 c-sig-0505 c-sig-0506
-    c-sig-0507 c-sig-0508 c-sig-0509 c-sig-0510 c-sig-0511 c-sig-0530
+    c-sig-0507 c-sig-0508 c-sig-0509 c-sig-0510 c-sig-0511 c-sig-0512
+    c-sig-0530
     c-sig-0531 c-sig-0532 c-sig-0533 c-sig-0534 c-sig-0535 c-sig-0536
     c-sig-0537 c-sig-0538 c-sig-0539 c-sig-0540 c-sig-0541 c-sig-0542
     c-sig-0543 c-sig-0544 c-sig-0545 c-sig-0546 c-sig-0547 c-sig-0548
-    c-sig-0549 c-sig-0550 c-sig-0551 c-sig-0553 c-sig-0554 c-sig-0555
+    c-sig-0549 c-sig-0550 c-sig-0551 c-sig-0552 c-sig-0553 c-sig-0554 c-sig-0555
     c-sig-0556 c-sig-0557 c-sig-0558 c-sig-0559 c-sig-0560 c-sig-0561
     c-sig-0562 c-sig-0563 c-sig-0564 c-sig-0565 c-sig-0566 c-sig-0567
     c-sig-0568 c-sig-0569 c-sig-0570 c-sig-0571 c-sig-0572 c-sig-0573
     c-sig-0574 c-sig-0575 c-sig-0576 c-sig-0577 c-sig-0578 c-sig-0579
-    c-sig-0580 c-sig-0581 c-sig-0582 c-sig-0583 c-sig-0584
+    c-sig-0580 c-sig-0581 c-sig-0582 c-sig-0583 c-sig-0584 c-sig-0585
+    c-sig-0586
 )
 positive=0
 negative=0
@@ -1174,12 +1197,12 @@ for index in "${!p2_06_cases[@]}"; do
     validate_rust_evidence "$file" runtime "$evidence" "$required_call" \
         "check_sig_case_coverage: ${id} is not a named active P2-06 test in ${relative}"
 done
-[[ "$positive" -eq 16 && "$negative" -eq 49 && "$negative" -gt "$positive" ]] || {
-    printf 'check_sig_case_coverage: expected 16 positive and 49 negative P2-06 cases, got %s/%s\n' \
+[[ "$positive" -eq 18 && "$negative" -eq 51 && "$negative" -gt "$positive" ]] || {
+    printf 'check_sig_case_coverage: expected 18 positive and 51 negative P2-06 cases, got %s/%s\n' \
         "$positive" "$negative" >&2
     exit 1
 }
-[[ "$(printf '%s\n' "${p2_06_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 65 ]] || {
+[[ "$(printf '%s\n' "${p2_06_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 69 ]] || {
     printf 'check_sig_case_coverage: P2-06 cases must use distinct named evidence\n' >&2
     exit 1
 }
@@ -1512,5 +1535,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 228 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13; P2-06: 16/49)\n'
+printf 'OK: all 232 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13; P2-06: 18/51)\n'

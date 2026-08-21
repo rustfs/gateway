@@ -266,6 +266,27 @@ impl<'q> RawQuery<'q> {
         Ok(found)
     }
 
+    pub(crate) fn decoded_pairs(&self) -> Result<Vec<(String, Option<String>)>, AuthError> {
+        let mut pairs = Vec::new();
+        for component in self.raw.split('&') {
+            if component.is_empty() {
+                continue;
+            }
+            let (raw_name, raw_value) = component
+                .split_once('=')
+                .map_or((component, None), |(name, value)| (name, Some(value)));
+            let name = String::from_utf8(percent_decode(raw_name)?).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
+            let value = raw_value
+                .map(percent_decode)
+                .transpose()?
+                .map(String::from_utf8)
+                .transpose()
+                .map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
+            pairs.push((name, value));
+        }
+        Ok(pairs)
+    }
+
     /// Compares one decoded query value with an issued session token without materialising the
     /// token in a `String` or a reallocating buffer.
     ///

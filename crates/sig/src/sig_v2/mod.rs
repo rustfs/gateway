@@ -22,9 +22,8 @@
 //! privileged-operation refusal or duplicate signature parameters (that is [`crate::SecurityFloor`],
 //! H1/H3/H6), POST-form field enforcement (that is [`crate::post_policy`]), or deciding whether a
 //! request presented credentials at all (that is [`crate::detect_credentials`], H4).
-//! Upstream: [`crate::codec`], [`crate::Signature`], [`crate::RequestNow`]. Downstream: P2-06's
-//! verifier wiring, which is not yet in place — [`crate::SecurityFloor::admit`] still answers
-//! `NotImplemented(SigV2)`, so nothing here is reachable from a served request today.
+//! Upstream: [`crate::codec`], [`crate::Signature`], [`crate::RequestNow`]. Downstream:
+//! [`crate::SecurityFloor::admit`] and the gateway's built-in verifier.
 //!
 //! # Why SigV2 at all
 //!
@@ -55,14 +54,15 @@ pub use timestamp::{parse_sigv2_date, signed_timestamp};
 
 use crate::clock::{MAX_PRESIGNED_EXPIRY_SECONDS, RequestNow};
 use crate::codec::decode_base64_exact;
+use crate::contracts::SIGV2_EXPIRES_ABSOLUTE;
 use crate::scheme::ALGORITHM_SIGV2_PREFIX;
 use crate::signature::{CtBytes, Signature, SignatureMatch};
 use crate::verdict::{AuthError, Identity};
 
 /// Whether SigV2 is accepted, and in which location.
 ///
-/// The default is [`SigV2Policy::HeaderOnly`]: header authentication works, presigned SigV2 does
-/// not. Presigned is the dangerous half — a presigned URL is a bearer token that travels in
+/// The default is [`SigV2Policy::HeaderOnly`]: header authentication works, while presigned and
+/// browser-POST SigV2 do not. Those compatibility locations are the dangerous half — a presigned URL is a bearer token that travels in
 /// referrer headers, proxy logs and browser history, SigV2 signs almost none of the query string
 /// (see [`INCLUDED_QUERY`]), and MinIO #5411 was a rewritten SigV2 presigned URL that reached an
 /// admin operation. Turning it on is therefore an explicit deployment decision, and the startup
@@ -79,7 +79,8 @@ pub enum SigV2Policy {
     /// `Authorization: AWS …` is accepted; presigned SigV2 URLs are refused.
     #[default]
     HeaderOnly,
-    /// Both locations are accepted. Opt-in, and still subject to the security floor's H1/H3/H6.
+    /// Header, presigned URL, and browser-POST locations are accepted. Opt-in, and still subject
+    /// to the security floor's H1/H3/H6 and POST-policy field enforcement.
     HeaderAndPresigned,
 }
 
@@ -91,6 +92,7 @@ impl SigV2Policy {
             (Self::Disabled, _) => false,
             (Self::HeaderOnly, SigV2Mode::HeaderAuth) => true,
             (Self::HeaderOnly, SigV2Mode::PresignedUrl) => false,
+            (Self::HeaderOnly, SigV2Mode::PostPolicy) => false,
             (Self::HeaderAndPresigned, _) => true,
         }
     }
@@ -207,6 +209,19 @@ pub fn parse_presigned_credential(access_key_id: &str, signature: &str) -> Resul
     })
 }
 
+/// Reads the credential carried by SigV2 browser-POST form fields.
+///
+/// The form uses the same standard-base64, exact-width signature as the header and query shapes;
+/// only the error category follows the form/header surface rather than query parameters.
+pub(crate) fn parse_post_policy_credential(access_key_id: &str, signature: &str) -> Result<SigV2Authorization, AuthError> {
+    let access_key_id = Identity::new(access_key_id).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
+    let bytes = decode_base64_exact::<20>(signature).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
+    Ok(SigV2Authorization {
+        access_key_id: access_key_id.access_key_id().to_owned(),
+        presented: Signature::HmacSha1(CtBytes::from_array(bytes)),
+    })
+}
+
 /// The one place a SigV2 signature is compared.
 ///
 /// It is a thin wrapper over [`Signature::ct_verify`] on purpose: the wrapper exists so that no
@@ -243,6 +258,14 @@ pub fn verify_presented(presented: &Signature, expected: &Signature) -> Result<S
 pub fn parse_presigned_expires(raw: &str, now: RequestNow) -> Result<u64, AuthError> {
     let expires = parse_expires_digits(raw)?;
     let now_seconds = u64::try_from(now.unix_seconds()).map_err(|_| AuthError::AuthorizationQueryParametersError)?;
+    if !SIGV2_EXPIRES_ABSOLUTE {
+        if matches!(expires, 0) || expires > MAX_PRESIGNED_EXPIRY_SECONDS {
+            return Err(AuthError::AuthorizationQueryParametersError);
+        }
+        return now_seconds
+            .checked_add(expires)
+            .ok_or(AuthError::AuthorizationQueryParametersError);
+    }
     if expires <= now_seconds {
         return Err(AuthError::RequestExpired);
     }
@@ -279,7 +302,9 @@ mod tests {
     fn the_policy_defaults_to_header_only() {
         assert_eq!(SigV2Policy::default(), SigV2Policy::HeaderOnly);
         assert!(!SigV2Policy::default().allows(SigV2Mode::PresignedUrl));
+        assert!(!SigV2Policy::default().allows(SigV2Mode::PostPolicy));
         assert!(SigV2Policy::HeaderAndPresigned.allows(SigV2Mode::PresignedUrl));
+        assert!(SigV2Policy::HeaderAndPresigned.allows(SigV2Mode::PostPolicy));
         assert!(!SigV2Policy::Disabled.allows(SigV2Mode::HeaderAuth));
     }
 

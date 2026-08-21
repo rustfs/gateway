@@ -1,7 +1,7 @@
 [package]
 name = "rustfs-gateway-conformance"
 description = "Data-driven S3 conformance suite runnable against any implementation"
-version = "0.7.0"   # independent version: this is a product other S3 implementations run against themselves
+version = "0.9.0"   # independent version: this is a product other S3 implementations run against themselves
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
