@@ -55,14 +55,26 @@ for required in (
     "let Some(deadline_class) = O::spec().deadline_class()",
     "let deadline = request_config.handler_deadline(deadline_class);",
     "let cleanup_grace = request_config.handler_cleanup_grace();",
+    "let request_cancellation = request_config.request_cancellation();",
     "let (deadline_cancellation, context) = HandlerCancellationSource::pair();",
-    "handler_with_deadline(call, deadline_cancellation, deadline, cleanup_grace)",
+    "handler_with_request_cancellation(",
+    """handler_with_request_cancellation(
+                            call,
+                            deadline_cancellation,
+                            deadline,
+                            cleanup_grace,
+                            request_cancellation,
+                        )""",
+    "request_cancellation,",
+    "HandlerCancellationOutcome::RequestAborted { cleanup_completed }",
 ):
     if monomorphic_source.count(required) != 1:
         fail("monomorphic dispatch does not consume one request snapshot's handler deadline configuration")
 for required in (
     "handler deadline exceeded after cleanup completed",
     "handler deadline exceeded before cleanup completed",
+    "request ended after handler cleanup completed",
+    "request ended before handler cleanup completed",
 ):
     if monomorphic_source.count(required) != 1:
         fail("monomorphic dispatch does not suppress and classify late handler completion")

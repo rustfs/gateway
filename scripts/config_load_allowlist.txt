@@ -28,6 +28,6 @@ crates/gateway/src/operation_mode.rs:314
 crates/gateway/src/probe.rs:60
 crates/gateway/src/probe.rs:69
 crates/gateway/src/request_config.rs:56
-crates/gateway/src/request_deadline.rs:225
-crates/gateway/src/request_deadline.rs:232
+crates/gateway/src/request_deadline.rs:205
+crates/gateway/src/request_deadline.rs:212
 crates/gateway/src/service.rs:307
