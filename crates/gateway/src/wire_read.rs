@@ -15,11 +15,12 @@
 //! The one bounded, timed source of a request body's wire frames.
 //!
 //! Responsible for: [`WireFrames`] — pulling frames off the transport under
-//! [`crate::gate::BodyCeilings`] and [`crate::gate::BodyTimeouts`], feeding the signed payload
-//! hash from each frame, and reporting the refusal that stopped it — and [`WireReader`], the
-//! pull-model view of the same frames that `rustfs-gateway-http`'s chunk pipeline reads through.
+//! [`crate::gate::BodyCeilings`], [`crate::gate::BodyTimeouts`] and
+//! [`MAX_PAYLOAD_FREE_FRAME_RUN`], feeding the signed payload hash from each frame, and reporting
+//! the refusal that stopped it — and [`WireReader`], the pull-model view of the same frames that
+//! `rustfs-gateway-http`'s chunk pipeline reads through.
 //! NOT responsible for: what the bytes mean (`crate::gate` collects them, `crate::chunked`
-//! decodes them), the ceilings' values (`crate::gate::BodyCeilings::of`), or any framing rule
+//! decodes them), the byte ceilings' values (`crate::gate::BodyCeilings::of`), or any framing rule
 //! (`rustfs_gateway_http::ingest`).
 //! Upstream: `crate::gate`, the only module that builds either type. Downstream:
 //! `rustfs_gateway_http::IngestPipeline`, which pulls through [`WireReader`].
@@ -52,6 +53,51 @@ use sha2::{Digest, Sha256};
 
 use crate::gate::{BodyCeilings, BodyDigestObligation, BodyTimeouts};
 use crate::render::S3Error;
+
+/// How many frames carrying no payload may arrive between two that carry some.
+///
+/// Two frame shapes carry nothing: a trailer section, which [`http_body::Frame::into_data`]
+/// refuses, and a data frame of zero bytes. Neither advances [`WireProgress::seen`], so neither is
+/// charged against either ceiling, and each one *is* a frame arriving, so each one resets the
+/// between-frame deadline rather than expiring it. A peer that sends nothing else therefore keeps
+/// this reader in its loop for ever, holding a task, never yielding, and never transferring a
+/// byte — unbounded work with every bound that exists for it left unconsulted. rustfs/gateway#263.
+///
+/// # Why a run, and not a total for the body
+///
+/// The bound is on the number in a row, reset by any frame that carries payload. That is the
+/// difference between a rule with a constant in it and a rule that restores an invariant: with the
+/// run bounded at `N`, at least one frame in every `N + 1` carried a byte, and bytes are already
+/// bounded by [`BodyCeilings`]. The reader's total work is then a function of the ceilings this
+/// assembly already enforces rather than of what the peer feels like sending, and the ceiling is
+/// what refuses a peer paying for its silence a byte at a time.
+///
+/// A per-body total would bound the loop too, and would also refuse a long, legitimate upload from
+/// a framing layer that flushes — a refusal whose likelihood grows with the size of the body, which
+/// is the wrong shape for an upload gateway to carry.
+///
+/// # Why eight
+///
+/// A conforming message never sends more than two in a row. Both wire protocols this service
+/// accepts permit exactly one trailer section per message — RFC 9112 §7.1.2 gives a chunked body
+/// one trailer-section, RFC 9113 §8.1 gives an HTTP/2 message one trailing HEADERS frame — and a
+/// zero-length DATA frame is the one payload-free data frame a message can need, to carry
+/// END_STREAM.
+///
+/// The floor is measured rather than assumed, because what this bound counts is what the
+/// *transport* chose to hand over and not what the peer wrote. Over a real socket, hyper hands
+/// this reader **exactly one** payload-free frame for an HTTP/1.1 chunked body carrying a trailer
+/// section, and **none at all** for a `Content-Length` body:
+/// `a_real_chunked_body_with_a_trailer_section_is_still_read_whole` is red at a bound of zero and
+/// green at one, while `c_lim_0001_allows_a_long_socket_body_that_keeps_making_progress` is green
+/// even at zero.
+///
+/// The remaining seven are headroom for a framing layer that flushes without producing payload,
+/// and that part is a policy choice, stated rather than tuned: every value above the floor buys
+/// the same property — the work a peer can extract per byte it actually sends is a constant — and
+/// the value only decides how much slack a well-behaved intermediary gets before it is called a
+/// spin.
+pub(crate) const MAX_PAYLOAD_FREE_FRAME_RUN: u32 = 8;
 
 /// What one body read accumulates that outlives the reader consuming it.
 ///
@@ -118,6 +164,9 @@ pub(crate) struct WireFrames<'a, B> {
     timeouts: BodyTimeouts,
     /// The deadline for the frame currently being waited on; `None` before the first poll of one.
     delay: Option<Delay>,
+    /// How many frames carrying no payload have arrived since the last one that carried some.
+    /// Bounded by [`MAX_PAYLOAD_FREE_FRAME_RUN`], which is where the reason lives.
+    payload_free_run: u32,
     /// A fuse, not a state anything branches on today. Both callers stop on the first `None` —
     /// `crate::gate`'s collector is a `while let Some`, and [`WireReader`] guards with
     /// `eof_emitted` — so nothing reaches the early return below. It stays because
@@ -143,6 +192,7 @@ where
             ceilings,
             timeouts,
             delay: None,
+            payload_free_run: 0,
             ended: false,
         }
     }
@@ -150,7 +200,9 @@ where
     /// The next data frame, or `None` once the body is over.
     ///
     /// Trailer frames are skipped rather than counted: this assembly does not verify trailers, and
-    /// the framing layer is where one is judged.
+    /// the framing layer is where one is judged. Skipped, but not free — a frame that carries no
+    /// payload is charged against [`MAX_PAYLOAD_FREE_FRAME_RUN`], which is what stops this loop
+    /// from running for ever on a body that never delivers anything.
     pub(crate) fn poll_next(&mut self, context: &mut Context<'_>) -> Poll<Result<Option<Bytes>, S3Error>> {
         loop {
             if self.ended {
@@ -165,8 +217,10 @@ where
                 }
                 Poll::Ready(Ok(Some(frame))) => frame,
             };
-            // Neither this skip nor the empty-frame skip below is bounded — rustfs/gateway#263.
             let Ok(mut data) = frame.into_data() else {
+                if let Some(refusal) = self.charge_payload_free_frame() {
+                    return Poll::Ready(Err(refusal));
+                }
                 continue;
             };
             let length = data.remaining();
@@ -184,8 +238,13 @@ where
             if length == 0 {
                 // A frame carrying nothing is not the end of anything, and handing it on as a
                 // zero-length read would tell a pull consumer it made progress when it did not.
+                if let Some(refusal) = self.charge_payload_free_frame() {
+                    return Poll::Ready(Err(refusal));
+                }
                 continue;
             }
+            // The run is spent by a frame that carried something, and only by one.
+            self.payload_free_run = 0;
             // Taken whole rather than walked run by run. `Buf::copy_to_bytes` over a `Bytes` is a
             // split of the same allocation, which is what lets the unframed caller hand the frame
             // to its collector without copying it — `tests/request_allocations.rs` keeps that at
@@ -197,6 +256,23 @@ where
             }
             return Poll::Ready(Ok(Some(bytes)));
         }
+    }
+
+    /// Charges one frame that carried no payload against [`MAX_PAYLOAD_FREE_FRAME_RUN`].
+    ///
+    /// The refusal is the idle one, and deliberately the same refusal a stalled socket gets: both
+    /// mean the body has stopped making progress, both are true statements about a transfer that
+    /// is not happening, and both close the connection — a body abandoned mid-stream leaves no
+    /// synchronisation point to resume from (RFC 9112 §9.3). Minting a second refusal would put a
+    /// distinction on the wire that a client has no different action to take on.
+    /// `None` while the run is still inside the bound, and the refusal on the frame that crosses
+    /// it. An [`Option`] rather than a unit-success result, because
+    /// `scripts/check_error_resolution_surface.sh` forbids that shape anywhere under
+    /// `crates/gateway/src`: an already-resolved error is a value this crate renders, never one a
+    /// step that otherwise returns nothing hands back.
+    fn charge_payload_free_frame(&mut self) -> Option<S3Error> {
+        self.payload_free_run = self.payload_free_run.saturating_add(1);
+        (self.payload_free_run > MAX_PAYLOAD_FREE_FRAME_RUN).then(crate::gate::body_idle_timeout)
     }
 
     /// Records the refusal that stopped this read and returns the error the pull contract carries.

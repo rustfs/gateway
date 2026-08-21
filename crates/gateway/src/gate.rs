@@ -379,7 +379,14 @@ pub(crate) fn incomplete() -> S3Error {
     )
 }
 
-/// The indistinguishable refusal for first-byte and between-frame idle expiry.
+/// The indistinguishable refusal for a body that is not delivering: first-byte expiry,
+/// between-frame idle expiry, and a run of frames that carry no payload at all.
+///
+/// One refusal for three causes because a client has the same thing to do about each of them, and
+/// because the third is the second measured a different way: a peer that keeps a connection alive
+/// with payload-free frames is a peer whose body is idle, and the deadline cannot see it because
+/// every one of those frames is an arrival. `crate::wire_read::MAX_PAYLOAD_FREE_FRAME_RUN` is
+/// where that bound and its reason live. All three close the connection.
 pub(crate) fn body_idle_timeout() -> S3Error {
     from_transport_limit(
         HandlerError::new(ErrorCode::REQUEST_TIMEOUT, "the request body stopped making progress"),
