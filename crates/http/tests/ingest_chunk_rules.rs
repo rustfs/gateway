@@ -21,7 +21,7 @@
 //! (`ingest_framing`).
 //! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
-//! 5 positive / 27 negative.
+//! 5 positive / 28 negative.
 
 mod support;
 
@@ -33,6 +33,10 @@ const RSS_HEADROOM_BYTES: u64 = 8 * 1024 * 1024;
 const RSS_BALLAST_BYTES: usize = 24 * 1024 * 1024;
 const RSS_PROBE_ENV: &str = "RUSTFS_GATEWAY_CHUNK_LIMIT_RSS_PROBE";
 const RSS_PROBE_TEST: &str = "c_lim_0042_four_gibibyte_chunk_peak_rss_stays_below_eight_mibibytes";
+const CONCURRENT_PROBE_ENV: &str = "RUSTFS_GATEWAY_CONCURRENT_CHUNK_LIMIT_PROBE";
+const CONCURRENT_PROBE_TEST: &str = "c_lim_0064_concurrent_four_gibibyte_chunks_preserve_rss_and_healthy_p99";
+const CONCURRENT_ATTACKERS: usize = 100;
+const HEALTHY_PROBES: usize = 500;
 
 #[derive(Clone, Copy)]
 enum PeakMode {
@@ -153,6 +157,111 @@ fn measure_peak_rss(mode: PeakMode) -> u64 {
     parse_peak_rss(&String::from_utf8_lossy(&output.stderr))
 }
 
+fn concurrent_probe_requested() -> Option<bool> {
+    match std::env::var(CONCURRENT_PROBE_ENV).ok()?.as_str() {
+        "control" => Some(false),
+        "attack" => Some(true),
+        other => panic!("unknown c-lim-0064 concurrent probe mode: {other}"),
+    }
+}
+
+fn run_concurrent_probe(attack: bool) {
+    let start = std::sync::Arc::new(std::sync::Barrier::new(CONCURRENT_ATTACKERS + 1));
+    let finish = std::sync::Arc::new(std::sync::Barrier::new(CONCURRENT_ATTACKERS + 1));
+    let workers: Vec<_> = (0..CONCURRENT_ATTACKERS)
+        .map(|_| {
+            let start = std::sync::Arc::clone(&start);
+            let finish = std::sync::Arc::clone(&finish);
+            std::thread::spawn(move || {
+                start.wait();
+                let mut valid = if attack {
+                    let mut body = FOUR_GIB_CHUNK_HEADER.to_vec();
+                    body.extend_from_slice(&[b'z'; 4096]);
+                    let mut pipeline = unsigned_pipeline(body, 1, 4096, no_observers(), ChunkLimits::default());
+                    match drain_pipeline(&mut pipeline, 4096) {
+                        Err(error) => {
+                            error.bytes_before_error() == 0
+                                && matches!(
+                                    pipeline.reject(),
+                                    Some(ChunkReject::ChunkSizeTooLarge {
+                                        declared: 0xffff_ffff,
+                                        ..
+                                    })
+                                )
+                                && pipeline
+                                    .reject()
+                                    .is_some_and(|reject| reject.to_status() == http::StatusCode::BAD_REQUEST)
+                                && pipeline.decoded_bytes() == 0
+                                && pipeline.window_bytes() <= 64 * 1024
+                        }
+                        Ok(_) => false,
+                    }
+                } else {
+                    let mut pipeline = unsigned_pipeline(b"0\r\n\r\n".to_vec(), 1, 0, no_observers(), ChunkLimits::default());
+                    drain_pipeline(&mut pipeline, 16).is_ok()
+                };
+                let mut healthy_latencies = Vec::with_capacity(HEALTHY_PROBES / CONCURRENT_ATTACKERS);
+                for _ in 0..HEALTHY_PROBES / CONCURRENT_ATTACKERS {
+                    let started = std::time::Instant::now();
+                    let mut pipeline = unsigned_pipeline(b"0\r\n\r\n".to_vec(), 1, 0, no_observers(), ChunkLimits::default());
+                    valid &= drain_pipeline(&mut pipeline, 16).is_ok();
+                    healthy_latencies.push(started.elapsed());
+                }
+                finish.wait();
+                (valid, healthy_latencies)
+            })
+        })
+        .collect();
+
+    start.wait();
+    finish.wait();
+    let mut valid = 0;
+    let mut healthy_latencies = Vec::with_capacity(HEALTHY_PROBES);
+    for worker in workers {
+        let (worker_valid, mut worker_latencies) = worker.join().expect("a concurrent chunk worker joins");
+        valid += usize::from(worker_valid);
+        healthy_latencies.append(&mut worker_latencies);
+    }
+    assert_eq!(valid, CONCURRENT_ATTACKERS, "every concurrent chunk request has the expected outcome");
+    assert_eq!(healthy_latencies.len(), HEALTHY_PROBES, "every worker contributes healthy p99 samples");
+    healthy_latencies.sort_unstable();
+    let rank = (HEALTHY_PROBES * 99).div_ceil(100).saturating_sub(1);
+    let healthy_p99 = healthy_latencies[rank];
+    println!("c-lim-0064 healthy p99 nanos: {}", healthy_p99.as_nanos());
+}
+
+fn measure_concurrent_probe(attack: bool) -> (u64, std::time::Duration) {
+    let executable = std::env::current_exe().expect("the active test binary has a path");
+    let mut command = std::process::Command::new("/usr/bin/time");
+    #[cfg(target_os = "linux")]
+    command.arg("-v");
+    #[cfg(target_os = "macos")]
+    command.arg("-l");
+    let mode = if attack { "attack" } else { "control" };
+    let output = command
+        .arg(executable)
+        .args(["--exact", CONCURRENT_PROBE_TEST, "--nocapture"])
+        .env(CONCURRENT_PROBE_ENV, mode)
+        .output()
+        .expect("the concurrent chunk probe starts under /usr/bin/time");
+    assert!(
+        output.status.success(),
+        "the {mode} concurrent chunk probe failed:\n{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let p99_nanos = stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("c-lim-0064 healthy p99 nanos: "))
+        .and_then(|value| value.parse::<u64>().ok())
+        .expect("the concurrent chunk probe reports healthy p99");
+    (
+        parse_peak_rss(&String::from_utf8_lossy(&output.stderr)),
+        std::time::Duration::from_nanos(p99_nanos),
+    )
+}
+
 // ── positive ───────────────────────────────────────────────────────────────────────────
 
 /// Positive: three chunks arrive byte for byte, and the body is committable.
@@ -258,6 +367,36 @@ fn c_lim_0042_four_gibibyte_chunk_peak_rss_stays_below_eight_mibibytes() {
         attack.saturating_sub(control) < RSS_HEADROOM_BYTES,
         "the four-GiB chunk declaration increased peak RSS by {} bytes (control {control}, attack {attack})",
         attack.saturating_sub(control)
+    );
+}
+
+/// c-lim-0064. One hundred concurrent four-GiB announcements are all refused at the header;
+/// their peak RSS stays flat and a normal empty body keeps its control-derived p99.
+#[test]
+fn c_lim_0064_concurrent_four_gibibyte_chunks_preserve_rss_and_healthy_p99() {
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        eprintln!("SKIP c-lim-0064 peak RSS: this platform has no supported OS peak-RSS observer");
+        return;
+    }
+
+    if let Some(attack) = concurrent_probe_requested() {
+        run_concurrent_probe(attack);
+        return;
+    }
+
+    let (control_rss, control_p99) = measure_concurrent_probe(false);
+    let (attack_rss, attack_p99) = measure_concurrent_probe(true);
+    let p99_ceiling = control_p99.saturating_mul(8) + std::time::Duration::from_millis(5);
+    println!("c-lim-0064: RSS {control_rss}/{attack_rss}, p99 {control_p99:?}/{attack_p99:?}");
+    assert!(
+        attack_rss.saturating_sub(control_rss) < RSS_HEADROOM_BYTES,
+        "one hundred concurrent chunk attacks increased peak RSS by {} bytes",
+        attack_rss.saturating_sub(control_rss)
+    );
+    assert!(
+        attack_p99 <= p99_ceiling,
+        "healthy p99 {attack_p99:?} exceeded the control-derived {p99_ceiling:?} ceiling"
     );
 }
 

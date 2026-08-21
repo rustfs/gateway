@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WHAT: Binds c-lim-0042 to an exact header rejection and to an instrumented peak-RSS bound.
-# WHY: A bounded ingest window is not evidence that the assembled request path stays resident-memory bounded.
+# WHAT: Binds c-lim-0042 and c-lim-0064 to exact header rejection, peak-RSS bounds, and healthy p99.
+# WHY: A bounded ingest window is not evidence that concurrent attacks keep memory and healthy work bounded.
 # HOW TO EXEMPT: There is no exemption; both executable directions and the RSS instrument control are required.
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -165,13 +165,62 @@ for token in (
 ):
     if token not in measure_body:
         fail(f"c-lim-0042 RSS instrument lost {token!r}")
-if rss_text.count('"/usr/bin/time"') != 1:
-    fail("c-lim-0042 RSS instrument no longer uses exactly one OS peak-RSS observer")
+if rss_text.count('"/usr/bin/time"') != 2:
+    fail("chunk-limit evidence no longer uses exactly two OS peak-RSS observers")
 if "const RSS_HEADROOM_BYTES: u64 = 8 * 1024 * 1024" not in rss_code:
     fail("c-lim-0042 peak-RSS ceiling is not exactly eight MiB")
 for token in ("strip_prefix", "strip_suffix", "checked_mul"):
     if token not in rss_code:
         fail(f"c-lim-0042 RSS parser lost {token!r}")
 
-print("OK: c-lim-0042 rejects a four-GiB chunk at its header and measures less than eight MiB peak-RSS growth")
+concurrent_name = "c_lim_0064_concurrent_four_gibibyte_chunks_preserve_rss_and_healthy_p99"
+concurrent_body = function_body(rss_code, concurrent_name)
+for token in (
+    "measure_concurrent_probe(false)",
+    "measure_concurrent_probe(true)",
+    "attack_rss.saturating_sub(control_rss) < RSS_HEADROOM_BYTES",
+    "control_p99.saturating_mul(8) + std::time::Duration::from_millis(5)",
+    "attack_p99 <= p99_ceiling",
+):
+    if token not in concurrent_body:
+        fail(f"c-lim-0064 concurrent acceptance evidence lost {token!r}")
+
+probe_body = function_body(rss_code, "run_concurrent_probe")
+for token in (
+    "Barrier::new(CONCURRENT_ATTACKERS + 1)",
+    "(0..CONCURRENT_ATTACKERS)",
+    "FOUR_GIB_CHUNK_HEADER.to_vec()",
+    "unsigned_pipeline(body, 1, 4096",
+    "error.bytes_before_error() == 0",
+    "ChunkReject::ChunkSizeTooLarge",
+    "http::StatusCode::BAD_REQUEST",
+    "pipeline.decoded_bytes() == 0",
+    "pipeline.window_bytes() <= 64 * 1024",
+    "HEALTHY_PROBES / CONCURRENT_ATTACKERS",
+    "Vec::with_capacity(HEALTHY_PROBES)",
+    "assert_eq!(valid, CONCURRENT_ATTACKERS",
+    "assert_eq!(healthy_latencies.len(), HEALTHY_PROBES",
+    "healthy_latencies.sort_unstable()",
+    ".div_ceil(100)",
+):
+    if token not in probe_body:
+        fail(f"c-lim-0064 concurrent probe lost {token!r}")
+
+measure_body = function_body(rss_code, "measure_concurrent_probe")
+for token in (
+    "std::process::Command::new",
+    "CONCURRENT_PROBE_TEST",
+    "CONCURRENT_PROBE_ENV",
+    "output.status.success()",
+    "parse_peak_rss(&String::from_utf8_lossy(&output.stderr))",
+    "std::time::Duration::from_nanos(p99_nanos)",
+):
+    if token not in measure_body:
+        fail(f"c-lim-0064 concurrent measurement lost {token!r}")
+if "const CONCURRENT_ATTACKERS: usize = 100;" not in rss_code:
+    fail("c-lim-0064 does not run exactly one hundred concurrent attackers")
+if "const HEALTHY_PROBES: usize = 500;" not in rss_code:
+    fail("c-lim-0064 does not sample enough healthy requests for a non-max p99")
+
+print("OK: c-lim-0042 and c-lim-0064 reject four-GiB chunks with bounded peak RSS and healthy p99")
 PYEOF

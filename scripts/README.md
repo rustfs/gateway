@@ -144,7 +144,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_agents_context_contract.sh` | The root task-start context budget remains bounded at 8 files and 40k tokens | P0-03 |
 | `check_agents_layering.sh` | Scoped AGENTS files wait for the five-rule trigger and duplicate checker | P7-05 |
 | `check_config_load_once.sh` | `c-lim-0005` binds one request to one hot-config snapshot; `c-lim-0041` freezes every `.load()` / `.load_full()` call site at request entry | P3-05, P7-01 |
-| `check_chunk_limits.sh` | `c-lim-0042` binds a four-GiB chunk to header-time refusal and an instrumented peak-RSS increase below eight MiB | P3-05 |
+| `check_chunk_limits.sh` | `c-lim-0042` binds a four-GiB chunk to header-time refusal and an instrumented peak-RSS increase below eight MiB; `c-lim-0064` repeats the attack across 100 concurrent one-byte feeders while keeping peak RSS and healthy p99 bounded | P3-05 |
 | `check_missing_content_length.sh` | `c-lim-0020` / `c-lim-0022` bind an unframed non-streaming PutObject to 411 `MissingContentLength`, zero trailing bytes sent before the answer, and an observed socket close | P3-05 |
 | `check_declared_body_limit.sh` | `c-lim-0021` binds an oversized declared body to an immediate 400 `EntityTooLarge` and an observed socket close without sending the body | P3-05 |
 | `check_governor_fast_path.sh` | `c-lim-0004` binds an admitted request to the synchronous Governor path and structurally rejects allocation operations there | P3-05 |
