@@ -27,7 +27,8 @@ use super::*;
 
 use crate::ext::credentials::{Credentials, StaticCredentials};
 use rustfs_gateway_sig::{
-    Admission, OperationFloor, RawQuery, RequestNow, SecurityFloor, SigService, SkewWindow, WireView, enforce_clock_skew,
+    Admission, OperationFloor, RawQuery, RequestNow, SecurityFloor, SigService, SigV2Policy, SigV2Signer, SkewWindow, WireView,
+    enforce_clock_skew,
 };
 
 fn authenticator() -> SigV4Authenticator {
@@ -115,4 +116,40 @@ async fn c_sig_0428_form_field_material_uses_the_post_policy_authority() {
         panic!("authenticated verdict required")
     };
     assert!(verdict.is_authenticated());
+}
+
+/// Positive — c-sig-0586: the built-in verifier authenticates the floor-sealed SigV2 POST proof.
+#[tokio::test]
+async fn c_sig_0586_sigv2_post_policy_reaches_the_builtin_authenticator() {
+    const POLICY: &str = "eyJleHBpcmF0aW9uIjoiMjAzMC0wMS0wMVQwMDowMDowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LHsia2V5IjoidXBsb2Fkcy9yZXBvcnQudHh0In1dfQ==";
+    let signer = SigV2Signer::new("AKIDEXAMPLE", b"secret").expect("valid signer");
+    let signature = signer.post_policy_signature(POLICY);
+    let headers = http::HeaderMap::new();
+    let fields = [
+        ("key", "uploads/report.txt"),
+        ("bucket", "example-bucket"),
+        ("AWSAccessKeyId", "AKIDEXAMPLE"),
+        ("signature", signature.as_str()),
+        ("policy", POLICY),
+    ];
+    let view = WireView::new(&headers, RawQuery::new("")).with_form_fields(&fields);
+    let operation = OperationFloor::builtin("PutObject", SigService::S3).allow_post_policy();
+    let admitted = SecurityFloor::new()
+        .with_sigv2_policy(SigV2Policy::HeaderAndPresigned)
+        .admit(view, &operation, RequestNow::from_unix_seconds(1_440_938_160))
+        .expect("valid SigV2 form reaches the sealed path");
+    let Admission::SealedSigV2(sealed) = admitted else { panic!("SigV2 form must be sealed") };
+    let method = Method::POST;
+    let request = SigV2Authentication::new(&sealed, &method, "/", None);
+    let outcome = authenticator()
+        .verify_sigv2(&request)
+        .await
+        .expect("credential store is available");
+    let verdict = outcome.verdict();
+    assert!(verdict.is_authenticated());
+    let Verdict::Authenticated { scheme, .. } = verdict else {
+        panic!("authenticated scheme required")
+    };
+    assert_eq!(scheme.family, SigFamily::V2);
+    assert_eq!(scheme.location, SigLocation::FormField);
 }

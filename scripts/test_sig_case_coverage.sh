@@ -356,25 +356,25 @@ expect_fail check_sig_case_coverage.sh \
 mut_sig_p2_05_nested_test_disabled() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/sig/src/post_policy.rs")
+path = Path("crates/sig/src/post_policy_tests.rs")
 text = path.read_text()
-old = "#[test]\n    fn c_sig_0418_case_only_duplicate_fields_are_rejected()"
-new = "#[cfg(any())]\n    #[test]\n    fn c_sig_0418_case_only_duplicate_fields_are_rejected()"
+old = "#[test]\nfn c_sig_0418_case_only_duplicate_fields_are_rejected()"
+new = "#[cfg(any())]\n#[test]\nfn c_sig_0418_case_only_duplicate_fields_are_rejected()"
 if text.count(old) != 1:
     raise SystemExit("missing P2-05 nested-test mutation subject")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
-    'a P2-05 nested test being disabled by cfg' mut_sig_p2_05_nested_test_disabled
+    'a P2-05 split test being disabled by cfg' mut_sig_p2_05_nested_test_disabled
 
 mut_sig_p2_05_test_module_disabled() {
     python3 - <<'PYEOF'
 from pathlib import Path
 path = Path("crates/sig/src/post_policy.rs")
 text = path.read_text()
-old = "#[cfg(test)]\nmod tests {"
-new = "#[cfg(any())]\nmod tests {"
+old = '#[cfg(test)]\n#[path = "post_policy_tests.rs"]\nmod tests;'
+new = '#[cfg(any())]\n#[path = "post_policy_tests.rs"]\nmod tests;'
 if text.count(old) != 1:
     raise SystemExit("missing P2-05 test-module mutation subject")
 path.write_text(text.replace(old, new, 1))
@@ -386,7 +386,7 @@ expect_fail check_sig_case_coverage.sh \
 mut_sig_p2_05_primary_assertion_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/sig/src/post_policy.rs")
+path = Path("crates/sig/src/post_policy_tests.rs")
 text = path.read_text()
 old = "assert!(policy.verify(&key).is_ok());"
 new = "assert!(policy.final_key().starts_with(\"uploads/\"));"
@@ -401,7 +401,7 @@ expect_fail check_sig_case_coverage.sh \
 mut_sig_p2_05_second_size_direction_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/sig/src/post_policy.rs")
+path = Path("crates/sig/src/post_policy_tests.rs")
 text = path.read_text()
 old = "Some(PostPolicyError::EntityTooLarge)"
 if text.count(old) != 1:

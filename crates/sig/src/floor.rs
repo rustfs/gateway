@@ -607,8 +607,6 @@ impl SecurityFloor {
     /// # Errors
     ///
     /// * [`AuthError::AccessDenied`] when the [`SigV2Policy`] does not admit this location.
-    /// * [`AuthError::NotImplemented`] for the POST-form shape, which is P2-05's and is refused
-    ///   here rather than half-verified.
     /// * [`AuthError::AuthorizationHeaderMalformed`] for a credential this crate cannot parse, and
     ///   [`AuthError::AuthorizationQueryParametersError`] for its presigned spelling. Both are
     ///   rejections: a presented credential that cannot be read is never an anonymous request.
@@ -625,17 +623,27 @@ impl SecurityFloor {
         let mode = match marker.location() {
             SigLocation::Header => SigV2Mode::HeaderAuth,
             SigLocation::Query => SigV2Mode::PresignedUrl,
-            // The POST-form SigV2 shape (`AWSAccessKeyId` and `signature` fields) belongs to
-            // P2-05's policy enforcement. "Recognised and refused" is the honest answer for it;
-            // verifying the signature without the field-level rules would be worse than not
-            // verifying it at all.
-            _ => return Err(AuthError::NotImplemented(crate::error::Unimplemented::SigV2)),
+            SigLocation::FormField => SigV2Mode::PostPolicy,
         };
         if !self.sigv2.allows(mode) {
             return Err(AuthError::AccessDenied);
         }
         refuse_framed_sigv2_payload(&view)?;
         match mode {
+            SigV2Mode::PostPolicy => {
+                let access_key_id = view
+                    .form_value(AWS_ACCESS_KEY_ID_PARAM)
+                    .ok_or(AuthError::AuthorizationHeaderMalformed)?;
+                let signature = view.form_value("signature").ok_or(AuthError::AuthorizationHeaderMalformed)?;
+                let presented = crate::sig_v2::parse_post_policy_credential(access_key_id, signature)?;
+                Ok(Admission::SealedSigV2(SealedSigV2::post_policy(
+                    view,
+                    presented,
+                    now,
+                    presence,
+                    operation.service(),
+                )))
+            }
             SigV2Mode::PresignedUrl => {
                 let access_key_id = self.sigv2_query_value(&view, AWS_ACCESS_KEY_ID_PARAM)?;
                 let signature = self.sigv2_query_value(&view, SIGV2_SIGNATURE_PARAM)?;
@@ -653,10 +661,7 @@ impl SecurityFloor {
                     operation.service(),
                 )))
             }
-            // `SigV2Mode` is `#[non_exhaustive]`; a location added later must not be admitted by a
-            // wildcard, so header authentication is the named arm and everything else is refused
-            // above by the `marker.location()` match.
-            _ => {
+            SigV2Mode::HeaderAuth => {
                 let raw = view
                     .headers()
                     .get(AUTHORIZATION_HEADER)

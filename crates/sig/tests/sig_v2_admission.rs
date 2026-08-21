@@ -15,7 +15,7 @@
 //! P2-06 wiring evidence at the floor: what `SecurityFloor::admit` does with a SigV2 request.
 //!
 //! Responsible for: the admission decisions no served request can exercise — the POST-form shape
-//! the pipeline never assembles, the duplicate-parameter rule, and the two structural claims the
+//! the duplicate-parameter rule, POST-policy sealing, and the two structural claims the
 //! wiring rests on: **a SigV2 request never becomes a `SealedAws`**, and **a SigV2 request never
 //! becomes an `Admission::Anonymous`**.
 //! NOT responsible for: the string-to-sign (`sig_v2.rs`) or the verdict an assembled service
@@ -31,12 +31,15 @@
 //! request leaves `admit` as an error or as an `Admission::SealedSigV2`, and there is no path from
 //! `SealedSigV2` to `SealedAws`.
 //!
-//! Negative cases outnumber positive ones; there are no positive cases in this file.
+//! Negative cases outnumber positive ones.
 
 use http::HeaderMap;
 use http::header::{HeaderName, HeaderValue};
 use rustfs_gateway_sig::sig_v2::SigV2Policy;
-use rustfs_gateway_sig::{Admission, AuthError, OperationFloor, RawQuery, RequestNow, SecurityFloor, SigService, WireView};
+use rustfs_gateway_sig::{
+    Admission, AuthError, OperationFloor, PostPolicyLimits, RawQuery, RequestNow, SecretBytes, SecurityFloor, SigService,
+    SigV2Mode, SigV2PostPolicy, SigV2Signer, WireView,
+};
 
 /// `Tue, 27 Mar 2007 19:36:42 GMT`, the instant AWS's own SigV2 documentation signs at.
 const SIGNED_AT: &str = "Tue, 27 Mar 2007 19:36:42 GMT";
@@ -45,6 +48,8 @@ const SIGNED_AT_UNIX: i64 = 1_175_024_202;
 /// Twenty zero bytes in standard base64. Syntactically perfect and cryptographically worthless,
 /// which is exactly right here: the floor admits, it does not verify.
 const WELL_FORMED_SIGNATURE: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+/// A minimal policy whose only semantic fields are the bucket and final key.
+const POST_POLICY: &str = "eyJleHBpcmF0aW9uIjoiMjAzMC0wMS0wMVQwMDowMDowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LHsia2V5IjoidXBsb2Fkcy9yZXBvcnQudHh0In1dfQ==";
 
 fn now() -> RequestNow {
     RequestNow::from_unix_seconds(SIGNED_AT_UNIX)
@@ -76,6 +81,64 @@ fn operation() -> OperationFloor {
 /// The query one correctly shaped SigV2 presigned URL carries.
 fn presigned_query(expires_at: i64) -> String {
     format!("AWSAccessKeyId=AKIDEXAMPLE&Expires={expires_at}&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Positive
+// ---------------------------------------------------------------------------------------------
+
+/// Positive — c-sig-0512: SigV2 browser POST signs the base64 policy itself with HMAC-SHA1.
+#[test]
+fn c_sig_0512_sigv2_post_policy_uses_the_shared_policy_authority() {
+    let signer = SigV2Signer::new("AKIDEXAMPLE", b"secret").expect("a valid legacy credential");
+    let signature = signer.post_policy_signature(POST_POLICY);
+    let fields = [
+        ("key", "uploads/report.txt"),
+        ("bucket", "example-bucket"),
+        ("AWSAccessKeyId", "AKIDEXAMPLE"),
+        ("signature", signature.as_str()),
+        ("policy", POST_POLICY),
+    ];
+    let map = HeaderMap::new();
+    let view = WireView::new(&map, RawQuery::new("")).with_form_fields(&fields);
+    let admitted = SecurityFloor::new()
+        .with_sigv2_policy(SigV2Policy::HeaderAndPresigned)
+        .admit(view, &operation(), now())
+        .expect("the explicit compatibility policy admits SigV2 POST");
+    let Admission::SealedSigV2(sealed) = admitted else {
+        panic!("SigV2 POST must never reach another verifier");
+    };
+    assert_eq!(sealed.mode(), SigV2Mode::PostPolicy);
+
+    let policy = SigV2PostPolicy::parse(&fields, "", PostPolicyLimits::default(), now()).expect("the shared policy rules");
+    assert!(policy.verify(&SecretBytes::new(b"secret"), sealed.presented()).is_ok());
+    assert!(policy.enforce_final("example-bucket", "uploads/report.txt", 1).is_ok());
+}
+
+/// Negative — c-sig-0585: a syntactically valid policy signature from another key does not match.
+#[test]
+fn c_sig_0585_a_wrong_sigv2_post_policy_signature_is_refused() {
+    let signer = SigV2Signer::new("AKIDEXAMPLE", b"wrong-secret").expect("a valid legacy credential");
+    let signature = signer.post_policy_signature(POST_POLICY);
+    let fields = [
+        ("key", "uploads/report.txt"),
+        ("bucket", "example-bucket"),
+        ("AWSAccessKeyId", "AKIDEXAMPLE"),
+        ("signature", signature.as_str()),
+        ("policy", POST_POLICY),
+    ];
+    let map = HeaderMap::new();
+    let view = WireView::new(&map, RawQuery::new("")).with_form_fields(&fields);
+    let admitted = SecurityFloor::new()
+        .with_sigv2_policy(SigV2Policy::HeaderAndPresigned)
+        .admit(view, &operation(), now())
+        .expect("the floor admits a well-formed credential before comparison");
+    let Admission::SealedSigV2(sealed) = admitted else {
+        panic!("SigV2 POST must never reach another verifier");
+    };
+    let policy = SigV2PostPolicy::parse(&fields, "", PostPolicyLimits::default(), now()).expect("the shared policy rules");
+    let rejection = policy.verify(&SecretBytes::new(b"secret"), sealed.presented()).err();
+    assert_eq!(rejection, Some(rustfs_gateway_sig::PostPolicyError::SignatureMismatch));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -113,13 +176,11 @@ fn c_sig_0562_an_unparsable_sigv2_credential_is_never_admitted_anonymously() {
     assert_eq!(refusal, AuthError::AuthorizationHeaderMalformed);
 }
 
-/// Negative — c-sig-0563: the POST-form SigV2 shape is refused rather than half-verified.
+/// Negative — c-sig-0563: the default header-only policy refuses SigV2 browser POST.
 ///
-/// `AWSAccessKeyId` and `signature` form fields are SigV2's browser-POST spelling. Its field-level
-/// enforcement is P2-05's, and a signature checked without those rules is worse than no signature
-/// at all, so the floor answers `NotImplemented` and stops.
+/// `c-sig-0512` proves the explicitly enabled direction; this is the default-closed control.
 #[test]
-fn c_sig_0563_the_sigv2_post_form_shape_is_refused() {
+fn c_sig_0563_the_default_policy_refuses_sigv2_post_policy() {
     let map = HeaderMap::new();
     let fields = [
         ("AWSAccessKeyId", "AKIDEXAMPLE"),
@@ -129,8 +190,8 @@ fn c_sig_0563_the_sigv2_post_form_shape_is_refused() {
     let view = WireView::new(&map, RawQuery::new("")).with_form_fields(&fields);
     let refusal = SecurityFloor::new()
         .admit(view, &operation(), now())
-        .expect_err("the POST-form shape is refused");
-    assert_eq!(refusal, AuthError::NotImplemented(rustfs_gateway_sig::Unimplemented::SigV2));
+        .expect_err("the default policy refuses browser POST");
+    assert_eq!(refusal, AuthError::AccessDenied);
 }
 
 /// Negative — c-sig-0564: a repeated `Expires` is refused by **H6**, before any other rule runs.
