@@ -32,6 +32,7 @@ c-sig-0548|negative|conformance/cases/sig/c-sig-0548.toml|q-sig-v2-query-not-cov
 c-sig-0549|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0549_a_repeated_subresource_is_refused|
 c-sig-0550|negative|crates/sig/tests/compile_fail/c_sig_0550_sigv2_signature_eq.rs|let _ = left == right;|
 c-sig-0551|negative|scripts/test_guard_scripts.sh|mut_c_sig_0551_signature_equality|
+c-sig-0552|negative|crates/sig/tests/timing.rs|fn c_sig_0552_sigv2_difference_position_does_not_change_the_latency|best_distribution_difference(&differs_first, &differs_last)
 c-sig-0553|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0553_no_virtual_host_bucket_means_no_prefix|
 c-sig-0554|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0554_ambiguous_header_input_is_refused|
 c-sig-0555|negative|crates/sig/tests/compile_fail/c_sig_0555_sigv2_authorization_debug.rs|println!|

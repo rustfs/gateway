@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The latency-parity cases `c-sig-0107`, `c-sig-0108` and `c-sig-0111`.
+//! The latency-parity cases `c-sig-0107`, `c-sig-0108`, `c-sig-0111` and `c-sig-0552`.
 //!
 //! Responsible for: showing that where a signature first differs does not change how long the
 //! comparison takes, and that the unknown-access-key path and the wrong-signature path do the same
@@ -65,6 +65,13 @@ fn signature_with(first: u8, last: u8) -> Signature {
     Signature::HmacSha256(CtBytes::from_array(bytes))
 }
 
+fn signature_v2_with(first: u8, last: u8) -> Signature {
+    let mut bytes = [0x5a; 20];
+    bytes[0] = first;
+    bytes[19] = last;
+    Signature::HmacSha1(CtBytes::from_array(bytes))
+}
+
 fn time_batch(presented: &Signature, expected: &Signature) -> Duration {
     let start = Instant::now();
     for _ in 0..BATCH {
@@ -74,14 +81,13 @@ fn time_batch(presented: &Signature, expected: &Signature) -> Duration {
     start.elapsed()
 }
 
-fn median(mut samples: Vec<Duration>) -> Duration {
-    samples.sort_unstable();
-    samples[samples.len() / 2]
+fn percentile(samples: &[Duration], percentile: usize) -> Duration {
+    samples[(samples.len() - 1) * percentile / 100]
 }
 
-/// Interleaved A/B measurement. Returns the relative difference of the two medians.
-fn relative_difference(a: &(Signature, Signature), b: &(Signature, Signature)) -> f64 {
-    // Warm up: first-touch page faults and branch predictor state belong to neither side.
+/// Interleaved A/B measurement. Returns the relative p50 and p99 differences.
+fn distribution_difference(a: &(Signature, Signature), b: &(Signature, Signature)) -> (f64, f64) {
+    // First-touch faults and branch-predictor state belong to neither side.
     for _ in 0..8 {
         time_batch(&a.0, &a.1);
         time_batch(&b.0, &b.1);
@@ -90,8 +96,7 @@ fn relative_difference(a: &(Signature, Signature), b: &(Signature, Signature)) -
     let mut a_samples = Vec::with_capacity(SAMPLES);
     let mut b_samples = Vec::with_capacity(SAMPLES);
     for index in 0..SAMPLES {
-        // Alternate which side goes first, so a systematic per-pair warm-up cost cannot land on
-        // the same side every time.
+        // Drift cannot consistently land on one side when the first side alternates.
         if index % 2 == 0 {
             a_samples.push(time_batch(&a.0, &a.1));
             b_samples.push(time_batch(&b.0, &b.1));
@@ -100,12 +105,32 @@ fn relative_difference(a: &(Signature, Signature), b: &(Signature, Signature)) -
             a_samples.push(time_batch(&a.0, &a.1));
         }
     }
+    a_samples.sort_unstable();
+    b_samples.sort_unstable();
 
-    let a_median = median(a_samples).as_secs_f64();
-    let b_median = median(b_samples).as_secs_f64();
-    let smaller = a_median.min(b_median);
-    assert!(smaller > 0.0, "the clock produced a zero-length batch; raise BATCH");
-    (a_median - b_median).abs() / smaller
+    let relative = |a: Duration, b: Duration| {
+        let a = a.as_secs_f64();
+        let b = b.as_secs_f64();
+        let smaller = a.min(b);
+        assert!(smaller > 0.0, "the clock produced a zero-length batch; raise BATCH");
+        (a - b).abs() / smaller
+    };
+    (
+        relative(percentile(&a_samples, 50), percentile(&b_samples, 50)),
+        relative(percentile(&a_samples, 99), percentile(&b_samples, 99)),
+    )
+}
+
+fn best_distribution_difference(a: &(Signature, Signature), b: &(Signature, Signature)) -> (f64, f64) {
+    (0..ROUNDS)
+        .map(|_| distribution_difference(a, b))
+        .min_by(|left, right| left.0.max(left.1).total_cmp(&right.0.max(right.1)))
+        .expect("ROUNDS is non-zero")
+}
+
+/// Interleaved A/B measurement. Returns the relative difference of the two medians.
+fn relative_difference(a: &(Signature, Signature), b: &(Signature, Signature)) -> f64 {
+    distribution_difference(a, b).0
 }
 
 fn best_relative_difference(a: &(Signature, Signature), b: &(Signature, Signature)) -> f64 {
@@ -135,6 +160,27 @@ fn c_sig_0107_and_0108_the_position_of_the_difference_does_not_change_the_latenc
         difference < tolerance(),
         "comparison latency depends on where the signatures diverge ({difference:.4} relative, \
          tolerance {:.2}); that is a byte-at-a-time signature oracle",
+        tolerance()
+    );
+}
+
+/// Negative — c-sig-0552: SigV2 reads all 20 HMAC-SHA1 bytes before rejecting.
+#[test]
+fn c_sig_0552_sigv2_difference_position_does_not_change_the_latency() {
+    let expected = signature_v2_with(0x5a, 0x5a);
+    let differs_first = (signature_v2_with(0x00, 0x5a), expected.clone());
+    let differs_last = (signature_v2_with(0x5a, 0x00), expected);
+
+    assert!(differs_first.0.ct_verify(&differs_first.1).is_err());
+    assert!(differs_last.0.ct_verify(&differs_last.1).is_err());
+
+    let (p50_delta, p99_delta) = best_distribution_difference(&differs_first, &differs_last);
+    println!("SigV2 timing parity: p50_delta={p50_delta:.4}, p99_delta={p99_delta:.4}");
+    assert!(
+        p50_delta < tolerance() && p99_delta < tolerance(),
+        "SigV2 comparison latency depends on where the signatures diverge \
+         (p50_delta={p50_delta:.4}, p99_delta={p99_delta:.4}, tolerance {:.2}); that is a \
+         byte-at-a-time signature oracle",
         tolerance()
     );
 }

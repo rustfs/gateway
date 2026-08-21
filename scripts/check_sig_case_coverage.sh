@@ -1099,8 +1099,8 @@ done
     exit 1
 }
 
-[[ "${#p2_06_cases[@]}" -eq 68 ]] || {
-    printf 'check_sig_case_coverage: expected 68 P2-06 mappings, got %s\n' "${#p2_06_cases[@]}" >&2
+[[ "${#p2_06_cases[@]}" -eq 69 ]] || {
+    printf 'check_sig_case_coverage: expected 69 P2-06 mappings, got %s\n' "${#p2_06_cases[@]}" >&2
     exit 1
 }
 p2_06_expected_ids=(
@@ -1110,7 +1110,7 @@ p2_06_expected_ids=(
     c-sig-0531 c-sig-0532 c-sig-0533 c-sig-0534 c-sig-0535 c-sig-0536
     c-sig-0537 c-sig-0538 c-sig-0539 c-sig-0540 c-sig-0541 c-sig-0542
     c-sig-0543 c-sig-0544 c-sig-0545 c-sig-0546 c-sig-0547 c-sig-0548
-    c-sig-0549 c-sig-0550 c-sig-0551 c-sig-0553 c-sig-0554 c-sig-0555
+    c-sig-0549 c-sig-0550 c-sig-0551 c-sig-0552 c-sig-0553 c-sig-0554 c-sig-0555
     c-sig-0556 c-sig-0557 c-sig-0558 c-sig-0559 c-sig-0560 c-sig-0561
     c-sig-0562 c-sig-0563 c-sig-0564 c-sig-0565 c-sig-0566 c-sig-0567
     c-sig-0568 c-sig-0569 c-sig-0570 c-sig-0571 c-sig-0572 c-sig-0573
@@ -1197,12 +1197,12 @@ for index in "${!p2_06_cases[@]}"; do
     validate_rust_evidence "$file" runtime "$evidence" "$required_call" \
         "check_sig_case_coverage: ${id} is not a named active P2-06 test in ${relative}"
 done
-[[ "$positive" -eq 18 && "$negative" -eq 50 && "$negative" -gt "$positive" ]] || {
-    printf 'check_sig_case_coverage: expected 18 positive and 50 negative P2-06 cases, got %s/%s\n' \
+[[ "$positive" -eq 18 && "$negative" -eq 51 && "$negative" -gt "$positive" ]] || {
+    printf 'check_sig_case_coverage: expected 18 positive and 51 negative P2-06 cases, got %s/%s\n' \
         "$positive" "$negative" >&2
     exit 1
 }
-[[ "$(printf '%s\n' "${p2_06_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 68 ]] || {
+[[ "$(printf '%s\n' "${p2_06_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 69 ]] || {
     printf 'check_sig_case_coverage: P2-06 cases must use distinct named evidence\n' >&2
     exit 1
 }
@@ -1535,5 +1535,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 231 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13; P2-06: 18/50)\n'
+printf 'OK: all 232 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13; P2-06: 18/51)\n'
