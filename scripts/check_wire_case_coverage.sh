@@ -55,7 +55,7 @@ cases=(
     'c-wire-0060|negative|blocked|rustfs/backlog#1689::a client reset must cancel the handler, and HandlerCancellation has one variant (Deadline); the new cross-crate cancellation contract needs a merged ADR first'
     'c-wire-0061|negative|blocked|rustfs/backlog#1699::the header deadline closing a half-open connection is observed, but no harness measures resident memory or a healthy peer p99 while slow *headers* are parked; the slow-reader harness measures the write side'
     'c-wire-0062|negative|blocked|rustfs/backlog#1699::no head-to-first-body-byte deadline exists; ProgressIo::check_idle resets the idle deadline while a request is in flight, so a peer that never sends a declared body is retired by nothing'
-    'c-wire-0063|negative|bound|crates/http/tests/framing_smuggling.rs::c_wire_0063_an_over_large_declared_body_is_400_entity_too_large_and_never_drained;crates/gateway/tests/connection_teardown.rs::c_wire_0063_an_over_large_body_is_refused_on_the_socket_before_it_is_sent'
+    'c-wire-0063|negative|bound|crates/http/tests/framing_smuggling.rs::c_wire_0063_an_over_large_declared_body_is_400_entity_too_large_and_never_drained;crates/gateway/tests/connection_teardown.rs::c_wire_0063_c_lim_0021_an_over_large_body_is_refused_on_the_socket_before_it_is_sent'
     'c-wire-0064|negative|blocked|rustfs/backlog#1699::the per-IP half-open ceiling, accept backpressure and the thousand-connection memory budget are each observed by a different test; none of them observes the three together at the scale the case names'
 )
 

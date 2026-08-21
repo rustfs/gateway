@@ -12789,6 +12789,236 @@ PYEOF
 expect_fail check_missing_content_length.sh \
     'c-lim-0020 allowing the socket case to skip' mut_missing_length_socket_verdict_weakened \
     "c-lim-0020 socket evidence lost 'outcome.verdict, Verdict::Passed'"
+
+mut_declared_body_identity_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+old = "c_wire_0063_c_lim_0021_an_over_large_body_is_refused_on_the_socket_before_it_is_sent"
+new = "c_wire_0063_an_over_large_body_is_refused_on_the_socket_before_it_is_sent"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0021 identity anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 losing its executable identity' mut_declared_body_identity_removed \
+    'c-lim-0021 executable socket evidence is missing or duplicated'
+
+mut_declared_body_test_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+name = "c_wire_0063_c_lim_0021_an_over_large_body_is_refused_on_the_socket_before_it_is_sent"
+old = f"#[tokio::test]\nasync fn {name}()"
+new = f"async fn {name}()"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0021 active-test anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 being disabled as a test' mut_declared_body_test_disabled \
+    'c-lim-0021 evidence is not an active tokio test'
+
+mut_declared_body_module_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/integration.rs")
+text = path.read_text()
+old = '#[path = "connection_teardown.rs"]\nmod connection_teardown;'
+new = '#[path = "connection_teardown.rs"]\nmod removed_connection_teardown;'
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0021 integration-module anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 leaving the consolidated integration target' mut_declared_body_module_disabled \
+    'c-lim-0021 socket module is not active in the integration target'
+
+mut_declared_body_wire_edge_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_wire_case_coverage.sh")
+text = path.read_text()
+old = "crates/gateway/tests/connection_teardown.rs::c_wire_0063_c_lim_0021_an_over_large_body_is_refused_on_the_socket_before_it_is_sent"
+new = "crates/gateway/tests/connection_teardown.rs::c_wire_0063_an_over_large_body_is_refused_on_the_socket_before_it_is_sent"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0021 wire-edge anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 losing the c-wire-0063 evidence edge' mut_declared_body_wire_edge_removed \
+    'c-lim-0021 no longer shares the c-wire-0063 evidence edge'
+
+mut_declared_body_ceiling_widened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+old = "        max_body_bytes: 16,"
+new = "        max_body_bytes: 8192,"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0021 ceiling anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 widening the declared-body ceiling beyond the request' mut_declared_body_ceiling_widened \
+    'c-lim-0021 socket evidence lost the declared body ceiling'
+
+mut_declared_body_socket_replaced() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+old = "TcpStream::connect(local_addr).await"
+new = "fake_connect(local_addr).await"
+if text.count(old) != 2:
+    raise SystemExit("c-lim-0021 socket-connect census drifted")
+target = text.index("async fn c_wire_0063_c_lim_0021_")
+position = text.index(old, target)
+path.write_text(text[:position] + new + text[position + len(old):])
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 replacing its real TCP observation' mut_declared_body_socket_replaced \
+    'c-lim-0021 socket evidence lost a real TCP connection'
+
+mut_declared_body_head_not_written() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+target = text.index("async fn c_wire_0063_c_lim_0021_")
+old = "stream\n        .write_all("
+position = text.index(old, target)
+path.write_text(text[:position] + text[position:].replace(old, "stream\n        .fake_write_all(", 1))
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 no longer writing the request head' mut_declared_body_head_not_written \
+    'c-lim-0021 socket evidence lost the request-head write'
+
+mut_declared_body_length_lowered() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+old = "Content-Length: 4096\\r\\n\\r\\n"
+new = "Content-Length: 8\\r\\n\\r\\n"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0021 declared-length anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 sending a body length below the configured ceiling' mut_declared_body_length_lowered \
+    'c-lim-0021 no longer sends only an oversized declared request head'
+
+mut_declared_body_byte_sent() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+old = "Content-Length: 4096\\r\\n\\r\\n\")"
+new = "Content-Length: 4096\\r\\n\\r\\nx\")"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0021 head-only anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 sending a body byte before observing the refusal' mut_declared_body_byte_sent \
+    'c-lim-0021 no longer sends only an oversized declared request head'
+
+mut_declared_body_terminal_read_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+old = "stream.read_to_end(&mut response)"
+new = "stream.read_buf(&mut response)"
+if text.count(old) != 2:
+    raise SystemExit("c-lim-0021 terminal-read census drifted")
+target = text.index("async fn c_wire_0063_c_lim_0021_")
+position = text.index(old, target)
+path.write_text(text[:position] + new + text[position + len(old):])
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 no longer observing socket EOF' mut_declared_body_terminal_read_removed \
+    'c-lim-0021 socket evidence lost the bounded terminal read'
+
+mut_declared_body_deadline_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+old = "tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response))"
+new = "tokio::time::timeout(Duration::MAX, stream.read_to_end(&mut response))"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0021 response-deadline anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 losing its bounded refusal deadline' mut_declared_body_deadline_removed \
+    'c-lim-0021 socket evidence lost the response deadline'
+
+mut_declared_body_status_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+old = 'wire.starts_with("HTTP/1.1 400 ")'
+new = 'wire.starts_with("HTTP/1.1 413 ")'
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0021 status anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 forking from the 400 status authority' mut_declared_body_status_changed \
+    'c-lim-0021 no longer requires status 400'
+
+mut_declared_body_code_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+old = "ErrorCode::ENTITY_TOO_LARGE.as_str()"
+new = "ErrorCode::INVALID_REQUEST.as_str()"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0021 code anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 losing the EntityTooLarge code' mut_declared_body_code_changed \
+    'c-lim-0021 socket evidence lost the error-code assertion'
+
+mut_declared_body_connection_kept() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/connection_teardown.rs")
+text = path.read_text()
+old = 'wire.to_ascii_lowercase().contains("connection: close\\r\\n")'
+new = 'wire.to_ascii_lowercase().contains("connection: keep-alive\\r\\n")'
+if text.count(old) != 2:
+    raise SystemExit("c-lim-0021 close-assertion census drifted")
+target = text.index("async fn c_wire_0063_c_lim_0021_")
+position = text.index(old, target)
+path.write_text(text[:position] + new + text[position + len(old):])
+PYEOF
+}
+expect_fail check_declared_body_limit.sh \
+    'c-lim-0021 accepting a reusable connection' mut_declared_body_connection_kept \
+    'c-lim-0021 no longer requires an observed close announcement'
 # check_secret_hygiene.sh has six rules over the credential containers in crates/gateway/src/ext/,
 # which is outside the path scope of check_ct_eq.sh rules 3-6. Each is mutated separately, because
 # one case would leave the other five as prose. rustfs/backlog#1736 is the task, and
