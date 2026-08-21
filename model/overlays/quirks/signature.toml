@@ -88,3 +88,33 @@ cases   = ["c-sig-0506"]
   kind    = "aws-doc"
   ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTAuthentication.html"
   summary = "AWS defines an empty StringToSign Date position when x-amz-date supplies the request time."
+
+[[quirk]]
+id      = "q-sig-v2-expires-absolute"
+kind    = "sigv2_expires_absolute_policy"
+classification = "mutable"
+mutation_dimension = "sigv2_expires_absolute_policy"
+contract_value = "absolute_unix_second"
+target  = "Signature.SigV2PresignedExpires"
+summary = "SigV2 presigned Expires names an absolute Unix second rather than a relative lifetime."
+cases   = ["c-sig-0545"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTAuthentication.html"
+  summary = "AWS defines SigV2 query-string authentication with Expires as the absolute time after which the request is refused."
+
+[[quirk]]
+id      = "q-sig-v2-query-not-covered"
+kind    = "sigv2_query_coverage_policy"
+classification = "mutable"
+mutation_dimension = "sigv2_query_coverage_policy"
+contract_value = "ignore_unlisted_query"
+target  = "Signature.SigV2CanonicalizedResource"
+summary = "SigV2 canonical resources omit query parameters outside the reviewed subresource allowlist."
+cases   = ["c-sig-0548"]
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTAuthentication.html"
+  summary = "AWS limits SigV2 CanonicalizedResource query coverage to named S3 subresources rather than arbitrary parameters."

@@ -302,6 +302,18 @@ pub(super) fn contract_rule(table: &Toml, id: &str) -> Result<Option<ContractRul
         ("sigv2_date_slot_policy", "date_header_on_amz_date") => {
             (ContractValue::SignaturePolicy(false), MutationDimension::SigV2DateSlotPolicy)
         }
+        ("sigv2_expires_absolute_policy", "absolute_unix_second") => {
+            (ContractValue::SignaturePolicy(true), MutationDimension::SigV2ExpiresAbsolutePolicy)
+        }
+        ("sigv2_expires_absolute_policy", "relative_lifetime") => {
+            (ContractValue::SignaturePolicy(false), MutationDimension::SigV2ExpiresAbsolutePolicy)
+        }
+        ("sigv2_query_coverage_policy", "ignore_unlisted_query") => {
+            (ContractValue::SignaturePolicy(true), MutationDimension::SigV2QueryCoveragePolicy)
+        }
+        ("sigv2_query_coverage_policy", "include_unlisted_query") => {
+            (ContractValue::SignaturePolicy(false), MutationDimension::SigV2QueryCoveragePolicy)
+        }
         ("grantee_discriminator_policy", "derive_from_identifying_member") => (
             ContractValue::GranteeTypeFromIdentifyingMember,
             MutationDimension::GranteeDiscriminatorPolicy,

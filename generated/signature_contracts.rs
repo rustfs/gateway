@@ -26,3 +26,7 @@ pub(crate) const SIGNATURE_PAYLOAD_TOKEN_VERBATIM: bool = true;
 pub(crate) const SIGV2_INCLUDED_QUERY: bool = true;
 /// Whether SigV2 empties the Date slot when x-amz-date is present.
 pub(crate) const SIGV2_EMPTY_DATE_ON_AMZ_DATE: bool = true;
+/// Whether SigV2 presigned Expires is an absolute Unix second.
+pub(crate) const SIGV2_EXPIRES_ABSOLUTE: bool = true;
+/// Whether SigV2 omits arbitrary query parameters from its canonical resource.
+pub(crate) const SIGV2_QUERY_NOT_COVERED: bool = true;

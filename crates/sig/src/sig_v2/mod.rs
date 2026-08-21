@@ -55,6 +55,7 @@ pub use timestamp::{parse_sigv2_date, signed_timestamp};
 
 use crate::clock::{MAX_PRESIGNED_EXPIRY_SECONDS, RequestNow};
 use crate::codec::decode_base64_exact;
+use crate::contracts::SIGV2_EXPIRES_ABSOLUTE;
 use crate::scheme::ALGORITHM_SIGV2_PREFIX;
 use crate::signature::{CtBytes, Signature, SignatureMatch};
 use crate::verdict::{AuthError, Identity};
@@ -243,6 +244,14 @@ pub fn verify_presented(presented: &Signature, expected: &Signature) -> Result<S
 pub fn parse_presigned_expires(raw: &str, now: RequestNow) -> Result<u64, AuthError> {
     let expires = parse_expires_digits(raw)?;
     let now_seconds = u64::try_from(now.unix_seconds()).map_err(|_| AuthError::AuthorizationQueryParametersError)?;
+    if !SIGV2_EXPIRES_ABSOLUTE {
+        if matches!(expires, 0) || expires > MAX_PRESIGNED_EXPIRY_SECONDS {
+            return Err(AuthError::AuthorizationQueryParametersError);
+        }
+        return now_seconds
+            .checked_add(expires)
+            .ok_or(AuthError::AuthorizationQueryParametersError);
+    }
     if expires <= now_seconds {
         return Err(AuthError::RequestExpired);
     }

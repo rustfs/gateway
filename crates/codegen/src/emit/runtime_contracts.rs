@@ -540,6 +540,26 @@ pub fn render_signature(rules: &BTreeMap<String, ContractRule>) -> Result<String
         "/// Whether SigV2 empties the Date slot when x-amz-date is present.\npub(crate) const SIGV2_EMPTY_DATE_ON_AMZ_DATE: bool = {empty_date};"
     )
     .expect("writing to String cannot fail");
+
+    let expires_absolute = unique(rules, MutationDimension::SigV2ExpiresAbsolutePolicy)?;
+    let ContractValue::SignaturePolicy(expires_absolute) = expires_absolute else {
+        return Err(wrong_type(MutationDimension::SigV2ExpiresAbsolutePolicy));
+    };
+    writeln!(
+        out,
+        "/// Whether SigV2 presigned Expires is an absolute Unix second.\npub(crate) const SIGV2_EXPIRES_ABSOLUTE: bool = {expires_absolute};"
+    )
+    .expect("writing to String cannot fail");
+
+    let query_not_covered = unique(rules, MutationDimension::SigV2QueryCoveragePolicy)?;
+    let ContractValue::SignaturePolicy(query_not_covered) = query_not_covered else {
+        return Err(wrong_type(MutationDimension::SigV2QueryCoveragePolicy));
+    };
+    writeln!(
+        out,
+        "/// Whether SigV2 omits arbitrary query parameters from its canonical resource.\npub(crate) const SIGV2_QUERY_NOT_COVERED: bool = {query_not_covered};"
+    )
+    .expect("writing to String cannot fail");
     Ok(out)
 }
 

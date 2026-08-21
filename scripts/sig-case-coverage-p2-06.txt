@@ -24,10 +24,10 @@ c-sig-0541|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0541_the_default_policy_
 c-sig-0542|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0542_the_disabled_policy_refuses_both_locations|assert!(SigV2Policy::HeaderAndPresigned.allows(SigV2Mode::PresignedUrl))
 c-sig-0543|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0543_presigned_signs_the_expires_parameter_in_the_date_slot|
 c-sig-0544|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0544_expires_must_be_a_strict_unsigned_decimal|
-c-sig-0545|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0545_expires_beyond_seven_days_is_refused|
+c-sig-0545|negative|conformance/cases/sig/c-sig-0545.toml|q-sig-v2-expires-absolute|exact_utf8 = "absolute expiry"
 c-sig-0546|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0546_an_elapsed_expires_is_refused|
 c-sig-0547|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0547_an_expires_at_the_ceiling_is_checked_not_wrapped|
-c-sig-0548|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0548_query_outside_the_subresource_set_is_not_covered|assert_eq!(covered, tampered)
+c-sig-0548|negative|conformance/cases/sig/c-sig-0548.toml|q-sig-v2-query-not-covered|exact_utf8 = "uncovered query"
 c-sig-0549|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0549_a_repeated_subresource_is_refused|
 c-sig-0550|negative|crates/sig/tests/compile_fail/c_sig_0550_sigv2_signature_eq.rs|let _ = left == right;|
 c-sig-0551|negative|scripts/test_guard_scripts.sh|mut_c_sig_0551_signature_equality|

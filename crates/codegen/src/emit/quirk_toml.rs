@@ -299,6 +299,12 @@ pub fn render(
             Some(rustfs_gateway_model::MutationDimension::SigV2DateSlotPolicy) => {
                 out.push_str("contract_value = \"empty_on_amz_date\"\n")
             }
+            Some(rustfs_gateway_model::MutationDimension::SigV2ExpiresAbsolutePolicy) => {
+                out.push_str("contract_value = \"absolute_unix_second\"\n")
+            }
+            Some(rustfs_gateway_model::MutationDimension::SigV2QueryCoveragePolicy) => {
+                out.push_str("contract_value = \"ignore_unlisted_query\"\n")
+            }
             _ => {}
         },
         Some(ContractValue::SignaturePolicy(false)) => match contract_rule.map(|rule| rule.mutation_dimension) {
@@ -316,6 +322,12 @@ pub fn render(
             }
             Some(rustfs_gateway_model::MutationDimension::SigV2DateSlotPolicy) => {
                 out.push_str("contract_value = \"date_header_on_amz_date\"\n")
+            }
+            Some(rustfs_gateway_model::MutationDimension::SigV2ExpiresAbsolutePolicy) => {
+                out.push_str("contract_value = \"relative_lifetime\"\n")
+            }
+            Some(rustfs_gateway_model::MutationDimension::SigV2QueryCoveragePolicy) => {
+                out.push_str("contract_value = \"include_unlisted_query\"\n")
             }
             _ => {}
         },

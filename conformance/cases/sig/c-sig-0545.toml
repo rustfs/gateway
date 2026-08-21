@@ -1,0 +1,44 @@
+# c-sig-0545 — SigV2 presigned Expires is an absolute instant.
+
+[case]
+id = "c-sig-0545"
+schema_version = 1
+title = "A SigV2 presigned request uses an absolute Expires instant"
+rationale = "The runner converts a short lifetime into an absolute Unix second before signing. Treating that wire value as a relative lifetime exceeds the seven-day ceiling and refuses the request before the authenticated GetObject handler."
+polarity = "positive"
+operation = "GetObject"
+tags = ["signature", "sigv2", "presigned", "security"]
+timeout_ms = 10000
+quirks = ["q-sig-v2-expires-absolute"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTAuthentication.html"
+summary = "AWS defines SigV2 query-string Expires as the absolute time after which the request is refused."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "presigned-absolute.txt"
+content_type = "text/plain"
+body = { utf8 = "absolute expiry" }
+
+[request]
+method = "GET"
+target = "/conf-sig/presigned-absolute.txt"
+headers = {}
+sign = { mode = "presigned_v2", credential = "valid", expires_s = 60 }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = "absolute expiry"
