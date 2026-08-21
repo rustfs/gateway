@@ -184,9 +184,9 @@ fn rss_bytes() -> Option<usize> {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_srv_0010_half_header_is_closed_after_header_timeout() {
+async fn c_lim_0032_a_srv_0010_one_byte_per_second_header_closes_at_ten_seconds() {
     const CHILD_MARKER: &str = "RUSTFS_GATEWAY_SERVER_RSS_CHILD";
-    const TEST_NAME: &str = "conn::deadline_test::a_srv_0010_half_header_is_closed_after_header_timeout";
+    const TEST_NAME: &str = "conn::deadline_test::c_lim_0032_a_srv_0010_one_byte_per_second_header_closes_at_ten_seconds";
     if std::env::var_os(CHILD_MARKER).is_none() {
         let status = Command::new(std::env::current_exe().expect("test executable path is available"))
             .args(["--exact", TEST_NAME])
@@ -200,8 +200,8 @@ async fn a_srv_0010_half_header_is_closed_after_header_timeout() {
     let mut config = ServerConfig {
         bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         plaintext: true,
-        header_read_timeout: Duration::from_millis(100),
-        keep_alive_idle: Duration::from_millis(250),
+        header_read_timeout: Duration::from_secs(10),
+        keep_alive_idle: Duration::from_secs(30),
         ..ServerConfig::default()
     };
     config.max_connections = 1;
@@ -239,10 +239,7 @@ async fn a_srv_0010_half_header_is_closed_after_header_timeout() {
     let before_rss = rss_bytes();
 
     let mut stream = TcpStream::connect(local_addr).await.expect("second connection succeeds");
-    stream
-        .write_all(b"GET / HTTP/1.1\r\nHost:")
-        .await
-        .expect("partial header writes");
+    stream.write_all(b"G").await.expect("the first header byte writes");
     assert_eq!(metrics.accepted_connections(), 1, "the partial header is queued before accept");
     release.notify_one();
     tokio::time::timeout(Duration::from_secs(1), observer.wait_until_armed())
@@ -251,11 +248,27 @@ async fn a_srv_0010_half_header_is_closed_after_header_timeout() {
     drop(first);
 
     let started = crate::io::test_deadline_now();
-    tokio::time::advance(Duration::from_millis(101)).await;
+    for byte in b"ET / HTTP" {
+        tokio::time::advance(Duration::from_secs(1)).await;
+        stream
+            .write_all(&[*byte])
+            .await
+            .expect("one paced header byte writes before the deadline");
+        let mut probe = [0_u8; 1];
+        let error = stream.try_read(&mut probe).expect_err("the header deadline has not elapsed");
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+    }
+    assert_eq!(started.elapsed(), Duration::from_secs(9), "nine paced bytes do not close early");
+    tokio::time::advance(Duration::from_secs(1)).await;
     let mut byte = [0_u8; 1];
-    assert_eq!(stream.read(&mut byte).await.expect("close is observable"), 0);
+    let disconnected = match tokio::time::timeout(Duration::from_millis(1), stream.read(&mut byte)).await {
+        Ok(Ok(0)) => true,
+        Ok(Err(error)) => matches!(error.kind(), std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted),
+        Ok(Ok(_)) | Err(_) => false,
+    };
+    assert!(disconnected, "the socket closes at the header deadline");
     assert!(
-        started.elapsed() < Duration::from_millis(150),
+        started.elapsed() >= Duration::from_secs(10) && started.elapsed() < Duration::from_secs(11),
         "the header deadline, rather than the longer keep-alive timer, closed the socket"
     );
     if let (Some(before), Some(after)) = (before_rss, rss_bytes()) {

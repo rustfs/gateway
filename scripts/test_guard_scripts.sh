@@ -6480,6 +6480,52 @@ mut_server_body_read_idle_timeout() {
 expect_fail check_timeout_layer_ownership.sh \
     'ring-1 server claiming the body-read idle timeout layer' mut_server_body_read_idle_timeout
 
+mut_server_c_lim_0032_case_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/src/conn/deadline_test.rs")
+text = path.read_text()
+subject = "async fn c_lim_0032_a_srv_0010_one_byte_per_second_header_closes_at_ten_seconds() {"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0032 test name is not unique")
+path.write_text(text.replace(subject, "async fn a_srv_0010_one_byte_per_second_header_closes_at_ten_seconds() {", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0032 losing its executable slow-header evidence' mut_server_c_lim_0032_case_removed
+
+mut_server_c_lim_0032_deadline_changed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/src/conn/deadline_test.rs")
+text = path.read_text()
+subject = "        header_read_timeout: Duration::from_secs(10),\n"
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0032 deadline setup is not unique")
+path.write_text(text.replace(subject, "        header_read_timeout: Duration::from_secs(11),\n", 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0032 drifting from the ten-second header deadline' mut_server_c_lim_0032_deadline_changed
+
+mut_server_c_lim_0032_pacing_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/src/conn/deadline_test.rs")
+text = path.read_text()
+subject = '    for byte in b"ET / HTTP" {\n        tokio::time::advance(Duration::from_secs(1)).await;\n'
+replacement = '    for byte in b"ET / HTTP" {\n        tokio::task::yield_now().await;\n'
+if text.count(subject) != 1:
+    raise SystemExit("c-lim-0032 pacing loop is not unique")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_timeout_layer_ownership.sh \
+    'c-lim-0032 losing its one-byte-per-second pacing' mut_server_c_lim_0032_pacing_removed
+
 mut_server_c_lim_0062_case_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
