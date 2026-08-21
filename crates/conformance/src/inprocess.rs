@@ -93,7 +93,7 @@ use rustfs_gateway::{
     RequestContext, S3Service, ServiceBuilder, ServiceConfig, SessionBinding, SigV4Authenticator, SnapshotId, StaticCredentials,
     VirtualHostStyle, WireRequest, allow_when, collect, dto, fn_credential_provider, op_layer, policy_from,
 };
-
+mod sigv2;
 use crate::exec::block_on;
 use crate::fixture::{Fixture, StoredObject, Stub};
 use crate::interpolate::Captures;
@@ -104,7 +104,6 @@ use crate::observation::{
 use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::time;
 use crate::value::Value;
-
 /// The access key id every case names as `valid`.
 pub const VALID_ACCESS_KEY: &str = "AKIAIOSFODNN7EXAMPLE";
 /// Its secret. The AWS documentation example key, which is what makes a hand-checked signature
@@ -1480,12 +1479,12 @@ pub(crate) fn sign_request(
     let mode = sign.read("signSpec.mode").and_then(Value::as_str).unwrap_or("sigv4_header");
     match mode {
         "anonymous" | "none" => return Ok((headers.to_vec(), wire.target.clone())),
-        "sigv4_header" | "sigv4_unsigned_payload" | "presigned_v4" => {}
+        "sigv4_header" | "sigv4_unsigned_payload" | "presigned_v4" | "sigv2_header" => {}
         other => {
             return Err(SutError::Environment(format!(
-                "`sign.mode = \"{other}\"` is not wired: the in-process target signs the header \
-                 form, the unsigned-payload form and presigned URLs; a streaming mode needs the \
-                 chunk framing a socket transport owns"
+                "`sign.mode = \"{other}\"` is not wired: the in-process target signs SigV4 headers, \
+                 unsigned payloads and presigned URLs, plus SigV2 headers; streaming, presigned SigV2 \
+                 and POST-policy modes need their dedicated wire protocol"
             )));
         }
     }
@@ -1512,7 +1511,6 @@ pub(crate) fn sign_request(
             http::HeaderValue::from_str(value).map_err(|_| SutError::Environment(format!("`{value}` is not a header value")))?;
         map.append(name, value);
     }
-
     let credential = sign.read("signSpec.credential").and_then(Value::as_str).unwrap_or("valid");
     // An expired session token is a distinct identity, not the valid one under another name.
     // Signing it with the fixture's own credentials answered `200` and the case then asserted
@@ -1529,6 +1527,13 @@ pub(crate) fn sign_request(
         "empty_secret" => (VALID_ACCESS_KEY, b"" as &[u8], None),
         _ => (VALID_ACCESS_KEY, VALID_SECRET, None),
     };
+    let method = http::Method::from_bytes(wire.method.as_bytes())
+        .map_err(|_| SutError::Environment(format!("`{}` is not a method", wire.method)))?;
+    if mode == "sigv2_header" {
+        let input =
+            sigv2::HeaderSignInput::new(sign, &method, path, query, &mut map, accepted.host(), (access_key, secret, token));
+        return Ok((sigv2::sign_header(input)?, wire.target.clone()));
+    }
     let mut credentials = SigningCredentials::new(access_key, secret)
         .map_err(|error| SutError::Environment(format!("the signing credentials are not valid: {error}")))?;
     if let Some(token) = token {
@@ -1571,8 +1576,6 @@ pub(crate) fn sign_request(
     };
 
     let mut signer = SigV4Signer::new(credentials, scope);
-    let method = http::Method::from_bytes(wire.method.as_bytes())
-        .map_err(|_| SutError::Environment(format!("`{}` is not a method", wire.method)))?;
     let mut signing = SigningRequest::new(&method, path, query, &map, accepted.host().raw_for_signing(), payload, stamp);
     let signed_header_names = sign
         .read("signSpec.signed_headers")
