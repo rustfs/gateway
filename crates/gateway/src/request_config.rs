@@ -65,6 +65,7 @@ impl HandlerDeadlineReportSlot {
 pub(crate) struct RequestConfig<S> {
     snapshot: ConfigSnapshot,
     handler_deadline_report: HandlerDeadlineReportSlot,
+    request_cancellation: Option<tokio::sync::watch::Receiver<bool>>,
     stage: core::marker::PhantomData<fn() -> S>,
 }
 
@@ -73,8 +74,14 @@ impl RequestConfig<Entered> {
         Self {
             snapshot,
             handler_deadline_report: HandlerDeadlineReportSlot::new(),
+            request_cancellation: None,
             stage: core::marker::PhantomData,
         }
+    }
+
+    pub(crate) fn with_request_cancellation(mut self, request_cancellation: Option<tokio::sync::watch::Receiver<bool>>) -> Self {
+        self.request_cancellation = request_cancellation;
+        self
     }
 
     pub(crate) fn accepted(self) -> RequestConfig<Accepted> {
@@ -141,6 +148,7 @@ impl<S> RequestConfig<S> {
         RequestConfig {
             snapshot: self.snapshot,
             handler_deadline_report: self.handler_deadline_report,
+            request_cancellation: self.request_cancellation,
             stage: core::marker::PhantomData,
         }
     }

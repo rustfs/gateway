@@ -15174,6 +15174,57 @@ expect_fail check_config_load_once.sh \
     'c-lim-0005 losing the next-request replacement direction' mut_config_snapshot_next_request_stale \
     "c-lim-0005 runtime evidence drifted at 'assert_eq!(second.status(), http::StatusCode::OK);'"
 
+mut_request_cancellation_capture_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "        let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();\n"
+replacement = "        let request_cancellation = None;\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique request-cancellation capture subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'request entry dropping the server cancellation signal' mut_request_cancellation_capture_removed \
+    'request entry does not capture cancellation beside its one snapshot'
+
+mut_request_cancellation_store_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+text = path.read_text()
+subject = "        self.request_cancellation = request_cancellation;\n"
+replacement = "        self.request_cancellation = None;\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique request-cancellation store subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'the request snapshot refusing the captured cancellation signal' mut_request_cancellation_store_removed \
+    'request cancellation does not cross every typed snapshot stage'
+
+mut_request_cancellation_stage_propagation_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+text = path.read_text()
+subject = "            request_cancellation: self.request_cancellation,\n"
+replacement = "            request_cancellation: None,\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique request-cancellation propagation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a typed request stage dropping cancellation' mut_request_cancellation_stage_propagation_removed \
+    'request cancellation does not cross every typed snapshot stage'
+
 mut_extension_config_load() {
     python3 - <<'PYEOF'
 import pathlib

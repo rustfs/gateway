@@ -49,11 +49,11 @@ http-body-util = { workspace = true }
 hyper = { workspace = true }
 sha2 = { workspace = true }
 tower = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 dhat = { workspace = true }
 rustfs-gateway-server = { workspace = true }
-tokio.workspace = true
 trybuild = { workspace = true }
 
 [[test]]

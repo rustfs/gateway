@@ -40,6 +40,26 @@ expected_stages="$(printf '%s\n' accepted routed governed authenticated route_au
 [[ "$stages" == "$expected_stages" ]] \
     || fail 'the real S3Service path no longer consumes the snapshot through all eight stages in order'
 
+python3 - "${SOURCE_ROOT}/service.rs" "${SOURCE_ROOT}/request_config.rs" <<'PY'
+from pathlib import Path
+import sys
+
+service = Path(sys.argv[1]).read_text(encoding="utf-8")
+request_config = Path(sys.argv[2]).read_text(encoding="utf-8")
+capture = """        let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
+        let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
+"""
+if service.count(capture) != 1:
+    raise SystemExit("check_config_load_once: request entry does not capture cancellation beside its one snapshot")
+for fragment in (
+    "request_cancellation: Option<tokio::sync::watch::Receiver<bool>>,",
+    "self.request_cancellation = request_cancellation;",
+    "request_cancellation: self.request_cancellation,",
+):
+    if request_config.count(fragment) != 1:
+        raise SystemExit("check_config_load_once: request cancellation does not cross every typed snapshot stage")
+PY
+
 python3 - "$RUNTIME_EVIDENCE" <<'PY'
 from pathlib import Path
 import sys

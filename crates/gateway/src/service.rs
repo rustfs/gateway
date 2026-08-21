@@ -305,7 +305,8 @@ impl S3Service {
         // Exactly one load per request. The snapshot is passed down rather than the store, so no
         // later stage can observe a replacement made while this request is in flight.
         let config = self.inner.config.load_full();
-        let config = RequestConfig::enter(config);
+        let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
+        let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
         let handler_deadline_report = config.handler_deadline_report();
         let trace = self.inner.traces.mint();
         let now = self.inner.clock.now();
