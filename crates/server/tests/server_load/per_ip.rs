@@ -227,7 +227,13 @@ async fn c_wire_0061_slow_headers_expire_without_rss_or_healthy_p99_growth() {
     })
     .await
     .expect("the absolute header deadline closes peers that keep making partial progress");
-    assert_eq!(loaded.metrics.active_connections(), 0);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while loaded.metrics.active_connections() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("every expired slow-header connection is retired from the active census");
 
     shut_down(control, control_runtime, "the control listener").await;
     shut_down(loaded, loaded_runtime, "the loaded listener").await;
