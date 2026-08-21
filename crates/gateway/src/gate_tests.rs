@@ -500,7 +500,7 @@ async fn a_framed_body_past_the_operation_cap_is_a_400_invalid_request() {
 
 /// c-lim-0033. Negative — a real h1 connection closes after the first-body-byte deadline.
 #[tokio::test]
-async fn c_lim_0033_closes_a_socket_when_the_first_body_byte_never_arrives() {
+async fn c_wire_0062_c_lim_0033_closes_a_socket_when_the_first_body_byte_never_arrives() {
     let timeouts = BodyTimeouts::new(Duration::from_millis(20), Duration::from_millis(500)).expect("non-zero timeouts");
     let (response, reached) = timeout_response(b"", timeouts).await;
     let text = String::from_utf8(response).expect("HTTP response is text");
