@@ -17806,8 +17806,8 @@ from pathlib import Path
 
 path = Path("crates/gateway/src/monomorphic.rs")
 text = path.read_text()
-subject = "handler_with_deadline(call, deadline_cancellation, deadline, cleanup_grace)"
-replacement = "handler_with_deadline(call, HandlerCancellationSource::pair().0, deadline, cleanup_grace)"
+subject = "                            deadline_cancellation,\n"
+replacement = "                            HandlerCancellationSource::pair().0,\n"
 if text.count(subject) != 1:
     raise SystemExit("missing unique monomorphic deadline signal mutation subject")
 path.write_text(text.replace(subject, replacement, 1))
@@ -17817,6 +17817,60 @@ expect_fail_with_diagnostic check_monomorphic_dispatch.sh \
     'monomorphic dispatch signalling a token the handler cannot observe' \
     "monomorphic dispatch does not consume one request snapshot's handler deadline configuration" \
     mut_monomorphic_handler_deadline_signal_detached
+
+mut_monomorphic_request_cancellation_dropped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/monomorphic.rs")
+text = path.read_text()
+subject = "                        let request_cancellation = request_config.request_cancellation();\n"
+replacement = "                        let request_cancellation = None;\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique monomorphic request cancellation mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_monomorphic_dispatch.sh \
+    'monomorphic dispatch dropping request cancellation' \
+    "monomorphic dispatch does not consume one request snapshot's handler deadline configuration" \
+    mut_monomorphic_request_cancellation_dropped
+
+mut_monomorphic_request_abort_mapping_collapsed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/monomorphic.rs")
+text = path.read_text()
+subject = "HandlerCancellationOutcome::RequestAborted { cleanup_completed }"
+replacement = "HandlerCancellationOutcome::Expired { cleanup_completed }"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique monomorphic request abort mapping mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_monomorphic_dispatch.sh \
+    'monomorphic dispatch collapsing request abort into deadline expiry' \
+    "monomorphic dispatch does not consume one request snapshot's handler deadline configuration" \
+    mut_monomorphic_request_abort_mapping_collapsed
+
+mut_monomorphic_request_abort_cleanup_mapping_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/monomorphic.rs")
+text = path.read_text()
+subject = "request ended after handler cleanup completed"
+replacement = "request ended before handler cleanup completed"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique monomorphic request abort cleanup mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_monomorphic_dispatch.sh \
+    'monomorphic dispatch losing request-abort cleanup completion' \
+    'monomorphic dispatch does not suppress and classify late handler completion' \
+    mut_monomorphic_request_abort_cleanup_mapping_removed
 
 mut_monomorphic_handler_cleanup_mapping_removed() {
     python3 - <<'PYEOF'

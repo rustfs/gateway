@@ -107,7 +107,7 @@ pub(crate) mod sealed {
 
     use super::*;
     use crate::request_config::{InputAuthorized, RequestConfig};
-    use crate::request_deadline::{HandlerDeadlineOutcome, commit_with_progress_deadline, handler_with_deadline};
+    use crate::request_deadline::{HandlerCancellationOutcome, commit_with_progress_deadline, handler_with_request_cancellation};
 
     pub trait HandlerDeadlinePolicy: Send {
         fn handler_deadline(&self, class: rustfs_gateway_core::HandlerDeadlineClass) -> Duration;
@@ -117,6 +117,8 @@ pub(crate) mod sealed {
         fn commit_progress_deadline(&self) -> Duration;
 
         fn record_handler_deadline(&self, cleanup_completed: bool);
+
+        fn request_cancellation(&self) -> Option<tokio::sync::watch::Receiver<bool>>;
     }
 
     impl HandlerDeadlinePolicy for RequestConfig<InputAuthorized> {
@@ -134,6 +136,10 @@ pub(crate) mod sealed {
 
         fn record_handler_deadline(&self, cleanup_completed: bool) {
             RequestConfig::record_handler_deadline(self, cleanup_completed);
+        }
+
+        fn request_cancellation(&self) -> Option<tokio::sync::watch::Receiver<bool>> {
+            RequestConfig::request_cancellation(self)
         }
     }
 
@@ -270,22 +276,39 @@ pub(crate) mod sealed {
                         let deadline = request_config.handler_deadline(deadline_class);
                         let cleanup_grace = request_config.handler_cleanup_grace();
                         let commit_progress = request_config.commit_progress_deadline();
+                        let request_cancellation = request_config.request_cancellation();
                         let (deadline_cancellation, context) = HandlerCancellationSource::pair();
                         let call: BoxFuture<'static, _> =
                             Box::pin(async move { backend.call_with_context(request, context).await });
-                        match handler_with_deadline(call, deadline_cancellation, deadline, cleanup_grace).await {
-                            HandlerDeadlineOutcome::Completed(response) => response.map(|response| {
+                        match handler_with_request_cancellation(
+                            call,
+                            deadline_cancellation,
+                            deadline,
+                            cleanup_grace,
+                            request_cancellation,
+                        )
+                        .await
+                        {
+                            HandlerCancellationOutcome::Completed(response) => response.map(|response| {
                                 response.map_commit_work(|work| commit_with_progress_deadline(work, commit_progress))
                             }),
-                            HandlerDeadlineOutcome::Expired { cleanup_completed: true } => {
+                            HandlerCancellationOutcome::Expired { cleanup_completed: true } => {
                                 request_config.record_handler_deadline(true);
                                 Err(HandlerError::internal_error("handler deadline exceeded after cleanup completed"))
                             }
-                            HandlerDeadlineOutcome::Expired {
+                            HandlerCancellationOutcome::Expired {
                                 cleanup_completed: false,
                             } => {
                                 request_config.record_handler_deadline(false);
                                 Err(HandlerError::internal_error("handler deadline exceeded before cleanup completed"))
+                            }
+                            HandlerCancellationOutcome::RequestAborted { cleanup_completed } => {
+                                let message = if cleanup_completed {
+                                    "request ended after handler cleanup completed"
+                                } else {
+                                    "request ended before handler cleanup completed"
+                                };
+                                Err(HandlerError::internal_error(message))
                             }
                         }
                     },

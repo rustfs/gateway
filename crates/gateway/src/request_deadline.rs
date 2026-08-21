@@ -34,30 +34,10 @@ use rustfs_gateway_sig::timing::FailureFloor;
 use crate::clock::{MonotonicClock, MonotonicNow};
 use crate::ext::{PolicyError, PolicySnapshot, PolicySource};
 
-pub(crate) enum HandlerDeadlineOutcome<T> {
-    Completed(T),
-    Expired { cleanup_completed: bool },
-}
-
 pub(crate) enum HandlerCancellationOutcome<T> {
     Completed(T),
     Expired { cleanup_completed: bool },
     RequestAborted { cleanup_completed: bool },
-}
-
-pub(crate) async fn handler_with_deadline<T>(
-    handler: BoxFuture<'static, T>,
-    cancellation: HandlerCancellationSource,
-    deadline: Duration,
-    cleanup_grace: Duration,
-) -> HandlerDeadlineOutcome<T> {
-    match handler_with_request_cancellation(handler, cancellation, deadline, cleanup_grace, None).await {
-        HandlerCancellationOutcome::Completed(output) => HandlerDeadlineOutcome::Completed(output),
-        HandlerCancellationOutcome::Expired { cleanup_completed }
-        | HandlerCancellationOutcome::RequestAborted { cleanup_completed } => {
-            HandlerDeadlineOutcome::Expired { cleanup_completed }
-        }
-    }
 }
 
 pub(crate) async fn handler_with_request_cancellation<T>(
@@ -120,8 +100,8 @@ pub(crate) async fn handler_with_request_cancellation<T>(
 ///
 /// # Why this is a second deadline and not the handler's
 ///
-/// [`handler_with_deadline`] bounds the call that produces a [`rustfs_gateway_core::Resp`]. A
-/// backend that commits its head returns from that call **immediately**, handing back a
+/// The handler cancellation boundary produces a [`rustfs_gateway_core::Resp`]. A backend that
+/// commits its head returns from that call **immediately**, handing back a
 /// continuation the framework drives afterwards — so the three operations AWS documents as
 /// flushing their head early are precisely the three the handler deadline stops covering at the
 /// moment they start doing the long-running work it was written for.
