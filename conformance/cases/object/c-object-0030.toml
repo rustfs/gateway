@@ -1,4 +1,4 @@
-# c-lim-0020 / c-object-0030 — a plain object write with no declared length.
+# c-lim-0020 / c-lim-0022 / c-object-0030 — a plain object write with no declared length.
 #
 # Schema dimensions exercised: raw request head, dedicated status, connection verdict.
 
@@ -13,7 +13,10 @@ assertions, and the second is the one an implementation is likely to get wrong: 
 status tells the client its framing was at fault rather than its payload, and the connection has to \
 end because the server and the peer have just been shown to disagree about where this message \
 stops. A server that answers the status and then keeps reading would take the octets the client \
-believed were its body and parse them as the next request line."""
+believed were its body and parse them as the next request line. The four MiB trailing stream makes \
+the resource consequence executable too: without Content-Length or Transfer-Encoding, RFC 9112 \
+frames a zero-length request body, so the service must answer from the head before any trailing \
+octet is released rather than trying to aggregate an unbounded body."""
 polarity = "negative"
 operation = "PutObject"
 tags = ["wire-bytes", "error-shape", "connection"]
@@ -44,11 +47,20 @@ name = "conf-object"
 raw_head_utf8 = "PUT /conf-object/no-length-write HTTP/1.1\r\nhost: s3.localhost\r\nx-amz-content-sha256: UNSIGNED-PAYLOAD\r\n\r\n"
 sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }
 
+# Four MiB represented as repeated small frames. These bytes are deliberately not framed as this
+# request's body; the socket pacer must observe the 411 before releasing the first one.
+[[request.chunks]]
+utf8 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+repeat = 65536
+
 [expect]
 kind = "response"
 status = 411
 connection_after = "closed"
 headers_absent = ["etag"]
+
+[expect.request_progress]
+body_bytes_sent_at_response = 0
 
 [expect.error]
 code = "MissingContentLength"

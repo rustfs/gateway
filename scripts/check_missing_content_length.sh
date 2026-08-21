@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WHAT: Binds c-lim-0020 to the real no-length PutObject socket refusal.
+# WHAT: Binds c-lim-0020 and c-lim-0022 to the real no-length PutObject socket refusal.
 # WHY: A codec-only 411 does not prove the wire case is non-streaming or that the connection closes.
 # HOW TO EXEMPT: There is no exemption; the codec, corpus, socket, and close-policy evidence are required.
 
@@ -125,8 +125,8 @@ def function_body(code: str, name: str) -> str:
 
 case_path, wired_path = map(Path, sys.argv[1:])
 case_text = case_path.read_text()
-if case_text.count("# c-lim-0020 / c-object-0030") != 1:
-    fail("c-lim-0020 corpus identity is missing or duplicated")
+if case_text.count("# c-lim-0020 / c-lim-0022 / c-object-0030") != 1:
+    fail("c-lim-0020/c-lim-0022 corpus identity is missing or duplicated")
 try:
     case = tomllib.loads(case_text)
 except tomllib.TOMLDecodeError as error:
@@ -146,6 +146,14 @@ if "content-length" in names or "transfer-encoding" in names:
     fail("c-lim-0020 request gained declared or chunked framing")
 if request.get("sign", {}).get("mode") != "sigv4_unsigned_payload":
     fail("c-lim-0020 is no longer the plain non-streaming PutObject form")
+chunks = request.get("chunks")
+if not isinstance(chunks, list) or len(chunks) != 1:
+    fail("c-lim-0022 no longer carries one bounded representation of an oversized trailing stream")
+chunk = chunks[0]
+unit = chunk.get("utf8")
+repeat = chunk.get("repeat")
+if not isinstance(unit, str) or not isinstance(repeat, int) or len(unit.encode()) * repeat < 4 * 1024 * 1024:
+    fail("c-lim-0022 trailing stream is smaller than four MiB")
 expect = case.get("expect", {})
 if expect.get("status") != 411:
     fail("c-lim-0020 no longer requires status 411")
@@ -153,6 +161,8 @@ if expect.get("error", {}).get("code") != "MissingContentLength":
     fail("c-lim-0020 no longer requires MissingContentLength")
 if expect.get("connection_after") != "closed":
     fail("c-lim-0020 no longer requires the connection to close")
+if expect.get("request_progress", {}).get("body_bytes_sent_at_response") != 0:
+    fail("c-lim-0022 no longer proves the refusal precedes every trailing byte")
 
 wired_text = wired_path.read_text()
 wired_code = rust_code(wired_text)
@@ -166,5 +176,5 @@ for token in ("run_over_a_socket(id)", "outcome.verdict, Verdict::Passed"):
 if '"c-object-0030"' not in wired_raw:
     fail("c-lim-0020 socket evidence lost the corpus case")
 
-print("OK: c-lim-0020 rejects a non-streaming PutObject without Content-Length as 411 and closes the socket")
+print("OK: c-lim-0020/c-lim-0022 reject an unframed PutObject before trailing bytes and close the socket")
 PYEOF
