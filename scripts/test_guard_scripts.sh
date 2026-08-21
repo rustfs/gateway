@@ -19176,6 +19176,42 @@ expect_fail check_error_contract_ledger.sh \
     mut_error_ledger_mutation_never_replayed \
     'no expect_fail line runs it'
 
+mut_sigv2_conformance_mode_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/cases/sig/c-sig-0582.toml")
+text = path.read_text()
+old = 'sign = { mode = "sigv2_header", credential = "valid" }'
+new = 'sign = { mode = "sigv4_header", credential = "valid" }'
+if text.count(old) != 1:
+    raise SystemExit("SigV2 conformance mode mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0582 losing the SigV2 runner mode it exists to exercise' \
+    mut_sigv2_conformance_mode_removed \
+    'lost conformance evidence'
+
+mut_sigv2_conformance_wrong_secret_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/cases/sig/c-sig-0583.toml")
+text = path.read_text()
+old = 'sign = { mode = "sigv2_header", credential = "wrong_secret" }'
+new = 'sign = { mode = "sigv2_header", credential = "valid" }'
+if text.count(old) != 1:
+    raise SystemExit("SigV2 wrong-secret mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'c-sig-0583 signing with the valid secret instead of the wrong one' \
+    mut_sigv2_conformance_wrong_secret_removed \
+    'lost conformance evidence'
+
 fi
 
 guard_finish

@@ -1078,8 +1078,8 @@ done
     exit 1
 }
 
-[[ "${#p2_06_cases[@]}" -eq 62 ]] || {
-    printf 'check_sig_case_coverage: expected 62 P2-06 mappings, got %s\n' "${#p2_06_cases[@]}" >&2
+[[ "${#p2_06_cases[@]}" -eq 65 ]] || {
+    printf 'check_sig_case_coverage: expected 65 P2-06 mappings, got %s\n' "${#p2_06_cases[@]}" >&2
     exit 1
 }
 p2_06_expected_ids=(
@@ -1093,7 +1093,7 @@ p2_06_expected_ids=(
     c-sig-0562 c-sig-0563 c-sig-0564 c-sig-0565 c-sig-0566 c-sig-0567
     c-sig-0568 c-sig-0569 c-sig-0570 c-sig-0571 c-sig-0572 c-sig-0573
     c-sig-0574 c-sig-0575 c-sig-0576 c-sig-0577 c-sig-0578 c-sig-0579
-    c-sig-0580 c-sig-0581
+    c-sig-0580 c-sig-0581 c-sig-0582 c-sig-0583 c-sig-0584
 )
 positive=0
 negative=0
@@ -1129,6 +1129,16 @@ for index in "${!p2_06_cases[@]}"; do
         printf 'check_sig_case_coverage: %s is not named by %s\n' "$id" "$relative" >&2
         exit 1
     }
+    if [[ "$relative" == conformance/cases/*.toml ]]; then
+        for token in "$evidence" "$required_call"; do
+            grep -Fq "$token" "$file" || {
+                printf 'check_sig_case_coverage: %s lost conformance evidence `%s` in %s\n' \
+                    "$id" "$token" "$relative" >&2
+                exit 1
+            }
+        done
+        continue
+    fi
     if [[ "$relative" == crates/sig/tests/compile_fail/c_sig_*.rs ]]; then
         p2_06_compile_fail_paths+=("$relative")
         validate_rust_evidence "$file" compile "$evidence" '' \
@@ -1164,12 +1174,12 @@ for index in "${!p2_06_cases[@]}"; do
     validate_rust_evidence "$file" runtime "$evidence" "$required_call" \
         "check_sig_case_coverage: ${id} is not a named active P2-06 test in ${relative}"
 done
-[[ "$positive" -eq 15 && "$negative" -eq 47 && "$negative" -gt "$positive" ]] || {
-    printf 'check_sig_case_coverage: expected 15 positive and 47 negative P2-06 cases, got %s/%s\n' \
+[[ "$positive" -eq 16 && "$negative" -eq 49 && "$negative" -gt "$positive" ]] || {
+    printf 'check_sig_case_coverage: expected 16 positive and 49 negative P2-06 cases, got %s/%s\n' \
         "$positive" "$negative" >&2
     exit 1
 }
-[[ "$(printf '%s\n' "${p2_06_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 62 ]] || {
+[[ "$(printf '%s\n' "${p2_06_evidence[@]}" | sort -u | wc -l | tr -d ' ')" -eq 65 ]] || {
     printf 'check_sig_case_coverage: P2-06 cases must use distinct named evidence\n' >&2
     exit 1
 }
@@ -1502,5 +1512,5 @@ done
 
 run_evidence_validations
 
-printf 'OK: all 225 P2 signature cases map to executable evidence '
-printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13; P2-06: 15/47)\n'
+printf 'OK: all 228 P2 signature cases map to executable evidence '
+printf '(P2-01: 8/17; P2-02: 6/22; P2-03: 14/29; P2-04: 9/42; P2-05: 3/13; P2-06: 16/49)\n'

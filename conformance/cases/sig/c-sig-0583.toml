@@ -1,0 +1,48 @@
+# c-sig-0583 — a real SigV2 request signed with the wrong secret is refused.
+
+[case]
+id = "c-sig-0583"
+schema_version = 1
+title = "A SigV2 request signed with the wrong secret cannot become anonymous"
+rationale = "ListBuckets is reachable to an authenticated caller and refused to an anonymous one, so the 403 and uniform authentication document distinguish a verified refusal from a downgrade that happened to reach the handler."
+polarity = "negative"
+operation = "ListBuckets"
+tags = ["signature", "sigv2", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-3p3x-734c-h5vx"
+summary = "Authentication failures must not reveal whether the named access key or its signature was the part that failed."
+kind = "other"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "S3 authentication failures use a 403 response and must not execute the requested operation."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[request]
+method = "GET"
+target = "/"
+headers = { "date" = "Fri, 02 Jan 2026 03:04:05 GMT" }
+sign = { mode = "sigv2_header", credential = "wrong_secret" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+
+[expect.error]
+code = "InvalidAccessKeyId"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+not_contains_utf8 = ["AKIAIOSFODNN7EXAMPLE", "this-is-not-the-secret", "StringToSign", "SignatureProvided"]
