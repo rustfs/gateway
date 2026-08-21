@@ -12609,7 +12609,7 @@ mut_missing_length_identity_removed() {
 from pathlib import Path
 path = Path("conformance/cases/object/c-object-0030.toml")
 text = path.read_text()
-old = "# c-lim-0020 / c-object-0030"
+old = "# c-lim-0020 / c-lim-0022 / c-object-0030"
 if text.count(old) != 1:
     raise SystemExit("c-lim-0020 identity anchor drifted")
 path.write_text(text.replace(old, "# c-object-0030", 1))
@@ -12617,7 +12617,53 @@ PYEOF
 }
 expect_fail check_missing_content_length.sh \
     'c-lim-0020 losing its corpus identity' mut_missing_length_identity_removed \
-    'c-lim-0020 corpus identity is missing or duplicated'
+    'c-lim-0020/c-lim-0022 corpus identity is missing or duplicated'
+
+mut_unframed_body_identity_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = "# c-lim-0020 / c-lim-0022 / c-object-0030"
+new = "# c-lim-0020 / c-object-0030"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0022 identity anchor drifted")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0022 losing its corpus identity' mut_unframed_body_identity_removed \
+    'c-lim-0020/c-lim-0022 corpus identity is missing or duplicated'
+
+mut_unframed_body_stream_shrunk() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = "repeat = 65536"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0022 repeat anchor drifted")
+path.write_text(text.replace(old, "repeat = 1", 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0022 shrinking its trailing stream below four MiB' mut_unframed_body_stream_shrunk \
+    'c-lim-0022 trailing stream is smaller than four MiB'
+
+mut_unframed_body_progress_weakened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/object/c-object-0030.toml")
+text = path.read_text()
+old = "body_bytes_sent_at_response = 0"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0022 progress anchor drifted")
+path.write_text(text.replace(old, "body_bytes_sent_at_response = 1", 1))
+PYEOF
+}
+expect_fail check_missing_content_length.sh \
+    'c-lim-0022 allowing one trailing byte before the refusal' mut_unframed_body_progress_weakened \
+    'c-lim-0022 no longer proves the refusal precedes every trailing byte'
 
 mut_missing_length_case_id_changed() {
     python3 - <<'PYEOF'
