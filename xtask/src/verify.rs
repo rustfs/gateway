@@ -18,6 +18,7 @@
 //! budget. NOT responsible for: defining crate-local tests.
 //! Upstream: the `verify` command. Downstream: Cargo and the operation catalog.
 
+mod launcher;
 mod process;
 
 use std::collections::HashSet;
@@ -27,6 +28,8 @@ use std::process::{Command, ExitCode, Output};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
+
+use launcher::launcher_started;
 
 #[cfg(feature = "full")]
 use crate::{catalog, codegen};
@@ -56,6 +59,10 @@ pub(crate) fn verify(args: &[String]) -> ExitCode {
 }
 
 fn verify_crate(name: &str, json: bool) -> ExitCode {
+    let started = match launcher_started() {
+        Ok(started) => started,
+        Err(error) => return diagnostic("xtask launcher timestamp is invalid", "crate verification", &error),
+    };
     let package = match resolve_workspace_package(name) {
         Ok(package) => package,
         Err(error) => {
@@ -88,7 +95,7 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
         RunOptions {
             json,
             operation_cases: None,
-            started: None,
+            started,
             conformance_case: standalone_crate_case(&package),
         },
     )

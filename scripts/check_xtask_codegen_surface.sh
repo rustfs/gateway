@@ -14,7 +14,7 @@ fail() {
 }
 
 command -v python3 >/dev/null 2>&1 || fail 'python3 is required'
-for required in .cargo/config.toml Cargo.toml xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs \
+for required in .cargo/config.toml Cargo.toml xtask-launcher/Cargo.toml xtask-launcher/src/main.rs xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs xtask/src/verify/launcher.rs \
     crates/conformance/src/cli.rs crates/gateway/tests/cors_runtime.rs crates/server/tests/server_load.rs; do
     [[ -f "${ROOT}/${required}" ]] || fail "required input is missing: ${required}"
 done
@@ -27,10 +27,8 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 
-
 def fail(message):
     raise SystemExit(f"check_xtask_codegen_surface: {message}")
-
 
 def load(relative):
     path = root / relative
@@ -38,22 +36,28 @@ def load(relative):
         return tomllib.loads(path.read_text())
     except (OSError, tomllib.TOMLDecodeError) as error:
         fail(f"cannot parse {relative}: {error}")
-
-
 config = load(".cargo/config.toml")
 alias = config.get("alias", {}).get("xtask")
-expected_alias = "run --quiet --package xtask --no-default-features --"
+expected_alias = "run --quiet --package xtask-launcher --"
 if alias != expected_alias:
-    fail("the cargo xtask alias must select the no-default-feature dispatcher")
+    fail("the cargo xtask alias must enter the budget-aware launcher")
 
 workspace = load("Cargo.toml")
 manifest = load("xtask/Cargo.toml")
+launcher_manifest = load("xtask-launcher/Cargo.toml")
+if launcher_manifest.get("package", {}).get("name") != "xtask-launcher":
+    fail("the xtask launcher package name drifted")
+if launcher_manifest.get("dependencies", {}):
+    fail("the xtask launcher must stay dependency-free")
+members = workspace.get("workspace", {}).get("members", [])
+default_members = workspace.get("workspace", {}).get("default-members", [])
+if "xtask-launcher" not in members or "xtask-launcher" not in default_members:
+    fail("workspace tests must prebuild the xtask launcher")
 features = manifest.get("features")
 if not isinstance(features, dict):
     fail("xtask must have dependency and feature tables")
 if features.get("default") != ["full"]:
     fail("workspace tests must select the full xtask surface by default")
-
 workspace_dependencies = workspace.get("workspace", {}).get("dependencies", {})
 if not isinstance(workspace_dependencies, dict):
     fail("the workspace dependency table is missing")
@@ -408,6 +412,27 @@ def compact(text):
 
 source = (root / "xtask/src/main.rs").read_text()
 comments_removed, syntax = rust_views(source)
+launcher_comments, launcher_syntax = rust_views((root / "xtask-launcher/src/main.rs").read_text())
+launcher_request = functions_named("is_crate_request", launcher_syntax, launcher_comments)
+expected_launcher_request = compact('''
+if arguments.first().map(String::as_str) != Some("verify") {
+    return false;
+}
+let mut verify_arguments = arguments[1..].iter().map(String::as_str).filter(|argument| *argument != "--json");
+matches!((verify_arguments.next(), verify_arguments.next(), verify_arguments.next()), (Some("--crate"), Some(_), None))
+''')
+if len(launcher_request) != 1 or compact(launcher_request[0][1]) != expected_launcher_request:
+    fail("the launcher must select the full runner only for an exact crate request")
+launcher_main = functions_named("main", launcher_syntax, launcher_comments)
+launcher_body = compact(launcher_main[0][1]) if len(launcher_main) == 1 else ""
+launcher_fragments = {
+    "runner split": 'let runner: &[&str] = if is_crate_request(&arguments) { &["--features", "full"] } else { &["--no-default-features"] };',
+    "startup clock": 'Ok(started) => started.as_nanos().to_string()',
+    "budget handoff": '.env(STARTED_ENV, started)',
+    "xtask child": '.args(["run", "--quiet", "--package", "xtask"]).args(runner).arg("--").args(arguments)',
+}
+if not launcher_body or any(compact(fragment) not in launcher_body for fragment in launcher_fragments.values()):
+    fail("the launcher must preserve light codegen, reuse the full crate runner, and record startup")
 dispatches = functions_named("dispatch", syntax, comments_removed)
 expected_full_attribute = compact('#[cfg(feature = "full")]')
 expected_light_attribute = compact('#[cfg(not(feature = "full"))]')
@@ -558,6 +583,10 @@ if compact(verify_items[0][1]) != expected_verify_body:
     fail("verify must execute exact crate requests before delegating full-only forms")
 verify_crate_items = functions_named("verify_crate", syntax, comments_removed)
 expected_verify_crate_body = compact('''
+let started = match launcher_started() {
+    Ok(started) => started,
+    Err(error) => return diagnostic("xtask launcher timestamp is invalid", "crate verification", &error),
+};
 let package = match resolve_workspace_package(name) {
     Ok(package) => package,
     Err(error) => {
@@ -590,7 +619,7 @@ run_step_batches(
     RunOptions {
         json,
         operation_cases: None,
-        started: None,
+        started,
         conformance_case: standalone_crate_case(&package),
     },
 )
@@ -765,5 +794,5 @@ expected_tests_attribute = compact('#[cfg(all(test, feature = "full"))]')
 if len(tests_items) != 1 or [compact(attr) for attr in tests_items[0][1]] != [expected_tests_attribute]:
     fail("verify module tests must require the full feature")
 
-print("OK: cargo xtask keeps codegen and exact crate verification on the bounded light surface")
+print("OK: cargo xtask keeps codegen light and reuses the warmed runner for crate verification")
 PYEOF
