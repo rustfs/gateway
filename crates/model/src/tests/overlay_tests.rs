@@ -26,7 +26,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::overlay::{Overlay, ROUTE_FILE};
+use crate::overlay::{Overlay, ROUTE_FILE, RuleClassification, is_quirk_id};
 
 /// A throwaway overlay directory. Removed on drop, so a failing assertion does not leak one.
 struct Sandbox {
@@ -112,6 +112,29 @@ fn merges_every_family_file_in_the_directory() {
         vec!["q-alpha-0002".to_owned(), "q-base-0001".to_owned(), "q-beta-0003".to_owned()]
     );
     assert_eq!(overlay.scalars.get("ETag").map(String::as_str), Some("ETag"));
+}
+
+#[test]
+fn loads_a_mutable_runtime_contract_rule() {
+    let sandbox = Sandbox::new("mutable-contract");
+    sandbox
+        .write("ops/alpha.toml", "include = [\"Alpha\"]\n\n[op.Alpha]\nprecedence = 100\n")
+        .write(
+            "quirks/signature.toml",
+            "[[quirk]]\nid = \"q-sig-test-9999\"\nkind = \"signature_policy\"\nclassification = \"mutable\"\nmutation_dimension = \"signature_canonical_host_policy\"\ncontract_value = \"raw_host_bytes\"\ntarget = \"Signature.Test\"\nsummary = \"A generated signature policy consumed by the verifier.\"\ncases = [\"c-sig-9999\"]\n\n[[quirk.evidence]]\nkind = \"decision\"\nref = \"https://example.invalid/signature\"\nsummary = \"The test records an independently reviewed signature decision.\"\n",
+        );
+
+    let overlay = Overlay::load(sandbox.path()).expect("a mutable runtime contract loads");
+
+    assert_eq!(overlay.classifications.get("q-sig-test-9999"), Some(&RuleClassification::Mutable));
+    assert!(overlay.contract_rules.contains_key("q-sig-test-9999"));
+}
+
+#[test]
+fn accepts_a_descriptive_quirk_id_without_a_numeric_suffix() {
+    assert!(is_quirk_id("q-sig-v2-included-query"));
+    assert!(!is_quirk_id("q-sig-v2-Included-query"));
+    assert!(!is_quirk_id("q-sig-v2--included-query"));
 }
 
 #[test]

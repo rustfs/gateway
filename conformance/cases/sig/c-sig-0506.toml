@@ -1,0 +1,38 @@
+# c-sig-0506 — x-amz-date empties SigV2's Date slot.
+
+[case]
+id = "c-sig-0506"
+schema_version = 1
+title = "A SigV2 request with x-amz-date leaves the Date slot empty"
+rationale = "Both Date and x-amz-date are present so the two candidate strings differ. The client signs the AWS-defined empty Date slot, and the authenticated ListBuckets response proves the verifier made the same choice instead of copying the ordinary Date header."
+polarity = "positive"
+operation = "ListBuckets"
+tags = ["signature", "sigv2", "security"]
+timeout_ms = 10000
+quirks = ["q-sig-v2-empty-date-on-amz-date"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTAuthentication.html"
+summary = "AWS defines an empty StringToSign Date position when x-amz-date supplies the request time."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[request]
+method = "GET"
+target = "/"
+headers = { "date" = "Fri, 02 Jan 2026 03:04:05 GMT", "x-amz-date" = "Fri, 02 Jan 2026 03:04:05 GMT" }
+sign = { mode = "sigv2_header", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+contains_utf8 = ["<ListAllMyBucketsResult"]

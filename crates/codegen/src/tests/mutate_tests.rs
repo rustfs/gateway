@@ -26,7 +26,7 @@ use rustfs_gateway_model::ir::OperationIr;
 use super::codegen_tests::{artifacts, root};
 use crate::emit::quirk_toml::{ResolvedSource, SourceValue, resolve_at};
 use crate::mutate::apply::apply;
-use crate::mutate::{ABSENT_NOT_CONFIGURED_MUTANT, Mutation, plan, quirk_families};
+use crate::mutate::{ABSENT_NOT_CONFIGURED_MUTANT, Mutation, plan, plan_contract, quirk_families};
 use crate::{CodegenInput, CodegenOutput, generate, generate_mutated};
 
 /// The lifecycle request root: a string source with a real production consumer, used as the
@@ -243,6 +243,26 @@ fn a_mutated_run_produces_different_artefacts_than_an_unmutated_one() {
     let paths: Vec<_> = plain.files.iter().map(|(path, _)| path).collect();
     let mutated_paths: Vec<_> = mutated.files.iter().map(|(path, _)| path).collect();
     assert_eq!(paths, mutated_paths, "a mutation must not add or remove an artefact");
+}
+
+#[test]
+fn a_contract_mutation_changes_the_generated_signature_input() {
+    let root = root();
+    let input = CodegenInput::at(&root);
+    let out = CodegenOutput::at(&root);
+    let plain = generate(&input, &out).expect("codegen runs");
+    let rule = plain
+        .contract_rules
+        .get("q-sig-v2-included-query")
+        .expect("the signature contract exists");
+    let mutation = plan_contract("q-sig-v2-included-query", rule).expect("the boolean contract is plannable");
+
+    let mutated = generate_mutated(&input, &out, std::slice::from_ref(&mutation)).expect("codegen runs");
+
+    assert_ne!(plain.files, mutated.files, "the contract mutation must reach a generated consumer input");
+    let paths: Vec<_> = plain.files.iter().map(|(path, _)| path).collect();
+    let mutated_paths: Vec<_> = mutated.files.iter().map(|(path, _)| path).collect();
+    assert_eq!(paths, mutated_paths, "a contract mutation must not add or remove an artefact");
 }
 
 #[test]

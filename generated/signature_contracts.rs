@@ -22,3 +22,7 @@ pub(crate) const SIGNATURE_CANONICAL_HOST_RAW: bool = true;
 pub(crate) const SIGNATURE_RAW_PATH_FALLBACK: bool = true;
 /// Whether canonical signing keeps the client's accepted payload token spelling.
 pub(crate) const SIGNATURE_PAYLOAD_TOKEN_VERBATIM: bool = true;
+/// Whether SigV2 canonical resources include the reviewed subresource allowlist.
+pub(crate) const SIGV2_INCLUDED_QUERY: bool = true;
+/// Whether SigV2 empties the Date slot when x-amz-date is present.
+pub(crate) const SIGV2_EMPTY_DATE_ON_AMZ_DATE: bool = true;

@@ -158,7 +158,7 @@ operations it applies to.
 
 ```toml
 [[quirk]]
-id      = "q-etag-0020"          # q-<slug>-NNNN, allocated in discovery order
+id      = "q-etag-0020"          # q-<kebab-slug>; existing numbered ids remain valid
 kind    = "etag_render"          # free-form category; new behaviour must not need a schema bump
 classification = "mutable"       # mutable | contract; always explicit, never inferred from kind
 mutation_dimension = "wire_form"
@@ -175,16 +175,17 @@ cases   = ["c-etag-0011"]        # conformance cases that would fail if the quir
 
 Rules, all enforced by codegen:
 
-- every record is classified; a mutable record needs exactly one typed codec rule or lowered-IR
-  source rule, while a generated contract must bind to an independently mutable runtime or emitter
-  consumer; an untyped contract remains a deferred overlay fact and is not emitted or counted as
-  proved, wired, or complete;
+- every record is classified; a mutable record needs exactly one typed codec rule, lowered-IR
+  source rule, or runtime contract, while a generated contract must bind to an independently
+  mutable runtime or emitter consumer; an untyped contract remains a deferred overlay fact and is
+  not emitted or counted as proved, wired, or complete;
 - `kind` remains searchable metadata and never selects a codec, source, or mutation;
 - at least one `evidence` entry and at least one `cases` entry per quirk;
 - a quirk that nothing references is dead weight, and a reference to an undeclared quirk fails
   the run;
-- the number in a quirk id is allocated globally, in discovery order. It is not per family, so
-  two families never mint the same id — and the loader refuses it if they do.
+- quirk ids are stable lowercase kebab names. Existing numeric suffixes remain globally allocated
+  in discovery order; an issue that specifies a descriptive id may use that exact id. The loader
+  refuses duplicates across families.
 
 **Never paste upstream prose.** Behavioural facts are not copyrightable; the sentences describing
 them are. Evidence is a link plus a sentence you wrote. This is ADR-0001, and it is also why
