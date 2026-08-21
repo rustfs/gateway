@@ -8,6 +8,13 @@ to tick on a PR — and **which files you must never open**.
 Governance context lives in `README.md` (scope fence, relationship to s3s), `CONTRIBUTING.md`
 (contribution process), and `SECURITY.md` (disclosure). This file never contradicts them.
 
+## First-Principles Thinking
+
+Think from first principles. Do not assume the user fully understands what they want or the best
+way to achieve it. Start from the underlying need and problem. If the motivation or goal is unclear,
+stop and discuss it with the user. If the goal is clear but the requested path is not the shortest,
+say so and recommend a better approach.
+
 ## Rule Precedence
 
 Highest wins on conflict:
