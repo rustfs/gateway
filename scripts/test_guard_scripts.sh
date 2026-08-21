@@ -13495,6 +13495,26 @@ mut_ci_target_failure_swallowed() {
 expect_fail check_ci_test_split.sh \
     'the target-consolidation job swallowing a failure or timeout' mut_ci_target_failure_swallowed
 
+# The coverage self-test shares that runner, and shares nothing else: it is a second timed command
+# with a budget of its own. Both mutations below are the same two shapes as the pair above, which
+# is the point — a suite added to an existing runner is exactly as easy to silence as one with a
+# runner to itself, and neither is allowed to be.
+mut_ci_coverage_command_dropped() {
+    replace_ci_text 'scripts/ci_budget.sh 45 "test target coverage self-test" bash scripts/test_test_target_coverage.sh' \
+        'scripts/ci_budget.sh 45 "test target coverage self-test" true'
+}
+expect_fail check_ci_test_split.sh \
+    'the test-target coverage suite being replaced with a no-op' mut_ci_coverage_command_dropped \
+    'target-consolidation-self-test command changed or can hide a failure'
+
+mut_ci_coverage_failure_swallowed() {
+    replace_ci_text '          scripts/ci_budget.sh 45 "test target coverage self-test" bash scripts/test_test_target_coverage.sh' \
+        '          scripts/ci_budget.sh 45 "test target coverage self-test" bash scripts/test_test_target_coverage.sh || true'
+}
+expect_fail check_ci_test_split.sh \
+    'the test-target coverage suite swallowing a failure or timeout' mut_ci_coverage_failure_swallowed \
+    'target-consolidation-self-test command changed or can hide a failure'
+
 mut_ci_target_budget_widened() {
     replace_ci_text '  target-consolidation-self-test:
     name: Target consolidation self-test

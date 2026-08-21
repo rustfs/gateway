@@ -8,8 +8,13 @@ set -euo pipefail
 #   rustfs/gateway#60 measured separate integration targets and trybuild batches rebuilding the
 #   same test products until the 30-second verification budget expired.
 # HOW TO EXEMPT
-#   There are no exemptions. Add or remove a test by updating the source inventory and its single
-#   harness registration together.
+#   There are no exemptions for the three crates below. Add or remove a test by updating the source
+#   inventory and its single harness registration together.
+#
+#   That sentence used to be written without the qualifier, and for the workspace it was not true:
+#   this guard names three crates, and every other member was exempt by omission with nothing
+#   saying so (rustfs/gateway#277). scripts/check_test_target_coverage.sh is what makes the
+#   workspace-wide claim, by discovering the members instead of listing them.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
