@@ -62,6 +62,9 @@ mod lifecycle_roundtrip;
 #[path = "limit_layering.rs"]
 mod limit_layering;
 
+#[path = "lock_roundtrip.rs"]
+mod lock_roundtrip;
+
 #[path = "not_configured_declarations.rs"]
 mod not_configured_declarations;
 
