@@ -75,19 +75,23 @@ pub(super) fn sign_header(input: HeaderSignInput<'_>) -> Result<Vec<(String, Str
         secret,
         token,
     } = input;
-    for (key, description) in [
-        ("signSpec.signed_headers", "an explicit signed-header set"),
-        ("signSpec.payload_hash", "a SigV4 payload hash"),
-        ("signSpec.expires_s", "a presigned expiry"),
-        ("signSpec.tamper", "post-signing tampering"),
-        ("signSpec.service", "a SigV4 service scope"),
-        ("signSpec.region", "a SigV4 region scope"),
-    ] {
-        if sign.read(key).is_some() {
-            return Err(SutError::Environment(format!(
-                "`sign.mode = \"sigv2_header\"` does not support {description}"
-            )));
-        }
+    if sign.read("signSpec.signed_headers").is_some() {
+        return Err(unsupported("an explicit signed-header set"));
+    }
+    if sign.read("signSpec.payload_hash").is_some() {
+        return Err(unsupported("a SigV4 payload hash"));
+    }
+    if sign.read("signSpec.expires_s").is_some() {
+        return Err(unsupported("a presigned expiry"));
+    }
+    if sign.read("signSpec.tamper").is_some() {
+        return Err(unsupported("post-signing tampering"));
+    }
+    if sign.read("signSpec.service").is_some() {
+        return Err(unsupported("a SigV4 service scope"));
+    }
+    if sign.read("signSpec.region").is_some() {
+        return Err(unsupported("a SigV4 region scope"));
     }
     if let Some(token) = token {
         let value = http::HeaderValue::from_str(token)
@@ -121,6 +125,10 @@ pub(super) fn sign_header(input: HeaderSignInput<'_>) -> Result<Vec<(String, Str
                 .map_err(|_| SutError::Environment(format!("`{name}` is not a text header value")))
         })
         .collect()
+}
+
+fn unsupported(description: &str) -> SutError {
+    SutError::Environment(format!("`sign.mode = \"sigv2_header\"` does not support {description}"))
 }
 
 #[cfg(test)]
