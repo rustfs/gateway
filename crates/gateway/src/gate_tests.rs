@@ -211,6 +211,79 @@ async fn an_undeclared_oversized_body_is_still_refused() {
     assert_eq!(error.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
 }
 
+/// c-lim-0027 / c-ing-0044. Negative — gzip metadata never enables decompression, and both sides
+/// of the body ceiling are decided from the compressed wire size. This complete 96-byte gzip
+/// stream expands to 64 KiB; accepting it at 96 and refusing it at 95 distinguishes raw-byte
+/// accounting from both expanded-byte accounting and no accounting.
+#[tokio::test]
+async fn c_ing_0044_c_lim_0027_gzip_wire_bytes_set_the_body_ceiling() {
+    const GZIP_STREAM: &[u8] = &[
+        0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0xed, 0xc1, 0x01, 0x01, 0x00, 0x00, 0x00, 0x80, 0x90, 0xfe,
+        0xaf, 0xee, 0x08, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6a, 0xeb, 0x8e, 0x97, 0xd7, 0x00, 0x00, 0x01, 0x00,
+    ];
+    const RAW_BYTES: u64 = GZIP_STREAM.len() as u64;
+
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::CONTENT_ENCODING, http::HeaderValue::from_static("gzip"));
+    headers.insert(
+        http::header::CONTENT_LENGTH,
+        http::HeaderValue::from_str(&RAW_BYTES.to_string()).expect("a digit run"),
+    );
+    let framing =
+        rustfs_gateway_http::Framing::classify(http::Version::HTTP_11, &headers, &rustfs_gateway_http::Limits::default())
+            .expect("a framed request");
+    let ingest = crate::chunked::ChunkIngest::prepare(
+        &rustfs_gateway_sig::PayloadMode::Unsigned,
+        &headers,
+        &framing,
+        &crate::ext::ChunkSink::new(),
+        None,
+        rustfs_gateway_http::ChunkLimits::default(),
+    )
+    .expect("gzip metadata is not a framing error");
+    assert!(ingest.is_none(), "gzip never selects a decoder");
+
+    let proof = Authenticated::granted_for_test();
+    let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(GZIP_STREAM)]);
+    let opaque = SealedBody::seal(Some(body), Some(RAW_BYTES))
+        .read(
+            &proof,
+            BodyCeilings {
+                buffered: RAW_BYTES,
+                declared: None,
+            },
+            BodyTimeouts::S3,
+            ingest,
+            BodyDigestObligation::None,
+            BodyIntegrity::NONE,
+        )
+        .await
+        .expect("the raw stream fits exactly");
+    assert_eq!(opaque, Bytes::from_static(GZIP_STREAM));
+    assert_eq!(read.bytes_read(), RAW_BYTES);
+
+    let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(GZIP_STREAM)]);
+    let error = SealedBody::seal(Some(body), Some(RAW_BYTES))
+        .read(
+            &proof,
+            BodyCeilings {
+                buffered: RAW_BYTES - 1,
+                declared: None,
+            },
+            BodyTimeouts::S3,
+            None,
+            BodyDigestObligation::None,
+            BodyIntegrity::NONE,
+        )
+        .await
+        .expect_err("one raw byte past the ceiling is refused");
+    assert_eq!(error.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
+    assert_eq!(read.bytes_read(), 0, "the raw Content-Length is refused before a frame is polled");
+}
+
 /// Negative — the operation's own cap is refused **while the body is still arriving**: the
 /// frames behind the one that crossed the line are never polled, which is the difference
 /// between a cap and a report. Without this assertion "refused at 2 MiB" and "collected 40 MiB

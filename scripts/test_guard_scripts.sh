@@ -8655,6 +8655,21 @@ PYEOF
 expect_fail_self_mutation check_ingest_case_coverage.sh \
     'an ingest mapping naming a function that does not exist' mut_ingest_case_function_missing
 
+mut_gzip_raw_limit_identity_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/gate_tests.rs")
+text = path.read_text()
+old = "c_ing_0044_c_lim_0027_gzip_wire_bytes_set_the_body_ceiling"
+new = "c_ing_0044_gzip_wire_bytes_set_the_body_ceiling"
+if text.count(old) != 1:
+    raise SystemExit("missing or ambiguous c-lim-0027 identity mutation subject")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_ingest_case_coverage.sh \
+    'c-lim-0027 losing its shared executable identity' mut_gzip_raw_limit_identity_removed
+
 mut_ingest_partial_owner_dropped() {
     python3 - <<'PYEOF'
 from pathlib import Path
