@@ -359,7 +359,7 @@ async fn a_completed_handler_reports_no_deadline() {
 /// that code would be a pairing no S3 client has seen, and would fork the wire layer away from the
 /// one table that answers "which status does this code get?".
 #[tokio::test]
-async fn c_wire_0063_an_over_large_body_is_refused_on_the_socket_before_it_is_sent() {
+async fn c_wire_0063_c_lim_0021_an_over_large_body_is_refused_on_the_socket_before_it_is_sent() {
     let limits = Limits {
         max_body_bytes: 16,
         ..Limits::default()
