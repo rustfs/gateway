@@ -1,0 +1,23 @@
+[package]
+name = "xtask-launcher"
+description = "Budget-aware launcher for repository automation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+build = false
+autobins = false
+autotests = false
+autoexamples = false
+autobenches = false
+
+[package.metadata.gateway]
+ring = 0
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "xtask-launcher"
+path = "src/main.rs"

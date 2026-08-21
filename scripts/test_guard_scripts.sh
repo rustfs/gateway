@@ -1643,12 +1643,32 @@ probe_template_guard_missing_ruby() {
 probe_template_guard_missing_ruby
 
 # The codegen feedback loop must not rebuild product crates before generation starts.
-mut_xtask_codegen_alias_restores_full_defaults() {
-    perl -0pi -e 's/ --no-default-features//' .cargo/config.toml
+mut_xtask_codegen_alias_bypasses_launcher() {
+    perl -0pi -e 's#run --quiet --package xtask-launcher --#run --quiet --package xtask --no-default-features --#' .cargo/config.toml
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'the cargo xtask alias restoring full default features for codegen' \
-    mut_xtask_codegen_alias_restores_full_defaults
+    'the cargo xtask alias bypassing the budget-aware launcher' \
+    mut_xtask_codegen_alias_bypasses_launcher
+
+mut_xtask_crate_runner_returns_to_light_graph() {
+    perl -0pi -e 's/&\["--features", "full"\]/\&["--no-default-features"]/' \
+        xtask-launcher/src/main.rs
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'crate verification rebuilding the light runner after the workspace gate' \
+    mut_xtask_crate_runner_returns_to_light_graph
+
+mut_xtask_launcher_timestamp_removed() {
+    perl -0pi -e 's/started\.as_nanos\(\)\.to_string\(\)/"0".to_owned()/' xtask-launcher/src/main.rs
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the launcher no longer recording command startup' mut_xtask_launcher_timestamp_removed
+
+mut_xtask_verify_ignores_launcher_time() {
+    perl -0pi -e 's/        started,\n/        started: None,\n/' xtask/src/verify.rs
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'crate verification ignoring launcher time' mut_xtask_verify_ignores_launcher_time
 
 mut_xtask_codegen_gateway_becomes_nonoptional() {
     perl -0pi -e 's/rustfs-gateway = \{ workspace = true, optional = true \}/rustfs-gateway = { workspace = true }/' \
