@@ -379,40 +379,118 @@ fn adapting_the_pipeline_into_the_push_model_is_counted() {
     assert_eq!(metrics.adapt_buffers_total(), 1);
 }
 
-/// Negative: a body far larger than the window does need compaction, and what moves is bounded by
-/// the chunk being verified — not by the body. A decoder that compacted on every read would move
-/// something proportional to the upload.
-#[test]
-fn compaction_is_bounded_by_the_chunk_not_by_the_body() {
-    const CHUNK_BYTES: usize = 8 * 1024;
-    const CHUNKS: usize = 64;
+/// What one body's worth of compaction cost, and the window it was paid against.
+struct Compaction {
+    chunk: usize,
+    declared: u64,
+    window: u64,
+    moved: u64,
+}
 
-    let payload = vec![b'm'; CHUNK_BYTES];
+impl Compaction {
+    /// The bound `IngestPipeline::make_room` claims: one compaction per window's worth of room,
+    /// each moving at most the chunk being verified plus the metadata line ahead of it.
+    fn ceiling(&self) -> u64 {
+        let unit = self.chunk as u64 + 256;
+        self.declared.div_ceil(self.window - unit).saturating_mul(unit)
+    }
+
+    /// Whether this ratio is in the region where the window is at least three times the chunk —
+    /// the region in which the retained span is small relative to the room a compaction buys.
+    fn chunk_is_small_against_the_window(&self) -> bool {
+        (self.chunk as u64).saturating_mul(3) <= self.window
+    }
+}
+
+/// Drives `body_bytes` through the pipeline in signed chunks of `chunk_bytes` and reports what
+/// compaction moved.
+fn compaction_run(chunk_bytes: usize, body_bytes: usize) -> Compaction {
+    let chunks = body_bytes / chunk_bytes;
+    let payload = vec![b'm'; chunk_bytes];
     let mut chunker = SignedChunker::new(KEY, SEED);
-    for _ in 0..CHUNKS {
+    for _ in 0..chunks {
         chunker.push(&payload);
     }
     let body = chunker.finish();
-    let declared = (CHUNKS * CHUNK_BYTES) as u64;
+    let declared = (chunks * chunk_bytes) as u64;
 
     let mut pipeline = signed_pipeline(body, 16 * 1024, declared, KEY, SEED, no_observers(), ChunkLimits::default());
     let out = drain_pipeline(&mut pipeline, 16 * 1024).expect("a correctly signed body");
     assert_eq!(out.len() as u64, declared);
+    Compaction {
+        chunk: chunk_bytes,
+        declared,
+        window: pipeline.window_bytes() as u64,
+        moved: pipeline.bytes_moved_total(),
+    }
+}
 
-    // One compaction per (window - one chunk - one metadata line) bytes of input, each moving at
-    // most the chunk being verified plus a partial header.
-    let unit = CHUNK_BYTES as u64 + 256;
-    let compactions = declared.div_ceil((pipeline.window_bytes() as u64) - unit);
-    let ceiling = compactions.saturating_mul(unit);
-    assert!(
-        pipeline.bytes_moved_total() <= ceiling,
-        "moved {} bytes, ceiling is one chunk per window's worth of input ({ceiling})",
-        pipeline.bytes_moved_total()
-    );
-    assert!(
-        pipeline.bytes_moved_total() < declared / 2,
-        "compaction must not approach a full second pass over the body"
-    );
+/// Negative: a body far larger than the window does need compaction, and what moves is bounded by
+/// the chunk being verified — not by the body. A decoder that compacted on every read would move
+/// something proportional to the upload.
+///
+/// # Why this is parameterised, and what each bound claims
+///
+/// The bound is a **function of the chunk-size-to-window ratio**, and this case used to be run at
+/// one comfortable point of it (8 KiB chunks against the 64 KiB window, where 0.13 of the body
+/// moves). rustfs/gateway#265: at 32 KiB chunks against the same window the total reaches 0.97 of
+/// the body — a near-full second pass, which the fixed `< declared / 2` assertion never saw
+/// because the one configuration in the case was the one where it held.
+///
+/// So the two bounds are stated separately, each over the range it actually claims:
+///
+/// * **Everywhere** — `moved <= ceiling()`, one retained span per window's worth of room. This is
+///   the bound `make_room` is written to hold, and it holds across the whole range.
+/// * **Everywhere** — `moved < declared`: compaction never costs a *full* second pass. The peak
+///   is a knife edge at chunk == window/2, where the retained span and the room a compaction buys
+///   are the same size, so every chunk is moved once; measured 0.9986 at 64 KiB chunks against
+///   the 128 KiB window this pipeline grows to for them. The margin here is thin on purpose —
+///   this is the number a change to `make_room` would move.
+/// * **Where the window is at least three times the chunk** — `moved < declared / 2`, the
+///   original claim, kept at full strength in the region it was measured in and no further.
+///
+/// The chunk sizes are the ratio's landmarks against a 64 KiB initial window: a sixteenth, an
+/// eighth, a quarter, the last point of the halving region, exactly half — the worst — three
+/// quarters, the size that forces the window to double (and lands on half of *that* window, the
+/// other worst point), and one that fits inside the grown window comfortably.
+#[test]
+fn compaction_is_bounded_by_the_chunk_not_by_the_body() {
+    const BODY_BYTES: usize = 1024 * 1024;
+
+    for chunk_bytes in [
+        4 * 1024,
+        8 * 1024,
+        16 * 1024,
+        21 * 1024,
+        32 * 1024,
+        48 * 1024,
+        64 * 1024,
+        96 * 1024,
+    ] {
+        let run = compaction_run(chunk_bytes, BODY_BYTES);
+        let ceiling = run.ceiling();
+        assert!(
+            run.moved <= ceiling,
+            "chunk {chunk_bytes} in a {} byte window: moved {} bytes, and one retained span per window's worth of room is {ceiling}",
+            run.window,
+            run.moved
+        );
+        assert!(
+            run.moved < run.declared,
+            "chunk {chunk_bytes} in a {} byte window: moved {} bytes over a {} byte body, which is a full second pass",
+            run.window,
+            run.moved,
+            run.declared
+        );
+        if run.chunk_is_small_against_the_window() {
+            assert!(
+                run.moved < run.declared / 2,
+                "chunk {chunk_bytes} in a {} byte window: moved {} bytes, and a chunk this small against the window must stay under half the body",
+                run.window,
+                run.moved
+            );
+        }
+    }
 }
 
 /// Negative: the default framing-overhead ratio refuses signed chunks small enough to turn the
