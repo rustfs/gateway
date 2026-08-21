@@ -65,6 +65,9 @@ mod limit_layering;
 #[path = "not_configured_declarations.rs"]
 mod not_configured_declarations;
 
+#[path = "notification_roundtrip.rs"]
+mod notification_roundtrip;
+
 #[path = "operation_spec_semver.rs"]
 mod operation_spec_semver;
 

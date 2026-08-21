@@ -203,6 +203,7 @@ core_modules = (
     "lifecycle_roundtrip",
     "limit_layering",
     "not_configured_declarations",
+    "notification_roundtrip",
     "operation_spec_semver",
     "params_and_dispatch",
     "precondition_range",
