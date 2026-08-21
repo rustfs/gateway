@@ -17537,13 +17537,103 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     "dynamic dispatch does not consume one request snapshot's handler deadline configuration" \
     mut_handler_deadline_snapshot_duration_removed
 
+mut_handler_request_cancellation_snapshot_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/dispatch.rs")
+text = path.read_text()
+subject = "            let request_cancellation = request_config.request_cancellation();\n"
+replacement = "            let request_cancellation = None;\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique dynamic request-cancellation snapshot subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'dynamic dispatch dropping the request cancellation receiver' \
+    "dynamic dispatch does not consume one request snapshot's handler deadline configuration" \
+    mut_handler_request_cancellation_snapshot_removed
+
+mut_handler_request_cancellation_extract_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "        let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();\n"
+replacement = "        let request_cancellation = None;\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique request-cancellation extraction subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the service dropping the server request-cancellation signal' \
+    'the service does not extract the server request-cancellation signal' \
+    mut_handler_request_cancellation_extract_removed
+
+mut_handler_request_cancellation_stage_dropped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+text = path.read_text()
+subject = "            request_cancellation: self.request_cancellation,\n"
+replacement = "            request_cancellation: None,\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique request-cancellation stage subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'a pipeline stage dropping request cancellation' \
+    'request cancellation is not carried through the typed request snapshot' \
+    mut_handler_request_cancellation_stage_dropped
+
+mut_handler_request_cancellation_poll_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_deadline.rs")
+text = path.read_text()
+subject = "            return Poll::Ready(Err(HandlerCancellation::RequestAborted));\n"
+replacement = "            return Poll::Pending;\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique request-cancellation poll subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'the request-cancellation receiver no longer stopping the handler' \
+    'handler deadline race is missing a required poll or cancellation signal' \
+    mut_handler_request_cancellation_poll_removed
+
+mut_handler_request_abort_cleanup_mapping_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_deadline.rs")
+text = path.read_text()
+subject = "        _ => HandlerCancellationOutcome::RequestAborted { cleanup_completed },\n"
+replacement = "        _ => HandlerCancellationOutcome::Expired { cleanup_completed },\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique request-abort cleanup mapping subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'request abort cleanup being reported as a deadline' \
+    'request cancellation does not report bounded cleanup completion' \
+    mut_handler_request_abort_cleanup_mapping_removed
+
 mut_handler_deadline_signal_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
 path = Path("crates/gateway/src/request_deadline.rs")
 text = path.read_text()
-subject = "    cancellation.cancel(HandlerCancellation::Deadline);\n"
+subject = "    cancellation.cancel(reason);\n"
 if text.count(subject) != 1:
     raise SystemExit("missing unique handler deadline signal mutation subject")
 path.write_text(text.replace(subject, "", 1))
@@ -17560,8 +17650,8 @@ from pathlib import Path
 
 path = Path("crates/gateway/src/request_deadline.rs")
 text = path.read_text()
-subject = "    cancellation.cancel(HandlerCancellation::Deadline);\n"
-replacement = subject + "    return HandlerDeadlineOutcome::Completed(handler.await);\n"
+subject = "    cancellation.cancel(reason);\n"
+replacement = subject + "    return HandlerCancellationOutcome::Completed(handler.await);\n"
 if text.count(subject) != 1:
     raise SystemExit("missing unique late handler result mutation subject")
 path.write_text(text.replace(subject, replacement, 1))
@@ -17619,6 +17709,24 @@ expect_fail_with_diagnostic check_handler_deadline_class.sh \
     'dynamic dispatch losing the observed cleanup-completed outcome' \
     'dynamic dispatch can commit a handler result completed after its deadline' \
     mut_handler_cleanup_completion_mapping_removed
+
+mut_dynamic_request_abort_cleanup_mapping_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/dispatch.rs")
+text = path.read_text()
+subject = "request ended after handler cleanup completed"
+replacement = "request ended before handler cleanup completed"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique dynamic request-abort cleanup subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_deadline_class.sh \
+    'dynamic dispatch losing the request-abort cleanup result' \
+    'dynamic dispatch does not classify bounded request-abort cleanup' \
+    mut_dynamic_request_abort_cleanup_mapping_removed
 
 mut_monomorphic_static_handler_injection_bypassed() {
     python3 - <<'PYEOF'
