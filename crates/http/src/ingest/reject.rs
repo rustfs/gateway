@@ -110,6 +110,22 @@ pub enum ChunkReject {
     /// Never an end-of-stream: presenting a truncated upload to the handler as a complete one is
     /// how a partial object is committed as a whole one.
     TruncatedStream,
+    /// A trailer field name is outside the checksum/signature allowlist.
+    TrailerNotAllowed,
+    /// More than two trailer fields were declared or received.
+    TrailerCountExceeded,
+    /// The trailer section exceeded 1 KiB, including its terminating CRLF.
+    TrailerSizeExceeded,
+    /// A trailer field or declaration is not valid HTTP field syntax.
+    MalformedTrailer,
+    /// The received trailer names differ from the names declared in the request head.
+    DeclaredTrailerMismatch,
+    /// The wire ended before the declared trailer section was complete.
+    TruncatedBeforeTrailer,
+    /// Bytes followed the CRLF that ended the trailer section.
+    DataAfterTrailer,
+    /// A trailer declaration was attached to a payload mode that has no trailer section.
+    TrailerInNonTrailerMode,
     /// The declared framing mode and the declared lengths contradict each other.
     ModeConfusion(ModeConfusion),
 }
@@ -170,7 +186,9 @@ impl ChunkReject {
         match self {
             Self::SignatureChainBroken { .. } => ErrorCode::SIGNATURE_DOES_NOT_MATCH,
             Self::ChunkSizeTooLarge { .. } => ErrorCode::INVALID_CHUNK_SIZE,
-            Self::DecodedLengthUnderflow { .. } | Self::TruncatedStream => ErrorCode::INCOMPLETE_BODY,
+            Self::DecodedLengthUnderflow { .. } | Self::TruncatedStream | Self::TruncatedBeforeTrailer => {
+                ErrorCode::INCOMPLETE_BODY
+            }
             Self::DecodedLengthOverflow { .. } => ErrorCode::INCOMPLETE_BODY,
             _ => ErrorCode::INVALID_REQUEST,
         }
@@ -218,6 +236,7 @@ impl ChunkReject {
         matches!(
             self,
             Self::TruncatedStream
+                | Self::TruncatedBeforeTrailer
                 | Self::SignatureChainBroken { .. }
                 | Self::ChunkSizeTooLarge { .. }
                 | Self::TooManyChunks { .. }
@@ -244,6 +263,14 @@ impl ChunkReject {
             Self::DecodedLengthUnderflow { .. } => "decoded-length-underflow",
             Self::SignatureChainBroken { .. } => "signature-chain-broken",
             Self::TruncatedStream => "truncated-stream",
+            Self::TrailerNotAllowed => "trailer-not-allowed",
+            Self::TrailerCountExceeded => "trailer-count-exceeded",
+            Self::TrailerSizeExceeded => "trailer-size-exceeded",
+            Self::MalformedTrailer => "malformed-trailer",
+            Self::DeclaredTrailerMismatch => "declared-trailer-mismatch",
+            Self::TruncatedBeforeTrailer => "truncated-before-trailer",
+            Self::DataAfterTrailer => "data-after-trailer",
+            Self::TrailerInNonTrailerMode => "trailer-in-non-trailer-mode",
             Self::ModeConfusion(_) => "mode-confusion",
         }
     }

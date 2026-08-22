@@ -20,7 +20,7 @@
 //! be minted any other way ([`ChecksumVerified`]).
 //! NOT responsible for: choosing a digest algorithm — [`rustfs_gateway_types::ChecksumAlgorithm`]
 //! owns the table and the implementations — reading bytes off a socket, `aws-chunked` framing, or
-//! the trailer section, whose parser is still outstanding (see the module note below).
+//! the trailer section, whose integrity handoff is still outstanding (see the module note below).
 //! Upstream: `rustfs-gateway-types` for the algorithm table and the arbitration rules, this
 //! crate's [`HeaderView`]. Downstream: the assembly that owns the body read, which is the only
 //! place both halves of this module are reachable from.
@@ -68,13 +68,14 @@
 //! # What this module does not close yet
 //!
 //! A body that declares its checksum in a **trailer** (`x-amz-trailer`) under a streaming payload
-//! mode is refused with `501` before it reaches here, because the `aws-chunked` trailer section is
-//! not parsed anywhere yet. That refusal is keyed on the payload mode, so an `x-amz-trailer` on an
+//! mode is refused with `501` before it reaches here. The ingest layer can parse and bind the
+//! trailer names, but this module does not yet open an obligation whose expected value arrives at
+//! EOF. That refusal is keyed on the payload mode, so an `x-amz-trailer` on an
 //! *unframed* request reaches this module and resolves to no obligation at all — a gap this module
 //! cannot close, because closing it needs the trailer parser.
 //! There is deliberately no trailer branch in this module: a branch no request can reach is a
 //! branch no test can prove, and the one thing worse than a missing check is a check that reads
-//! like it ran. When the trailer parser lands, the obligation gains a variant and
+//! like it ran. When the production handoff lands, the obligation gains a variant and
 //! [`BodyDigests::verify`] gains the argument that carries the trailer section — which, because
 //! `rustfs-gateway-stream` hands trailers out only inside an end-of-stream event, cannot be
 //! supplied before the body is over.

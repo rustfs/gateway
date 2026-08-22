@@ -98,6 +98,7 @@ pub(crate) struct ChunkDecoder {
     state: State,
     cursor: usize,
     signed: bool,
+    trailers: bool,
     declared: u64,
     decoded_bytes: u64,
     overhead_bytes: u64,
@@ -108,11 +109,12 @@ pub(crate) struct ChunkDecoder {
 
 impl ChunkDecoder {
     /// Builds a decoder for a body that declared `declared` decoded bytes.
-    pub(crate) fn new(signed: bool, declared: u64, limits: ChunkLimits) -> Self {
+    pub(crate) fn new(signed: bool, trailers: bool, declared: u64, limits: ChunkLimits) -> Self {
         Self {
             state: State::Meta,
             cursor: 0,
             signed,
+            trailers,
             declared,
             decoded_bytes: 0,
             overhead_bytes: 0,
@@ -187,6 +189,15 @@ impl ChunkDecoder {
                 return Err(ChunkReject::DecodedLengthUnderflow {
                     declared: self.declared,
                     actual: self.decoded_bytes,
+                });
+            }
+            if self.trailers {
+                // A last-chunk ends with its size-line CRLF. In trailer framing the first field
+                // follows immediately; only an empty trailer section starts with another CRLF.
+                self.state = State::Done;
+                return Ok(DecodeEvent::ChunkEnd {
+                    signature,
+                    terminal: true,
                 });
             }
             self.state = State::DataCrlf {

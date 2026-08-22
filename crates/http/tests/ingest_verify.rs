@@ -21,18 +21,19 @@
 //! (`ingest_perf_gates`).
 //! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
-//! 3 positive / 17 negative.
+//! 4 positive / 24 negative.
 
 mod support;
 
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
+use http::{HeaderName, HeaderValue};
 use rustfs_gateway_http::{
     ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, ChunkSigningKey, IngestPipeline, IngestPolicy,
-    MAX_SCOPE_LINE_BYTES,
+    MAX_SCOPE_LINE_BYTES, TrailerDeclaration,
 };
-use rustfs_gateway_stream::{AsyncPayloadRead, ReadProgress};
+use rustfs_gateway_stream::{AsyncPayloadRead, ReadProgress, StreamError, TrailingHeaders};
 use smallvec::SmallVec;
 use support::ingest::{
     FramingFixture, ScriptReader, SignedChunker, TEST_AMZ_DATE, TEST_SCOPE_LINE, declared_length, drain_pipeline, hex_lower,
@@ -89,6 +90,25 @@ fn the_chain_survives_a_byte_at_a_time_socket() {
     assert_eq!(out, b"slowdrip");
 }
 
+/// Positive: an unsigned trailer is visible only on EOF, while checksum comparison remains an
+/// explicit later obligation.
+#[test]
+fn an_unsigned_trailer_reaches_eof_without_minting_commit_authority() {
+    let body = b"5\r\nhello\r\n0\r\nx-amz-checksum-crc32c:NhCmhg==\r\n\r\n".to_vec();
+    let mut pipeline = unsigned_trailer(body, 3, 5, "x-amz-checksum-crc32c");
+    let (output, trailers) = drive_trailered(&mut pipeline).expect("valid trailer");
+
+    assert_eq!(output, b"hello");
+    assert_eq!(
+        trailers
+            .get(&HeaderName::from_static("x-amz-checksum-crc32c"))
+            .expect("the declared trailer reaches EOF"),
+        &HeaderValue::from_static("NhCmhg==")
+    );
+    assert!(pipeline.trailer_section_complete(), "EOF proves the exact section arrived");
+    assert!(!pipeline.commit_allowed(), "parsing is not checksum comparison");
+}
+
 // ── negative ───────────────────────────────────────────────────────────────────────────
 
 /// Negative, and the property `VerifyBeforeDeliver` exists for: when the very first chunk's
@@ -111,6 +131,79 @@ fn c_ing_0035_a_bad_first_chunk_signature_delivers_zero_bytes() {
         ChunkReject::SignatureChainBroken { chunk_index: 0 }.to_status(),
         http::StatusCode::FORBIDDEN
     );
+}
+
+/// Negative: a trailer can never override authorization metadata from the authenticated head.
+#[test]
+fn c_ck_0022_authorization_is_not_an_allowed_trailer() {
+    let body = b"1\r\nx\r\n0\r\nauthorization:attacker\r\n\r\n".to_vec();
+    let mut pipeline = unsigned_trailer(body, 64, 1, "x-amz-checksum-crc32c");
+
+    assert!(drive_trailered(&mut pipeline).is_err());
+    assert_eq!(pipeline.reject(), Some(ChunkReject::TrailerNotAllowed));
+    assert!(!pipeline.commit_allowed());
+}
+
+/// Negative: sharing the checksum prefix does not make an unknown algorithm a checksum.
+#[test]
+fn an_unknown_checksum_algorithm_is_not_an_allowed_trailer() {
+    let result = TrailerDeclaration::parse(&HeaderValue::from_static("x-amz-checksum-unknown"), false);
+
+    assert!(matches!(result, Err(ChunkReject::TrailerNotAllowed)));
+}
+
+/// Negative: the two-field ceiling is enforced on what arrived, not only on the declaration.
+#[test]
+fn c_ck_0026_three_actual_trailers_are_refused() {
+    let body = b"1\r\nx\r\n0\r\nx-amz-checksum-crc32c:a\r\nx-amz-checksum-sha256:b\r\nx-amz-checksum-crc32:c\r\n\r\n".to_vec();
+    let mut pipeline = unsigned_trailer(body, 9, 1, "x-amz-checksum-crc32c,x-amz-checksum-sha256");
+
+    assert!(drive_trailered(&mut pipeline).is_err());
+    assert_eq!(pipeline.reject(), Some(ChunkReject::TrailerCountExceeded));
+}
+
+/// Negative: an unfinished field cannot grow past the one-kibibyte trailer budget.
+#[test]
+fn c_ck_0027_a_trailer_section_over_one_kibibyte_is_refused() {
+    let mut body = b"1\r\nx\r\n0\r\nx-amz-checksum-crc32c:".to_vec();
+    body.extend(core::iter::repeat_n(b'a', 1024));
+    body.extend_from_slice(b"\r\n\r\n");
+    let mut pipeline = unsigned_trailer(body, 73, 1, "x-amz-checksum-crc32c");
+
+    assert!(drive_trailered(&mut pipeline).is_err());
+    assert_eq!(pipeline.reject(), Some(ChunkReject::TrailerSizeExceeded));
+}
+
+/// Negative: changing the declared checksum name is a set mismatch, even when both names are
+/// individually allowed.
+#[test]
+fn c_ck_0028_the_actual_trailer_name_must_equal_the_declaration() {
+    let body = b"1\r\nx\r\n0\r\nx-amz-checksum-sha256:a\r\n\r\n".to_vec();
+    let mut pipeline = unsigned_trailer(body, 5, 1, "x-amz-checksum-crc32c");
+
+    assert!(drive_trailered(&mut pipeline).is_err());
+    assert_eq!(pipeline.reject(), Some(ChunkReject::DeclaredTrailerMismatch));
+}
+
+/// Negative: declaring two fields and sending one cannot be mistaken for a complete section.
+#[test]
+fn c_ck_0029_every_declared_trailer_must_arrive() {
+    let body = b"1\r\nx\r\n0\r\nx-amz-checksum-crc32c:a\r\n\r\n".to_vec();
+    let mut pipeline = unsigned_trailer(body, 7, 1, "x-amz-checksum-crc32c,x-amz-checksum-sha256");
+
+    assert!(drive_trailered(&mut pipeline).is_err());
+    assert_eq!(pipeline.reject(), Some(ChunkReject::DeclaredTrailerMismatch));
+}
+
+/// Negative: transport EOF before the empty line that closes the trailer never becomes body EOF.
+#[test]
+fn c_ck_0043_truncation_before_the_trailer_terminator_is_an_error() {
+    let body = b"1\r\nx\r\n0\r\nx-amz-checksum-crc32c:a\r\n".to_vec();
+    let mut pipeline = unsigned_trailer(body, 4, 1, "x-amz-checksum-crc32c");
+
+    assert!(drive_trailered(&mut pipeline).is_err());
+    assert_eq!(pipeline.reject(), Some(ChunkReject::TruncatedBeforeTrailer));
+    assert!(!pipeline.commit_allowed());
 }
 
 /// Negative: when a later chunk fails, the bytes of *that* chunk are still zero — the consumer
@@ -399,4 +492,40 @@ fn a_failed_body_still_reports_consistent_counters() {
         8,
         "an observer sees what was decoded, which is not what was delivered"
     );
+}
+
+fn unsigned_trailer(body: Vec<u8>, slice: usize, declared: u64, names: &'static str) -> IngestPipeline<ScriptReader> {
+    let framing =
+        ChunkFraming::derive(&FramingFixture::streaming_unsigned_trailer()).expect("the fixture is internally consistent");
+    let declaration =
+        TrailerDeclaration::parse(&HeaderValue::from_static(names), false).expect("the checksum declaration is allowed");
+    IngestPipeline::new(
+        ScriptReader::new(body, slice),
+        framing,
+        declared_length(declared),
+        None,
+        no_observers(),
+        ChunkLimits::default(),
+        IngestPolicy::default(),
+    )
+    .and_then(|pipeline| pipeline.with_trailer_declaration(declaration))
+    .expect("the declaration matches the framing mode")
+}
+
+fn drive_trailered(pipeline: &mut IngestPipeline<ScriptReader>) -> Result<(Vec<u8>, TrailingHeaders), StreamError> {
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut output = Vec::new();
+    let mut buffer = [0_u8; 2];
+    loop {
+        match Pin::new(&mut *pipeline).poll_fill(&mut cx, &mut buffer) {
+            Poll::Pending => continue,
+            Poll::Ready(Err(error)) => return Err(error),
+            Poll::Ready(Ok(ReadProgress::Filled(written))) => {
+                output.extend_from_slice(&buffer[..written]);
+            }
+            Poll::Ready(Ok(ReadProgress::Eof { trailers })) => {
+                return Ok((output, trailers));
+            }
+        }
+    }
 }
