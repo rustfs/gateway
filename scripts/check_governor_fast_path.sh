@@ -50,7 +50,8 @@ grep -qF 'request.extensions().get::<ClientAddr>()' "$SERVICE" \
 if grep -qiF 'x-forwarded-for' "$SERVICE"; then
     fail 'the service reads an untrusted forwarding header for governor input'
 fi
-grep -qF 'pub(crate) const fn new(' "$INTERFACE" \
+governor_request_interface="$(sed -n "/^impl<'a> GovernorRequest<'a> {$/,/^}$/p" "$INTERFACE")"
+grep -qF 'pub(crate) const fn new(' <<<"$governor_request_interface" \
     || fail 'GovernorRequest construction is no longer framework-owned'
 if grep -Eq '^[[:space:]]+pub (operation|bucket|declared_body_bytes|identity|client_addr|kind):' "$INTERFACE"; then
     fail 'GovernorRequest exposes writable framework-owned fields'

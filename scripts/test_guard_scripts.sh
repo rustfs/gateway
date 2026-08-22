@@ -10871,7 +10871,7 @@ PYEOF
 }
 expect_fail_with_diagnostic check_op_file_shape.sh \
     'a Shares: declaration whose far end never agreed to it' \
-    "`Members:` does not name it" \
+    '`Members:` does not name it' \
     mut_op_shape_shares_link_without_membership
 
 mut_op_shape_members_without_shares() {
@@ -12655,10 +12655,10 @@ call_anchor = ".try_acquire(&GovernorRequest::new(operation, meta.bucket(), decl
 call = text.find(call_anchor)
 if call < 0 or text.find(call_anchor, call + 1) >= 0:
     raise SystemExit("c-lim-0039 main-pipeline governor call anchor drifted")
-start = text.rfind("        if self\n", 0, call)
+start = text.rfind("        let lease = match self\n", 0, call)
 if start < 0:
     raise SystemExit("c-lim-0039 governor block start drifted")
-end = text.find("        let config = config.governed();", call)
+end = text.find("        let config = config.governed(lease);", call)
 if end < 0:
     raise SystemExit("c-lim-0039 governed-stage anchor drifted")
 block = text[start:end]
