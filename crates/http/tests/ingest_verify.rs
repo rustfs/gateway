@@ -133,15 +133,17 @@ fn c_ing_0035_a_bad_first_chunk_signature_delivers_zero_bytes() {
     );
 }
 
-/// Negative: a trailer can never override authorization metadata from the authenticated head.
+/// Negative: a trailer can never override control metadata from the authenticated head.
 #[test]
-fn c_ck_0022_authorization_is_not_an_allowed_trailer() {
-    let body = b"1\r\nx\r\n0\r\nauthorization:attacker\r\n\r\n".to_vec();
-    let mut pipeline = unsigned_trailer(body, 64, 1, "x-amz-checksum-crc32c");
+fn c_ck_0022_to_0025_control_fields_are_not_allowed_trailers() {
+    for name in ["authorization", "host", "x-amz-decoded-content-length", "x-amz-acl"] {
+        let body = format!("1\r\nx\r\n0\r\n{name}:attacker\r\n\r\n").into_bytes();
+        let mut pipeline = unsigned_trailer(body, 64, 1, "x-amz-checksum-crc32c");
 
-    assert!(drive_trailered(&mut pipeline).is_err());
-    assert_eq!(pipeline.reject(), Some(ChunkReject::TrailerNotAllowed));
-    assert!(!pipeline.commit_allowed());
+        assert!(drive_trailered(&mut pipeline).is_err(), "{name} reached EOF as a trailer");
+        assert_eq!(pipeline.reject(), Some(ChunkReject::TrailerNotAllowed), "{name} was not refused by name");
+        assert!(!pipeline.commit_allowed(), "{name} unlocked commit");
+    }
 }
 
 /// Negative: sharing the checksum prefix does not make an unknown algorithm a checksum.

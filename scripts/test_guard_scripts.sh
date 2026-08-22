@@ -4927,6 +4927,73 @@ mut_stream_shared_trailer_slot() {
 }
 expect_fail check_no_shared_trailers.sh \
     'stream trailers returning to a shared mutable slot' mut_stream_shared_trailer_slot
+expect_fail check_no_trailer_mutex.sh \
+    'the P3-04 trailer mutex alias rejecting a shared slot' mut_stream_shared_trailer_slot
+
+mut_checksum_ledger_missing_row() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_checksum_case_coverage.sh")
+text = path.read_text()
+needle = "    'c-ck-0041|negative|test:crates/gateway/src/request_body_tests.rs::c_ck_0041_a_matching_checksum_never_substitutes_for_the_payload_hash'\n"
+if text.count(needle) != 1:
+    raise SystemExit("checksum ledger row mutation anchor is not unique")
+path.write_text(text.replace(needle, "", 1))
+PYEOF
+}
+expect_fail_self_mutation check_checksum_case_coverage.sh \
+    'the checksum ledger losing one of its thirty-eight rows' mut_checksum_ledger_missing_row
+
+mut_checksum_ledger_comment_only_test() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/http/tests/checksum_arbitration.rs")
+text = path.read_text()
+old = "fn c_ck_0001_a_matching_checksum_header_verifies_and_reports_what_it_verified() {"
+new = "fn renamed_matching_checksum_header_verifies_and_reports_what_it_verified() {"
+if text.count(old) != 1:
+    raise SystemExit("checksum evidence mutation anchor is not unique")
+text = text.replace(old, new, 1)
+text += f"\n// {old} assert!(true); }}\n"
+path.write_text(text)
+PYEOF
+}
+expect_fail check_checksum_case_coverage.sh \
+    'the checksum ledger accepting a deleted test name left only in a comment' \
+    mut_checksum_ledger_comment_only_test
+
+mut_checksum_ledger_trybuild_unbound() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/tests/compile_fail.rs")
+text = path.read_text()
+needle = '    cases.compile_fail("tests/compile_fail/c_ck_0020_*.rs");\n'
+if text.count(needle) != 1:
+    raise SystemExit("checksum trybuild mutation anchor is not unique")
+path.write_text(text.replace(needle, "", 1))
+PYEOF
+}
+expect_fail check_checksum_case_coverage.sh \
+    'the checksum timing fixture no longer being run by trybuild' mut_checksum_ledger_trybuild_unbound
+
+mut_checksum_ledger_range_backlink_weakened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/cases/range/c-range-0016.toml")
+text = path.read_text()
+needle = '"x-amz-checksum-crc32" = "*"'
+if text.count(needle) != 1:
+    raise SystemExit("range checksum backlink mutation anchor is not unique")
+path.write_text(text.replace(needle, '"x-amz-request-id" = "*"', 1))
+PYEOF
+}
+expect_fail check_checksum_case_coverage.sh \
+    'the checksum range backlink losing its full-object positive control' \
+    mut_checksum_ledger_range_backlink_weakened
 
 mut_stream_rwlock_trailer_slot() {
     printf '\nstruct SharedTrailers(std::sync::RwLock<Option<crate::TrailingHeaders>>);\n' \
@@ -5515,6 +5582,7 @@ probe_stream_guards_fail_closed() {
     local guard output rc tool_path empty_root
     local guards=(
         check_no_shared_trailers.sh
+        check_no_trailer_mutex.sh
         check_no_as_any.sh
         check_no_spawn_in_stream.sh
         check_stream_vocabulary.sh

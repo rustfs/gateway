@@ -565,6 +565,7 @@ error_goldens = {path.stem for path in gateway_compile_dir.glob("error_resolutio
 if error_sources != error_goldens:
     fail("gateway error-resolution trybuild sources and goldens must remain paired")
 gateway_calls = ['cases.compile_fail("tests/compile_fail/azc_*.rs");']
+gateway_calls.append('cases.compile_fail("tests/compile_fail/c_ck_0020_*.rs");')
 if error_sources:
     gateway_calls.append('cases.compile_fail("tests/compile_fail/error_resolution_*.rs");')
 gateway_calls.append('cases.compile_fail("tests/trybuild/credential/*.rs");')
