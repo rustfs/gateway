@@ -87,6 +87,8 @@ fixed now so that the same check does not get written twice under two names.
 |---|---|---|
 | `check_layer_dependencies.sh` | Internal crate dependency direction is one-way; the allow matrix is a DAG; `rustfs-gateway-conformance` may only use the facade; the stream kernel's normal/build dependencies stay on its reviewed external whitelist | P0 (Week-1, before P1) |
 | `check_no_shared_trailers.sh` | Stream trailers are never stored behind a shared mutable optional slot; only EOF owns them | P1-05 |
+| `check_no_trailer_mutex.sh` | P3-04 acceptance alias for the stronger workspace-wide shared-trailer guard | P3-04 |
+| `check_checksum_case_coverage.sh` | All 38 P3-04 checksum and trailer ids map to active tests, a mutation-tested guard, trybuild, or the live range case | P3-04 |
 | `check_no_as_any.sh` | Stream payloads expose no `as_any` or runtime downcast escape hatch | P1-05 |
 | `check_stream_vocabulary.sh` | The stream kernel contains no S3 protocol vocabulary in source or comments | P1-05 |
 | `check_pipeline_stage_shape.sh` | The real `RequestConfig` carrier owns its state and every state in its transition closure is a lifetime-free marker | P1-05 |

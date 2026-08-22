@@ -247,6 +247,30 @@ async fn the_streaming_production_path_refuses_a_mismatched_signed_trailer_hmac(
     );
 }
 
+#[tokio::test]
+async fn c_ck_0041_a_matching_checksum_never_substitutes_for_the_payload_hash() {
+    let proof = Authenticated::granted_for_test();
+    let mut headers = HeaderMap::new();
+    headers.insert(HeaderName::from_static("x-amz-checksum-crc32"), HeaderValue::from_static("DUoRhQ=="));
+    let integrity = BodyIntegrity::resolve(&HeaderView::new(&headers), ChecksumSubject::RequestBody).ok();
+    assert!(integrity.is_some(), "the CRC32 claim is well formed");
+    let Some(integrity) = integrity else {
+        return;
+    };
+    let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"hello world")]);
+    let error = SealedBody::seal(Some(body), Some(11))
+        .read(&proof, roomy(), BodyTimeouts::S3, None, BodyDigestObligation::Sha256([0; 32]), integrity)
+        .await
+        .err();
+    assert!(error.is_some(), "a matching checksum excused a different payload hash");
+    let Some(error) = error else {
+        return;
+    };
+
+    assert_eq!(error.code(), Some(&ErrorCode::X_AMZ_CONTENT_SHA256_MISMATCH));
+    assert!(read.is_exhausted(), "the digest was compared before the whole body arrived");
+}
+
 /// `c-ing-0061`. Negative — opening a stream does not poll its transport.
 #[tokio::test]
 async fn opening_a_streaming_body_does_not_read_ahead() {
@@ -338,7 +362,7 @@ async fn a_streaming_frame_wider_than_the_resident_window_is_refused() {
 
 /// Negative — dropping before EOF cannot manufacture a successful terminal verdict.
 #[tokio::test]
-async fn dropping_an_unread_streaming_body_refuses_commit() {
+async fn c_ck_0062_dropping_an_unread_streaming_body_refuses_commit() {
     let proof = Authenticated::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"body")]);
     let opened = SealedBody::seal(Some(body), Some(4))

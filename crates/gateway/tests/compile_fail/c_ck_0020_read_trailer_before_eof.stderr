@@ -1,0 +1,5 @@
+error[E0599]: no method named `trailers` found for reference `&ReadProgress` in the current scope
+  --> tests/compile_fail/c_ck_0020_read_trailer_before_eof.rs:25:14
+   |
+25 |     progress.trailers()
+   |              ^^^^^^^^ method not found in `&ReadProgress`

@@ -134,6 +134,20 @@ fn c_ck_0001_a_matching_checksum_header_verifies_and_reports_what_it_verified() 
 }
 
 #[test]
+fn c_ck_0004_a_crc64nvme_header_is_verified_and_reported() {
+    const VALUE: &str = "rosUhgp5mIg=";
+    let mut digests = resolve(&[("x-amz-checksum-crc64nvme", VALUE)])
+        .expect("one published CRC64NVME check value")
+        .begin();
+    digests.update(b"123456789");
+    let verified = digests.verify().expect("the published CRC64NVME value matches");
+    let checksum = verified.checksum().expect("the request claimed one");
+
+    assert_eq!(checksum.algorithm(), ChecksumAlgorithm::Crc64Nvme);
+    assert_eq!(checksum.render_base64(), VALUE);
+}
+
+#[test]
 fn c_ck_0006_a_matching_content_md5_verifies_on_its_own() {
     assert_eq!(round_trip(&[("content-md5", MD5)], BODY), Ok(BODY.len() as u64));
 }

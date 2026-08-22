@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Trailer ownership must remain part of the EOF event. A shared mutable slot
+# Trailer ownership must remain part of the EOF event across the workspace. A shared mutable slot
 # makes "not received yet" indistinguishable from "received no trailers".
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,13 +18,13 @@ import re
 import sys
 
 root = Path(sys.argv[1])
-source = root / "crates/stream/src"
+source = root / "crates"
 if not source.is_dir():
-    print("check_no_shared_trailers: required input is missing: crates/stream/src", file=sys.stderr)
+    print("check_no_shared_trailers: required input is missing: crates", file=sys.stderr)
     raise SystemExit(1)
 
 violations = []
-files = sorted(source.rglob("*.rs"))
+files = sorted(path for path in source.rglob("*.rs") if "generated" not in path.parts)
 if not files:
     print("check_no_shared_trailers: no Rust sources found", file=sys.stderr)
     raise SystemExit(1)
