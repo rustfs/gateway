@@ -54,6 +54,8 @@ mod error_context_filters;
 mod facade_probe;
 #[path = "governor_runtime.rs"]
 mod governor_runtime;
+#[path = "governor_streaming.rs"]
+mod governor_streaming;
 #[path = "handler_panic.rs"]
 mod handler_panic;
 #[path = "ingest_assembly.rs"]

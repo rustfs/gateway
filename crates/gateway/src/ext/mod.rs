@@ -99,7 +99,8 @@ pub use self::filter::{
     wire_filter,
 };
 pub use self::governor::{
-    ClassKind, ClientAddr, DefaultGovernor, Governor, GovernorRates, GovernorRequest, LayeredGovernor, Lease, Rate, Unlimited,
+    BodyQuota, BodyQuotaExceeded, ClassKind, ClientAddr, DefaultGovernor, Governor, GovernorRates, GovernorRequest,
+    LayeredGovernor, Lease, Rate, Unlimited, VerifiedBodyProgress,
 };
 pub use self::host::{Addressing, HostQuery, HostResolver, PathStyleOnly, ResolvedHost, TargetOrigin, VhostHint};
 pub use self::observer::{NoObserver, Observer, RequestEvent};

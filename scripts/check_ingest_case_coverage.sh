@@ -64,7 +64,7 @@ cases=(
     'c-ing-0061|negative|bound|crates/gateway/tests/streaming_request.rs::c_ing_0061_body_idle_cancels_a_live_handler_and_closes_the_socket;crates/gateway/tests/streaming_request.rs::c_ing_0061_handler_stall_stops_live_socket_progress'
     'c-ing-0062|negative|bound|crates/gateway/tests/throughput_request.rs::c_ing_0062_one_byte_per_second_is_closed_for_body_throughput;crates/gateway/tests/throughput_request.rs::c_ing_0062_concurrent_slow_uploads_bound_rss_and_healthy_p99'
     'c-ing-0063|negative|bound|crates/http/tests/ingest_perf_gates.rs::c_ing_0063_the_window_stays_bounded_by_the_chunk_ceiling;crates/http/tests/ingest_perf_gates.rs::c_ing_0063_the_window_is_not_allocated_up_front;crates/gateway/tests/chunked_allocations.rs::c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body;crates/gateway/tests/streaming_request.rs::c_ing_0063_concurrent_large_live_uploads_keep_bounded_resident_ownership'
-    'c-ing-0064|negative|blocked|rustfs/gateway#333::a Governor refusal that arrives mid-body must propagate as cancellation and close the socket without draining; Governor runs before the body is read, so no mid-upload refusal path exists until the verified streaming-body contract lands'
+    'c-ing-0064|negative|bound|crates/gateway/tests/governor_streaming.rs::c_ing_0064_mid_body_governor_refusal_cancels_rolls_back_and_closes'
 )
 
 # The ids whose evidence must be plural. Each names two claims that have never implied one
@@ -74,7 +74,7 @@ plural_evidence=('c-ing-0002' 'c-ing-0003' 'c-ing-0005' 'c-ing-0020')
 
 # Editing this set is the only way a case becomes blocked, so a case cannot quietly stop being
 # evidence-backed. Each id here must also carry an owning issue in the table above.
-blocked_ids=('c-ing-0064')
+blocked_ids=()
 
 # The same, for rows that prove part of a case. A partial row is checked as strictly as a bound
 # one on the half it claims.
@@ -85,7 +85,7 @@ command -v python3 >/dev/null 2>&1 || {
     exit 1
 }
 
-python3 - "$ROOT" "${#cases[@]}" "$(printf '%s\n' "${plural_evidence[@]}")" "$(printf '%s\n' "${blocked_ids[@]}")" "$(printf '%s\n' "${partial_ids[@]}")" "${cases[@]}" <<'PYEOF'
+python3 - "$ROOT" "${#cases[@]}" "$(printf '%s\n' "${plural_evidence[@]}")" "$(printf '%s\n' "${blocked_ids[@]-}")" "$(printf '%s\n' "${partial_ids[@]}")" "${cases[@]}" <<'PYEOF'
 import re
 import sys
 from pathlib import Path

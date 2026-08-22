@@ -167,7 +167,7 @@ service = function(
 markers = (
     ("routed stage", r"let\s+config\s*=\s*config\.routed\(\)\s*;"),
     ("governor call", r"\.governor\s*\.try_acquire\s*\("),
-    ("governed stage", r"let\s+config\s*=\s*config\.governed\(\)\s*;"),
+    ("governed stage", r"let\s+config\s*=\s*config\.governed\(lease\)\s*;"),
     ("sealed body", r"SealedBody::seal\s*\("),
     ("body read", r"\bsealed\s*\.handoff\s*\("),
     ("body-read stage", r"state\.config\.body_read\(\)"),

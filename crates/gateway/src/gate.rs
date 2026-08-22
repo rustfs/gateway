@@ -290,12 +290,12 @@ where
     pub(crate) fn stream(
         self,
         _proof: &Authenticated<'_>,
-        ceilings: BodyCeilings,
-        timeouts: BodyTimeouts,
+        body_plan: (BodyCeilings, BodyTimeouts, Option<std::sync::Arc<dyn crate::BodyQuota>>),
         ingest: Option<crate::chunked::ChunkIngest>,
         digest: BodyDigestObligation,
         integrity: BodyIntegrity,
     ) -> Result<crate::request_body::StreamingRead, S3Error> {
+        let (ceilings, timeouts, body_quota) = body_plan;
         if let Some(cap) = ceilings.declared
             && self.declared_length.is_some_and(|length| length > cap)
         {
@@ -304,22 +304,28 @@ where
         if ceilings.whole_body && self.declared_length.is_some_and(|length| length > ceilings.buffered) {
             return Err(past_buffered_ceiling());
         }
-        crate::request_body::StreamingRead::new(self.body, self.declared_length, ceilings, timeouts, ingest, digest, integrity)
+        crate::request_body::StreamingRead::new(
+            self.body,
+            self.declared_length,
+            (ceilings, timeouts, body_quota),
+            ingest,
+            digest,
+            integrity,
+        )
     }
 
     pub(crate) async fn handoff(
         self,
         proof: &Authenticated<'_>,
-        body_plan: (RequestBodyMode, BodyCeilings),
-        timeouts: BodyTimeouts,
+        body_plan: (RequestBodyMode, BodyCeilings, BodyTimeouts, Option<std::sync::Arc<dyn crate::BodyQuota>>),
         ingest: Option<crate::chunked::ChunkIngest>,
         digest: BodyDigestObligation,
         integrity: BodyIntegrity,
     ) -> Result<(RequestBody, Option<crate::request_body::BodyMonitor>), S3Error> {
-        let (mode, ceilings) = body_plan;
+        let (mode, ceilings, timeouts, body_quota) = body_plan;
         match mode {
             RequestBodyMode::Streaming => {
-                let opened = self.stream(proof, ceilings, timeouts, ingest, digest, integrity)?;
+                let opened = self.stream(proof, (ceilings, timeouts, body_quota), ingest, digest, integrity)?;
                 let (stream, monitor) = opened.into_parts();
                 Ok((RequestBody::Stream(stream), Some(monitor)))
             }
@@ -430,6 +436,15 @@ pub(crate) fn body_throughput_timeout() -> S3Error {
     from_transport_limit(
         HandlerError::new(ErrorCode::REQUEST_TIMEOUT, "the request body remained below the minimum throughput"),
         StatusCode::REQUEST_TIMEOUT,
+        crate::close::ConnectionIntent::Close,
+    )
+}
+
+/// The closing refusal for a lease whose streaming body quota was exhausted.
+pub(crate) fn body_quota_refusal() -> S3Error {
+    from_handler(
+        HandlerError::new(ErrorCode::SLOW_DOWN, "the service is not accepting this request right now"),
+        ResponseKind::Other,
         crate::close::ConnectionIntent::Close,
     )
 }

@@ -38,7 +38,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Barrier;
 
-const SIGNED_CHUNK_BYTES: usize = 256;
+pub(super) const SIGNED_CHUNK_BYTES: usize = 256;
 
 struct ThroughputBackend {
     entered: AtomicUsize,
@@ -83,7 +83,11 @@ impl Handler<StreamingPut> for ThroughputBackend {
     }
 }
 
-fn signed_chunked_request(decoded_len: usize) -> (Vec<u8>, Vec<u8>) {
+pub(super) fn signed_chunked_request(decoded_len: usize) -> (Vec<u8>, Vec<u8>) {
+    signed_chunked_request_with_chunk_bytes(decoded_len, SIGNED_CHUNK_BYTES)
+}
+
+pub(super) fn signed_chunked_request_with_chunk_bytes(decoded_len: usize, chunk_bytes: usize) -> (Vec<u8>, Vec<u8>) {
     let decoded: Vec<u8> = (0..decoded_len).map(|index| (index % 251) as u8).collect();
     let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
     let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("a SigV4 stamp");
@@ -97,7 +101,7 @@ fn signed_chunked_request(decoded_len: usize) -> (Vec<u8>, Vec<u8>) {
         .expect("a valid request");
     let accepted = rustfs_gateway::WireRequest::accept(probe, &rustfs_gateway::Limits::default()).expect("an acceptable host");
     let wire_len = decoded
-        .chunks(SIGNED_CHUNK_BYTES)
+        .chunks(chunk_bytes)
         .map(|chunk| chunk.len() + format!("{:x}", chunk.len()).len() + 17 + 64 + 4)
         .sum::<usize>()
         + 1
@@ -126,7 +130,7 @@ fn signed_chunked_request(decoded_len: usize) -> (Vec<u8>, Vec<u8>) {
     let signed = signer.sign_headers(&signing).expect("a signable request");
     let mut chain = signer.chunk_signer(&signed).expect("a chunk chain");
     let mut wire = Vec::with_capacity(wire_len);
-    for chunk in decoded.chunks(SIGNED_CHUNK_BYTES) {
+    for chunk in decoded.chunks(chunk_bytes) {
         wire.extend_from_slice(&chain.encode_chunk(chunk));
     }
     wire.extend_from_slice(&chain.encode_chunk(b""));

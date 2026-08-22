@@ -22,8 +22,10 @@
 //! authentication. Downstream: generated streaming request fields and the handler wrapper.
 
 use core::future::{Future, poll_fn};
+use core::panic::AssertUnwindSafe;
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use std::panic::catch_unwind;
 
 use bytes::Bytes;
 use rustfs_gateway_http::{BodyDigests, BodyIntegrity, IngestPipeline};
@@ -33,6 +35,7 @@ use rustfs_gateway_stream::{
 use tokio::sync::{oneshot, watch};
 
 use crate::chunked::ChunkIngest;
+use crate::ext::{BodyQuota, VerifiedBodyProgress};
 use crate::gate::{BodyCeilings, BodyDigestObligation, BodyTimeouts};
 use crate::integrity::checksum_refusal;
 use crate::render::S3Error;
@@ -56,8 +59,7 @@ impl StreamingRead {
     pub(crate) fn new<B>(
         body: Option<B>,
         declared_length: Option<u64>,
-        ceilings: BodyCeilings,
-        timeouts: BodyTimeouts,
+        body_plan: (BodyCeilings, BodyTimeouts, Option<std::sync::Arc<dyn BodyQuota>>),
         ingest: Option<ChunkIngest>,
         digest: BodyDigestObligation,
         integrity: BodyIntegrity,
@@ -67,6 +69,7 @@ impl StreamingRead {
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
+        let (ceilings, timeouts, body_quota) = body_plan;
         let (progress_tx, progress_rx) = watch::channel(0_u64);
         let progress = WireProgress::new(digest).with_observer(progress_tx);
         let decoded_length = ingest.as_ref().map(ChunkIngest::decoded_length).or(declared_length);
@@ -77,7 +80,7 @@ impl StreamingRead {
                 integrity.begin().verify().map(|_| BodyVerified).map_err(checksum_refusal)
             };
             let (terminal_tx, terminal_rx) = oneshot::channel();
-            let _ = terminal_tx.send(verdict);
+            let _ = terminal_tx.send(BodyTerminal::Complete(verdict));
             return Ok(Self {
                 stream: ByteStream::from_bytes(Bytes::new()),
                 terminal: BodyMonitor {
@@ -101,6 +104,7 @@ impl StreamingRead {
             progress,
             digests: Some(integrity.begin()),
             terminal: Some(terminal_tx),
+            body_quota,
             decoded_length,
             delivered: 0,
             ended: false,
@@ -123,7 +127,7 @@ impl StreamingRead {
 
 /// The exact terminal body verdict retained outside the protocol-neutral stream.
 pub struct BodyMonitor {
-    terminal: oneshot::Receiver<Result<BodyVerified, S3Error>>,
+    terminal: oneshot::Receiver<BodyTerminal>,
     pub(crate) progress: watch::Receiver<u64>,
     pub(crate) timeouts: BodyTimeouts,
 }
@@ -133,14 +137,20 @@ pub(crate) struct BodyVerified;
 
 pub(crate) enum BodyEvent {
     Complete(Result<BodyVerified, S3Error>),
+    Quota,
     Idle,
     Throughput,
+}
+
+pub(crate) enum BodyTerminal {
+    Complete(Result<BodyVerified, S3Error>),
+    Quota,
 }
 
 impl BodyMonitor {
     pub(crate) async fn next_event(&mut self) -> BodyEvent {
         enum Wake {
-            Terminal(Result<Result<BodyVerified, S3Error>, oneshot::error::RecvError>),
+            Terminal(Result<BodyTerminal, oneshot::error::RecvError>),
             Progress(Result<(), watch::error::RecvError>),
             Idle,
             Throughput,
@@ -175,7 +185,8 @@ impl BodyMonitor {
                 .await
             };
             match wake {
-                Wake::Terminal(Ok(verdict)) => return BodyEvent::Complete(verdict),
+                Wake::Terminal(Ok(BodyTerminal::Complete(verdict))) => return BodyEvent::Complete(verdict),
+                Wake::Terminal(Ok(BodyTerminal::Quota)) => return BodyEvent::Quota,
                 Wake::Terminal(Err(_)) | Wake::Progress(Err(_)) => {
                     return BodyEvent::Complete(Err(crate::gate::incomplete()));
                 }
@@ -206,15 +217,14 @@ impl BodyMonitor {
     pub(crate) async fn wait(mut self) -> Result<BodyVerified, S3Error> {
         match self.next_event().await {
             BodyEvent::Complete(verdict) => verdict,
+            BodyEvent::Quota => Err(crate::gate::body_quota_refusal()),
             BodyEvent::Idle => Err(crate::gate::body_idle_timeout()),
             BodyEvent::Throughput => Err(crate::gate::body_throughput_timeout()),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn pending_for_test(
-        timeouts: BodyTimeouts,
-    ) -> (Self, oneshot::Sender<Result<BodyVerified, S3Error>>, watch::Sender<u64>) {
+    pub(crate) fn pending_for_test(timeouts: BodyTimeouts) -> (Self, oneshot::Sender<BodyTerminal>, watch::Sender<u64>) {
         let (terminal_tx, terminal) = oneshot::channel();
         let (progress_tx, progress) = watch::channel(0);
         (
@@ -233,7 +243,8 @@ struct VerifiedRequestBody<B> {
     source: Source<B>,
     progress: WireProgress,
     digests: Option<BodyDigests>,
-    terminal: Option<oneshot::Sender<Result<BodyVerified, S3Error>>>,
+    terminal: Option<oneshot::Sender<BodyTerminal>>,
+    body_quota: Option<std::sync::Arc<dyn BodyQuota>>,
     decoded_length: Option<u64>,
     delivered: u64,
     ended: bool,
@@ -242,7 +253,7 @@ struct VerifiedRequestBody<B> {
 impl<B> VerifiedRequestBody<B> {
     fn settle(&mut self, verdict: Result<BodyVerified, S3Error>) {
         if let Some(terminal) = self.terminal.take() {
-            let _ = terminal.send(verdict);
+            let _ = terminal.send(BodyTerminal::Complete(verdict));
         }
         self.ended = true;
     }
@@ -253,10 +264,24 @@ impl<B> VerifiedRequestBody<B> {
     }
 
     fn deliver(&mut self, bytes: Bytes) -> Poll<Result<PayloadRead, StreamError>> {
+        let newly_verified_bytes = bytes.len() as u64;
+        let verified_bytes = self.delivered.saturating_add(newly_verified_bytes);
+        if self.body_quota.as_ref().is_some_and(|quota| {
+            catch_unwind(AssertUnwindSafe(|| {
+                quota.check(VerifiedBodyProgress::new(verified_bytes, newly_verified_bytes))
+            }))
+            .map_or(true, |decision| decision.is_err())
+        }) {
+            if let Some(terminal) = self.terminal.take() {
+                let _ = terminal.send(BodyTerminal::Quota);
+            }
+            self.ended = true;
+            return Poll::Ready(Err(StreamError::incomplete_body().with_bytes_before_error(self.delivered)));
+        }
         if let Some(digests) = self.digests.as_mut() {
             digests.update(&bytes);
         }
-        self.delivered = self.delivered.saturating_add(bytes.len() as u64);
+        self.delivered = verified_bytes;
         Poll::Ready(Ok(PayloadRead::Chunk(bytes)))
     }
 
@@ -341,7 +366,7 @@ where
 impl<B> Drop for VerifiedRequestBody<B> {
     fn drop(&mut self) {
         if let Some(terminal) = self.terminal.take() {
-            let _ = terminal.send(Err(crate::gate::incomplete()));
+            let _ = terminal.send(BodyTerminal::Complete(Err(crate::gate::incomplete())));
         }
     }
 }

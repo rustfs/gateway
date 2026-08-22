@@ -513,7 +513,7 @@ mod tests {
         seen.push(Arc::clone(accepted.config()));
         let routed = accepted.routed();
         seen.push(Arc::clone(routed.config()));
-        let governed = routed.governed();
+        let governed = routed.governed(crate::Lease::admit());
         seen.push(Arc::clone(governed.config()));
         handle.store(ServiceConfig::new(16));
         let replacement = load_replacement(&store);
