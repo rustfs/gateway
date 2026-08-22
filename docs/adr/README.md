@@ -67,6 +67,7 @@ second copy is a second thing to keep in sync.
 | 0009 | Typed scope-region rejection across sig and gateway | Accepted |
 | 0010 | Box the public DTO inside handler requests | Accepted |
 | 0011 | Handler deadlines propagate explicit cancellation | Accepted |
+| 0012 | Verified request bodies cross the handler boundary as streams | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.
