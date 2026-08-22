@@ -7168,6 +7168,34 @@ mut_protected_with_breaking() { printf '\nContract note.\n' >>NOTICE; }
 expect_protected_pass 'a protected change carrying the literal BREAKING declaration' mut_protected_with_breaking 'BREAKING: downstream users must adopt the new contract.'
 mut_new_adr() { printf '# New decision\n' >docs/adr/9999-new-decision.md; }
 expect_protected_pass 'a newly added ADR' mut_new_adr
+
+mut_new_adr_with_required_index_row() {
+    printf '# ADR-0012: New indexed decision\n\n- Status: Accepted\n' >docs/adr/0012-new-indexed-decision.md
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("docs/adr/README.md")
+text = path.read_text()
+anchor = "| 0011 | Handler deadlines propagate explicit cancellation | Accepted |"
+if text.count(anchor) != 1:
+    raise SystemExit("missing unique ADR index tail")
+path.write_text(text.replace(anchor, anchor + "\n| 0012 | New indexed decision | Accepted |", 1))
+PYEOF
+}
+expect_protected_pass 'a newly added ADR with its required matching index row' mut_new_adr_with_required_index_row
+
+mut_new_adr_with_mismatched_index_row() {
+    mut_new_adr_with_required_index_row
+    sed -i.bak 's/New indexed decision/Wrong indexed decision/' docs/adr/README.md
+    rm docs/adr/README.md.bak
+}
+expect_protected_fail 'a new ADR whose index title does not match' mut_new_adr_with_mismatched_index_row
+
+mut_new_adr_with_index_and_readme_drift() {
+    mut_new_adr_with_required_index_row
+    printf '\nUnrelated policy drift.\n' >>docs/adr/README.md
+}
+expect_protected_fail 'a new ADR index row hiding another README change' mut_new_adr_with_index_and_readme_drift
 mut_ordinary_manifest_and_new_case() { printf '\n# ordinary manifest comment\n' >>crates/core/Cargo.toml; printf '[case]\nid = "c-new-9999"\n' >conformance/cases/c-new-9999.toml; }
 expect_protected_pass 'an ordinary Cargo.toml edit and a newly added conformance case' mut_ordinary_manifest_and_new_case
 mut_protected_rust_version() { sed 's/^rust-version = .*/rust-version = "999.0"/' Cargo.toml >Cargo.toml.mut; mv Cargo.toml.mut Cargo.toml; }

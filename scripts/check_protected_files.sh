@@ -117,6 +117,38 @@ while index < len(fields) and fields[index]:
     index += 1
     changes.append((status[0], old, path))
 
+new_adr_rows: list[tuple[int, str]] = []
+for status, old, path in changes:
+    match = re.fullmatch(r"docs/adr/([0-9]{4})-[a-z0-9]+(?:-[a-z0-9]+)*\.md", path)
+    if status != "A" or old is not None or match is None:
+        continue
+    try:
+        source = git("show", f"{head}:{path}").decode("utf-8")
+    except UnicodeError as error:
+        fail(f"new ADR is not UTF-8: {path}: {error}")
+    title = re.search(rf"^# ADR-{match.group(1)}: (.+)$", source, re.MULTILINE)
+    adr_status = re.search(r"^- Status: (.+)$", source, re.MULTILINE)
+    if title is None or adr_status is None:
+        continue
+    number = int(match.group(1), 10)
+    new_adr_rows.append(
+        (number, f"| {number:04d} | {title.group(1)} | {adr_status.group(1)} |\n")
+    )
+
+readme_index_only = False
+if new_adr_rows:
+    try:
+        base_readme = git("show", f"{base}:docs/adr/README.md").decode("utf-8")
+        head_readme = git("show", f"{head}:docs/adr/README.md").decode("utf-8")
+    except UnicodeError as error:
+        fail(f"ADR index is not UTF-8: {error}")
+    expected = base_readme.splitlines(keepends=True)
+    index_rows = [offset for offset, line in enumerate(expected) if re.match(r"^\| [0-9]{4} \|", line)]
+    if index_rows:
+        insert_at = index_rows[-1] + 1
+        expected[insert_at:insert_at] = [row for _, row in sorted(new_adr_rows)]
+        readme_index_only = "".join(expected) == head_readme
+
 exact = {
     "LICENSE",
     "NOTICE",
@@ -146,6 +178,8 @@ for status, old, path in changes:
             violations.add((candidate, "protocol overlay changed"))
         elif candidate.startswith(("spec/quirks/", "spec/contracts/")):
             violations.add((candidate, "generated protocol rule changed"))
+        elif candidate == "docs/adr/README.md" and status == "M" and old is None and readme_index_only:
+            continue
         elif candidate.startswith("docs/adr/") and not (status in {"A", "C"} and old is None):
             violations.add((candidate, "accepted ADR changed or moved"))
     if status in {"D", "R"}:
