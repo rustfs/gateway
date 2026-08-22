@@ -35,7 +35,7 @@ pub(super) fn artifacts() -> crate::Artifacts {
     generate(&CodegenInput::at(&root), &CodegenOutput::at(&root)).expect("codegen runs against the pinned model")
 }
 
-fn body(artifacts: &crate::Artifacts, suffix: &str) -> String {
+pub(super) fn body(artifacts: &crate::Artifacts, suffix: &str) -> String {
     artifacts
         .files
         .iter()

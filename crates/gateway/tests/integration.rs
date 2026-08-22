@@ -94,5 +94,7 @@ mod service_config;
 mod sigv2_runtime;
 #[path = "sse_runtime.rs"]
 mod sse_runtime;
+#[path = "streaming_request.rs"]
+mod streaming_request;
 #[path = "vhost_resolution.rs"]
 mod vhost_resolution;

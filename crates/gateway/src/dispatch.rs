@@ -64,16 +64,14 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use bytes::Bytes;
 use rustfs_gateway_core::registry::erase_authorized_handler_with_context;
 use rustfs_gateway_core::{
     Answer as CoreAnswer, AuthRequirement, BoxFuture, CodecError, Decision, Denied, EncodedResponse, ErasedCodec, ErasedDecoded,
     ErasedRequest, Handler, HandlerCancellationSource, HandlerContext, HandlerError, MetaView, OperationCodec, OwnedResource,
-    Req, RequestBody, Resp, RouteEntry, TargetKind,
+    Req, RequestBody, RequestBodyMode, Resp, RouteEntry, TargetKind,
 };
 use rustfs_gateway_sig::OperationFloor;
 use rustfs_gateway_stream::ByteStream;
-use rustfs_gateway_types::ErrorCode;
 
 use crate::ext::{Next, OpLayer, Terminal};
 use crate::request_config::{InputAuthorized, RequestConfig};
@@ -113,6 +111,10 @@ impl Invocation {
     #[cfg(test)]
     pub(crate) fn cancel(&self, reason: rustfs_gateway_core::HandlerCancellation) -> bool {
         self._cancellation.cancel(reason)
+    }
+
+    pub(crate) fn cancellation_source(&self) -> HandlerCancellationSource {
+        self._cancellation.clone()
     }
 }
 
@@ -274,18 +276,18 @@ impl OperationDispatch {
         self.auth
     }
 
+    /// How the generated decoder receives this operation's request body.
+    pub(crate) const fn request_body_mode(&self) -> RequestBodyMode {
+        self.codec.request_body_mode()
+    }
+
     /// Decodes the request without making it dispatchable.
     ///
     /// # Errors
     ///
     /// [`CodecError`] when the request could not be read. A handler failure is inside the future.
-    pub(crate) fn decode(&self, meta: &MetaView<'_>, body: Bytes) -> Result<ErasedDecoded, CodecError> {
-        let streamed = RequestBody::Stream(ByteStream::from_bytes(body.clone()));
-        match self.codec.decode(meta, streamed) {
-            Ok(decoded) => Ok(decoded),
-            Err(error) if error.code() == &ErrorCode::INTERNAL_ERROR => self.codec.decode(meta, RequestBody::Buffered(body)),
-            Err(error) => Err(error),
-        }
+    pub(crate) fn decode(&self, meta: &MetaView<'_>, body: RequestBody) -> Result<ErasedDecoded, CodecError> {
+        self.codec.decode(meta, body)
     }
 
     /// The normalized resources that require the second authorization stage.
@@ -490,6 +492,7 @@ pub(crate) fn target_of(entry: &RouteEntry) -> TargetKind {
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
     use rustfs_gateway_core::{Predicate, RouteSelector};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
@@ -686,7 +689,9 @@ mod tests {
         let wire = rustfs_gateway_http::WireRequest::accept(request, &rustfs_gateway_http::Limits::default())
             .expect("an acceptable request");
         let meta = MetaView::of(&wire, TargetKind::Service).expect("a service-level view");
-        let decoded = dispatch.decode(&meta, Bytes::new()).expect("a decodable request");
+        let decoded = dispatch
+            .decode(&meta, RequestBody::Buffered(Bytes::new()))
+            .expect("a decodable request");
         let resources = dispatch.resources(&decoded).expect("derived resources");
         let decisions = vec![Decision::Allow; resources.len()];
         let authorized = dispatch.authorize(decoded, &decisions).expect("authorized");

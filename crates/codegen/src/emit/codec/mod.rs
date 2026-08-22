@@ -147,9 +147,15 @@ fn operation(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<
     }
     response_names.push("status_code");
     let _ = writeln!(out, "use crate::codec::response::{{{}}};", response_names.join(", "));
-    out.push_str("use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, value};\n\n");
+    out.push_str("use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, RequestBodyMode, value};\n\n");
 
     let _ = writeln!(out, "impl OperationCodec for dto::{marker} {{");
+    let _ = writeln!(
+        out,
+        "    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::{};",
+        ir.payload.request.buffering.as_str()
+    );
+    out.push('\n');
     out.push_str(&overrides);
     out.push_str("    fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {\n");
     out.push_str(&decoded);

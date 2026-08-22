@@ -58,18 +58,17 @@ for required in (
     "let request_cancellation = request_config.request_cancellation();",
     "let (deadline_cancellation, context) = HandlerCancellationSource::pair();",
     "handler_with_request_cancellation(",
-    """handler_with_request_cancellation(
-                            call,
-                            deadline_cancellation,
-                            deadline,
-                            cleanup_grace,
-                            request_cancellation,
-                        )""",
-    "request_cancellation,",
     "HandlerCancellationOutcome::RequestAborted { cleanup_completed }",
 ):
     if monomorphic_source.count(required) != 1:
         fail("monomorphic dispatch does not consume one request snapshot's handler deadline configuration")
+compact_monomorphic = "".join(monomorphic_source.split())
+managed_call = (
+    "handler_with_request_cancellation(call,deadline_cancellation,deadline,cleanup_grace,"
+    "request_cancellation,)"
+)
+if compact_monomorphic.count(managed_call) != 1:
+    fail("monomorphic dispatch does not consume one request snapshot's handler deadline configuration")
 for required in (
     "handler deadline exceeded after cleanup completed",
     "handler deadline exceeded before cleanup completed",

@@ -29,9 +29,11 @@ use rustfs_gateway_types::dto;
 use rustfs_gateway_types::ops::create_bucket::Input;
 
 use crate::codec::response::{EncodedResponse, status_code};
-use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, value};
+use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, RequestBodyMode, value};
 
 impl OperationCodec for dto::CreateBucket {
+    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::Full;
+
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
         let mut input = Input { ..Default::default() };
         // ACL — header `x-amz-acl`, repeated field lines joined.

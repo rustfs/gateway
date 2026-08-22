@@ -60,7 +60,7 @@ pub use crate::codec::response::{
     response_framing_allowed, status_code,
 };
 pub use crate::codec::value::*;
-pub use crate::codec::view::{MetaView, RequestBody};
+pub use crate::codec::view::{MetaView, RequestBody, RequestBodyMode};
 
 use crate::op::Operation;
 
@@ -83,6 +83,12 @@ pub mod ops;
 /// name itself; making it a supertrait-bounded extension means a third party opts in when it has
 /// one.
 pub trait OperationCodec: Operation {
+    /// The generated request-body handoff mode.
+    ///
+    /// The buffered default keeps a third-party codec source-compatible while preventing an
+    /// assembly from handing it an unbounded live producer unless it opts in explicitly.
+    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::Full;
+
     /// The `response-*` overrides this operation honours, in IR order.
     ///
     /// Empty for every operation that declares none, which is most of them. It is an associated

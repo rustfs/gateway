@@ -31,9 +31,11 @@ use rustfs_gateway_types::dto;
 use rustfs_gateway_types::ops::get_object::Input;
 
 use crate::codec::response::{EncodedResponse, ResponseBody, ResponseOverride, status_code};
-use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, value};
+use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, RequestBodyMode, value};
 
 impl OperationCodec for dto::GetObject {
+    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
+
     const RESPONSE_OVERRIDES: &'static [ResponseOverride] = &[
         ResponseOverride::new("response-cache-control", "cache-control", "ResponseCacheControl"),
         ResponseOverride::new("response-content-disposition", "content-disposition", "ResponseContentDisposition"),

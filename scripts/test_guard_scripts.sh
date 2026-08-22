@@ -5112,9 +5112,9 @@ from pathlib import Path
 
 path = Path("scripts/allowances/as-any-allowances.txt")
 text = path.read_text()
-if "codecs.rs:210" not in text:
+if "codecs.rs:217" not in text:
     raise SystemExit("expected allowlist entry is missing")
-path.write_text(text.replace("codecs.rs:210", "codecs.rs:211", 1))
+path.write_text(text.replace("codecs.rs:217", "codecs.rs:218", 1))
 PYEOF
 }
 expect_fail check_no_as_any.sh \
@@ -12663,13 +12663,12 @@ if end < 0:
     raise SystemExit("c-lim-0039 governed-stage anchor drifted")
 block = text[start:end]
 without = text[:start] + text[end:]
-read = without.find("            let body = sealed")
+read = without.find("            let (body, body_monitor) = sealed")
 if read < 0:
     raise SystemExit("c-lim-0039 body-read anchor drifted")
-insert = without.find("                .await?;", read)
+insert = without.find("            Ok((", read)
 if insert < 0:
     raise SystemExit("c-lim-0039 body-read completion anchor drifted")
-insert += len("                .await?;")
 decoy = '        let _governor_position_decoy = r###"' + block + '"###;\n'
 without = without[:start] + decoy + without[start:]
 insert += len(decoy)

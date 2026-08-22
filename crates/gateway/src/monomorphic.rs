@@ -101,13 +101,17 @@ pub(crate) mod sealed {
 
     use rustfs_gateway_core::{
         AuthRequirement, BoxFuture, Decision, Handler, HandlerCancellationSource, HandlerError, MetaView, OperationCodec,
-        OwnedResource, StaticDispatchError, StaticDispatchOutcome, StaticOperation,
+        OwnedResource, RequestBody, RequestBodyMode, StaticDispatchError, StaticDispatchOutcome, StaticOperation,
     };
     use rustfs_gateway_sig::OperationFloor;
 
     use super::*;
+    use crate::render::S3Error;
     use crate::request_config::{InputAuthorized, RequestConfig};
-    use crate::request_deadline::{HandlerCancellationOutcome, commit_with_progress_deadline, handler_with_request_cancellation};
+    use crate::request_deadline::{
+        BodyMonitoredOutcome, HandlerCancellationOutcome, commit_with_progress_deadline, handler_with_body_monitor,
+        handler_with_request_cancellation,
+    };
 
     pub trait HandlerDeadlinePolicy: Send {
         fn handler_deadline(&self, class: rustfs_gateway_core::HandlerDeadlineClass) -> Duration;
@@ -119,6 +123,8 @@ pub(crate) mod sealed {
         fn record_handler_deadline(&self, cleanup_completed: bool);
 
         fn request_cancellation(&self) -> Option<tokio::sync::watch::Receiver<bool>>;
+
+        fn take_body_monitor(&mut self) -> Option<crate::request_body::BodyMonitor>;
     }
 
     impl HandlerDeadlinePolicy for RequestConfig<InputAuthorized> {
@@ -141,6 +147,10 @@ pub(crate) mod sealed {
         fn request_cancellation(&self) -> Option<tokio::sync::watch::Receiver<bool>> {
             RequestConfig::request_cancellation(self)
         }
+
+        fn take_body_monitor(&mut self) -> Option<crate::request_body::BodyMonitor> {
+            RequestConfig::take_body_monitor(self)
+        }
     }
 
     pub trait Set<H>: Send + Sync + 'static {
@@ -149,6 +159,8 @@ pub(crate) mod sealed {
         fn floor(operation: &str) -> Option<&'static OperationFloor>;
 
         fn auth(operation: &str) -> Option<Option<AuthRequirement>>;
+
+        fn request_body_mode(operation: &str) -> Option<RequestBodyMode>;
 
         fn dispatch<'a, S, T, G, E, Route, RouteFuture, Read, ReadFuture, Input, InputFuture>(
             operation: &'a str,
@@ -162,11 +174,11 @@ pub(crate) mod sealed {
             S: Send + 'a,
             T: Send + 'a,
             G: HandlerDeadlinePolicy + Send + 'a,
-            E: Send + 'a,
+            E: From<S3Error> + Send + 'a,
             Route: FnOnce() -> RouteFuture + Send + 'a,
             RouteFuture: Future<Output = Result<S, E>> + Send + 'a,
             Read: FnOnce(S) -> ReadFuture + Send + 'a,
-            ReadFuture: Future<Output = Result<(T, Bytes), E>> + Send + 'a,
+            ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
             Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
             InputFuture: Future<Output = Result<(Vec<Decision>, G), E>> + Send + 'a;
     }
@@ -185,6 +197,10 @@ pub(crate) mod sealed {
             None
         }
 
+        fn request_body_mode(_operation: &str) -> Option<RequestBodyMode> {
+            None
+        }
+
         fn dispatch<'a, S, T, G, E, Route, RouteFuture, Read, ReadFuture, Input, InputFuture>(
             operation: &'a str,
             _meta: &'a MetaView<'a>,
@@ -197,11 +213,11 @@ pub(crate) mod sealed {
             S: Send + 'a,
             T: Send + 'a,
             G: HandlerDeadlinePolicy + Send + 'a,
-            E: Send + 'a,
+            E: From<S3Error> + Send + 'a,
             Route: FnOnce() -> RouteFuture + Send + 'a,
             RouteFuture: Future<Output = Result<S, E>> + Send + 'a,
             Read: FnOnce(S) -> ReadFuture + Send + 'a,
-            ReadFuture: Future<Output = Result<(T, Bytes), E>> + Send + 'a,
+            ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
             Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
             InputFuture: Future<Output = Result<(Vec<Decision>, G), E>> + Send + 'a,
         {
@@ -241,6 +257,14 @@ pub(crate) mod sealed {
             }
         }
 
+        fn request_body_mode(operation: &str) -> Option<RequestBodyMode> {
+            if operation == O::NAME {
+                Some(O::REQUEST_BODY)
+            } else {
+                Tail::request_body_mode(operation)
+            }
+        }
+
         fn dispatch<'a, S, T, G, E, Route, RouteFuture, Read, ReadFuture, Input, InputFuture>(
             operation: &'a str,
             meta: &'a MetaView<'a>,
@@ -253,11 +277,11 @@ pub(crate) mod sealed {
             S: Send + 'a,
             T: Send + 'a,
             G: HandlerDeadlinePolicy + Send + 'a,
-            E: Send + 'a,
+            E: From<S3Error> + Send + 'a,
             Route: FnOnce() -> RouteFuture + Send + 'a,
             RouteFuture: Future<Output = Result<S, E>> + Send + 'a,
             Read: FnOnce(S) -> ReadFuture + Send + 'a,
-            ReadFuture: Future<Output = Result<(T, Bytes), E>> + Send + 'a,
+            ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
             Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
             InputFuture: Future<Output = Result<(Vec<Decision>, G), E>> + Send + 'a,
         {
@@ -269,29 +293,44 @@ pub(crate) mod sealed {
                     authorize_route,
                     read_body,
                     authorize_input,
-                    |backend, request, request_config| async move {
+                    |backend, request, mut request_config| async move {
                         let Some(deadline_class) = O::spec().deadline_class() else {
-                            return Err(HandlerError::internal_error("handler deadline class is missing"));
+                            return Err(StaticDispatchError::Handler(HandlerError::internal_error(
+                                "handler deadline class is missing",
+                            )));
                         };
                         let deadline = request_config.handler_deadline(deadline_class);
                         let cleanup_grace = request_config.handler_cleanup_grace();
                         let commit_progress = request_config.commit_progress_deadline();
                         let request_cancellation = request_config.request_cancellation();
+                        let body_monitor = request_config.take_body_monitor();
                         let (deadline_cancellation, context) = HandlerCancellationSource::pair();
                         let call: BoxFuture<'static, _> =
                             Box::pin(async move { backend.call_with_context(request, context).await });
-                        match handler_with_request_cancellation(
-                            call,
-                            deadline_cancellation,
-                            deadline,
-                            cleanup_grace,
-                            request_cancellation,
-                        )
-                        .await
-                        {
-                            HandlerCancellationOutcome::Completed(response) => response.map(|response| {
-                                response.map_commit_work(|work| commit_with_progress_deadline(work, commit_progress))
-                            }),
+                        let body_cancellation = deadline_cancellation.clone();
+                        let managed: BoxFuture<'static, _> = Box::pin(async move {
+                            handler_with_request_cancellation(
+                                call,
+                                deadline_cancellation,
+                                deadline,
+                                cleanup_grace,
+                                request_cancellation,
+                            )
+                            .await
+                        });
+                        let managed =
+                            match handler_with_body_monitor(managed, body_cancellation, cleanup_grace, body_monitor).await {
+                                BodyMonitoredOutcome::Completed(outcome) => outcome,
+                                BodyMonitoredOutcome::Failed(error) => {
+                                    return Err(StaticDispatchError::Body(E::from(error)));
+                                }
+                                BodyMonitoredOutcome::Idle { cleanup_completed } => {
+                                    let _ = cleanup_completed;
+                                    return Err(StaticDispatchError::Body(E::from(crate::gate::body_idle_timeout())));
+                                }
+                            };
+                        let response = match managed {
+                            HandlerCancellationOutcome::Completed(response) => response,
                             HandlerCancellationOutcome::Expired { cleanup_completed: true } => {
                                 request_config.record_handler_deadline(true);
                                 Err(HandlerError::internal_error("handler deadline exceeded after cleanup completed"))
@@ -310,7 +349,10 @@ pub(crate) mod sealed {
                                 };
                                 Err(HandlerError::internal_error(message))
                             }
-                        }
+                        };
+                        response
+                            .map(|response| response.map_commit_work(|work| commit_with_progress_deadline(work, commit_progress)))
+                            .map_err(StaticDispatchError::Handler)
                     },
                 ))
             } else {

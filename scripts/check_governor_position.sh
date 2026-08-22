@@ -169,7 +169,7 @@ markers = (
     ("governor call", r"\.governor\s*\.try_acquire\s*\("),
     ("governed stage", r"let\s+config\s*=\s*config\.governed\(\)\s*;"),
     ("sealed body", r"SealedBody::seal\s*\("),
-    ("body read", r"\bsealed\s*\.read\s*\("),
+    ("body read", r"\bsealed\s*\.handoff\s*\("),
     ("body-read stage", r"state\.config\.body_read\(\)"),
 )
 positions = []

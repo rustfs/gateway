@@ -652,6 +652,7 @@ gateway_modules = (
     "service_config",
     "sigv2_runtime",
     "sse_runtime",
+    "streaming_request",
     "vhost_resolution",
 )
 gateway_tests = gateway_root / "tests"
