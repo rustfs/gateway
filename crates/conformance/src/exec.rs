@@ -15,7 +15,7 @@
 //! Driving futures to completion on the calling thread.
 //!
 //! Responsible for: [`block_on`], a minimal driver for direct fixture futures, and
-//! [`ServiceRuntime`], the current-thread Tokio runtime required by facade calls.
+//! `ServiceRuntime`, the current-thread Tokio runtime required by facade calls.
 //! NOT responsible for: I/O readiness or a work-stealing scheduler. The service runtime enables
 //! only timers so committed responses can make progress after returning their frozen head.
 //! Upstream: nothing. Downstream: direct fixture tests, `crate::inprocess`, and `crate::socket`.

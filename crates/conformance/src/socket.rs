@@ -104,7 +104,7 @@
 //!
 //! # Why the service runtime is current-threaded
 //!
-//! One thread serves each connection, and one [`crate::exec::ServiceRuntime`] drives both the
+//! One thread serves each connection, and one `crate::exec::ServiceRuntime` drives both the
 //! service call and its response body. The runtime enables timers but no work-stealing or I/O
 //! driver. Blocking inside `poll_frame` is sound because the thread has no other connection to
 //! progress.

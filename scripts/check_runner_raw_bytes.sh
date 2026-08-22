@@ -42,7 +42,7 @@ except (OSError, tomllib.TOMLDecodeError) as error:
     print(f"check_runner_raw_bytes: {error}", file=sys.stderr)
     raise SystemExit(1)
 
-allowed_dependencies = {"rustfs-gateway", "bytes", "http", "http-body"}
+allowed_dependencies = {"rustfs-gateway", "bytes", "http", "http-body", "tokio"}
 dependencies = manifest.get("dependencies", {})
 if not isinstance(dependencies, dict):
     print("check_runner_raw_bytes: [dependencies] must be a table", file=sys.stderr)

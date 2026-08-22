@@ -192,6 +192,7 @@ core_modules = (
     "acl_roundtrip",
     "authz_consumption",
     "codec_binding",
+    "committed_head",
     "compile_fail",
     "configuration_error_declarations",
     "cors_roundtrip",
@@ -509,6 +510,8 @@ if core_arity_sources:
 core_calls.append('cases.compile_fail("tests/compile_fail/c_sig_0018_*.rs");')
 if any(core_compile_dir.glob("c_sig_0123_*.rs")):
     core_calls.append('cases.compile_fail("tests/compile_fail/c_sig_0123_*.rs");')
+if any(core_compile_dir.glob("committed_*.rs")):
+    core_calls.append('cases.compile_fail("tests/compile_fail/committed_*.rs");')
 if core_error_sources:
     core_calls.append('cases.compile_fail("tests/compile_fail/error_resolution_*.rs");')
 if core_upload_sources:
@@ -623,6 +626,7 @@ gateway_modules = (
     "authz_implementations",
     "backend_reachability",
     "chunked_allocations",
+    "committed_head_runtime",
     "committed_progress",
     "compat_aliases",
     "compile_fail",

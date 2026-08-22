@@ -248,6 +248,26 @@ impl Handler<dto::CopyObject> for CommittedCopy {
             }),
         ))
     }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<dto::CopyObject>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<dto::CopyObject> {
+        let outcome = self.0;
+        Ok(rustfs_gateway::Resp::commit(
+            HeadPart::new(http::HeaderMap::new()).expect("an empty generated operation head"),
+            Box::pin(async move {
+                match outcome {
+                    support::CopyCommit::Answer => Ok(dto::CopyObjectOutput::default()),
+                    support::CopyCommit::Fail => Err(rustfs_gateway::HandlerError::new(
+                        rustfs_gateway::ErrorCode::NO_SUCH_KEY,
+                        "the source key disappeared",
+                    )),
+                }
+            }),
+        ))
+    }
 }
 
 /// a-asm-0007. Both dispatch paths detach the same generated operation and render either terminal

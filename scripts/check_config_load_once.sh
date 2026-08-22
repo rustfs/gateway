@@ -31,7 +31,7 @@ expected="$(grep -Ev '^[[:space:]]*(#|$)' "$ALLOWLIST" | LC_ALL=C sort)"
     printf 'check_config_load_once: expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
     exit 1
 }
-[[ "$(grep -c '^crates/gateway/src/service.rs:307$' <<<"$expected")" == 1 ]] \
+[[ "$(grep -c '^crates/gateway/src/service.rs:304$' <<<"$expected")" == 1 ]] \
     || fail 'the one request-entry configuration load is not allowlisted exactly once'
 
 stages="$(grep -oE '\.(accepted|routed|governed|authenticated|route_authorized|body_read|decoded|input_authorized)\(' \

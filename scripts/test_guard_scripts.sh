@@ -17764,8 +17764,8 @@ from pathlib import Path
 
 path = Path("crates/gateway/src/lib.rs")
 text = path.read_text()
-subject = "    HandlerCancellation, HandlerContext, HandlerDeadlineClass, HandlerError,"
-replacement = "    HandlerCancellation, HandlerContext, HandlerError,"
+subject = "HandlerCancellation, HandlerContext, HandlerDeadlineClass, HandlerError,"
+replacement = "HandlerCancellation, HandlerContext, HandlerError,"
 if text.count(subject) != 1:
     raise SystemExit("missing unique handler deadline class facade-export mutation subject")
 path.write_text(text.replace(subject, replacement, 1))
@@ -18426,8 +18426,8 @@ from pathlib import Path
 
 path = Path("crates/gateway/src/service.rs")
 text = path.read_text()
-subject = "            handler_deadline,\n            identity: outcome.identity.as_ref(),"
-replacement = "            handler_deadline: None,\n            identity: outcome.identity.as_ref(),"
+subject = "                handler_deadline,\n                identity: outcome.identity.as_ref(),"
+replacement = "                handler_deadline: None,\n                identity: outcome.identity.as_ref(),"
 if text.count(subject) != 1:
     raise SystemExit("missing unique observed handler deadline mutation subject")
 path.write_text(text.replace(subject, replacement, 1))

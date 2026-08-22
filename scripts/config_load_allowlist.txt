@@ -1,7 +1,11 @@
 crates/gateway/src/clock.rs:338
+crates/gateway/src/commit.rs:554
+crates/gateway/src/commit.rs:557
+crates/gateway/src/commit.rs:583
+crates/gateway/src/commit.rs:588
 crates/gateway/src/config.rs:363
 crates/gateway/src/config.rs:373
-crates/gateway/src/dispatch.rs:610
+crates/gateway/src/dispatch.rs:601
 crates/gateway/src/ext/authz_audit.rs:230
 crates/gateway/src/ext/cors.rs:108
 crates/gateway/src/ext/cors.rs:278
@@ -26,10 +30,10 @@ crates/gateway/src/ext/governor/default.rs:531
 crates/gateway/src/ext/governor/meter.rs:63
 crates/gateway/src/ext/governor/meter.rs:90
 crates/gateway/src/ext/oplayer.rs:286
-crates/gateway/src/operation_mode.rs:348
+crates/gateway/src/operation_mode.rs:290
 crates/gateway/src/probe.rs:60
 crates/gateway/src/probe.rs:69
 crates/gateway/src/request_config.rs:57
 crates/gateway/src/request_deadline.rs:297
 crates/gateway/src/request_deadline.rs:304
-crates/gateway/src/service.rs:307
+crates/gateway/src/service.rs:304

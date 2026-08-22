@@ -174,9 +174,7 @@ impl PayloadStream for CommitStream {
                 if timer.as_mut().poll(context).is_pending() {
                     return Poll::Pending;
                 }
-                timer
-                    .as_mut()
-                    .reset(tokio::time::Instant::now() + Duration::from_secs(KEEPALIVE_INTERVAL_SECONDS));
+                self.timer = Some(Box::pin(tokio::time::sleep(Duration::from_secs(KEEPALIVE_INTERVAL_SECONDS))));
                 Poll::Ready(Ok(PayloadRead::Chunk(Bytes::from_static(&[KEEPALIVE_BYTE]))))
             }
         }
