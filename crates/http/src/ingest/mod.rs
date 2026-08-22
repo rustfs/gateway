@@ -20,7 +20,8 @@
 //! NOT responsible for: parsing `x-amz-content-sha256` (that is `rustfs-gateway-sig`, one layer
 //! above, which is why the framing facts arrive through [`PayloadFramingSource`] rather than as a
 //! mode this crate could re-derive); verifying the request signature; parsing or verifying a
-//! trailer section (P3-04); choosing which digests a request needs (P3-04); and timeouts (P3-05).
+//! trailer checksum or trailer-signature comparison (P3-04); choosing which digests a request
+//! needs (P3-04); and timeouts (P3-05).
 //! Upstream: `rustfs-gateway-stream` for the pull model and the observer trait, this crate's
 //! `framing` and `limits`. Downstream: `rustfs-gateway-core` and the storage layer.
 //!
@@ -57,6 +58,7 @@ mod decoder;
 mod pipeline;
 mod reject;
 mod signer;
+mod trailer;
 
 pub use crate::ingest::decoder::MIN_CHUNK_META_BYTES;
 pub use crate::ingest::pipeline::{IngestPipeline, IngestPolicy};
@@ -64,6 +66,7 @@ pub use crate::ingest::reject::{ChunkReject, ModeConfusion};
 pub use crate::ingest::signer::{
     ChunkScope, ChunkSeed, ChunkSigner, ChunkSigningKey, MAX_SCOPE_LINE_BYTES, ScopeId, SigningKeyCache,
 };
+pub use crate::ingest::trailer::{MAX_TRAILER_SECTION_BYTES, TrailerDeclaration};
 
 use crate::framing::Framing;
 

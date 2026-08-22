@@ -10,6 +10,7 @@ Agent entry point for bounded, signature-aware HTTP wire ingestion.
 | `src/limits.rs` | Wire budget vocabulary. | A header/query/body ceiling changes. |
 | `src/form/` | The POST Object multipart reader: bounded text fields, then a file reader that cannot exist without a ceiling. | A POST form field or file ceiling changes, or the policy-before-file order is in question. |
 | `src/checksum.rs` | The one authority on request-body integrity: `Content-MD5` and `x-amz-checksum-*` arbitration, the digests, and the `ChecksumVerified` witness. | A digest is claimed and not compared, or two layers disagree about which checksum a request made. |
+| `src/ingest/trailer.rs` | Strict bounded `aws-chunked` trailer parsing and declared-set matching. | A trailer name, size, count, or EOF boundary is accepted wrongly. |
 | `src/metadata.rs` | Metadata-header validation. | User metadata is malformed or oversized. |
 | `src/framing.rs` | Body framing selected from authenticated payload mode. | Content length or chunk framing is wrong. |
 | `src/chunk.rs` | aws-chunked syntax and decoding. | A chunk boundary or trailer is rejected wrongly. |
@@ -20,6 +21,7 @@ Agent entry point for bounded, signature-aware HTTP wire ingestion.
 | `tests/ingest_framing.rs` | Framing decision matrix. | Change payload/framing selection. |
 | `tests/ingest_verify.rs` | Streaming signature matrix. | Change signature-chain verification. |
 | `tests/ingest_perf_gates.rs` | Ingestion allocation/cost gates. | Change the hot path. |
+| `tests/ingest_trailers.rs` | Trailer-section positive and negative matrix. | Change trailer parsing or EOF delivery. |
 | `tests/host.rs` | Host parsing matrix. | Change addressing. |
 | `tests/form_limits.rs` | POST Object form ceilings and ordering. | Change `src/form/`. |
 | `tests/form_allocations.rs` | Measures that reading a file part costs a heap independent of the file. | Change the file read path. |

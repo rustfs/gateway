@@ -18,8 +18,8 @@
 //! feeding the signer and every observer from the same borrowed run, holding a chunk back until
 //! its signature verifies, and delivering only verified bytes.
 //! NOT responsible for: framing rules (the decoder owns those), the signature chain (the signer
-//! owns that), digest algorithms (P3-04), timeouts and cancellation (P3-05), and trailer parsing
-//! (P3-04, which reads [`IngestPipeline::commit_allowed`] to know it still has work to do).
+//! owns that), digest algorithms and trailer-signature comparison (P3-04), or timeouts and
+//! cancellation (P3-05).
 //! Upstream: `rustfs-gateway-stream`'s pull model and observer trait, this crate's `decoder`,
 //! `signer` and `limits`. Downstream: `rustfs-gateway-core` and the storage layer.
 //!
@@ -60,6 +60,7 @@ use crate::ingest::DecodedLength;
 use crate::ingest::decoder::{ChunkDecoder, DecodeEvent, MIN_CHUNK_META_BYTES};
 use crate::ingest::reject::{ChunkReject, ModeConfusion};
 use crate::ingest::signer::ChunkSigner;
+use crate::ingest::trailer::{TrailerDeclaration, TrailerProgress, parse_trailer_section};
 use crate::limits::ChunkLimits;
 
 /// The window size the pipeline starts from before it learns how large the chunks really are.
@@ -136,6 +137,9 @@ pub struct IngestPipeline<R> {
     failed: bool,
     commit_allowed: bool,
     failure: Option<ChunkReject>,
+    trailer_declaration: Option<TrailerDeclaration>,
+    trailers: Option<TrailingHeaders>,
+    trailer_section_complete: bool,
 }
 
 impl<R> IngestPipeline<R> {
@@ -177,7 +181,7 @@ impl<R> IngestPipeline<R> {
 
         Ok(Self {
             inner,
-            decoder: ChunkDecoder::new(framing.has_chunk_signatures(), declared.get(), limits),
+            decoder: ChunkDecoder::new(framing.has_chunk_signatures(), framing.declares_trailers(), declared.get(), limits),
             signer,
             observers,
             framing,
@@ -197,7 +201,28 @@ impl<R> IngestPipeline<R> {
             failed: false,
             commit_allowed: false,
             failure: None,
+            trailer_declaration: None,
+            trailers: None,
+            trailer_section_complete: false,
         })
+    }
+
+    /// Attaches the trailer names already accepted from the request head.
+    ///
+    /// # Errors
+    ///
+    /// [`ChunkReject::TrailerInNonTrailerMode`] when the authenticated payload mode has no trailer
+    /// section, and [`ChunkReject::DeclaredTrailerMismatch`] when the declaration's signed shape
+    /// disagrees with that mode.
+    pub fn with_trailer_declaration(mut self, trailer_declaration: TrailerDeclaration) -> Result<Self, ChunkReject> {
+        if !self.framing.declares_trailers() {
+            return Err(ChunkReject::TrailerInNonTrailerMode);
+        }
+        if self.framing.has_chunk_signatures() != trailer_declaration.signed() {
+            return Err(ChunkReject::DeclaredTrailerMismatch);
+        }
+        self.trailer_declaration = Some(trailer_declaration);
+        Ok(self)
     }
 
     /// How many body bytes the decoder has produced.
@@ -222,14 +247,23 @@ impl<R> IngestPipeline<R> {
 
     /// Whether what has arrived may be committed.
     ///
-    /// `false` until the terminal chunk has been consumed and verified. When the mode declared a
-    /// trailer section it stays `false` after that too: the trailer carries a checksum and, in
-    /// signed framing, its own signature, and neither has been checked here. P3-04 owns that
-    /// check; until it lands, a trailered upload is decoded and delivered but never marked
-    /// committable, which fails closed.
+    /// `false` until every integrity obligation has been discharged.
+    ///
+    /// This parser can make a non-trailered body committable. A trailered body stays false even
+    /// after [`Self::trailer_section_complete`] becomes true, because parsing the expected value
+    /// is not comparing it against the body digest.
     #[must_use]
     pub fn commit_allowed(&self) -> bool {
         self.commit_allowed
+    }
+
+    /// Whether the exact declared trailer section arrived and transport EOF followed it.
+    ///
+    /// This is deliberately weaker than [`Self::commit_allowed`]: it proves framing and name-set
+    /// completeness, not that a checksum or trailer signature agreed.
+    #[must_use]
+    pub fn trailer_section_complete(&self) -> bool {
+        self.trailer_section_complete
     }
 
     /// How many bytes the pipeline has memmoved to keep the window compact.
@@ -487,6 +521,35 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
         }
     }
 
+    /// Reads more of the bounded trailer section without retaining consumed chunk bytes.
+    fn refill_trailer(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamError>> {
+        if self.filled >= self.window.len() {
+            let start = self.decoder.cursor();
+            if start == 0 {
+                return Poll::Ready(Err(self.fail(ChunkReject::TrailerSizeExceeded)));
+            }
+            self.window.copy_within(start..self.filled, 0);
+            self.filled = self.filled.saturating_sub(start);
+            self.decoder.rebase(start);
+        }
+        let filled = self.filled;
+        let Some(tail) = self.window.get_mut(filled..).filter(|tail| !tail.is_empty()) else {
+            return Poll::Ready(Err(self.fail(ChunkReject::TrailerSizeExceeded)));
+        };
+        match Pin::new(&mut self.inner).poll_fill(cx, tail) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(err)) => {
+                self.failed = true;
+                Poll::Ready(Err(err.or_bytes_before_error(self.delivered_bytes)))
+            }
+            Poll::Ready(Ok(ReadProgress::Filled(n))) => {
+                self.filled = self.filled.saturating_add(n);
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Ok(ReadProgress::Eof { .. })) => Poll::Ready(Err(self.fail(ChunkReject::TruncatedBeforeTrailer))),
+        }
+    }
+
     /// Settles what happens after the terminal chunk.
     fn finalize(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamError>> {
         if self.decoder.decoded_bytes() != self.declared {
@@ -497,11 +560,30 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
             return Poll::Ready(Err(self.fail(reject)));
         }
         if self.framing.declares_trailers() {
-            // Whatever follows the terminal chunk is the trailer section. It is P3-04's, and
-            // until it has been verified nothing may be committed.
-            self.finished = true;
-            self.commit_allowed = false;
-            return Poll::Ready(Ok(()));
+            let Some(declaration) = self.trailer_declaration.as_ref() else {
+                // A caller using the compatibility constructor has no authenticated declaration
+                // to compare with. Preserve the old fail-closed result.
+                self.finished = true;
+                self.commit_allowed = false;
+                return Poll::Ready(Ok(()));
+            };
+            if self.trailers.is_none() {
+                let start = self.decoder.cursor();
+                let input = self.window.get(start..self.filled).unwrap_or(&[]);
+                match parse_trailer_section(input, declaration) {
+                    Err(reject) => return Poll::Ready(Err(self.fail(reject))),
+                    Ok(TrailerProgress::NeedMore) => return self.refill_trailer(cx),
+                    Ok(TrailerProgress::Complete { trailers, consumed }) => {
+                        let end = start.saturating_add(consumed);
+                        if end != self.filled {
+                            return Poll::Ready(Err(self.fail(ChunkReject::DataAfterTrailer)));
+                        }
+                        self.trailers = Some(trailers);
+                        self.filled = 0;
+                        self.decoder.rebase(end);
+                    }
+                }
+            }
         }
         if self.decoder.cursor() < self.filled {
             return Poll::Ready(Err(self.fail(ChunkReject::ZeroSizedNonTerminalChunk)));
@@ -535,10 +617,29 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                 self.failed = true;
                 Poll::Ready(Err(err.or_bytes_before_error(self.delivered_bytes)))
             }
-            Poll::Ready(Ok(ReadProgress::Filled(0))) | Poll::Ready(Ok(ReadProgress::Eof { .. })) => {
+            Poll::Ready(Ok(ReadProgress::Filled(0))) if self.framing.declares_trailers() => {
+                Poll::Ready(Err(self.fail(ChunkReject::TruncatedBeforeTrailer)))
+            }
+            Poll::Ready(Ok(ReadProgress::Filled(0))) => {
                 self.finished = true;
                 self.commit_allowed = true;
                 Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Ok(ReadProgress::Eof { trailers })) if self.framing.declares_trailers() && !trailers.is_empty() => {
+                Poll::Ready(Err(self.fail(ChunkReject::DataAfterTrailer)))
+            }
+            Poll::Ready(Ok(ReadProgress::Eof { .. })) => {
+                self.finished = true;
+                if self.framing.declares_trailers() {
+                    self.trailer_section_complete = true;
+                    self.commit_allowed = false;
+                } else {
+                    self.commit_allowed = true;
+                }
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Ok(ReadProgress::Filled(_))) if self.framing.declares_trailers() => {
+                Poll::Ready(Err(self.fail(ChunkReject::DataAfterTrailer)))
             }
             Poll::Ready(Ok(ReadProgress::Filled(_))) => Poll::Ready(Err(self.fail(ChunkReject::ZeroSizedNonTerminalChunk))),
         }
@@ -564,11 +665,8 @@ impl<R: AsyncPayloadRead + Unpin> AsyncPayloadRead for IngestPipeline<R> {
                     return Poll::Ready(Err(StreamError::polled_after_eof().with_bytes_before_error(this.delivered_bytes)));
                 }
                 this.eof_emitted = true;
-                // The trailer section, when there is one, is delivered by P3-04; an empty map here
-                // is "this stage saw no trailer", and `commit_allowed` is what says the check is
-                // still outstanding.
                 return Poll::Ready(Ok(ReadProgress::Eof {
-                    trailers: TrailingHeaders::empty(),
+                    trailers: this.trailers.take().unwrap_or_else(TrailingHeaders::empty),
                 }));
             }
             match this.advance(cx) {

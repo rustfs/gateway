@@ -86,8 +86,8 @@ pub use crate::header_view::{
 pub use crate::host::{EffectiveHost, HostError, HostSource, MAX_HOST_BYTES, RawHost, effective_host, effective_host_of};
 pub use crate::ingest::{
     ChunkFraming, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, ChunkSigningKey, DecodedLength, IngestPipeline, IngestPolicy,
-    MAX_SCOPE_LINE_BYTES, MIN_CHUNK_META_BYTES, ModeConfusion, PayloadFramingSource, ScopeId, SigningKeyCache,
-    validate_decoded_length,
+    MAX_SCOPE_LINE_BYTES, MAX_TRAILER_SECTION_BYTES, MIN_CHUNK_META_BYTES, ModeConfusion, PayloadFramingSource, ScopeId,
+    SigningKeyCache, TrailerDeclaration, validate_decoded_length,
 };
 pub use crate::limits::{ChunkLimits, LimitKind, Limits};
 pub use crate::metadata::{METADATA_PREFIX, MetadataReject, validate_metadata_key, validate_metadata_value};
