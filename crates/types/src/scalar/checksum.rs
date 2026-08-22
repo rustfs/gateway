@@ -166,6 +166,15 @@ impl ChecksumAlgorithm {
             other => Box::new(CrcChecksummer::new(other)),
         }
     }
+
+    /// The calculator target `crc-fast` selected for this CRC on the current host.
+    ///
+    /// This reports the implementation actually selected by `crc-fast`, rather than inferring it
+    /// from CPU features. `None` is returned for the SHA algorithms, which do not use `crc-fast`.
+    #[must_use]
+    pub fn crc_acceleration_target(self) -> Option<String> {
+        self.crc_algorithm().map(crc_fast::get_calculator_target)
+    }
 }
 
 impl fmt::Display for ChecksumAlgorithm {

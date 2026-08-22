@@ -29,6 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use rustfs_gateway_http::{ChunkLimits, ChunkSigningKey, ScopeId, SigningKeyCache};
 use rustfs_gateway_stream::{ByteCounter, ByteObserver, ObserverOutcome, Payload, StreamMetrics};
+use rustfs_gateway_types::ChecksumAlgorithm;
 use smallvec::SmallVec;
 use support::ingest::{
     SignedChunker, drain_pipeline, hmac_sha256, no_observers, signed_pipeline, unsigned_body, unsigned_pipeline,
@@ -291,6 +292,14 @@ fn c_ing_0008_observers_are_called_at_chunk_granularity() {
 
     let outcomes = pipeline.finish_observers();
     assert_eq!(outcomes[0].observed_bytes(), 2 * CHUNK_BYTES as u64);
+
+    let target = ChecksumAlgorithm::Crc32c
+        .crc_acceleration_target()
+        .expect("CRC32C has a crc-fast calculator");
+    assert_ne!(
+        target, "software-fallback-tables",
+        "c-ing-0008 requires crc-fast hardware acceleration, selected {target}"
+    );
 }
 
 /// Positive: consuming the pipeline through the pull model performs no adapting copy at all. The

@@ -32,7 +32,7 @@ cases=(
     'c-ing-0005|positive|bound|crates/http/tests/ingest_perf_gates.rs::c_ing_0005_four_observers_and_the_signer_each_see_the_body_exactly_once;crates/http/tests/ingest_perf_gates.rs::c_ing_0005_the_single_pass_instrument_reports_two_when_the_body_is_walked_twice'
     'c-ing-0006|positive|bound|crates/http/tests/ingest_framing.rs::c_ing_0006_a_decoded_length_that_fits_inside_the_wire_length_is_accepted'
     'c-ing-0007|positive|bound|crates/http/tests/ingest_chunk_rules.rs::c_ing_0007_a_chunk_of_exactly_the_ceiling_is_accepted'
-    'c-ing-0008|positive|partial|crates/http/tests/ingest_perf_gates.rs::c_ing_0008_observers_are_called_at_chunk_granularity@@rustfs/backlog#1692::the call granularity is proved, but the case also demands that CRC32C be asserted hardware-accelerated and fail on a software fallback; no digest algorithm is implemented in this crate and the checksum authority that owns algorithm selection performs no hardware dispatch assertion'
+    'c-ing-0008|positive|bound|crates/http/tests/ingest_perf_gates.rs::c_ing_0008_observers_are_called_at_chunk_granularity'
     'c-ing-0009|positive|bound|crates/http/tests/ingest_verify.rs::c_ing_0009_an_empty_signed_body_still_verifies_its_terminal_chunk'
     'c-ing-0010|positive|bound|crates/gateway/src/chunked.rs::c_ing_0010_a_content_encoding_of_aws_chunked_alongside_a_streaming_signature_still_parses'
     'c-ing-0020|negative|bound|crates/http/tests/ingest_framing.rs::c_ing_0020_a_pipeline_cannot_be_built_for_a_body_the_signature_did_not_frame;crates/gateway/src/chunked.rs::c_ing_0020_an_unframed_mode_never_builds_a_pipeline'
@@ -78,14 +78,14 @@ blocked_ids=()
 
 # The same, for rows that prove part of a case. A partial row is checked as strictly as a bound
 # one on the half it claims.
-partial_ids=('c-ing-0008')
+partial_ids=()
 
 command -v python3 >/dev/null 2>&1 || {
     printf 'check_ingest_case_coverage: required command is missing: python3\n' >&2
     exit 1
 }
 
-python3 - "$ROOT" "${#cases[@]}" "$(printf '%s\n' "${plural_evidence[@]}")" "$(printf '%s\n' "${blocked_ids[@]-}")" "$(printf '%s\n' "${partial_ids[@]}")" "${cases[@]}" <<'PYEOF'
+python3 - "$ROOT" "${#cases[@]}" "$(printf '%s\n' "${plural_evidence[@]}")" "$(printf '%s\n' "${blocked_ids[@]-}")" "$(printf '%s\n' "${partial_ids[@]-}")" "${cases[@]}" <<'PYEOF'
 import re
 import sys
 from pathlib import Path
@@ -334,6 +334,8 @@ def check_evidence(identifier, polarity, evidence):
         if not any(token in body for token in ASSERTION_TOKENS):
             fail(f"{identifier} maps to `{function}` in {relative}, whose body asserts nothing")
             continue
+        if identifier == "c-ing-0008" and ("crc_acceleration_target" not in body or "assert_ne!" not in body):
+            fail(f"{identifier} does not assert that crc-fast avoided its software fallback")
         if polarity == "negative":
             refuses = any(token in body for token in REFUSAL_TOKENS)
             bounds = CEILING_PATTERN.search(body) is not None

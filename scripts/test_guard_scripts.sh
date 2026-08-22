@@ -8931,8 +8931,8 @@ expect_fail check_wire_case_coverage.sh \
 
 # P3-03 ingest case coverage (rustfs/backlog#1691). Four failure modes, one mutation each: a
 # mapping can be deleted, it can point at a function nobody wrote, the assertion it points at can
-# be replaced by something that reads like an assertion and cannot fail, and a row that proves half
-# a case can quietly stop naming who owns the other half.
+# be replaced by something that reads like an assertion and cannot fail, and the hardware gate can
+# stop rejecting crc-fast's software fallback.
 mut_ingest_case_mapping_deleted() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -8976,19 +8976,20 @@ PYEOF
 expect_fail check_ingest_case_coverage.sh \
     'c-lim-0027 losing its shared executable identity' mut_gzip_raw_limit_identity_removed
 
-mut_ingest_partial_owner_dropped() {
+mut_ingest_hardware_fallback_gate_dropped() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("scripts/check_ingest_case_coverage.sh")
+path = Path("crates/http/tests/ingest_perf_gates.rs")
 text = path.read_text()
-old = "@@rustfs/backlog#1692::"
-if old not in text:
-    raise SystemExit("missing ingest partial-owner mutation subject")
-path.write_text(text.replace(old, "@@nobody::", 1))
+old = '    assert_ne!(\n        target, "software-fallback-tables",\n'
+new = '    assert_eq!(\n        target, "software-fallback-tables",\n'
+if text.count(old) != 1:
+    raise SystemExit("missing or ambiguous ingest hardware-gate mutation subject")
+path.write_text(text.replace(old, new, 1))
 PYEOF
 }
-expect_fail_self_mutation check_ingest_case_coverage.sh \
-    'a partially proved ingest case losing the issue that owns the rest' mut_ingest_partial_owner_dropped
+expect_fail check_ingest_case_coverage.sh \
+    'the CRC32C gate accepting crc-fast software fallback' mut_ingest_hardware_fallback_gate_dropped
 
 mut_ingest_case_assertion_is_a_decoy() {
     python3 - <<'PYEOF'
