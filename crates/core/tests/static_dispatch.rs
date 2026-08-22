@@ -23,12 +23,13 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use rustfs_gateway_core::{
-    AuthRequirement, CodecError, EncodedResponse, Handler, HandlerDeadlineClass, HandlerResult, MetaView, NoDerived, Operation,
-    OperationCodec, OperationOrigin, OperationSpec, Req, RequestBody, ResourceShape, Resp, StaticDispatchError,
+    AuthRequirement, CodecError, EncodedResponse, Handler, HandlerDeadlineClass, HandlerResult, HeadPart, MetaView, NoDerived,
+    Operation, OperationCodec, OperationOrigin, OperationSpec, Req, RequestBody, ResourceShape, Resp, StaticDispatchError,
     StaticDispatchOutcome, StaticOperation, TargetKind,
 };
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{OperationFloor, SigService};
+use rustfs_gateway_types::dto::{CompleteMultipartUpload, CompleteMultipartUploadOutput};
 
 static SPEC: OperationSpec = OperationSpec::builder("example:StaticProbe", 200, None)
     .handler_deadline_class(HandlerDeadlineClass::Standard)
@@ -201,17 +202,25 @@ fn mapping_a_commit_leaves_a_settled_answer_and_an_event_stream_alone() {
 /// and reassembled would quietly move this back to the operation's declared `200`.
 #[tokio::test]
 async fn mapping_a_commit_replaces_the_work_and_keeps_the_committed_status() {
-    let response = Resp::<StaticProbe>::commit_with_status(
-        Box::pin(async { Err(rustfs_gateway_core::HandlerError::internal_error("the original")) }),
+    let response = Resp::<CompleteMultipartUpload>::commit_with_status(
+        HeadPart::new(http::HeaderMap::new()).expect("an empty operation head"),
+        Box::pin(async {
+            Err::<CompleteMultipartUploadOutput, _>(rustfs_gateway_core::HandlerError::internal_error("the original"))
+        }),
         206,
     )
-    .map_commit_work(|_original| Box::pin(async { Err(rustfs_gateway_core::HandlerError::internal_error("the replacement")) }));
+    .map_commit_work(|_original| {
+        Box::pin(async {
+            Err::<CompleteMultipartUploadOutput, _>(rustfs_gateway_core::HandlerError::internal_error("the replacement"))
+        })
+    });
     assert_eq!(response.status(), 206);
     assert!(response.is_committed());
     let (answer, _status) = response.into_parts();
-    let rustfs_gateway_core::Answer::Committed(work) = answer else {
+    let rustfs_gateway_core::Answer::Committed(committed) = answer else {
         panic!("a committed answer stopped being one");
     };
+    let (_head, work) = committed.into_parts();
     assert_eq!(
         work.await.err().map(|error| error.message().to_owned()),
         Some("the replacement".to_owned())

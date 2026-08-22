@@ -198,3 +198,18 @@ impl OperationCodec for dto::UploadPartCopy {
         Ok(response)
     }
 }
+
+impl crate::handler::deferred_sealed::Sealed for dto::UploadPartCopy {}
+
+impl crate::handler::DeferredOperation for dto::UploadPartCopy {
+    const RESPONSE_HEADERS: &'static [&'static str] = &[
+        "x-amz-copy-source-version-id",
+        "x-amz-request-charged",
+        "x-amz-server-side-encryption",
+        "x-amz-server-side-encryption-aws-kms-key-id",
+        "x-amz-server-side-encryption-bucket-key-enabled",
+        "x-amz-server-side-encryption-customer-algorithm",
+        "x-amz-server-side-encryption-customer-key-md5",
+    ];
+    const RESPONSE_HEADER_PREFIXES: &'static [&'static str] = &[];
+}

@@ -40,7 +40,6 @@ use rustfs_gateway::{
     Credentials, FixedClock, Limits, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, WireRequest,
     allow_when, collect, dto,
 };
-use rustfs_gateway_conformance::exec::block_on;
 use rustfs_gateway_conformance::fixture::{Fixture, StoredObject, Stub};
 use rustfs_gateway_conformance::inprocess::{HOST, REGION, VALID_ACCESS_KEY, VALID_SECRET};
 
@@ -95,6 +94,7 @@ fn content_md5(body: &[u8]) -> String {
 
 /// One assembled service over one fixture, and the state behind it.
 struct Harness {
+    runtime: tokio::runtime::Runtime,
     service: S3Service,
     state: Arc<Mutex<Fixture>>,
 }
@@ -180,7 +180,11 @@ impl Harness {
             )
             .build()
             .expect("the service assembles");
-        Harness { service, state }
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("the service runtime starts");
+        Harness { runtime, service, state }
     }
 
     /// Signs one request and drains what came back.
@@ -229,11 +233,14 @@ impl Harness {
             builder = builder.header(name, value);
         }
         let request = builder.body(Bytes::from_static(body)).expect("a well-formed request");
-        let response = block_on(self.service.call_bytes(request));
+        let response = self.runtime.block_on(self.service.call_bytes(request));
         let (parts, payload) = response.into_parts();
         let status = parts.status.as_u16();
         let headers = parts.headers.clone();
-        let drained = block_on(collect(http::Response::from_parts(parts, payload))).expect("the body drains");
+        let drained = self
+            .runtime
+            .block_on(collect(http::Response::from_parts(parts, payload)))
+            .expect("the body drains");
         Answer {
             status,
             headers,

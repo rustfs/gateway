@@ -21,7 +21,6 @@
 //! decision this file makes is delegated to one of them. It does not listen on a socket either:
 //! that is P7-02's.
 //! Upstream: `crate::builder`. Downstream: `crate::adapt`, and any consumer holding a service.
-//!
 //! # The order, and what each position is load-bearing for
 //!
 //! ```text
@@ -63,7 +62,6 @@
 //! **`FILTER resp` before `invariants` and `stamp`** so that the two things the framework
 //! guarantees about every response survive a deployment's rewrite: a `304` cannot be given content,
 //! and a response cannot lose its request identifier.
-//!
 //! Three positions would be defects if moved. **Govern before the body** is the difference between
 //! refusing a gibibyte upload and paying for it first. **Authorize before dispatch** is what gives
 //! the authorizer the bucket and key the path actually named, rather than a second parse of the
@@ -92,7 +90,6 @@
 //! declares it through its transport, or acknowledges the risk through
 //! [`rustfs_gateway_core::SseConfig`]; there is no third way, and
 //! `tests/sse_runtime.rs` asserts the header does not become one.
-//!
 //! # Why the clock is read once
 //!
 //! At the top, before acceptance, and never again — the reading is taken in [`S3Service::call`] and
@@ -124,8 +121,8 @@ use rustfs_gateway_core::cors::{
 };
 use rustfs_gateway_core::{
     BoxFuture, Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RegionLabel, ResourceShape,
-    ResponseBody, ResponseKind, RouteRequestParts, Router, SseConfig, StaticCommittedError, StaticDispatchError,
-    StaticDispatchOutcome, TargetKind, TransportSecurity,
+    ResponseBody, ResponseKind, RouteRequestParts, Router, SseConfig, StaticDispatchError, StaticDispatchOutcome, TargetKind,
+    TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
     resolve,
 };
@@ -382,14 +379,34 @@ impl S3Service {
         // Stamp last on both paths. A refusal already has the same identifiers; success encoders
         // and filters cannot replace this final value.
         crate::stamp::stamp(response.headers_mut(), &trace, now);
-        self.inner.observer.on_response(&RequestEvent {
-            request_id: trace.request_id(),
-            operation: outcome.operation,
-            status: response.status().as_u16(),
-            handler_deadline,
-            identity: outcome.identity.as_ref(),
-            error: outcome.error.as_ref(),
-        });
+        let event_request_id = *trace.request_id();
+        let event_operation = outcome.operation;
+        let event_status = response.status().as_u16();
+        let event_identity = outcome.identity.clone();
+        let committed_observer = Arc::clone(&self.inner.observer);
+        let started_committed_work = crate::commit::start_pending(
+            &mut response,
+            Box::new(move |error| {
+                committed_observer.on_response(&RequestEvent {
+                    request_id: &event_request_id,
+                    operation: event_operation,
+                    status: event_status,
+                    handler_deadline,
+                    identity: event_identity.as_ref(),
+                    error: error.as_ref(),
+                });
+            }),
+        );
+        if !started_committed_work {
+            self.inner.observer.on_response(&RequestEvent {
+                request_id: trace.request_id(),
+                operation: outcome.operation,
+                status: response.status().as_u16(),
+                handler_deadline,
+                identity: outcome.identity.as_ref(),
+                error: outcome.error.as_ref(),
+            });
+        }
         response
     }
 
@@ -1065,16 +1082,15 @@ impl S3Service {
 
         match dispatched {
             StaticDispatchOutcome::Settled(encoded) => into_response(encoded),
-            StaticDispatchOutcome::Committed { status, result } => {
-                let committed = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
-                match result {
-                    Ok(encoded) => crate::commit::answered(encoded, committed),
-                    Err(StaticCommittedError::Handler(error)) => {
-                        outcome.refuse_after_commit(from_handler(error, response_kind, ConnectionIntent::MayKeepAlive), committed)
-                    }
-                    Err(StaticCommittedError::Codec(error)) => {
-                        outcome.refuse_after_commit(from_codec(error, response_kind), committed)
-                    }
+            StaticDispatchOutcome::Committed { status, response } => {
+                let host_bucket = resolved.bucket().cloned();
+                let names = self.inner.names.clone();
+                let trace = *outcome.trace;
+                drop(meta);
+                let context = crate::commit::CommitContext::new(wire, target, host_bucket, names, response_kind, trace);
+                match crate::commit::prepare_response(response, status, context) {
+                    Ok(response) => response,
+                    Err(error) => outcome.refuse_handler(error),
                 }
             }
             StaticDispatchOutcome::EventStream { status, stream } => {
@@ -1335,17 +1351,6 @@ impl<'a> Outcome<'a> {
             ErrorCode::SLOW_DOWN,
             "the service is not accepting this request right now",
         ))
-    }
-
-    /// The same, for a refusal that arrived after the head had gone out.
-    ///
-    /// The observer is told the code either way — a `200` whose body carries `<Code>InvalidPart</Code>`
-    /// is a failed request, and an audit trail that recorded it as a success is the exact mistake the
-    /// status line invites. What differs is the status, which is the committed one and no longer
-    /// this refusal's to choose.
-    fn refuse_after_commit(&mut self, error: S3Error, committed: StatusCode) -> Response<Body> {
-        self.error = error.code().cloned();
-        crate::commit::refused(&error, self.trace, committed)
     }
 }
 

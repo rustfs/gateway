@@ -83,6 +83,9 @@ use crate::error_resolution::{ErrorContext, HandlerErrorContext, ResponseKind, r
 use crate::fault::{ErrorDetail, ErrorHeader, PRECONDITION_FAILED_MESSAGE, RANGE_NOT_SATISFIABLE_MESSAGE};
 use crate::op::Operation;
 
+pub(crate) use crate::committed::deferred_sealed;
+pub use crate::committed::{CommitOutcome, CommitWork, CommittedResponse, DeferredOperation, HeadPart, HeadPartError};
+
 /// The return type every extension point in this workspace writes by hand.
 ///
 /// Re-exported by the `rustfs-gateway` facade so that a downstream crate implementing an extension
@@ -185,20 +188,6 @@ where
     }
 }
 
-/// What a committed operation eventually produced: the answer, or the refusal.
-///
-/// Deliberately statusless. The status went out with the head, so a value that could carry a second
-/// one would be a value that can contradict the wire — and the contradiction would be discovered by
-/// the client, not by a test. This type is the whole of "a committed response cannot change its
-/// status": there is nowhere left to put one.
-pub type CommitOutcome<O> = Result<<O as Operation>::Output, HandlerError>;
-
-/// The work that decides a committed response, handed to the framework to drive.
-///
-/// Boxed rather than generic because the registry erases the operation and the backend, and a
-/// continuation that stayed generic would have to be named by every layer it passes through.
-pub type CommitWork<O> = BoxFuture<'static, CommitOutcome<O>>;
-
 /// The content half of a [`Resp`]: known now, or committed and still running.
 ///
 /// Not `#[non_exhaustive]`: the facade matches on it exhaustively and a third arm is a change to how
@@ -207,7 +196,7 @@ pub enum Answer<O: Operation> {
     /// The status and the content were decided together.
     Settled(O::Output),
     /// The status is decided; the content is not, and the head has gone out on the strength of it.
-    Committed(CommitWork<O>),
+    Committed(CommittedResponse<O>),
     /// A sequence of already framed event-stream messages.
     ///
     /// Unlike [`Self::Committed`], errors after the head are frames inside this stream rather than
@@ -253,42 +242,6 @@ impl<O: Operation> Resp<O> {
     pub const fn with_status(output: O::Output, status: u16) -> Self {
         Self {
             answer: Answer::Settled(output),
-            status,
-        }
-    }
-
-    /// Commits the operation's declared success status **before** the outcome is known.
-    ///
-    /// For the operators AWS documents as flushing their head early — `CompleteMultipartUpload`,
-    /// `CopyObject` — because the work can outlast a client's timeout and a status that waited for
-    /// it would arrive after the client had given up.
-    ///
-    /// Everything the backend still has to decide travels in `work`, whose output is a
-    /// [`CommitOutcome`]: an output or a [`HandlerError`], and no status. That is not a convention —
-    /// it is why a committed response cannot change its status, and why this call is the last place
-    /// the status is nameable.
-    ///
-    /// A refusal that arrives through `work` is rendered as the same `<Error>` document a refusal
-    /// before the commit would have produced, into a body whose head has already gone out. What it
-    /// cannot do is change the status line, add a response header, or hold the connection on its own
-    /// terms: the keep-alive bytes are the framework's.
-    ///
-    /// Call it only after every check that can refuse *before* the head is committed has run. A
-    /// malformed completion request is a `400`, and it stays a `400` because the backend has not
-    /// committed anything yet.
-    #[must_use]
-    pub fn commit(work: CommitWork<O>) -> Self {
-        Self {
-            answer: Answer::Committed(work),
-            status: O::spec().success_status,
-        }
-    }
-
-    /// [`Self::commit`] with a status other than the declared one.
-    #[must_use]
-    pub const fn commit_with_status(work: CommitWork<O>, status: u16) -> Self {
-        Self {
-            answer: Answer::Committed(work),
             status,
         }
     }
@@ -382,10 +335,35 @@ impl<O: Operation> Resp<O> {
     pub fn map_commit_work(self, f: impl FnOnce(CommitWork<O>) -> CommitWork<O>) -> Self {
         let Self { answer, status } = self;
         let answer = match answer {
-            Answer::Committed(work) => Answer::Committed(f(work)),
+            Answer::Committed(committed) => Answer::Committed(committed.map_work(f)),
             settled_or_stream => settled_or_stream,
         };
         Self { answer, status }
+    }
+}
+
+impl<O: DeferredOperation> Resp<O> {
+    /// Commits the operation's declared success status before the outcome is known.
+    ///
+    /// The generated deferred-operation marker limits this constructor to operations whose IR
+    /// permits an error document after `200`. `head` contains every operation header known before
+    /// the detached work starts; `work` can produce only an output or a [`HandlerError`], never a
+    /// second status.
+    #[must_use]
+    pub fn commit(head: HeadPart<O>, work: CommitWork<O>) -> Self {
+        Self {
+            answer: Answer::Committed(CommittedResponse::new(head, work, O::RESPONSE_HEADERS, O::RESPONSE_HEADER_PREFIXES)),
+            status: O::spec().success_status,
+        }
+    }
+
+    /// [`Self::commit`] with a status other than the operation's declared success status.
+    #[must_use]
+    pub fn commit_with_status(head: HeadPart<O>, work: CommitWork<O>, status: u16) -> Self {
+        Self {
+            answer: Answer::Committed(CommittedResponse::new(head, work, O::RESPONSE_HEADERS, O::RESPONSE_HEADER_PREFIXES)),
+            status,
+        }
     }
 }
 

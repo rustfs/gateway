@@ -22,10 +22,11 @@
 
 use core::future::Future;
 use core::marker::PhantomData;
-use core::task::Poll;
+use core::task::{Context, Poll};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
+use http::HeaderMap;
 use rustfs_gateway_stream::ByteStream;
 
 use crate::authz::{Decoded, authorize_input, prepare_input};
@@ -43,8 +44,8 @@ pub enum StaticDispatchOutcome {
     Committed {
         /// The already committed status.
         status: u16,
-        /// The encoded continuation, or its post-commit failure.
-        result: Result<EncodedResponse, StaticCommittedError>,
+        /// The frozen operation headers and unresolved detached work.
+        response: StaticCommittedResponse,
     },
     /// An already framed event stream.
     EventStream {
@@ -62,6 +63,109 @@ pub enum StaticCommittedError {
     Handler(HandlerError),
     /// The completed output could not be encoded.
     Codec(CodecError),
+}
+
+trait ErasedCommittedWork: Send {
+    fn poll_resolve(
+        &mut self,
+        context: &mut Context<'_>,
+        meta: &MetaView<'_>,
+        status: u16,
+        head: &HeaderMap,
+    ) -> Poll<Result<EncodedResponse, StaticCommittedError>>;
+}
+
+struct TypedCommittedWork<O: OperationCodec> {
+    work: Option<crate::CommitWork<O>>,
+    response_headers: &'static [&'static str],
+    response_header_prefixes: &'static [&'static str],
+}
+
+impl<O: OperationCodec> ErasedCommittedWork for TypedCommittedWork<O> {
+    fn poll_resolve(
+        &mut self,
+        context: &mut Context<'_>,
+        meta: &MetaView<'_>,
+        status: u16,
+        head: &HeaderMap,
+    ) -> Poll<Result<EncodedResponse, StaticCommittedError>> {
+        let output = match poll_committed_work(&mut self.work, context) {
+            Poll::Ready(Ok(output)) => output,
+            Poll::Ready(Err(error)) => return Poll::Ready(Err(StaticCommittedError::Handler(error))),
+            Poll::Pending => return Poll::Pending,
+        };
+        let encoded = match encode::<O>(output, meta, status) {
+            Ok(encoded) => encoded,
+            Err(error) => return Poll::Ready(Err(StaticCommittedError::Codec(error))),
+        };
+        let terminal_headers = operation_headers(&encoded.headers, self.response_headers, self.response_header_prefixes);
+        if terminal_headers != *head {
+            return Poll::Ready(Err(StaticCommittedError::Codec(CodecError::internal(
+                "the committed output headers differ from the frozen response head",
+            ))));
+        }
+        Poll::Ready(Ok(encoded))
+    }
+}
+
+/// A committed response whose typed operation has been erased but whose work has not started.
+///
+/// The facade receives this value before spawning. It can therefore finish response filters,
+/// invariants, and framework headers while the backend work remains unpolled.
+pub struct StaticCommittedResponse {
+    head: HeaderMap,
+    work: Box<dyn ErasedCommittedWork>,
+}
+
+impl StaticCommittedResponse {
+    /// Erases one generated operation's committed response for the facade boundary.
+    #[doc(hidden)]
+    pub fn erase<O: OperationCodec>(committed: crate::CommittedResponse<O>) -> Self {
+        let (head, work, response_headers, response_header_prefixes) = committed.into_dispatch_parts();
+        Self {
+            head: head.into_headers(),
+            work: Box::new(TypedCommittedWork::<O> {
+                work: Some(work),
+                response_headers,
+                response_header_prefixes,
+            }),
+        }
+    }
+
+    /// The validated operation headers that leave before the work starts.
+    #[must_use]
+    pub const fn head(&self) -> &HeaderMap {
+        &self.head
+    }
+
+    /// Drives and encodes the detached work against a rebuilt request view.
+    ///
+    /// # Errors
+    ///
+    /// [`StaticCommittedError`] when the handler fails, panics, cannot encode its output, or
+    /// produces operation headers different from the frozen head.
+    pub async fn resolve(self, meta: &MetaView<'_>, status: u16) -> Result<EncodedResponse, StaticCommittedError> {
+        let Self { head, mut work } = self;
+        core::future::poll_fn(move |context| work.poll_resolve(context, meta, status, &head)).await
+    }
+}
+
+impl core::fmt::Debug for StaticCommittedResponse {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("StaticCommittedResponse")
+            .field("head", &self.head)
+            .finish_non_exhaustive()
+    }
+}
+
+fn operation_headers(headers: &HeaderMap, exact: &[&str], prefixes: &[&str]) -> HeaderMap {
+    let mut operation = HeaderMap::new();
+    for (name, value) in headers {
+        if exact.contains(&name.as_str()) || prefixes.iter().any(|prefix| name.as_str().starts_with(prefix)) {
+            operation.append(name.clone(), value.clone());
+        }
+    }
+    operation
 }
 
 /// A refusal from the sealed static operation entry.
@@ -209,42 +313,38 @@ where
             Answer::Settled(output) => encode::<O>(output, meta, status)
                 .map(StaticDispatchOutcome::Settled)
                 .map_err(StaticDispatchError::Codec),
-            Answer::Committed(work) => {
-                let result = match contain_committed_work(work).await {
-                    Ok(output) => encode::<O>(output, meta, status).map_err(StaticCommittedError::Codec),
-                    Err(error) => Err(StaticCommittedError::Handler(error)),
-                };
-                Ok(StaticDispatchOutcome::Committed { status, result })
-            }
+            Answer::Committed(committed) => Ok(StaticDispatchOutcome::Committed {
+                status,
+                response: StaticCommittedResponse::erase(committed),
+            }),
             Answer::EventStream(stream) => Ok(StaticDispatchOutcome::EventStream { status, stream }),
         }
     }
 }
 
-async fn contain_committed_work<T>(work: crate::BoxFuture<'static, Result<T, HandlerError>>) -> Result<T, HandlerError> {
-    let mut work = Some(work);
-    core::future::poll_fn(move |context| {
-        let polled = match work.as_mut() {
-            Some(work) => catch_unwind(AssertUnwindSafe(|| work.as_mut().poll(context))),
-            None => return Poll::Ready(Err(HandlerError::internal_error("the handler failed"))),
-        };
-        match polled {
-            Ok(Poll::Ready(result)) => {
-                let completed = work.take();
-                match catch_unwind(AssertUnwindSafe(|| drop(completed))) {
-                    Ok(()) => Poll::Ready(result),
-                    Err(_) => Poll::Ready(Err(HandlerError::internal_error("the handler failed"))),
-                }
-            }
-            Ok(Poll::Pending) => Poll::Pending,
-            Err(_) => {
-                let abandoned = work.take();
-                let _ = catch_unwind(AssertUnwindSafe(|| drop(abandoned)));
-                Poll::Ready(Err(HandlerError::internal_error("the handler failed")))
+fn poll_committed_work<T>(
+    work: &mut Option<crate::BoxFuture<'static, Result<T, HandlerError>>>,
+    context: &mut Context<'_>,
+) -> Poll<Result<T, HandlerError>> {
+    let polled = match work.as_mut() {
+        Some(work) => catch_unwind(AssertUnwindSafe(|| work.as_mut().poll(context))),
+        None => return Poll::Ready(Err(HandlerError::internal_error("the handler failed"))),
+    };
+    match polled {
+        Ok(Poll::Ready(result)) => {
+            let completed = work.take();
+            match catch_unwind(AssertUnwindSafe(|| drop(completed))) {
+                Ok(()) => Poll::Ready(result),
+                Err(_) => Poll::Ready(Err(HandlerError::internal_error("the handler failed"))),
             }
         }
-    })
-    .await
+        Ok(Poll::Pending) => Poll::Pending,
+        Err(_) => {
+            let abandoned = work.take();
+            let _ = catch_unwind(AssertUnwindSafe(|| drop(abandoned)));
+            Poll::Ready(Err(HandlerError::internal_error("the handler failed")))
+        }
+    }
 }
 
 pub(crate) fn decode<O: OperationCodec>(meta: &MetaView<'_>, body: RequestBody) -> Result<Decoded<O>, CodecError> {

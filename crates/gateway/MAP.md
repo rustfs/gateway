@@ -25,6 +25,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `src/payload_header.rs` | Signed payload and trailer declaration parsing | A request head selects the wrong payload mode |
 | `src/render.rs` | One S3 error renderer | Changing refusal bytes or headers |
 | `src/commit.rs` | 200-then-answer/error response shape | Work continues after the head commits |
+| `src/commit_task.rs` | Detached committed-work task ownership | Work stops after its response body is dropped |
 | `src/invariants.rs` | HEAD/bodyless and SSE-C response rules | A forbidden body or key reaches the wire |
 | `src/monomorphic.rs` | Concrete-backend service and type-level operation set | Building or auditing static dispatch |
 | `src/operation_mode.rs` | Dynamic/static adapters for the common pipeline | Auditing how a routed operation reaches its codec and handler |

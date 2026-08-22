@@ -68,7 +68,7 @@ use rustfs_gateway_core::registry::erase_authorized_handler_with_context;
 use rustfs_gateway_core::{
     Answer as CoreAnswer, AuthRequirement, BoxFuture, CodecError, Decision, Denied, EncodedResponse, ErasedCodec, ErasedDecoded,
     ErasedRequest, Handler, HandlerCancellationSource, HandlerContext, HandlerError, MetaView, OperationCodec, OwnedResource,
-    Req, RequestBody, RequestBodyMode, Resp, RouteEntry, TargetKind,
+    Req, RequestBody, RequestBodyMode, Resp, RouteEntry, StaticCommittedResponse, TargetKind,
 };
 use rustfs_gateway_sig::OperationFloor;
 use rustfs_gateway_stream::ByteStream;
@@ -80,9 +80,6 @@ use crate::request_deadline::{HandlerCancellationOutcome, commit_with_progress_d
 /// A `Resp<O>`'s output whose `O` this table has forgotten.
 type ErasedOutput = Box<dyn std::any::Any + Send>;
 
-/// The continuation of a committed response, with `O` forgotten.
-pub(crate) type ErasedCommitWork = BoxFuture<'static, Result<ErasedOutput, HandlerError>>;
-
 /// What a backend answered with, once the operation type is gone.
 ///
 /// The distinction survives erasure on purpose: it is the difference between a response whose head
@@ -92,7 +89,7 @@ pub(crate) enum ErasedAnswer {
     /// The output is here; the response can be encoded whole.
     Settled(ErasedOutput),
     /// The status is committed and the outcome is still running.
-    Committed(ErasedCommitWork),
+    Committed(StaticCommittedResponse),
     /// An already framed event stream, with no generated output document to encode.
     EventStream(ByteStream),
 }
@@ -223,17 +220,11 @@ impl OperationDispatch {
                     let response = response.downcast::<Resp<O>>().map_err(|_| {
                         HandlerError::internal_error("the registered dispatch received another operation's response")
                     })?;
+                    let response = response.map_commit_work(|work| commit_with_progress_deadline(work, commit_progress));
                     let (answer, status) = response.into_parts();
                     let answer = match answer {
                         CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput),
-                        // Bounded here rather than after the erasure, so that the deadline wraps
-                        // the backend's own future and not a layer of `Box<dyn Any>` around it.
-                        CoreAnswer::Committed(work) => {
-                            let work = commit_with_progress_deadline(work, commit_progress);
-                            ErasedAnswer::Committed(Box::pin(
-                                async move { work.await.map(|output| Box::new(output) as ErasedOutput) },
-                            ))
-                        }
+                        CoreAnswer::Committed(committed) => ErasedAnswer::Committed(StaticCommittedResponse::erase(committed)),
                         CoreAnswer::EventStream(stream) => ErasedAnswer::EventStream(stream),
                     };
                     Ok((answer, status))

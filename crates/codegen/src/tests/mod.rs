@@ -23,6 +23,7 @@
 mod boolean_tests;
 mod bounds_tests;
 mod codegen_tests;
+mod deferred_tests;
 mod dto_tests;
 mod empty_value_tests;
 mod error_status_tests;

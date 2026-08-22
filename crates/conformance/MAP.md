@@ -19,6 +19,7 @@ ADRs; this map only selects files.
 | `src/conn/` | Connection state and reusable transport helpers. | A multi-exchange case loses connection state. |
 | `src/sign.rs` | Request signing for corpus inputs. | A signed case sends the wrong request. |
 | `src/fixture.rs` | Deterministic fixture backend used by local runs. | Setup state or a fixture operation behaves wrongly. |
+| `src/fixture/committed.rs` | Late-failure work and frozen response heads for committed fixture operations. | Copy or multipart completion loses its pre-commit metadata. |
 | `src/fixture/handlers_bucket.rs` | Bucket Handler entries for the deterministic fixture. | A bucket operation stops reaching existing fixture behavior. |
 | `src/token.rs` | The continuation-token codec: an HMAC-authenticated page position bound to its listing. | A cursor is honoured that this service did not issue, or a real one is refused. |
 | `src/fixture/pagination_properties.rs` | Generated set semantics for the fixture's paging. | A resumed page skips or repeats an entry. |

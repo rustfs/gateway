@@ -76,11 +76,6 @@
 //! request. So the head is assembled once to be accepted and read, and again to be sent. The two
 //! are built from the same description, so they cannot disagree.
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-
 use rustfs_gateway::sig::{
     AmzDate, LookupBudget, PayloadMode, SessionToken, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope,
     Tamper, TamperComponent,
@@ -93,8 +88,12 @@ use rustfs_gateway::{
     RequestContext, S3Service, ServiceBuilder, ServiceConfig, SessionBinding, SigV4Authenticator, SnapshotId, StaticCredentials,
     VirtualHostStyle, WireRequest, allow_when, collect, dto, fn_credential_provider, op_layer, policy_from,
 };
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 mod sigv2;
-use crate::exec::block_on;
+use crate::exec::ServiceRuntime;
 use crate::fixture::{Fixture, StoredObject, Stub};
 use crate::interpolate::Captures;
 use crate::observation::{
@@ -1336,7 +1335,8 @@ impl Sut for InProcess {
         let (body, progress) = ObservedBody::new(wire.frames.iter().map(|frame| bytes::Bytes::from(frame.clone())));
         let request = assemble_request(&wire.method, &target, &headers, body)?;
         let started = std::time::Instant::now();
-        let response = block_on(service.call(request));
+        let runtime = ServiceRuntime::new().map_err(|error| SutError::Environment(format!("in-process runtime: {error}")))?;
+        let response = runtime.block_on(service.call(request));
         // The head is kept before the body is drained, so that a body which fails halfway can still
         // be reported *as a response that failed halfway* rather than as an environment problem. A
         // drain that consumed the head first would leave the transport with nothing to report but
@@ -1348,7 +1348,7 @@ impl Sut for InProcess {
             .iter()
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect();
-        let drained = block_on(collect(http::Response::from_parts(parts, payload)));
+        let drained = runtime.block_on(collect(http::Response::from_parts(parts, payload)));
         let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
 
         let render = |pairs: Vec<(http::HeaderName, http::HeaderValue)>| -> Vec<(String, String)> {

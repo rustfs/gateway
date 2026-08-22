@@ -327,3 +327,21 @@ impl OperationCodec for dto::CopyObject {
         Ok(response)
     }
 }
+
+impl crate::handler::deferred_sealed::Sealed for dto::CopyObject {}
+
+impl crate::handler::DeferredOperation for dto::CopyObject {
+    const RESPONSE_HEADERS: &'static [&'static str] = &[
+        "x-amz-copy-source-version-id",
+        "x-amz-expiration",
+        "x-amz-request-charged",
+        "x-amz-server-side-encryption",
+        "x-amz-server-side-encryption-aws-kms-key-id",
+        "x-amz-server-side-encryption-bucket-key-enabled",
+        "x-amz-server-side-encryption-context",
+        "x-amz-server-side-encryption-customer-algorithm",
+        "x-amz-server-side-encryption-customer-key-md5",
+        "x-amz-version-id",
+    ];
+    const RESPONSE_HEADER_PREFIXES: &'static [&'static str] = &[];
+}

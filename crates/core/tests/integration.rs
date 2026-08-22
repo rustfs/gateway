@@ -35,6 +35,9 @@ mod codec_binding;
 #[path = "compile_fail.rs"]
 mod compile_fail;
 
+#[path = "committed_head.rs"]
+mod committed_head;
+
 #[path = "configuration_error_declarations.rs"]
 mod configuration_error_declarations;
 

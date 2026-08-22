@@ -129,12 +129,16 @@ use rustfs_gateway::{
     validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
+mod committed;
 mod handlers_bucket;
 mod handlers_object;
 #[cfg(test)]
 mod list_allocations;
 #[cfg(test)]
 mod pagination_properties;
+
+use committed::{ArmedFault, COMPLETE_MULTIPART_UPLOAD, COPY_OBJECT, CommittedFault, head as committed_head};
+pub use committed::{COMMITTED_OPERATIONS, UnreportableFault};
 
 /// The canonical user id every listing reports as the owner.
 ///
@@ -505,94 +509,6 @@ pub struct Fixture {
     token_secret: crate::token::TokenSecret,
 }
 
-/// A failure a case declared for the point *after* an operation has committed its response head.
-///
-/// Every other way a case can make an operation fail describes state that was already true when the
-/// request arrived — a bucket that is not there, a key that is not there, a precondition that does
-/// not hold. All of those are discovered while a status is still choosable, so all of them are
-/// refused with their own status, which is what `c-copy-0026`, `c-copy-0034` and the ten
-/// completions `crates/conformance/tests/multipart_family.rs::REFUSED_BEFORE_COMMIT` names pin.
-/// None of them can reach the state this type exists to produce: the head is on
-/// the wire, the status is spent, and the failure has nowhere to go but the body.
-///
-/// Moving one of those checks below the commit boundary instead would have produced the same wire
-/// shape and destroyed the cases that pin the boundary, which is exactly the trade
-/// `crates/conformance/tests/copy_family.rs` recorded as the reason `c-copy-0038` stayed red.
-#[derive(Debug, Clone)]
-struct CommittedFault {
-    /// The operation whose work fails. A case with several exchanges fails one of them, not all.
-    operation: String,
-    /// What the work does once the head is out.
-    effect: CommittedFaultEffect,
-}
-
-/// The two ways a committed continuation can go wrong, which are not one thing with a parameter.
-/// One *reports*: it has an answer and no status to put it in. The other has no answer at all, so
-/// only a bound outside it can end the response. Modelling the second as the first with a special
-/// code would make the case that asserts the bound satisfiable by a backend that simply failed fast.
-#[derive(Debug, Clone)]
-enum CommittedFaultEffect {
-    /// The work reports this code, inside the body, under the status already sent.
-    Reports(ErrorCode),
-    /// The work never resolves. Nothing below the framework can end the response.
-    StopsMakingProgress,
-}
-
-/// What an armed [`CommittedFault`] does to one continuation. Returned to the handler rather than
-/// applied for it: the lookup happens before the head is committed and the effect after, and a
-/// helper doing both would hide the boundary being asserted.
-#[derive(Debug)]
-pub(crate) enum ArmedFault {
-    /// Fail the continuation with this refusal.
-    Reports(HandlerError),
-    /// Never resolve.
-    StopsMakingProgress,
-}
-
-/// The operation names this fixture commits a head for, and can therefore report a fault from.
-///
-/// One home, because a fault armed against a name no handler reads is armed against nothing: the
-/// lookup answers `None`, the case runs as though it had declared no fault, and it reports whatever
-/// it happened to get. The list is not merely written down — every name in it is driven through its
-/// own handler by `every_operation_this_fixture_commits_for_reports_the_fault_armed_against_it` in
-/// this file's tests, so a name added here without a call site is a red test rather than a silent
-/// skip.
-///
-/// Shorter than the model's `ERROR_AFTER_200`, which also carries `UploadPartCopy`: this fixture
-/// answers that one without committing anything, so there is no point in it at which a fault could
-/// arrive. `crate::inprocess` refuses a case naming it rather than arming nothing.
-pub const COMMITTED_OPERATIONS: &[&str] = &[COMPLETE_MULTIPART_UPLOAD, COPY_OBJECT];
-
-/// The one spelling of `CompleteMultipartUpload` that arms and the one that reports are the same.
-const COMPLETE_MULTIPART_UPLOAD: &str = "CompleteMultipartUpload";
-/// The one spelling of `CopyObject` that arms and the one that reports are the same.
-const COPY_OBJECT: &str = "CopyObject";
-
-/// A fault was armed against an operation this fixture does not commit a head for.
-///
-/// Carries the name so the refusal can say which one; the set it was measured against is
-/// [`COMMITTED_OPERATIONS`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnreportableFault {
-    operation: String,
-}
-
-impl UnreportableFault {
-    /// The operation the case named.
-    #[must_use]
-    pub fn operation(&self) -> &str {
-        &self.operation
-    }
-}
-
-/// What a committed operation reports when a case armed a fault against it.
-///
-/// Deliberately not the message AWS writes for the code: this failure was arranged by the case, and
-/// a message claiming otherwise would put the fixture's arrangement on the wire disguised as the
-/// service's own diagnosis. No case asserts it — they assert the code, which is the part a client
-/// branches on.
-const COMMITTED_FAULT_MESSAGE: &str = "The operation failed after its response head had been committed.";
-
 impl Fixture {
     /// An empty fixture whose clock reads `now`.
     #[must_use]
@@ -601,73 +517,6 @@ impl Fixture {
             now,
             home_region: HOME_REGION.to_owned(),
             ..Fixture::default()
-        }
-    }
-
-    /// Arms the failure `[setup.fault]` declared, so that `operation` fails after its head is out.
-    ///
-    /// One fault per case: a case that armed two would be describing two operations failing in one
-    /// exchange, which no request can observe.
-    ///
-    /// # Errors
-    ///
-    /// [`UnreportableFault`] when `operation` is not one this fixture commits a head for. Refusing
-    /// here is the whole point of the call being fallible: arming a fault against a handler that
-    /// never reads one leaves the case running with nothing arranged, and a case that reports on a
-    /// scenario that did not happen is worse than one that does not run.
-    pub fn arm_committed_fault(&mut self, operation: &str, code: ErrorCode) -> Result<(), UnreportableFault> {
-        self.arm(operation, CommittedFaultEffect::Reports(code))
-    }
-
-    /// Arms the stall `[setup.fault] at = "no_progress_after_commit"` declared: `operation` commits
-    /// its head and its continuation then never resolves. The backend a bound on progress has to be
-    /// measured against — every other way this fixture can fail an operation eventually answers
-    /// something, and a response that answers is one nothing had to end.
-    ///
-    /// # Errors
-    ///
-    /// [`UnreportableFault`], on the same list and for the same reason as
-    /// [`Fixture::arm_committed_fault`].
-    pub fn arm_committed_stall(&mut self, operation: &str) -> Result<(), UnreportableFault> {
-        self.arm(operation, CommittedFaultEffect::StopsMakingProgress)
-    }
-
-    /// The one place the operation name is measured against [`COMMITTED_OPERATIONS`].
-    fn arm(&mut self, operation: &str, effect: CommittedFaultEffect) -> Result<(), UnreportableFault> {
-        if !COMMITTED_OPERATIONS.contains(&operation) {
-            return Err(UnreportableFault {
-                operation: operation.to_owned(),
-            });
-        }
-        self.committed_fault = Some(CommittedFault {
-            operation: operation.to_owned(),
-            effect,
-        });
-        Ok(())
-    }
-
-    /// The armed failure for `operation`, as the refusal its continuation returns.
-    ///
-    /// Read *before* the head is committed and reported *after*, which is the whole distinction:
-    /// the lookup is a fixture detail, and the moment the client learns of it is not.
-    ///
-    /// `subject` is the object the operation was working on. A handful of codes — `NoSuchKey` among
-    /// them — are refused by [`rustfs_gateway::ErrorContext::ordinary`] unless they carry the fact
-    /// they are about, because a context-free one cannot be masked against a caller who is not
-    /// allowed to learn the object exists. A fault naming one and handing over no subject does not
-    /// fail loudly: it resolves to `InternalError`, and the case reads as a defect in the
-    /// committed-response path rather than as a fault that was armed wrong.
-    #[must_use]
-    fn committed_fault(&self, operation: &str, subject: &str) -> Option<ArmedFault> {
-        let fault = self.committed_fault.as_ref().filter(|fault| fault.operation == operation)?;
-        match &fault.effect {
-            CommittedFaultEffect::StopsMakingProgress => Some(ArmedFault::StopsMakingProgress),
-            CommittedFaultEffect::Reports(code) if *code == ErrorCode::NO_SUCH_KEY => {
-                Some(ArmedFault::Reports(no_such_key(subject)))
-            }
-            CommittedFaultEffect::Reports(code) => {
-                Some(ArmedFault::Reports(HandlerError::new(code.clone(), COMMITTED_FAULT_MESSAGE)))
-            }
         }
     }
 
@@ -1056,17 +905,8 @@ impl Fixture {
     /// copy *wrote*, and a caller that re-read the newest version to find it would be answering
     /// from state rather than from the write it just performed.
     pub fn put_object(&mut self, bucket: &str, key: &str, object: StoredObject) -> String {
-        let last_modified = object.last_modified;
         let version = self.mint_version(bucket);
-        let versions = self.objects.entry((bucket.to_owned(), key.to_owned())).or_default();
-        if version == UNVERSIONED {
-            versions.clear();
-        }
-        versions.push(StoredVersion {
-            version_id: version.clone(),
-            object: Some(object),
-            last_modified,
-        });
+        self.put_object_with_version(bucket, key, object, version.clone());
         version
     }
 
@@ -3075,6 +2915,14 @@ impl Stub {
         // the one thing a copy can still discover after the head is out: the source resolved, the
         // conditions held, and the bytes were not there when they came to be read.
         let fault = fixture.committed_fault(COPY_OBJECT, source.key.as_str());
+        let destination_version = fixture.mint_version(input.bucket.as_str());
+        let head = committed_head::<dto::CopyObject>(&[
+            ("x-amz-copy-source-version-id", source_version.as_deref()),
+            (
+                "x-amz-version-id",
+                (destination_version != UNVERSIONED).then_some(destination_version.as_str()),
+            ),
+        ])?;
         // The guard is released before the head goes out: the continuation is `'static` and takes
         // the state back on its own, so nothing holds the fixture across the commit.
         drop(fixture);
@@ -3086,31 +2934,33 @@ impl Stub {
         // The head is committed here. Everything below runs with the status line already on the
         // wire, and the only thing it can still report is a failure with no status of its own —
         // which is all a `[setup.fault]` arranged for this operation is able to be.
-        Ok(Resp::commit(Box::pin(async move {
-            match fault {
-                Some(ArmedFault::Reports(error)) => return Err(error),
-                Some(ArmedFault::StopsMakingProgress) => core::future::pending::<()>().await,
-                None => {}
-            }
-            let etag = object.etag.clone();
-            let mut fixture = state
-                .lock()
-                .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
-            let written = fixture.put_object(bucket.as_str(), key.as_str(), object);
-            drop(fixture);
-            let destination_version = (written != UNVERSIONED).then_some(written);
+        Ok(Resp::commit(
+            head,
+            Box::pin(async move {
+                match fault {
+                    Some(ArmedFault::Reports(error)) => return Err(error),
+                    Some(ArmedFault::StopsMakingProgress) => core::future::pending::<()>().await,
+                    None => {}
+                }
+                let etag = object.etag.clone();
+                let mut fixture = state
+                    .lock()
+                    .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
+                fixture.put_object_with_version(bucket.as_str(), key.as_str(), object, destination_version.clone());
+                drop(fixture);
 
-            Ok(dto::CopyObjectOutput {
-                e_tag: entity_tag(&etag)?,
-                last_modified: Some(Timestamp::from_secs(now)),
-                // Two headers, never one value written into both: one names the version the copy
-                // read and the other the version it created, and a client told they are the same
-                // records the source as its new object.
-                copy_source_version_id: source_version,
-                version_id: destination_version,
-                ..dto::CopyObjectOutput::default()
-            })
-        })))
+                Ok(dto::CopyObjectOutput {
+                    e_tag: entity_tag(&etag)?,
+                    last_modified: Some(Timestamp::from_secs(now)),
+                    // Two headers, never one value written into both: one names the version the copy
+                    // read and the other the version it created, and a client told they are the same
+                    // records the source as its new object.
+                    copy_source_version_id: source_version,
+                    version_id: (destination_version != UNVERSIONED).then_some(destination_version),
+                    ..dto::CopyObjectOutput::default()
+                })
+            }),
+        ))
     }
 
     /// One part of a multipart upload, copied out of an object rather than sent.
@@ -4463,6 +4313,15 @@ impl Stub {
         // status line is spent, and every check above still runs first — which is why arming one
         // cannot turn any of the completions `REFUSED_BEFORE_COMMIT` names into a `200`.
         let fault = fixture.committed_fault(COMPLETE_MULTIPART_UPLOAD, upload.key.as_str());
+        let destination_version = fixture.mint_version(&upload.bucket);
+        let encryption_header = upload.encryption.as_ref().map(ToString::to_string);
+        let head = committed_head::<dto::CompleteMultipartUpload>(&[
+            (
+                "x-amz-version-id",
+                (destination_version != UNVERSIONED).then_some(destination_version.as_str()),
+            ),
+            ("x-amz-server-side-encryption", encryption_header.as_deref()),
+        ])?;
         // The guard is released before the head goes out: the continuation is `'static` and takes
         // the state back on its own, so nothing holds the fixture across the commit.
         drop(fixture);
@@ -4475,88 +4334,91 @@ impl Stub {
 
         // The head is committed here. Everything below runs with the status line already on the
         // wire, and the only thing it can still report is a failure with no status of its own.
-        Ok(Resp::commit(Box::pin(async move {
-            match fault {
-                Some(ArmedFault::Reports(error)) => return Err(error),
-                // Nothing below runs: what ends this response is outside this future entirely.
-                Some(ArmedFault::StopsMakingProgress) => core::future::pending::<()>().await,
-                None => {}
-            }
-            let mut assembled = Vec::new();
-            let mut digests = Vec::new();
-            let mut part_checksums = Vec::new();
-            for stored in &ordered_parts {
-                digests.push(crate::md5::digest(&stored.body));
-                if let Some(checksum) = upload.checksum.as_ref() {
-                    part_checksums.push((checksum_of(checksum, &stored.body)?, stored.body.len() as u64));
+        Ok(Resp::commit(
+            head,
+            Box::pin(async move {
+                match fault {
+                    Some(ArmedFault::Reports(error)) => return Err(error),
+                    // Nothing below runs: what ends this response is outside this future entirely.
+                    Some(ArmedFault::StopsMakingProgress) => core::future::pending::<()>().await,
+                    None => {}
                 }
-                assembled.extend_from_slice(&stored.body);
-            }
-            // The two ways S3 rolls part checksums into one, and they are not interchangeable: a
-            // composite is a digest *of the digests* and carries `-N`, while a full-object checksum
-            // is the digest the whole object would have had if it had arrived in one request.
-            // Emitting one where the upload asked for the other gives a client a value that never
-            // verifies.
-            let checksum_spec = match upload.checksum.as_ref() {
-                None => None,
-                Some(checksum) if checksum.kind == dto::ChecksumType::FULL_OBJECT => Some(
-                    ChecksumSpec::combine_full_object(&part_checksums)
-                        .map_err(|_| HandlerError::internal_error("the part checksums do not combine"))?,
-                ),
-                Some(_) => {
-                    let parts: Vec<ChecksumSpec> = part_checksums.iter().map(|(spec, _)| *spec).collect();
-                    Some(
-                        ChecksumSpec::composite_of(&parts)
-                            .map_err(|_| HandlerError::internal_error("the part checksums have no composite"))?,
-                    )
+                let mut assembled = Vec::new();
+                let mut digests = Vec::new();
+                let mut part_checksums = Vec::new();
+                for stored in &ordered_parts {
+                    digests.push(crate::md5::digest(&stored.body));
+                    if let Some(checksum) = upload.checksum.as_ref() {
+                        part_checksums.push((checksum_of(checksum, &stored.body)?, stored.body.len() as u64));
+                    }
+                    assembled.extend_from_slice(&stored.body);
                 }
-            };
-            let checksum_type = upload.checksum.as_ref().map(|checksum| checksum.kind.clone());
-            // The entity tag of a multipart object is not the digest of its bytes. It is the digest
-            // of the concatenated part digests with the part count after a hyphen, and a client that
-            // reads the plain MD5 back would compare it against the composite and conclude the
-            // object is corrupt. `ETag::from_part_digests` is the framework's own derivation of that
-            // rule, so the two spellings cannot drift.
-            let composite = ETag::from_part_digests(&digests)
-                .map_err(|_| HandlerError::internal_error("a part digest set has no entity tag"))?;
-            let mut fixture = state
-                .lock()
-                .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
-            let now = fixture.now;
-            let object = StoredObject {
-                body: assembled,
-                etag: composite.opaque_tag().to_owned(),
-                last_modified: now,
-                // The part boundaries, recorded here because this is the only moment they exist:
-                // the upload is removed two lines below, and after that the object is the one
-                // witness to how it was assembled. Without them a `partNumber` read has nothing
-                // to resolve against, and `c-range-0007` cannot tell a server that serves part 2
-                // from one that serves the first sixteen bytes of part 1.
-                part_lengths: ordered_parts.iter().map(|part| part.body.len() as u64).collect(),
-                ..upload.attributes.clone()
-            };
-            let written = fixture.put_object(&upload.bucket, &upload.key, object);
-            fixture.uploads.remove(&upload_id);
-            drop(fixture);
-            Ok(dto::CompleteMultipartUploadOutput {
-                bucket: Some(bucket),
-                key: Some(key),
-                location: Some(location),
-                e_tag: Some(composite),
-                version_id: (written != UNVERSIONED).then_some(written),
-                // The body binds one element per algorithm rather than the packed spec a header
-                // binds, so the rendering is explicit here. CRC32 is the only algorithm this fixture
-                // computes, and `upload_checksum` refuses the rest outright rather than letting one
-                // fall through to an empty element.
-                checksum_crc32: checksum_spec.as_ref().map(|spec| spec.render_base64().to_owned()),
-                checksum_type,
-                // Decided at initiation, reported here. That gap is the whole of what these cases
-                // measure: the completion's head is flushed before the body is assembled, so a value
-                // that is only looked up afterwards can never become a header.
-                server_side_encryption: upload.encryption.clone(),
-                ..dto::CompleteMultipartUploadOutput::default()
-            })
-        })))
+                // The two ways S3 rolls part checksums into one, and they are not interchangeable: a
+                // composite is a digest *of the digests* and carries `-N`, while a full-object checksum
+                // is the digest the whole object would have had if it had arrived in one request.
+                // Emitting one where the upload asked for the other gives a client a value that never
+                // verifies.
+                let checksum_spec = match upload.checksum.as_ref() {
+                    None => None,
+                    Some(checksum) if checksum.kind == dto::ChecksumType::FULL_OBJECT => Some(
+                        ChecksumSpec::combine_full_object(&part_checksums)
+                            .map_err(|_| HandlerError::internal_error("the part checksums do not combine"))?,
+                    ),
+                    Some(_) => {
+                        let parts: Vec<ChecksumSpec> = part_checksums.iter().map(|(spec, _)| *spec).collect();
+                        Some(
+                            ChecksumSpec::composite_of(&parts)
+                                .map_err(|_| HandlerError::internal_error("the part checksums have no composite"))?,
+                        )
+                    }
+                };
+                let checksum_type = upload.checksum.as_ref().map(|checksum| checksum.kind.clone());
+                // The entity tag of a multipart object is not the digest of its bytes. It is the digest
+                // of the concatenated part digests with the part count after a hyphen, and a client that
+                // reads the plain MD5 back would compare it against the composite and conclude the
+                // object is corrupt. `ETag::from_part_digests` is the framework's own derivation of that
+                // rule, so the two spellings cannot drift.
+                let composite = ETag::from_part_digests(&digests)
+                    .map_err(|_| HandlerError::internal_error("a part digest set has no entity tag"))?;
+                let mut fixture = state
+                    .lock()
+                    .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
+                let now = fixture.now;
+                let object = StoredObject {
+                    body: assembled,
+                    etag: composite.opaque_tag().to_owned(),
+                    last_modified: now,
+                    // The part boundaries, recorded here because this is the only moment they exist:
+                    // the upload is removed two lines below, and after that the object is the one
+                    // witness to how it was assembled. Without them a `partNumber` read has nothing
+                    // to resolve against, and `c-range-0007` cannot tell a server that serves part 2
+                    // from one that serves the first sixteen bytes of part 1.
+                    part_lengths: ordered_parts.iter().map(|part| part.body.len() as u64).collect(),
+                    ..upload.attributes.clone()
+                };
+                fixture.put_object_with_version(&upload.bucket, &upload.key, object, destination_version.clone());
+                fixture.uploads.remove(&upload_id);
+                drop(fixture);
+                Ok(dto::CompleteMultipartUploadOutput {
+                    bucket: Some(bucket),
+                    key: Some(key),
+                    location: Some(location),
+                    e_tag: Some(composite),
+                    version_id: (destination_version != UNVERSIONED).then_some(destination_version),
+                    // The body binds one element per algorithm rather than the packed spec a header
+                    // binds, so the rendering is explicit here. CRC32 is the only algorithm this fixture
+                    // computes, and `upload_checksum` refuses the rest outright rather than letting one
+                    // fall through to an empty element.
+                    checksum_crc32: checksum_spec.as_ref().map(|spec| spec.render_base64().to_owned()),
+                    checksum_type,
+                    // Decided at initiation, reported here. That gap is the whole of what these cases
+                    // measure: the completion's head is flushed before the body is assembled, so a value
+                    // that is only looked up afterwards can never become a header.
+                    server_side_encryption: upload.encryption.clone(),
+                    ..dto::CompleteMultipartUploadOutput::default()
+                })
+            }),
+        ))
     }
 
     fn list_multipart_uploads(&self, input: &dto::ListMultipartUploadsInput) -> HandlerResult<dto::ListMultipartUploads> {
@@ -5209,7 +5071,7 @@ mod tests {
     fn refusal_after_commit<O: rustfs_gateway::Operation>(resp: Resp<O>) -> Option<HandlerError> {
         let (answer, _status) = resp.into_parts();
         match answer {
-            rustfs_gateway::Answer::Committed(work) => crate::exec::block_on(work).err(),
+            rustfs_gateway::Answer::Committed(committed) => crate::exec::block_on(committed.into_parts().1).err(),
             _ => panic!("{} did not commit its head", O::NAME),
         }
     }
@@ -5293,9 +5155,10 @@ mod tests {
 
     fn stalls_for_ever<O: rustfs_gateway::Operation>(resp: Resp<O>) -> bool {
         let (answer, _status) = resp.into_parts();
-        let rustfs_gateway::Answer::Committed(mut work) = answer else {
+        let rustfs_gateway::Answer::Committed(committed) = answer else {
             panic!("{} did not commit its head", O::NAME);
         };
+        let (_, mut work) = committed.into_parts();
         let mut context = core::task::Context::from_waker(core::task::Waker::noop());
         work.as_mut().poll(&mut context).is_pending()
     }
