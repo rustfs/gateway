@@ -218,6 +218,10 @@ impl VerifiedBodyProgress {
 }
 
 /// The opaque refusal returned by a streaming body quota.
+///
+/// # Security
+///
+/// Default construction is fail-closed: it represents refusal and carries no request data.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BodyQuotaExceeded(());
 
