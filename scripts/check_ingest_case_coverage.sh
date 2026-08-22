@@ -60,11 +60,11 @@ cases=(
     'c-ing-0042|negative|bound|crates/http/tests/ingest_framing.rs::c_ing_0042_a_decoded_length_larger_than_the_wire_length_is_refused'
     'c-ing-0043|negative|bound|crates/http/tests/ingest_chunk_rules.rs::c_ing_0043_a_truncated_stream_fails_and_never_reports_end_of_stream;crates/http/tests/ingest_verify.rs::c_ing_0043_a_truncated_signed_body_reports_what_had_verified'
     'c-ing-0044|negative|bound|crates/gateway/src/chunked.rs::c_ing_0044_a_gzip_content_encoding_is_delivered_without_being_inflated;crates/gateway/src/gate_tests.rs::c_ing_0044_c_lim_0027_gzip_wire_bytes_set_the_body_ceiling'
-    'c-ing-0060|negative|blocked|rustfs/backlog#1699::a client reset three gigabytes into an upload must cancel the handler so it can release the quota and drop the partial part; the only HandlerCancellation variant is Deadline, and the cross-crate cancellation contract this needs is P3-05 work behind a merged ADR'
-    'c-ing-0061|negative|blocked|rustfs/backlog#1699::the back-pressure half holds by construction because the pull model has no read-ahead task, but the between-reads idle deadline the case names does not exist; a handler that stops consuming for forty seconds is retired by nothing today'
-    'c-ing-0062|negative|blocked|rustfs/backlog#1699::no minimum-throughput floor exists, so a peer feeding one byte per second is refused by no rule; the resident-bytes and healthy-peer-p99 halves also need a harness that observes memory rather than the process resident size a blind sampling window already misreported once'
-    'c-ing-0063|negative|partial|crates/http/tests/ingest_perf_gates.rs::c_ing_0063_the_window_stays_bounded_by_the_chunk_ceiling;crates/http/tests/ingest_perf_gates.rs::c_ing_0063_the_window_is_not_allocated_up_front;crates/gateway/tests/chunked_allocations.rs::c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body@@rustfs/backlog#1691::the per-connection bound now holds end to end — rustfs/gateway#229 stopped the assembly collecting the whole wire body beside the window, and the peak heap one upload holds is measured at two body sizes — but the case says 512 concurrent 5 GiB uploads, and nothing here observes more than one connection at a time; the total-RSS half also needs an instrument that is not the process resident size a blind sampling window already misreported once'
-    'c-ing-0064|negative|blocked|rustfs/backlog#1699::a Governor refusal that arrives mid-body must propagate as a cancellation and close the socket without draining; the Governor runs before the body is read, so no mid-upload refusal path exists to observe'
+    'c-ing-0060|negative|bound|crates/gateway/tests/connection_teardown.rs::c_wire_0060_c_ing_0060_c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit'
+    'c-ing-0061|negative|blocked|rustfs/gateway#331::the wire reader has a between-frame idle deadline, but SealedBody collects the complete request before dispatch, so a handler cannot stop consuming a stream and exercise end-to-end back-pressure'
+    'c-ing-0062|negative|blocked|rustfs/gateway#332::no minimum-throughput floor exists, so a peer feeding one byte per second is refused by no rule; the resident-bytes and healthy-peer-p99 halves also need a harness with a measurable control'
+    'c-ing-0063|negative|partial|crates/http/tests/ingest_perf_gates.rs::c_ing_0063_the_window_stays_bounded_by_the_chunk_ceiling;crates/http/tests/ingest_perf_gates.rs::c_ing_0063_the_window_is_not_allocated_up_front;crates/gateway/tests/chunked_allocations.rs::c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body@@rustfs/gateway#331::rustfs/gateway#229 removed the second whole-body copy and the pipeline window itself is bounded, but ChunkIngest still collects the decoded body before dispatch; no test observes bounded ownership across concurrent large logical uploads'
+    'c-ing-0064|negative|blocked|rustfs/gateway#333::a Governor refusal that arrives mid-body must propagate as cancellation and close the socket without draining; Governor runs before the body is read, so no mid-upload refusal path exists until the verified streaming-body contract lands'
 )
 
 # The ids whose evidence must be plural. Each names two claims that have never implied one
@@ -74,7 +74,7 @@ plural_evidence=('c-ing-0002' 'c-ing-0003' 'c-ing-0005' 'c-ing-0020')
 
 # Editing this set is the only way a case becomes blocked, so a case cannot quietly stop being
 # evidence-backed. Each id here must also carry an owning issue in the table above.
-blocked_ids=('c-ing-0060' 'c-ing-0061' 'c-ing-0062' 'c-ing-0064')
+blocked_ids=('c-ing-0061' 'c-ing-0062' 'c-ing-0064')
 
 # The same, for rows that prove part of a case. A partial row is checked as strictly as a bound
 # one on the half it claims.
@@ -123,6 +123,7 @@ REFUSAL_TOKENS = (
     "ModeConfusion",
     "WireReject",
     "LimitKind",
+    "HandlerCancellation::RequestAborted",
     "reject_of",
     "refuse(",
     "is_none()",
@@ -271,9 +272,9 @@ def function_span(code, name):
 
 
 def name_covers(function, identifier):
-    """A `c-ing-0030` row may only point at `c_ing_0030_*` or a `c_ing_0029_to_0031_*` range."""
+    """A row may point at its exact `c_ing_0030_` segment or a leading range."""
     number = int(identifier.rsplit("-", 1)[1])
-    if function.startswith(f"c_ing_{number:04d}_"):
+    if re.search(rf"(?:^|_)c_ing_{number:04d}_", function):
         return True
     span = re.match(r"^c_ing_(\d{4})_to_(\d{4})_", function)
     return span is not None and int(span.group(1)) <= number <= int(span.group(2))

@@ -347,10 +347,10 @@ async fn an_acknowledged_handler_deadline_keeps_the_observed_socket_reusable() {
     );
 }
 
-/// `c-lim-0060`. Negative — resetting a request while its one global request permit is held
+/// `c-ing-0060`, `c-wire-0060`, and `c-lim-0060`. Negative — resetting a request while its one global request permit is held
 /// signals the handler, lets it finish rollback, and releases the permit for another connection.
 #[tokio::test]
-async fn c_wire_0060_c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit() {
+async fn c_wire_0060_c_ing_0060_c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit() {
     let backend = Arc::new(ResetBackend::new());
     let service = wired()
         .register::<Ping, _>(Arc::clone(&backend))
