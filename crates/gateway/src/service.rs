@@ -146,7 +146,7 @@ use crate::ext::{
     HostResolver, InputAuthzRequest, Observer, PolicySnapshot, PolicySource, PolicyTimeout, RequestContext, RequestEvent,
     ResolvedHost, ResponseView, RoutedView, ServerExtensions, SigV2Authentication, StageFilter, WireHead, emit_safely,
 };
-use crate::gate::{Authenticated, BodyCeilings, BodyDigestObligation, BodyTimeouts, SealedBody};
+use crate::gate::{Authenticated, BodyCeilings, BodyDigestObligation, SealedBody};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::payload_header::{payload_mode, presigned_body_obligation};
@@ -529,6 +529,7 @@ impl S3Service {
             // crate has no codec for. Answered rather than panicked.
             return outcome.refuse_handler(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, NOT_REGISTERED_MESSAGE));
         };
+        let request_body_mode = M::request_body_mode(&op);
         let declared_length = wire.framing().declared_length();
 
         // The body is taken out before anything borrows the head, so the head can be read across
@@ -893,16 +894,24 @@ impl S3Service {
                 None => None,
             };
 
-            let ceilings = BodyCeilings::of(operation, state.config.config().max_buffered_body_bytes());
+            let ceilings = BodyCeilings::for_mode(request_body_mode, operation, state.config.config().max_buffered_body_bytes());
+            let body_deadlines = state.config.config().request_body_deadlines();
             // The accepted head, not the pre-filter copy: it is the map the codec binds from.
             let integrity = crate::integrity::resolve(&body_wire.headers(), body_wire.method(), operation)?;
-            let body = sealed
-                .read(&authenticated, ceilings, BodyTimeouts::S3, ingest, body_digest, integrity)
+            let (body, body_monitor) = sealed
+                .handoff(
+                    &authenticated,
+                    (request_body_mode, ceilings),
+                    body_deadlines,
+                    ingest,
+                    body_digest,
+                    integrity,
+                )
                 .await?;
             Ok((
                 ReadForDecode {
                     policy: state.policy,
-                    config: state.config.body_read(),
+                    config: state.config.body_read().with_body_monitor(body_monitor),
                 },
                 body,
             ))

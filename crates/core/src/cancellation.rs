@@ -35,17 +35,21 @@ pub enum HandlerCancellation {
     Deadline,
     /// The transport stopped waiting for this request, for example after a client reset.
     RequestAborted,
+    /// The handler stopped polling its still-incomplete request body.
+    BodyIdle,
 }
 
 impl HandlerCancellation {
     const NONE: u8 = 0;
     const DEADLINE: u8 = 1;
     const REQUEST_ABORTED: u8 = 2;
+    const BODY_IDLE: u8 = 3;
 
     const fn code(self) -> u8 {
         match self {
             Self::Deadline => Self::DEADLINE,
             Self::RequestAborted => Self::REQUEST_ABORTED,
+            Self::BodyIdle => Self::BODY_IDLE,
         }
     }
 
@@ -53,6 +57,7 @@ impl HandlerCancellation {
         match code {
             Self::DEADLINE => Some(Self::Deadline),
             Self::REQUEST_ABORTED => Some(Self::RequestAborted),
+            Self::BODY_IDLE => Some(Self::BodyIdle),
             _ => None,
         }
     }
@@ -288,5 +293,13 @@ mod tests {
         assert!(!source.cancel(HandlerCancellation::Deadline));
         assert!(context.is_cancelled());
         assert_eq!(context.cancellation_reason(), Some(HandlerCancellation::Deadline));
+    }
+
+    /// Negative — request-body starvation is distinguishable from total handler execution time.
+    #[test]
+    fn body_idle_has_its_own_handler_cancellation_reason() {
+        let (source, context) = HandlerCancellationSource::pair();
+        assert!(source.cancel(HandlerCancellation::BodyIdle));
+        assert_eq!(context.cancellation_reason(), Some(HandlerCancellation::BodyIdle));
     }
 }

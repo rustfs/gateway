@@ -23,7 +23,6 @@
 //! Downstream: Cargo's test harness.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
-
 use core::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -130,6 +129,7 @@ fn a_neighbouring_operation_name_does_not_inherit_the_cap() {
 const fn roomy() -> BodyCeilings {
     BodyCeilings {
         buffered: 1 << 20,
+        whole_body: true,
         declared: None,
     }
 }
@@ -183,6 +183,7 @@ async fn an_oversized_declared_body_is_refused_without_being_read() {
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"x")]);
     let ceilings = BodyCeilings {
         buffered: 1024,
+        whole_body: true,
         declared: None,
     };
     let error = SealedBody::seal(Some(body), Some(1 << 30))
@@ -202,6 +203,7 @@ async fn an_undeclared_oversized_body_is_still_refused() {
     let (body, _) = crate::probe::ObservedBody::new([Bytes::from(vec![0_u8; 4096])]);
     let ceilings = BodyCeilings {
         buffered: 1024,
+        whole_body: true,
         declared: None,
     };
     let error = SealedBody::seal(Some(body), None)
@@ -253,6 +255,7 @@ async fn c_ing_0044_c_lim_0027_gzip_wire_bytes_set_the_body_ceiling() {
             &proof,
             BodyCeilings {
                 buffered: RAW_BYTES,
+                whole_body: true,
                 declared: None,
             },
             BodyTimeouts::S3,
@@ -271,6 +274,7 @@ async fn c_ing_0044_c_lim_0027_gzip_wire_bytes_set_the_body_ceiling() {
             &proof,
             BodyCeilings {
                 buffered: RAW_BYTES - 1,
+                whole_body: true,
                 declared: None,
             },
             BodyTimeouts::S3,
@@ -295,6 +299,7 @@ async fn the_declared_cap_is_refused_at_the_frame_that_crosses_it() {
     let (body, read) = crate::probe::ObservedBody::new(frames);
     let ceilings = BodyCeilings {
         buffered: 1 << 20,
+        whole_body: true,
         declared: Some(128),
     };
     let error = SealedBody::seal(Some(body), None)
@@ -316,6 +321,7 @@ async fn a_declared_length_past_the_operation_cap_is_refused_unread() {
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"x")]);
     let ceilings = BodyCeilings {
         buffered: 1 << 20,
+        whole_body: true,
         declared: Some(128),
     };
     let error = SealedBody::seal(Some(body), Some(4096))
@@ -445,6 +451,7 @@ async fn a_framed_body_past_the_ceiling_is_a_413_and_not_an_incomplete_body() {
     let (body, read) = crate::probe::ObservedBody::new(framed_chunks(100));
     let ceilings = BodyCeilings {
         buffered: 1024,
+        whole_body: true,
         declared: None,
     };
     let ingest = unsigned_ingest(6400, 7000);
@@ -480,6 +487,7 @@ async fn a_framed_body_past_the_operation_cap_is_a_400_invalid_request() {
     let (body, _) = crate::probe::ObservedBody::new(framed_chunks(100));
     let ceilings = BodyCeilings {
         buffered: 1 << 20,
+        whole_body: true,
         declared: Some(128),
     };
     let ingest = unsigned_ingest(6400, 7000);

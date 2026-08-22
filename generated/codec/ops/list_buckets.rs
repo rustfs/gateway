@@ -30,9 +30,11 @@ use rustfs_gateway_types::dto;
 use rustfs_gateway_types::ops::list_buckets::Input;
 
 use crate::codec::response::{EncodedResponse, ResponseBody, status_code};
-use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, value};
+use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, RequestBodyMode, value};
 
 impl OperationCodec for dto::ListBuckets {
+    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
+
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
         let mut input = Input { ..Default::default() };
         // MaxBuckets — query `max-buckets`, percent-decoded once.

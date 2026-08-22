@@ -58,11 +58,9 @@
 //! never buffered. A ceiling that is only consulted once the body is in hand is not a ceiling; it
 //! is a report.
 
-use std::time::Duration;
-
 use bytes::{BufMut, Bytes, BytesMut};
 use http::StatusCode;
-use rustfs_gateway_core::{HandlerError, ResponseKind};
+use rustfs_gateway_core::{HandlerError, RequestBody, RequestBodyMode, ResponseKind};
 use rustfs_gateway_http::{BodyIntegrity, ChecksumVerified};
 use rustfs_gateway_sig::Verdict;
 use rustfs_gateway_types::ErrorCode;
@@ -113,53 +111,16 @@ impl<'a> Authenticated<'a> {
 /// The bounds one body read is subject to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BodyCeilings {
-    /// How much this assembly will hold in memory, whatever the operation is.
+    /// How much one retained frame or a fully buffered body may hold.
     pub(crate) buffered: u64,
+    /// Whether `buffered` limits the complete logical body rather than one live frame.
+    pub(crate) whole_body: bool,
     /// How large a well-formed body for this operation can be, when the operation declares one.
     pub(crate) declared: Option<u64>,
 }
 
 /// Idle deadlines for one request body.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct BodyTimeouts {
-    first_byte: Duration,
-    read_idle: Duration,
-}
-
-impl BodyTimeouts {
-    /// The framework defaults required by the limits contract.
-    pub(crate) const S3: Self = Self {
-        first_byte: Duration::from_secs(20),
-        read_idle: Duration::from_secs(30),
-    };
-
-    /// Builds non-zero deadlines. Zero is not an alias for unlimited.
-    #[cfg(test)]
-    pub(crate) const fn new(first_byte: Duration, read_idle: Duration) -> Option<Self> {
-        if first_byte.is_zero() || read_idle.is_zero() {
-            return None;
-        }
-        Some(Self { first_byte, read_idle })
-    }
-
-    /// Maximum silence between the request head and the first body byte.
-    #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn first_byte(self) -> Duration {
-        self.first_byte
-    }
-
-    /// Maximum silence between adjacent body reads.
-    #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn read_idle(self) -> Duration {
-        self.read_idle
-    }
-
-    pub(crate) const fn waiting_for(self, body_byte_seen: bool) -> Duration {
-        if body_byte_seen { self.read_idle } else { self.first_byte }
-    }
-}
+pub(crate) type BodyTimeouts = crate::config::RequestBodyDeadlineConfig;
 
 /// The integrity work that remains after authentication and before decoding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,7 +136,24 @@ impl BodyCeilings {
     pub(crate) const fn of(operation: &str, buffered: u64) -> Self {
         Self {
             buffered,
+            whole_body: true,
             declared: declared_body_cap(operation),
+        }
+    }
+
+    /// The resident window for a streaming body, with no total logical-size ceiling.
+    pub(crate) const fn streaming(declared: Option<u64>) -> Self {
+        Self {
+            buffered: 1024 * 1024,
+            whole_body: false,
+            declared,
+        }
+    }
+
+    pub(crate) const fn for_mode(mode: RequestBodyMode, operation: &str, buffered: u64) -> Self {
+        match mode {
+            RequestBodyMode::Streaming => Self::streaming(declared_body_cap(operation)),
+            RequestBodyMode::None | RequestBodyMode::Full | RequestBodyMode::Deferred => Self::of(operation, buffered),
         }
     }
 }
@@ -226,7 +204,7 @@ where
         // halves of one guarantee: `BodyDigestObligation::Sha256` is minted only by
         // `presigned_body_obligation`, so a header-signed request's payload hash is still not
         // compared here — a P2 gap this predates and does not close.
-        let mut progress = WireProgress::new(digest);
+        let progress = WireProgress::new(digest);
         // Read only by the unframed arm below, and that is the whole of the rule: under framing
         // the bytes arriving here are chunk headers, signatures and CRLFs, and the object's own
         // octets exist only after the decoder has produced them, so the framed path's digests are
@@ -248,11 +226,10 @@ where
         {
             return Err(past_declared_cap());
         }
-        if self.declared_length.is_some_and(|length| length > ceilings.buffered) {
+        if ceilings.whole_body && self.declared_length.is_some_and(|length| length > ceilings.buffered) {
             return Err(past_buffered_ceiling());
         }
 
-        let mut body = core::pin::pin!(body);
         // Both ceilings are applied to the *wire* bytes — the ones the peer wrote and this process
         // is holding — frame by frame inside `WireFrames`, whichever branch below consumes them.
         // `crate::chunked` states why that is the right side of the decode to count on.
@@ -264,7 +241,7 @@ where
             // octets, so the checksum covers what the caller claimed a digest for and not the
             // framing around it.
             Some(ingest) => {
-                let frames = WireFrames::new(body.as_mut(), &mut progress, ceilings, timeouts);
+                let frames = WireFrames::new(body, progress.clone(), ceilings, timeouts);
                 let decoded = ingest.run(WireReader::new(frames), &mut digests).await;
                 // The reader's refusal outranks the pipeline's: a ceiling that answered `413` is
                 // not an `IncompleteBody`, and the pull contract cannot carry the difference.
@@ -274,7 +251,7 @@ where
             // Every digest this body owes is fed from the frame while it is still in cache, so the
             // body is walked once however many claims it carries.
             None => {
-                let mut frames = WireFrames::new(body.as_mut(), &mut progress, ceilings, timeouts);
+                let mut frames = WireFrames::new(body, progress.clone(), ceilings, timeouts);
                 let mut collected = BytesMut::new();
                 while let Some(frame) = core::future::poll_fn(|context| frames.poll_next(context)).await? {
                     if fuse_digests {
@@ -303,9 +280,62 @@ where
         let _verified: ChecksumVerified = digests.verify().map_err(checksum_refusal)?;
         Ok(body)
     }
+
+    /// Opens a verified live producer without polling the transport.
+    ///
+    /// # Errors
+    ///
+    /// A head-level ceiling refusal or an ingest pipeline that cannot be constructed from the
+    /// authenticated framing decision.
+    pub(crate) fn stream(
+        self,
+        _proof: &Authenticated<'_>,
+        ceilings: BodyCeilings,
+        timeouts: BodyTimeouts,
+        ingest: Option<crate::chunked::ChunkIngest>,
+        digest: BodyDigestObligation,
+        integrity: BodyIntegrity,
+    ) -> Result<crate::request_body::StreamingRead, S3Error> {
+        if let Some(cap) = ceilings.declared
+            && self.declared_length.is_some_and(|length| length > cap)
+        {
+            return Err(past_declared_cap());
+        }
+        if ceilings.whole_body && self.declared_length.is_some_and(|length| length > ceilings.buffered) {
+            return Err(past_buffered_ceiling());
+        }
+        crate::request_body::StreamingRead::new(self.body, self.declared_length, ceilings, timeouts, ingest, digest, integrity)
+    }
+
+    pub(crate) async fn handoff(
+        self,
+        proof: &Authenticated<'_>,
+        body_plan: (RequestBodyMode, BodyCeilings),
+        timeouts: BodyTimeouts,
+        ingest: Option<crate::chunked::ChunkIngest>,
+        digest: BodyDigestObligation,
+        integrity: BodyIntegrity,
+    ) -> Result<(RequestBody, Option<crate::request_body::BodyMonitor>), S3Error> {
+        let (mode, ceilings) = body_plan;
+        match mode {
+            RequestBodyMode::Streaming => {
+                let opened = self.stream(proof, ceilings, timeouts, ingest, digest, integrity)?;
+                let (stream, monitor) = opened.into_parts();
+                Ok((RequestBody::Stream(stream), Some(monitor)))
+            }
+            RequestBodyMode::None => {
+                self.read(proof, ceilings, timeouts, ingest, digest, integrity).await?;
+                Ok((RequestBody::None, None))
+            }
+            RequestBodyMode::Full | RequestBodyMode::Deferred => {
+                let bytes = self.read(proof, ceilings, timeouts, ingest, digest, integrity).await?;
+                Ok((RequestBody::Buffered(bytes), None))
+            }
+        }
+    }
 }
 
-fn content_sha256_mismatch() -> S3Error {
+pub(crate) fn content_sha256_mismatch() -> S3Error {
     from_handler(
         HandlerError::new(
             ErrorCode::X_AMZ_CONTENT_SHA256_MISMATCH,
@@ -328,7 +358,7 @@ fn content_sha256_mismatch() -> S3Error {
 /// key entries, and a thousand entries of the maximum key length plus their version ids fit inside
 /// two mebibytes with room to spare. Everything else is `None` and falls back to the assembly's
 /// buffered ceiling.
-const fn declared_body_cap(operation: &str) -> Option<u64> {
+pub(crate) const fn declared_body_cap(operation: &str) -> Option<u64> {
     match operation.as_bytes() {
         b"DeleteObjects" => Some(MAX_DELETE_OBJECTS_BODY_BYTES),
         _ => None,

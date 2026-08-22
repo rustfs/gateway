@@ -45,6 +45,7 @@
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use bytes::{Buf, Bytes};
 use futures_timer::Delay;
@@ -104,7 +105,7 @@ pub(crate) const MAX_PAYLOAD_FREE_FRAME_RUN: u32 = 8;
 /// The reader is moved into `rustfs-gateway-http`'s pipeline and dropped with it, so everything
 /// the caller still needs afterwards — how much arrived, the payload hash, and the refusal that
 /// stopped the read — lives here and is borrowed rather than owned by the reader.
-pub(crate) struct WireProgress {
+struct WireProgressState {
     seen: u64,
     /// The obligation and the hasher opened for it, held together so that the value compared is
     /// necessarily the value the hasher was opened for. Two parameters, one at construction and
@@ -113,6 +114,10 @@ pub(crate) struct WireProgress {
     sha256: Option<Sha256>,
     refusal: Option<S3Error>,
 }
+
+/// Shared accounting retained by the request owner while a framed pipeline owns the reader.
+#[derive(Clone)]
+pub(crate) struct WireProgress(Arc<Mutex<WireProgressState>>);
 
 impl WireProgress {
     /// Opens the accounting for one body, hashing only when a digest was actually promised.
@@ -124,7 +129,7 @@ impl WireProgress {
     /// payload hash is compared — the P2 gap `crate::gate` records — the framed path gets the
     /// comparison rather than silently skipping it.
     pub(crate) fn new(digest: BodyDigestObligation) -> Self {
-        Self {
+        Self(Arc::new(Mutex::new(WireProgressState {
             seen: 0,
             digest,
             sha256: match digest {
@@ -132,23 +137,50 @@ impl WireProgress {
                 BodyDigestObligation::Sha256(_) => Some(Sha256::new()),
             },
             refusal: None,
+        })))
+    }
+
+    fn state(&self) -> MutexGuard<'_, WireProgressState> {
+        match self.0.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
         }
     }
 
     /// The refusal this read stopped on, when the reader produced one.
-    pub(crate) fn take_refusal(&mut self) -> Option<S3Error> {
-        self.refusal.take()
+    pub(crate) fn take_refusal(&self) -> Option<S3Error> {
+        self.state().refusal.take()
     }
 
     /// Whether the wire bytes that arrived match the digest the request was signed with.
     ///
     /// `true` when nothing was promised: an obligation nobody made cannot be broken.
-    pub(crate) fn digest_matches(&mut self) -> bool {
-        if let (BodyDigestObligation::Sha256(expected), Some(hasher)) = (self.digest, self.sha256.take()) {
+    pub(crate) fn digest_matches(&self) -> bool {
+        let mut state = self.state();
+        if let (BodyDigestObligation::Sha256(expected), Some(hasher)) = (state.digest, state.sha256.take()) {
             let actual: [u8; 32] = hasher.finalize().into();
             return actual == expected;
         }
         true
+    }
+
+    pub(crate) fn seen(&self) -> u64 {
+        self.state().seen
+    }
+
+    fn record(&self, bytes: &Bytes) -> u64 {
+        let mut state = self.state();
+        state.seen = state.seen.saturating_add(bytes.len() as u64);
+        if let Some(hasher) = state.sha256.as_mut() {
+            hasher.update(bytes);
+        }
+        state.seen
+    }
+
+    fn refuse(&self, refusal: S3Error) -> StreamError {
+        let mut state = self.state();
+        state.refusal.get_or_insert(refusal);
+        StreamError::incomplete_body().with_bytes_before_error(state.seen)
     }
 }
 
@@ -157,9 +189,9 @@ impl WireProgress {
 /// Every frame passes the ceilings *before* its bytes are handed on, so the frame that crosses a
 /// line is refused rather than buffered — which is the whole difference between a ceiling and a
 /// report about a buffer that already exists.
-pub(crate) struct WireFrames<'a, B> {
-    body: Pin<&'a mut B>,
-    progress: &'a mut WireProgress,
+pub(crate) struct WireFrames<B> {
+    body: Pin<Box<B>>,
+    progress: WireProgress,
     ceilings: BodyCeilings,
     timeouts: BodyTimeouts,
     /// The deadline for the frame currently being waited on; `None` before the first poll of one.
@@ -175,19 +207,14 @@ pub(crate) struct WireFrames<'a, B> {
     ended: bool,
 }
 
-impl<'a, B> WireFrames<'a, B>
+impl<B> WireFrames<B>
 where
     B: http_body::Body,
 {
     /// Opens the read. Nothing is polled until [`Self::poll_next`] is.
-    pub(crate) fn new(
-        body: Pin<&'a mut B>,
-        progress: &'a mut WireProgress,
-        ceilings: BodyCeilings,
-        timeouts: BodyTimeouts,
-    ) -> Self {
+    pub(crate) fn new(body: B, progress: WireProgress, ceilings: BodyCeilings, timeouts: BodyTimeouts) -> Self {
         Self {
-            body,
+            body: Box::pin(body),
             progress,
             ceilings,
             timeouts,
@@ -226,13 +253,17 @@ where
             let length = data.remaining();
             // Inside the loop, before the bytes are kept. `data` is dropped with the error, so the
             // frame that crossed the line is not buffered either.
-            self.progress.seen = self.progress.seen.saturating_add(length as u64);
+            let bytes = data.copy_to_bytes(length);
+            if length as u64 > self.ceilings.buffered {
+                return Poll::Ready(Err(crate::gate::past_buffered_ceiling()));
+            }
+            let seen = self.progress.record(&bytes);
             if let Some(cap) = self.ceilings.declared
-                && self.progress.seen > cap
+                && seen > cap
             {
                 return Poll::Ready(Err(crate::gate::past_declared_cap()));
             }
-            if self.progress.seen > self.ceilings.buffered {
+            if self.ceilings.whole_body && seen > self.ceilings.buffered {
                 return Poll::Ready(Err(crate::gate::past_buffered_ceiling()));
             }
             if length == 0 {
@@ -250,10 +281,6 @@ where
             // to its collector without copying it — `tests/request_allocations.rs` keeps that at
             // zero copies. The framed caller copies it into the pipeline's window either way, as
             // any pull-model consumer must; `tests/chunked_allocations.rs` is what bounds that.
-            let bytes = data.copy_to_bytes(length);
-            if let Some(hasher) = self.progress.sha256.as_mut() {
-                hasher.update(&bytes);
-            }
             return Poll::Ready(Ok(Some(bytes)));
         }
     }
@@ -279,8 +306,7 @@ where
     ///
     /// The first refusal stands: a later generic failure must not overwrite the rule that fired.
     fn fail(&mut self, refusal: S3Error) -> StreamError {
-        self.progress.refusal.get_or_insert(refusal);
-        StreamError::incomplete_body().with_bytes_before_error(self.progress.seen)
+        self.progress.refuse(refusal)
     }
 
     /// One frame, under the deadline that applies to it.
@@ -296,7 +322,7 @@ where
                 if let Poll::Ready(frame) = self.body.as_mut().poll_frame(context) {
                     return Poll::Ready(Self::settle(frame));
                 }
-                let mut delay = Delay::new(self.timeouts.waiting_for(self.progress.seen != 0));
+                let mut delay = Delay::new(self.timeouts.waiting_for(self.progress.seen() != 0));
                 if Pin::new(&mut delay).poll(context).is_ready() {
                     return Poll::Ready(Err(crate::gate::body_idle_timeout()));
                 }
@@ -333,19 +359,19 @@ where
 ///
 /// `rustfs_gateway_http::IngestPipeline` reads through this, so the wire bytes it decodes are
 /// resident in its window and nowhere else.
-pub(crate) struct WireReader<'a, B> {
-    frames: WireFrames<'a, B>,
+pub(crate) struct WireReader<B> {
+    frames: WireFrames<B>,
     /// What is left of the frame the last fill did not finish copying out.
     leftover: Bytes,
     eof_emitted: bool,
 }
 
-impl<'a, B> WireReader<'a, B>
+impl<B> WireReader<B>
 where
     B: http_body::Body,
 {
     /// Wraps a frame source. The reader owns it, so the frames have exactly one consumer.
-    pub(crate) fn new(frames: WireFrames<'a, B>) -> Self {
+    pub(crate) fn new(frames: WireFrames<B>) -> Self {
         Self {
             frames,
             leftover: Bytes::new(),
@@ -354,7 +380,7 @@ where
     }
 }
 
-impl<B> AsyncPayloadRead for WireReader<'_, B>
+impl<B> AsyncPayloadRead for WireReader<B>
 where
     B: http_body::Body,
 {

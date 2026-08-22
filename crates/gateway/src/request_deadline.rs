@@ -33,11 +33,66 @@ use rustfs_gateway_sig::timing::FailureFloor;
 
 use crate::clock::{MonotonicClock, MonotonicNow};
 use crate::ext::{PolicyError, PolicySnapshot, PolicySource};
+use crate::render::S3Error;
+use crate::request_body::{BodyEvent, BodyMonitor};
 
 pub(crate) enum HandlerCancellationOutcome<T> {
     Completed(T),
     Expired { cleanup_completed: bool },
     RequestAborted { cleanup_completed: bool },
+}
+
+pub(crate) enum BodyMonitoredOutcome<T> {
+    Completed(T),
+    Failed(S3Error),
+    Idle { cleanup_completed: bool },
+}
+
+pub(crate) async fn handler_with_body_monitor<T>(
+    mut handler: BoxFuture<'static, T>,
+    cancellation: HandlerCancellationSource,
+    cleanup_grace: Duration,
+    mut monitor: Option<BodyMonitor>,
+) -> BodyMonitoredOutcome<T> {
+    let Some(ref mut monitor) = monitor else {
+        return BodyMonitoredOutcome::Completed(handler.await);
+    };
+    let mut body_event = Box::pin(monitor.next_event());
+    let raced = poll_fn(|context| {
+        // The terminal body verdict wins a wake shared with the handler result.
+        if let Poll::Ready(event) = body_event.as_mut().poll(context) {
+            return Poll::Ready(Err(event));
+        }
+        if let Poll::Ready(output) = handler.as_mut().poll(context) {
+            return Poll::Ready(Ok(output));
+        }
+        Poll::Pending
+    })
+    .await;
+    match raced {
+        Ok(output) => match body_event.await {
+            BodyEvent::Complete(Ok(_)) => BodyMonitoredOutcome::Completed(output),
+            BodyEvent::Complete(Err(error)) => BodyMonitoredOutcome::Failed(error),
+            BodyEvent::Idle => BodyMonitoredOutcome::Idle { cleanup_completed: true },
+        },
+        Err(BodyEvent::Complete(Ok(_))) => BodyMonitoredOutcome::Completed(handler.await),
+        Err(BodyEvent::Complete(Err(error))) => BodyMonitoredOutcome::Failed(error),
+        Err(BodyEvent::Idle) => {
+            cancellation.cancel(HandlerCancellation::BodyIdle);
+            let mut grace = Box::pin(futures_timer::Delay::new(cleanup_grace));
+            let cleanup_completed = poll_fn(|context| {
+                if handler.as_mut().poll(context).is_ready() {
+                    return Poll::Ready(true);
+                }
+                if grace.as_mut().poll(context).is_ready() {
+                    return Poll::Ready(false);
+                }
+                Poll::Pending
+            })
+            .await;
+            BodyMonitoredOutcome::Idle { cleanup_completed }
+        }
+    }
 }
 
 pub(crate) async fn handler_with_request_cancellation<T>(
@@ -240,6 +295,26 @@ mod tests {
         deadline: Duration,
     ) -> BoxFuture<'static, Result<T, HandlerError>> {
         commit_with_progress_deadline(work, deadline)
+    }
+
+    /// Negative — a handler that keeps running without polling its live body receives the body-idle
+    /// reason before the ordinary handler deadline.
+    #[tokio::test]
+    async fn body_idle_cancels_the_handler_with_its_distinct_reason() {
+        let timeouts = crate::gate::BodyTimeouts::new(Duration::from_millis(20), Duration::from_millis(20))
+            .expect("non-zero body deadlines");
+        let (monitor, _terminal, _progress) = crate::request_body::BodyMonitor::pending_for_test(timeouts);
+        let (cancellation, context) = HandlerCancellationSource::pair();
+        let observed = Arc::new(Mutex::new(None));
+        let handler_observed = Arc::clone(&observed);
+        let handler = Box::pin(async move {
+            let reason = context.cancelled().await;
+            *handler_observed.lock().expect("the observation lock") = Some(reason);
+        });
+
+        let outcome = handler_with_body_monitor(handler, cancellation, Duration::from_millis(100), Some(monitor)).await;
+        assert!(matches!(outcome, BodyMonitoredOutcome::Idle { cleanup_completed: true }));
+        assert_eq!(*observed.lock().expect("the observation lock"), Some(HandlerCancellation::BodyIdle));
     }
 
     /// **Negative — a continuation that never resolves reports the bound, not a hang.**

@@ -28,6 +28,54 @@ pub const DEFAULT_STANDARD_HANDLER_DEADLINE: Duration = Duration::from_secs(30);
 pub const DEFAULT_EXTENDED_HANDLER_DEADLINE: Duration = Duration::from_secs(15 * 60);
 const DEFAULT_HANDLER_CLEANUP_GRACE: Duration = Duration::from_secs(1);
 
+/// Validated idle deadlines for a request body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RequestBodyDeadlineConfig {
+    first_byte: Duration,
+    read_idle: Duration,
+}
+
+impl RequestBodyDeadlineConfig {
+    /// The S3-compatible defaults used by [`ServiceConfig`].
+    pub const S3: Self = Self {
+        first_byte: Duration::from_secs(20),
+        read_idle: Duration::from_secs(30),
+    };
+
+    /// Builds non-zero first-byte and between-read deadlines.
+    ///
+    /// Returns `None` when either duration is zero. Zero is never an alias for unlimited.
+    #[must_use]
+    pub const fn new(first_byte: Duration, read_idle: Duration) -> Option<Self> {
+        if first_byte.is_zero() || read_idle.is_zero() {
+            return None;
+        }
+        Some(Self { first_byte, read_idle })
+    }
+
+    /// Returns the maximum silence before the first body byte.
+    #[must_use]
+    pub const fn first_byte(self) -> Duration {
+        self.first_byte
+    }
+
+    /// Returns the maximum silence between adjacent body reads.
+    #[must_use]
+    pub const fn read_idle(self) -> Duration {
+        self.read_idle
+    }
+
+    pub(crate) const fn waiting_for(self, body_byte_seen: bool) -> Duration {
+        if body_byte_seen { self.read_idle } else { self.first_byte }
+    }
+}
+
+impl Default for RequestBodyDeadlineConfig {
+    fn default() -> Self {
+        Self::S3
+    }
+}
+
 /// How many keep-alive intervals may pass with no outcome before a committed response is ended.
 ///
 /// The quantum is [`crate::commit::KEEPALIVE_INTERVAL_SECONDS`] rather than a number of seconds of
@@ -166,6 +214,7 @@ pub struct ServiceConfig {
     max_buffered_body_bytes: u64,
     verbose_signature_errors: bool,
     handler_deadlines: HandlerDeadlineConfig,
+    request_body_deadlines: RequestBodyDeadlineConfig,
 }
 
 impl ServiceConfig {
@@ -181,6 +230,7 @@ impl ServiceConfig {
                 cleanup_grace: DEFAULT_HANDLER_CLEANUP_GRACE,
                 commit_progress: DEFAULT_COMMIT_PROGRESS_DEADLINE,
             },
+            request_body_deadlines: RequestBodyDeadlineConfig::S3,
         }
     }
 
@@ -240,6 +290,19 @@ impl ServiceConfig {
     pub const fn with_handler_deadlines(mut self, handler_deadlines: HandlerDeadlineConfig) -> Self {
         self.handler_deadlines = handler_deadlines;
         self
+    }
+
+    /// Replaces the first-byte and between-read request-body deadlines.
+    #[must_use]
+    pub const fn with_request_body_deadlines(mut self, deadlines: RequestBodyDeadlineConfig) -> Self {
+        self.request_body_deadlines = deadlines;
+        self
+    }
+
+    /// Returns the request-body idle deadlines held by this snapshot.
+    #[must_use]
+    pub const fn request_body_deadlines(&self) -> RequestBodyDeadlineConfig {
+        self.request_body_deadlines
     }
 
     /// Returns the duration mapped to an operation's closed handler deadline class.

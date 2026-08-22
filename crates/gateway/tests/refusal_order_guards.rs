@@ -42,6 +42,12 @@ fn service() -> String {
     fs::read_to_string(&path).expect("the service module exists")
 }
 
+/// The sole live request-body producer.
+fn request_body() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/request_body.rs");
+    fs::read_to_string(&path).expect("the streaming request-body module exists")
+}
+
 /// Every function declared inside the proof's own `impl` block that hands one back.
 ///
 /// Scoped to the block rather than to the file, because the file also holds `BodyCeilings::of` and
@@ -113,7 +119,7 @@ fn the_body_read_still_demands_the_proof() {
     );
 }
 
-/// Negative — the pipeline seals the body above the verifier and reads it below. The order is what
+/// Negative — the pipeline seals the body above the verifier and hands it off below. The order is what
 /// the type enforces; this asserts the two call sites are still on the sides that make the
 /// enforcement mean something, so that a refactor which moved both together is visible.
 #[test]
@@ -122,10 +128,10 @@ fn the_pipeline_seals_before_it_authenticates_and_reads_after() {
     let sealed = source.find("SealedBody::seal(").expect("the body is sealed");
     let admitted = source.find(".floor.admit(").expect("the floor admits");
     let proof = source.find("Authenticated::of(&verdict)").expect("the proof is minted");
-    let read = source.find(".read(&authenticated").expect("the body is read");
+    let handoff = source.find(".handoff(").expect("the body is handed off");
     assert!(sealed < admitted, "the body must be sealed before the floor sees the request");
     assert!(admitted < proof, "the proof must be minted from a verdict the floor produced");
-    assert!(proof < read, "the body must be read after the proof exists, never before");
+    assert!(proof < handoff, "the body must be handed off after the proof exists, never before");
 }
 
 /// Negative — no other module may collect a request body. One reader is what makes the proof the
@@ -155,4 +161,29 @@ fn nothing_outside_the_gate_collects_a_request_body() {
         }
     }
     assert!(offenders.is_empty(), "a request body is drained outside the gate: {offenders:#?}");
+}
+
+/// Negative — the live producer has no task, queue, or whole-body collector between handler polls
+/// and transport polls. The terminal and progress one-value signals are deliberately not pumps.
+#[test]
+fn the_streaming_request_path_has_no_read_ahead_pump() {
+    let source = request_body();
+    for forbidden in ["tokio::spawn", "mpsc::", "BytesMut", ".collect::<Vec<u8>>()"] {
+        assert!(!source.contains(forbidden), "the streaming request path contains `{forbidden}`");
+    }
+    assert!(
+        source.contains("Plain(WireFrames<B>)"),
+        "the live producer no longer owns the transport reader"
+    );
+}
+
+/// Negative — the decoded delivery buffer and the unframed transport-frame window remain
+/// independently visible and narrower than the four-mebibyte per-connection contract.
+#[test]
+fn the_streaming_request_window_cannot_quietly_widen() {
+    let producer = request_body();
+    let gate = gate();
+    assert!(producer.contains("const DELIVERY_BYTES: usize = 64 * 1024;"));
+    assert!(gate.contains("buffered: 1024 * 1024,"));
+    assert!(gate.contains("whole_body: false,"));
 }

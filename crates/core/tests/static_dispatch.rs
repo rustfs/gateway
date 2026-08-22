@@ -120,7 +120,7 @@ async fn the_static_entry_preserves_the_authorization_order() {
         },
         move |()| async move {
             body_trail.lock().expect("trail lock").push("body");
-            Ok::<_, &'static str>(((), Bytes::new()))
+            Ok::<_, &'static str>(((), RequestBody::Buffered(Bytes::new())))
         },
         move |(), resources| async move {
             input_trail.lock().expect("trail lock").push("input-authorize");
@@ -148,7 +148,7 @@ async fn a_routed_identity_mismatch_is_fail_closed() {
         &meta(),
         backend,
         || async { Ok::<_, &'static str>(()) },
-        |()| async { Ok::<_, &'static str>(((), Bytes::new())) },
+        |()| async { Ok::<_, &'static str>(((), RequestBody::Buffered(Bytes::new()))) },
         |(), _| async { Ok::<_, &'static str>((Vec::new(), ())) },
     )
     .await;

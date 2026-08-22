@@ -31,9 +31,11 @@ use rustfs_gateway_types::dto;
 use rustfs_gateway_types::ops::upload_part::Input;
 
 use crate::codec::response::{EncodedResponse, status_code};
-use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, value};
+use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, RequestBodyMode, value};
 
 impl OperationCodec for dto::UploadPart {
+    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::Streaming;
+
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
         let mut input = Input { ..Default::default() };
         // Body — the streaming request body, never aggregated.

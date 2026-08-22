@@ -51,7 +51,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::authz::{Decoded, authorize_input, prepare_input};
-use crate::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody};
+use crate::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use crate::handler::Resp;
 use crate::registry::handlers::{ErasedRequest, ErasedResponse};
 use crate::{Decision, Denied, DerivedResourceSet, OwnedResource};
@@ -111,6 +111,7 @@ const EVENT_STREAM_UNSUPPORTED: &str =
 #[derive(Clone)]
 pub struct ErasedCodec {
     operation: &'static str,
+    request_body: RequestBodyMode,
     decode: ErasedDecode,
     resources: ErasedResources,
     authorize: ErasedAuthorize,
@@ -131,6 +132,12 @@ impl ErasedCodec {
     #[must_use]
     pub const fn operation_name(&self) -> &'static str {
         self.operation
+    }
+
+    /// How the operation's decoder receives its request body.
+    #[must_use]
+    pub const fn request_body_mode(&self) -> RequestBodyMode {
+        self.request_body
     }
 
     /// The decoder, for a caller that wants to keep it.
@@ -239,6 +246,7 @@ pub(crate) fn erase<O: OperationCodec>() -> ErasedCodec {
     });
     ErasedCodec {
         operation: O::NAME,
+        request_body: O::REQUEST_BODY,
         decode,
         resources,
         authorize,

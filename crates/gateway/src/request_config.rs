@@ -66,6 +66,7 @@ pub(crate) struct RequestConfig<S> {
     snapshot: ConfigSnapshot,
     handler_deadline_report: HandlerDeadlineReportSlot,
     request_cancellation: Option<tokio::sync::watch::Receiver<bool>>,
+    body_monitor: Option<crate::request_body::BodyMonitor>,
     stage: core::marker::PhantomData<fn() -> S>,
 }
 
@@ -75,6 +76,7 @@ impl RequestConfig<Entered> {
             snapshot,
             handler_deadline_report: HandlerDeadlineReportSlot::new(),
             request_cancellation: None,
+            body_monitor: None,
             stage: core::marker::PhantomData,
         }
     }
@@ -120,6 +122,11 @@ impl RequestConfig<RouteAuthorized> {
 }
 
 impl RequestConfig<BodyRead> {
+    pub(crate) fn with_body_monitor(mut self, body_monitor: Option<crate::request_body::BodyMonitor>) -> Self {
+        self.body_monitor = body_monitor;
+        self
+    }
+
     pub(crate) fn decoded(self) -> RequestConfig<Decoded> {
         self.advance()
     }
@@ -148,11 +155,16 @@ impl<S> RequestConfig<S> {
         self.request_cancellation.clone()
     }
 
+    pub(crate) fn take_body_monitor(&mut self) -> Option<crate::request_body::BodyMonitor> {
+        self.body_monitor.take()
+    }
+
     fn advance<N>(self) -> RequestConfig<N> {
         RequestConfig {
             snapshot: self.snapshot,
             handler_deadline_report: self.handler_deadline_report,
             request_cancellation: self.request_cancellation,
+            body_monitor: self.body_monitor,
             stage: core::marker::PhantomData,
         }
     }

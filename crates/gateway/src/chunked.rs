@@ -125,6 +125,30 @@ pub(crate) struct ChunkIngest {
 }
 
 impl ChunkIngest {
+    pub(crate) fn decoded_length(&self) -> u64 {
+        self.declared.get()
+    }
+
+    pub(crate) fn into_pipeline<R>(self, wire: R) -> Result<IngestPipeline<R>, S3Error>
+    where
+        R: AsyncPayloadRead + Unpin,
+    {
+        IngestPipeline::new(
+            wire,
+            self.framing,
+            self.declared,
+            self.signer,
+            Default::default(),
+            self.limits,
+            IngestPolicy::verify_before_deliver(),
+        )
+        .map_err(from_chunk_reject)
+    }
+
+    pub(crate) fn refusal<R>(pipeline: &IngestPipeline<R>) -> S3Error {
+        pipeline.reject().map_or_else(chunk_stream_failed, from_chunk_reject)
+    }
+
     /// Decides whether the chunk parser runs, and assembles what it runs with.
     ///
     /// Everything here is decidable from the head, and all of it happens before a body byte is
@@ -201,18 +225,7 @@ impl ChunkIngest {
     where
         R: AsyncPayloadRead + Unpin,
     {
-        let mut pipeline = IngestPipeline::new(
-            wire,
-            self.framing,
-            self.declared,
-            self.signer,
-            // `SmallVec::default()` without naming `smallvec`: this assembly attaches no digest
-            // observer, and the crate is `rustfs-gateway-http`'s dependency rather than this one's.
-            Default::default(),
-            self.limits,
-            IngestPolicy::verify_before_deliver(),
-        )
-        .map_err(from_chunk_reject)?;
+        let mut pipeline = self.into_pipeline(wire)?;
 
         let mut decoded = BytesMut::new();
         let mut buffer = vec![0_u8; DRAIN_BUFFER_BYTES];
@@ -226,7 +239,7 @@ impl ChunkIngest {
                 // The reject is the reason; the `StreamError` is only its carrier, and recovering
                 // it by downcast would be a negotiation with no contract. `IngestPipeline::reject`
                 // exists so the status and the code come from the rule that fired.
-                Err(_) => return Err(pipeline.reject().map_or_else(chunk_stream_failed, from_chunk_reject)),
+                Err(_) => return Err(Self::refusal(&pipeline)),
                 Ok(ReadProgress::Filled(0)) => continue,
                 Ok(ReadProgress::Filled(written)) => match buffer.get(..written) {
                     Some(run) => {
@@ -276,7 +289,7 @@ fn build_signer(sink: &ChunkSink, seed: Option<&str>) -> Result<ChunkSigner, S3E
 ///
 /// `501` and not `400`: the request is well-formed and it is this service that is incomplete.
 /// Answering `400` would tell a correct client to change a correct request.
-fn trailers_not_verified() -> S3Error {
+pub(crate) fn trailers_not_verified() -> S3Error {
     from_handler(
         HandlerError::new(
             ErrorCode::NOT_IMPLEMENTED,

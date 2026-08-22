@@ -24,15 +24,16 @@ use core::task::Poll;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
-use bytes::Bytes;
 use rustfs_gateway_core::{
-    AuthRequirement, BoxFuture, Decision, HandlerError, MetaView, OwnedResource, StaticCommittedError, StaticDispatchError,
-    StaticDispatchOutcome,
+    AuthRequirement, BoxFuture, Decision, HandlerError, MetaView, OwnedResource, RequestBody, RequestBodyMode,
+    StaticCommittedError, StaticDispatchError, StaticDispatchOutcome,
 };
 
 use crate::dispatch::{DispatchTable, ErasedAnswer};
 use crate::monomorphic::sealed::Set as StaticSet;
+use crate::render::S3Error;
 use crate::request_config::{InputAuthorized, RequestConfig};
+use crate::request_deadline::{BodyMonitoredOutcome, handler_with_body_monitor};
 
 pub(crate) trait OperationMode {
     type Entry: Send;
@@ -42,6 +43,8 @@ pub(crate) trait OperationMode {
     fn floor(entry: &Self::Entry) -> &'static rustfs_gateway_sig::OperationFloor;
 
     fn auth(entry: &Self::Entry) -> Option<AuthRequirement>;
+
+    fn request_body_mode(entry: &Self::Entry) -> RequestBodyMode;
 
     fn dispatch<'a, S, T, E, Route, RouteFuture, Read, ReadFuture, Input, InputFuture>(
         &'a self,
@@ -55,11 +58,11 @@ pub(crate) trait OperationMode {
     where
         S: Send + 'a,
         T: Send + 'a,
-        E: Send + 'a,
+        E: From<S3Error> + Send + 'a,
         Route: FnOnce() -> RouteFuture + Send + 'a,
         RouteFuture: Future<Output = Result<S, E>> + Send + 'a,
         Read: FnOnce(S) -> ReadFuture + Send + 'a,
-        ReadFuture: Future<Output = Result<(T, Bytes), E>> + Send + 'a,
+        ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
         InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<InputAuthorized>), E>> + Send + 'a;
 }
@@ -83,6 +86,10 @@ impl OperationMode for DynamicMode<'_> {
         entry.auth()
     }
 
+    fn request_body_mode(entry: &Self::Entry) -> RequestBodyMode {
+        entry.request_body_mode()
+    }
+
     fn dispatch<'a, S, T, E, Route, RouteFuture, Read, ReadFuture, Input, InputFuture>(
         &'a self,
         entry: Self::Entry,
@@ -95,11 +102,11 @@ impl OperationMode for DynamicMode<'_> {
     where
         S: Send + 'a,
         T: Send + 'a,
-        E: Send + 'a,
+        E: From<S3Error> + Send + 'a,
         Route: FnOnce() -> RouteFuture + Send + 'a,
         RouteFuture: Future<Output = Result<S, E>> + Send + 'a,
         Read: FnOnce(S) -> ReadFuture + Send + 'a,
-        ReadFuture: Future<Output = Result<(T, Bytes), E>> + Send + 'a,
+        ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
         InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<InputAuthorized>), E>> + Send + 'a,
     {
@@ -108,14 +115,26 @@ impl OperationMode for DynamicMode<'_> {
             let (body_state, body) = read_body(route_state).await.map_err(StaticDispatchError::Body)?;
             let decoded = entry.decode(meta, body).map_err(StaticDispatchError::Codec)?;
             let resources = entry.resources(&decoded).map_err(StaticDispatchError::Codec)?;
-            let (decisions, request_config) = authorize_input_callback(body_state, resources)
+            let (decisions, mut request_config) = authorize_input_callback(body_state, resources)
                 .await
                 .map_err(StaticDispatchError::Input)?;
             let authorized = entry.authorize(decoded, &decisions).map_err(StaticDispatchError::Denied)?;
+            let body_monitor = request_config.take_body_monitor();
+            let cleanup_grace = request_config.config().handler_cleanup_grace();
             let invocation = entry
                 .invoke(authorized, request_config)
                 .map_err(StaticDispatchError::Handler)?;
-            let (answer, status) = invocation.await.map_err(StaticDispatchError::Handler)?;
+            let body_cancellation = invocation.cancellation_source();
+            let answer =
+                match handler_with_body_monitor(Box::pin(invocation), body_cancellation, cleanup_grace, body_monitor).await {
+                    BodyMonitoredOutcome::Completed(answer) => answer,
+                    BodyMonitoredOutcome::Failed(error) => return Err(StaticDispatchError::Body(E::from(error))),
+                    BodyMonitoredOutcome::Idle { cleanup_completed } => {
+                        let _ = cleanup_completed;
+                        return Err(StaticDispatchError::Body(E::from(crate::gate::body_idle_timeout())));
+                    }
+                };
+            let (answer, status) = answer.map_err(StaticDispatchError::Handler)?;
             match answer {
                 ErasedAnswer::Settled(output) => entry
                     .encode(output, meta, status)
@@ -168,6 +187,7 @@ pub(crate) struct MonomorphicMode<H, Operations> {
 pub(crate) struct MonomorphicEntry {
     floor: &'static rustfs_gateway_sig::OperationFloor,
     auth: Option<AuthRequirement>,
+    request_body: RequestBodyMode,
 }
 
 impl<H, Operations> OperationMode for MonomorphicMode<H, Operations>
@@ -181,6 +201,7 @@ where
         Some(MonomorphicEntry {
             floor: Operations::floor(operation)?,
             auth: Operations::auth(operation)?,
+            request_body: Operations::request_body_mode(operation)?,
         })
     }
 
@@ -190,6 +211,10 @@ where
 
     fn auth(entry: &Self::Entry) -> Option<AuthRequirement> {
         entry.auth
+    }
+
+    fn request_body_mode(entry: &Self::Entry) -> RequestBodyMode {
+        entry.request_body
     }
 
     fn dispatch<'a, S, T, E, Route, RouteFuture, Read, ReadFuture, Input, InputFuture>(
@@ -204,11 +229,11 @@ where
     where
         S: Send + 'a,
         T: Send + 'a,
-        E: Send + 'a,
+        E: From<S3Error> + Send + 'a,
         Route: FnOnce() -> RouteFuture + Send + 'a,
         RouteFuture: Future<Output = Result<S, E>> + Send + 'a,
         Read: FnOnce(S) -> ReadFuture + Send + 'a,
-        ReadFuture: Future<Output = Result<(T, Bytes), E>> + Send + 'a,
+        ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
         InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<InputAuthorized>), E>> + Send + 'a,
     {
@@ -223,6 +248,7 @@ mod tests {
     use core::task::Context;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use bytes::Bytes;
     use rustfs_gateway_core::{StaticDispatchError, TargetKind};
     use rustfs_gateway_http::{Limits, WireRequest};
 
@@ -284,16 +310,16 @@ mod tests {
                 &meta(),
                 move || {
                     route_callbacks.fetch_add(1, Ordering::SeqCst);
-                    async { Ok::<_, &'static str>(()) }
+                    async { Ok::<_, S3Error>(()) }
                 },
                 move |()| {
                     body_callbacks.fetch_add(1, Ordering::SeqCst);
-                    async { Ok::<_, &'static str>(((), Bytes::new())) }
+                    async { Ok::<_, S3Error>(((), RequestBody::None)) }
                 },
                 move |(), _| {
                     input_callbacks.fetch_add(1, Ordering::SeqCst);
                     async {
-                        Ok::<_, &'static str>((
+                        Ok::<_, S3Error>((
                             Vec::new(),
                             RequestConfig::enter(Arc::new(crate::ServiceConfig::new(1)))
                                 .accepted()

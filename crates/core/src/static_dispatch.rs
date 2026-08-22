@@ -26,9 +26,7 @@ use core::task::Poll;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
-use bytes::Bytes;
 use rustfs_gateway_stream::ByteStream;
-use rustfs_gateway_types::ErrorCode;
 
 use crate::authz::{Decoded, authorize_input, prepare_input};
 use crate::{
@@ -123,7 +121,7 @@ where
         Route: FnOnce() -> RouteFuture,
         RouteFuture: Future<Output = Result<S, E>>,
         Read: FnOnce(S) -> ReadFuture,
-        ReadFuture: Future<Output = Result<(T, Bytes), E>>,
+        ReadFuture: Future<Output = Result<(T, RequestBody), E>>,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture,
         InputFuture: Future<Output = Result<(Vec<Decision>, G), E>>,
     {
@@ -136,7 +134,10 @@ where
             authorize_input_callback,
             |backend, request, _request_guard| async move {
                 let (_cancellation, context) = HandlerCancellationSource::pair();
-                backend.call_with_context(request, context).await
+                backend
+                    .call_with_context(request, context)
+                    .await
+                    .map_err(StaticDispatchError::Handler)
             },
         )
         .await
@@ -182,11 +183,11 @@ where
         Route: FnOnce() -> RouteFuture,
         RouteFuture: Future<Output = Result<S, E>>,
         Read: FnOnce(S) -> ReadFuture,
-        ReadFuture: Future<Output = Result<(T, Bytes), E>>,
+        ReadFuture: Future<Output = Result<(T, RequestBody), E>>,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture,
         InputFuture: Future<Output = Result<(Vec<Decision>, G), E>>,
         Invoke: FnOnce(Arc<B>, crate::Req<O>, G) -> InvokeFuture,
-        InvokeFuture: Future<Output = crate::HandlerResult<O>>,
+        InvokeFuture: Future<Output = Result<crate::Resp<O>, StaticDispatchError<E>>>,
     {
         if routed_operation != O::NAME {
             return Err(StaticDispatchError::OperationMismatch {
@@ -202,9 +203,7 @@ where
             .await
             .map_err(StaticDispatchError::Input)?;
         let authorized = authorize::<O>(decoded, &decisions).map_err(StaticDispatchError::Denied)?;
-        let response = invoke_handler(backend, authorized.into_request(), request_guard)
-            .await
-            .map_err(StaticDispatchError::Handler)?;
+        let response = invoke_handler(backend, authorized.into_request(), request_guard).await?;
         let (answer, status) = response.into_parts();
         match answer {
             Answer::Settled(output) => encode::<O>(output, meta, status)
@@ -248,13 +247,8 @@ async fn contain_committed_work<T>(work: crate::BoxFuture<'static, Result<T, Han
     .await
 }
 
-pub(crate) fn decode<O: OperationCodec>(meta: &MetaView<'_>, body: Bytes) -> Result<Decoded<O>, CodecError> {
-    let streamed = RequestBody::Stream(ByteStream::from_bytes(body.clone()));
-    let input = match O::decode(meta, streamed) {
-        Ok(input) => input,
-        Err(error) if error.code() == &ErrorCode::INTERNAL_ERROR => O::decode(meta, RequestBody::Buffered(body))?,
-        Err(error) => return Err(error),
-    };
+pub(crate) fn decode<O: OperationCodec>(meta: &MetaView<'_>, body: RequestBody) -> Result<Decoded<O>, CodecError> {
+    let input = O::decode(meta, body)?;
     prepare_input::<O>(input).map_err(|error| CodecError::new(error.code().clone(), error.message()))
 }
 

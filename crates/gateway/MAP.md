@@ -30,6 +30,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `src/operation_mode.rs` | Dynamic/static adapters for the common pipeline | Auditing how a routed operation reaches its codec and handler |
 | `src/posture.rs` | Startup-only security posture rendering and the public assembly snapshot | Auditing deployment security visibility |
 | `src/request_deadline.rs` | Runtime-independent policy and failure-floor deadlines | Editing timeout mechanics used by the request pipeline |
+| `src/request_body.rs` | Live verified request-body producer, terminal verdict, and progress signal | A streaming upload crosses the codec or handler boundary |
 | `src/stamp.rs` | Framework-owned response headers | A response lacks IDs, `Server`, or `Date` |
 | `src/trace.rs` | Request IDs and trace sources | Joining an answer to an audit record |
 | `src/clock.rs` | Wall and monotonic clock sources | A request reads time twice |

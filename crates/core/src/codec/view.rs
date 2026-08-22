@@ -362,6 +362,24 @@ pub enum RequestBody {
     Stream(ByteStream),
 }
 
+/// How much of a request body must exist before its decoder runs.
+///
+/// Generated codecs publish this from the lowered protocol IR so an assembly can choose the body
+/// shape before moving the sole live producer into the decoder. Third-party codecs default to
+/// [`Self::Full`], the conservative mode that preserves the complete-body handoff.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum RequestBodyMode {
+    /// The operation has no request payload.
+    None,
+    /// The complete bounded body is available before decoding.
+    #[default]
+    Full,
+    /// The decoder receives a live producer before the body is complete.
+    Streaming,
+    /// The response head is committed before the request-side outcome is known.
+    Deferred,
+}
+
 impl RequestBody {
     /// The buffered bytes, or the error a decoder raises when the body was not buffered.
     ///

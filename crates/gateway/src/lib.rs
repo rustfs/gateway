@@ -97,6 +97,7 @@ mod payload_header;
 mod posture;
 mod probe;
 mod render;
+mod request_body;
 mod request_config;
 mod request_deadline;
 mod service;
@@ -119,7 +120,7 @@ pub use crate::close::ConnectionIntent;
 pub use crate::config::{
     ConfigHandle, ConfigSnapshot, DEFAULT_COMMIT_PROGRESS_DEADLINE, DEFAULT_EXTENDED_HANDLER_DEADLINE,
     DEFAULT_STANDARD_HANDLER_DEADLINE, HandlerDeadlineConfig, HandlerDeadlineConfigError, KEEPALIVE_INTERVALS_WITHOUT_PROGRESS,
-    ServiceConfig,
+    RequestBodyDeadlineConfig, ServiceConfig,
 };
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
@@ -169,8 +170,8 @@ pub use rustfs_gateway_core::{
     HandlerCancellation, HandlerContext, HandlerDeadlineClass, HandlerError, HandlerErrorContext, HandlerResult, HasOperation,
     HttpDate, InvalidErrorContext, MetaView, MissingHandlers, MissingObject, NoDerived, Operation, OperationCodec, OperationSet,
     OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req,
-    RequestBody, RequiredParam, ResourceIdentity, ResourceShape, ResourceVisibility, Resp, ResponseBody, ResponseKind,
-    ResponseOverride, RouteEntry, RouteSelector, RouterBuilder, TargetKind, resolve,
+    RequestBody, RequestBodyMode, RequiredParam, ResourceIdentity, ResourceShape, ResourceVisibility, Resp, ResponseBody,
+    ResponseKind, ResponseOverride, RouteEntry, RouteSelector, RouterBuilder, TargetKind, resolve,
 };
 
 /// Input-parameterized compatibility name for an operation request.
