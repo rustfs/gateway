@@ -38,7 +38,13 @@ async fn opening_a_streaming_body_does_not_read_ahead() {
     let proof = Authenticated::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"first-"), Bytes::from_static(b"second")]);
     let opened = SealedBody::seal(Some(body), Some(12))
-        .stream(&proof, roomy(), BodyTimeouts::S3, None, BodyDigestObligation::None, BodyIntegrity::NONE)
+        .stream(
+            &proof,
+            (roomy(), BodyTimeouts::S3, None),
+            None,
+            BodyDigestObligation::None,
+            BodyIntegrity::NONE,
+        )
         .ok();
     assert!(opened.is_some(), "the streaming body did not open");
     let Some(opened) = opened else {
@@ -69,8 +75,7 @@ async fn a_streaming_body_may_exceed_its_resident_window() {
     let opened = SealedBody::seal(Some(body), Some((3 * FRAME_BYTES) as u64))
         .stream(
             &proof,
-            BodyCeilings::streaming(None),
-            BodyTimeouts::S3,
+            (BodyCeilings::streaming(None), BodyTimeouts::S3, None),
             None,
             BodyDigestObligation::None,
             BodyIntegrity::NONE,
@@ -99,8 +104,7 @@ async fn a_streaming_frame_wider_than_the_resident_window_is_refused() {
     let opened = SealedBody::seal(Some(body), None)
         .stream(
             &proof,
-            BodyCeilings::streaming(None),
-            BodyTimeouts::S3,
+            (BodyCeilings::streaming(None), BodyTimeouts::S3, None),
             None,
             BodyDigestObligation::None,
             BodyIntegrity::NONE,
@@ -123,7 +127,13 @@ async fn dropping_an_unread_streaming_body_refuses_commit() {
     let proof = Authenticated::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"body")]);
     let opened = SealedBody::seal(Some(body), Some(4))
-        .stream(&proof, roomy(), BodyTimeouts::S3, None, BodyDigestObligation::None, BodyIntegrity::NONE)
+        .stream(
+            &proof,
+            (roomy(), BodyTimeouts::S3, None),
+            None,
+            BodyDigestObligation::None,
+            BodyIntegrity::NONE,
+        )
         .ok();
     assert!(opened.is_some(), "the streaming body did not open");
     let Some(opened) = opened else {

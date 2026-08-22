@@ -39,6 +39,8 @@ pub enum HandlerCancellation {
     BodyIdle,
     /// The request body made progress below the configured windowed throughput floor.
     BodyThroughput,
+    /// The admitted request exhausted its streaming body quota.
+    BodyQuota,
 }
 
 impl HandlerCancellation {
@@ -47,6 +49,7 @@ impl HandlerCancellation {
     const REQUEST_ABORTED: u8 = 2;
     const BODY_IDLE: u8 = 3;
     const BODY_THROUGHPUT: u8 = 4;
+    const BODY_QUOTA: u8 = 5;
 
     const fn code(self) -> u8 {
         match self {
@@ -54,6 +57,7 @@ impl HandlerCancellation {
             Self::RequestAborted => Self::REQUEST_ABORTED,
             Self::BodyIdle => Self::BODY_IDLE,
             Self::BodyThroughput => Self::BODY_THROUGHPUT,
+            Self::BodyQuota => Self::BODY_QUOTA,
         }
     }
 
@@ -63,6 +67,7 @@ impl HandlerCancellation {
             Self::REQUEST_ABORTED => Some(Self::RequestAborted),
             Self::BODY_IDLE => Some(Self::BodyIdle),
             Self::BODY_THROUGHPUT => Some(Self::BodyThroughput),
+            Self::BODY_QUOTA => Some(Self::BodyQuota),
             _ => None,
         }
     }

@@ -698,7 +698,7 @@ mod tests {
         let config = RequestConfig::enter(Arc::new(config))
             .accepted()
             .routed()
-            .governed()
+            .governed(crate::Lease::admit())
             .authenticated()
             .route_authorized()
             .body_read()

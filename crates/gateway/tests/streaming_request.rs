@@ -100,7 +100,7 @@ impl OperationCodec for StreamingPut {
     }
 }
 
-fn streaming_route() -> RouteEntry {
+pub(super) fn streaming_route() -> RouteEntry {
     RouteEntry {
         precedence: 50,
         selector: RouteSelector::new(STREAMING_PREDICATES),

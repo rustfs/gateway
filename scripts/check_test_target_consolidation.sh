@@ -632,6 +632,7 @@ gateway_modules = (
     "error_context_filters",
     "facade_probe",
     "governor_runtime",
+    "governor_streaming",
     "handler_panic",
     "ingest_assembly",
     "middleware",

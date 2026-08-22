@@ -582,16 +582,16 @@ impl S3Service {
 
         // Routed, so there is a bucket to expose to a deployment governor; before the body and
         // credential lookup, so either framework refusal prevents the work it limits.
-        if self
+        let lease = match self
             .inner
             .governor
             .try_acquire(&GovernorRequest::new(operation, meta.bucket(), declared_length, None, client_addr, class))
             .await
-            .is_err()
         {
-            return outcome.refuse_for_load();
-        }
-        let config = config.governed();
+            Ok(lease) => lease,
+            Err(()) => return outcome.refuse_for_load(),
+        };
+        let config = config.governed(lease);
 
         // Sealed here and read at the bottom. Between the two lies every stage that can refuse
         // this request for a reason decidable from its head, and none of them can reach the bytes:
@@ -896,13 +896,13 @@ impl S3Service {
 
             let ceilings = BodyCeilings::for_mode(request_body_mode, operation, state.config.config().max_buffered_body_bytes());
             let body_deadlines = state.config.config().request_body_deadlines();
+            let body_quota = state.config.body_quota();
             // The accepted head, not the pre-filter copy: it is the map the codec binds from.
             let integrity = crate::integrity::resolve(&body_wire.headers(), body_wire.method(), operation)?;
             let (body, body_monitor) = sealed
                 .handoff(
                     &authenticated,
-                    (request_body_mode, ceilings),
-                    body_deadlines,
+                    (request_body_mode, ceilings, body_deadlines, body_quota),
                     ingest,
                     body_digest,
                     integrity,

@@ -15,8 +15,9 @@
 //! Whether this deployment will spend resources on this request at all.
 //!
 //! Responsible for: [`Governor`], the question it is asked ([`GovernorRequest`]), the permit it
-//! hands back ([`Lease`]), the limiter a deployment gets without asking ([`DefaultGovernor`], in
-//! `governor/default.rs`), and [`Unlimited`], which adds no deployment-specific limit.
+//! hands back ([`Lease`]), the lease's optional [`BodyQuota`], the limiter a deployment gets
+//! without asking ([`DefaultGovernor`], in `governor/default.rs`), and [`Unlimited`], which adds no
+//! deployment-specific limit.
 //! NOT responsible for: connection-level back-pressure and idle timeouts, which belong to the
 //! server (P7-02) and not here; authorisation, which is a different question with a different
 //! answer; or counting anything, which is the implementation's business.
@@ -48,7 +49,9 @@ mod rates;
 pub use self::default::{DefaultGovernor, LayeredGovernor};
 pub use self::rates::{GovernorRates, Rate};
 
+use std::fmt;
 use std::net::{IpAddr, Ipv6Addr};
+use std::sync::Arc;
 
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::Identity;
@@ -186,19 +189,93 @@ impl<'a> GovernorRequest<'a> {
     }
 }
 
-/// Permission to proceed.
+/// Verified body progress presented to a lease's optional streaming quota.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerifiedBodyProgress {
+    verified_bytes: u64,
+    newly_verified_bytes: u64,
+}
+
+impl VerifiedBodyProgress {
+    pub(crate) const fn new(verified_bytes: u64, newly_verified_bytes: u64) -> Self {
+        Self {
+            verified_bytes,
+            newly_verified_bytes,
+        }
+    }
+
+    /// Cumulative bytes verified before delivery to the handler.
+    #[must_use]
+    pub const fn verified_bytes(self) -> u64 {
+        self.verified_bytes
+    }
+
+    /// Newly verified bytes awaiting delivery to the handler.
+    #[must_use]
+    pub const fn newly_verified_bytes(self) -> u64 {
+        self.newly_verified_bytes
+    }
+}
+
+/// The opaque refusal returned by a streaming body quota.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BodyQuotaExceeded(());
+
+impl BodyQuotaExceeded {
+    /// Refuses further verified body progress.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(())
+    }
+}
+
+/// An optional synchronous quota attached to one admitted request.
 ///
-/// An opaque token rather than `()` so that the admit path reads as an acquisition. It releases
-/// nothing on drop today; when a concurrency limiter needs that, the release goes here and every
-/// call site already holds the value it has to hold.
-#[derive(Debug)]
+/// The gateway invokes this once for each newly verified run, before exposing that run to the
+/// handler. Refusal is terminal; the gateway does not poll or drain the remaining request body.
+pub trait BodyQuota: Send + Sync + 'static {
+    /// Admits or refuses the next verified run.
+    ///
+    /// This runs in the body poll path and must return promptly without blocking. A panic is
+    /// contained and treated as a refusal.
+    fn check(&self, progress: VerifiedBodyProgress) -> Result<(), BodyQuotaExceeded>;
+}
+
+impl<T: BodyQuota + ?Sized> BodyQuota for Arc<T> {
+    fn check(&self, progress: VerifiedBodyProgress) -> Result<(), BodyQuotaExceeded> {
+        (**self).check(progress)
+    }
+}
+
+/// Permission to proceed, with at most one streaming body quota.
 #[must_use = "a lease that is dropped immediately admits the request without limiting it"]
-pub struct Lease(());
+pub struct Lease {
+    body_quota: Option<Arc<dyn BodyQuota>>,
+}
+
+impl fmt::Debug for Lease {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Lease")
+            .field("has_body_quota", &self.body_quota.is_some())
+            .finish()
+    }
+}
 
 impl Lease {
     /// Admits the request.
     pub const fn admit() -> Self {
-        Self(())
+        Self { body_quota: None }
+    }
+
+    /// Attaches the only streaming body quota for this request.
+    pub fn with_body_quota(mut self, quota: impl BodyQuota) -> Self {
+        self.body_quota = Some(Arc::new(quota));
+        self
+    }
+
+    pub(crate) fn body_quota(&self) -> Option<Arc<dyn BodyQuota>> {
+        self.body_quota.clone()
     }
 }
 
@@ -247,6 +324,7 @@ impl Governor for Unlimited {
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct RefuseEverything;
 
@@ -279,6 +357,34 @@ mod tests {
     async fn the_trait_is_dyn_compatible() {
         let governor: std::sync::Arc<dyn Governor> = std::sync::Arc::new(Unlimited);
         assert!(governor.try_acquire(&request()).await.is_ok());
+    }
+
+    struct CountingQuota(Arc<AtomicUsize>);
+
+    impl BodyQuota for CountingQuota {
+        fn check(&self, _progress: VerifiedBodyProgress) -> Result<(), BodyQuotaExceeded> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    /// Negative — replacing a quota cannot create a callback chain that grows with configuration.
+    #[test]
+    fn a_lease_holds_exactly_one_body_quota() {
+        let first = Arc::new(AtomicUsize::new(0));
+        let second = Arc::new(AtomicUsize::new(0));
+        let lease = Lease::admit()
+            .with_body_quota(CountingQuota(Arc::clone(&first)))
+            .with_body_quota(CountingQuota(Arc::clone(&second)));
+
+        lease
+            .body_quota()
+            .expect("the replacement quota")
+            .check(VerifiedBodyProgress::new(1, 1))
+            .expect("the replacement admits");
+
+        assert_eq!(first.load(Ordering::Relaxed), 0);
+        assert_eq!(second.load(Ordering::Relaxed), 1);
     }
 
     /// Positive — the governor named after admitting everything admits everything.

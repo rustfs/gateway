@@ -332,6 +332,10 @@ pub(crate) mod sealed {
                                     let _ = cleanup_completed;
                                     return Err(StaticDispatchError::Body(E::from(crate::gate::body_throughput_timeout())));
                                 }
+                                BodyMonitoredOutcome::Quota { cleanup_completed } => {
+                                    let _ = cleanup_completed;
+                                    return Err(StaticDispatchError::Body(E::from(crate::gate::body_quota_refusal())));
+                                }
                             };
                         let response = match managed {
                             HandlerCancellationOutcome::Completed(response) => response,

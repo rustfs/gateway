@@ -137,6 +137,10 @@ impl OperationMode for DynamicMode<'_> {
                         let _ = cleanup_completed;
                         return Err(StaticDispatchError::Body(E::from(crate::gate::body_throughput_timeout())));
                     }
+                    BodyMonitoredOutcome::Quota { cleanup_completed } => {
+                        let _ = cleanup_completed;
+                        return Err(StaticDispatchError::Body(E::from(crate::gate::body_quota_refusal())));
+                    }
                 };
             let (answer, status) = answer.map_err(StaticDispatchError::Handler)?;
             match answer {
@@ -328,7 +332,7 @@ mod tests {
                             RequestConfig::enter(Arc::new(crate::ServiceConfig::new(1)))
                                 .accepted()
                                 .routed()
-                                .governed()
+                                .governed(crate::Lease::admit())
                                 .authenticated()
                                 .route_authorized()
                                 .body_read()

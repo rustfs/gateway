@@ -14,11 +14,12 @@
 
 //! The request-local configuration carrier through the eight assembly stages.
 //!
-//! Responsible for: carrying the one configuration snapshot loaded at request entry.
+//! Responsible for: carrying the one configuration snapshot loaded at request entry, the admitted
+//! Governor lease, and request-local cancellation monitors through the pipeline.
 //! NOT responsible for: loading or replacing configuration, or implementing a pipeline stage.
 //! Upstream: [`crate::S3Service`]. Downstream: the ordered pipeline in `service.rs`.
 
-use crate::ConfigSnapshot;
+use crate::{ConfigSnapshot, Lease};
 use std::sync::atomic::{AtomicU8, Ordering};
 
 pub(crate) struct Entered;
@@ -67,6 +68,7 @@ pub(crate) struct RequestConfig<S> {
     handler_deadline_report: HandlerDeadlineReportSlot,
     request_cancellation: Option<tokio::sync::watch::Receiver<bool>>,
     body_monitor: Option<crate::request_body::BodyMonitor>,
+    governor_lease: Option<Lease>,
     stage: core::marker::PhantomData<fn() -> S>,
 }
 
@@ -77,6 +79,7 @@ impl RequestConfig<Entered> {
             handler_deadline_report: HandlerDeadlineReportSlot::new(),
             request_cancellation: None,
             body_monitor: None,
+            governor_lease: None,
             stage: core::marker::PhantomData,
         }
     }
@@ -98,7 +101,8 @@ impl RequestConfig<Accepted> {
 }
 
 impl RequestConfig<Routed> {
-    pub(crate) fn governed(self) -> RequestConfig<Governed> {
+    pub(crate) fn governed(mut self, lease: Lease) -> RequestConfig<Governed> {
+        self.governor_lease = Some(lease);
         self.advance()
     }
 }
@@ -159,12 +163,17 @@ impl<S> RequestConfig<S> {
         self.body_monitor.take()
     }
 
+    pub(crate) fn body_quota(&self) -> Option<std::sync::Arc<dyn crate::BodyQuota>> {
+        self.governor_lease.as_ref().and_then(Lease::body_quota)
+    }
+
     fn advance<N>(self) -> RequestConfig<N> {
         RequestConfig {
             snapshot: self.snapshot,
             handler_deadline_report: self.handler_deadline_report,
             request_cancellation: self.request_cancellation,
             body_monitor: self.body_monitor,
+            governor_lease: self.governor_lease,
             stage: core::marker::PhantomData,
         }
     }

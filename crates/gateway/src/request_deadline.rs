@@ -47,6 +47,7 @@ pub(crate) enum BodyMonitoredOutcome<T> {
     Failed(S3Error),
     Idle { cleanup_completed: bool },
     Throughput { cleanup_completed: bool },
+    Quota { cleanup_completed: bool },
 }
 
 pub(crate) async fn handler_with_body_monitor<T>(
@@ -76,9 +77,28 @@ pub(crate) async fn handler_with_body_monitor<T>(
             BodyEvent::Complete(Err(error)) => BodyMonitoredOutcome::Failed(error),
             BodyEvent::Idle => BodyMonitoredOutcome::Idle { cleanup_completed: true },
             BodyEvent::Throughput => BodyMonitoredOutcome::Throughput { cleanup_completed: true },
+            BodyEvent::Quota => {
+                cancellation.cancel(HandlerCancellation::BodyQuota);
+                BodyMonitoredOutcome::Quota { cleanup_completed: true }
+            }
         },
         Err(BodyEvent::Complete(Ok(_))) => BodyMonitoredOutcome::Completed(handler.await),
         Err(BodyEvent::Complete(Err(error))) => BodyMonitoredOutcome::Failed(error),
+        Err(BodyEvent::Quota) => {
+            cancellation.cancel(HandlerCancellation::BodyQuota);
+            let mut grace = Box::pin(futures_timer::Delay::new(cleanup_grace));
+            let cleanup_completed = poll_fn(|context| {
+                if handler.as_mut().poll(context).is_ready() {
+                    return Poll::Ready(true);
+                }
+                if grace.as_mut().poll(context).is_ready() {
+                    return Poll::Ready(false);
+                }
+                Poll::Pending
+            })
+            .await;
+            BodyMonitoredOutcome::Quota { cleanup_completed }
+        }
         Err(BodyEvent::Idle) => {
             cancellation.cancel(HandlerCancellation::BodyIdle);
             let mut grace = Box::pin(futures_timer::Delay::new(cleanup_grace));
