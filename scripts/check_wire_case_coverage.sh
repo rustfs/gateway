@@ -52,7 +52,7 @@ cases=(
     'c-wire-0043|negative|bound|crates/http/tests/header_and_query.rs::c_wire_0043_a_signed_or_significant_header_with_non_utf8_bytes_is_rejected'
     'c-wire-0044|negative|bound|crates/http/tests/header_and_query.rs::c_wire_0044_a_metadata_value_that_decodes_to_crlf_is_rejected'
     'c-wire-0045|negative|bound|crates/http/tests/header_and_query.rs::c_wire_0045_a_metadata_key_that_is_not_a_token_is_rejected'
-    'c-wire-0060|negative|bound|crates/gateway/tests/connection_teardown.rs::c_wire_0060_c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit'
+    'c-wire-0060|negative|bound|crates/gateway/tests/connection_teardown.rs::c_wire_0060_c_ing_0060_c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit'
     'c-wire-0061|negative|bound|crates/server/tests/server_load/per_ip.rs::c_wire_0061_slow_headers_expire_without_rss_or_healthy_p99_growth'
     'c-wire-0062|negative|bound|crates/gateway/src/gate_tests.rs::c_wire_0062_c_lim_0033_closes_a_socket_when_the_first_body_byte_never_arrives'
     'c-wire-0063|negative|bound|crates/http/tests/framing_smuggling.rs::c_wire_0063_an_over_large_declared_body_is_400_entity_too_large_and_never_drained;crates/gateway/tests/connection_teardown.rs::c_wire_0063_c_lim_0021_an_over_large_body_is_refused_on_the_socket_before_it_is_sent'
