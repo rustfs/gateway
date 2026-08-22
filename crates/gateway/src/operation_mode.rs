@@ -133,6 +133,10 @@ impl OperationMode for DynamicMode<'_> {
                         let _ = cleanup_completed;
                         return Err(StaticDispatchError::Body(E::from(crate::gate::body_idle_timeout())));
                     }
+                    BodyMonitoredOutcome::Throughput { cleanup_completed } => {
+                        let _ = cleanup_completed;
+                        return Err(StaticDispatchError::Body(E::from(crate::gate::body_throughput_timeout())));
+                    }
                 };
             let (answer, status) = answer.map_err(StaticDispatchError::Handler)?;
             match answer {

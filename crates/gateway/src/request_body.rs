@@ -16,8 +16,9 @@
 //!
 //! Responsible for: moving the sole transport owner into a protocol-neutral `ByteStream`,
 //! publishing decoded runs only after their per-run verification, and settling one gateway-owned
-//! terminal verdict at EOF, failure, or drop. NOT responsible for: choosing which operations
-//! stream, invoking handlers, or rendering the terminal refusal. Upstream: `crate::gate` after
+//! terminal verdict at EOF, failure, or drop, and publishing wire progress to the body monitor.
+//! NOT responsible for: choosing which operations stream, invoking handlers, or rendering the
+//! terminal refusal. Upstream: `crate::gate` after
 //! authentication. Downstream: generated streaming request fields and the handler wrapper.
 
 use core::future::{Future, poll_fn};
@@ -66,7 +67,8 @@ impl StreamingRead {
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        let progress = WireProgress::new(digest);
+        let (progress_tx, progress_rx) = watch::channel(0_u64);
+        let progress = WireProgress::new(digest).with_observer(progress_tx);
         let decoded_length = ingest.as_ref().map(ChunkIngest::decoded_length).or(declared_length);
         if ingest.is_none() && body.as_ref().is_none_or(http_body::Body::is_end_stream) {
             let verdict = if !progress.digest_matches() {
@@ -76,7 +78,6 @@ impl StreamingRead {
             };
             let (terminal_tx, terminal_rx) = oneshot::channel();
             let _ = terminal_tx.send(verdict);
-            let (_progress_tx, progress_rx) = watch::channel(0_u64);
             return Ok(Self {
                 stream: ByteStream::from_bytes(Bytes::new()),
                 terminal: BodyMonitor {
@@ -95,13 +96,11 @@ impl StreamingRead {
             }
         };
         let (terminal_tx, terminal_rx) = oneshot::channel();
-        let (progress_tx, progress_rx) = watch::channel(0_u64);
         let producer = VerifiedRequestBody {
             source,
             progress,
             digests: Some(integrity.begin()),
             terminal: Some(terminal_tx),
-            progress_tx,
             decoded_length,
             delivered: 0,
             ended: false,
@@ -135,6 +134,7 @@ pub(crate) struct BodyVerified;
 pub(crate) enum BodyEvent {
     Complete(Result<BodyVerified, S3Error>),
     Idle,
+    Throughput,
 }
 
 impl BodyMonitor {
@@ -143,32 +143,61 @@ impl BodyMonitor {
             Terminal(Result<Result<BodyVerified, S3Error>, oneshot::error::RecvError>),
             Progress(Result<(), watch::error::RecvError>),
             Idle,
+            Throughput,
         }
 
+        let mut body_started = *self.progress.borrow() != 0;
+        let mut idle_deadline = Box::pin(futures_timer::Delay::new(self.timeouts.waiting_for(body_started)));
+        let mut throughput_deadline =
+            body_started.then(|| Box::pin(futures_timer::Delay::new(self.timeouts.throughput_window())));
+        let mut window_start_bytes = 0_u64;
         loop {
-            let body_started = *self.progress.borrow() != 0;
-            let mut changed = Box::pin(self.progress.changed());
-            let mut deadline = Box::pin(futures_timer::Delay::new(self.timeouts.waiting_for(body_started)));
-            let wake = poll_fn(|context| {
-                if let Poll::Ready(verdict) = Pin::new(&mut self.terminal).poll(context) {
-                    return Poll::Ready(Wake::Terminal(verdict));
-                }
-                if let Poll::Ready(progress) = changed.as_mut().poll(context) {
-                    return Poll::Ready(Wake::Progress(progress));
-                }
-                if deadline.as_mut().poll(context).is_ready() {
-                    return Poll::Ready(Wake::Idle);
-                }
-                Poll::Pending
-            })
-            .await;
+            let wake = {
+                let mut changed = Box::pin(self.progress.changed());
+                poll_fn(|context| {
+                    if let Poll::Ready(verdict) = Pin::new(&mut self.terminal).poll(context) {
+                        return Poll::Ready(Wake::Terminal(verdict));
+                    }
+                    if let Poll::Ready(progress) = changed.as_mut().poll(context) {
+                        return Poll::Ready(Wake::Progress(progress));
+                    }
+                    if throughput_deadline
+                        .as_mut()
+                        .is_some_and(|deadline| deadline.as_mut().poll(context).is_ready())
+                    {
+                        return Poll::Ready(Wake::Throughput);
+                    }
+                    if idle_deadline.as_mut().poll(context).is_ready() {
+                        return Poll::Ready(Wake::Idle);
+                    }
+                    Poll::Pending
+                })
+                .await
+            };
             match wake {
                 Wake::Terminal(Ok(verdict)) => return BodyEvent::Complete(verdict),
                 Wake::Terminal(Err(_)) | Wake::Progress(Err(_)) => {
                     return BodyEvent::Complete(Err(crate::gate::incomplete()));
                 }
-                Wake::Progress(Ok(())) => {}
+                Wake::Progress(Ok(())) => {
+                    let delivered = *self.progress.borrow();
+                    if delivered != 0 {
+                        if !body_started {
+                            body_started = true;
+                            throughput_deadline = Some(Box::pin(futures_timer::Delay::new(self.timeouts.throughput_window())));
+                        }
+                        idle_deadline = Box::pin(futures_timer::Delay::new(self.timeouts.waiting_for(true)));
+                    }
+                }
                 Wake::Idle => return BodyEvent::Idle,
+                Wake::Throughput => {
+                    let delivered = *self.progress.borrow();
+                    if delivered.saturating_sub(window_start_bytes) < self.timeouts.minimum_throughput_bytes() {
+                        return BodyEvent::Throughput;
+                    }
+                    window_start_bytes = delivered;
+                    throughput_deadline = Some(Box::pin(futures_timer::Delay::new(self.timeouts.throughput_window())));
+                }
             }
         }
     }
@@ -178,6 +207,7 @@ impl BodyMonitor {
         match self.next_event().await {
             BodyEvent::Complete(verdict) => verdict,
             BodyEvent::Idle => Err(crate::gate::body_idle_timeout()),
+            BodyEvent::Throughput => Err(crate::gate::body_throughput_timeout()),
         }
     }
 
@@ -204,7 +234,6 @@ struct VerifiedRequestBody<B> {
     progress: WireProgress,
     digests: Option<BodyDigests>,
     terminal: Option<oneshot::Sender<Result<BodyVerified, S3Error>>>,
-    progress_tx: watch::Sender<u64>,
     decoded_length: Option<u64>,
     delivered: u64,
     ended: bool,
@@ -228,7 +257,6 @@ impl<B> VerifiedRequestBody<B> {
             digests.update(&bytes);
         }
         self.delivered = self.delivered.saturating_add(bytes.len() as u64);
-        self.progress_tx.send_replace(self.delivered);
         Poll::Ready(Ok(PayloadRead::Chunk(bytes)))
     }
 

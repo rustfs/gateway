@@ -28,11 +28,13 @@ pub const DEFAULT_STANDARD_HANDLER_DEADLINE: Duration = Duration::from_secs(30);
 pub const DEFAULT_EXTENDED_HANDLER_DEADLINE: Duration = Duration::from_secs(15 * 60);
 const DEFAULT_HANDLER_CLEANUP_GRACE: Duration = Duration::from_secs(1);
 
-/// Validated idle deadlines for a request body.
+/// Validated idle deadlines and windowed throughput floor for a request body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RequestBodyDeadlineConfig {
     first_byte: Duration,
     read_idle: Duration,
+    minimum_throughput_bytes: u64,
+    throughput_window: Duration,
 }
 
 impl RequestBodyDeadlineConfig {
@@ -40,9 +42,11 @@ impl RequestBodyDeadlineConfig {
     pub const S3: Self = Self {
         first_byte: Duration::from_secs(20),
         read_idle: Duration::from_secs(30),
+        minimum_throughput_bytes: 1024,
+        throughput_window: Duration::from_secs(10),
     };
 
-    /// Builds non-zero first-byte and between-read deadlines.
+    /// Builds non-zero first-byte and between-read deadlines with the shipped throughput floor.
     ///
     /// Returns `None` when either duration is zero. Zero is never an alias for unlimited.
     #[must_use]
@@ -50,7 +54,25 @@ impl RequestBodyDeadlineConfig {
         if first_byte.is_zero() || read_idle.is_zero() {
             return None;
         }
-        Some(Self { first_byte, read_idle })
+        Some(Self {
+            first_byte,
+            read_idle,
+            minimum_throughput_bytes: Self::S3.minimum_throughput_bytes,
+            throughput_window: Self::S3.throughput_window,
+        })
+    }
+
+    /// Replaces the minimum body progress required in each fixed window.
+    ///
+    /// Returns `None` when either value is zero. Zero is never an alias for disabling the floor.
+    #[must_use]
+    pub const fn try_with_throughput_floor(mut self, minimum_bytes: u64, window: Duration) -> Option<Self> {
+        if minimum_bytes == 0 || window.is_zero() {
+            return None;
+        }
+        self.minimum_throughput_bytes = minimum_bytes;
+        self.throughput_window = window;
+        Some(self)
     }
 
     /// Returns the maximum silence before the first body byte.
@@ -63,6 +85,18 @@ impl RequestBodyDeadlineConfig {
     #[must_use]
     pub const fn read_idle(self) -> Duration {
         self.read_idle
+    }
+
+    /// Returns the minimum body bytes required in each throughput window.
+    #[must_use]
+    pub const fn minimum_throughput_bytes(self) -> u64 {
+        self.minimum_throughput_bytes
+    }
+
+    /// Returns the fixed window used to measure minimum body throughput.
+    #[must_use]
+    pub const fn throughput_window(self) -> Duration {
+        self.throughput_window
     }
 
     pub(crate) const fn waiting_for(self, body_byte_seen: bool) -> Duration {
@@ -292,14 +326,14 @@ impl ServiceConfig {
         self
     }
 
-    /// Replaces the first-byte and between-read request-body deadlines.
+    /// Replaces the request body's idle deadlines and windowed throughput floor.
     #[must_use]
     pub const fn with_request_body_deadlines(mut self, deadlines: RequestBodyDeadlineConfig) -> Self {
         self.request_body_deadlines = deadlines;
         self
     }
 
-    /// Returns the request-body idle deadlines held by this snapshot.
+    /// Returns the request-body progress policy held by this snapshot.
     #[must_use]
     pub const fn request_body_deadlines(&self) -> RequestBodyDeadlineConfig {
         self.request_body_deadlines
@@ -390,6 +424,22 @@ mod tests {
             HandlerDeadlineConfig::new(std::time::Duration::from_secs(1), std::time::Duration::ZERO),
             Err(HandlerDeadlineConfigError::ZeroExtended),
         );
+    }
+
+    /// Negative — neither half of the body-throughput floor can be disabled with zero.
+    #[test]
+    fn request_body_throughput_floor_is_non_zero_and_configurable() {
+        let defaults = RequestBodyDeadlineConfig::S3;
+        assert_eq!(defaults.minimum_throughput_bytes(), 1024);
+        assert_eq!(defaults.throughput_window(), Duration::from_secs(10));
+        assert_eq!(defaults.try_with_throughput_floor(0, Duration::from_secs(1)), None);
+        assert_eq!(defaults.try_with_throughput_floor(1, Duration::ZERO), None);
+
+        let configured = defaults.try_with_throughput_floor(4096, Duration::from_secs(2));
+        assert!(configured.is_some(), "the non-zero floor is accepted");
+        let configured = configured.unwrap_or(defaults);
+        assert_eq!(configured.minimum_throughput_bytes(), 4096);
+        assert_eq!(configured.throughput_window(), Duration::from_secs(2));
     }
 
     #[test]

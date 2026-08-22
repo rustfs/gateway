@@ -117,7 +117,10 @@ struct WireProgressState {
 
 /// Shared accounting retained by the request owner while a framed pipeline owns the reader.
 #[derive(Clone)]
-pub(crate) struct WireProgress(Arc<Mutex<WireProgressState>>);
+pub(crate) struct WireProgress {
+    state: Arc<Mutex<WireProgressState>>,
+    observer: Option<tokio::sync::watch::Sender<u64>>,
+}
 
 impl WireProgress {
     /// Opens the accounting for one body, hashing only when a digest was actually promised.
@@ -129,19 +132,29 @@ impl WireProgress {
     /// payload hash is compared — the P2 gap `crate::gate` records — the framed path gets the
     /// comparison rather than silently skipping it.
     pub(crate) fn new(digest: BodyDigestObligation) -> Self {
-        Self(Arc::new(Mutex::new(WireProgressState {
-            seen: 0,
-            digest,
-            sha256: match digest {
-                BodyDigestObligation::None => None,
-                BodyDigestObligation::Sha256(_) => Some(Sha256::new()),
-            },
-            refusal: None,
-        })))
+        Self {
+            state: Arc::new(Mutex::new(WireProgressState {
+                seen: 0,
+                digest,
+                sha256: match digest {
+                    BodyDigestObligation::None => None,
+                    BodyDigestObligation::Sha256(_) => Some(Sha256::new()),
+                },
+                refusal: None,
+            })),
+            observer: None,
+        }
+    }
+
+    /// Publishes cumulative wire-byte progress to the request owner.
+    #[must_use]
+    pub(crate) fn with_observer(mut self, observer: tokio::sync::watch::Sender<u64>) -> Self {
+        self.observer = Some(observer);
+        self
     }
 
     fn state(&self) -> MutexGuard<'_, WireProgressState> {
-        match self.0.lock() {
+        match self.state.lock() {
             Ok(state) => state,
             Err(poisoned) => poisoned.into_inner(),
         }
@@ -174,7 +187,12 @@ impl WireProgress {
         if let Some(hasher) = state.sha256.as_mut() {
             hasher.update(bytes);
         }
-        state.seen
+        let seen = state.seen;
+        drop(state);
+        if let Some(observer) = &self.observer {
+            observer.send_replace(seen);
+        }
+        seen
     }
 
     fn refuse(&self, refusal: S3Error) -> StreamError {

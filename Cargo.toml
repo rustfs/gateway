@@ -17,7 +17,7 @@ authors = ["RustFS Team"]
 rustfs-gateway = { path = "crates/gateway", version = "0.16.0" }
 rustfs-gateway-codegen = { path = "crates/codegen", version = "0.7.0" }
 rustfs-gateway-conformance = { path = "crates/conformance", version = "0.9.0" }
-rustfs-gateway-core = { path = "crates/core", version = "0.9.0" }
+rustfs-gateway-core = { path = "crates/core", version = "0.9.1" }
 rustfs-gateway-http = { path = "crates/http", version = "0.1.0" }
 rustfs-gateway-macros = { path = "crates/macros", version = "0.1.0" }
 rustfs-gateway-model = { path = "crates/model", version = "0.5.0" }
