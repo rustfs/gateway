@@ -515,7 +515,10 @@ async fn a_head_keeps_the_headers_a_get_would_have_carried() {
 /// never happened, which is why the document has to be there and the status has to stay.
 #[tokio::test]
 async fn a_failure_after_the_head_is_committed_keeps_the_status_and_carries_the_document() {
-    let response = support::exchange_wire(&support::service(), plain(http::Method::PUT, "/?commit-then-fail")).await;
+    let service = support::copy_commit_builder(support::CopyCommit::Fail)
+        .build()
+        .expect("a complete assembly");
+    let response = support::exchange_wire(&service, support::copy_commit_request()).await;
     assert_eq!(response.status(), http::StatusCode::OK, "the refusal changed the status line");
     let body = String::from_utf8(response.body().to_vec()).expect("utf-8");
     assert!(body.starts_with(rustfs_gateway::commit::PROLOGUE), "{body}");
@@ -528,11 +531,12 @@ async fn a_failure_after_the_head_is_committed_keeps_the_status_and_carries_the_
 /// carrying, and it is the trap `c-mpu-0038` exists for.
 #[tokio::test]
 async fn a_committed_body_carries_exactly_one_declaration_whichever_way_it_ends() {
-    for query in ["/?commit-then-fail", "/?commit-then-answer"] {
-        let response = support::exchange_wire(&support::service(), plain(http::Method::PUT, query)).await;
+    for outcome in [support::CopyCommit::Fail, support::CopyCommit::Answer] {
+        let service = support::copy_commit_builder(outcome).build().expect("a complete assembly");
+        let response = support::exchange_wire(&service, support::copy_commit_request()).await;
         let body = String::from_utf8(response.body().to_vec()).expect("utf-8");
-        assert_eq!(body.matches("<?xml").count(), 1, "{query}: {body}");
-        assert!(body.starts_with(rustfs_gateway::commit::PROLOGUE), "{query}: {body}");
+        assert_eq!(body.matches("<?xml").count(), 1, "{body}");
+        assert!(body.starts_with(rustfs_gateway::commit::PROLOGUE), "{body}");
     }
 }
 
@@ -541,11 +545,12 @@ async fn a_committed_body_carries_exactly_one_declaration_whichever_way_it_ends(
 /// never arrives leaves a client waiting, which turns a reported failure into a hang.
 #[tokio::test]
 async fn a_committed_response_announces_neither_a_length_nor_a_trailer_section() {
-    for query in ["/?commit-then-fail", "/?commit-then-answer"] {
-        let response = support::exchange_wire(&support::service(), plain(http::Method::PUT, query)).await;
-        assert_eq!(response.header("content-length"), None, "{query}");
-        assert_eq!(response.header("trailer"), None, "{query}");
-        assert_eq!(response.header("transfer-encoding"), None, "{query}");
+    for outcome in [support::CopyCommit::Fail, support::CopyCommit::Answer] {
+        let service = support::copy_commit_builder(outcome).build().expect("a complete assembly");
+        let response = support::exchange_wire(&service, support::copy_commit_request()).await;
+        assert_eq!(response.header("content-length"), None);
+        assert_eq!(response.header("trailer"), None);
+        assert_eq!(response.header("transfer-encoding"), None);
     }
 }
 
@@ -554,13 +559,11 @@ async fn a_committed_response_announces_neither_a_length_nor_a_trailer_section()
 #[tokio::test]
 async fn the_observer_sees_a_committed_failure_as_a_failure() {
     let recorder = Arc::new(Recorder::default());
-    let service = wired()
-        .register::<support::ContentPing, _>(Arc::new(Backend))
-        .route(support::content_ping_route())
+    let service = support::copy_commit_builder(support::CopyCommit::Fail)
         .observer(Arc::clone(&recorder) as Arc<dyn rustfs_gateway::Observer>)
         .build()
         .expect("a complete assembly");
-    let response = support::exchange_wire(&service, plain(http::Method::PUT, "/?commit-then-fail")).await;
+    let response = support::exchange_wire(&service, support::copy_commit_request()).await;
     assert_eq!(response.status(), http::StatusCode::OK);
     let seen = recorder.seen.lock().expect("the recorder");
     assert_eq!(seen.len(), 1);
@@ -578,10 +581,13 @@ async fn the_observer_sees_a_committed_failure_as_a_failure() {
 /// error document.
 #[tokio::test]
 async fn a_committed_response_that_succeeds_carries_the_encoders_document() {
-    let response = support::exchange_wire(&support::service(), plain(http::Method::PUT, "/?commit-then-answer")).await;
+    let service = support::copy_commit_builder(support::CopyCommit::Answer)
+        .build()
+        .expect("a complete assembly");
+    let response = support::exchange_wire(&service, support::copy_commit_request()).await;
     assert_eq!(response.status(), http::StatusCode::OK);
     let body = String::from_utf8(response.body().to_vec()).expect("utf-8");
-    assert!(body.ends_with("<Ping>committed</Ping>"), "{body}");
+    assert!(body.contains("<CopyObjectResult"), "{body}");
     assert!(!body.contains("<Error>"), "{body}");
 }
 

@@ -200,6 +200,20 @@ impl OperationCodec for dto::CompleteMultipartUpload {
     }
 }
 
+impl crate::handler::deferred_sealed::Sealed for dto::CompleteMultipartUpload {}
+
+impl crate::handler::DeferredOperation for dto::CompleteMultipartUpload {
+    const RESPONSE_HEADERS: &'static [&'static str] = &[
+        "x-amz-expiration",
+        "x-amz-request-charged",
+        "x-amz-server-side-encryption",
+        "x-amz-server-side-encryption-aws-kms-key-id",
+        "x-amz-server-side-encryption-bucket-key-enabled",
+        "x-amz-version-id",
+    ];
+    const RESPONSE_HEADER_PREFIXES: &'static [&'static str] = &[];
+}
+
 /// Reads one `CompletedMultipartUpload` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
 fn read_completed_multipart_upload(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::CompletedMultipartUpload, CodecError> {

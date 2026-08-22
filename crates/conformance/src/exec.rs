@@ -12,25 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Driving one future to completion on the calling thread.
+//! Driving futures to completion on the calling thread.
 //!
-//! Responsible for: [`block_on`], twenty lines of `std` that let a synchronous [`crate::sut::Sut`]
-//! call an `async` service entry point.
-//! NOT responsible for: timers, I/O readiness, or concurrency. There is none of any of them here:
-//! the in-process assembly reads an in-memory body and never registers with a reactor, so a future
-//! that returns `Pending` is waiting on something this crate did not create — and the park below
-//! is then exactly the diagnosis, a hang rather than a wrong answer.
-//! Upstream: nothing. Downstream: `crate::inprocess`.
+//! Responsible for: [`block_on`], a minimal driver for direct fixture futures, and
+//! `ServiceRuntime`, the current-thread Tokio runtime required by facade calls.
+//! NOT responsible for: I/O readiness or a work-stealing scheduler. The service runtime enables
+//! only timers so committed responses can make progress after returning their frozen head.
+//! Upstream: nothing. Downstream: direct fixture tests, `crate::inprocess`, and `crate::socket`.
 //!
-//! # Why not an async runtime
+//! # Why two drivers
 //!
-//! This crate is a product other S3 implementations run against themselves, and every dependency
-//! it carries is one they inherit. A work-stealing scheduler to run one future at a time on one
-//! thread is the largest thing it could have inherited for the least reason.
+//! Direct fixture futures need no runtime. Facade calls do: a committed response captures the
+//! current Tokio handle, returns its head, and completes on a detached task while the body is
+//! drained. Keeping one current-thread runtime across both polls preserves that ownership contract.
 
 use std::future::Future;
 use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
+
+/// A single-thread driver kept alive across a facade call and response drain.
+pub(crate) struct ServiceRuntime(tokio::runtime::Runtime);
+
+impl ServiceRuntime {
+    /// Builds a timer-enabled runtime without an I/O or work-stealing driver.
+    pub(crate) fn new() -> Result<Self, std::io::Error> {
+        tokio::runtime::Builder::new_current_thread().enable_time().build().map(Self)
+    }
+
+    /// Drives one future while keeping detached facade work on the same runtime alive.
+    pub(crate) fn block_on<F: Future>(&self, future: F) -> F::Output {
+        self.0.block_on(future)
+    }
+}
 
 /// Wakes the thread that parked itself waiting for the future.
 struct Unpark(std::thread::Thread);

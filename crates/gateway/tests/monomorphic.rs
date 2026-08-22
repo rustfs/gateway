@@ -32,8 +32,8 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use rustfs_gateway::{
-    AssemblyError, ClockSkewAck, Handler, HandlerCancellation, HandlerDeadlineConfig, HandlerResult, Next, OperationSetEnd,
-    OperationSetNode, Req, RuleRef, ServiceBuilder, ServiceConfig, WireResponse, dto, op_layer,
+    AssemblyError, ClockSkewAck, Handler, HandlerCancellation, HandlerDeadlineConfig, HandlerResult, HeadPart, Next,
+    OperationSetEnd, OperationSetNode, Req, RuleRef, ServiceBuilder, ServiceConfig, WireResponse, dto, op_layer,
 };
 use support::{Backend, ContentPing, HeadPing, Ping, PingOutput, content_ping_route, head_ping_route, ping_route, plain, wired};
 
@@ -223,14 +223,71 @@ async fn static_and_dynamic_document_shapes_are_identical() {
         .build_monomorphic::<_, OrdinaryOperations>(static_backend)
         .expect("a complete static assembly");
 
-    for (method, uri) in [
-        (http::Method::POST, "/"),
-        (http::Method::PUT, "/?refuse"),
-        (http::Method::PUT, "/?commit-then-answer"),
-        (http::Method::PUT, "/?commit-then-fail"),
-    ] {
+    for (method, uri) in [(http::Method::POST, "/"), (http::Method::PUT, "/?refuse")] {
         let dynamic_response = collect(dynamic.call_bytes(plain(method.clone(), uri)).await).await;
         let static_response = collect(monomorphic.call_bytes(plain(method, uri)).await).await;
+        assert_wire_parity(&dynamic_response, &static_response);
+    }
+}
+
+struct CommittedCopy(support::CopyCommit);
+
+impl Handler<dto::CopyObject> for CommittedCopy {
+    async fn call(&self, _request: Req<dto::CopyObject>) -> HandlerResult<dto::CopyObject> {
+        let outcome = self.0;
+        Ok(rustfs_gateway::Resp::commit(
+            HeadPart::new(http::HeaderMap::new()).expect("an empty generated operation head"),
+            Box::pin(async move {
+                match outcome {
+                    support::CopyCommit::Answer => Ok(dto::CopyObjectOutput::default()),
+                    support::CopyCommit::Fail => Err(rustfs_gateway::HandlerError::new(
+                        rustfs_gateway::ErrorCode::NO_SUCH_KEY,
+                        "the source key disappeared",
+                    )),
+                }
+            }),
+        ))
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<dto::CopyObject>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<dto::CopyObject> {
+        let outcome = self.0;
+        Ok(rustfs_gateway::Resp::commit(
+            HeadPart::new(http::HeaderMap::new()).expect("an empty generated operation head"),
+            Box::pin(async move {
+                match outcome {
+                    support::CopyCommit::Answer => Ok(dto::CopyObjectOutput::default()),
+                    support::CopyCommit::Fail => Err(rustfs_gateway::HandlerError::new(
+                        rustfs_gateway::ErrorCode::NO_SUCH_KEY,
+                        "the source key disappeared",
+                    )),
+                }
+            }),
+        ))
+    }
+}
+
+/// a-asm-0007. Both dispatch paths detach the same generated operation and render either terminal
+/// document after the same frozen head.
+#[tokio::test]
+async fn static_and_dynamic_committed_document_shapes_are_identical() {
+    type Operations = OperationSetNode<dto::CopyObject, OperationSetEnd>;
+    for outcome in [support::CopyCommit::Answer, support::CopyCommit::Fail] {
+        let dynamic = support::wired_at_signed_time()
+            .register::<dto::CopyObject, _>(Arc::new(CommittedCopy(outcome)))
+            .build()
+            .expect("a complete dynamic assembly");
+        let static_backend = Arc::new(CommittedCopy(outcome));
+        let monomorphic = support::wired_at_signed_time()
+            .register::<dto::CopyObject, _>(Arc::clone(&static_backend))
+            .build_monomorphic::<_, Operations>(static_backend)
+            .expect("a complete static assembly");
+
+        let dynamic_response = collect(dynamic.call_bytes(support::copy_commit_request()).await).await;
+        let static_response = collect(monomorphic.call_bytes(support::copy_commit_request()).await).await;
         assert_wire_parity(&dynamic_response, &static_response);
     }
 }
@@ -305,16 +362,22 @@ async fn static_and_dynamic_handler_panics_are_identical() {
 
 struct CommitPanics;
 
-impl Handler<Ping> for CommitPanics {
-    async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
+impl Handler<dto::CopyObject> for CommitPanics {
+    async fn call(&self, _request: Req<dto::CopyObject>) -> HandlerResult<dto::CopyObject> {
         Ok(rustfs_gateway::Resp::commit_with_status(
+            HeadPart::new(http::HeaderMap::new()).expect("an empty generated operation head"),
             Box::pin(async { panic!("committed continuation panic fixture") }),
             http::StatusCode::ACCEPTED.as_u16(),
         ))
     }
 
-    async fn call_with_context(&self, _request: Req<Ping>, _context: rustfs_gateway::HandlerContext) -> HandlerResult<Ping> {
+    async fn call_with_context(
+        &self,
+        _request: Req<dto::CopyObject>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<dto::CopyObject> {
         Ok(rustfs_gateway::Resp::commit_with_status(
+            HeadPart::new(http::HeaderMap::new()).expect("an empty generated operation head"),
             Box::pin(async { panic!("committed continuation panic fixture") }),
             http::StatusCode::ACCEPTED.as_u16(),
         ))
@@ -325,21 +388,19 @@ impl Handler<Ping> for CommitPanics {
 /// changing the status already sent, on both dispatch paths.
 #[tokio::test]
 async fn static_and_dynamic_committed_panics_keep_the_committed_status() {
-    type Operations = OperationSetNode<Ping, OperationSetEnd>;
-    let dynamic = wired()
-        .register::<Ping, _>(Arc::new(CommitPanics))
-        .route(ping_route())
+    type Operations = OperationSetNode<dto::CopyObject, OperationSetEnd>;
+    let dynamic = support::wired_at_signed_time()
+        .register::<dto::CopyObject, _>(Arc::new(CommitPanics))
         .build()
         .expect("a complete dynamic assembly");
     let static_backend = Arc::new(CommitPanics);
-    let monomorphic = wired()
-        .register::<Ping, _>(Arc::clone(&static_backend))
-        .route(ping_route())
+    let monomorphic = support::wired_at_signed_time()
+        .register::<dto::CopyObject, _>(Arc::clone(&static_backend))
         .build_monomorphic::<_, Operations>(static_backend)
         .expect("a complete static assembly");
 
-    let dynamic_response = collect(dynamic.call_bytes(plain(http::Method::POST, "/")).await).await;
-    let static_response = collect(monomorphic.call_bytes(plain(http::Method::POST, "/")).await).await;
+    let dynamic_response = collect(dynamic.call_bytes(support::copy_commit_request()).await).await;
+    let static_response = collect(monomorphic.call_bytes(support::copy_commit_request()).await).await;
     assert_wire_parity(&dynamic_response, &static_response);
     assert_eq!(dynamic_response.status(), http::StatusCode::ACCEPTED);
     let body = std::str::from_utf8(dynamic_response.body()).expect("a UTF-8 committed error document");
@@ -350,12 +411,10 @@ async fn static_and_dynamic_committed_panics_keep_the_committed_status() {
 struct ReadyThenDropPanics;
 
 impl Future for ReadyThenDropPanics {
-    type Output = Result<PingOutput, rustfs_gateway::HandlerError>;
+    type Output = Result<dto::CopyObjectOutput, rustfs_gateway::HandlerError>;
 
     fn poll(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Ready(Ok(PingOutput {
-            message: "must not escape the committed boundary".to_owned(),
-        }))
+        Poll::Ready(Ok(dto::CopyObjectOutput::default()))
     }
 }
 
@@ -367,16 +426,22 @@ impl Drop for ReadyThenDropPanics {
 
 struct CommitDropPanics;
 
-impl Handler<Ping> for CommitDropPanics {
-    async fn call(&self, _request: Req<Ping>) -> HandlerResult<Ping> {
+impl Handler<dto::CopyObject> for CommitDropPanics {
+    async fn call(&self, _request: Req<dto::CopyObject>) -> HandlerResult<dto::CopyObject> {
         Ok(rustfs_gateway::Resp::commit_with_status(
+            HeadPart::new(http::HeaderMap::new()).expect("an empty generated operation head"),
             Box::pin(ReadyThenDropPanics),
             http::StatusCode::ACCEPTED.as_u16(),
         ))
     }
 
-    async fn call_with_context(&self, _request: Req<Ping>, _context: rustfs_gateway::HandlerContext) -> HandlerResult<Ping> {
+    async fn call_with_context(
+        &self,
+        _request: Req<dto::CopyObject>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<dto::CopyObject> {
         Ok(rustfs_gateway::Resp::commit_with_status(
+            HeadPart::new(http::HeaderMap::new()).expect("an empty generated operation head"),
             Box::pin(ReadyThenDropPanics),
             http::StatusCode::ACCEPTED.as_u16(),
         ))
@@ -387,21 +452,19 @@ impl Handler<Ping> for CommitDropPanics {
 /// boundary, so a destructor panic cannot replace the status already sent.
 #[tokio::test]
 async fn static_and_dynamic_committed_drop_panics_keep_the_committed_status() {
-    type Operations = OperationSetNode<Ping, OperationSetEnd>;
-    let dynamic = wired()
-        .register::<Ping, _>(Arc::new(CommitDropPanics))
-        .route(ping_route())
+    type Operations = OperationSetNode<dto::CopyObject, OperationSetEnd>;
+    let dynamic = support::wired_at_signed_time()
+        .register::<dto::CopyObject, _>(Arc::new(CommitDropPanics))
         .build()
         .expect("a complete dynamic assembly");
     let static_backend = Arc::new(CommitDropPanics);
-    let monomorphic = wired()
-        .register::<Ping, _>(Arc::clone(&static_backend))
-        .route(ping_route())
+    let monomorphic = support::wired_at_signed_time()
+        .register::<dto::CopyObject, _>(Arc::clone(&static_backend))
         .build_monomorphic::<_, Operations>(static_backend)
         .expect("a complete static assembly");
 
-    let dynamic_response = collect(dynamic.call_bytes(plain(http::Method::POST, "/")).await).await;
-    let static_response = collect(monomorphic.call_bytes(plain(http::Method::POST, "/")).await).await;
+    let dynamic_response = collect(dynamic.call_bytes(support::copy_commit_request()).await).await;
+    let static_response = collect(monomorphic.call_bytes(support::copy_commit_request()).await).await;
     assert_wire_parity(&dynamic_response, &static_response);
     assert_eq!(dynamic_response.status(), http::StatusCode::ACCEPTED);
     let body = std::str::from_utf8(dynamic_response.body()).expect("a UTF-8 committed error document");

@@ -1,0 +1,41 @@
+error[E0599]: the associated function or constant `new` exists for struct `HeadPart<ListBuckets>`, but its trait bounds were not satisfied
+  --> tests/compile_fail/committed_unmarked_operation.rs:25:41
+   |
+25 |     let head = HeadPart::<ListBuckets>::new(http::HeaderMap::new()).unwrap();
+   |                                         ^^^ associated function or constant cannot be called on `HeadPart<ListBuckets>` due to unsatisfied trait bounds
+   |
+  ::: $WORKSPACE/crates/types/src/../generated/ops/list_buckets.rs
+   |
+   | pub struct ListBuckets;
+   | ---------------------- doesn't satisfy `ListBuckets: DeferredOperation`
+   |
+   = note: the following trait bounds were not satisfied:
+           `ListBuckets: DeferredOperation`
+
+error[E0599]: the associated function or constant `commit` exists for struct `Resp<ListBuckets>`, but its trait bounds were not satisfied
+  --> tests/compile_fail/committed_unmarked_operation.rs:26:34
+   |
+26 |     let _ = Resp::<ListBuckets>::commit(head, Box::pin(async { Ok(ListBucketsOutput::default()) }));
+   |                                  ^^^^^^ associated function or constant cannot be called on `Resp<ListBuckets>` due to unsatisfied trait bounds
+   |
+  ::: $WORKSPACE/crates/types/src/../generated/ops/list_buckets.rs
+   |
+   | pub struct ListBuckets;
+   | ---------------------- doesn't satisfy `ListBuckets: DeferredOperation`
+   |
+note: if you're trying to build a new `Resp<ListBuckets>` consider using one of the following associated functions:
+      Resp::<O>::new
+      Resp::<O>::with_status
+      Resp::<O>::event_stream
+  --> src/handler.rs
+   |
+   |     pub fn new(output: O::Output) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+   |     pub const fn with_status(output: O::Output, status: u16) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+   |     pub fn event_stream(stream: ByteStream) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: the following trait bounds were not satisfied:
+           `ListBuckets: DeferredOperation`

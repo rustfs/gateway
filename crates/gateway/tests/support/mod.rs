@@ -31,9 +31,12 @@
 #![allow(dead_code, unreachable_pub, clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 pub mod allocations;
+mod committed;
 mod handlers;
 pub mod select;
 pub mod vhost_stub;
+
+pub use committed::{CopyCommit, copy_commit_builder, copy_commit_request};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -43,10 +46,9 @@ use rustfs_gateway::dto::{Bucket, ListBuckets, ListBucketsOutput};
 use rustfs_gateway::sig::PayloadMode;
 use rustfs_gateway::{
     AuthRequirement, BoxFuture, BucketName, CodecError, Credentials, ETag, EncodedResponse, Governor, GovernorRequest, Handler,
-    HandlerError, HandlerErrorContext, HandlerResult, Lease, MetaView, MissingObject, Observer, Operation, OperationCodec,
-    OperationFloor, OperationSpec, Predicate, RegionSet, Req, RequestBody, RequestEvent, ResourceShape, ResourceVisibility, Resp,
-    ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, SigService, SigV4Authenticator, StaticCredentials,
-    TargetKind, allow_when,
+    HandlerError, HandlerErrorContext, HandlerResult, Lease, MetaView, Observer, Operation, OperationCodec, OperationFloor,
+    OperationSpec, Predicate, RegionSet, Req, RequestBody, RequestEvent, ResourceShape, Resp, ResponseBody, RouteEntry,
+    RouteSelector, S3Service, ServiceBuilder, SigService, SigV4Authenticator, StaticCredentials, TargetKind, allow_when,
 };
 use rustfs_gateway_core::HandlerDeadlineClass;
 
@@ -149,10 +151,6 @@ pub enum HeadPingInput {
     Refuse,
     /// Refuse with `304`, which is bodyless whatever the method.
     NotModified,
-    /// Commit the head, then answer.
-    CommitThenAnswer,
-    /// Commit the head, then fail — the shape `CompleteMultipartUpload` and `CopyObject` need.
-    CommitThenFail,
 }
 
 pub static HEAD_PING_SPEC: OperationSpec = OperationSpec::builder("example:HeadPing", 200, None)
@@ -204,12 +202,6 @@ impl OperationCodec for HeadPing {
         }
         if request.query("not-modified").is_some() {
             return Ok(HeadPingInput::NotModified);
-        }
-        if request.query("commit-then-answer").is_some() {
-            return Ok(HeadPingInput::CommitThenAnswer);
-        }
-        if request.query("commit-then-fail").is_some() {
-            return Ok(HeadPingInput::CommitThenFail);
         }
         Ok(HeadPingInput::Content)
     }
@@ -311,13 +303,6 @@ pub fn content_ping_route() -> RouteEntry {
     }
 }
 
-/// What a committed answer's encoder is handed: a whole document, declaration included, because that
-/// is what a generated encoder produces and the framework has to remove exactly one of them.
-#[must_use]
-pub fn committed_answer_document() -> String {
-    format!("{}<Ping>committed</Ping>", rustfs_gateway::declaration())
-}
-
 /// The one answer both twins give, so neither can drift from the other.
 ///
 /// `Resp` rather than `PingOutput`, because two of the five shapes are a *response* decision rather
@@ -334,16 +319,6 @@ where
         HeadPingInput::NotModified => {
             Err(HandlerErrorContext::not_modified(ETag::new("head-ping").expect("a valid entity tag")).into())
         }
-        // The head goes out here. What follows can no longer choose a status: the continuation's
-        // output type is `Result<O::Output, HandlerError>` and neither arm carries one.
-        HeadPingInput::CommitThenAnswer => Ok(Resp::commit(Box::pin(async {
-            Ok(PingOutput {
-                message: committed_answer_document(),
-            })
-        }))),
-        HeadPingInput::CommitThenFail => Ok(Resp::commit(Box::pin(async {
-            Err(HandlerErrorContext::missing_object(MissingObject::Key, ResourceVisibility::Visible).into())
-        }))),
     }
 }
 
@@ -629,6 +604,15 @@ pub const SIGNED_AT_STAMP: &str = "20260102T030405Z";
 #[must_use]
 pub fn fixed_clock() -> rustfs_gateway::FixedClock {
     rustfs_gateway::FixedClock::at_unix_seconds(SIGNED_AT_UNIX_SECONDS)
+}
+
+/// The standard fixture builder with the signed-request clock and its explicit skew witness.
+#[must_use]
+pub fn wired_at_signed_time() -> ServiceBuilder {
+    wired().clock_with_skew_ack(
+        fixed_clock(),
+        rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+    )
 }
 
 /// One correctly signed, body-less request against the fixture's credentials.

@@ -63,3 +63,7 @@ http = { workspace = true }
 # is the facade's public surface too, for the same reason as the two above, and not a dependency
 # this crate chose for its own convenience.
 http-body = { workspace = true }
+# A committed response captures the caller's Tokio runtime before it returns its frozen head. The
+# in-process and socket targets therefore keep one current-thread runtime alive while they call the
+# facade and drain that response; no work-stealing scheduler or I/O driver is enabled.
+tokio = { workspace = true, features = ["time"] }

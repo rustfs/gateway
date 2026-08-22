@@ -85,6 +85,7 @@ mod chunked;
 mod clock;
 pub mod close;
 pub mod commit;
+mod commit_task;
 mod config;
 mod dispatch;
 mod ext;
@@ -166,12 +167,13 @@ pub use rustfs_gateway_types::dto;
 // type is unnameable is the same defect as an unexported contract, one step further along.
 pub use rustfs_gateway_core::{
     Answer, ArnForm, AuthRequirement, Authorized, BodyPolicy, BoxFuture, CodecError, CommitOutcome, CommitWork,
-    DerivedResourceError, ELEMENT_ORDER, EncodedResponse, ErrorContext, ErrorDetail, ErrorHeader, ErrorResolution, Handler,
-    HandlerCancellation, HandlerContext, HandlerDeadlineClass, HandlerError, HandlerErrorContext, HandlerResult, HasOperation,
-    HttpDate, InvalidErrorContext, MetaView, MissingHandlers, MissingObject, NoDerived, Operation, OperationCodec, OperationSet,
-    OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req,
-    RequestBody, RequestBodyMode, RequiredParam, ResourceIdentity, ResourceShape, ResourceVisibility, Resp, ResponseBody,
-    ResponseKind, ResponseOverride, RouteEntry, RouteSelector, RouterBuilder, TargetKind, resolve,
+    CommittedResponse, DeferredOperation, DerivedResourceError, ELEMENT_ORDER, EncodedResponse, ErrorContext, ErrorDetail,
+    ErrorHeader, ErrorResolution, Handler, HandlerCancellation, HandlerContext, HandlerDeadlineClass, HandlerError,
+    HandlerErrorContext, HandlerResult, HasOperation, HeadPart, HeadPartError, HttpDate, InvalidErrorContext, MetaView,
+    MissingHandlers, MissingObject, NoDerived, Operation, OperationCodec, OperationSet, OperationSpec,
+    PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody,
+    RequestBodyMode, RequiredParam, ResourceIdentity, ResourceShape, ResourceVisibility, Resp, ResponseBody, ResponseKind,
+    ResponseOverride, RouteEntry, RouteSelector, RouterBuilder, TargetKind, resolve,
 };
 
 /// Input-parameterized compatibility name for an operation request.

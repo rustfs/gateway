@@ -32,6 +32,9 @@ mod authz_consumption;
 #[path = "codec_binding.rs"]
 mod codec_binding;
 
+#[path = "committed_head.rs"]
+mod committed_head;
+
 #[path = "compile_fail.rs"]
 mod compile_fail;
 

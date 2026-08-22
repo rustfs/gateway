@@ -20,13 +20,11 @@
 //! Upstream: `dispatch` and `monomorphic`. Downstream: `service`.
 
 use core::future::Future;
-use core::task::Poll;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use rustfs_gateway_core::{
-    AuthRequirement, BoxFuture, Decision, HandlerError, MetaView, OwnedResource, RequestBody, RequestBodyMode,
-    StaticCommittedError, StaticDispatchError, StaticDispatchOutcome,
+    AuthRequirement, BoxFuture, Decision, MetaView, OwnedResource, RequestBody, RequestBodyMode, StaticDispatchError,
+    StaticDispatchOutcome,
 };
 
 use crate::dispatch::{DispatchTable, ErasedAnswer};
@@ -148,43 +146,11 @@ impl OperationMode for DynamicMode<'_> {
                     .encode(output, meta, status)
                     .map(StaticDispatchOutcome::Settled)
                     .map_err(StaticDispatchError::Codec),
-                ErasedAnswer::Committed(work) => {
-                    let result = match contain_committed_work(work).await {
-                        Ok(output) => entry.encode(output, meta, status).map_err(StaticCommittedError::Codec),
-                        Err(error) => Err(StaticCommittedError::Handler(error)),
-                    };
-                    Ok(StaticDispatchOutcome::Committed { status, result })
-                }
+                ErasedAnswer::Committed(response) => Ok(StaticDispatchOutcome::Committed { status, response }),
                 ErasedAnswer::EventStream(stream) => Ok(StaticDispatchOutcome::EventStream { status, stream }),
             }
         })
     }
-}
-
-async fn contain_committed_work<T>(work: BoxFuture<'static, Result<T, HandlerError>>) -> Result<T, HandlerError> {
-    let mut work = Some(work);
-    core::future::poll_fn(move |context| {
-        let polled = match work.as_mut() {
-            Some(work) => catch_unwind(AssertUnwindSafe(|| work.as_mut().poll(context))),
-            None => return Poll::Ready(Err(HandlerError::internal_error("the handler failed"))),
-        };
-        match polled {
-            Ok(Poll::Ready(result)) => {
-                let completed = work.take();
-                match catch_unwind(AssertUnwindSafe(|| drop(completed))) {
-                    Ok(()) => Poll::Ready(result),
-                    Err(_) => Poll::Ready(Err(HandlerError::internal_error("the handler failed"))),
-                }
-            }
-            Ok(Poll::Pending) => Poll::Pending,
-            Err(_) => {
-                let abandoned = work.take();
-                let _ = catch_unwind(AssertUnwindSafe(|| drop(abandoned)));
-                Poll::Ready(Err(HandlerError::internal_error("the handler failed")))
-            }
-        }
-    })
-    .await
 }
 
 pub(crate) struct MonomorphicMode<H, Operations> {
@@ -252,8 +218,6 @@ where
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
-    use core::pin::Pin;
-    use core::task::Context;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use bytes::Bytes;
@@ -273,28 +237,6 @@ mod tests {
             .expect("a valid request");
         let wire = Box::leak(Box::new(WireRequest::accept(request, &Limits::default()).expect("an accepted request")));
         MetaView::of(wire, TargetKind::Service).expect("service metadata")
-    }
-
-    struct ReadyThenDropPanics;
-
-    impl Future for ReadyThenDropPanics {
-        type Output = Result<(), HandlerError>;
-
-        fn poll(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Self::Output> {
-            Poll::Ready(Ok(()))
-        }
-    }
-
-    impl Drop for ReadyThenDropPanics {
-        fn drop(&mut self) {
-            panic!("dynamic committed continuation drop panic fixture");
-        }
-    }
-
-    #[tokio::test]
-    async fn dynamic_committed_ready_contains_a_destructor_panic() {
-        let result = contain_committed_work(Box::pin(ReadyThenDropPanics)).await;
-        assert!(result.is_err(), "a destructor panic escaped as a successful committed body");
     }
 
     /// a-asm-0007. Even if an internal cache hands dispatch metadata selected for ListBuckets to

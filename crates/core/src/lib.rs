@@ -98,6 +98,7 @@
 pub mod authz;
 pub mod cancellation;
 pub mod codec;
+mod committed;
 mod contracts;
 pub mod cors;
 pub mod dialect;
@@ -122,6 +123,7 @@ pub use crate::codec::{
     BodyAllowance, CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode, ResponseBody,
     ResponseOverride, body_allowance, override_header_value, response_body_allowed, response_framing_allowed,
 };
+pub use crate::committed::{CommitOutcome, CommitWork, CommittedResponse, DeferredOperation, HeadPart, HeadPartError};
 pub use crate::contracts::{copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, error_root_namespace};
 pub use crate::dialect::{Dialect, DialectBuilder, DialectError, DialectOperation, DialectOverlay, DialectRoute, OverlayRow};
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
@@ -134,7 +136,7 @@ pub use crate::fault::{
     ELEMENT_ORDER, ErrorDetail, ErrorHeader, HttpDate, InvalidWireLabel, PRECONDITION_FAILED_MESSAGE,
     RANGE_NOT_SATISFIABLE_MESSAGE, RedirectTarget, RegionLabel,
 };
-pub use crate::handler::{Answer, BoxFuture, CommitOutcome, CommitWork, Handler, HandlerError, HandlerResult, Req, Resp};
+pub use crate::handler::{Answer, BoxFuture, Handler, HandlerError, HandlerResult, Req, Resp};
 pub use crate::op::{
     AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation, is_standard_operation_name,
     standard_operation_names,
@@ -152,4 +154,6 @@ pub use crate::route::{
 pub use crate::sse::{
     KeyFingerprint, KeySide, PartRejection, PlaintextCustomerKeyAck, SseConfig, SseEnforced, SseRejection, TransportSecurity,
 };
-pub use crate::static_dispatch::{StaticCommittedError, StaticDispatchError, StaticDispatchOutcome, StaticOperation};
+pub use crate::static_dispatch::{
+    StaticCommittedError, StaticCommittedResponse, StaticDispatchError, StaticDispatchOutcome, StaticOperation,
+};

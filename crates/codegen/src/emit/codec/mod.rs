@@ -166,6 +166,21 @@ fn operation(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<
     out.push_str(&encoded);
     out.push_str("    }\n}\n");
 
+    if ir.errors.allows_error_after_200 {
+        let headers = response_binding_names(ir, Binding::Header);
+        let prefixes = response_binding_names(ir, Binding::PrefixHeaders);
+        let _ = write!(
+            out,
+            "\nimpl crate::handler::deferred_sealed::Sealed for dto::{marker} {{}}\n\n\
+             impl crate::handler::DeferredOperation for dto::{marker} {{\n\
+             \x20   const RESPONSE_HEADERS: &'static [&'static str] = {};\n\
+             \x20   const RESPONSE_HEADER_PREFIXES: &'static [&'static str] = {};\n\
+             }}\n",
+            rust_string_slice(&headers),
+            rust_string_slice(&prefixes),
+        );
+    }
+
     for (name, shape) in &ir.shapes {
         if reachable_from(ir, name, Side::Input) {
             out.push('\n');
@@ -177,6 +192,31 @@ fn operation(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<
         }
     }
     Ok(out)
+}
+
+fn response_binding_names(ir: &OperationIr, binding: Binding) -> Vec<String> {
+    let mut names = ir
+        .output
+        .iter()
+        .filter(|field| field.binding == binding)
+        .filter_map(|field| field.wire_name.as_deref())
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+fn rust_string_slice(values: &[String]) -> String {
+    if values.is_empty() {
+        return "&[]".to_owned();
+    }
+    let entries = values
+        .iter()
+        .map(|value| format!("        \"{value}\","))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("&[\n{entries}\n    ]")
 }
 
 #[cfg(test)]

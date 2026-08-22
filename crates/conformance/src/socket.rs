@@ -102,13 +102,12 @@
 //! everything the pause was there to buy — the server gets the chance to answer before the next
 //! frame exists — and gives it deterministically, which the pause could not.
 //!
-//! # Why there is no async runtime
+//! # Why the service runtime is current-threaded
 //!
-//! One thread per connection, and the service future driven on that thread by [`crate::exec::block_on`].
-//! This crate is a product other S3 implementations run against themselves, and every dependency it
-//! carries is one they inherit; a work-stealing scheduler to run one future at a time is the largest
-//! thing it could inherit for the least reason. Blocking inside `poll_frame` is sound because the
-//! thread doing it serves one connection and has nothing else to make progress on.
+//! One thread serves each connection, and one `crate::exec::ServiceRuntime` drives both the
+//! service call and its response body. The runtime enables timers but no work-stealing or I/O
+//! driver. Blocking inside `poll_frame` is sound because the thread has no other connection to
+//! progress.
 
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
@@ -119,7 +118,7 @@ use std::time::{Duration, Instant};
 
 use rustfs_gateway::{ConnectionIntent, S3Service, collect, connection_intent_of};
 
-use crate::exec::block_on;
+use crate::exec::ServiceRuntime;
 use crate::observation::ConnectionState;
 use crate::sut::SutError;
 
@@ -771,12 +770,13 @@ fn exchange(
     }
     let request = builder.body(body).map_err(|_| ())?;
 
-    let response = block_on(service.call(request));
+    let runtime = ServiceRuntime::new().map_err(|_| ())?;
+    let response = runtime.block_on(service.call(request));
     // Read before the response is consumed, and read as an *extension* rather than as a header.
     // `crate::render` deliberately does not write `Connection: close`; only the hyper and tower
     // adapters do, and a harness that reported the header would be reporting an announcement.
     let intent = connection_intent_of(&response).unwrap_or_default();
-    let collected = block_on(collect(response));
+    let collected = runtime.block_on(collect(response));
     // Raised whatever the collect returned, and *before* a byte of the response is written: a
     // client blocked waiting to release the next frame has to be told that no further frame will
     // ever be read, and a stream that failed halfway is still an answer in that sense. Signalling

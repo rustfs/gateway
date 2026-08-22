@@ -118,7 +118,7 @@ handler="$(mktemp "${TMPDIR:-/tmp}/gateway-static-handler.XXXXXX")"
 trap 'rm -f "$state" "$decoder" "$handler"' EXIT
 
 awk '
-    /^define internal.*@_RNCINvMNt.*static_dispatch.*StaticOperation.*integration7support4Ping.*(8dispatch|21dispatch_with_handler).*7Backend/ { take = 1 }
+    /^define internal.*@_RNCINvM.*static_dispatch.*StaticOperation.*integration7support4Ping.*(8dispatch|21dispatch_with_handler).*7Backend/ { take = 1 }
     take { print }
     take && /^}/ { exit }
 ' "$ir" >"$state"
