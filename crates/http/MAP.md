@@ -19,9 +19,8 @@ Agent entry point for bounded, signature-aware HTTP wire ingestion.
 | `src/conn.rs` | Connection close/reuse observations. | Wire lifecycle reporting is wrong. |
 | `tests/ingest_chunk_rules.rs` | Chunk grammar negative matrix. | Change chunk syntax or limits. |
 | `tests/ingest_framing.rs` | Framing decision matrix. | Change payload/framing selection. |
-| `tests/ingest_verify.rs` | Streaming signature matrix. | Change signature-chain verification. |
+| `tests/ingest_verify.rs` | Streaming signature and trailer matrix. | Change signature-chain verification or trailer parsing. |
 | `tests/ingest_perf_gates.rs` | Ingestion allocation/cost gates. | Change the hot path. |
-| `tests/ingest_trailers.rs` | Trailer-section positive and negative matrix. | Change trailer parsing or EOF delivery. |
 | `tests/host.rs` | Host parsing matrix. | Change addressing. |
 | `tests/form_limits.rs` | POST Object form ceilings and ordering. | Change `src/form/`. |
 | `tests/form_allocations.rs` | Measures that reading a file part costs a heap independent of the file. | Change the file read path. |
