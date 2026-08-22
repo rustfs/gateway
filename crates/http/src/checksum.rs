@@ -20,7 +20,8 @@
 //! be minted any other way ([`ChecksumVerified`]).
 //! NOT responsible for: choosing a digest algorithm — [`rustfs_gateway_types::ChecksumAlgorithm`]
 //! owns the table and the implementations — reading bytes off a socket, `aws-chunked` framing, or
-//! the trailer section, whose integrity handoff is still outstanding (see the module note below).
+//! parsing the trailer section. It does consume the EOF-only parsed fields to discharge a trailer
+//! checksum obligation.
 //! Upstream: `rustfs-gateway-types` for the algorithm table and the arbitration rules, this
 //! crate's [`HeaderView`]. Downstream: the assembly that owns the body read, which is the only
 //! place both halves of this module are reachable from.
@@ -65,33 +66,31 @@
 //! crate knows headers and not operations, so the caller states which through [`ChecksumSubject`];
 //! the arbitration runs either way, and only the comparison is conditional.
 //!
-//! # What this module does not close yet
+//! # Trailer checks happen only at EOF
 //!
-//! A body that declares its checksum in a **trailer** (`x-amz-trailer`) under a streaming payload
-//! mode is refused with `501` before it reaches here. The ingest layer can parse and bind the
-//! trailer names, but this module does not yet open an obligation whose expected value arrives at
-//! EOF. That refusal is keyed on the payload mode, so an `x-amz-trailer` on an
-//! *unframed* request reaches this module and resolves to no obligation at all — a gap this module
-//! cannot close, because closing it needs the trailer parser.
-//! There is deliberately no trailer branch in this module: a branch no request can reach is a
-//! branch no test can prove, and the one thing worse than a missing check is a check that reads
-//! like it ran. When the production handoff lands, the obligation gains a variant and
-//! [`BodyDigests::verify`] gains the argument that carries the trailer section — which, because
-//! `rustfs-gateway-stream` hands trailers out only inside an end-of-stream event, cannot be
-//! supplied before the body is over.
+//! A trailer declaration opens its digest before the first body byte, but its expected value is
+//! read only by [`BodyDigests::verify_with_trailers`]. The argument is a [`TrailingHeaders`] value,
+//! which the stream crate exposes only inside an EOF event. Calling [`BodyDigests::verify`] on the
+//! same obligation supplies an empty trailer set and fails with
+//! [`ChecksumReject::TrailerChecksumMissing`]; looking too early can no longer mean "skip".
 //!
 //! [`HeaderView`]: crate::HeaderView
 
 use http::StatusCode;
 use http::header::HeaderName;
+use rustfs_gateway_stream::TrailingHeaders;
 use rustfs_gateway_types::{
-    ChecksumAlgorithm, ChecksumError, ChecksumSpec, Checksummer, ContentMd5, ErrorCode, Md5Digest, parse_request_checksum,
+    ChecksumAlgorithm, ChecksumError, ChecksumSpec, ChecksumType, Checksummer, ContentMd5, ErrorCode, Md5Digest,
+    parse_request_checksum,
 };
 
 use crate::header_view::HeaderView;
 
 /// The header carrying the legacy whole-body digest.
 const CONTENT_MD5: HeaderName = HeaderName::from_static("content-md5");
+const X_AMZ_TRAILER: HeaderName = HeaderName::from_static("x-amz-trailer");
+const SDK_CHECKSUM_ALGORITHM: HeaderName = HeaderName::from_static("x-amz-sdk-checksum-algorithm");
+const CHECKSUM_TYPE: HeaderName = HeaderName::from_static("x-amz-checksum-type");
 
 /// Why a request body's integrity claim was refused.
 ///
@@ -123,6 +122,12 @@ pub enum ChecksumReject {
     BadDigest,
     /// An `x-amz-checksum-*` value did not match the body that arrived.
     ChecksumMismatch,
+    /// A value checksum and a trailer checksum both claimed the same request body.
+    HeaderAndTrailerBothPresent,
+    /// The body ended without the checksum its `x-amz-trailer` declaration promised.
+    TrailerChecksumMissing,
+    /// A trailer checksum was declared for a request shape that cannot carry one.
+    TrailerNotAllowed,
 }
 
 impl ChecksumReject {
@@ -167,6 +172,9 @@ impl ChecksumReject {
             Self::InvalidDigest => "The Content-MD5 you specified is not valid",
             Self::BadDigest => "The Content-MD5 you specified did not match what we received",
             Self::ChecksumMismatch => "The checksum you specified did not match what we received",
+            Self::HeaderAndTrailerBothPresent => "A checksum cannot be supplied in both the request headers and trailer",
+            Self::TrailerChecksumMissing => "The declared trailer checksum did not arrive",
+            Self::TrailerNotAllowed => "This request does not carry a trailer checksum",
         }
     }
 
@@ -181,6 +189,9 @@ impl ChecksumReject {
             Self::InvalidDigest => "invalid-digest",
             Self::BadDigest => "bad-digest",
             Self::ChecksumMismatch => "checksum-mismatch",
+            Self::HeaderAndTrailerBothPresent => "header-and-trailer-checksum",
+            Self::TrailerChecksumMissing => "trailer-checksum-missing",
+            Self::TrailerNotAllowed => "trailer-not-allowed",
         }
     }
 
@@ -239,6 +250,23 @@ pub enum ChecksumSubject {
     None,
 }
 
+fn declared_trailer_checksum(headers: &HeaderView<'_>) -> Result<Option<ChecksumAlgorithm>, ChecksumReject> {
+    let Some(value) = headers.get_bytes(&X_AMZ_TRAILER) else {
+        return Ok(None);
+    };
+    let value = core::str::from_utf8(value).map_err(|_| ChecksumReject::InvalidChecksumValue)?;
+    let mut names = value.split(',').map(|name| name.trim_matches([' ', '\t']));
+    let Some(name) = names.next().filter(|name| !name.is_empty()) else {
+        return Err(ChecksumReject::InvalidChecksumValue);
+    };
+    if names.next().is_some() {
+        return Err(ChecksumReject::MultipleChecksumHeaders);
+    }
+    ChecksumAlgorithm::from_header_name(name)
+        .map(Some)
+        .ok_or(ChecksumReject::UnknownAlgorithm)
+}
+
 /// What one request body's digests must come out to.
 ///
 /// Resolved from the head, before a body byte is read, because no number of body bytes settles a
@@ -248,6 +276,8 @@ pub enum ChecksumSubject {
 pub struct BodyIntegrity {
     md5: Option<ContentMd5>,
     checksum: Option<ChecksumSpec>,
+    trailer_checksum: Option<ChecksumAlgorithm>,
+    trailer_type: Option<ChecksumType>,
 }
 
 impl BodyIntegrity {
@@ -255,6 +285,8 @@ impl BodyIntegrity {
     pub const NONE: Self = Self {
         md5: None,
         checksum: None,
+        trailer_checksum: None,
+        trailer_type: None,
     };
 
     /// Reads every integrity claim a request head carries.
@@ -276,8 +308,35 @@ impl BodyIntegrity {
     /// this build does not implement, a value that is not base64 of the right width, and a
     /// `Content-MD5` that is not base64 of sixteen bytes.
     pub fn resolve(headers: &HeaderView<'_>, subject: ChecksumSubject) -> Result<Self, ChecksumReject> {
-        let checksum = parse_request_checksum(headers.iter_text().map(|(name, value)| (name.as_str(), value)))
-            .map_err(ChecksumReject::of)?;
+        let trailer_checksum = declared_trailer_checksum(headers)?;
+        let checksum = parse_request_checksum(headers.iter_text().filter_map(|(name, value)| {
+            if trailer_checksum.is_some() && name == SDK_CHECKSUM_ALGORITHM {
+                None
+            } else {
+                Some((name.as_str(), value))
+            }
+        }))
+        .map_err(ChecksumReject::of)?;
+        if checksum.is_some() && trailer_checksum.is_some() {
+            return Err(ChecksumReject::HeaderAndTrailerBothPresent);
+        }
+        if let Some(algorithm) = trailer_checksum {
+            if subject != ChecksumSubject::RequestBody {
+                return Err(ChecksumReject::TrailerNotAllowed);
+            }
+            if let Some(declared) = headers.get_str(&SDK_CHECKSUM_ALGORITHM) {
+                let declared = ChecksumAlgorithm::from_wire_name(declared).ok_or(ChecksumReject::UnknownAlgorithm)?;
+                if declared != algorithm {
+                    return Err(ChecksumReject::SdkAlgorithmMismatch);
+                }
+            }
+        }
+        let trailer_type = match headers.get_str(&CHECKSUM_TYPE) {
+            Some(value) if trailer_checksum.is_some() => {
+                Some(ChecksumType::parse(value).map_err(|_| ChecksumReject::InvalidChecksumValue)?)
+            }
+            _ => None,
+        };
         // A keyed lookup, not a second walk of the map: the arbitration above already walks it
         // once, and this runs on every request including the overwhelming majority that claim
         // nothing.
@@ -286,8 +345,18 @@ impl BodyIntegrity {
             None => None,
         };
         Ok(match subject {
-            ChecksumSubject::RequestBody => Self { md5, checksum },
-            ChecksumSubject::NamedResource => Self { md5, checksum: None },
+            ChecksumSubject::RequestBody => Self {
+                md5,
+                checksum,
+                trailer_checksum,
+                trailer_type,
+            },
+            ChecksumSubject::NamedResource => Self {
+                md5,
+                checksum: None,
+                trailer_checksum: None,
+                trailer_type: None,
+            },
             ChecksumSubject::None => Self::NONE,
         })
     }
@@ -295,7 +364,7 @@ impl BodyIntegrity {
     /// Whether this body owes any comparison at all.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.md5.is_none() && self.checksum.is_none()
+        self.md5.is_none() && self.checksum.is_none() && self.trailer_checksum.is_none()
     }
 
     /// The checksum the request claimed, before it has been checked against anything.
@@ -320,7 +389,7 @@ impl BodyIntegrity {
     /// integrity claim is one branch.
     #[must_use]
     pub fn begin(self) -> BodyDigests {
-        let algorithm = self.checksum.map(|spec| spec.algorithm());
+        let algorithm = self.checksum.map(|spec| spec.algorithm()).or(self.trailer_checksum);
         BodyDigests {
             md5: self.md5.map(|_| ContentMd5::digester()),
             checksum: algorithm.map(ChecksumAlgorithm::checksummer),
@@ -392,6 +461,17 @@ impl BodyDigests {
     /// is compared first only so that a request carrying both gets the older, more widely
     /// understood code for the older header; both are compared whichever fails.
     pub fn verify(self) -> Result<ChecksumVerified, ChecksumReject> {
+        self.verify_with_trailers(&TrailingHeaders::empty())
+    }
+
+    /// Closes every digest after EOF and compares a trailer-carried checksum when declared.
+    ///
+    /// # Errors
+    ///
+    /// In addition to [`Self::verify`]'s mismatch errors,
+    /// [`ChecksumReject::TrailerChecksumMissing`] when the declared field is absent and
+    /// [`ChecksumReject::InvalidChecksumValue`] when it is not a strict checksum value.
+    pub fn verify_with_trailers(self, trailers: &TrailingHeaders) -> Result<ChecksumVerified, ChecksumReject> {
         let Self {
             expected,
             md5,
@@ -410,7 +490,26 @@ impl BodyDigests {
             (Some(_), None) | (None, Some(_)) => return Err(ChecksumReject::BadDigest),
         }
 
-        let verified = match (expected.checksum, checksum) {
+        let expected_checksum = match (expected.checksum, expected.trailer_checksum) {
+            (Some(claimed), None) => Some(claimed),
+            (None, Some(algorithm)) => {
+                let name = HeaderName::from_static(algorithm.header_name());
+                let value = trailers
+                    .get(&name)
+                    .ok_or(ChecksumReject::TrailerChecksumMissing)?
+                    .to_str()
+                    .map_err(|_| ChecksumReject::InvalidChecksumValue)?;
+                let claimed = ChecksumSpec::parse_header(algorithm.header_name(), value).map_err(ChecksumReject::of)?;
+                Some(match expected.trailer_type {
+                    Some(kind) => claimed.with_type(kind).map_err(ChecksumReject::of)?,
+                    None => claimed,
+                })
+            }
+            (Some(_), Some(_)) => return Err(ChecksumReject::HeaderAndTrailerBothPresent),
+            (None, None) => None,
+        };
+
+        let verified = match (expected_checksum, checksum) {
             (Some(claimed), Some(running)) => {
                 let digest = running.finalize();
                 // The claim is compared as bytes, not as text: two base64 spellings of one digest

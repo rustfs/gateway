@@ -21,10 +21,11 @@
 //! published check values) or the response rendering (the facade owns that).
 //! Upstream: `rustfs-gateway-http`. Downstream: nothing.
 //!
-//! 15 negative / 5 positive.
+//! 19 negative / 6 positive.
 
 use http::{HeaderMap, HeaderName, HeaderValue};
 use rustfs_gateway_http::{BodyIntegrity, ChecksumReject, ChecksumSubject, HeaderView};
+use rustfs_gateway_stream::TrailingHeaders;
 use rustfs_gateway_types::{ChecksumAlgorithm, ErrorCode};
 
 /// The body every case in this file digests, and the true digests of it.
@@ -62,6 +63,61 @@ fn round_trip(pairs: &[(&str, &str)], body: &[u8]) -> Result<u64, ChecksumReject
     digests.update(body);
     let verified = digests.verify()?;
     Ok(verified.verified_bytes())
+}
+
+fn trailers(pairs: &[(&str, &str)]) -> TrailingHeaders {
+    TrailingHeaders::from_header_map(headers(pairs))
+}
+
+#[test]
+fn c_ck_0002_a_matching_unsigned_trailer_checksum_verifies_only_at_eof() {
+    let integrity = resolve(&[
+        ("x-amz-trailer", "x-amz-checksum-crc32"),
+        ("x-amz-sdk-checksum-algorithm", "CRC32"),
+    ])
+    .expect("one declared trailer checksum is not an ambiguity");
+    let mut missing = integrity.begin();
+    missing.update(BODY);
+    assert_eq!(missing.verify(), Err(ChecksumReject::TrailerChecksumMissing));
+
+    let mut digests = integrity.begin();
+    digests.update(BODY);
+    let verified = digests
+        .verify_with_trailers(&trailers(&[("x-amz-checksum-crc32", CRC32)]))
+        .expect("the EOF value is the CRC32 of the body");
+    assert_eq!(verified.verified_bytes(), BODY.len() as u64);
+    assert_eq!(verified.checksum().map(|checksum| checksum.render_base64()), Some(CRC32));
+}
+
+#[test]
+fn c_ck_0035_a_header_checksum_and_a_trailer_checksum_are_refused_together() {
+    assert_eq!(
+        resolve(&[("x-amz-checksum-crc32", CRC32), ("x-amz-trailer", "x-amz-checksum-crc32")]),
+        Err(ChecksumReject::HeaderAndTrailerBothPresent)
+    );
+}
+
+#[test]
+fn c_ck_0036_the_sdk_algorithm_must_match_a_trailer_checksum_too() {
+    assert_eq!(
+        resolve(&[
+            ("x-amz-trailer", "x-amz-checksum-crc32"),
+            ("x-amz-sdk-checksum-algorithm", "SHA256"),
+        ]),
+        Err(ChecksumReject::SdkAlgorithmMismatch)
+    );
+}
+
+#[test]
+fn c_ck_0039_a_trailer_checksum_that_disagrees_with_the_body_is_refused() {
+    let mut digests = resolve(&[("x-amz-trailer", "x-amz-checksum-crc32")])
+        .expect("one declared trailer checksum")
+        .begin();
+    digests.update(BODY);
+    assert_eq!(
+        digests.verify_with_trailers(&trailers(&[("x-amz-checksum-crc32", "AAAAAA==")])),
+        Err(ChecksumReject::ChecksumMismatch)
+    );
 }
 
 #[test]
@@ -250,6 +306,9 @@ fn no_two_refusals_share_a_label_or_a_sentence() {
         ChecksumReject::InvalidDigest,
         ChecksumReject::BadDigest,
         ChecksumReject::ChecksumMismatch,
+        ChecksumReject::HeaderAndTrailerBothPresent,
+        ChecksumReject::TrailerChecksumMissing,
+        ChecksumReject::TrailerNotAllowed,
     ];
     let mut labels: Vec<&str> = all.iter().map(|reject| reject.as_str()).collect();
     let mut sentences: Vec<&str> = all.iter().map(|reject| reject.message()).collect();

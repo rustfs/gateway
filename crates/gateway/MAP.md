@@ -20,7 +20,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `src/gate_tests.rs` | The body read's own unit suite, split out at the 800-line limit | Changing a ceiling, a deadline or a framed refusal code |
 | `src/wire_read.rs` | The one bounded, deadlined source of a body's wire frames, and the pull-model view the chunk pipeline reads through | A limit stops being applied per frame, or the framed path holds the wire body |
 | `src/probe.rs` | Observable request-body progress | Testing whether a refusal read bytes |
-| `src/chunked.rs` | `aws-chunked` ingest selection and execution | A framed upload stores wrong bytes |
+| `src/chunked.rs`, `src/chunked_trailer_tests.rs` | `aws-chunked` ingest execution and trailer commit tests | A framed upload stores wrong bytes |
 | `src/integrity.rs` | What an `x-amz-checksum-*` header is the digest *of*, per operation, and how an integrity verdict renders | A body digest is compared against the wrong bytes, or not at all |
 | `src/payload_header.rs` | Signed payload and trailer declaration parsing | A request head selects the wrong payload mode |
 | `src/render.rs` | One S3 error renderer | Changing refusal bytes or headers |
@@ -94,7 +94,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 
 - Request bodies are buffered, bounded by `ServiceConfig::max_buffered_body_bytes` and operation caps.
 - `SseEnforced` is positional rather than carried on `Req<O>`; changing that needs a core API ADR.
-- Trailered `aws-chunked` modes remain unimplemented until trailer verification can commit safely.
+- Signed-trailer `aws-chunked` remains unimplemented until its final HMAC can commit safely.
 - This crate declares connection intent; only a transport can observe a socket close.
 - The header map is cloned once because `WireRequest` does not expose the accepted signing view.
 - `x-amz-id-2` is a fixed uppercase-hex token, intentionally not AWS-shaped.

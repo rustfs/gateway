@@ -60,26 +60,22 @@
 //! already cross-checked against `Content-Length` *before the first byte is read*. So the decoded
 //! size is pinned by the head, not policed by a budget.
 //!
-//! # What is not wired, stated rather than faked
+//! # Trailer commit boundary
 //!
-//! **Trailered modes are refused.** `rustfs_gateway_http::IngestPipeline::commit_allowed` stays
-//! `false` after a body that declared `x-amz-trailer`, because the trailer's checksum and — under
-//! signed framing — its own signature are P3-04's and are not verified anywhere yet. Delivering
-//! such a body would mean committing an object whose declared integrity check was never run, so
-//! this refuses instead. `c-chunked-0001` is a trailered upload; it is currently skipped by the
-//! conformance runner for an unrelated reason (a `half_close` control chunk needs a transport that
-//! owns the connection, and the in-process target hands over a complete body), so this refusal is
-//! not what that case is waiting on.
+//! Unsigned trailer framing is parsed here and its EOF fields leave through [`ChunkOutput`]. The
+//! parser's own `commit_allowed` stays false for that shape; [`ChunkOutput::commit_allowed`] needs
+//! a [`ChecksumVerified`] produced from those EOF fields before the assembly may commit. Signed
+//! trailers remain refused until their final trailer HMAC is compared as well.
 
 use bytes::{Bytes, BytesMut};
 use http::HeaderMap;
 use rustfs_gateway_core::{HandlerError, ResponseKind};
 use rustfs_gateway_http::{
-    BodyDigests, ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, DecodedLength, Framing,
-    IngestPipeline, IngestPolicy, PayloadFramingSource, validate_decoded_length,
+    BodyDigests, ChecksumVerified, ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, DecodedLength,
+    Framing, IngestPipeline, IngestPolicy, PayloadFramingSource, TrailerDeclaration, validate_decoded_length,
 };
 use rustfs_gateway_sig::PayloadMode;
-use rustfs_gateway_stream::{AsyncPayloadRead, ReadProgress};
+use rustfs_gateway_stream::{AsyncPayloadRead, ReadProgress, TrailingHeaders};
 use rustfs_gateway_types::ErrorCode;
 
 use crate::close::ConnectionIntent;
@@ -121,7 +117,31 @@ pub(crate) struct ChunkIngest {
     framing: ChunkFraming,
     declared: DecodedLength,
     signer: Option<ChunkSigner>,
+    trailer_declaration: Option<TrailerDeclaration>,
     limits: ChunkLimits,
+}
+
+/// The decoded body together with the EOF-only trailer evidence needed to authorize its commit.
+#[derive(Debug)]
+pub(crate) struct ChunkOutput {
+    body: Bytes,
+    trailers: TrailingHeaders,
+    parser_commit_allowed: bool,
+    trailer_section_complete: bool,
+}
+
+impl ChunkOutput {
+    pub(crate) fn trailers(&self) -> &TrailingHeaders {
+        &self.trailers
+    }
+
+    pub(crate) fn commit_allowed(&self, verified: &ChecksumVerified) -> bool {
+        self.parser_commit_allowed || (self.trailer_section_complete && verified.checksum().is_some())
+    }
+
+    pub(crate) fn into_body(self) -> Bytes {
+        self.body
+    }
 }
 
 impl ChunkIngest {
@@ -133,7 +153,7 @@ impl ChunkIngest {
     where
         R: AsyncPayloadRead + Unpin,
     {
-        IngestPipeline::new(
+        let pipeline = IngestPipeline::new(
             wire,
             self.framing,
             self.declared,
@@ -142,7 +162,11 @@ impl ChunkIngest {
             self.limits,
             IngestPolicy::verify_before_deliver(),
         )
-        .map_err(from_chunk_reject)
+        .map_err(from_chunk_reject)?;
+        match self.trailer_declaration {
+            Some(declaration) => pipeline.with_trailer_declaration(declaration).map_err(from_chunk_reject),
+            None => Ok(pipeline),
+        }
     }
 
     pub(crate) fn refusal<R>(pipeline: &IngestPipeline<R>) -> S3Error {
@@ -160,8 +184,8 @@ impl ChunkIngest {
     ///
     /// * `Ok(None)` — not an error: the mode does not frame the body, and the bytes are the
     ///   object's own.
-    /// * A `501` for a trailered mode, and for a signed mode whose verification material the
-    ///   authenticator did not publish. Both fail closed; see the module documentation.
+    /// * A `501` for a signed trailered mode, and for a signed mode whose verification material
+    ///   the authenticator did not publish. Both fail closed; see the module documentation.
     /// * The mapped [`ChunkReject`] for a head-level framing contradiction.
     pub(crate) fn prepare(
         payload: &PayloadMode,
@@ -175,9 +199,18 @@ impl ChunkIngest {
         if !framing.is_framed() {
             return Ok(None);
         }
-        if framing.declares_trailers() {
+        if framing.declares_trailers() && framing.has_chunk_signatures() {
             return Err(trailers_not_verified());
         }
+
+        let trailer_declaration = if framing.declares_trailers() {
+            let value = headers
+                .get("x-amz-trailer")
+                .ok_or_else(|| from_chunk_reject(ChunkReject::DeclaredTrailerMismatch))?;
+            Some(TrailerDeclaration::parse(value, false).map_err(from_chunk_reject)?)
+        } else {
+            None
+        };
 
         let header = headers.get(DECODED_LENGTH_HEADER).and_then(|value| value.to_str().ok());
         let declared = validate_decoded_length(&framing, header, wire)
@@ -196,6 +229,7 @@ impl ChunkIngest {
             framing,
             declared,
             signer,
+            trailer_declaration,
             limits,
         }))
     }
@@ -217,11 +251,10 @@ impl ChunkIngest {
     ///
     /// # Errors
     ///
-    /// The mapped [`ChunkReject`] for any framing or signature verdict, and a `501` if the
-    /// pipeline finishes without permitting a commit — which can only happen for a shape this
-    /// assembly declined to accept at [`Self::prepare`], and is refused again rather than
-    /// delivered.
-    pub(crate) async fn run<R>(self, wire: R, digests: &mut BodyDigests) -> Result<Bytes, S3Error>
+    /// The mapped [`ChunkReject`] for any framing or signature verdict. The return value still
+    /// carries a separate commit decision: a complete unsigned trailer section is not enough
+    /// until its checksum produces a [`ChecksumVerified`].
+    pub(crate) async fn run<R>(self, wire: R, digests: &mut BodyDigests) -> Result<ChunkOutput, S3Error>
     where
         R: AsyncPayloadRead + Unpin,
     {
@@ -229,7 +262,7 @@ impl ChunkIngest {
 
         let mut decoded = BytesMut::new();
         let mut buffer = vec![0_u8; DRAIN_BUFFER_BYTES];
-        loop {
+        let trailers = loop {
             let progress = core::future::poll_fn(|cx| {
                 let pinned = core::pin::Pin::new(&mut pipeline);
                 pinned.poll_fill(cx, &mut buffer)
@@ -248,17 +281,16 @@ impl ChunkIngest {
                     }
                     None => return Err(chunk_stream_failed()),
                 },
-                Ok(ReadProgress::Eof { .. }) => break,
+                Ok(ReadProgress::Eof { trailers }) => break trailers,
             }
-        }
+        };
 
-        if !pipeline.commit_allowed() {
-            // Unreachable for the shapes `prepare` admits, and refused rather than delivered
-            // anyway: "the pipeline says this must not be committed" is not a sentence to answer
-            // by committing it.
-            return Err(trailers_not_verified());
-        }
-        Ok(decoded.freeze())
+        Ok(ChunkOutput {
+            body: decoded.freeze(),
+            trailers,
+            parser_commit_allowed: pipeline.commit_allowed(),
+            trailer_section_complete: pipeline.trailer_section_complete(),
+        })
     }
 }
 
@@ -347,6 +379,11 @@ pub(crate) fn presented_signature_hex(headers: &HeaderMap, query: &str) -> Optio
     }
     None
 }
+
+#[cfg(test)]
+#[path = "chunked_trailer_tests.rs"]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod trailer_tests;
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
@@ -473,7 +510,7 @@ mod tests {
             .run(resident(b"b\r\nhello world\r\n0\r\n\r\n"), &mut digests)
             .await
             .expect("well-formed unsigned framing");
-        assert_eq!(decoded, Bytes::from_static(b"hello world"));
+        assert_eq!(decoded.body.as_ref(), b"hello world");
     }
 
     /// Negative — a `Content-Encoding` this service does not frame with is never decoded, and the
@@ -520,7 +557,7 @@ mod tests {
             .run(MemoryReader::new([Bytes::from(wire)], TrailingHeaders::empty()), &mut digests)
             .await
             .expect("the framing is well formed; the payload is opaque");
-        assert_eq!(decoded, Bytes::from_static(GZIP_HEADER), "the compressed bytes are the object");
+        assert_eq!(decoded.body.as_ref(), GZIP_HEADER, "the compressed bytes are the object");
     }
 
     /// Negative — a signed framed body with no published material is refused rather than decoded
@@ -600,7 +637,7 @@ mod tests {
             .run(resident(b"b\r\nhello world\r\n0\r\n\r\n"), &mut digests)
             .await
             .expect("well-formed unsigned framing");
-        assert_eq!(decoded, Bytes::from_static(b"hello world"));
+        assert_eq!(decoded.body.as_ref(), b"hello world");
         assert_eq!(digests.observed_bytes(), 11, "eleven decoded bytes, not the twenty-one on the wire");
         let verified = digests.verify().expect("DUoRhQ== is the CRC32 of the decoded body");
         assert_eq!(verified.verified_bytes(), 11);
@@ -726,36 +763,6 @@ mod tests {
             .expect_err("the chunk signature is not the one the chain derives");
         assert_eq!(error.status(), http::StatusCode::FORBIDDEN);
         assert!(error.must_close_connection(), "an unverified peer's connection does not survive");
-    }
-
-    /// Negative — a trailered mode is refused, and with the status that says the gap is this
-    /// service's rather than the client's.
-    ///
-    /// `commit_allowed` stays `false` for a trailered body because nothing verifies the trailer's
-    /// checksum yet. Delivering it anyway would commit an object whose declared integrity check was
-    /// never run, so the refusal is the honest answer and `501` is the honest status.
-    #[tokio::test]
-    async fn a_trailered_mode_is_refused_as_unimplemented_and_not_as_malformed() {
-        let mut headers = HeaderMap::new();
-        headers.insert(http::HeaderName::from_static(DECODED_LENGTH_HEADER), http::HeaderValue::from_static("11"));
-        let trailer = rustfs_gateway_sig::DeclaredTrailers::new(
-            [rustfs_gateway_sig::TrailerName::new("x-amz-checksum-crc32").expect("a valid trailer name")],
-            false,
-        )
-        .expect("one name is a valid set");
-        let error = ChunkIngest::prepare(
-            &PayloadMode::StreamingSigned {
-                trailer: rustfs_gateway_sig::TrailerSet::Declared(trailer),
-            },
-            &headers,
-            &wire_length(4096),
-            &sink_with_material(),
-            Some(&"a".repeat(64)),
-            ChunkLimits::default(),
-        )
-        .err()
-        .expect("trailer verification is not wired");
-        assert_eq!(error.status(), http::StatusCode::NOT_IMPLEMENTED);
     }
 
     /// Negative — a framed body that declares no decoded length is refused at the head, before a

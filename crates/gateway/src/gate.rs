@@ -233,7 +233,7 @@ where
         // Both ceilings are applied to the *wire* bytes — the ones the peer wrote and this process
         // is holding — frame by frame inside `WireFrames`, whichever branch below consumes them.
         // `crate::chunked` states why that is the right side of the decode to count on.
-        let body = match ingest {
+        let (body, verified) = match ingest {
             // Pulled, not collected. The decoder reads frames through `WireReader` as its window
             // has room for them, so the wire octets are never resident beside the decoded body:
             // the pipeline's bound is the only bound there is, which is what rustfs/gateway#229
@@ -245,7 +245,12 @@ where
                 let decoded = ingest.run(WireReader::new(frames), &mut digests).await;
                 // The reader's refusal outranks the pipeline's: a ceiling that answered `413` is
                 // not an `IncompleteBody`, and the pull contract cannot carry the difference.
-                decoded.map_err(|error| progress.take_refusal().unwrap_or(error))?
+                let decoded = decoded.map_err(|error| progress.take_refusal().unwrap_or(error))?;
+                let verified = digests.verify_with_trailers(decoded.trailers()).map_err(checksum_refusal)?;
+                if !decoded.commit_allowed(&verified) {
+                    return Err(crate::chunked::trailers_not_verified());
+                }
+                (decoded.into_body(), verified)
             }
             // Not framed, so these bytes are the object's own and the collector keeps them whole.
             // Every digest this body owes is fed from the frame while it is still in cache, so the
@@ -265,7 +270,9 @@ where
                     // it is a bound on the shape rather than on the number.
                     collected.put(frame);
                 }
-                collected.freeze()
+                let body = collected.freeze();
+                let verified = digests.verify().map_err(checksum_refusal)?;
+                (body, verified)
             }
         };
         // After the read rather than before it: under framing the payload hash is only complete
@@ -277,7 +284,7 @@ where
         }
         // Bound and dropped on purpose: the witness's value is where it can be produced, not what
         // it carries. When the commit path takes an integrity proof by value (P5), it takes this.
-        let _verified: ChecksumVerified = digests.verify().map_err(checksum_refusal)?;
+        let _verified: ChecksumVerified = verified;
         Ok(body)
     }
 

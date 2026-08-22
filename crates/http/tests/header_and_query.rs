@@ -204,6 +204,15 @@ fn c_wire_0041_a_repeated_content_sha256_header_is_rejected() {
     );
 }
 
+#[test]
+fn c_ck_0028_a_repeated_trailer_declaration_is_rejected_before_the_body() {
+    let request = put(vec![
+        (name("x-amz-trailer"), raw_value(b"x-amz-checksum-crc32")),
+        (name("x-amz-trailer"), raw_value(b"x-amz-checksum-sha256")),
+    ]);
+    assert_eq!(accept(request).err(), Some(WireReject::DuplicateSingleValuedHeader("x-amz-trailer")));
+}
+
 /// Negative — `range` is deliberately *not* single-valued, and this is the case that says so.
 ///
 /// RFC 9110 §5.3 already defines what two field lines mean, and §14.2 already defines what a

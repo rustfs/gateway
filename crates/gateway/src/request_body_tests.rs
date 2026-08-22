@@ -19,7 +19,9 @@
 //! Upstream: `request_body`. Downstream: c-ing-0061 and c-ing-0063 acceptance evidence.
 
 use bytes::Bytes;
-use rustfs_gateway_http::BodyIntegrity;
+use http::{HeaderMap, HeaderName, HeaderValue};
+use rustfs_gateway_http::{BodyIntegrity, ChecksumSubject, Framing, HeaderView};
+use rustfs_gateway_sig::{DeclaredTrailers, PayloadMode, TrailerName, TrailerSet};
 use rustfs_gateway_types::ErrorCode;
 
 use crate::gate::{Authenticated, BodyCeilings, BodyDigestObligation, BodyTimeouts, SealedBody};
@@ -30,6 +32,111 @@ const fn roomy() -> BodyCeilings {
         whole_body: true,
         declared: None,
     }
+}
+
+fn unsigned_trailered(headers: &HeaderMap) -> Option<crate::chunked::ChunkIngest> {
+    let name = TrailerName::new("x-amz-checksum-crc32").ok()?;
+    let declared = DeclaredTrailers::new([name], false).ok()?;
+    let mode = PayloadMode::StreamingUnsigned {
+        trailer: TrailerSet::Declared(declared),
+    };
+    let wire = Framing::classify(http::Version::HTTP_11, headers, &rustfs_gateway_http::Limits::default()).ok()?;
+    crate::chunked::ChunkIngest::prepare(
+        &mode,
+        headers,
+        &wire,
+        &crate::ext::ChunkSink::new(),
+        None,
+        rustfs_gateway_http::ChunkLimits::default(),
+    )
+    .ok()?
+}
+
+fn trailer_headers(wire_len: usize) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from(wire_len as u64));
+    headers.insert(HeaderName::from_static("x-amz-decoded-content-length"), HeaderValue::from_static("11"));
+    headers.insert(HeaderName::from_static("x-amz-trailer"), HeaderValue::from_static("x-amz-checksum-crc32"));
+    headers
+}
+
+#[tokio::test]
+async fn c_ck_0002_the_streaming_production_path_accepts_a_matching_unsigned_trailer_checksum() {
+    const WIRE: &[u8] = b"b\r\nhello world\r\n0\r\nx-amz-checksum-crc32:DUoRhQ==\r\n\r\n";
+    let proof = Authenticated::granted_for_test();
+    let headers = trailer_headers(WIRE.len());
+    let ingest = unsigned_trailered(&headers);
+    assert!(ingest.is_some(), "the unsigned trailer shape is implemented");
+    let Some(ingest) = ingest else {
+        return;
+    };
+    let integrity = BodyIntegrity::resolve(&HeaderView::new(&headers), ChecksumSubject::RequestBody).ok();
+    assert!(integrity.is_some(), "one trailer checksum obligation");
+    let Some(integrity) = integrity else {
+        return;
+    };
+    let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(WIRE)]);
+    let opened = SealedBody::seal(Some(body), Some(WIRE.len() as u64))
+        .stream(
+            &proof,
+            (BodyCeilings::streaming(None), BodyTimeouts::S3, None),
+            Some(ingest),
+            BodyDigestObligation::None,
+            integrity,
+        )
+        .ok();
+    assert!(opened.is_some(), "the verified stream opens");
+    let Some(opened) = opened else {
+        return;
+    };
+    let (stream, terminal) = opened.into_parts();
+    let collected = crate::wire::collect(http::Response::new(stream.into_body())).await.ok();
+    assert!(collected.is_some(), "the matching checksum reaches EOF");
+    let Some(collected) = collected else {
+        return;
+    };
+    assert_eq!(collected.body(), &Bytes::from_static(b"hello world"));
+    assert!(terminal.wait().await.is_ok());
+    assert!(read.is_exhausted());
+}
+
+#[tokio::test]
+async fn c_ck_0039_the_streaming_production_path_refuses_a_mismatched_unsigned_trailer_checksum() {
+    const WIRE: &[u8] = b"b\r\nhello world\r\n0\r\nx-amz-checksum-crc32:AAAAAA==\r\n\r\n";
+    let proof = Authenticated::granted_for_test();
+    let headers = trailer_headers(WIRE.len());
+    let ingest = unsigned_trailered(&headers);
+    assert!(ingest.is_some(), "the unsigned trailer shape is implemented");
+    let Some(ingest) = ingest else {
+        return;
+    };
+    let integrity = BodyIntegrity::resolve(&HeaderView::new(&headers), ChecksumSubject::RequestBody).ok();
+    assert!(integrity.is_some(), "one trailer checksum obligation");
+    let Some(integrity) = integrity else {
+        return;
+    };
+    let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(WIRE)]);
+    let opened = SealedBody::seal(Some(body), Some(WIRE.len() as u64))
+        .stream(
+            &proof,
+            (BodyCeilings::streaming(None), BodyTimeouts::S3, None),
+            Some(ingest),
+            BodyDigestObligation::None,
+            integrity,
+        )
+        .ok();
+    assert!(opened.is_some(), "the stream opens before the EOF value arrives");
+    let Some(opened) = opened else {
+        return;
+    };
+    let (stream, terminal) = opened.into_parts();
+    assert!(crate::wire::collect(http::Response::new(stream.into_body())).await.is_err());
+    let refusal = terminal.wait().await.err();
+    assert_eq!(
+        refusal.as_ref().and_then(crate::render::S3Error::code),
+        Some(&ErrorCode::X_AMZ_CONTENT_CHECKSUM_MISMATCH)
+    );
+    assert!(read.is_exhausted());
 }
 
 /// `c-ing-0061`. Negative — opening a stream does not poll its transport.
