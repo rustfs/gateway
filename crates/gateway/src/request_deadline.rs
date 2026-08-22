@@ -14,8 +14,8 @@
 
 //! Runtime-independent request deadlines.
 //!
-//! Responsible for: handler, committed-continuation, policy snapshot and security failure-floor
-//! deadlines without assuming a Tokio runtime.
+//! Responsible for: handler, body-progress, committed-continuation, policy snapshot and security
+//! failure-floor deadlines without assuming a Tokio runtime.
 //! NOT responsible for: choosing any duration or rendering a timeout response.
 //! Upstream: clocks and policy sources. Downstream: `service`, `dispatch`, `monomorphic`.
 
@@ -46,6 +46,7 @@ pub(crate) enum BodyMonitoredOutcome<T> {
     Completed(T),
     Failed(S3Error),
     Idle { cleanup_completed: bool },
+    Throughput { cleanup_completed: bool },
 }
 
 pub(crate) async fn handler_with_body_monitor<T>(
@@ -74,6 +75,7 @@ pub(crate) async fn handler_with_body_monitor<T>(
             BodyEvent::Complete(Ok(_)) => BodyMonitoredOutcome::Completed(output),
             BodyEvent::Complete(Err(error)) => BodyMonitoredOutcome::Failed(error),
             BodyEvent::Idle => BodyMonitoredOutcome::Idle { cleanup_completed: true },
+            BodyEvent::Throughput => BodyMonitoredOutcome::Throughput { cleanup_completed: true },
         },
         Err(BodyEvent::Complete(Ok(_))) => BodyMonitoredOutcome::Completed(handler.await),
         Err(BodyEvent::Complete(Err(error))) => BodyMonitoredOutcome::Failed(error),
@@ -91,6 +93,21 @@ pub(crate) async fn handler_with_body_monitor<T>(
             })
             .await;
             BodyMonitoredOutcome::Idle { cleanup_completed }
+        }
+        Err(BodyEvent::Throughput) => {
+            cancellation.cancel(HandlerCancellation::BodyThroughput);
+            let mut grace = Box::pin(futures_timer::Delay::new(cleanup_grace));
+            let cleanup_completed = poll_fn(|context| {
+                if handler.as_mut().poll(context).is_ready() {
+                    return Poll::Ready(true);
+                }
+                if grace.as_mut().poll(context).is_ready() {
+                    return Poll::Ready(false);
+                }
+                Poll::Pending
+            })
+            .await;
+            BodyMonitoredOutcome::Throughput { cleanup_completed }
         }
     }
 }
@@ -315,6 +332,51 @@ mod tests {
         let outcome = handler_with_body_monitor(handler, cancellation, Duration::from_millis(100), Some(monitor)).await;
         assert!(matches!(outcome, BodyMonitoredOutcome::Idle { cleanup_completed: true }));
         assert_eq!(*observed.lock().expect("the observation lock"), Some(HandlerCancellation::BodyIdle));
+    }
+
+    /// Negative — byte-at-a-time progress cannot rearm the body deadline forever when one
+    /// throughput window receives less than its configured floor.
+    #[tokio::test]
+    async fn trickle_progress_cancels_the_handler_with_the_throughput_reason() {
+        let timeouts = crate::gate::BodyTimeouts::new(Duration::from_millis(50), Duration::from_millis(30))
+            .expect("non-zero body deadlines")
+            .try_with_throughput_floor(8, Duration::from_millis(40))
+            .expect("a non-zero throughput floor");
+        let (monitor, _terminal, progress) = crate::request_body::BodyMonitor::pending_for_test(timeouts);
+        let feeder = tokio::spawn(async move {
+            for delivered in 1..=6 {
+                progress.send_replace(delivered);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+        let (cancellation, context) = HandlerCancellationSource::pair();
+        let observed = Arc::new(Mutex::new(None));
+        let handler_observed = Arc::clone(&observed);
+        let handler = Box::pin(async move {
+            let reason = context.cancelled().await;
+            *handler_observed.lock().expect("the observation lock") = Some(reason);
+        });
+
+        let outcome = handler_with_body_monitor(handler, cancellation, Duration::from_millis(100), Some(monitor)).await;
+        feeder.await.expect("the trickle feeder joins");
+        assert!(matches!(outcome, BodyMonitoredOutcome::Throughput { cleanup_completed: true }));
+        assert_eq!(*observed.lock().expect("the observation lock"), Some(HandlerCancellation::BodyThroughput));
+    }
+
+    /// Negative — satisfying a throughput window is not fresh wire progress and cannot postpone
+    /// the between-read idle deadline.
+    #[tokio::test]
+    async fn throughput_window_completion_does_not_rearm_body_idle() {
+        let timeouts = crate::gate::BodyTimeouts::new(Duration::from_millis(200), Duration::from_millis(100))
+            .expect("non-zero body deadlines")
+            .try_with_throughput_floor(1, Duration::from_millis(100))
+            .expect("a non-zero throughput floor");
+        let (mut monitor, _terminal, progress) = crate::request_body::BodyMonitor::pending_for_test(timeouts);
+        progress.send_replace(1);
+
+        let event = monitor.next_event().await;
+
+        assert!(matches!(event, BodyEvent::Idle));
     }
 
     /// **Negative — a continuation that never resolves reports the bound, not a hang.**

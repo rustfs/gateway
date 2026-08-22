@@ -425,6 +425,15 @@ pub(crate) fn body_idle_timeout() -> S3Error {
     )
 }
 
+/// The closing refusal for a body that keeps arriving below its configured throughput floor.
+pub(crate) fn body_throughput_timeout() -> S3Error {
+    from_transport_limit(
+        HandlerError::new(ErrorCode::REQUEST_TIMEOUT, "the request body remained below the minimum throughput"),
+        StatusCode::REQUEST_TIMEOUT,
+        crate::close::ConnectionIntent::Close,
+    )
+}
+
 #[cfg(test)]
 #[path = "gate_tests.rs"]
 mod tests;

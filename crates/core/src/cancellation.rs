@@ -37,6 +37,8 @@ pub enum HandlerCancellation {
     RequestAborted,
     /// The handler stopped polling its still-incomplete request body.
     BodyIdle,
+    /// The request body made progress below the configured windowed throughput floor.
+    BodyThroughput,
 }
 
 impl HandlerCancellation {
@@ -44,12 +46,14 @@ impl HandlerCancellation {
     const DEADLINE: u8 = 1;
     const REQUEST_ABORTED: u8 = 2;
     const BODY_IDLE: u8 = 3;
+    const BODY_THROUGHPUT: u8 = 4;
 
     const fn code(self) -> u8 {
         match self {
             Self::Deadline => Self::DEADLINE,
             Self::RequestAborted => Self::REQUEST_ABORTED,
             Self::BodyIdle => Self::BODY_IDLE,
+            Self::BodyThroughput => Self::BODY_THROUGHPUT,
         }
     }
 
@@ -58,6 +62,7 @@ impl HandlerCancellation {
             Self::DEADLINE => Some(Self::Deadline),
             Self::REQUEST_ABORTED => Some(Self::RequestAborted),
             Self::BODY_IDLE => Some(Self::BodyIdle),
+            Self::BODY_THROUGHPUT => Some(Self::BodyThroughput),
             _ => None,
         }
     }
@@ -301,5 +306,13 @@ mod tests {
         let (source, context) = HandlerCancellationSource::pair();
         assert!(source.cancel(HandlerCancellation::BodyIdle));
         assert_eq!(context.cancellation_reason(), Some(HandlerCancellation::BodyIdle));
+    }
+
+    /// Negative — a body that trickles below its floor is distinct from a body that goes idle.
+    #[test]
+    fn body_throughput_has_its_own_handler_cancellation_reason() {
+        let (source, context) = HandlerCancellationSource::pair();
+        assert!(source.cancel(HandlerCancellation::BodyThroughput));
+        assert_eq!(context.cancellation_reason(), Some(HandlerCancellation::BodyThroughput));
     }
 }

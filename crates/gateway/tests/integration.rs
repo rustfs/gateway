@@ -96,5 +96,7 @@ mod sigv2_runtime;
 mod sse_runtime;
 #[path = "streaming_request.rs"]
 mod streaming_request;
+#[path = "throughput_request.rs"]
+mod throughput_request;
 #[path = "vhost_resolution.rs"]
 mod vhost_resolution;

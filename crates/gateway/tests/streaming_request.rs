@@ -43,13 +43,13 @@ use tokio::net::TcpStream;
 use tokio::sync::Notify;
 use tokio::sync::{Barrier, watch};
 
-struct StreamingPut;
+pub(super) struct StreamingPut;
 
-struct StreamingInput {
-    body: ByteStream,
+pub(super) struct StreamingInput {
+    pub(super) body: ByteStream,
 }
 
-struct StreamingOutput;
+pub(super) struct StreamingOutput;
 
 static STREAMING_SPEC: OperationSpec = OperationSpec::builder("example:StreamingPut", 200, None)
     .handler_deadline_class(HandlerDeadlineClass::Standard)
@@ -165,7 +165,7 @@ struct ResidentBackend {
     entered: AtomicUsize,
 }
 
-struct SwallowingBackend;
+pub(super) struct SwallowingBackend;
 
 impl Handler<StreamingPut> for SwallowingBackend {
     async fn call(&self, request: Req<StreamingPut>) -> HandlerResult<StreamingPut> {
@@ -247,14 +247,25 @@ where
     B: Handler<StreamingPut>,
 {
     let deadlines = RequestBodyDeadlineConfig::new(Duration::from_secs(1), body_idle).expect("non-zero body deadlines");
+    service_with_deadlines(backend, deadlines)
+}
+
+pub(super) fn service_with_deadlines<B>(backend: Arc<B>, deadlines: RequestBodyDeadlineConfig) -> S3Service
+where
+    B: Handler<StreamingPut>,
+{
     let (builder, _handle) = support::wired()
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .register::<StreamingPut, _>(backend)
         .route(streaming_route())
         .config(ServiceConfig::new(1024 * 1024).with_request_body_deadlines(deadlines));
     builder.build().expect("a complete streaming assembly")
 }
 
-fn live_server(service: S3Service) -> RunningServer {
+pub(super) fn live_server(service: S3Service) -> RunningServer {
     let service = tower::service_fn(move |request| {
         let mut service = service.clone();
         async move {
@@ -294,7 +305,7 @@ fn head_with(content_length: usize, header: &str) -> Vec<u8> {
         .into_bytes()
 }
 
-async fn stop(running: RunningServer) {
+pub(super) async fn stop(running: RunningServer) {
     assert_eq!(
         running.shutdown.trigger(Duration::from_secs(1)).await,
         ShutdownReport { drained: 0, aborted: 0 }
@@ -302,7 +313,7 @@ async fn stop(running: RunningServer) {
     assert!(running.task.await.expect("the server task joins").is_ok());
 }
 
-fn rss_bytes() -> Option<usize> {
+pub(super) fn rss_bytes() -> Option<usize> {
     let output = Command::new("ps")
         .args(["-o", "rss=", "-p", &std::process::id().to_string()])
         .output()
@@ -311,7 +322,7 @@ fn rss_bytes() -> Option<usize> {
     kibibytes.checked_mul(1024)
 }
 
-fn resident_ballast(bytes: usize) -> Vec<u8> {
+pub(super) fn resident_ballast(bytes: usize) -> Vec<u8> {
     let mut state = 0x6d2b_79f5_u32;
     let mut ballast = Vec::with_capacity(bytes);
     for _ in 0..bytes {

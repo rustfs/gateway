@@ -62,7 +62,7 @@ cases=(
     'c-ing-0044|negative|bound|crates/gateway/src/chunked.rs::c_ing_0044_a_gzip_content_encoding_is_delivered_without_being_inflated;crates/gateway/src/gate_tests.rs::c_ing_0044_c_lim_0027_gzip_wire_bytes_set_the_body_ceiling'
     'c-ing-0060|negative|bound|crates/gateway/tests/connection_teardown.rs::c_wire_0060_c_ing_0060_c_lim_0060_a_client_reset_cancels_the_handler_rolls_back_and_releases_its_permit'
     'c-ing-0061|negative|bound|crates/gateway/tests/streaming_request.rs::c_ing_0061_body_idle_cancels_a_live_handler_and_closes_the_socket;crates/gateway/tests/streaming_request.rs::c_ing_0061_handler_stall_stops_live_socket_progress'
-    'c-ing-0062|negative|blocked|rustfs/gateway#332::no minimum-throughput floor exists, so a peer feeding one byte per second is refused by no rule; the resident-bytes and healthy-peer-p99 halves also need a harness with a measurable control'
+    'c-ing-0062|negative|bound|crates/gateway/tests/throughput_request.rs::c_ing_0062_one_byte_per_second_is_closed_for_body_throughput;crates/gateway/tests/throughput_request.rs::c_ing_0062_concurrent_slow_uploads_bound_rss_and_healthy_p99'
     'c-ing-0063|negative|bound|crates/http/tests/ingest_perf_gates.rs::c_ing_0063_the_window_stays_bounded_by_the_chunk_ceiling;crates/http/tests/ingest_perf_gates.rs::c_ing_0063_the_window_is_not_allocated_up_front;crates/gateway/tests/chunked_allocations.rs::c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body;crates/gateway/tests/streaming_request.rs::c_ing_0063_concurrent_large_live_uploads_keep_bounded_resident_ownership'
     'c-ing-0064|negative|blocked|rustfs/gateway#333::a Governor refusal that arrives mid-body must propagate as cancellation and close the socket without draining; Governor runs before the body is read, so no mid-upload refusal path exists until the verified streaming-body contract lands'
 )
@@ -74,7 +74,7 @@ plural_evidence=('c-ing-0002' 'c-ing-0003' 'c-ing-0005' 'c-ing-0020')
 
 # Editing this set is the only way a case becomes blocked, so a case cannot quietly stop being
 # evidence-backed. Each id here must also carry an owning issue in the table above.
-blocked_ids=('c-ing-0062' 'c-ing-0064')
+blocked_ids=('c-ing-0064')
 
 # The same, for rows that prove part of a case. A partial row is checked as strictly as a bound
 # one on the half it claims.
@@ -125,6 +125,7 @@ REFUSAL_TOKENS = (
     "LimitKind",
     "HandlerCancellation::RequestAborted",
     "HandlerCancellation::BodyIdle",
+    "HandlerCancellation::BodyThroughput",
     "reject_of",
     "refuse(",
     "is_none()",
