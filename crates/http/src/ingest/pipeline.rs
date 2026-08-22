@@ -18,8 +18,7 @@
 //! feeding the signer and every observer from the same borrowed run, holding a chunk back until
 //! its signature verifies, and delivering only verified bytes.
 //! NOT responsible for: framing rules (the decoder owns those), the signature chain (the signer
-//! owns that), digest algorithms and trailer-signature comparison (P3-04), or timeouts and
-//! cancellation (P3-05).
+//! owns that), digest algorithms, or timeouts and cancellation (P3-05).
 //! Upstream: `rustfs-gateway-stream`'s pull model and observer trait, this crate's `decoder`,
 //! `signer` and `limits`. Downstream: `rustfs-gateway-core` and the storage layer.
 //!
@@ -140,6 +139,7 @@ pub struct IngestPipeline<R> {
     trailer_declaration: Option<TrailerDeclaration>,
     trailers: Option<TrailingHeaders>,
     trailer_section_complete: bool,
+    trailer_signature_satisfied: bool,
 }
 
 impl<R> IngestPipeline<R> {
@@ -204,6 +204,7 @@ impl<R> IngestPipeline<R> {
             trailer_declaration: None,
             trailers: None,
             trailer_section_complete: false,
+            trailer_signature_satisfied: !framing.declares_trailers() || !framing.has_chunk_signatures(),
         })
     }
 
@@ -264,6 +265,12 @@ impl<R> IngestPipeline<R> {
     #[must_use]
     pub fn trailer_section_complete(&self) -> bool {
         self.trailer_section_complete
+    }
+
+    /// Whether this mode required no trailer HMAC or the final chained HMAC matched.
+    #[must_use]
+    pub fn trailer_signature_satisfied(&self) -> bool {
+        self.trailer_signature_satisfied
     }
 
     /// How many bytes the pipeline has memmoved to keep the window compact.
@@ -577,6 +584,15 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
                         let end = start.saturating_add(consumed);
                         if end != self.filled {
                             return Poll::Ready(Err(self.fail(ChunkReject::DataAfterTrailer)));
+                        }
+                        if declaration.signed() {
+                            let Some(signer) = self.signer.as_mut() else {
+                                return Poll::Ready(Err(self.fail(ChunkReject::TrailerSignatureMismatch)));
+                            };
+                            if let Err(reject) = signer.verify_trailer(&trailers) {
+                                return Poll::Ready(Err(self.fail(reject)));
+                            }
+                            self.trailer_signature_satisfied = true;
                         }
                         self.trailers = Some(trailers);
                         self.filled = 0;

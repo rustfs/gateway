@@ -20,11 +20,10 @@
 //! NOT responsible for: deriving a signing key. The four-step derivation is
 //! `rustfs-gateway-sig`'s and stays there — this module holds the *result* and the closure that
 //! produces it, because a security primitive implemented twice is a security primitive that
-//! drifts. Also not responsible for verifying the request signature, or for the trailer
-//! signature (P3-04).
+//! drifts. Also not responsible for verifying the request signature.
 //! Upstream: `hmac`, `sha2`, `subtle`, `zeroize`. Downstream: `pipeline`.
 //!
-//! # Why the derivation is cached and the chunk HMAC is not
+//! # Why the derivation is cached and the per-frame HMAC is not
 //!
 //! A SigV4 signing key is `HMAC(HMAC(HMAC(HMAC("AWS4"+secret, date), region), service),
 //! "aws4_request")`. Every input is the credential scope; none of them is the chunk. Deriving it
@@ -72,6 +71,12 @@ const EMPTY_SHA256_HEX: &[u8; 64] = b"e3b0c44298fc1c149afbf4c8996fb92427ae41e464
 
 /// The fixed prefix of a chunk string-to-sign.
 const CHUNK_STRING_TO_SIGN_PREFIX: &[u8] = b"AWS4-HMAC-SHA256-PAYLOAD\n";
+
+/// The fixed prefix of a trailer string-to-sign.
+const TRAILER_STRING_TO_SIGN_PREFIX: &[u8] = b"AWS4-HMAC-SHA256-TRAILER\n";
+
+/// The final HMAC carried inside a signed trailer section.
+const TRAILER_SIGNATURE_HEADER: &str = "x-amz-trailer-signature";
 
 /// One HMAC-SHA256 step.
 fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
@@ -447,13 +452,69 @@ impl ChunkSigner {
         Ok(())
     }
 
+    /// Verifies the final HMAC over the canonical trailing checksum header.
+    ///
+    /// The terminal zero-sized chunk has already advanced `previous`, so this comparison is
+    /// chained from that signature. The signature field itself is excluded from the canonical
+    /// block; every remaining field is written as `name:value\n`.
+    ///
+    /// # Errors
+    ///
+    /// [`ChunkReject::TrailerSignatureMissing`] when the field is absent and
+    /// [`ChunkReject::TrailerSignatureMismatch`] when its spelling or HMAC is wrong.
+    pub(crate) fn verify_trailer(&mut self, trailers: &rustfs_gateway_stream::TrailingHeaders) -> Result<(), ChunkReject> {
+        let presented = trailers
+            .as_header_map()
+            .get(TRAILER_SIGNATURE_HEADER)
+            .and_then(|value| decode_hex_lower_32(value.as_bytes()))
+            .ok_or_else(|| {
+                if trailers.as_header_map().contains_key(TRAILER_SIGNATURE_HEADER) {
+                    ChunkReject::TrailerSignatureMismatch
+                } else {
+                    ChunkReject::TrailerSignatureMissing
+                }
+            })?;
+
+        let mut canonical = Sha256::new();
+        let mut signed_fields = 0_u8;
+        for (name, value) in trailers.iter() {
+            if name.as_str() == TRAILER_SIGNATURE_HEADER {
+                continue;
+            }
+            Digest::update(&mut canonical, name.as_str().as_bytes());
+            Digest::update(&mut canonical, b":");
+            Digest::update(&mut canonical, value.as_bytes());
+            Digest::update(&mut canonical, b"\n");
+            signed_fields = signed_fields.saturating_add(1);
+        }
+        if signed_fields != 1 {
+            return Err(ChunkReject::DeclaredTrailerMismatch);
+        }
+        let digest: [u8; 32] = canonical.finalize().into();
+        let mut buf = [0u8; STRING_TO_SIGN_CAPACITY];
+        let len = self
+            .write_trailer_string_to_sign(&digest, &mut buf)
+            .ok_or(ChunkReject::TrailerSignatureMismatch)?;
+        let signed = buf.get(..len).ok_or(ChunkReject::TrailerSignatureMismatch)?;
+        let expected = hmac_sha256(self.key.expose(), signed);
+        self.hmac_calls = self.hmac_calls.saturating_add(1);
+
+        let matched: bool = expected.ct_eq(&presented).into();
+        if !matched {
+            return Err(ChunkReject::TrailerSignatureMismatch);
+        }
+        self.previous = expected;
+        Ok(())
+    }
+
     /// How many chunks have been verified so far.
     #[must_use]
     pub fn chunks_verified(&self) -> u32 {
         self.chunk_index
     }
 
-    /// How many HMAC operations this signer has performed: exactly one per chunk.
+    /// How many HMAC operations this signer has performed: one per chunk and, when present, one
+    /// for the final signed trailer.
     #[must_use]
     pub fn hmac_calls(&self) -> u64 {
         self.hmac_calls
@@ -500,6 +561,30 @@ impl ChunkSigner {
 
         Some(at)
     }
+
+    /// Writes the final trailer string-to-sign into `out` and returns its length.
+    fn write_trailer_string_to_sign(&self, trailer_digest: &[u8; 32], out: &mut [u8; STRING_TO_SIGN_CAPACITY]) -> Option<usize> {
+        let mut at = 0usize;
+        let mut put = |src: &[u8], at: &mut usize| -> Option<()> {
+            let end = at.checked_add(src.len())?;
+            out.get_mut(*at..end)?.copy_from_slice(src);
+            *at = end;
+            Some(())
+        };
+
+        put(TRAILER_STRING_TO_SIGN_PREFIX, &mut at)?;
+        put(self.scope.amz_date.as_bytes(), &mut at)?;
+        put(b"\n", &mut at)?;
+        put(self.scope.scope_line.as_bytes(), &mut at)?;
+        put(b"\n", &mut at)?;
+        let mut hex = [0u8; 64];
+        write_hex_lower(&self.previous, &mut hex)?;
+        put(&hex, &mut at)?;
+        put(b"\n", &mut at)?;
+        write_hex_lower(trailer_digest, &mut hex)?;
+        put(&hex, &mut at)?;
+        Some(at)
+    }
 }
 
 impl fmt::Debug for ChunkSigner {
@@ -519,4 +604,33 @@ impl fmt::Debug for ChunkSigner {
 /// `None` for any other spelling, including uppercase hex and a quoted value.
 pub(crate) fn parse_chunk_signature(input: &[u8]) -> Option<[u8; 32]> {
     decode_hex_lower_32(input)
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use http::{HeaderMap, HeaderName, HeaderValue};
+    use rustfs_gateway_stream::TrailingHeaders;
+
+    use super::*;
+
+    #[test]
+    fn a_wrong_final_hmac_has_a_distinct_refusal() {
+        let mut fields = HeaderMap::new();
+        fields.insert(HeaderName::from_static("x-amz-checksum-crc32"), HeaderValue::from_static("AAAAAA=="));
+        fields.insert(
+            HeaderName::from_static(TRAILER_SIGNATURE_HEADER),
+            HeaderValue::from_static("0000000000000000000000000000000000000000000000000000000000000000"),
+        );
+        let mut signer = ChunkSigner::new(
+            ChunkSigningKey::from_derived([0x5a; 32]),
+            ChunkScope::new("20130524/us-east-1/s3/aws4_request", "20130524T000000Z").expect("valid scope"),
+            ChunkSeed::from_request_signature([0xaa; 32]),
+        );
+
+        assert_eq!(
+            signer.verify_trailer(&TrailingHeaders::from_header_map(fields)),
+            Err(ChunkReject::TrailerSignatureMismatch)
+        );
+    }
 }

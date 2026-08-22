@@ -398,9 +398,9 @@ fn a_seed_that_is_not_lowercase_hex_is_refused() {
     assert!(ChunkSeed::from_hex("").is_err());
 }
 
-/// Negative: a trailered body decodes and delivers, and still may not be committed. The trailer
-/// carries a checksum and, in signed framing, its own signature; neither has been checked here,
-/// so the pipeline fails closed rather than reporting a body it has not finished validating.
+/// Negative: an unsigned trailered body decodes and delivers, and still may not be committed. The
+/// trailer checksum has not been checked here, so the pipeline fails closed rather than reporting
+/// a body it has not finished validating.
 #[test]
 fn a_trailered_body_is_never_committable_at_this_stage() {
     let mut body = unsigned_body(&[b"payload"]);

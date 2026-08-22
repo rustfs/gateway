@@ -289,6 +289,7 @@ impl<B> VerifiedRequestBody<B> {
         &mut self,
         parser_commit_allowed: bool,
         trailer_section_complete: bool,
+        trailer_signature_satisfied: bool,
         trailers: TrailingHeaders,
     ) -> Poll<Result<PayloadRead, StreamError>> {
         if let Some(refusal) = self.progress.take_refusal() {
@@ -304,7 +305,7 @@ impl<B> VerifiedRequestBody<B> {
             Ok(verified) => verified,
             Err(rejection) => return self.fail(checksum_refusal(rejection)),
         };
-        if !parser_commit_allowed && !(trailer_section_complete && verified.checksum().is_some()) {
+        if !parser_commit_allowed && !(trailer_section_complete && trailer_signature_satisfied && verified.checksum().is_some()) {
             return self.fail(crate::chunked::trailers_not_verified());
         }
         self.settle(Ok(BodyVerified));
@@ -324,12 +325,12 @@ where
             return Poll::Ready(Err(StreamError::polled_after_eof().with_bytes_before_error(this.delivered)));
         }
         match &mut this.source {
-            Source::Empty => this.finish(true, false, TrailingHeaders::empty()),
+            Source::Empty => this.finish(true, false, true, TrailingHeaders::empty()),
             Source::Plain(frames) => match frames.poll_next(context) {
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(Err(refusal)) => this.fail(refusal),
                 Poll::Ready(Ok(Some(bytes))) => this.deliver(bytes),
-                Poll::Ready(Ok(None)) => this.finish(true, false, TrailingHeaders::empty()),
+                Poll::Ready(Ok(None)) => this.finish(true, false, true, TrailingHeaders::empty()),
             },
             Source::Framed(pipeline) => {
                 let mut buffer = vec![0_u8; DELIVERY_BYTES];
@@ -347,7 +348,8 @@ where
                     Poll::Ready(Ok(ReadProgress::Eof { trailers })) => {
                         let commit_allowed = pipeline.commit_allowed();
                         let trailer_section_complete = pipeline.trailer_section_complete();
-                        this.finish(commit_allowed, trailer_section_complete, trailers)
+                        let trailer_signature_satisfied = pipeline.trailer_signature_satisfied();
+                        this.finish(commit_allowed, trailer_section_complete, trailer_signature_satisfied, trailers)
                     }
                 }
             }

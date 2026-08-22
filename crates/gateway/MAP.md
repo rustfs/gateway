@@ -94,7 +94,6 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 
 - Request bodies are buffered, bounded by `ServiceConfig::max_buffered_body_bytes` and operation caps.
 - `SseEnforced` is positional rather than carried on `Req<O>`; changing that needs a core API ADR.
-- Signed-trailer `aws-chunked` remains unimplemented until its final HMAC can commit safely.
 - This crate declares connection intent; only a transport can observe a socket close.
 - The header map is cloned once because `WireRequest` does not expose the accepted signing view.
 - `x-amz-id-2` is a fixed uppercase-hex token, intentionally not AWS-shaped.

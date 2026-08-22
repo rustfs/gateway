@@ -120,6 +120,10 @@ pub enum ChunkReject {
     MalformedTrailer,
     /// The received trailer names differ from the names declared in the request head.
     DeclaredTrailerMismatch,
+    /// A signed trailer section ended without its mandatory final HMAC.
+    TrailerSignatureMissing,
+    /// The final trailer HMAC was malformed or did not match the chained signature.
+    TrailerSignatureMismatch,
     /// The wire ended before the declared trailer section was complete.
     TruncatedBeforeTrailer,
     /// Bytes followed the CRLF that ended the trailer section.
@@ -172,7 +176,9 @@ impl ChunkReject {
     #[must_use]
     pub fn to_status(&self) -> StatusCode {
         match self {
-            Self::SignatureChainBroken { .. } => StatusCode::FORBIDDEN,
+            Self::SignatureChainBroken { .. } | Self::TrailerSignatureMissing | Self::TrailerSignatureMismatch => {
+                StatusCode::FORBIDDEN
+            }
             _ => StatusCode::BAD_REQUEST,
         }
     }
@@ -184,7 +190,9 @@ impl ChunkReject {
     #[must_use]
     pub fn error_code(&self) -> ErrorCode {
         match self {
-            Self::SignatureChainBroken { .. } => ErrorCode::SIGNATURE_DOES_NOT_MATCH,
+            Self::SignatureChainBroken { .. } | Self::TrailerSignatureMissing | Self::TrailerSignatureMismatch => {
+                ErrorCode::SIGNATURE_DOES_NOT_MATCH
+            }
             Self::ChunkSizeTooLarge { .. } => ErrorCode::INVALID_CHUNK_SIZE,
             Self::DecodedLengthUnderflow { .. } | Self::TruncatedStream | Self::TruncatedBeforeTrailer => {
                 ErrorCode::INCOMPLETE_BODY
@@ -238,6 +246,8 @@ impl ChunkReject {
             Self::TruncatedStream
                 | Self::TruncatedBeforeTrailer
                 | Self::SignatureChainBroken { .. }
+                | Self::TrailerSignatureMissing
+                | Self::TrailerSignatureMismatch
                 | Self::ChunkSizeTooLarge { .. }
                 | Self::TooManyChunks { .. }
                 | Self::OverheadRatioExceeded { .. }
@@ -268,6 +278,8 @@ impl ChunkReject {
             Self::TrailerSizeExceeded => "trailer-size-exceeded",
             Self::MalformedTrailer => "malformed-trailer",
             Self::DeclaredTrailerMismatch => "declared-trailer-mismatch",
+            Self::TrailerSignatureMissing => "trailer-signature-missing",
+            Self::TrailerSignatureMismatch => "trailer-signature-mismatch",
             Self::TruncatedBeforeTrailer => "truncated-before-trailer",
             Self::DataAfterTrailer => "data-after-trailer",
             Self::TrailerInNonTrailerMode => "trailer-in-non-trailer-mode",

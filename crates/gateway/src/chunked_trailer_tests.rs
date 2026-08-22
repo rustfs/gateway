@@ -149,26 +149,131 @@ fn sink_with_material() -> ChunkSink {
     sink
 }
 
-#[tokio::test]
-async fn a_signed_trailered_mode_is_refused_until_its_hmac_is_verified() {
-    let mut headers = HeaderMap::new();
-    headers.insert(http::HeaderName::from_static(DECODED_LENGTH_HEADER), http::HeaderValue::from_static("11"));
-    let trailer = rustfs_gateway_sig::DeclaredTrailers::new(
+fn signed_trailered() -> PayloadMode {
+    let declared = rustfs_gateway_sig::DeclaredTrailers::new(
         [rustfs_gateway_sig::TrailerName::new("x-amz-checksum-crc32").expect("a valid trailer name")],
         false,
     )
-    .expect("one name is a valid set");
-    let error = ChunkIngest::prepare(
-        &PayloadMode::StreamingSigned {
-            trailer: rustfs_gateway_sig::TrailerSet::Declared(trailer),
-        },
+    .expect("one checksum trailer");
+    PayloadMode::StreamingSigned {
+        trailer: rustfs_gateway_sig::TrailerSet::Declared(declared),
+    }
+}
+
+fn signed_trailer_headers() -> HeaderMap {
+    unsigned_trailer_headers()
+}
+
+const SIGNED_CHUNK: &str = "363c3b84bea6aab48c5dbef2daa7010a85774527b5780fde436990666c721cd6";
+const SIGNED_ZERO_CHUNK: &str = "3f9a21b0b8726c09b85a7d66e31ac4426f5127e2eab04820f390a81621b948e3";
+const SIGNED_TRAILER: &str = "8e7095168f795d75ed6296ec35143f8d8ec11df313a8b1683c0da0ec1be72c48";
+
+fn signed_wire(trailer_signature: Option<&str>) -> MemoryReader {
+    let mut wire = format!(
+        "b;chunk-signature={SIGNED_CHUNK}\r\nhello world\r\n\
+         0;chunk-signature={SIGNED_ZERO_CHUNK}\r\n\
+         x-amz-checksum-crc32:DUoRhQ==\r\n"
+    );
+    if let Some(signature) = trailer_signature {
+        wire.push_str("x-amz-trailer-signature:");
+        wire.push_str(signature);
+        wire.push_str("\r\n");
+    }
+    wire.push_str("\r\n");
+    MemoryReader::new([Bytes::from(wire)], TrailingHeaders::empty())
+}
+
+#[tokio::test]
+async fn c_ck_0003_a_signed_trailer_unlocks_commit_only_after_its_final_hmac() {
+    let headers = signed_trailer_headers();
+    let ingest = ChunkIngest::prepare(
+        &signed_trailered(),
         &headers,
         &wire_length(4096),
         &sink_with_material(),
         Some(&"a".repeat(64)),
         ChunkLimits::default(),
     )
-    .err()
-    .expect("trailer HMAC verification is not wired");
-    assert_eq!(error.status(), http::StatusCode::NOT_IMPLEMENTED);
+    .expect("signed trailer verification is implemented")
+    .expect("a framed body");
+    let mut digests = rustfs_gateway_http::BodyIntegrity::resolve(
+        &rustfs_gateway_http::HeaderView::new(&headers),
+        rustfs_gateway_http::ChecksumSubject::RequestBody,
+    )
+    .expect("one checksum trailer")
+    .begin();
+    let output = ingest
+        .run(signed_wire(Some(SIGNED_TRAILER)), &mut digests)
+        .await
+        .expect("the chunk chain and final trailer HMAC agree");
+    let verified = digests
+        .verify_with_trailers(output.trailers())
+        .expect("the checksum trailer matches the decoded body");
+    assert!(output.commit_allowed(&verified));
+    assert_eq!(output.body.as_ref(), b"hello world");
+}
+
+#[tokio::test]
+async fn c_ck_0031_a_missing_signed_trailer_hmac_is_forbidden() {
+    let headers = signed_trailer_headers();
+    let ingest = ChunkIngest::prepare(
+        &signed_trailered(),
+        &headers,
+        &wire_length(4096),
+        &sink_with_material(),
+        Some(&"a".repeat(64)),
+        ChunkLimits::default(),
+    )
+    .expect("signed trailer verification is implemented")
+    .expect("a framed body");
+    let mut digests = rustfs_gateway_http::BodyIntegrity::NONE.begin();
+    let error = ingest
+        .run(signed_wire(None), &mut digests)
+        .await
+        .expect_err("the final HMAC is mandatory");
+    assert_eq!(error.status(), http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_mismatched_signed_trailer_hmac_is_forbidden() {
+    let headers = signed_trailer_headers();
+    let ingest = ChunkIngest::prepare(
+        &signed_trailered(),
+        &headers,
+        &wire_length(4096),
+        &sink_with_material(),
+        Some(&"a".repeat(64)),
+        ChunkLimits::default(),
+    )
+    .expect("signed trailer verification is implemented")
+    .expect("a framed body");
+    let mut digests = rustfs_gateway_http::BodyIntegrity::NONE.begin();
+    let error = ingest
+        .run(signed_wire(Some(&"0".repeat(64))), &mut digests)
+        .await
+        .expect_err("a mismatched final HMAC is rejected");
+    assert_eq!(error.status(), http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn c_ck_0032_the_trailer_hmac_is_seeded_by_the_zero_chunk_signature() {
+    const TRAILER_SEEDED_BY_DATA_CHUNK: &str = "70edc4d9a7881b1459744e1384bee0f6d39a79da499e80fdea94824380305b31";
+
+    let headers = signed_trailer_headers();
+    let ingest = ChunkIngest::prepare(
+        &signed_trailered(),
+        &headers,
+        &wire_length(4096),
+        &sink_with_material(),
+        Some(&"a".repeat(64)),
+        ChunkLimits::default(),
+    )
+    .expect("signed trailer verification is implemented")
+    .expect("a framed body");
+    let mut digests = rustfs_gateway_http::BodyIntegrity::NONE.begin();
+    let error = ingest
+        .run(signed_wire(Some(TRAILER_SEEDED_BY_DATA_CHUNK)), &mut digests)
+        .await
+        .expect_err("the preceding data chunk cannot seed the trailer HMAC");
+    assert_eq!(error.status(), http::StatusCode::FORBIDDEN);
 }
