@@ -68,6 +68,8 @@ mod naming_policy;
 mod object_lock_intent;
 #[path = "patch_layer_landings.rs"]
 mod patch_layer_landings;
+#[path = "payload_transport.rs"]
+mod payload_transport;
 #[path = "pipeline.rs"]
 mod pipeline;
 #[path = "precondition_contract.rs"]

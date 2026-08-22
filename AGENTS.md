@@ -307,7 +307,7 @@ closes the cycle.
               rustfs-gateway-http                wire layer: header/query views, limits, aws-chunked
                  │       │
                  ▼       ▼
-        rustfs-gateway-types ──▶ rustfs-gateway-stream ──▶ bitflags / bytes / http
+        rustfs-gateway-types ──▶ rustfs-gateway-stream ──▶ bitflags / bytes / http / http-body
                  │
                  ▼
            rustfs-gateway-xml ──▶ quick-xml

@@ -80,7 +80,7 @@ layers = [
 ]
 allowed = dict(layers)
 rank = {name: index for index, (name, _) in enumerate(layers)}
-stream_external = {"bitflags", "bytes", "http"}
+stream_external = {"bitflags", "bytes", "http", "http-body"}
 dispatcher_name = "rustfs-gateway-xtask-dispatch"
 dispatcher_manifest = "crates/xtask-dispatch/Cargo.toml"
 dispatcher_allowed_dependencies: set[str] = set()
@@ -89,7 +89,7 @@ dispatcher_audit_sentinel = "complete"
 required_agents_fragments = [
     "- **Ring 0/1 — protocol kernel and runtime**: every package under `crates/`. Zero rustfs dependencies.",
     "  runtime host, with no internal crate dependency:\n        rustfs-gateway-server                    listener, TLS, hyper, admission, shutdown",
-    "        rustfs-gateway-types ──▶ rustfs-gateway-stream ──▶ bitflags / bytes / http",
+    "        rustfs-gateway-types ──▶ rustfs-gateway-stream ──▶ bitflags / bytes / http / http-body",
     "        rustfs-gateway ──▶ rustfs-gateway-macros          public facade re-export of optional registration sugar",
     "        rustfs-gateway-xtask-dispatch (crates/xtask-dispatch)   std-only cargo xtask process selection",
     "        xtask ──▶ gateway + conformance + core + codegen + model   generation and diagnostics only",
