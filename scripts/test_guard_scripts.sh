@@ -7169,20 +7169,41 @@ expect_protected_pass 'a protected change carrying the literal BREAKING declarat
 mut_new_adr() { printf '# New decision\n' >docs/adr/9999-new-decision.md; }
 expect_protected_pass 'a newly added ADR' mut_new_adr
 
-mut_new_adr_with_required_index_row() {
-    printf '# ADR-0012: New indexed decision\n\n- Status: Accepted\n' >docs/adr/0012-new-indexed-decision.md
-    python3 - <<'PYEOF'
+add_next_indexed_adr() {
+    python3 - "$1" "$2" <<'PYEOF'
+import re
+import sys
 from pathlib import Path
 
 path = Path("docs/adr/README.md")
 text = path.read_text()
-anchor = "| 0011 | Handler deadlines propagate explicit cancellation | Accepted |"
-if text.count(anchor) != 1:
-    raise SystemExit("missing unique ADR index tail")
-path.write_text(text.replace(anchor, anchor + "\n| 0012 | New indexed decision | Accepted |", 1))
+rows = list(re.finditer(r"^\| ([0-9]{4}) \|[^\n]*$", text, re.MULTILINE))
+if not rows:
+    raise SystemExit("missing ADR index rows")
+number = int(rows[-1].group(1), 10) + 1
+if number > 9999:
+    raise SystemExit("ADR test number exceeds four digits")
+title, slug = sys.argv[1:]
+record = Path(f"docs/adr/{number:04d}-{slug}.md")
+if record.exists():
+    raise SystemExit(f"ADR test path already exists: {record}")
+record.write_text(f"# ADR-{number:04d}: {title}\n\n- Status: Accepted\n")
+insert_at = rows[-1].end()
+row = f"\n| {number:04d} | {title} | Accepted |"
+path.write_text(text[:insert_at] + row + text[insert_at:])
 PYEOF
 }
+
+mut_new_adr_with_required_index_row() {
+    add_next_indexed_adr 'New indexed decision' 'new-indexed-decision'
+}
 expect_protected_pass 'a newly added ADR with its required matching index row' mut_new_adr_with_required_index_row
+
+mut_new_adr_after_existing_next_number() {
+    add_next_indexed_adr 'Existing indexed decision' 'existing-indexed-decision'
+    mut_new_adr_with_required_index_row
+}
+expect_protected_pass 'a newly added ADR after the previous next number was accepted' mut_new_adr_after_existing_next_number
 
 mut_new_adr_with_mismatched_index_row() {
     mut_new_adr_with_required_index_row
