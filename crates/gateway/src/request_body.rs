@@ -285,10 +285,12 @@ impl<B> VerifiedRequestBody<B> {
         Poll::Ready(Ok(PayloadRead::Chunk(bytes)))
     }
 
-    fn finish(&mut self, commit_allowed: bool) -> Poll<Result<PayloadRead, StreamError>> {
-        if !commit_allowed {
-            return self.fail(crate::chunked::trailers_not_verified());
-        }
+    fn finish(
+        &mut self,
+        parser_commit_allowed: bool,
+        trailer_section_complete: bool,
+        trailers: TrailingHeaders,
+    ) -> Poll<Result<PayloadRead, StreamError>> {
         if let Some(refusal) = self.progress.take_refusal() {
             return self.fail(refusal);
         }
@@ -298,13 +300,15 @@ impl<B> VerifiedRequestBody<B> {
         let Some(digests) = self.digests.take() else {
             return self.fail(crate::gate::incomplete());
         };
-        if let Err(rejection) = digests.verify() {
-            return self.fail(checksum_refusal(rejection));
+        let verified = match digests.verify_with_trailers(&trailers) {
+            Ok(verified) => verified,
+            Err(rejection) => return self.fail(checksum_refusal(rejection)),
+        };
+        if !parser_commit_allowed && !(trailer_section_complete && verified.checksum().is_some()) {
+            return self.fail(crate::chunked::trailers_not_verified());
         }
         self.settle(Ok(BodyVerified));
-        Poll::Ready(Ok(PayloadRead::Eof {
-            trailers: TrailingHeaders::empty(),
-        }))
+        Poll::Ready(Ok(PayloadRead::Eof { trailers }))
     }
 }
 
@@ -320,12 +324,12 @@ where
             return Poll::Ready(Err(StreamError::polled_after_eof().with_bytes_before_error(this.delivered)));
         }
         match &mut this.source {
-            Source::Empty => this.finish(true),
+            Source::Empty => this.finish(true, false, TrailingHeaders::empty()),
             Source::Plain(frames) => match frames.poll_next(context) {
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(Err(refusal)) => this.fail(refusal),
                 Poll::Ready(Ok(Some(bytes))) => this.deliver(bytes),
-                Poll::Ready(Ok(None)) => this.finish(true),
+                Poll::Ready(Ok(None)) => this.finish(true, false, TrailingHeaders::empty()),
             },
             Source::Framed(pipeline) => {
                 let mut buffer = vec![0_u8; DELIVERY_BYTES];
@@ -340,9 +344,10 @@ where
                         buffer.truncate(written);
                         this.deliver(Bytes::from(buffer))
                     }
-                    Poll::Ready(Ok(ReadProgress::Eof { .. })) => {
+                    Poll::Ready(Ok(ReadProgress::Eof { trailers })) => {
                         let commit_allowed = pipeline.commit_allowed();
-                        this.finish(commit_allowed)
+                        let trailer_section_complete = pipeline.trailer_section_complete();
+                        this.finish(commit_allowed, trailer_section_complete, trailers)
                     }
                 }
             }
