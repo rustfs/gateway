@@ -154,6 +154,106 @@ fn deadlines(minimum_bytes: u64, window: Duration, read_idle: Duration) -> Reque
         .expect("a non-zero throughput floor")
 }
 
+fn require_complete_http_response(read: std::io::Result<usize>, response: &[u8]) -> std::io::Result<()> {
+    match read {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset && has_complete_content_length_response(response) => {
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn has_complete_content_length_response(response: &[u8]) -> bool {
+    let Some(head_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return false;
+    };
+    let Ok(head) = std::str::from_utf8(&response[..head_end]) else {
+        return false;
+    };
+    let mut lines = head.split("\r\n");
+    let Some(status) = lines.next() else {
+        return false;
+    };
+    if !status.starts_with("HTTP/1.1 ") {
+        return false;
+    }
+
+    let mut content_length = None;
+    for line in lines {
+        let Some((name, value)) = line.split_once(':') else {
+            return false;
+        };
+        if name.eq_ignore_ascii_case("content-length") {
+            if content_length.is_some() {
+                return false;
+            }
+            let value = value.trim();
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return false;
+            }
+            let Ok(parsed) = value.parse::<usize>() else {
+                return false;
+            };
+            content_length = Some(parsed);
+        }
+    }
+
+    content_length.is_some_and(|declared| response.len() - head_end - 4 == declared)
+}
+
+#[test]
+fn complete_response_accepts_connection_reset_after_declared_body() {
+    let response = b"HTTP/1.1 408 Request Timeout\r\nContent-Length: 4\r\n\r\nslow";
+    let read = Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
+
+    require_complete_http_response(read, response).expect("the complete response survives the reset");
+}
+
+#[test]
+fn complete_response_accepts_clean_eof() {
+    require_complete_http_response(Ok(4), b"body").expect("a clean EOF remains valid");
+}
+
+#[test]
+fn complete_response_rejects_reset_after_truncated_body() {
+    let response = b"HTTP/1.1 408 Request Timeout\r\nContent-Length: 5\r\n\r\nslow";
+    let read = Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
+
+    assert_eq!(
+        require_complete_http_response(read, response)
+            .expect_err("the truncated response stays rejected")
+            .kind(),
+        std::io::ErrorKind::ConnectionReset
+    );
+}
+
+#[test]
+fn complete_response_rejects_reset_without_content_length() {
+    let response = b"HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\nslow";
+    let read = Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
+
+    assert_eq!(
+        require_complete_http_response(read, response)
+            .expect_err("an unframed response stays rejected")
+            .kind(),
+        std::io::ErrorKind::ConnectionReset
+    );
+}
+
+#[test]
+fn complete_response_rejects_unrelated_read_error() {
+    let response = b"HTTP/1.1 408 Request Timeout\r\nContent-Length: 4\r\n\r\nslow";
+    let read = Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
+
+    assert_eq!(
+        require_complete_http_response(read, response)
+            .expect_err("an unrelated read error stays rejected")
+            .kind(),
+        std::io::ErrorKind::BrokenPipe
+    );
+}
+
 async fn exchange(address: SocketAddr, head: &[u8], wire: &[u8]) -> (Duration, String) {
     let started = Instant::now();
     let mut stream = TcpStream::connect(address).await.expect("the client connects");
@@ -189,10 +289,10 @@ async fn c_ing_0062_one_byte_per_second_is_closed_for_body_throughput() {
         }
     });
     let mut response = Vec::new();
-    tokio::time::timeout(Duration::from_secs(4), reader.read_to_end(&mut response))
+    let read = tokio::time::timeout(Duration::from_secs(4), reader.read_to_end(&mut response))
         .await
-        .expect("the throughput floor retires the request")
-        .expect("the response reads");
+        .expect("the throughput floor retires the request");
+    require_complete_http_response(read, &response).expect("the response reads completely");
     feeder.abort();
     let _ = feeder.await;
     let text = String::from_utf8(response).expect("an HTTP/1.1 response");
