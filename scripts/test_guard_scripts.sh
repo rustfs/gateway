@@ -19051,6 +19051,97 @@ expect_fail check_form_limits.sh \
     'c-lim-0002 evidence deleted, which must fail rather than skip' mut_form_evidence_file_removed \
     'required input is missing'
 
+mut_response_header_direct_expect() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/codec/response.rs")
+text = path.read_text()
+text += '''
+
+fn injected_response_header(bytes: &[u8]) -> HeaderValue {
+    HeaderValue::from_bytes(bytes).expect("caller supplied a header value")
+}
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_no_response_header_unwrap.sh \
+    'a response header value parsed from caller bytes with expect' \
+    mut_response_header_direct_expect \
+    'panic-capable response header construction'
+
+mut_response_header_split_unwrap() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/codec/response.rs")
+text = path.read_text()
+text += '''
+
+fn injected_response_header(response: &mut EncodedResponse, bytes: &[u8]) {
+    let parsed = HeaderValue::from_bytes(bytes);
+    response.headers.insert(http::header::CONTENT_TYPE, parsed.unwrap());
+}
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_no_response_header_unwrap.sh \
+    'a fallible response header parse separated from its unwrap' \
+    mut_response_header_split_unwrap \
+    'panic-capable response header construction'
+
+mut_response_header_aliased_expect() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/codec/response.rs")
+text = path.read_text()
+text += '''
+
+type ResponseHeader = HeaderValue;
+
+fn injected_response_header(bytes: &[u8]) -> ResponseHeader {
+    ResponseHeader::from_bytes(bytes).expect("caller supplied a header value")
+}
+'''
+path.write_text(text)
+PYEOF
+}
+expect_fail check_no_response_header_unwrap.sh \
+    'a response header alias hiding a panic-capable parser' \
+    mut_response_header_aliased_expect \
+    'panic-capable response header construction'
+
+mut_response_header_test_expect() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/src/codec/response.rs")
+text = path.read_text()
+text += '''
+
+#[cfg(test)]
+fn injected_test_header(bytes: &[u8]) -> HeaderValue {
+    HeaderValue::from_bytes(bytes).expect("the fixture supplies a header value")
+}
+'''
+path.write_text(text)
+PYEOF
+}
+expect_guard_pass check_no_response_header_unwrap.sh \
+    'a test-only fixture may use expect on its own header bytes' \
+    mut_response_header_test_expect
+
+mut_response_header_authority_removed() {
+    rm crates/core/src/codec/response.rs
+}
+expect_fail check_no_response_header_unwrap.sh \
+    'the response-header authority disappearing instead of being scanned' \
+    mut_response_header_authority_removed \
+    'required input is missing'
+
 fi
 
 if [[ "$ERROR_STATUS_ONLY" == 1 ]]; then
