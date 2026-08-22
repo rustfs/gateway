@@ -84,11 +84,19 @@ impl TrailerDeclaration {
         self.signed
     }
 
-    fn matches(&self, fields: &HeaderMap) -> bool {
+    fn validate_fields(&self, fields: &HeaderMap) -> Result<(), ChunkReject> {
+        if self.signed && !fields.contains_key(TRAILER_SIGNATURE) {
+            return Err(ChunkReject::TrailerSignatureMissing);
+        }
         let expected = self.names.len().saturating_add(usize::from(self.signed));
-        fields.len() == expected
+        if fields.len() == expected
             && self.names.iter().all(|name| fields.contains_key(name))
             && (!self.signed || fields.contains_key(TRAILER_SIGNATURE))
+        {
+            Ok(())
+        } else {
+            Err(ChunkReject::DeclaredTrailerMismatch)
+        }
     }
 }
 
@@ -116,9 +124,7 @@ pub(crate) fn parse_trailer_section(input: &[u8], declaration: &TrailerDeclarati
             return Err(ChunkReject::TrailerSizeExceeded);
         }
         if line_len == 0 {
-            if !declaration.matches(&fields) {
-                return Err(ChunkReject::DeclaredTrailerMismatch);
-            }
+            declaration.validate_fields(&fields)?;
             return Ok(TrailerProgress::Complete {
                 trailers: TrailingHeaders::from_header_map(fields),
                 consumed: cursor,
@@ -178,4 +184,19 @@ fn is_checksum(name: &HeaderName) -> bool {
 
 fn is_allowed(name: &HeaderName) -> bool {
     is_checksum(name) || name == TRAILER_SIGNATURE
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_signed_declaration_without_its_final_hmac_has_a_distinct_refusal() {
+        let declaration = TrailerDeclaration::parse(&HeaderValue::from_static("x-amz-checksum-crc32"), true)
+            .expect("one checksum plus its implicit signature");
+        let result = parse_trailer_section(b"x-amz-checksum-crc32:AAAAAA==\r\n\r\n", &declaration);
+
+        assert!(matches!(result, Err(ChunkReject::TrailerSignatureMissing)));
+    }
 }

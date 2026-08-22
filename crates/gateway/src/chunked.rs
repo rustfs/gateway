@@ -64,8 +64,8 @@
 //!
 //! Unsigned trailer framing is parsed here and its EOF fields leave through [`ChunkOutput`]. The
 //! parser's own `commit_allowed` stays false for that shape; [`ChunkOutput::commit_allowed`] needs
-//! a [`ChecksumVerified`] produced from those EOF fields before the assembly may commit. Signed
-//! trailers remain refused until their final trailer HMAC is compared as well.
+//! a [`ChecksumVerified`] produced from those EOF fields before the assembly may commit. A signed
+//! trailer additionally needs its final HMAC chained from the terminal chunk signature.
 
 use bytes::{Bytes, BytesMut};
 use http::HeaderMap;
@@ -128,6 +128,7 @@ pub(crate) struct ChunkOutput {
     trailers: TrailingHeaders,
     parser_commit_allowed: bool,
     trailer_section_complete: bool,
+    trailer_signature_satisfied: bool,
 }
 
 impl ChunkOutput {
@@ -136,7 +137,8 @@ impl ChunkOutput {
     }
 
     pub(crate) fn commit_allowed(&self, verified: &ChecksumVerified) -> bool {
-        self.parser_commit_allowed || (self.trailer_section_complete && verified.checksum().is_some())
+        self.parser_commit_allowed
+            || (self.trailer_section_complete && self.trailer_signature_satisfied && verified.checksum().is_some())
     }
 
     pub(crate) fn into_body(self) -> Bytes {
@@ -184,8 +186,7 @@ impl ChunkIngest {
     ///
     /// * `Ok(None)` — not an error: the mode does not frame the body, and the bytes are the
     ///   object's own.
-    /// * A `501` for a signed trailered mode, and for a signed mode whose verification material
-    ///   the authenticator did not publish. Both fail closed; see the module documentation.
+    /// * A `501` for a signed mode whose verification material the authenticator did not publish.
     /// * The mapped [`ChunkReject`] for a head-level framing contradiction.
     pub(crate) fn prepare(
         payload: &PayloadMode,
@@ -199,15 +200,11 @@ impl ChunkIngest {
         if !framing.is_framed() {
             return Ok(None);
         }
-        if framing.declares_trailers() && framing.has_chunk_signatures() {
-            return Err(trailers_not_verified());
-        }
-
         let trailer_declaration = if framing.declares_trailers() {
             let value = headers
                 .get("x-amz-trailer")
                 .ok_or_else(|| from_chunk_reject(ChunkReject::DeclaredTrailerMismatch))?;
-            Some(TrailerDeclaration::parse(value, false).map_err(from_chunk_reject)?)
+            Some(TrailerDeclaration::parse(value, framing.has_chunk_signatures()).map_err(from_chunk_reject)?)
         } else {
             None
         };
@@ -290,6 +287,7 @@ impl ChunkIngest {
             trailers,
             parser_commit_allowed: pipeline.commit_allowed(),
             trailer_section_complete: pipeline.trailer_section_complete(),
+            trailer_signature_satisfied: pipeline.trailer_signature_satisfied(),
         })
     }
 }
@@ -317,22 +315,6 @@ fn build_signer(sink: &ChunkSink, seed: Option<&str>) -> Result<ChunkSigner, S3E
     Ok(ChunkSigner::new(key, scope, seed))
 }
 
-/// The refusal for a body whose declared trailer this assembly cannot verify.
-///
-/// `501` and not `400`: the request is well-formed and it is this service that is incomplete.
-/// Answering `400` would tell a correct client to change a correct request.
-pub(crate) fn trailers_not_verified() -> S3Error {
-    from_handler(
-        HandlerError::new(
-            ErrorCode::NOT_IMPLEMENTED,
-            "this service does not yet verify the trailer this upload declared",
-        ),
-        ResponseKind::Other,
-        // The body was not read to its end, so RFC 9112 §9.3 leaves no choice.
-        ConnectionIntent::Close,
-    )
-}
-
 /// The refusal for a signed framed body with no verification material.
 ///
 /// A configuration or extension-point gap rather than a client error, and it fails closed: the
@@ -344,6 +326,15 @@ fn chunk_signatures_unavailable() -> S3Error {
             ErrorCode::NOT_IMPLEMENTED,
             "this deployment cannot verify the per-chunk signatures this upload declared",
         ),
+        ResponseKind::Other,
+        ConnectionIntent::Close,
+    )
+}
+
+/// The fail-closed fallback when parsed trailer evidence did not produce every required witness.
+pub(crate) fn trailers_not_verified() -> S3Error {
+    from_handler(
+        HandlerError::new(ErrorCode::INVALID_REQUEST, "the declared trailer was not verified"),
         ResponseKind::Other,
         ConnectionIntent::Close,
     )
