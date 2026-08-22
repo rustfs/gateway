@@ -25,8 +25,10 @@ use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use bytes::Bytes;
+use http_body::Body as _;
 
 use crate::adapt::AdaptCost;
+use crate::body::Body;
 use crate::caps::{PayloadCaps, validate_caps};
 use crate::error::StreamErrorKind;
 use crate::file_region::{FileRegion, FileRegionError};
@@ -74,6 +76,12 @@ const SEGMENTS: [&[u8]; 3] = [b"first-", b"second-", b"third"];
 
 fn segments() -> Vec<Bytes> {
     SEGMENTS.iter().map(|part| Bytes::from_static(part)).collect()
+}
+
+fn poll_http_frame(body: &mut Body) -> core::task::Poll<Option<Result<http_body::Frame<Bytes>, crate::StreamError>>> {
+    let waker = std::task::Waker::noop();
+    let mut context = core::task::Context::from_waker(waker);
+    core::pin::Pin::new(body).poll_frame(&mut context)
 }
 
 /// `c-pay-0001` — an in-memory payload advertises what it can do, and the bits agree with its length.
@@ -268,6 +276,37 @@ pub(crate) fn c_pay_0007() -> u32 {
         id,
         "an empty run of bytes is normalised to the empty payload rather than to a zero-length one",
         matches!(Payload::from_bytes(Bytes::new()), Payload::Empty),
+    );
+    c.count()
+}
+
+/// `c-pay-0009` — an unknown-length pull body stays unknown when exposed to an HTTP transport.
+pub(crate) fn c_pay_0009() -> u32 {
+    let id = "c-pay-0009";
+    let mut c = Checks::new();
+    let reader = ScriptedReader::new([Step::Chunk("hello"), Step::Eof(TrailingHeaders::empty())])
+        .with_caps(PayloadCaps::PULL)
+        .with_len_hint(None);
+    let mut body = Body::from_reader(reader).expect("the pull body declares consistent capabilities");
+
+    c.that(id, "the payload has no exact length", body.len_hint().is_none());
+    let hint = body.size_hint();
+    c.that(id, "the HTTP lower bound does not invent bytes", hint.lower() == 0);
+    c.that(id, "the HTTP upper bound stays unknown", hint.upper().is_none());
+
+    let frame = match poll_http_frame(&mut body) {
+        core::task::Poll::Ready(Some(Ok(frame))) => frame,
+        other => panic!("{id}: the first HTTP frame was not ready: {other:?}"),
+    };
+    c.that(
+        id,
+        "the transport receives the produced bytes",
+        frame.into_data().is_ok_and(|bytes| bytes == Bytes::from_static(b"hello")),
+    );
+    c.that(
+        id,
+        "the body ends after its data rather than inventing a length-bearing frame",
+        matches!(poll_http_frame(&mut body), core::task::Poll::Ready(None)),
     );
     c.count()
 }
@@ -505,6 +544,40 @@ pub(crate) fn c_pay_0025() -> u32 {
         id,
         "the adaptation moves every byte and changes none",
         joined(&chunks) == b"pull-then-push",
+    );
+    c.count()
+}
+
+/// `c-pay-0029` — more than sixteen segments reach the HTTP transport separately and unchanged.
+pub(crate) fn c_pay_0029() -> u32 {
+    let id = "c-pay-0029";
+    let mut c = Checks::new();
+    let segments: Vec<Bytes> = (0_u8..17).map(|index| Bytes::from(vec![index])).collect();
+    let pointers: Vec<*const u8> = segments.iter().map(|segment| segment.as_ptr()).collect();
+    let mut body = Body::from_segments(segments);
+
+    c.that(id, "all seventeen bytes are declared", body.len_hint() == Some(17));
+    for (index, expected_pointer) in pointers.into_iter().enumerate() {
+        let frame = match poll_http_frame(&mut body) {
+            core::task::Poll::Ready(Some(Ok(frame))) => frame,
+            other => panic!("{id}: segment {index} was not exposed as one ready HTTP frame: {other:?}"),
+        };
+        let bytes = frame.into_data().expect("the in-memory payload emits data frames");
+        c.that(
+            id,
+            "the segment order is preserved",
+            bytes.as_ref() == [u8::try_from(index).expect("the index is below seventeen")],
+        );
+        c.that(
+            id,
+            "the segment reaches the transport without flattening",
+            bytes.as_ptr() == expected_pointer,
+        );
+    }
+    c.that(
+        id,
+        "the seventeenth segment is the last data frame",
+        matches!(poll_http_frame(&mut body), core::task::Poll::Ready(None)),
     );
     c.count()
 }

@@ -3,7 +3,7 @@
 Body, byte-stream and payload primitives. **No protocol vocabulary of any kind lives here.**
 This crate exists because a streaming output field would otherwise make `rustfs-gateway-types` and
 `rustfs-gateway-http` depend on each other; if protocol words leak in, that cycle returns in another
-shape. Three dependencies (`bytes`, `http`, `bitflags`), zero internal ones.
+shape. Four dependencies (`bitflags`, `bytes`, `http`, `http-body`), zero internal ones.
 
 ## Two properties to know before editing
 
@@ -32,13 +32,13 @@ shape. Three dependencies (`bytes`, `http`, `bitflags`), zero internal ones.
 | `src/read.rs` | Pull half: `AsyncPayloadRead`, `ReadProgress`, `BoxPayloadReader` | Writing a consumer that owns its buffer |
 | `src/adapt.rs` | `AdaptCost`, `Adapt`, `MemoryStream`, `MemoryReader`, `StreamToReader` (Copy), `ReaderToStream` (Buffer) | Changing what an adaptation costs, or adding an adapter |
 | `src/metrics.rs` | `StreamMetrics`: `adapt_copies_total`, `adapt_copied_bytes_total`, `adapt_buffers_total`, `zero_copy_refusals(reason)`, `zero_copy_refused_bytes_total` | Wiring the counters into an exporter, or writing a zero-copy gate |
-| `src/body.rs` | `Body`: the one owned body type layers above name | Passing a body through a pipeline stage |
+| `src/body.rs` | `Body`: the one owned body type layers above name and its truthful `http_body::Body` view | Passing a body through a pipeline stage or into an HTTP server |
 | `src/byte_stream.rs` | `ByteStream` + `RemainingLength`: declared-length bookkeeping; short body ⇒ `IncompleteBody`, overlong ⇒ `LengthMismatch` | Wrapping a producer whose length was announced up front |
 | `src/trailers.rs` | `TrailingHeaders` | Building a trailer section at the end of a decoded body |
 | `src/error.rs` | `StreamError` + `StreamErrorKind`, and `bytes_before_error` | Deciding what an aborted transfer may still commit |
 | `src/file_region.rs` | `FileRegion` (unix): owned fd + offset + len, overflow refused at construction | Adding a kernel-side transfer path |
 | `src/tests/` | `eof_trailers` (ordering and concrete EOF shape), `cancellation` (drop ownership), `caps_matrix` (shape × model), `adapt_cost` (cost + counters), `zero_copy` (the four refusals and their order), `observer` (single-pass accounting), `body`, `trailers`, `file_region`, `support` (scripted producers) | Changing any behaviour above |
-| `src/tests/pay_ledger.rs` | The 28 `c-pay-*` rows, each bound to a case body, to a named guard case, or deferred to an owning issue; the meta-checks that stop the table rotting | Adding a payload case, or moving one off the deferred list |
+| `src/tests/pay_ledger.rs` | The 28 `c-pay-*` rows, each bound to a case body, named guard, or live external acceptance test; the meta-checks that stop the table rotting | Adding a payload case, or changing an external proof |
 | `src/tests/pay_cases.rs`, `src/tests/pay_scale.rs` | The case bodies. `pay_scale` holds the gibibyte gate and the no-read-ahead measurement, each with the control that proves its instrument can report the opposite | Changing what a `c-pay-*` row asserts |
 
 ## Boundaries
@@ -59,7 +59,7 @@ shape. Three dependencies (`bytes`, `http`, `bitflags`), zero internal ones.
 ## Verify
 
 ```bash
-cargo test -p rustfs-gateway-stream            # 75 tests
+cargo test -p rustfs-gateway-stream            # 87 tests
 cargo clippy -p rustfs-gateway-stream --all-targets -- -D warnings
 bash scripts/check_layer_dependencies.sh
 ```

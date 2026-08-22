@@ -639,6 +639,7 @@ gateway_modules = (
     "naming_policy",
     "object_lock_intent",
     "patch_layer_landings",
+    "payload_transport",
     "pipeline",
     "precondition_contract",
     "refusal_order_guards",

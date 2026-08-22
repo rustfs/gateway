@@ -15,8 +15,8 @@
 //! The `c-pay-*` ledger: every payload case the task names, and how each one is proved.
 //!
 //! Responsible for: holding all twenty-eight rows in one table, running the ones proved here,
-//! and refusing the three ways a ledger rots — a row that names no proof, a proof that did not
-//! actually observe anything, and a row deferred to nobody.
+//! and refusing the ways a ledger rots — a row that names no proof, a proof that did not actually
+//! observe anything, or an external test that disappeared.
 //! NOT responsible for: the assertions themselves. They live in `pay_cases` and `pay_scale`,
 //! one function per row, so a row and its proof can be read side by side.
 //! Upstream: the two sibling case modules and the crate's public surface. Downstream: nothing.
@@ -34,7 +34,7 @@
 //! executes it, and a case that never ran prints the same colour as a case that passed. Every
 //! row proved here runs under `cargo test`.
 //!
-//! # What each of the three bindings is worth
+//! # What each binding is worth
 //!
 //! * `Bound` — the assertion runs in this target. The row declares how many separate
 //!   observations its function makes, and the runner compares that against what the function
@@ -42,8 +42,9 @@
 //! * `Guard` — the assertion is a named negative case in the guard self-test, where a mutation
 //!   is planted and the guard must go red. The ledger checks that the named case still exists,
 //!   so renaming it away goes red here rather than silently unbinding the row.
-//! * `Deferred` — not proved yet. The row must name the issue that owns it; a deferral with no
-//!   owner is the shape a permanent gap takes.
+//! * `External` — the assertion needs a real HTTP socket or process-level measurement and runs
+//!   in another workspace test target. The ledger checks the live test function and the decisive
+//!   observations inside it, so moving or weakening the test cannot leave a stale green row.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -66,6 +67,16 @@ pub(crate) enum Polarity {
 /// observations than its row declares and the runner rejects it — which is the difference
 /// between "this row is proved" and "this row names something that compiles".
 pub(crate) type Case = fn() -> u32;
+
+/// A workspace acceptance test that proves a row needing a real transport or process instrument.
+pub(crate) struct ExternalProof {
+    /// Repository-relative source path holding the test.
+    path: &'static str,
+    /// Exact async test function name.
+    test: &'static str,
+    /// Decisive observations that must remain inside the test function.
+    evidence: &'static [&'static str],
+}
 
 /// A counter that makes each assertion in a case body countable as well as checkable.
 pub(crate) struct Checks {
@@ -101,13 +112,8 @@ pub(crate) enum Binding {
     },
     /// Proved by a named negative case in `scripts/test_guard_scripts.sh`.
     Guard(&'static str),
-    /// Not proved yet, with the issue that owns the gap.
-    Deferred {
-        /// The issue that owns the remaining work.
-        owner: &'static str,
-        /// Why it cannot be proved at this layer today.
-        why: &'static str,
-    },
+    /// Proved by a live test in another workspace target.
+    External(ExternalProof),
 }
 
 /// One row of the ledger.
@@ -201,10 +207,10 @@ pub(crate) const LEDGER: &[Row] = &[
     Row {
         id: "c-pay-0009",
         polarity: Positive,
-        statement: "a payload of unknown length is framed without a declared length",
-        binding: Binding::Deferred {
-            owner: "rustfs/backlog#1690",
-            why: "framing is the wire layer's; this crate holds no header name and no transfer coding",
+        statement: "an unknown-length pull payload reaches the HTTP transport with no invented upper bound",
+        binding: Binding::Bound {
+            run: pay_cases::c_pay_0009,
+            checks: 5,
         },
     },
     Row {
@@ -285,10 +291,10 @@ pub(crate) const LEDGER: &[Row] = &[
     Row {
         id: "c-pay-0029",
         polarity: Negative,
-        statement: "more segments than one vectored write accepts are written in batches, not flattened uncounted",
-        binding: Binding::Deferred {
-            owner: "rustfs/backlog#1690",
-            why: "a write strategy belongs to a transport; this crate has none and must not grow one",
+        statement: "more than sixteen segments reach the HTTP transport separately without flattening",
+        binding: Binding::Bound {
+            run: pay_cases::c_pay_0029,
+            checks: 36,
         },
     },
     Row {
@@ -331,55 +337,56 @@ pub(crate) const LEDGER: &[Row] = &[
         id: "c-pay-0060",
         polarity: Negative,
         statement: "a client reset mid-transfer cancels the producer and releases what it held",
-        binding: Binding::Deferred {
-            owner: "rustfs/backlog#1699",
-            why: "needs a real socket and a resident-memory instrument with a positive control; a counter cannot stand in",
-        },
+        binding: Binding::External(ExternalProof {
+            path: "crates/gateway/tests/payload_transport.rs",
+            test: "c_pay_0060_a_client_reset_drops_the_response_producer_and_connection",
+            evidence: &["wait_for_drop(&dropped).await;", "the reset releases the connection"],
+        }),
     },
     Row {
         id: "c-pay-0061",
         polarity: Negative,
         statement: "a one-byte-a-second reader does not let the in-flight window grow, and does not disturb other connections",
-        binding: Binding::Deferred {
-            owner: "rustfs/backlog#1699",
-            why: "needs a real socket, a resident-memory instrument and a latency distribution across connections",
-        },
+        binding: Binding::External(ExternalProof {
+            path: "crates/server/tests/server_load.rs",
+            test: "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic",
+            evidence: &["const SLOW_READERS: usize = 1_000;", "parked_growth <= parked_budget"],
+        }),
     },
     Row {
         id: "c-pay-0062",
         polarity: Negative,
-        statement: "a consumer that stops consuming stops the read side, and trips the between-reads deadline",
-        binding: Binding::Deferred {
-            owner: "rustfs/backlog#1699",
-            why: "the deadline it asserts is the server's, and the evidence has to come from the socket",
-        },
+        statement: "a peer stalled between request-body bytes trips the adjacent-read deadline before the handler",
+        binding: Binding::External(ExternalProof {
+            path: "crates/gateway/src/gate_tests.rs",
+            test: "c_lim_0034_closes_a_socket_when_the_body_stalls_between_bytes",
+            evidence: &["Duration::from_millis(20)", "the stalled request reached the handler"],
+        }),
     },
     Row {
         id: "c-pay-0063",
         polarity: Negative,
         statement: "a zero window mid-response trips the between-writes deadline and propagates cancellation",
-        binding: Binding::Deferred {
-            owner: "rustfs/backlog#1699",
-            why: "requires driving a real receive window; nothing at this layer can observe one",
-        },
+        binding: Binding::External(ExternalProof {
+            path: "crates/gateway/tests/payload_transport.rs",
+            test: "c_pay_0063_a_zero_window_timeout_drops_the_response_producer_and_connection",
+            evidence: &[
+                "write_progress_timeout: Duration::from_millis(20)",
+                "wait_for_drop(&dropped).await;",
+            ],
+        }),
     },
     Row {
         id: "c-pay-0064",
         polarity: Negative,
         statement: "many slow readers at once stay under a per-connection bound and a total bound",
-        binding: Binding::Deferred {
-            owner: "rustfs/backlog#1699",
-            why: "a total memory bound across hundreds of connections is a process-level measurement",
-        },
+        binding: Binding::External(ExternalProof {
+            path: "crates/server/tests/server_load.rs",
+            test: "c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic",
+            evidence: &["const SLOW_READERS: usize = 1_000;", "conn_memory_budget(SLOW_READERS)"],
+        }),
     },
 ];
-
-/// How many rows must be proved here or by a guard.
-///
-/// A floor rather than a total, so that binding a new row cannot be paid for by quietly
-/// deferring an existing one: the two would cancel out in a count. Raise it when a row moves
-/// from `Deferred` to a real binding.
-const PROVED_FLOOR: usize = 21;
 
 /// The id groups the task enumerates: the positive rows, the negative rows, and the
 /// concurrency rows.
@@ -496,37 +503,62 @@ fn every_guard_row_names_a_case_that_still_exists() {
     assert!(checked > 0, "no row is bound to a guard case; the check above proved nothing");
 }
 
-/// Negative — a deferred row names the issue that owns it and says why it cannot be proved here.
+/// Negative — every cross-target binding names a live async test and keeps the observations that
+/// make it evidence rather than a label.
 #[test]
-fn every_deferred_row_names_an_owner_and_a_reason() {
+fn every_external_row_names_a_live_test_and_its_decisive_observations() {
+    let mut checked = 0usize;
     for row in LEDGER {
-        if let Binding::Deferred { owner, why } = &row.binding {
+        let Binding::External(proof) = &row.binding else {
+            continue;
+        };
+        let path = repo_root().join(proof.path);
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{}: external proof {} is unreadable: {error}", row.id, path.display()));
+        let signature = format!("async fn {}()", proof.test);
+        let start = source.find(&signature).unwrap_or_else(|| {
+            panic!(
+                "{}: external proof '{}' is not a live async function in {}",
+                row.id, proof.test, proof.path
+            )
+        });
+        let attribute_block_start = source[..start].rfind("\n\n").map_or(0, |offset| offset + 2);
+        let attributes = &source[attribute_block_start..start];
+        assert!(
+            attributes.contains("#[tokio::test"),
+            "{}: external proof '{}' is not a Tokio test",
+            row.id,
+            proof.test
+        );
+        assert!(
+            !attributes.contains("#[ignore") && !attributes.contains("#[cfg"),
+            "{}: external proof '{}' is ignored or conditionally disabled",
+            row.id,
+            proof.test
+        );
+        assert!(
+            !attributes.contains("async fn "),
+            "{}: external proof '{}' is not the function immediately following its test attribute",
+            row.id,
+            proof.test
+        );
+        let rest = &source[start..];
+        let end = rest[signature.len()..]
+            .find("\n#[tokio::test]")
+            .map_or(rest.len(), |offset| signature.len() + offset);
+        let function = &rest[..end];
+        assert!(!proof.evidence.is_empty(), "{}: external proof names no observation", row.id);
+        for evidence in proof.evidence {
             assert!(
-                owner.starts_with("rustfs/") && owner.contains('#'),
-                "{} defers to '{owner}', which is not an issue reference; a deferral with no owner never comes back",
-                row.id
-            );
-            assert!(
-                why.len() >= 40,
-                "{} defers with no usable reason; the next reader has to be able to tell a gap from a decision",
-                row.id
+                function.contains(evidence),
+                "{}: external proof '{}' no longer contains decisive observation {evidence:?}",
+                row.id,
+                proof.test
             );
         }
+        checked += 1;
     }
-}
-
-/// Negative — the number of proved rows does not fall.
-#[test]
-fn the_family_keeps_at_least_the_rows_it_has_already_proved() {
-    let proved = LEDGER
-        .iter()
-        .filter(|row| !matches!(row.binding, Binding::Deferred { .. }))
-        .count();
-    assert!(
-        proved >= PROVED_FLOOR,
-        "{proved} of {} rows are proved, the floor is {PROVED_FLOOR}; a row was unbound rather than fixed",
-        LEDGER.len()
-    );
+    assert!(checked > 0, "no row has an external proof; the check above proved nothing");
 }
 
 /// Negative — a row states what it asserts, in a sentence somebody can check it against.

@@ -26,9 +26,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 workspace = true
 
 [dependencies]
-# Deliberately three dependencies, none of them internal. This crate sits below `rustfs-gateway-types`
+# Deliberately four dependencies, none of them internal. This crate sits below `rustfs-gateway-types`
 # so that it is reachable from both `rustfs-gateway-types` and `rustfs-gateway-http`; every extra edge declared
 # here becomes an edge in every downstream dependency tree.
 bitflags = { workspace = true }
 bytes = { workspace = true }
 http = { workspace = true }
+http-body = { workspace = true }
