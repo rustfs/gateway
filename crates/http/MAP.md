@@ -23,3 +23,4 @@ Agent entry point for bounded, signature-aware HTTP wire ingestion.
 | `tests/host.rs` | Host parsing matrix. | Change addressing. |
 | `tests/form_limits.rs` | POST Object form ceilings and ordering. | Change `src/form/`. |
 | `tests/form_allocations.rs` | Measures that reading a file part costs a heap independent of the file. | Change the file read path. |
+| `benches/parse.rs` | Asserts zero allocations for eight-query indexing and signed-header canonicalization. | Change request-head parsing or canonical-header writing. |

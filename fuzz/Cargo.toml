@@ -70,3 +70,10 @@ path = "fuzz_targets/opaque_token.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "wire_accept"
+path = "fuzz_targets/wire_accept.rs"
+test = false
+doc = false
+bench = false

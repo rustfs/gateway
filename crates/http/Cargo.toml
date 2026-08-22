@@ -45,6 +45,10 @@ sha2 = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
 
+[[bench]]
+name = "parse"
+harness = false
+
 [dev-dependencies]
 # The allocation instrument. `form_allocations.rs` installs `dhat::Alloc` as the test binary's
 # global allocator and compares two runs of the same read at two file sizes; a claim about a
