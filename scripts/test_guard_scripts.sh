@@ -2818,20 +2818,35 @@ expect_fail check_response_encoding_ledger.sh \
     'the deferred-operation trybuild fixture leaving the harness' \
     mut_response_encoding_trybuild_glob_removed
 
-mut_response_encoding_block_loses_owner() {
+mut_response_encoding_zero_window_evidence_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("scripts/check_response_encoding_ledger.sh")
+path = Path("crates/gateway/tests/committed_progress.rs")
 text = path.read_text()
-old = "c-enc-0060|negative|blocked|rustfs/backlog#1701::"
+old = "fn c_enc_0060_complete_multipart_upload_finishes_behind_a_zero_window("
 if text.count(old) != 1:
-    raise SystemExit("response-encoding block owner mutation subject is not unique")
-path.write_text(text.replace(old, "c-enc-0060|negative|blocked|unowned::", 1))
+    raise SystemExit("response-encoding zero-window mutation subject is not unique")
+path.write_text(text.replace(old, "fn removed_c_enc_0060_complete_multipart_upload_finishes_behind_a_zero_window(", 1))
 PYEOF
 }
-expect_fail_self_mutation check_response_encoding_ledger.sh \
-    'a blocked response rule losing its owning issue' \
-    mut_response_encoding_block_loses_owner
+expect_fail check_response_encoding_ledger.sh \
+    'the CompleteMultipartUpload zero-window evidence disappearing' \
+    mut_response_encoding_zero_window_evidence_removed
+
+mut_response_encoding_commit_load_evidence_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/commit.rs")
+text = path.read_text()
+old = "fn c_enc_0065_five_hundred_twelve_commits_have_linear_timer_wakes("
+if text.count(old) != 1:
+    raise SystemExit("response-encoding commit-load mutation subject is not unique")
+path.write_text(text.replace(old, "fn removed_c_enc_0065_five_hundred_twelve_commits_have_linear_timer_wakes(", 1))
+PYEOF
+}
+expect_fail check_response_encoding_ledger.sh \
+    'the 512-way committed timer evidence disappearing' \
+    mut_response_encoding_commit_load_evidence_removed
 
 mut_response_encoding_redirect_authority_bypassed() {
     python3 - <<'PYEOF'
