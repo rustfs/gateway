@@ -72,6 +72,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "route_compiled_equiv"
+path = "fuzz_targets/route_compiled_equiv.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "opaque_token"
 path = "fuzz_targets/opaque_token.rs"
 test = false

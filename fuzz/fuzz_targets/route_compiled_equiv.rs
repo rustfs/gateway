@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Fuzzes route pairs that the generated selector lattice accepted as disjoint.
+//! Fuzzes equivalence between the readable generated route table and compiled router.
 //!
-//! Responsible for: the libFuzzer entry point for the disjointness property.
-//! NOT responsible for: request generation or compiled-router equivalence.
+//! Responsible for: the libFuzzer entry point for compiled/readable route equivalence.
+//! NOT responsible for: request generation or route-lattice disjointness.
 //! Upstream: libFuzzer bytes and shared route support. Downstream: nothing — it asserts.
 
 #![no_main]
@@ -25,6 +25,4 @@ mod route;
 
 use libfuzzer_sys::fuzz_target;
 
-fuzz_target!(|input: &[u8]| {
-    route::check_disjoint(input);
-});
+fuzz_target!(|input: &[u8]| route::check_compiled_equiv(input));
