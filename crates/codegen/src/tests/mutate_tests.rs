@@ -20,13 +20,15 @@
 //! behind `cargo xtask conformance mutate`.
 //! Upstream: `crate::mutate`. Downstream: nothing.
 
-use rustfs_gateway_model::MutationDimension;
 use rustfs_gateway_model::ir::OperationIr;
+use rustfs_gateway_model::{
+    CodecRule, CodecValue, HeaderToleranceValue, MutationDimension, UnknownElementPolicyValue, WireFormValue,
+};
 
 use super::codegen_tests::{artifacts, root};
 use crate::emit::quirk_toml::{ResolvedSource, SourceValue, resolve_at};
 use crate::mutate::apply::apply;
-use crate::mutate::{ABSENT_NOT_CONFIGURED_MUTANT, Mutation, plan, plan_contract, quirk_families};
+use crate::mutate::{ABSENT_NOT_CONFIGURED_MUTANT, Mutation, apply_codec, plan, plan_codec, plan_contract, quirk_families};
 use crate::{CodegenInput, CodegenOutput, generate, generate_mutated};
 
 /// The lifecycle request root: a string source with a real production consumer, used as the
@@ -381,4 +383,123 @@ fn n_an_empty_element_spelling_the_ir_does_not_define_is_refused() {
     )
     .expect_err("a capitalised spelling is not an IR spelling");
     assert!(error.contains("does not define"), "{error}");
+}
+
+#[test]
+fn a_codec_enum_is_flipped_and_read_back() {
+    let mut rules = std::collections::BTreeMap::from([(
+        "q-acl-0006".to_owned(),
+        CodecRule {
+            current: CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Skip),
+            mutation_dimension: MutationDimension::UnknownElementPolicy,
+        },
+    )]);
+    let mutation = plan_codec("q-acl-0006", &rules["q-acl-0006"]).expect("the codec rule is plannable");
+
+    assert!(apply_codec(&mut rules, &mutation).expect("the writer accepts its own plan"));
+    assert_eq!(
+        rules["q-acl-0006"].current,
+        CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Reject)
+    );
+}
+
+#[test]
+fn a_codec_integer_range_is_flipped_to_the_unbounded_default() {
+    let mut rules = std::collections::BTreeMap::from([(
+        "q-part-number-0072".to_owned(),
+        CodecRule {
+            current: CodecValue::IntegerRange { min: 1, max: 10_000 },
+            mutation_dimension: MutationDimension::IntegerRange,
+        },
+    )]);
+    let mutation = plan_codec("q-part-number-0072", &rules["q-part-number-0072"]).expect("the range is plannable");
+
+    assert!(apply_codec(&mut rules, &mutation).expect("the writer accepts its own plan"));
+    assert!(!rules.contains_key("q-part-number-0072"), "absence selects the unbounded integer parser");
+}
+
+#[test]
+fn a_wire_form_is_flipped_to_the_unvalidated_default() {
+    let mut rules = std::collections::BTreeMap::from([(
+        "q-token-form-0075".to_owned(),
+        CodecRule {
+            current: CodecValue::WireForm(WireFormValue::OpaqueToken),
+            mutation_dimension: MutationDimension::WireForm,
+        },
+    )]);
+    let mutation = plan_codec("q-token-form-0075", &rules["q-token-form-0075"]).expect("the form is plannable");
+
+    assert!(apply_codec(&mut rules, &mutation).expect("the writer accepts its own plan"));
+    assert!(!rules.contains_key("q-token-form-0075"), "absence selects the unvalidated string parser");
+}
+
+#[test]
+fn a_header_tolerance_is_flipped_to_the_strict_default() {
+    let mut rules = std::collections::BTreeMap::from([(
+        "q-cond-0050".to_owned(),
+        CodecRule {
+            current: CodecValue::HeaderTolerance(HeaderToleranceValue::DateCondition),
+            mutation_dimension: MutationDimension::HeaderTolerance,
+        },
+    )]);
+    let mutation = plan_codec("q-cond-0050", &rules["q-cond-0050"]).expect("the tolerance is plannable");
+
+    assert!(apply_codec(&mut rules, &mutation).expect("the writer accepts its own plan"));
+    assert!(!rules.contains_key("q-cond-0050"), "absence is the strict decoder default");
+}
+
+#[test]
+fn n_the_codec_writer_refuses_a_stale_plan() {
+    let mut rules = std::collections::BTreeMap::from([(
+        "q-acl-0006".to_owned(),
+        CodecRule {
+            current: CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Reject),
+            mutation_dimension: MutationDimension::UnknownElementPolicy,
+        },
+    )]);
+    let stale = Mutation::new(
+        "q-acl-0006",
+        "@codec.q-acl-0006",
+        SourceValue::Text("skip".to_owned()),
+        SourceValue::Text("reject".to_owned()),
+    )
+    .expect("the plan itself is well formed");
+
+    let error = apply_codec(&mut rules, &stale).expect_err("a stale plan must not be written");
+    assert!(error.contains("disagree"), "{error}");
+}
+
+#[test]
+fn n_a_codec_value_and_its_dimension_must_agree() {
+    let rule = CodecRule {
+        current: CodecValue::MediaType("application/json".to_owned()),
+        mutation_dimension: MutationDimension::WireForm,
+    };
+
+    let error = plan_codec("q-example", &rule).expect_err("a mismatched codec declaration must not be planned");
+    assert!(error.contains("media_type") && error.contains("wire_form"), "{error}");
+}
+
+#[test]
+fn n_a_codec_path_cannot_name_a_different_rule() {
+    let mut rules = std::collections::BTreeMap::from([(
+        "q-acl-0006".to_owned(),
+        CodecRule {
+            current: CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Skip),
+            mutation_dimension: MutationDimension::UnknownElementPolicy,
+        },
+    )]);
+    let misplaced = Mutation::new(
+        "q-acl-0006",
+        "@codec.q-cors-0007",
+        SourceValue::Text("skip".to_owned()),
+        SourceValue::Text("reject".to_owned()),
+    )
+    .expect("the plan itself is well formed");
+
+    let error = apply_codec(&mut rules, &misplaced).expect_err("one rule must not write another rule's value");
+    assert!(
+        error.contains("names `q-cors-0007`") && error.contains("belongs to `q-acl-0006`"),
+        "{error}"
+    );
 }

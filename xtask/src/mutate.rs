@@ -530,18 +530,17 @@ fn select(
                 let plan = mutate::plan_contract(&id, rule).map(|mutation| vec![mutation]);
                 (dimension, plan.map_err(Outcome::Unplannable))
             }
-            None => {
-                let dimension = overlay
-                    .codec_rules
-                    .get(&id)
-                    .map_or_else(|| "unknown".to_owned(), |rule| rule.mutation_dimension.as_str().to_owned());
-                (
-                    dimension,
-                    Err(Outcome::Unsupported(
-                        "this rule is a codec input, not a lowered-IR source; it needs a second writer".to_owned(),
-                    )),
-                )
-            }
+            None => match overlay.codec_rules.get(&id) {
+                Some(rule) => {
+                    let dimension = rule.mutation_dimension.as_str().to_owned();
+                    let plan = mutate::plan_codec(&id, rule).map(|mutation| vec![mutation]);
+                    (dimension, plan.map_err(Outcome::Unplannable))
+                }
+                None => (
+                    "unknown".to_owned(),
+                    Err(Outcome::Unsupported("this rule has no mutation input".to_owned())),
+                ),
+            },
         };
         targets.push(Target {
             quirk: id,

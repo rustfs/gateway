@@ -389,7 +389,7 @@ fn unknown_xml_element_policy_reaches_the_generated_reader() {
     use rustfs_gateway_model::{CodecValue, UnknownElementPolicyValue};
 
     let mut artifacts = artifacts();
-    for id in ["q-acl-0006", "q-enc-0006", "q-lock-0014"] {
+    for id in ["q-acl-0006", "q-enc-0006", "q-lock-0014", "q-select-0007"] {
         let (_, quirk) = artifacts
             .files
             .iter()
@@ -413,6 +413,12 @@ fn unknown_xml_element_policy_reaches_the_generated_reader() {
         .map(|(_, body)| body)
         .expect("PutBucketAcl codec exists");
     assert!(put_acl.contains("the body contains an unknown element"), "{put_acl}");
+    let select = files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("codec/ops/select_object_content.rs"))
+        .map(|(_, body)| body)
+        .expect("SelectObjectContent codec exists");
+    assert!(select.contains("if root.children.iter().any(|child|"), "{select}");
 }
 
 #[test]

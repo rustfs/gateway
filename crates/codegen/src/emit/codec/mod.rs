@@ -241,6 +241,15 @@ fn unknown_element_policy(ir: &OperationIr, rules: &CodecRules) -> Result<Unknow
     Ok(found.unwrap_or(UnknownElementPolicyValue::Skip))
 }
 
+fn unknown_child_guard<'a>(node: &str, names: impl Iterator<Item = &'a str>, indent: &str) -> String {
+    let names = names.map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(", ");
+    format!(
+        "{indent}if {node}.children.iter().any(|child| ![{names}].contains(&child.name.as_str())) {{\n\
+         {indent}    return Err(CodecError::malformed_xml(\"the body contains an unknown element\"));\n\
+         {indent}}}\n"
+    )
+}
+
 /// Whether a shape member is carried by an XML attribute rather than by a child element.
 ///
 /// The two emitters ask this for opposite reasons and must agree: `decode` reads such a member out
