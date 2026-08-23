@@ -153,7 +153,7 @@ impl CopySource {
     /// not UTF-8, and any ARN that is neither of the two S3 forms. An unrecognised ARN is never
     /// demoted to a bucket name: `arn:aws:iam::1:user/bob` would otherwise address a bucket
     /// literally called `arn:aws:iam::1:user`.
-    pub(crate) fn parse(raw: &str) -> Result<Self, CopySourceRejection> {
+    pub fn parse(raw: &str) -> Result<Self, CopySourceRejection> {
         if raw.is_empty() {
             return Err(CopySourceRejection::new(
                 ErrorCode::INVALID_ARGUMENT,
