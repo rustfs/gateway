@@ -21,11 +21,18 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use std::sync::OnceLock;
+
 use rustfs_gateway_model::ir::Type;
 use rustfs_gateway_model::overlay::RuleClassification;
 
+fn artifacts() -> &'static crate::Artifacts {
+    static ARTIFACTS: OnceLock<crate::Artifacts> = OnceLock::new();
+    ARTIFACTS.get_or_init(super::codegen_tests::artifacts)
+}
+
 fn decoder(name: &str) -> String {
-    let artifacts = super::codegen_tests::artifacts();
+    let artifacts = artifacts();
     let ir = artifacts
         .operations
         .iter()
@@ -43,7 +50,7 @@ fn a_field_with_no_quirk_at_all_has_no_wire_form() {
 
 #[test]
 fn metadata_without_a_typed_rule_does_not_declare_a_form() {
-    let artifacts = super::codegen_tests::artifacts();
+    let artifacts = artifacts();
     for id in ["q-etag-form-0074", "q-token-form-0075", "q-marker-form-0076"] {
         assert!(!artifacts.codec_rules.contains_key(id), "{id} must not select codec validation");
     }
@@ -89,7 +96,7 @@ fn free_text_kind_is_not_a_codec_gate() {
 
 #[test]
 fn n_contract_wire_forms_emit_no_mutable_spec_record() {
-    let artifacts = super::codegen_tests::artifacts();
+    let artifacts = artifacts();
     for id in ["q-etag-form-0074", "q-token-form-0075", "q-marker-form-0076"] {
         let suffix = format!("spec/quirks/{id}.toml");
         assert!(
@@ -113,7 +120,7 @@ fn n_generated_decoders_do_not_call_removed_wire_form_validators() {
 
 #[test]
 fn contract_wire_forms_are_not_emitted_as_mutable_spec_data() {
-    let artifacts = super::codegen_tests::artifacts();
+    let artifacts = artifacts();
     let root = super::codegen_tests::root();
     let overlay = rustfs_gateway_model::Overlay::load(&root.join("model/overlays")).expect("the canonical overlay loads");
     for id in ["q-etag-form-0074", "q-token-form-0075", "q-marker-form-0076"] {
