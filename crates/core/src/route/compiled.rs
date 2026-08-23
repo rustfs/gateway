@@ -189,11 +189,28 @@ fn compile_entry(entry: &RouteEntry, bits: &SubresourceBits) -> Result<Compiled,
                 methods = Some(index);
             }
             Predicate::Target(target) => targets = Some(target_index(target)),
-            Predicate::QueryPresent(key) => required_mask |= bits.mask_for(key),
-            Predicate::QueryAbsent(key) => forbidden_mask |= bits.mask_for(key),
+            Predicate::QueryPresent(key) => {
+                let mask = bits.mask_for(key);
+                if mask == 0 {
+                    extra.push(predicate.clone());
+                } else {
+                    required_mask |= mask;
+                }
+            }
+            Predicate::QueryAbsent(key) => {
+                let mask = bits.mask_for(key);
+                if mask == 0 {
+                    extra.push(predicate.clone());
+                } else {
+                    forbidden_mask |= mask;
+                }
+            }
             Predicate::QueryEquals(key, _) => {
                 // The bit says the key is there; only a predicate can say what its value is.
-                required_mask |= bits.mask_for(key);
+                let mask = bits.mask_for(key);
+                if mask != 0 {
+                    required_mask |= mask;
+                }
                 extra.push(predicate.clone());
             }
             Predicate::HostClass(class) => host_class = Some(class),
@@ -334,7 +351,7 @@ impl CompiledRouter {
         let Some(bucket) = self.buckets.get(index).and_then(|row| row.get(target_index(request.target))) else {
             return (None, 0);
         };
-        let mask = self.bits.mask_of(request.query);
+        let mask = self.bits.restrict(request.query.subresource_mask());
         // The canonical hot context: no routing query key, the ordinary endpoint, no ARN. That is
         // what `GET /bucket/key` and its siblings look like, and `empty_mask_answer` precomputed
         // the answer for exactly it.

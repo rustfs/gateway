@@ -15,8 +15,8 @@
 //! The compiled router: fast, and still the same answer.
 //!
 //! Responsible for: the cost of the hot shapes, the derivation of the subresource bits, the
-//! sixty-four-key ceiling, and — the only reason the compiled router is allowed to exist — that
-//! it agrees with the readable table on every request anybody can generate.
+//! generated bit assignment, and — the only reason the compiled router is allowed to exist —
+//! that it agrees with the readable table on every request anybody can generate.
 //! NOT responsible for: wall-clock timing. Nothing here measures nanoseconds. Time is flaky on a
 //! shared runner; a predicate-evaluation count and a `size_of` are not, and they are what actually
 //! distinguishes an array index from a linear scan.
@@ -36,8 +36,7 @@ use crate::support;
 use http::Method;
 use proptest::prelude::*;
 use rustfs_gateway_core::route::{
-    ArnForm, CompileError, CompiledRouter, HostClass, MAX_SUBRESOURCE_KEYS, Predicate, RouteBucket, RouteTable, ShadowingDecls,
-    ShadowingPolicy, TargetKind,
+    ArnForm, CompileError, CompiledRouter, HostClass, Predicate, RouteBucket, RouteTable, ShadowingDecls, TargetKind,
 };
 use support::{Req, entry, fixture_table};
 
@@ -236,39 +235,55 @@ fn both_implementations_agree_on_every_route_case() {
     }
 }
 
-/// c-fast-1004 — a table over the ceiling fails to compile rather than losing keys.
 #[test]
-fn a_table_routing_on_more_than_sixty_four_keys_will_not_compile() {
-    // Each entry gets its own key, and each key claims a bit.
-    let keys: Vec<String> = (0..=MAX_SUBRESOURCE_KEYS).map(|index| format!("k{index:04}")).collect();
-    let entries = keys
-        .iter()
-        .enumerate()
-        .map(|(index, key)| {
-            let leaked: &'static str = Box::leak(key.clone().into_boxed_str());
-            let name: &'static str = Box::leak(format!("Op{index:04}").into_boxed_str());
-            entry(
-                name,
-                u16::try_from(index).unwrap_or(u16::MAX),
-                vec![
-                    Predicate::Method(Method::GET),
-                    Predicate::Target(TargetKind::Bucket),
-                    Predicate::QueryPresent(leaked),
-                ],
-            )
-        })
-        .collect();
-    let table = RouteTable::build(entries, &ShadowingDecls::NONE.with_policy(ShadowingPolicy::TotalOnly))
-        .expect("the entries themselves are fine");
-    let error = CompiledRouter::compile(&table).expect_err("sixty-five keys do not fit in sixty-four bits");
-    let CompileError::TooManySubresourceKeys { count, overflow } = &error else {
-        panic!("expected the ceiling, got {error}");
-    };
-    assert_eq!(*count, MAX_SUBRESOURCE_KEYS + 1);
-    assert!(!overflow.is_empty(), "the report must name the key that did not fit");
+fn a_third_party_query_key_remains_a_residual_predicate() {
+    let table = RouteTable::build(
+        vec![entry(
+            "vendor:CustomQueryOperation",
+            1,
+            vec![
+                Predicate::Method(Method::GET),
+                Predicate::Target(TargetKind::Bucket),
+                Predicate::QueryPresent("custom-query-key"),
+            ],
+        )],
+        &ShadowingDecls::NONE,
+    )
+    .expect("the extension route is valid");
+    let router = CompiledRouter::compile(&table).expect("extension keys do not belong to the generated S3 vocabulary");
+    let request = Req::new("GET /bucket?custom-query-key");
+    assert_eq!(
+        table.resolve(&request.parts()).map(|entry| entry.op_name),
+        Some("vendor:CustomQueryOperation")
+    );
+    assert_eq!(name_of(&table, router.resolve(&request.parts())), Some("vendor:CustomQueryOperation"));
+    assert_eq!(router.bits().mask_for("custom-query-key"), 0);
+}
+
+#[test]
+fn a_route_key_missing_from_codegen_fails_closed() {
+    let table = RouteTable::build(
+        vec![entry(
+            "GetObject",
+            1,
+            vec![
+                Predicate::Method(Method::GET),
+                Predicate::Target(TargetKind::Bucket),
+                Predicate::QueryPresent("not-generated-by-codegen"),
+            ],
+        )],
+        &ShadowingDecls::NONE,
+    )
+    .expect("the readable table can represent the synthetic key");
+    let error = CompiledRouter::compile(&table).expect_err("compiled routing must not assign an ad hoc bit");
     assert!(
-        error.to_string().contains("do not drop keys"),
-        "silent truncation must be refused in so many words"
+        matches!(
+            error,
+            CompileError::UnknownSubresourceKey {
+                key: "not-generated-by-codegen"
+            }
+        ),
+        "unexpected compile error: {error}"
     );
 }
 
@@ -331,6 +346,19 @@ fn unknown_query_keys_do_not_cost_the_shortcut() {
     let (id, evaluations) = router.resolve_counted(&request.parts());
     assert_eq!(name_of(&table, id), Some("GetObject"));
     assert_eq!(evaluations, 0, "a key nothing routes on must be free");
+}
+
+#[test]
+fn compiled_router_consumes_the_query_index_mask_without_a_second_scan() {
+    let source = include_str!("../src/route/compiled.rs");
+    assert!(
+        source.contains("request.query.subresource_mask()"),
+        "the router must consume the mask formed by QueryIndex"
+    );
+    assert!(
+        !source.contains("mask_of(request.query)"),
+        "re-scanning the query in the router defeats the single-pass contract"
+    );
 }
 
 /// The readable implementation is still here, and is still the reference.

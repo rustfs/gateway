@@ -32,6 +32,7 @@ use crate::json::Value;
 use crate::overlay::{AttributeOverlay, FieldOverlay, OpOverlay, Overlay, ShapeOverlay, Side};
 use crate::smithy::{Model, has_trait, local_name, target_of, trait_of};
 
+mod routing_query;
 mod support;
 
 use support::{
@@ -54,6 +55,8 @@ pub struct Lowered {
     pub operations: Vec<OperationIr>,
     /// Operations deliberately not generated, with their reason.
     pub deferred: BTreeMap<String, String>,
+    /// Routing query keys from every model operation, including deferred operations.
+    pub routing_query_keys: Vec<String>,
 }
 
 /// Lowers every whitelisted operation.
@@ -93,9 +96,11 @@ pub fn lower(model: &Model, overlay: &Overlay) -> Result<Lowered> {
     for name in &names {
         operations.push(lower_one(model, overlay, name)?);
     }
+    let routing_query_keys = routing_query::keys(model, overlay, &model_ops)?;
     Ok(Lowered {
         operations,
         deferred: overlay.deferred.clone(),
+        routing_query_keys,
     })
 }
 
