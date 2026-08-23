@@ -41,7 +41,8 @@ workflow_env_keys = [
 require_equal(workflow.fetch("env", {}).keys, workflow_env_keys,
               "workflow environment may not override split-job commands")
 
-workspace = jobs.fetch("workspace-tests")
+workspace_ids = ["workspace-tests", "workspace-tests-2"]
+workspaces = workspace_ids.map { |job_id| jobs.fetch(job_id) }
 signing_suite = jobs.fetch("signing-suite")
 guard = jobs.fetch("guard-self-test")
 guard_group_ids = ["guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4"]
@@ -55,13 +56,17 @@ error_status = jobs.fetch("error-status-self-test")
 aggregate = jobs.fetch("test")
 
 worker_keys = ["name", "runs-on", "timeout-minutes", "steps"]
-require_equal(workspace.keys, worker_keys, "workspace-tests changed its parallel nine-minute contract")
+workspaces.each_with_index do |job, index|
+  require_equal(job.keys, worker_keys,
+                "#{workspace_ids[index]} changed its parallel nine-minute contract")
+  require_equal(job.values_at("name", "runs-on", "timeout-minutes"),
+                ["Workspace tests #{index + 1}", "ubuntu-latest", 9],
+                "#{workspace_ids[index]} identity or budget changed")
+end
 guard_groups.each_with_index do |job, index|
   require_equal(job.keys, worker_keys,
                 "#{guard_group_ids[index]} changed its parallel six-minute contract")
 end
-require_equal(workspace.values_at("name", "runs-on", "timeout-minutes"),
-              ["Workspace tests", "ubuntu-latest", 9], "workspace-tests identity or budget changed")
 require_equal(signing_suite.keys, worker_keys, "signing-suite changed its parallel four-minute contract")
 require_equal(signing_suite.values_at("name", "runs-on", "timeout-minutes"),
               ["Official signing suite", "ubuntu-latest", 4], "signing-suite identity or budget changed")
@@ -101,7 +106,7 @@ require_equal(error_status.values_at("name", "runs-on", "timeout-minutes"),
               ["Error status self-test", "ubuntu-latest", 2],
               "error-status-self-test identity or budget changed")
 
-([workspace] + guard_groups).each do |job|
+(workspaces + guard_groups).each do |job|
   steps = job.fetch("steps")
   require_equal(steps.length, 4, "a split worker changed its setup or command step count")
   expected_setup = [
@@ -114,8 +119,10 @@ require_equal(error_status.values_at("name", "runs-on", "timeout-minutes"),
   require_equal(steps.last.keys, ["name", "run"], "a split worker command can skip or hide failure")
 end
 
-require_equal(workspace.fetch("steps").first(3).map(&:keys), [["uses"], ["uses", "with"], ["uses"]],
-              "workspace-tests setup gained executable control")
+workspaces.each_with_index do |job, index|
+  require_equal(job.fetch("steps").first(3).map(&:keys), [["uses"], ["uses", "with"], ["uses"]],
+                "#{workspace_ids[index]} setup gained executable control")
+end
 signing_suite_steps = signing_suite.fetch("steps")
 require_equal(signing_suite_steps.length, 4, "signing-suite changed its setup or command step count")
 require_equal(signing_suite_steps.first(3).map { |step| step.fetch("uses") }, [
@@ -185,9 +192,11 @@ require_equal(error_status_steps.first,
 require_equal(error_status_steps.last.keys, ["name", "run"],
               "error-status-self-test command can skip or hide failure")
 
-workspace_run = <<~'RUN'
-  scripts/ci_budget.sh 480 "workspace tests" cargo test --workspace
+workspace_runs = [<<~'RUN', <<~'RUN']
+  scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance
   scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
+RUN
+  scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance
 RUN
 signing_suite_run = <<~'RUN'
   scripts/ci_budget.sh 90 "signing suite build" cargo build --package xtask --bin xtask
@@ -221,8 +230,12 @@ build_guard_runs = (0...2).map do |group|
     scripts/ci_budget.sh 270 "build-backed guards #{group + 1}/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
   RUN
 end
-require_equal(workspace.fetch("steps").last.fetch("run"), workspace_run,
-              "workspace-tests command changed or can hide a failure")
+workspaces.each_with_index do |job, index|
+  require_equal(job.fetch("steps").last.fetch("run"), workspace_runs.fetch(index),
+                "#{workspace_ids[index]} command changed, lost its shard, or can hide a failure")
+end
+require_equal(workspace_runs.uniq.length, 2,
+              "the workspace test runners do not cover two distinct shards")
 require_equal(signing_suite_steps.last.fetch("run"), signing_suite_run,
               "signing-suite command changed or can hide a failure")
 guard_groups.each_with_index do |job, index|
@@ -287,13 +300,14 @@ end
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "error-status-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all thirteen workers within the budget")
+              ["Test", ["workspace-tests", "workspace-tests-2", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "error-status-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all fourteen workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
 expected_env = {
   "WORKSPACE_RESULT" => "${{ needs.workspace-tests.result }}",
+  "WORKSPACE_2_RESULT" => "${{ needs.workspace-tests-2.result }}",
   "SIGNING_SUITE_RESULT" => "${{ needs.signing-suite.result }}",
   "GUARD_RESULT" => "${{ needs.guard-self-test.result }}",
   "GUARD_2_RESULT" => "${{ needs.guard-self-test-2.result }}",
@@ -310,6 +324,7 @@ expected_env = {
 require_equal(steps.first.fetch("env"), expected_env, "the Test step does not bind all worker results")
 expected_run = <<~'RUN'
   test "$WORKSPACE_RESULT" = success
+  test "$WORKSPACE_2_RESULT" = success
   test "$SIGNING_SUITE_RESULT" = success
   test "$GUARD_RESULT" = success
   test "$GUARD_2_RESULT" = success
@@ -448,4 +463,4 @@ if build_groups != [0, 1]:
     )
 PY
 
-printf 'OK: workspace, signing suite, four guard shards, target-consolidation, quirk-ledger, DTO compiler, two build guard shards, error-status and TSAN workers are parallel behind Test\n'
+printf 'OK: two workspace shards, signing suite, four guard shards, target-consolidation, quirk-ledger, DTO compiler, two build guard shards, error-status and TSAN workers are parallel behind Test\n'
