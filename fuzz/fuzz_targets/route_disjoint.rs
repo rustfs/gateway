@@ -25,4 +25,6 @@ mod route;
 
 use libfuzzer_sys::fuzz_target;
 
-fuzz_target!(|input: &[u8]| route::check_disjoint(input));
+fuzz_target!(|input: &[u8]| {
+    route::check_disjoint(input);
+});
