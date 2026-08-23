@@ -110,3 +110,44 @@ fn n_generated_decoders_do_not_call_removed_wire_form_validators() {
         assert!(!text.contains("token_form("), "{operation} still calls the removed token validator");
     }
 }
+
+#[test]
+fn contract_wire_forms_are_not_emitted_as_mutable_spec_data() {
+    let artifacts = super::codegen_tests::artifacts();
+    let root = super::codegen_tests::root();
+    let overlay = rustfs_gateway_model::Overlay::load(&root.join("model/overlays")).expect("the canonical overlay loads");
+    for id in ["q-etag-form-0074", "q-token-form-0075", "q-marker-form-0076"] {
+        let path = format!("spec/quirks/{id}.toml");
+        assert!(
+            artifacts
+                .files
+                .iter()
+                .all(|(candidate, _)| !candidate.to_string_lossy().ends_with(&path)),
+            "{id} must not claim a mechanically distinct mutation"
+        );
+        assert_eq!(
+            overlay.classifications.get(id),
+            Some(&RuleClassification::Contract),
+            "{id} keeps its evidence without duplicating the operation-owned validator"
+        );
+    }
+}
+
+#[test]
+fn contract_wire_forms_leave_validation_to_the_operation_parser() {
+    let get = decoder("GetObject");
+    assert!(get.contains("input.if_match = Some(raw.to_owned());"));
+    assert!(!get.contains("value::etag_form(raw, \"IfMatch\")?"));
+
+    let head = decoder("HeadObject");
+    assert!(head.contains("input.if_none_match = Some(raw.to_owned());"));
+    assert!(!head.contains("value::etag_form(raw, \"IfNoneMatch\")?"));
+
+    let list = decoder("ListObjectsV2");
+    assert!(list.contains("input.continuation_token = Some(value::opaque(raw));"));
+    assert!(!list.contains("value::token_form(raw, \"ContinuationToken\")?"));
+
+    let multipart = decoder("ListMultipartUploads");
+    assert!(multipart.contains("input.upload_id_marker = Some(raw.to_owned());"));
+    assert!(!multipart.contains("value::token_form(raw, \"UploadIdMarker\")?"));
+}
