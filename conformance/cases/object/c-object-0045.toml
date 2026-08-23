@@ -1,0 +1,54 @@
+# c-object-0045 — the literal null is a version id, not a missing query value.
+
+[case]
+id = "c-object-0045"
+schema_version = 1
+title = "The literal null is accepted as a version id"
+rationale = """
+The spelling null is the version id of an object written before versioning was enabled. Treating it
+as an absent value, a reserved word, or a parse error makes that object unreachable. This versioned
+bucket never minted a null version, so the expected NoSuchVersion response proves the request made
+it through decoding and into version lookup without confusing null with no versionId at all."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/versioning-workflows.html"
+summary = "An object written before versioning is enabled has the version id null, and that literal id continues to name the object after versioning is enabled."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object-null-version"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-object-null-version"
+key = "versioned/read.txt"
+content_type = "text/plain"
+body = { utf8 = "versioned body" }
+
+[request]
+method = "GET"
+target = "/conf-object-null-version/versioned/read.txt?versionId=null"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag", "content-range"]
+
+[expect.error]
+code = "NoSuchVersion"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>NoSuchVersion</Code>"]
+not_contains_utf8 = ["versioned body"]

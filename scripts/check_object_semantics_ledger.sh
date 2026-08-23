@@ -48,7 +48,7 @@ requirements=(
     'c-obj-0014|positive|bound|conformance/cases/object/c-object-0001.toml::/expect/headers_present/content-length=11'
     'c-obj-0015|positive|blocked|rustfs/backlog#1680::the fixture answers every read from bytes it already holds, so no handler in this repository returns a stream of unknown length and a chunked read cannot be staged'
     'c-obj-0016|positive|bound|conformance/cases/object/c-object-0036.toml::/exchanges/0/expect/status=204;conformance/cases/object/c-object-0036.toml::/exchanges/0/expect/headers_present/x-amz-delete-marker=true'
-    'c-obj-0017|positive|blocked|rustfs/backlog#1680::the literal version id null is the fixture value for an unversioned key, so a case sending it would pass whether or not the decoder treats it as a version id'
+    'c-obj-0017|positive|bound|conformance/cases/object/c-object-0045.toml::/request/target=/conf-object-null-version/versioned/read.txt?versionId=null;conformance/cases/object/c-object-0045.toml::/expect/status=404;conformance/cases/object/c-object-0045.toml::/expect/error/code=NoSuchVersion'
     'c-obj-0018|positive|bound|conformance/cases/tagging/c-tagging-0019.toml::/exchanges/1/expect/headers_present/x-amz-tagging-count=2'
     'c-obj-0019|positive|bound|conformance/cases/object/c-object-0004.toml::/expect/body/exact_utf8~<Deleted><Key>batch/two</Key></Deleted>'
     'c-obj-0020|positive|bound|conformance/cases/object/c-object-0024.toml::/expect/body/exact_utf8~<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"></DeleteResult>'
@@ -154,6 +154,7 @@ case_polarity=(
     'conformance/cases/object/c-object-0042.toml|positive'
     'conformance/cases/object/c-object-0043.toml|negative'
     'conformance/cases/object/c-object-0044.toml|negative'
+    'conformance/cases/object/c-object-0045.toml|positive'
     'conformance/cases/tagging/c-tagging-0019.toml|positive'
 )
 
