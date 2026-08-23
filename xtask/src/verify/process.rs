@@ -153,9 +153,18 @@ fn failed_to_start(step: &str, error: io::Error) -> Batch {
 
 fn capture_root() -> io::Result<PathBuf> {
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
-    let path = std::env::temp_dir().join(format!("gateway-verify-{}-{nonce}", std::process::id()));
-    fs::create_dir(&path)?;
-    Ok(path)
+    for attempt in 0..100 {
+        let path = std::env::temp_dir().join(format!("gateway-verify-{}-{nonce}-{attempt}", std::process::id()));
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not allocate a unique verification capture directory",
+    ))
 }
 
 impl Supervisor {

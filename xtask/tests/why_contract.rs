@@ -61,6 +61,33 @@ fn a_doc_0007_error_code_and_header_resolve() {
 }
 
 #[test]
+fn explicit_error_code_query_prints_status_producers_and_cases() {
+    let output = why(&["error-code", "NoSuchKey"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("status=404"), "{stdout}");
+    assert!(stdout.contains("GetObject"), "{stdout}");
+    assert!(stdout.contains("c-object-0007"), "{stdout}");
+}
+
+#[test]
+fn explicit_error_code_query_rejects_a_non_error_target() {
+    let output = why(&["error-code", "GetObject"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "error code `GetObject` not found\n");
+}
+
+#[test]
+fn explicit_error_code_query_rejects_an_unknown_namespace() {
+    let output = why(&["operation", "GetObject"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "usage: cargo xtask why [error-code] <quirk | operation | error-code | header | ADR | rule> [--json]\n"
+    );
+}
+
+#[test]
 fn a_doc_0008_adr_json_matches_the_text_sections() {
     let output = why(&["ADR-0005", "--json"]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));

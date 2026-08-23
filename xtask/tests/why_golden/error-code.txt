@@ -1,4 +1,4 @@
-RULE      NoSuchKey — S3 error code produced by CopyObject, DeleteObjectTagging, GetObject, GetObjectAcl, GetObjectAttributes, GetObjectLegalHold, GetObjectRetention, GetObjectTagging, HeadObject, PutObjectAcl, PutObjectLegalHold, PutObjectRetention, PutObjectTagging, RestoreObject, SelectObjectContent, UploadPartCopy
+RULE      NoSuchKey — S3 error code status=404 produced by CopyObject, DeleteObjectTagging, GetObject, GetObjectAcl, GetObjectAttributes, GetObjectLegalHold, GetObjectRetention, GetObjectTagging, HeadObject, PutObjectAcl, PutObjectLegalHold, PutObjectRetention, PutObjectTagging, RestoreObject, SelectObjectContent, UploadPartCopy
 EVIDENCE  NONE
 CASES     c-copy-0025 — A copy source that is an ARN of another service is refused rather than read as a bucket name
           c-copy-0034 — A copy from a missing key answers NoSuchKey and from a missing bucket answers NoSuchBucket

@@ -28,6 +28,7 @@ use std::process::ExitCode;
 
 use rustfs_gateway::RuleRef;
 use rustfs_gateway_model::ir::{Evidence, OperationIr, Quirk};
+use rustfs_gateway_model::{ErrorStatus, Overlay};
 
 use crate::codegen::repo_root;
 
@@ -36,6 +37,8 @@ mod distance;
 mod tests;
 
 use distance::distance;
+
+const WHY_USAGE: &str = "usage: cargo xtask why [error-code] <quirk | operation | error-code | header | ADR | rule> [--json]";
 
 /// The namespace in which a reverse-trace target was found.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +109,7 @@ struct Answer {
 
 struct Index {
     operations: Vec<OperationIr>,
+    error_status: Vec<ErrorStatus>,
     cases: Vec<CaseRecord>,
     adrs: Vec<AdrRecord>,
     rule_tests: Vec<RuleTestRecord>,
@@ -123,10 +127,18 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             positional.push(arg.as_str());
         }
     }
-    let [argument] = positional.as_slice() else {
-        eprintln!("usage: cargo xtask why <quirk | operation | error-code | header | ADR | rule> [--json]");
-        return ExitCode::from(2);
+    let (namespace, argument) = match positional.as_slice() {
+        [argument] => (None, *argument),
+        [namespace, argument] => (Some(*namespace), *argument),
+        _ => {
+            eprintln!("{WHY_USAGE}");
+            return ExitCode::from(2);
+        }
     };
+    if namespace.is_some_and(|namespace| namespace != "error-code") {
+        eprintln!("{WHY_USAGE}");
+        return ExitCode::from(2);
+    }
 
     let index = match Index::load(repo_root()) {
         Ok(index) => index,
@@ -135,7 +147,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let target = match index.resolve(argument) {
+    let target = match namespace.map_or_else(|| index.resolve(argument), |_| index.resolve_error_code(argument)) {
         Ok(target) => target,
         Err(error) => {
             eprintln!("{error}");
@@ -166,11 +178,15 @@ impl Index {
         let operations = rustfs_gateway_codegen::generate(&input, &output)
             .map_err(|error| format!("operation IR: {error}"))?
             .operations;
+        let error_status = Overlay::load(&input.overlays)
+            .map_err(|error| format!("error status authority: {error}"))?
+            .error_status;
         let cases = load_cases(&root)?;
         let adrs = load_adrs(&root)?;
         let rule_tests = load_rule_tests(&root)?;
         Ok(Self {
             operations,
+            error_status,
             cases,
             adrs,
             rule_tests,
@@ -191,12 +207,12 @@ impl Index {
         {
             return Ok(WhyTarget::Op(operation.operation.clone()));
         }
-        if self
-            .operations
+        if let Some(status) = self
+            .error_status
             .iter()
-            .any(|operation| contains(&operation.errors.codes, argument))
+            .find(|status| status.name.eq_ignore_ascii_case(argument))
         {
-            return Ok(WhyTarget::ErrorCode(argument.to_owned()));
+            return Ok(WhyTarget::ErrorCode(status.name.clone()));
         }
         let lower = argument.to_ascii_lowercase();
         if self.operations.iter().any(|operation| contains(&operation.headers(), &lower)) {
@@ -218,6 +234,14 @@ impl Index {
                 closest.join(", ")
             }
         ))
+    }
+
+    fn resolve_error_code(&self, argument: &str) -> Result<WhyTarget, String> {
+        self.error_status
+            .iter()
+            .find(|status| status.name.eq_ignore_ascii_case(argument))
+            .map(|status| WhyTarget::ErrorCode(status.name.clone()))
+            .ok_or_else(|| format!("error code `{argument}` not found"))
     }
 
     fn answer(&self, target: WhyTarget) -> Answer {
@@ -301,6 +325,7 @@ impl Index {
     }
 
     fn error_answer(&self, code: &str) -> Answer {
+        let status = self.error_status.iter().find(|status| status.name == code);
         let producers: Vec<&OperationIr> = self
             .operations
             .iter()
@@ -315,7 +340,11 @@ impl Index {
             .collect();
         finish(Answer {
             id: code.to_owned(),
-            summary: format!("S3 error code produced by {}", names.join(", ")),
+            summary: format!(
+                "S3 error code status={} produced by {}",
+                status.map_or_else(|| "unknown".to_owned(), |status| status.status.to_string()),
+                names.join(", ")
+            ),
             evidence: Vec::new(),
             cases,
             adrs: Vec::new(),
@@ -324,7 +353,7 @@ impl Index {
                 .map(|name| format!("spec/operations/{name}.toml:errors"))
                 .collect(),
             related: names,
-            complete: true,
+            complete: status.is_some(),
         })
     }
 
@@ -413,6 +442,7 @@ impl Index {
             universe.extend(operation.headers());
             universe.extend(operation.quirks.iter().map(|quirk| quirk.id.clone()));
         }
+        universe.extend(self.error_status.iter().map(|status| status.name.clone()));
         universe.extend(self.cases.iter().flat_map(|case| case.quirks.iter().cloned()));
         universe.extend(self.adrs.iter().map(|adr| adr.line.id.clone()));
         universe.extend(RuleRef::ALL.iter().map(|rule| rule.as_str().to_owned()));
