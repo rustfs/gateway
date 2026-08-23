@@ -216,7 +216,7 @@ fn the_pre_auth_error_never_formats_a_message() {
         // `Display` may format; a *message* may not. The distinction is that `Display` renders an
         // error that is already fully determined, while a formatted message would carry new text.
         assert!(
-            !trimmed.contains("format!(") || text.contains("impl std::fmt::Display for PreAuthError"),
+            !trimmed.contains("format!("),
             "{}:{}: a pre-authentication message is a compile-time constant\n  {line}",
             path.display(),
             number.saturating_add(1),
