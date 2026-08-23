@@ -2823,10 +2823,10 @@ mut_response_encoding_block_loses_owner() {
 from pathlib import Path
 path = Path("scripts/check_response_encoding_ledger.sh")
 text = path.read_text()
-old = "c-enc-0021|negative|blocked|rustfs/backlog#1701::"
+old = "c-enc-0032|negative|blocked|rustfs/backlog#1701::"
 if text.count(old) != 1:
     raise SystemExit("response-encoding block owner mutation subject is not unique")
-path.write_text(text.replace(old, "c-enc-0021|negative|blocked|unowned::", 1))
+path.write_text(text.replace(old, "c-enc-0032|negative|blocked|unowned::", 1))
 PYEOF
 }
 expect_fail_self_mutation check_response_encoding_ledger.sh \

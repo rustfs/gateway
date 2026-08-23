@@ -681,6 +681,7 @@ impl ServiceBuilder {
             cors: Arc::new(CachedCorsSource::new(self.cors_source, self.cors_cache)),
             cors_policy: self.cors_policy,
             sse: self.sse,
+            response_body_corrections: std::sync::atomic::AtomicU64::new(0),
         }))
     }
 

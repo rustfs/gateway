@@ -37,10 +37,10 @@ requirements=(
     # BodylessResponse was superseded by the single final invariant seam. The executable contract
     # is the runtime correction on every method/status path, not a second response type.
     'c-enc-0020|negative|bound|crates/gateway/src/invariants.rs::test fn a_bodyless_status_loses_its_framing_headers_too;crates/gateway/tests/patch_layer_landings.rs::test fn bodyless_status_fix_is_the_response_invariant'
-    'c-enc-0021|negative|blocked|rustfs/backlog#1701::the final invariant removes a forbidden 204 body, but no response-correction metric records that backend defect yet'
+    'c-enc-0021|negative|bound|crates/gateway/tests/response_invariants.rs::test fn c_enc_0021_a_body_on_204_is_removed_and_counted'
     'c-enc-0022|negative|bound|crates/gateway/tests/pipeline.rs::test fn a_refusal_answered_to_a_head_carries_no_content_and_still_reports_the_length_it_would_have_sent'
     'c-enc-0023|negative|bound|crates/gateway/tests/pipeline.rs::test fn a_success_answered_to_a_head_carries_no_content_and_still_reports_a_length'
-    'c-enc-0024|negative|blocked|rustfs/backlog#1701::a response filter can still construct a Content-Length plus Transfer-Encoding conflict without a typed EncodeError'
+    'c-enc-0024|negative|bound|crates/gateway/src/invariants.rs::test fn c_enc_0024_content_length_with_transfer_encoding_is_a_typed_error;crates/gateway/tests/response_invariants.rs::test fn c_enc_0024_content_length_with_transfer_encoding_is_rejected'
     # A blanket ETag-on-304 guard was rejected by the issue decision. This binds the conditional
     # rule: a representation whose 200 carries an ETag keeps that validator on its 304.
     'c-enc-0025|negative|bound|crates/gateway/tests/pipeline.rs::test fn a_not_modified_refusal_carries_neither_content_nor_a_framing_header'
