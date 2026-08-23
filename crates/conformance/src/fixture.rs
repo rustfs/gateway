@@ -2709,6 +2709,26 @@ impl Stub {
         ))
     }
 
+    fn get_object_attributes(&self, input: &dto::GetObjectAttributesInput) -> HandlerResult<dto::GetObjectAttributes> {
+        let fixture = self.borrow()?;
+        require_bucket(&fixture, &input.bucket)?;
+        let selected = match input.version_id.as_deref() {
+            Some(version_id) => Selected::Object(select_named(&fixture, input.bucket.as_str(), input.key.as_str(), version_id)?),
+            None => select_current(&fixture, input.bucket.as_str(), input.key.as_str()),
+        };
+        let object = match selected {
+            Selected::Object(object) => object,
+            Selected::Absent => return Err(no_such_key(input.key.as_str())),
+            Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
+        };
+        let wants_etag = input.object_attributes.split(',').any(|attribute| attribute.trim() == "ETag");
+        Ok(Resp::new(dto::GetObjectAttributesOutput {
+            last_modified: Some(Timestamp::from_secs(object.last_modified)),
+            e_tag: wants_etag.then(|| entity_tag(&object.etag)).transpose()?,
+            ..dto::GetObjectAttributesOutput::default()
+        }))
+    }
+
     fn head_object(&self, input: &dto::HeadObjectInput) -> HandlerResult<dto::HeadObject> {
         // The same order as `get_object`'s, and for the same reason. A `HEAD` that disagreed with a
         // `GET` about which refusal comes first would be the harder half of the bug to find.

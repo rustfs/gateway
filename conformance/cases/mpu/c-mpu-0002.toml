@@ -163,7 +163,31 @@ connection_after = "open"
 code = "PreconditionFailed"
 request_id_present = true
 
-# 5 — the same digest without the suffix, which is what an implementation that treated a multipart
+# 5 — the multipart value reaches the one XML response that omits entity-tag quotes. This is the
+# operation-level exception; the completion and HEAD exchanges above are its quoted controls.
+[[exchanges]]
+name = "object attributes renders the composite tag bare"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu/three-parts?attributes"
+headers = { "x-amz-object-attributes" = "ETag" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_present = { "content-type" = "application/xml" }
+headers_absent = ["etag"]
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<GetObjectAttributesOutput xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ETag>ceb79c6e3e838cdabb8fa04e30b4082f-3</ETag></GetObjectAttributesOutput>'''
+not_contains_utf8 = ["&quot;", "-3\"</ETag>"]
+
+# 6 — the same digest without the suffix, which is what an implementation that treated a multipart
 # object like any other write would store.
 [[exchanges]]
 name = "the assembled digest is refused"

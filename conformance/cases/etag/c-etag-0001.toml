@@ -75,7 +75,7 @@ connection_after = "open"
 exact_utf8 = '''
 <?xml version="1.0" encoding="UTF-8"?>
 <GetObjectAttributesOutput xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ETag>5d41402abc4b2a76b9719d911017c592</ETag></GetObjectAttributesOutput>'''
-not_contains_utf8 = ["&quot;", "\""]
+not_contains_utf8 = ["&quot;", "<ETag>\""]
 
 # ── exchange 2: the rule — quoted ETag, same connection ────────────────────────
 [[exchanges]]
@@ -95,10 +95,10 @@ connection_after = "open"
 [exchanges.expect.body]
 exact_utf8 = '''
 <?xml version="1.0" encoding="UTF-8"?>
-<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><IsTruncated>false</IsTruncated><Contents><Key>hello</Key><LastModified>2026-01-02T03:04:05.000Z</LastModified><ETag>&quot;5d41402abc4b2a76b9719d911017c592&quot;</ETag><Size>5</Size><StorageClass>STANDARD</StorageClass></Contents><Name>conf-etag</Name><Prefix>hello</Prefix><MaxKeys>1000</MaxKeys><KeyCount>1</KeyCount></ListBucketResult>'''
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>conf-etag</Name><Prefix>hello</Prefix><KeyCount>1</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated><Contents><Key>hello</Key><LastModified>2026-01-02T03:04:05.000Z</LastModified><ETag>&quot;5d41402abc4b2a76b9719d911017c592&quot;</ETag><Size>5</Size><StorageClass>STANDARD</StorageClass></Contents></ListBucketResult>'''
 
 [exchanges.expect.body.xml]
 root = "ListBucketResult"
 xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
 declaration = true
-element_order = ["IsTruncated", "Contents", "Name", "Prefix", "MaxKeys", "KeyCount"]
+element_order = ["Name", "Prefix", "KeyCount", "MaxKeys", "IsTruncated", "Contents"]

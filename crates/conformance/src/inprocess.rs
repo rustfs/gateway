@@ -17,8 +17,7 @@
 //! Responsible for: turning one `[request]` block into signed bytes, handing them to
 //! [`rustfs_gateway::S3Service::call_bytes`], and turning what comes back into an
 //! [`Observation`] — the response head in wire order, the body, and the trailers.
-//! NOT responsible for: judging anything (`crate::expect`), or storing anything
-//! (`crate::fixture`).
+//! NOT responsible for: judging anything (`crate::expect`), or storing anything (`crate::fixture`).
 //! Upstream: `rustfs-gateway`, `crate::fixture`, `crate::exec`. Downstream: `crate::cli`.
 //!
 //! # What this transport can see, and what it cannot
@@ -431,6 +430,7 @@ impl InProcess {
             .register::<dto::GetPublicAccessBlock, _>(Arc::clone(&backend))
             .register::<dto::HeadBucket, _>(Arc::clone(&backend))
             .register::<dto::GetObject, _>(Arc::clone(&backend))
+            .register::<dto::GetObjectAttributes, _>(Arc::clone(&backend))
             .register::<dto::GetObjectAcl, _>(Arc::clone(&backend))
             .register::<dto::GetObjectLegalHold, _>(Arc::clone(&backend))
             .register::<dto::GetObjectLockConfiguration, _>(Arc::clone(&backend))

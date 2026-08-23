@@ -36,6 +36,25 @@ impl Handler<dto::GetObject> for Stub {
     }
 }
 
+impl Handler<dto::GetObjectAttributes> for Stub {
+    fn call(
+        &self,
+        request: Req<dto::GetObjectAttributes>,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetObjectAttributes>> + Send {
+        let outcome = self.get_object_attributes(request.input());
+        async move { outcome }
+    }
+
+    fn call_with_context(
+        &self,
+        request: Req<dto::GetObjectAttributes>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> impl core::future::Future<Output = HandlerResult<dto::GetObjectAttributes>> + Send {
+        let outcome = self.get_object_attributes(request.input());
+        async move { outcome }
+    }
+}
+
 impl Handler<dto::HeadObject> for Stub {
     fn call(&self, request: Req<dto::HeadObject>) -> impl core::future::Future<Output = HandlerResult<dto::HeadObject>> + Send {
         let outcome = self.head_object(request.input());
