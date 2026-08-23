@@ -80,15 +80,6 @@ pub(crate) fn is_forbidden_control(byte: u8) -> bool {
     matches!(byte, 0x00..=0x08 | 0x0A..=0x1F | 0x7F)
 }
 
-/// Whether the slice is free of CR and LF specifically.
-///
-/// Kept separate from [`contains_forbidden_control`] because the decoded-metadata rule cares
-/// about the injection pair on its own, and reporting "control character" for a decoded `\r\n`
-/// loses the reason the check exists.
-pub(crate) fn contains_crlf(bytes: &[u8]) -> bool {
-    bytes.iter().any(|byte| matches!(byte, b'\r' | b'\n'))
-}
-
 /// Whether every byte is a visible ASCII character, with no space and no control.
 pub(crate) fn is_all_ascii_graphic(bytes: &[u8]) -> bool {
     !bytes.is_empty() && bytes.iter().all(u8::is_ascii_graphic)

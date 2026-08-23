@@ -90,7 +90,9 @@ pub use crate::ingest::{
     SigningKeyCache, TrailerDeclaration, validate_decoded_length,
 };
 pub use crate::limits::{ChunkLimits, LimitKind, Limits};
-pub use crate::metadata::{METADATA_PREFIX, MetadataReject, validate_metadata_key, validate_metadata_value};
+pub use crate::metadata::{
+    METADATA_PREFIX, MetadataReject, decode_metadata_value, encode_metadata_value, validate_metadata_key, validate_metadata_value,
+};
 pub use crate::query_view::{QueryIndex, QueryView, SINGLE_VALUED_QUERY_PARAMS};
 pub use crate::reject::{MAX_LINGER_DRAIN_BYTES, WireReject};
 pub use crate::wire::{RawPath, WireRequest};

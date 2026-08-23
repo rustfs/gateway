@@ -289,7 +289,7 @@ fn one_field(
         Binding::PrefixHeaders => match &field.ty {
             Type::Map { .. } => {
                 let _ = writeln!(out, "        // {member} — every header under `{wire}`.");
-                out.push_str(&assign(8, &target, &format!("value::prefixed_map(request, \"{wire}\")")));
+                out.push_str(&assign(8, &target, &format!("value::metadata_map(request, \"{wire}\", \"{member}\")?")));
             }
             Type::ChecksumSpec => {
                 let _ = writeln!(out, "        // {member} — the one checksum header under `{wire}`.");

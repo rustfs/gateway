@@ -239,7 +239,39 @@ fn xml_body(ir: &OperationIr) -> Result<String, String> {
     if !plan.is_empty() {
         // Read once, before a byte is written: `encoding-type` covers the whole document, and a
         // member that consulted the request for itself could disagree with its siblings.
-        out.push_str("        let url_encoding = value::url_encoding(request);\n");
+        let has_encoding_echo = ir
+            .output
+            .iter()
+            .any(|field| field.binding == Binding::BodyXml && field.name == "EncodingType");
+        if has_encoding_echo {
+            out.push_str("        let mut output = output;\n");
+        }
+        let checks: Vec<&str> = plan.force_checks().collect();
+        let Some(first) = checks.first() else {
+            return Err(format!("codec {}: a non-empty URL plan has no force predicate", ir.operation));
+        };
+        let lead = "        let force_url_encoding = ";
+        let first_suffix = if checks.len() == 1 { ";" } else { "" };
+        if lead.len().saturating_add(first.len()) <= 120 {
+            let _ = writeln!(out, "{lead}{first}{first_suffix}");
+        } else {
+            let _ = writeln!(out, "{lead}");
+            let _ = writeln!(out, "            {first}{first_suffix}");
+        }
+        for (index, check) in checks.iter().enumerate().skip(1) {
+            let suffix = if index.saturating_add(1) == checks.len() { ";" } else { "" };
+            let _ = writeln!(out, "            || {check}{suffix}");
+        }
+        out.push_str("        let url_encoding = value::url_encoding_for_response(request, force_url_encoding);\n");
+        if has_encoding_echo {
+            out.push_str(
+                "        output.encoding_type = if url_encoding == value::UrlEncoding::Requested {\n\
+                 \x20           Some(dto::EncodingType::URL)\n\
+                 \x20       } else {\n\
+                 \x20           None\n\
+                 \x20       };\n",
+            );
+        }
     }
     out.push_str("        let mut writer = rustfs_gateway_xml::XmlWriter::document();\n");
 

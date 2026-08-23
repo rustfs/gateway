@@ -143,7 +143,7 @@ impl OperationCodec for dto::CopyObject {
         // Key — URI label, decoded once by `MetaView::of`.
         input.key = request.require_key()?;
         // Metadata — every header under `x-amz-meta-`.
-        input.metadata = value::prefixed_map(request, "x-amz-meta-");
+        input.metadata = value::metadata_map(request, "x-amz-meta-", "Metadata")?;
         // MetadataDirective — header `x-amz-metadata-directive`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-metadata-directive") {
             let raw = raw.as_ref();

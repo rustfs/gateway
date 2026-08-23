@@ -1,0 +1,66 @@
+# c-object-0040 — RFC 2047 metadata is decoded for storage and encoded on return.
+
+[case]
+id = "c-object-0040"
+schema_version = 1
+title = "Adjacent encoded words in user metadata return as one canonical encoded value"
+rationale = """
+Passing the request spelling through unchanged looks correct for one encoded word but stores transport syntax instead of the Unicode value. Two adjacent words expose that shortcut: their separating whitespace is not data, so the returned header must encode the joined text rather than echo the two original tokens."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["encoding", "wire-bytes", "object-attributes"]
+timeout_ms = 10000
+quirks = ["q-meta-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html"
+summary = "S3 decodes non-ASCII user metadata according to RFC 2047 before storage and encodes it again when returning the value."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc2047#section-6.2"
+summary = "Whitespace separating adjacent encoded words is omitted from the decoded text."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "write-adjacent-encoded-words"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/meta/rfc2047"
+headers = { "x-amz-meta-caption" = "=?UTF-8?B?5Lit?=   =?UTF-8?B?5paH?=" }
+body = { utf8 = "metadata" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"9f81f3c07476a0d97f6793673dd8e475\""
+
+[[exchanges]]
+name = "head-canonical-encoded-value"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object/meta/rfc2047"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-meta-caption" = "=?UTF-8?B?5Lit5paH?="

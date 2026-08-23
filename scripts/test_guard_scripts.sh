@@ -2695,8 +2695,8 @@ from pathlib import Path
 
 path = Path("scripts/check_object_semantics_ledger.sh")
 text = path.read_text()
-old = "    'c-obj-0011|positive|blocked|rustfs/backlog#1680::"
-new = "    'c-obj-0011|positive|blocked|someone-will-do-it::"
+old = "    'c-obj-0015|positive|blocked|rustfs/backlog#1680::"
+new = "    'c-obj-0015|positive|blocked|someone-will-do-it::"
 if text.count(old) != 1:
     raise SystemExit("blocked-row owner mutation subject is not unique")
 path.write_text(text.replace(old, new, 1))

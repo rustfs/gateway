@@ -99,7 +99,7 @@ impl OperationCodec for dto::CreateMultipartUpload {
         // Key — URI label, decoded once by `MetaView::of`.
         input.key = request.require_key()?;
         // Metadata — every header under `x-amz-meta-`.
-        input.metadata = value::prefixed_map(request, "x-amz-meta-");
+        input.metadata = value::metadata_map(request, "x-amz-meta-", "Metadata")?;
         // ServerSideEncryption — header `x-amz-server-side-encryption`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption") {
             let raw = raw.as_ref();

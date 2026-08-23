@@ -162,9 +162,9 @@ impl ObjectKey {
     /// Whether a response listing this key must percent-encode it even when the request did not
     /// ask for `encoding-type=url`.
     ///
-    /// True exactly when the key carries a character no XML 1.0 document may contain — see
-    /// [`is_xml_representable`]. Emitting such a key produces a body the client's parser rejects
-    /// outright, so one badly named object hides every other object in the bucket.
+    /// True when the key carries C0, DEL, or another character XML 1.0 cannot represent. S3
+    /// forces the whole listing into `encoding-type=url` for the complete control range, including
+    /// tab, line feed, carriage return and DEL even though XML itself can spell the first three.
     ///
     /// `&`, `<` and `"` are **not** here, deliberately. They are representable, the writer escapes
     /// the ones that need it, and `c-list-0036` pins that a key carrying all three comes back
@@ -172,7 +172,7 @@ impl ObjectKey {
     /// key every client can already read.
     #[must_use]
     pub fn needs_url_encoding(&self) -> bool {
-        !is_xml_representable(&self.key)
+        !is_xml_representable(&self.key) || self.key.chars().any(|ch| ch <= '\u{1f}' || ch == '\u{7f}')
     }
 }
 

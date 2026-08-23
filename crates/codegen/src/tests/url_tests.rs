@@ -16,9 +16,9 @@
 //! reaches none fails the run.
 //!
 //! Responsible for: the resolution of `xml.url_encoded_fields` into per-member decisions, and the
-//! calls that resolution produces in the generated response half.
+//! calls that resolution produces in the generated response half, including the forced echo.
 //! NOT responsible for: what percent-encoding does to bytes, which is
-//! `rustfs-gateway-core`'s codec suite, or whether the parameter is echoed, which is a handler.
+//! `rustfs-gateway-core`'s codec suite.
 //! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
@@ -71,9 +71,19 @@ fn the_listing_families_encode_their_root_members_and_their_entry_keys() {
 fn the_generated_encoder_reads_the_decision_once_and_passes_it_down() {
     let body = encode::body(&ir("ListObjectsV2"), &Default::default()).expect("encodes");
     assert_eq!(
-        body.matches("value::url_encoding(request)").count(),
+        body.matches("value::url_encoding_for_response(request,").count(),
         1,
         "one decision per response, not one per member:\n{body}"
+    );
+    assert!(
+        body.contains(
+            "output.encoding_type = if url_encoding == value::UrlEncoding::Requested {\n\
+             \x20           Some(dto::EncodingType::URL)\n\
+             \x20       } else {\n\
+             \x20           None\n\
+             \x20       };"
+        ),
+        "the response-wide decision must set and clear the URL echo authoritatively:\n{body}"
     );
     assert!(
         body.contains("write_object(&mut writer, item, url_encoding)?"),

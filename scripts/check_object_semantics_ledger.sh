@@ -42,8 +42,8 @@ requirements=(
     'c-obj-0008|positive|bound|conformance/cases/mpu/c-mpu-0007.toml::/exchanges/3/expect/headers_present/x-amz-storage-class=GLACIER'
     'c-obj-0009|positive|blocked|rustfs/backlog#1680::the entity-tag half is c-object-0002, but the fixture stores no checksum a write supplied, so no case can assert that the head returns the same checksum headers the write answered'
     'c-obj-0010|positive|bound|conformance/cases/object/c-object-0002.toml::/exchanges/0/expect/headers_present/content-length=11;conformance/cases/object/c-object-0002.toml::/exchanges/1/expect/headers_present/content-length=11'
-    'c-obj-0011|positive|blocked|rustfs/backlog#1680::no decoder in this repository reads RFC 2047 encoded-words out of x-amz-meta-*, so a case asserting the round trip would be asserting that the encoded form survives verbatim, which is a different rule'
-    'c-obj-0012|positive|blocked|rustfs/backlog#1680::the folded encoded-word form needs the RFC 2047 decoder of c-obj-0011 before a case can assert where the UTF-8 boundaries land'
+    'c-obj-0011|positive|bound|conformance/cases/object/c-object-0040.toml::/exchanges/1/expect/headers_present/x-amz-meta-caption==?UTF-8?B?5Lit5paH?='
+    'c-obj-0012|positive|bound|conformance/cases/object/c-object-0040.toml::/exchanges/0/request/headers/x-amz-meta-caption==?UTF-8?B?5Lit?=   =?UTF-8?B?5paH?=;conformance/cases/object/c-object-0040.toml::/exchanges/1/expect/headers_present/x-amz-meta-caption==?UTF-8?B?5Lit5paH?='
     'c-obj-0013|positive|bound|conformance/cases/object/c-object-0028.toml::/exchanges/1/expect/header_name_bytes_exact=True;conformance/cases/object/c-object-0028.toml::/exchanges/1/expect/headers_present/x-amz-meta-mixedcase=kept'
     'c-obj-0014|positive|bound|conformance/cases/object/c-object-0001.toml::/expect/headers_present/content-length=11'
     'c-obj-0015|positive|blocked|rustfs/backlog#1680::the fixture answers every read from bytes it already holds, so no handler in this repository returns a stream of unknown length and a chunked read cannot be staged'
@@ -149,6 +149,7 @@ case_polarity=(
     'conformance/cases/object/c-object-0036.toml|negative'
     'conformance/cases/object/c-object-0037.toml|negative'
     'conformance/cases/object/c-object-0038.toml|negative'
+    'conformance/cases/object/c-object-0040.toml|positive'
     'conformance/cases/tagging/c-tagging-0019.toml|positive'
 )
 
