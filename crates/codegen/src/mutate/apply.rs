@@ -182,19 +182,15 @@ fn write_field(field: &mut Field, property: &str, value: &SourceValue, path: &st
             else {
                 return Err(format!("mutation source `{path}` is not a list"));
             };
-            // `wrapper_name` is `None` exactly when the list is flattened, so an inverted
-            // `flattened` needs the entry element supplied or dropped in the same write. The entry
-            // element of a wrapped list defaults to the field's own wire name, which is what the
-            // reader would have found had the model declared the list wrapped in the first place.
-            let wrapper_name = if flattened {
-                None
+            // The IR stores the entry name in `wire_name` when flattened, but the wrapper name
+            // there when wrapped, so a strategy flip has to move both names with the boolean.
+            let entry_name = field.wire_name.clone().unwrap_or_else(|| field.name.clone());
+            let (wire_name, wrapper_name) = if flattened {
+                (Some(wrapper_name.clone().unwrap_or_else(|| "member".to_owned())), None)
             } else {
-                Some(
-                    wrapper_name
-                        .clone()
-                        .unwrap_or_else(|| field.wire_name.clone().unwrap_or_else(|| field.name.clone())),
-                )
+                (Some(field.name.clone()), Some(entry_name))
             };
+            field.wire_name = wire_name;
             field.ty = Type::List {
                 member: member.clone(),
                 flattened,

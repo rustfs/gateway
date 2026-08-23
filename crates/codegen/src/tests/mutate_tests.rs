@@ -69,6 +69,50 @@ fn a_boolean_rule_is_flipped_and_a_list_shape_follows_it() {
     apply(&mut operations, &mutation).expect("the writer accepts its own plan");
 
     assert_eq!(resolve_at(&operations, path).expect("still resolves"), SourceValue::Bool(false));
+    let rules = operations
+        .iter()
+        .find(|operation| operation.operation == "GetBucketLifecycleConfiguration")
+        .and_then(|operation| operation.output.iter().find(|field| field.name == "Rules"))
+        .expect("the lifecycle output still has its Rules field");
+    assert_eq!(
+        rules.wire_name.as_deref(),
+        Some("Rules"),
+        "the wrapped mutant needs the list wrapper name"
+    );
+    let rustfs_gateway_model::ir::Type::List { wrapper_name, .. } = &rules.ty else {
+        panic!("the mutated Rules field is still a list");
+    };
+    assert_eq!(wrapper_name.as_deref(), Some("Rule"), "the wrapped mutant keeps the entry name");
+}
+
+#[test]
+fn a_wrapped_list_mutant_repeats_the_original_entry_name() {
+    let mut operations = lowered();
+    let path = "ListBuckets.output.Buckets.list_flattened";
+    let current = resolve_at(&operations, path).expect("the wrapped bucket list resolves");
+    assert_eq!(current, SourceValue::Bool(false), "the bucket list is wrapped on the wire");
+    let mutation = plan("q-wrapped-0062", MutationDimension::WrapStrategy, &source(path, current)).expect("plannable");
+
+    apply(&mut operations, &mutation).expect("the writer accepts its own plan");
+
+    let buckets = operations
+        .iter()
+        .find(|operation| operation.operation == "ListBuckets")
+        .and_then(|operation| operation.output.iter().find(|field| field.name == "Buckets"))
+        .expect("the ListBuckets output still has its Buckets field");
+    assert_eq!(
+        buckets.wire_name.as_deref(),
+        Some("Bucket"),
+        "the flattened mutant repeats the entry name"
+    );
+    let rustfs_gateway_model::ir::Type::List {
+        flattened, wrapper_name, ..
+    } = &buckets.ty
+    else {
+        panic!("the mutated Buckets field is still a list");
+    };
+    assert!(*flattened, "the mutant is flattened");
+    assert!(wrapper_name.is_none(), "a flattened mutant has no wrapper entry metadata");
 }
 
 #[test]

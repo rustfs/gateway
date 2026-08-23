@@ -431,6 +431,7 @@ impl InProcess {
             .register::<dto::GetPublicAccessBlock, _>(Arc::clone(&backend))
             .register::<dto::HeadBucket, _>(Arc::clone(&backend))
             .register::<dto::GetObject, _>(Arc::clone(&backend))
+            .register::<dto::GetObjectAttributes, _>(Arc::clone(&backend))
             .register::<dto::GetObjectAcl, _>(Arc::clone(&backend))
             .register::<dto::GetObjectLegalHold, _>(Arc::clone(&backend))
             .register::<dto::GetObjectLockConfiguration, _>(Arc::clone(&backend))

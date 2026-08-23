@@ -18,9 +18,8 @@
 //! `GetObjectAttributes`, plus the [`HasOperation`] reverse mapping from its input type.
 //! NOT responsible for: the wire bindings, generated into
 //! `generated/codec/ops/get_object_attributes.rs` from `generated/ir/GetObjectAttributes.json`;
-//! nor for answering the request — no backend in this workspace handles it yet, and the honest
-//! answer for an operation the protocol defines and this build does not serve is
-//! `crate::dispatch::NOT_REGISTERED_MESSAGE`, not another operation's body.
+//! nor for answering the request — backends opt in by registering a handler, and the honest answer
+//! when they do not is `crate::dispatch::NOT_REGISTERED_MESSAGE`, not another operation's body.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
 //! Shares: nothing. The entity tag it writes is the multipart family's composite value, but the
