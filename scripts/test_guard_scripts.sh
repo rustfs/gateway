@@ -14236,6 +14236,47 @@ PYEOF
 expect_fail check_preauth_no_interp.sh \
     'a provider error carrying request-derived text' mut_provider_error_interpolates_request
 
+mut_preauth_message_becomes_owned() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/core/src/error.rs")
+text = path.read_text().replace("message: &'static str,", "message: String,", 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_preauth_static_msg.sh \
+    'a pre-authentication error owning runtime text' mut_preauth_message_becomes_owned \
+    "PreAuthError message must remain exactly &'static str"
+
+mut_preauth_formats_message() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/core/src/error.rs")
+path.write_text(path.read_text() + '\nfn forged_message(value: &str) { let _ = format!("{value}"); }\n')
+PYEOF
+}
+expect_fail check_preauth_static_msg.sh \
+    'a pre-authentication message formatted at runtime' mut_preauth_formats_message \
+    'PreAuthError must not format a message'
+
+mut_preauth_leaks_message() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/core/src/dispatch.rs")
+path.write_text(path.read_text() + '\nfn forged_static(value: String) -> &\x27static str { Box::leak(value.into_boxed_str()) }\n')
+PYEOF
+}
+expect_fail check_preauth_static_msg.sh \
+    'a runtime string laundered into a static message' mut_preauth_leaks_message \
+    'a runtime string must not be laundered into a static message'
+
+mut_preauth_subject_deleted() {
+    rm -f crates/core/src/error.rs
+}
+expect_fail check_preauth_static_msg.sh \
+    "the guard's subject deleted, which must fail rather than skip" mut_preauth_subject_deleted \
+    'PreAuthError subject is missing'
+
 mut_signing_key_cache() {
     python3 - <<'PYEOF'
 import pathlib
