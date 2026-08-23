@@ -73,7 +73,7 @@ bench = false
 
 [[bin]]
 name = "route_compiled_equiv"
-path = "fuzz_targets/route_disjoint.rs"
+path = "fuzz_targets/route_compiled_equiv.rs"
 test = false
 doc = false
 bench = false
