@@ -12,147 +12,101 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! What the wire-form refusals the model does not state actually generate.
+//! The ownership boundary for values whose final grammar belongs to an operation parser.
 //!
-//! Responsible for: the form resolution rules, and that the declared forms reach the decoders of
-//! the members that carry them and no others.
-//! NOT responsible for: what the refusals do to a request, which is `rustfs-gateway-core`'s codec
-//! suite.
-//! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
+//! Responsible for: proving that generated codecs preserve conditional tags and listing cursors
+//! unchanged, and that free-text `wire_form` records do not become mutable codec inputs.
+//! NOT responsible for: the final rejection, which the linked conformance cases exercise through
+//! the operation parser. Upstream: the overlay and codec emitter. Downstream: generated decoders.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use std::collections::BTreeMap;
+use rustfs_gateway_model::ir::Type;
+use rustfs_gateway_model::overlay::RuleClassification;
 
-use rustfs_gateway_model::ir::{Binding, Field, Type};
-use rustfs_gateway_model::{CodecRule, CodecValue, MutationDimension, WireFormValue};
-
-use crate::emit::codec::forms::{self, Form};
-
-fn field(name: &str, ty: Type, quirks: &[&str]) -> Field {
-    Field {
-        name: name.to_owned(),
-        wire_name: Some(name.to_lowercase()),
-        required: false,
-        binding: Binding::Header,
-        ty,
-        hot: false,
-        default: None,
-        omit_when: None,
-        missing_error: None,
-        quirk_refs: quirks.iter().map(|q| (*q).to_owned()).collect(),
-    }
-}
-
-fn wire_form(current: WireFormValue) -> CodecRule {
-    CodecRule {
-        current: CodecValue::WireForm(current),
-        mutation_dimension: MutationDimension::WireForm,
-    }
+fn decoder(name: &str) -> String {
+    let artifacts = super::codegen_tests::artifacts();
+    let ir = artifacts
+        .operations
+        .iter()
+        .find(|ir| ir.operation == name)
+        .unwrap_or_else(|| panic!("{name} is generated"));
+    crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("decodes")
 }
 
 #[test]
 fn a_field_with_no_quirk_at_all_has_no_wire_form() {
-    let resolved = forms::of(&field("IfMatch", Type::String, &[]), &BTreeMap::new(), "Fixture").expect("resolves");
-    assert_eq!(resolved, None, "an ordinary string keeps the plain conversion");
+    let conversion = crate::emit::codec::expr::from_wire(&Type::String, "Value", "Fixture", false, None, None)
+        .expect("a string has a plain decoder");
+    assert_eq!(conversion, "raw.to_owned()");
 }
 
 #[test]
 fn metadata_without_a_typed_rule_does_not_declare_a_form() {
-    let resolved = forms::of(&field("IfMatch", Type::String, &["q-cond-0046"]), &BTreeMap::new(), "Fixture").expect("resolves");
-    assert_eq!(resolved, None, "only the typed rule map declares a grammar");
+    let artifacts = super::codegen_tests::artifacts();
+    for id in ["q-etag-form-0074", "q-token-form-0075", "q-marker-form-0076"] {
+        assert!(!artifacts.codec_rules.contains_key(id), "{id} must not select codec validation");
+    }
 }
 
 #[test]
-fn the_declared_forms_reach_the_members_that_carry_them() {
-    let values = BTreeMap::from([
-        ("q-etag-form-0074".to_owned(), wire_form(WireFormValue::EntityTag)),
-        ("q-token-form-0075".to_owned(), wire_form(WireFormValue::OpaqueToken)),
-        ("q-marker-form-0076".to_owned(), wire_form(WireFormValue::OpaqueToken)),
-    ]);
-    let tag = forms::of(&field("IfMatch", Type::String, &["q-etag-form-0074"]), &values, "GetObject").expect("resolves");
-    assert_eq!(tag, Some(Form::EntityTag));
-    let cursor = forms::of(
-        &field("ContinuationToken", Type::OpaqueString, &["q-token-form-0075"]),
-        &values,
-        "ListObjectsV2",
-    )
-    .expect("resolves");
-    assert_eq!(cursor, Some(Form::OpaqueToken));
-    // The same cursor grammar, reached through a member the model left as a plain string.
-    let marker = forms::of(
-        &field("UploadIdMarker", Type::String, &["q-marker-form-0076"]),
-        &values,
-        "ListMultipartUploads",
-    )
-    .expect("resolves");
-    assert_eq!(marker, Some(Form::OpaqueToken));
+fn the_contract_forms_reach_the_members_that_carry_them_unchanged() {
+    assert!(decoder("GetObject").contains("input.if_match = Some(raw.to_owned());"));
+    assert!(decoder("ListObjectsV2").contains("input.continuation_token = Some(value::opaque(raw));"));
+    assert!(decoder("ListMultipartUploads").contains("input.upload_id_marker = Some(raw.to_owned());"));
 }
 
 #[test]
-fn a_wire_form_comes_from_the_quirk_value_not_its_id() {
-    let values = BTreeMap::from([("q-invented-9999".to_owned(), wire_form(WireFormValue::EntityTag))]);
-
-    let resolved = forms::of(&field("IfMatch", Type::String, &["q-invented-9999"]), &values, "Fixture")
-        .expect("the overlay value, not a Rust id table, selects the grammar");
-
-    assert_eq!(resolved, Some(Form::EntityTag));
+fn a_wire_form_comes_from_the_contract_record_not_a_codec_rule() {
+    let root = super::codegen_tests::root();
+    let overlay = rustfs_gateway_model::Overlay::load(&root.join("model/overlays")).expect("the canonical overlay loads");
+    assert_eq!(overlay.classifications.get("q-etag-form-0074"), Some(&RuleClassification::Contract));
+    assert!(!overlay.codec_rules.contains_key("q-etag-form-0074"));
 }
 
 #[test]
-fn the_storage_is_composed_around_one_checker_per_grammar() {
+fn the_storage_is_composed_without_a_codec_owned_checker() {
     assert_eq!(
-        Form::OpaqueToken.call("ContinuationToken", &Type::OpaqueString),
-        "value::opaque(value::token_form(raw, \"ContinuationToken\")?)"
+        crate::emit::codec::expr::from_wire(&Type::OpaqueString, "ContinuationToken", "Fixture", false, None, None)
+            .expect("an opaque string is preserved"),
+        "value::opaque(raw)"
     );
     assert_eq!(
-        Form::OpaqueToken.call("UploadIdMarker", &Type::String),
-        "value::token_form(raw, \"UploadIdMarker\")?.to_owned()"
+        crate::emit::codec::expr::from_wire(&Type::String, "UploadIdMarker", "Fixture", false, None, None)
+            .expect("a string is preserved"),
+        "raw.to_owned()"
     );
 }
 
 #[test]
 fn free_text_kind_is_not_a_codec_gate() {
-    let resolved = forms::of(&field("IfMatch", Type::String, &["q-invented-9999"]), &BTreeMap::new(), "Fixture")
-        .expect("metadata cannot control codec generation");
-    assert_eq!(resolved, None);
+    let root = super::codegen_tests::root();
+    let overlay = rustfs_gateway_model::Overlay::load(&root.join("model/overlays")).expect("the canonical overlay loads");
+    for id in ["q-tag-wrapped-0088", "q-tag-header-form-0093"] {
+        assert!(!overlay.codec_rules.contains_key(id), "{id} free-text metadata cannot select a codec");
+    }
 }
 
 #[test]
-fn n_a_form_on_a_member_whose_type_it_cannot_read_fails_the_run() {
-    let values = BTreeMap::from([("q-etag-form-0074".to_owned(), wire_form(WireFormValue::EntityTag))]);
-    let error = forms::of(&field("MaxKeys", Type::Integer, &["q-etag-form-0074"]), &values, "Fixture")
-        .expect_err("an entity-tag grammar on an integer is a mistake, not a grammar");
-    assert!(error.contains("MaxKeys"), "{error}");
-}
-
-#[test]
-fn n_two_form_quirks_disagreeing_on_one_member_fail_the_run() {
-    let values = BTreeMap::from([
-        ("q-etag-form-0074".to_owned(), wire_form(WireFormValue::EntityTag)),
-        ("q-token-form-0075".to_owned(), wire_form(WireFormValue::OpaqueToken)),
-    ]);
-    let member = field("Confused", Type::String, &["q-etag-form-0074", "q-token-form-0075"]);
-    let error = forms::of(&member, &values, "Fixture").expect_err("one member has one wire form");
-    assert!(error.contains("Confused"), "{error}");
-}
-
-#[test]
-fn the_declared_forms_reach_the_generated_decoders() {
+fn n_contract_wire_forms_emit_no_mutable_spec_record() {
     let artifacts = super::codegen_tests::artifacts();
-    let decoder = |name: &str| {
-        let ir = artifacts
-            .operations
-            .iter()
-            .find(|ir| ir.operation == name)
-            .unwrap_or_else(|| panic!("{name} is generated"));
-        crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("decodes")
-    };
-    assert!(decoder("GetObject").contains("value::etag_form(raw, \"IfMatch\")?.to_owned()"));
-    assert!(decoder("HeadObject").contains("value::etag_form(raw, \"IfNoneMatch\")?.to_owned()"));
-    assert!(decoder("ListObjectsV2").contains("value::opaque(value::token_form(raw, \"ContinuationToken\")?)"));
-    assert!(decoder("ListMultipartUploads").contains("value::token_form(raw, \"UploadIdMarker\")?.to_owned()"));
-    // A string nobody gave a grammar to still takes the plain conversion, so the change is not a
-    // blanket one: the key marker beside the upload-id marker is a key, and a key is not a token.
-    assert!(decoder("ListMultipartUploads").contains("input.key_marker = Some(raw.to_owned());"));
+    for id in ["q-etag-form-0074", "q-token-form-0075", "q-marker-form-0076"] {
+        let suffix = format!("spec/quirks/{id}.toml");
+        assert!(
+            artifacts
+                .files
+                .iter()
+                .all(|(path, _)| !path.to_string_lossy().ends_with(&suffix)),
+            "{id} has no mechanically distinct mutation"
+        );
+    }
+}
+
+#[test]
+fn n_generated_decoders_do_not_call_removed_wire_form_validators() {
+    for operation in ["GetObject", "HeadObject", "ListObjectsV2", "ListMultipartUploads"] {
+        let text = decoder(operation);
+        assert!(!text.contains("etag_form("), "{operation} still calls the removed tag validator");
+        assert!(!text.contains("token_form("), "{operation} still calls the removed token validator");
+    }
 }

@@ -142,8 +142,8 @@ const PERCENT_EXPANSION: usize = 3;
 
 /// The longest opaque cursor this service mints, in bytes, before percent-encoding.
 ///
-/// **The same number as `rustfs_gateway_core::codec::value::MAX_TOKEN_LEN`**, which is the
-/// protocol ceiling the listing codecs refuse a cursor at. It is written again here because this
+/// **The same number as `rustfs_gateway_core::ops::shared::pagination::MAX_CURSOR_BYTES`**, which
+/// is the protocol ceiling the listing operations refuse a cursor at. It is written again here because this
 /// crate sits *below* `rustfs-gateway-core` in the ring order and cannot import it — the edge runs
 /// the other way, and reversing it to share a constant would be a dependency cycle bought for one
 /// integer.

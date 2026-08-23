@@ -42,7 +42,6 @@ pub mod bounds;
 pub mod decode;
 pub mod encode;
 pub mod expr;
-pub mod forms;
 pub mod media;
 pub mod tolerance;
 pub mod url;

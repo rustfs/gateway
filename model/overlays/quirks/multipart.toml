@@ -260,9 +260,7 @@ cases   = ["c-mpu-0010", "c-mpu-0011", "c-mpu-0047", "c-mpu-0048"]
 [[quirk]]
 id      = "q-marker-form-0076"
 kind    = "wire_form"
-classification = "mutable"
-codec_value = "opaque_token"
-mutation_dimension = "wire_form"
+classification = "contract"
 target  = "ListMultipartUploads.UploadIdMarker"
 summary = "The upload-id cursor of an upload listing is a server-minted value that comes back through the query string, so one spelling a parent traversal — including the percent-encoded spelling, which is already decoded when the check runs — is refused before the listing reads anything."
 cases   = ["c-mpu-0047"]

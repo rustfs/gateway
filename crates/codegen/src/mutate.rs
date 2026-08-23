@@ -38,7 +38,7 @@ use rustfs_gateway_model::ir::{EmptyValue, TimestampFormat};
 use rustfs_gateway_model::toml_lite::{self, Toml};
 use rustfs_gateway_model::{
     BooleanSpellingValue, CodecRule, CodecValue, ContractRule, ContractValue, HeaderToleranceValue, MutationDimension,
-    UnknownElementPolicyValue, WireFormValue,
+    UnknownElementPolicyValue,
 };
 
 use crate::emit::quirk_toml::{ResolvedSource, SourceValue};
@@ -144,15 +144,6 @@ pub fn plan_contract(quirk: &str, rule: &ContractRule) -> std::result::Result<Mu
 /// Returns the reason when the value and dimension disagree or the replacement would not differ.
 pub fn plan_codec(quirk: &str, rule: &CodecRule) -> std::result::Result<Mutation, String> {
     let (path, from, to, expected_dimension) = match &rule.current {
-        CodecValue::WireForm(value) => {
-            let from = wire_form_source(*value);
-            (
-                format!("{CODEC_PATH_PREFIX}{quirk}"),
-                from,
-                SourceValue::OptionalText(None),
-                MutationDimension::WireForm,
-            )
-        }
         CodecValue::IntegerRange { min, max } => (
             format!("{CODEC_PATH_PREFIX}{quirk}"),
             SourceValue::OptionalText(Some(format!("{min}..={max}"))),
@@ -250,7 +241,6 @@ pub(crate) fn apply_codec(rules: &mut BTreeMap<String, CodecRule>, mutation: &Mu
 
 fn codec_source(value: &CodecValue) -> SourceValue {
     match value {
-        CodecValue::WireForm(value) => wire_form_source(*value),
         CodecValue::IntegerRange { min, max } => SourceValue::OptionalText(Some(format!("{min}..={max}"))),
         CodecValue::MediaType(value) => SourceValue::Text(value.clone()),
         CodecValue::HeaderTolerance(HeaderToleranceValue::DateCondition) => {
@@ -273,16 +263,6 @@ fn write_codec_value(current: &mut CodecValue, replacement: &SourceValue) -> std
         _ => return Err("codec mutation replacement has the wrong value shape".to_owned()),
     }
     Ok(())
-}
-
-fn wire_form_source(value: WireFormValue) -> SourceValue {
-    SourceValue::OptionalText(Some(
-        match value {
-            WireFormValue::EntityTag => "entity_tag",
-            WireFormValue::OpaqueToken => "opaque_token",
-        }
-        .to_owned(),
-    ))
 }
 
 fn unknown_element_policy_source(value: UnknownElementPolicyValue) -> SourceValue {
@@ -323,7 +303,6 @@ fn parse_boolean_spelling(value: &str) -> std::result::Result<BooleanSpellingVal
 
 fn codec_kind(value: &CodecValue) -> &'static str {
     match value {
-        CodecValue::WireForm(_) => "wire_form",
         CodecValue::IntegerRange { .. } => "integer_range",
         CodecValue::MediaType(_) => "media_type",
         CodecValue::HeaderTolerance(_) => "header_tolerance",

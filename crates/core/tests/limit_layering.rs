@@ -14,24 +14,21 @@
 
 //! Which layer answers when two layers both have a ceiling for the same value.
 //!
-//! Responsible for: pinning `rustfs-gateway-http`'s resource budget above this crate's protocol
-//! ceiling on a server-minted cursor, and proving the ordering is observable end to end — the same
-//! token, refused by the operation with the code the client can act on rather than by the wire
-//! with the code it cannot.
+//! Responsible for: pinning `rustfs-gateway-http`'s resource budget above the protocol ceiling on
+//! a server-minted cursor, and proving that an overlong but transport-safe token reaches the
+//! operation parser instead of being refused by the wire or the generated codec.
 //! NOT responsible for: the wording of either refusal (`crates/http/tests/reject_wording.rs`) or
-//! the cursor grammar itself (`src/codec/tests.rs`).
+//! the cursor grammar itself (the operation that consumes the opaque token).
 //! Upstream: `rustfs-gateway-http`, `rustfs-gateway-core`. Downstream: nothing.
 //!
 //! # Why this file exists at all
 //!
-//! `MAX_TOKEN_LEN` is written twice — here in the codec, and again in `crates/http`'s limit
-//! derivation — because `rustfs-gateway-http` sits below this crate in the ring order and cannot
-//! import it. A comment saying "keep these in sync" is not a mechanism. This file is: it is the
-//! lowest place in the tree that can see both numbers, so it is where the relationship between
-//! them is asserted.
+//! The cursor ceiling lives in the operation layer, while `crates/http` repeats it in the query
+//! budget derivation because that lower ring cannot import core. This file is the lowest place in
+//! the tree that can see both numbers, so it asserts the relationship between them.
 //!
 //! The relationship is deliberately an *inequality*, not an equality. The wire budget must leave
-//! room for a cursor the codec has to be able to call invalid; it must not be pinned to the
+//! room for a cursor the operation has to be able to call invalid; it must not be pinned to the
 //! cursor ceiling, because it is a sum over every query value S3 can carry and the cursor is one
 //! term of it.
 //!
@@ -43,8 +40,8 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use http::Request;
-use rustfs_gateway_core::codec::value::MAX_TOKEN_LEN;
 use rustfs_gateway_core::codec::{MetaView, OperationCodec, RequestBody};
+use rustfs_gateway_core::ops::shared::pagination::MAX_CURSOR_BYTES;
 use rustfs_gateway_core::route::TargetKind;
 use rustfs_gateway_http::{LimitKind, Limits, WireReject, WireRequest};
 use rustfs_gateway_types::{ErrorCode, dto};
@@ -93,40 +90,40 @@ fn the_wire_budget_is_above_the_cursor_ceiling() {
     // constant assertion is a compile-time fact dressed up as a test. The relationship is what is
     // asserted either way, and this spelling reports both numbers when it fails.
     assert_eq!(
-        Limits::DEFAULT_MAX_QUERY_BYTES.max(MAX_TOKEN_LEN),
+        Limits::DEFAULT_MAX_QUERY_BYTES.max(MAX_CURSOR_BYTES),
         Limits::DEFAULT_MAX_QUERY_BYTES,
-        "a query budget of {} cannot admit a cursor of {MAX_TOKEN_LEN} plus the parameters around it",
+        "a query budget of {} cannot admit a cursor of {MAX_CURSOR_BYTES} plus the parameters around it",
         Limits::DEFAULT_MAX_QUERY_BYTES
     );
     // Percent-encoding is worst-case three bytes to one, and the derivation says so; a budget that
     // only admitted the unencoded form would refuse a conforming client's spelling of the same
     // cursor.
-    let encoded = 3 * MAX_TOKEN_LEN;
+    let encoded = 3 * MAX_CURSOR_BYTES;
     assert_eq!(Limits::DEFAULT_MAX_QUERY_BYTES.max(encoded), Limits::DEFAULT_MAX_QUERY_BYTES);
 }
 
-/// Negative — a cursor one byte past the protocol ceiling is refused by the operation, not by the
-/// wire.
+/// A cursor one byte past the protocol ceiling reaches the operation parser, not a lower-layer
+/// refusal.
 ///
 /// The boundary matters more than the 4 KiB the conformance case uses: it is the first length at
 /// which the two layers could disagree about who answers.
 #[test]
-fn a_cursor_one_byte_over_is_the_operation_s_refusal() {
-    match refuse(MAX_TOKEN_LEN + 1) {
-        Refused::Codec(code) => assert_eq!(code, ErrorCode::INVALID_ARGUMENT),
+fn a_cursor_one_byte_over_reaches_the_operation_parser() {
+    match refuse(MAX_CURSOR_BYTES + 1) {
+        Refused::Accepted => {}
+        Refused::Codec(code) => panic!("the generated codec answered first with {code}"),
         Refused::Wire(reject) => panic!("the wire answered first with {:?}", reject.error_code()),
-        Refused::Accepted => panic!("a cursor past the ceiling was accepted"),
     }
 }
 
-/// Negative — the four-kibibyte token of `c-list-0030` is `InvalidArgument`, and never the wire's
-/// size complaint.
+/// The four-kibibyte token of `c-list-0030` also reaches the operation parser, where the
+/// conformance case pins its `InvalidArgument` response.
 #[test]
-fn the_conformance_token_is_an_invalid_argument() {
+fn the_conformance_token_reaches_the_operation_parser() {
     match refuse(4096) {
-        Refused::Codec(code) => assert_eq!(code, ErrorCode::INVALID_ARGUMENT),
+        Refused::Accepted => {}
+        Refused::Codec(code) => panic!("the generated codec answered first with {code}"),
         Refused::Wire(reject) => panic!("the wire answered first with {:?}", reject.error_code()),
-        Refused::Accepted => panic!("a four-kibibyte cursor was accepted"),
     }
 }
 
@@ -136,7 +133,7 @@ fn the_conformance_token_is_an_invalid_argument() {
 /// cases would still pass.
 #[test]
 fn a_cursor_at_the_ceiling_still_decodes() {
-    match refuse(MAX_TOKEN_LEN) {
+    match refuse(MAX_CURSOR_BYTES) {
         Refused::Accepted => {}
         Refused::Codec(code) => panic!("a cursor at the ceiling was refused with {code}"),
         Refused::Wire(reject) => panic!("a cursor at the ceiling was refused with {:?}", reject.error_code()),

@@ -215,7 +215,7 @@ fn n_a_codec_value_without_a_mutation_dimension_is_not_a_mutable_rule() {
     let sandbox = Sandbox::new("codec-without-mutation");
     sandbox.write("ops/alpha.toml", "include = [\"Alpha\"]\n").write(
         "quirks/codec.toml",
-        "[[quirk]]\nid = \"q-codec-0001\"\nkind = \"wire_form\"\nclassification = \"mutable\"\ncodec_value = \"entity_tag\"\n\
+        "[[quirk]]\nid = \"q-codec-0001\"\nkind = \"payload_media\"\nclassification = \"mutable\"\ncodec_value = \"application/json\"\n\
              target = \"Alpha.Value\"\nsummary = \"The wire value has one grammar.\"\ncases = [\"c-codec-0001\"]\n\n\
              [[quirk.evidence]]\nkind = \"observed\"\nref = \"https://example.invalid/codec\"\n\
              summary = \"Written by the test, never pasted.\"\n",
@@ -230,7 +230,7 @@ fn n_a_mutation_dimension_without_a_codec_value_is_metadata_not_a_rule() {
     let sandbox = Sandbox::new("mutation-without-codec");
     sandbox.write("ops/alpha.toml", "include = [\"Alpha\"]\n").write(
         "quirks/codec.toml",
-        "[[quirk]]\nid = \"q-codec-0002\"\nkind = \"wire_form\"\nclassification = \"mutable\"\nmutation_dimension = \"wire_form\"\n\
+        "[[quirk]]\nid = \"q-codec-0002\"\nkind = \"payload_media\"\nclassification = \"mutable\"\nmutation_dimension = \"media_type\"\n\
              target = \"Alpha.Value\"\nsummary = \"The wire value has one grammar.\"\ncases = [\"c-codec-0002\"]\n\n\
              [[quirk.evidence]]\nkind = \"observed\"\nref = \"https://example.invalid/codec\"\n\
              summary = \"Written by the test, never pasted.\"\n",
@@ -259,7 +259,7 @@ fn n_a_contract_cannot_carry_mutable_codec_input() {
         "quirks/contract.toml",
         &quirk("q-contract-0001", "c-contract-0001").replace(
             "classification = \"contract\"\n",
-            "classification = \"contract\"\ncodec_value = \"entity_tag\"\nmutation_dimension = \"wire_form\"\n",
+            "classification = \"contract\"\ncodec_value = \"application/json\"\nmutation_dimension = \"media_type\"\n",
         ),
     );
 

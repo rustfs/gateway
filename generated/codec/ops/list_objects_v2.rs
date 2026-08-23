@@ -65,7 +65,7 @@ impl OperationCodec for dto::ListObjectsV2 {
         // ContinuationToken — query `continuation-token`, percent-decoded once.
         if let Some(raw) = request.query("continuation-token") {
             let raw = raw.as_ref();
-            input.continuation_token = Some(value::opaque(value::token_form(raw, "ContinuationToken")?));
+            input.continuation_token = Some(value::opaque(raw));
         }
         // FetchOwner — query `fetch-owner`, percent-decoded once.
         if let Some(raw) = request.query("fetch-owner") {

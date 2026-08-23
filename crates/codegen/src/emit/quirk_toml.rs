@@ -33,7 +33,7 @@ use rustfs_gateway_model::{
     IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue, PercentDecodePassesValue,
     ResidualEncodedDangerousValue, RuleClassification, SourceRule, StoredLegacyControlPolicyValue, TemporalRelationValue,
     TraversalSegmentDelimitersValue, UnicodeNormalizationValue, UnknownElementPolicyValue, ValidatorAuthorityValue,
-    ValidatorReplaceabilityValue, WireFormValue,
+    ValidatorReplaceabilityValue,
 };
 
 use super::{quote, string_list};
@@ -256,8 +256,6 @@ pub fn render(
     };
     let _ = writeln!(out, "classification = {}", quote(class));
     match codec_rule.map(|rule| &rule.current) {
-        Some(CodecValue::WireForm(WireFormValue::EntityTag)) => out.push_str("codec_value = \"entity_tag\"\n"),
-        Some(CodecValue::WireForm(WireFormValue::OpaqueToken)) => out.push_str("codec_value = \"opaque_token\"\n"),
         Some(CodecValue::IntegerRange { min, max }) => {
             let _ = writeln!(out, "codec_min = {min}");
             let _ = writeln!(out, "codec_max = {max}");

@@ -1447,7 +1447,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-codegen"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "rustfs-gateway-model",
  "thiserror",
@@ -1468,7 +1468,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-core"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "bytes",
  "http",
@@ -1516,7 +1516,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-model"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "thiserror",
 ]

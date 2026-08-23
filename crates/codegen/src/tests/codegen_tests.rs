@@ -84,16 +84,52 @@ fn c_cg_0003_operations_md_carries_three_reverse_indexes() {
 }
 
 #[test]
-fn codec_quirks_are_emitted_as_reviewable_spec_data() {
+fn contract_wire_forms_are_not_emitted_as_mutable_spec_data() {
     let artifacts = artifacts();
-    let (_, quirk) = artifacts
-        .files
-        .iter()
-        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-etag-form-0074.toml"))
-        .expect("the typed quirk table is generated");
+    let overlay = rustfs_gateway_model::Overlay::load(&root().join("model/overlays")).expect("the canonical overlay loads");
+    for id in ["q-etag-form-0074", "q-token-form-0075", "q-marker-form-0076"] {
+        let path = format!("spec/quirks/{id}.toml");
+        assert!(
+            artifacts
+                .files
+                .iter()
+                .all(|(candidate, _)| !candidate.to_string_lossy().ends_with(&path)),
+            "{id} must not claim a mechanically distinct mutation"
+        );
+        assert_eq!(
+            overlay.classifications.get(id),
+            Some(&rustfs_gateway_model::overlay::RuleClassification::Contract),
+            "{id} keeps its evidence without duplicating the operation-owned validator"
+        );
+    }
+}
 
-    assert!(quirk.contains("codec_value = \"entity_tag\""), "{quirk}");
-    assert!(quirk.contains("mutation_dimension = \"wire_form\""), "{quirk}");
+#[test]
+fn contract_wire_forms_leave_validation_to_the_operation_parser() {
+    let artifacts = artifacts();
+    let decoder = |name: &str| {
+        let ir = artifacts
+            .operations
+            .iter()
+            .find(|ir| ir.operation == name)
+            .unwrap_or_else(|| panic!("{name} is generated"));
+        crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("decodes")
+    };
+    let get = decoder("GetObject");
+    assert!(get.contains("input.if_match = Some(raw.to_owned());"));
+    assert!(!get.contains("value::etag_form(raw, \"IfMatch\")?"));
+
+    let head = decoder("HeadObject");
+    assert!(head.contains("input.if_none_match = Some(raw.to_owned());"));
+    assert!(!head.contains("value::etag_form(raw, \"IfNoneMatch\")?"));
+
+    let list = decoder("ListObjectsV2");
+    assert!(list.contains("input.continuation_token = Some(value::opaque(raw));"));
+    assert!(!list.contains("value::token_form(raw, \"ContinuationToken\")?"));
+
+    let multipart = decoder("ListMultipartUploads");
+    assert!(multipart.contains("input.upload_id_marker = Some(raw.to_owned());"));
+    assert!(!multipart.contains("value::token_form(raw, \"UploadIdMarker\")?"));
 }
 
 #[test]

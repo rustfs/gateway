@@ -86,7 +86,7 @@ impl OperationCodec for dto::CopyObject {
         // CopySourceIfMatch — header `x-amz-copy-source-if-match`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-if-match") {
             let raw = raw.as_ref();
-            input.copy_source_if_match = Some(value::etag_form(raw, "CopySourceIfMatch")?.to_owned());
+            input.copy_source_if_match = Some(raw.to_owned());
         }
         // CopySourceIfModifiedSince — header `x-amz-copy-source-if-modified-since`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-if-modified-since") {
@@ -97,7 +97,7 @@ impl OperationCodec for dto::CopyObject {
         // CopySourceIfNoneMatch — header `x-amz-copy-source-if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-if-none-match") {
             let raw = raw.as_ref();
-            input.copy_source_if_none_match = Some(value::etag_form(raw, "CopySourceIfNoneMatch")?.to_owned());
+            input.copy_source_if_none_match = Some(raw.to_owned());
         }
         // CopySourceIfUnmodifiedSince — header `x-amz-copy-source-if-unmodified-since`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-if-unmodified-since") {

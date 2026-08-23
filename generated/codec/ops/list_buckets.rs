@@ -47,7 +47,7 @@ impl OperationCodec for dto::ListBuckets {
         // ContinuationToken — query `continuation-token`, percent-decoded once.
         if let Some(raw) = request.query("continuation-token") {
             let raw = raw.as_ref();
-            input.continuation_token = Some(value::opaque(value::token_form(raw, "ContinuationToken")?));
+            input.continuation_token = Some(value::opaque(raw));
         }
         // Prefix — query `prefix`, percent-decoded once.
         if let Some(raw) = request.query("prefix") {

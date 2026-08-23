@@ -19,7 +19,7 @@
 //! do) or performing them (`rustfs-gateway-core`'s `codec::value::text_payload` does).
 //! Upstream: [`rustfs_gateway_model::ir`]. Downstream: [`super::decode`], [`super::encode`].
 //!
-//! # Why this is the third sibling of [`super::bounds`] and [`super::forms`]
+//! # Why this is the third sibling of [`super::bounds`] and [`super::boolean`]
 //!
 //! Same shape of problem, same seam. `spec/ir.schema.json` is frozen: `payload_spec.kind` is a
 //! closed six-value enum with no `Json` member, `field` has no `media_type`, and the overlay
@@ -53,9 +53,8 @@ use rustfs_gateway_model::{CodecRule, CodecValue};
 
 /// Whether this member is a payload carried as text rather than as XML or bytes.
 ///
-/// The two string types are both admitted for the same reason [`super::forms`] admits both: the
-/// distinction between them is about round-tripping, and a document read as text round-trips
-/// either way.
+/// The two string types are both admitted because their distinction is about round-tripping, and
+/// a document read as text round-trips either way.
 pub fn is_text_payload(field: &Field) -> bool {
     field.binding == Binding::Payload && matches!(field.ty, Type::String | Type::OpaqueString)
 }

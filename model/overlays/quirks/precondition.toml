@@ -383,9 +383,7 @@ cases   = ["c-range-0011", "c-range-0012", "c-range-0013"]
 [[quirk]]
 id      = "q-etag-form-0074"
 kind    = "wire_form"
-classification = "mutable"
-codec_value = "entity_tag"
-mutation_dimension = "wire_form"
+classification = "contract"
 target  = "GetObject.IfMatch"
 summary = "A conditional header carries one entity tag and is checked against that grammar before anything compares it, so an unterminated quote is a bad request rather than a tag whose first character is a quote, and two field lines joined by a comma are refused rather than reduced to whichever one arrived first."
 cases   = ["c-cond-0019", "c-cond-0028"]

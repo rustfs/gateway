@@ -55,7 +55,7 @@ impl OperationCodec for dto::HeadObject {
         // IfMatch — header `if-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-match") {
             let raw = raw.as_ref();
-            input.if_match = Some(value::etag_form(raw, "IfMatch")?.to_owned());
+            input.if_match = Some(raw.to_owned());
         }
         // IfModifiedSince — header `if-modified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("if-modified-since") {
@@ -65,7 +65,7 @@ impl OperationCodec for dto::HeadObject {
         // IfNoneMatch — header `if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-none-match") {
             let raw = raw.as_ref();
-            input.if_none_match = Some(value::etag_form(raw, "IfNoneMatch")?.to_owned());
+            input.if_none_match = Some(raw.to_owned());
         }
         // IfUnmodifiedSince — header `if-unmodified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("if-unmodified-since") {

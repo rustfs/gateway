@@ -161,15 +161,16 @@ fn a_response_override_is_still_refused_when_it_is_not_a_date() {
     dto::GetObject::decode(&view, RequestBody::None).expect_err("a response override is not a condition");
 }
 
-/// Negative — an entity-tag condition is still refused when it is not an entity tag.
+/// An entity-tag condition remains present for the operation parser when its spelling is invalid.
 ///
-/// The neighbouring member, on the same operation, with the same optionality. If the emitter had
-/// applied the tolerance by binding rather than by quirk, this is the assertion that would fail.
+/// The neighbouring member has the same optionality. If the emitter applied date tolerance by
+/// binding rather than by quirk, it could drop this value before the operation saw it.
 #[test]
-fn an_entity_tag_condition_is_still_strict() {
+fn an_entity_tag_condition_reaches_the_operation_parser_unchanged() {
     let request = accepted("GET", &[("if-match", "\"unterminated")]);
     let view = MetaView::of(&request, TargetKind::Object).expect("the path has both labels");
-    dto::GetObject::decode(&view, RequestBody::None).expect_err("an unterminated tag is not a tag");
+    let input = dto::GetObject::decode(&view, RequestBody::None).expect("the operation parser owns the entity-tag grammar");
+    assert_eq!(input.if_match.as_deref(), Some("\"unterminated"));
 }
 
 /// Positive — a readable date still binds, on both members.
