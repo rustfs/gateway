@@ -33,6 +33,7 @@ use rustfs_gateway_model::{ErrorStatus, Overlay};
 use crate::codegen::repo_root;
 
 mod distance;
+mod error_code;
 #[cfg(test)]
 mod tests;
 
@@ -147,7 +148,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let target = match namespace.map_or_else(|| index.resolve(argument), |_| index.resolve_error_code(argument)) {
+    let target = match namespace.map_or_else(|| index.resolve(argument), |_| error_code::resolve(&index.error_status, argument)) {
         Ok(target) => target,
         Err(error) => {
             eprintln!("{error}");
@@ -236,19 +237,11 @@ impl Index {
         ))
     }
 
-    fn resolve_error_code(&self, argument: &str) -> Result<WhyTarget, String> {
-        self.error_status
-            .iter()
-            .find(|status| status.name.eq_ignore_ascii_case(argument))
-            .map(|status| WhyTarget::ErrorCode(status.name.clone()))
-            .ok_or_else(|| format!("error code `{argument}` not found"))
-    }
-
     fn answer(&self, target: WhyTarget) -> Answer {
         match target {
             WhyTarget::Quirk(id) => self.quirk_answer(&id),
             WhyTarget::Op(name) => self.operation_answer(&name),
-            WhyTarget::ErrorCode(code) => self.error_answer(&code),
+            WhyTarget::ErrorCode(code) => error_code::answer(&self.error_status, &self.operations, &self.cases, &code),
             WhyTarget::Header(header) => self.header_answer(&header),
             WhyTarget::Adr(id) => self.adr_answer(&id),
             WhyTarget::Rule(id) => self.rule_answer(&id),
@@ -321,39 +314,6 @@ impl Index {
             spec: vec![format!("spec/operations/{name}.toml")],
             related: quirks,
             complete: true,
-        })
-    }
-
-    fn error_answer(&self, code: &str) -> Answer {
-        let status = self.error_status.iter().find(|status| status.name == code);
-        let producers: Vec<&OperationIr> = self
-            .operations
-            .iter()
-            .filter(|operation| contains(&operation.errors.codes, code))
-            .collect();
-        let names: Vec<String> = producers.iter().map(|operation| operation.operation.clone()).collect();
-        let cases = self
-            .cases
-            .iter()
-            .filter(|case| contains_token(&case.source, code))
-            .map(|case| case.line.clone())
-            .collect();
-        finish(Answer {
-            id: code.to_owned(),
-            summary: format!(
-                "S3 error code status={} produced by {}",
-                status.map_or_else(|| "unknown".to_owned(), |status| status.status.to_string()),
-                names.join(", ")
-            ),
-            evidence: Vec::new(),
-            cases,
-            adrs: Vec::new(),
-            spec: names
-                .iter()
-                .map(|name| format!("spec/operations/{name}.toml:errors"))
-                .collect(),
-            related: names,
-            complete: status.is_some(),
         })
     }
 

@@ -22,6 +22,7 @@ Agent entry point for repository automation commands.
 | `src/verify/tests.rs` | Verification selection and scheduling unit contracts. | A bounded verification scope or schedule changes. |
 | `src/why.rs` | Reverse trace and stable text/JSON rendering. | A `why` namespace or section changes. |
 | `src/why/distance.rs` | Edit-distance ranking for nearby reverse-trace targets. | Unknown-target suggestions drift. |
+| `src/why/error_code.rs` | Error-code status, producer and case reverse tracing. | The `why error-code` answer changes. |
 | `src/why/tests.rs` | Pure completeness and exit-outcome controls. | The `why` completion rule changes. |
 | `tests/integration.rs` | Single integration-test target registering all four test sources. | Add, remove, or rename an xtask integration test source. |
 | `tests/cli_contract.rs` | Shared CLI output/exit contracts registered by `integration.rs`. | Change help or general process behavior. |
