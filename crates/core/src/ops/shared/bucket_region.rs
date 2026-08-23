@@ -32,7 +32,9 @@
 //! `x-amz-bucket-region`: SDKs complete the redirect by reading that header, so leaving it off
 //! turns "your bucket is over there" into a client that simply fails. Building the refusal in one
 //! place makes the header structurally inseparable from the status — a caller cannot spell the 301
-//! through this module and forget the region, because the region is the argument.
+//! through this module and forget the region, because the region is the argument. The permanent
+//! form deliberately has no `Location` header: AWS documents that clients must use the error
+//! document to find the correct endpoint. Only the temporary form is automatically followable.
 
 use rustfs_gateway_types::BucketName;
 
@@ -123,6 +125,18 @@ mod tests {
         assert_eq!(error.details().len(), 1);
         assert_eq!(error.details()[0].element(), "Region");
         assert_eq!(error.details()[0].text(), "eu-west-1");
+    }
+
+    /// Negative — rustfs/backlog#1694 `c-err-1015`. AWS's permanent-request-routing contract says
+    /// the 301 omits `Location`; clients use the XML endpoint instead:
+    /// <https://docs.aws.amazon.com/AmazonS3/latest/developerguide/UsingRouting.html>
+    #[test]
+    fn c_err_1015_a_permanent_redirect_has_no_location_header() {
+        let error = permanent_redirect(region("eu-west-1"));
+        assert!(
+            error.headers().iter().all(|header| header.name().as_str() != "location"),
+            "a permanent redirect must not be automatically followable"
+        );
     }
 
     /// Positive — the bucket-naming form adds `<BucketName>` ahead of `<Region>`, in the declared
