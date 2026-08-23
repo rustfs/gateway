@@ -90,7 +90,7 @@ requirements=(
     'c-err-1012|negative|bound|scripts/test_guard_scripts.sh::fn mut_error_status_unlisted_dead_row;scripts/test_guard_scripts.sh::fn mut_error_status_stale_allowance'
     'c-err-1013|negative|bound|crates/core/tests/purity_guard.rs::fn the_pre_auth_error_never_formats_a_message'
     'c-err-1014|negative|bound|conformance/cases/object/c-object-0011.toml::/expect/body/exact_utf8~<Error><Key>batch/retained</Key>;conformance/cases/object/c-object-0004.toml::/expect/body/exact_utf8~<Deleted><Key>batch/absent</Key></Deleted>'
-    'c-err-1015|negative|blocked|rustfs/backlog#1694::the 301 carries x-amz-bucket-region and nothing else today, and only the 307 attaches a Location; whether AWS puts a Location on the permanent redirect is a protocol question that needs evidence before an ErrorHeader variant is added to a closed enum'
+    'c-err-1015|negative|bound|crates/core/src/ops/shared/bucket_region.rs::fn c_err_1015_a_permanent_redirect_has_no_location_header'
 )
 
 # §7 counts itself: 9 positive and 15 negative. Transcribed once, so that relabelling a rule to
