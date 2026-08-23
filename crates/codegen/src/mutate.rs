@@ -36,7 +36,10 @@ use std::path::Path;
 
 use rustfs_gateway_model::ir::{EmptyValue, TimestampFormat};
 use rustfs_gateway_model::toml_lite::{self, Toml};
-use rustfs_gateway_model::{ContractRule, ContractValue, MutationDimension};
+use rustfs_gateway_model::{
+    BooleanSpellingValue, CodecRule, CodecValue, ContractRule, ContractValue, HeaderToleranceValue, MutationDimension,
+    UnknownElementPolicyValue, WireFormValue,
+};
 
 use crate::emit::quirk_toml::{ResolvedSource, SourceValue};
 use crate::{Error, Result, io};
@@ -46,7 +49,7 @@ use crate::{Error, Result, io};
 pub struct Mutation {
     /// The quirk whose rule this source carries.
     pub quirk: String,
-    /// The lowered-IR path, or an `@contract.` path for a runtime contract.
+    /// The lowered-IR path, or an `@contract.` / `@codec.` path for a typed overlay input.
     pub path: String,
     /// The value the unmutated IR carries at that path.
     pub from: SourceValue,
@@ -103,6 +106,9 @@ const NOT_CONFIGURED_SUFFIX: &str = ".errors.not_configured";
 /// Prefix for a mutation that targets a typed runtime contract instead of lowered operation IR.
 const CONTRACT_PATH_PREFIX: &str = "@contract.";
 
+/// Prefix for a mutation that targets a typed codec input instead of lowered operation IR.
+const CODEC_PATH_PREFIX: &str = "@codec.";
+
 /// Plans the flip for one resolved source under one mutation dimension.
 ///
 /// Every dimension gets the one alternative that a client would actually observe: a boolean is
@@ -129,6 +135,201 @@ pub fn plan_contract(quirk: &str, rule: &ContractRule) -> std::result::Result<Mu
     let current = contract_source(&rule.current)?;
     let to = alternative(rule.mutation_dimension, &current, &format!("{CONTRACT_PATH_PREFIX}{quirk}"))?;
     Mutation::new(quirk, &format!("{CONTRACT_PATH_PREFIX}{quirk}"), current, to)
+}
+
+/// Plans the mechanical opposite of one typed codec input.
+///
+/// # Errors
+///
+/// Returns the reason when the value and dimension disagree or the replacement would not differ.
+pub fn plan_codec(quirk: &str, rule: &CodecRule) -> std::result::Result<Mutation, String> {
+    let (path, from, to, expected_dimension) = match &rule.current {
+        CodecValue::WireForm(value) => {
+            let from = wire_form_source(*value);
+            (
+                format!("{CODEC_PATH_PREFIX}{quirk}"),
+                from,
+                SourceValue::OptionalText(None),
+                MutationDimension::WireForm,
+            )
+        }
+        CodecValue::IntegerRange { min, max } => (
+            format!("{CODEC_PATH_PREFIX}{quirk}"),
+            SourceValue::OptionalText(Some(format!("{min}..={max}"))),
+            SourceValue::OptionalText(None),
+            MutationDimension::IntegerRange,
+        ),
+        CodecValue::MediaType(value) => {
+            let alternative = if value == "text/plain" {
+                "application/octet-stream"
+            } else {
+                "text/plain"
+            };
+            (
+                format!("{CODEC_PATH_PREFIX}{quirk}"),
+                SourceValue::Text(value.clone()),
+                SourceValue::Text(alternative.to_owned()),
+                MutationDimension::MediaType,
+            )
+        }
+        CodecValue::HeaderTolerance(HeaderToleranceValue::DateCondition) => (
+            format!("{CODEC_PATH_PREFIX}{quirk}"),
+            SourceValue::OptionalText(Some("date_condition".to_owned())),
+            SourceValue::OptionalText(None),
+            MutationDimension::HeaderTolerance,
+        ),
+        CodecValue::UnknownElementPolicy(value) => {
+            let from = unknown_element_policy_source(*value);
+            let to = unknown_element_policy_source(match value {
+                UnknownElementPolicyValue::Skip => UnknownElementPolicyValue::Reject,
+                UnknownElementPolicyValue::Reject => UnknownElementPolicyValue::Skip,
+            });
+            (format!("{CODEC_PATH_PREFIX}{quirk}"), from, to, MutationDimension::UnknownElementPolicy)
+        }
+        CodecValue::BooleanSpelling(value) => {
+            let from = boolean_spelling_source(*value);
+            let to = boolean_spelling_source(match value {
+                BooleanSpellingValue::AsciiCaseInsensitive => BooleanSpellingValue::LowercaseOnly,
+                BooleanSpellingValue::LowercaseOnly => BooleanSpellingValue::AsciiCaseInsensitive,
+            });
+            (format!("{CODEC_PATH_PREFIX}{quirk}"), from, to, MutationDimension::BooleanSpellingPolicy)
+        }
+    };
+    if rule.mutation_dimension != expected_dimension {
+        return Err(format!(
+            "codec rule `{quirk}` carries `{}` but declares mutation dimension `{}`",
+            codec_kind(&rule.current),
+            rule.mutation_dimension.as_str()
+        ));
+    }
+    Mutation::new(quirk, &path, from, to)
+}
+
+/// Applies a typed codec mutation, returning whether the path named that namespace.
+///
+/// # Errors
+///
+/// Returns the reason when the id is stale, the current value changed, or the replacement has the
+/// wrong value shape.
+pub(crate) fn apply_codec(rules: &mut BTreeMap<String, CodecRule>, mutation: &Mutation) -> std::result::Result<bool, String> {
+    let Some(id) = mutation.path.strip_prefix(CODEC_PATH_PREFIX) else {
+        return Ok(false);
+    };
+    if id != mutation.quirk {
+        return Err(format!(
+            "codec path `{}` names `{id}`, but the mutation belongs to `{}`",
+            mutation.path, mutation.quirk
+        ));
+    }
+    let rule = rules
+        .get(id)
+        .ok_or_else(|| format!("codec mutation names unknown rule `{id}`"))?;
+    let found = codec_source(&rule.current);
+    if found != mutation.from {
+        return Err(format!(
+            "codec rule `{id}` carries {found:?}, but the mutation plan replaces {:?}; the ledger and generated input disagree",
+            mutation.from
+        ));
+    }
+
+    if mutation.to == SourceValue::OptionalText(None) {
+        rules.remove(id);
+        return Ok(true);
+    }
+
+    let rule = rules
+        .get_mut(id)
+        .ok_or_else(|| format!("codec mutation names unknown rule `{id}`"))?;
+    write_codec_value(&mut rule.current, &mutation.to)?;
+    let written = codec_source(&rule.current);
+    if written != mutation.to {
+        return Err(format!("codec rule `{id}` does not read back as {:?}; found {written:?}", mutation.to));
+    }
+    Ok(true)
+}
+
+fn codec_source(value: &CodecValue) -> SourceValue {
+    match value {
+        CodecValue::WireForm(value) => wire_form_source(*value),
+        CodecValue::IntegerRange { min, max } => SourceValue::OptionalText(Some(format!("{min}..={max}"))),
+        CodecValue::MediaType(value) => SourceValue::Text(value.clone()),
+        CodecValue::HeaderTolerance(HeaderToleranceValue::DateCondition) => {
+            SourceValue::OptionalText(Some("date_condition".to_owned()))
+        }
+        CodecValue::UnknownElementPolicy(value) => unknown_element_policy_source(*value),
+        CodecValue::BooleanSpelling(value) => boolean_spelling_source(*value),
+    }
+}
+
+fn write_codec_value(current: &mut CodecValue, replacement: &SourceValue) -> std::result::Result<(), String> {
+    match (current, replacement) {
+        (CodecValue::MediaType(value), SourceValue::Text(replacement)) => replacement.clone_into(value),
+        (CodecValue::UnknownElementPolicy(value), SourceValue::Text(replacement)) => {
+            *value = parse_unknown_element_policy(replacement)?;
+        }
+        (CodecValue::BooleanSpelling(value), SourceValue::Text(replacement)) => {
+            *value = parse_boolean_spelling(replacement)?;
+        }
+        _ => return Err("codec mutation replacement has the wrong value shape".to_owned()),
+    }
+    Ok(())
+}
+
+fn wire_form_source(value: WireFormValue) -> SourceValue {
+    SourceValue::OptionalText(Some(
+        match value {
+            WireFormValue::EntityTag => "entity_tag",
+            WireFormValue::OpaqueToken => "opaque_token",
+        }
+        .to_owned(),
+    ))
+}
+
+fn unknown_element_policy_source(value: UnknownElementPolicyValue) -> SourceValue {
+    SourceValue::Text(
+        match value {
+            UnknownElementPolicyValue::Skip => "skip",
+            UnknownElementPolicyValue::Reject => "reject",
+        }
+        .to_owned(),
+    )
+}
+
+fn parse_unknown_element_policy(value: &str) -> std::result::Result<UnknownElementPolicyValue, String> {
+    match value {
+        "skip" => Ok(UnknownElementPolicyValue::Skip),
+        "reject" => Ok(UnknownElementPolicyValue::Reject),
+        _ => Err(format!("unknown codec element policy `{value}`")),
+    }
+}
+
+fn boolean_spelling_source(value: BooleanSpellingValue) -> SourceValue {
+    SourceValue::Text(
+        match value {
+            BooleanSpellingValue::AsciiCaseInsensitive => "ascii_case_insensitive",
+            BooleanSpellingValue::LowercaseOnly => "lowercase_only",
+        }
+        .to_owned(),
+    )
+}
+
+fn parse_boolean_spelling(value: &str) -> std::result::Result<BooleanSpellingValue, String> {
+    match value {
+        "ascii_case_insensitive" => Ok(BooleanSpellingValue::AsciiCaseInsensitive),
+        "lowercase_only" => Ok(BooleanSpellingValue::LowercaseOnly),
+        _ => Err(format!("unknown codec boolean spelling `{value}`")),
+    }
+}
+
+fn codec_kind(value: &CodecValue) -> &'static str {
+    match value {
+        CodecValue::WireForm(_) => "wire_form",
+        CodecValue::IntegerRange { .. } => "integer_range",
+        CodecValue::MediaType(_) => "media_type",
+        CodecValue::HeaderTolerance(_) => "header_tolerance",
+        CodecValue::UnknownElementPolicy(_) => "unknown_element_policy",
+        CodecValue::BooleanSpelling(_) => "boolean_spelling_policy",
+    }
 }
 
 /// Applies a typed runtime-contract mutation, returning whether the path named that namespace.

@@ -248,6 +248,11 @@ pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[
     let mut overlay = Overlay::load(&input.overlays)?;
     let mut lowered = lower(&model, &overlay)?;
     for mutation in mutations {
+        if mutate::apply_codec(&mut overlay.codec_rules, mutation)
+            .map_err(|message| Error::Policy(format!("quirk `{}`: {message}", mutation.quirk)))?
+        {
+            continue;
+        }
         if mutate::apply_contract(&mut overlay.contract_rules, mutation)
             .map_err(|message| Error::Policy(format!("quirk `{}`: {message}", mutation.quirk)))?
         {

@@ -392,7 +392,7 @@ fn one_field(
         },
         Binding::BodyXml => {
             if open_document {
-                out.push_str(&open_request_document(ir)?);
+                out.push_str(&open_request_document(ir, super::unknown_element_policy(ir, rules)?)?);
             }
             out.push_str(&xml_member(ir, field, &target, rules, "root", 8)?);
         }
@@ -469,7 +469,7 @@ fn wrap(field: &Field, inner: &str) -> String {
 /// [`xml_member`]. No `.about(..)` rides the wrong-root refusal here: at operation level there is
 /// no single member the root belongs to, and naming an arbitrary one of them would put a member
 /// into an error that is about the document.
-fn open_request_document(ir: &OperationIr) -> Result<String, String> {
+fn open_request_document(ir: &OperationIr, unknown_elements: UnknownElementPolicyValue) -> Result<String, String> {
     let root = ir
         .xml
         .request_root
@@ -494,6 +494,14 @@ fn open_request_document(ir: &OperationIr) -> Result<String, String> {
     let _ = writeln!(out, "        if ![{names}].contains(&root.name.as_str()) {{");
     out.push_str("            return Err(CodecError::malformed_xml(\"the request body has the wrong root element\"));\n");
     out.push_str("        }\n");
+    if unknown_elements == UnknownElementPolicyValue::Reject {
+        let names = ir.input.iter().filter(|field| field.binding == Binding::BodyXml);
+        out.push_str(&super::unknown_child_guard(
+            "root",
+            names.map(|field| field.wire_name.as_deref().unwrap_or(&field.name)),
+            "        ",
+        ));
+    }
     Ok(out)
 }
 
@@ -737,20 +745,12 @@ pub fn shape_reader(
     let _ = writeln!(out, "    {construct}");
 
     if unknown_elements == UnknownElementPolicyValue::Reject && !empty {
-        let names = shape
-            .fields
-            .iter()
-            .filter(|field| !carried_as_attribute(shape, &field.name))
-            .map(|field| field.wire_name.as_deref().unwrap_or(&field.name))
-            .map(|name| format!("\"{name}\""))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let _ = writeln!(
-            out,
-            "    if node.children.iter().any(|child| ![{names}].contains(&child.name.as_str())) {{"
-        );
-        out.push_str("        return Err(CodecError::malformed_xml(\"the body contains an unknown element\"));\n");
-        out.push_str("    }\n");
+        let names = shape.fields.iter().filter(|field| !carried_as_attribute(shape, &field.name));
+        out.push_str(&super::unknown_child_guard(
+            "node",
+            names.map(|field| field.wire_name.as_deref().unwrap_or(&field.name)),
+            "    ",
+        ));
     }
 
     for field in &shape.fields {

@@ -387,9 +387,8 @@ fn opaque_expiration_values_are_a_typed_codegen_decision() {
 #[test]
 fn unknown_xml_element_policy_reaches_the_generated_reader() {
     use rustfs_gateway_model::{CodecValue, UnknownElementPolicyValue};
-
     let mut artifacts = artifacts();
-    for id in ["q-acl-0006", "q-enc-0006", "q-lock-0014"] {
+    for id in ["q-acl-0006", "q-enc-0006", "q-lock-0014", "q-select-0007"] {
         let (_, quirk) = artifacts
             .files
             .iter()
@@ -399,7 +398,6 @@ fn unknown_xml_element_policy_reaches_the_generated_reader() {
         artifacts.codec_rules.get_mut(id).expect("the codec rule exists").current =
             CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Reject);
     }
-
     let files = crate::emit::codec::emit(
         &artifacts.operations,
         &artifacts.codec_rules,
@@ -407,12 +405,15 @@ fn unknown_xml_element_policy_reaches_the_generated_reader() {
         Path::new("generated"),
     )
     .expect("the mutated codec renders in memory");
-    let put_acl = files
-        .iter()
-        .find(|(path, _)| path.to_string_lossy().ends_with("codec/ops/put_bucket_acl.rs"))
-        .map(|(_, body)| body)
-        .expect("PutBucketAcl codec exists");
-    assert!(put_acl.contains("the body contains an unknown element"), "{put_acl}");
+    let emitted = |suffix: &str| {
+        files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(suffix))
+            .map(|(_, body)| body)
+            .expect("the operation codec exists")
+    };
+    assert!(emitted("codec/ops/put_bucket_acl.rs").contains("the body contains an unknown element"));
+    assert!(emitted("codec/ops/select_object_content.rs").contains("if root.children.iter().any(|child|"));
 }
 
 #[test]
