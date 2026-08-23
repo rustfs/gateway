@@ -1,0 +1,69 @@
+# c-object-0043 — Content-MD5 and x-amz-checksum are independent claims.
+
+[case]
+id = "c-object-0043"
+schema_version = 1
+title = "Each integrity header is verified even when the other one is valid"
+rationale = """
+Checking only one of two supplied integrity claims lets a proxy-added header silently disable the
+caller's protection. The two exchanges reverse which claim is wrong so an implementation stuck on
+one verifier cannot satisfy both directions."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "PutObject accepts Content-MD5 and algorithm-specific checksum headers as separate integrity claims."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "valid-md5-does-not-hide-wrong-crc32c"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/checksum/wrong-crc32c"
+headers = { "content-md5" = "XrY7u+Ae7tCTyyK7j1rNww==", "x-amz-checksum-crc32c" = "AAAAAA==" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag"]
+
+[exchanges.expect.error]
+code = "XAmzContentChecksumMismatch"
+request_id_present = true
+
+[[exchanges]]
+name = "valid-crc32c-does-not-hide-wrong-md5"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/checksum/wrong-md5"
+headers = { "content-md5" = "NOP31GPJaSZodWxatv8tWg==", "x-amz-checksum-crc32c" = "yZRlqg==" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag"]
+
+[exchanges.expect.error]
+code = "BadDigest"
+request_id_present = true

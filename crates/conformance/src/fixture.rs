@@ -113,20 +113,21 @@ use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::dto;
 use rustfs_gateway::{
-    AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec, ConditionalOutcome,
-    CopyRange, CopySourceRejection, ETag, ErrorCode, EventSequence, GranteeType, Handler, HandlerError, HandlerErrorContext,
-    HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators, Operation, PRECONDITION_FAILED_MESSAGE,
-    PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision, RangeSelectors, RecordedUpload, RegionLabel,
-    RegionSet, Req, RequestKind, ResolvedUploadId, ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope,
-    TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee, collect, completion_failure_retains_upload,
-    conditional_write_guards_before_mutation, copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds,
-    copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate, evaluate_range,
-    format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag, parse_tagging_header,
-    permanent_redirect_for, resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint, resolve_part,
-    resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate, validate_cors,
-    validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
-    validate_notification, validate_policy, validate_public_access_block, validate_replication, validate_request_payment,
-    validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
+    AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec,
+    ChecksumType as PackedChecksumType, ConditionalOutcome, CopyRange, CopySourceRejection, ETag, ErrorCode, EventSequence,
+    GranteeType, Handler, HandlerError, HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators,
+    Operation, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision,
+    RangeSelectors, RecordedUpload, RegionLabel, RegionSet, Req, RequestKind, ResolvedUploadId, ResourceVisibility, Resp,
+    RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee, collect,
+    completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_source_guards_before_target_write,
+    copy_source_if_match_miss_proceeds, copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate,
+    evaluate_range, format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag,
+    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_input as resolve_acl_input,
+    resolve_location_constraint, resolve_part, resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document,
+    validate_accelerate, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
+    validate_lock_configuration, validate_logging, validate_notification, validate_policy, validate_public_access_block,
+    validate_replication, validate_request_payment, validate_restore, validate_retention, validate_select, validate_tag_set,
+    validate_versioning, validate_website,
 };
 
 mod committed;
@@ -227,6 +228,12 @@ pub struct StoredObject {
     pub storage_class: String,
     /// The unquoted MD5 entity tag of `body`.
     pub etag: String,
+    /// The full-object checksum a write supplied, including its algorithm.
+    ///
+    /// [`StoredObject::new`] stamps CRC32 for objects established directly by `[setup]`, preserving
+    /// the fixture's existing checksum-bearing setup contract. A request that supplies another
+    /// algorithm replaces it only after the ingest pipeline has verified the body.
+    pub checksum: Option<ChecksumSpec>,
     /// The instant the case pinned, in Unix seconds.
     pub last_modified: i64,
     /// The length of each part the object was completed from, in part order, or empty for an
@@ -248,11 +255,13 @@ impl StoredObject {
     #[must_use]
     pub fn new(body: Vec<u8>, content_type: Option<String>, last_modified: i64) -> StoredObject {
         let etag = crate::md5::hex_digest(&body);
+        let checksum = ChecksumSpec::from_digest(ChecksumAlgorithm::Crc32, &crate::crc32::digest(&body)).ok();
         StoredObject {
             body,
             content_type,
             storage_class: "STANDARD".to_owned(),
             etag,
+            checksum,
             last_modified,
             ..StoredObject::default()
         }
@@ -1945,7 +1954,7 @@ fn resolve_range(
     }
 }
 
-/// The `x-amz-checksum-crc32` a read reports, and the two reasons it reports none.
+/// The stored `x-amz-checksum-*` value a read reports, and the two reasons it reports none.
 ///
 /// * **The client has to ask.** S3 emits the digest only for `x-amz-checksum-mode: ENABLED`, so a
 ///   backend that volunteered it would put a header on every read that no case asked for.
@@ -1954,17 +1963,60 @@ fn resolve_range(
 ///   then reports data corruption — which sends an operator to look at storage rather than at a
 ///   header. `c-range-0016` is both halves of this, in two exchanges on one connection.
 ///
-/// CRC-32 because it is the one algorithm this suite can compute: the facade exports
-/// [`ChecksumSpec`] but not the `Checksummer` trait behind `ChecksumAlgorithm::checksummer`, so
-/// `src/crc32.rs` is this suite's own, and every other backend outside the workspace will write
-/// one too. The digest is of the bytes `[setup]` declared and of nothing else.
-fn read_checksum(mode: Option<&dto::ChecksumMode>, partial: bool, whole: &[u8]) -> Option<String> {
-    if partial || mode != Some(&dto::ChecksumMode::ENABLED) {
-        return None;
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ReportedChecksum {
+    crc32: Option<String>,
+    crc32c: Option<String>,
+    crc64nvme: Option<String>,
+    sha1: Option<String>,
+    sha256: Option<String>,
+    kind: Option<dto::ChecksumType>,
+}
+
+fn reported_checksum_type(spec: ChecksumSpec) -> Option<dto::ChecksumType> {
+    match spec.checksum_type() {
+        PackedChecksumType::Composite => Some(dto::ChecksumType::COMPOSITE),
+        PackedChecksumType::FullObject => Some(dto::ChecksumType::FULL_OBJECT),
     }
-    ChecksumSpec::from_digest(ChecksumAlgorithm::Crc32, &crate::crc32::digest(whole))
-        .ok()
-        .map(|spec| spec.render_base64().to_owned())
+}
+
+fn read_checksum(mode: Option<&dto::ChecksumMode>, partial: bool, stored: Option<ChecksumSpec>) -> ReportedChecksum {
+    if partial || mode != Some(&dto::ChecksumMode::ENABLED) {
+        return ReportedChecksum::default();
+    }
+    let Some(spec) = stored else {
+        return ReportedChecksum::default();
+    };
+    let value = Some(spec.render_base64().to_owned());
+    let kind = reported_checksum_type(spec);
+    match spec.algorithm() {
+        ChecksumAlgorithm::Crc32 => ReportedChecksum {
+            crc32: value,
+            kind,
+            ..ReportedChecksum::default()
+        },
+        ChecksumAlgorithm::Crc32c => ReportedChecksum {
+            crc32c: value,
+            kind,
+            ..ReportedChecksum::default()
+        },
+        ChecksumAlgorithm::Crc64Nvme => ReportedChecksum {
+            crc64nvme: value,
+            kind,
+            ..ReportedChecksum::default()
+        },
+        ChecksumAlgorithm::Sha1 => ReportedChecksum {
+            sha1: value,
+            kind,
+            ..ReportedChecksum::default()
+        },
+        ChecksumAlgorithm::Sha256 => ReportedChecksum {
+            sha256: value,
+            kind,
+            ..ReportedChecksum::default()
+        },
+        _ => ReportedChecksum::default(),
+    }
 }
 
 /// The storage class a read reports, which S3 omits for the default class.
@@ -2555,6 +2607,9 @@ async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> 
         guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
     }
     let mut object = StoredObject::new(bytes, input.content_type.clone(), now);
+    if let Some(checksum) = input.checksum_spec {
+        object.checksum = Some(checksum);
+    }
     object.cache_control = input.cache_control.clone();
     object.content_disposition = input.content_disposition.clone();
     object.content_encoding = input.content_encoding.clone();
@@ -2576,6 +2631,8 @@ async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> 
     }
     Ok(Resp::new(dto::PutObjectOutput {
         size: Some(size),
+        checksum_spec: input.checksum_spec,
+        checksum_type: input.checksum_spec.and_then(reported_checksum_type),
         // `ETag` is a *required* member of this output, so leaving it at its default did not omit
         // the header — it emitted an empty one, which is worse than omitting it: a client that
         // stores the value it was handed records `""` as the digest of the object it just wrote.
@@ -2674,6 +2731,7 @@ impl Stub {
         )?;
         let body = object.body.get(slice.start..slice.end_exclusive).unwrap_or_default().to_vec();
         let status = slice.status;
+        let checksum = read_checksum(input.checksum_mode.as_ref(), slice.suppress_object_checksum, object.checksum);
         Ok(Resp::with_status(
             dto::GetObjectOutput {
                 content_length: Some(body.len() as i64),
@@ -2689,7 +2747,12 @@ impl Stub {
                 // which is what makes a resumed download able to notice the object changed under it.
                 e_tag: Some(entity_tag(&object.etag)?),
                 last_modified: Some(Timestamp::from_secs(object.last_modified)),
-                checksum_crc32: read_checksum(input.checksum_mode.as_ref(), slice.suppress_object_checksum, &object.body),
+                checksum_crc32: checksum.crc32,
+                checksum_crc32c: checksum.crc32c,
+                checksum_crc64nvme: checksum.crc64nvme,
+                checksum_sha1: checksum.sha1,
+                checksum_sha256: checksum.sha256,
+                checksum_type: checksum.kind,
                 cache_control: object.cache_control.clone(),
                 content_disposition: object.content_disposition.clone(),
                 content_encoding: object.content_encoding.clone(),
@@ -2781,6 +2844,7 @@ impl Stub {
         let slice = resolve_range(input.range.as_ref().map(|range| range.as_str()), None, input.part_number, object)?;
         let served = slice.end_exclusive.saturating_sub(slice.start);
         let status = slice.status;
+        let checksum = read_checksum(input.checksum_mode.as_ref(), slice.suppress_object_checksum, object.checksum);
         Ok(Resp::with_status(
             dto::HeadObjectOutput {
                 content_length: Some(served as i64),
@@ -2794,7 +2858,12 @@ impl Stub {
                 last_modified: Some(Timestamp::from_secs(object.last_modified)),
                 // The same rule as `GetObject`'s, for the same reason: a `HEAD` carries the head a
                 // `GET` would, so the two would otherwise disagree about the object's integrity.
-                checksum_crc32: read_checksum(input.checksum_mode.as_ref(), slice.suppress_object_checksum, &object.body),
+                checksum_crc32: checksum.crc32,
+                checksum_crc32c: checksum.crc32c,
+                checksum_crc64nvme: checksum.crc64nvme,
+                checksum_sha1: checksum.sha1,
+                checksum_sha256: checksum.sha256,
+                checksum_type: checksum.kind,
                 cache_control: object.cache_control.clone(),
                 content_disposition: object.content_disposition.clone(),
                 content_encoding: object.content_encoding.clone(),
@@ -4400,6 +4469,8 @@ impl Stub {
                 // rule, so the two spellings cannot drift.
                 let composite = ETag::from_part_digests(&digests)
                     .map_err(|_| HandlerError::internal_error("a part digest set has no entity tag"))?;
+                let stored_checksum = checksum_spec
+                    .or_else(|| ChecksumSpec::from_digest(ChecksumAlgorithm::Crc32, &crate::crc32::digest(&assembled)).ok());
                 let mut fixture = state
                     .lock()
                     .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
@@ -4407,6 +4478,7 @@ impl Stub {
                 let object = StoredObject {
                     body: assembled,
                     etag: composite.opaque_tag().to_owned(),
+                    checksum: stored_checksum,
                     last_modified: now,
                     // The part boundaries, recorded here because this is the only moment they exist:
                     // the upload is removed two lines below, and after that the object is the one
@@ -5569,22 +5641,41 @@ mod tests {
     /// unasked case is the one that would put a header on every read in the corpus.
     #[test]
     fn a_read_reports_no_checksum_unless_it_was_asked_and_whole() {
-        assert_eq!(read_checksum(Some(&dto::ChecksumMode::ENABLED), true, b"123456789"), None);
-        assert_eq!(read_checksum(None, false, b"123456789"), None);
-        assert_eq!(read_checksum(None, true, b"123456789"), None);
+        let stored = ChecksumSpec::from_digest(ChecksumAlgorithm::Crc32, &crate::crc32::digest(b"123456789"))
+            .expect("the published CRC32 digest has the right width");
+        assert_eq!(
+            read_checksum(Some(&dto::ChecksumMode::ENABLED), true, Some(stored)),
+            ReportedChecksum::default()
+        );
+        assert_eq!(read_checksum(None, false, Some(stored)), ReportedChecksum::default());
+        assert_eq!(read_checksum(None, true, Some(stored)), ReportedChecksum::default());
         // A value this build has no constant for is not `ENABLED` by resemblance.
-        assert_eq!(read_checksum(Some(&dto::ChecksumMode::custom("enabled")), false, b"123456789"), None);
+        assert_eq!(
+            read_checksum(Some(&dto::ChecksumMode::custom("enabled")), false, Some(stored)),
+            ReportedChecksum::default()
+        );
     }
 
     /// Positive — a whole read that asked reports the CRC-32 of the bytes it sends, base64 as the
     /// header carries it. Pinned against `crate::crc32`'s published check vector.
     #[test]
     fn a_whole_read_that_asked_reports_the_crc32_of_its_bytes() {
+        let check = |bytes: &[u8]| {
+            ChecksumSpec::from_digest(ChecksumAlgorithm::Crc32, &crate::crc32::digest(bytes))
+                .expect("a computed CRC32 digest has the right width")
+        };
         assert_eq!(
-            read_checksum(Some(&dto::ChecksumMode::ENABLED), false, b"123456789").as_deref(),
+            read_checksum(Some(&dto::ChecksumMode::ENABLED), false, Some(check(b"123456789")))
+                .crc32
+                .as_deref(),
             Some("y/Q5Jg==")
         );
-        assert_eq!(read_checksum(Some(&dto::ChecksumMode::ENABLED), false, b"").as_deref(), Some("AAAAAA=="));
+        assert_eq!(
+            read_checksum(Some(&dto::ChecksumMode::ENABLED), false, Some(check(b"")))
+                .crc32
+                .as_deref(),
+            Some("AAAAAA==")
+        );
     }
 
     /// Every spelling the exported parser accepts arrives as a tag rather than as a 400.

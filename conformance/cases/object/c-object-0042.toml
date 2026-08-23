@@ -1,0 +1,70 @@
+# c-object-0042 — CRC64NVME is not collapsed into a CRC32 response.
+
+[case]
+id = "c-object-0042"
+schema_version = 1
+title = "A CRC64NVME write is read back under the same algorithm"
+rationale = """
+Persisting only checksum text is insufficient because the same base64 string has no algorithm
+identity. This case uses the wider default SDK checksum so a store that always reports CRC32 is
+observable even when it retained some digest-shaped bytes."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["checksum", "object-attributes"]
+timeout_ms = 10000
+quirks = ["q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "CRC64NVME is a full-object checksum used by S3 when clients do not choose another algorithm."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "write-with-crc64nvme"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/checksum/crc64nvme"
+headers = { "x-amz-checksum-crc64nvme" = "jSnVw/bqjr4=" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-checksum-crc64nvme" = "jSnVw/bqjr4="
+"x-amz-checksum-type" = "FULL_OBJECT"
+
+[[exchanges]]
+name = "read-returns-crc64nvme"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/checksum/crc64nvme"
+headers = { "x-amz-checksum-mode" = "ENABLED" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_absent = ["x-amz-checksum-crc32", "x-amz-checksum-crc32c"]
+
+[exchanges.expect.headers_present]
+"x-amz-checksum-crc64nvme" = "jSnVw/bqjr4="
+"x-amz-checksum-type" = "FULL_OBJECT"
+
+[exchanges.expect.body]
+exact_utf8 = "hello world"

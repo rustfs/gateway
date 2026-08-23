@@ -1,0 +1,93 @@
+# c-object-0041 — a single-request checksum survives the write.
+
+[case]
+id = "c-object-0041"
+schema_version = 1
+title = "A CRC32C write returns and stores the checksum that verified its bytes"
+rationale = """
+Accepting an integrity header and then dropping it makes the write look protected while later reads
+cannot give an SDK the digest it needs to verify downloaded bytes. The write, head and read share
+one exact value here so a fixture that silently substitutes another algorithm cannot pass."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["checksum", "object-attributes"]
+timeout_ms = 10000
+quirks = ["q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "S3 stores a supplied object checksum and returns it when checksum mode is enabled on a later read."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "write-with-crc32c"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/checksum/crc32c"
+headers = { "x-amz-checksum-crc32c" = "yZRlqg==" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"etag" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\""
+"x-amz-checksum-crc32c" = "yZRlqg=="
+"x-amz-checksum-type" = "FULL_OBJECT"
+
+[[exchanges]]
+name = "head-returns-the-same-crc32c"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object/checksum/crc32c"
+headers = { "x-amz-checksum-mode" = "ENABLED" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_absent = ["x-amz-checksum-crc32", "x-amz-checksum-crc64nvme"]
+
+[exchanges.expect.headers_present]
+"etag" = "\"5eb63bbbe01eeed093cb22bb8f5acdc3\""
+"x-amz-checksum-crc32c" = "yZRlqg=="
+"x-amz-checksum-type" = "FULL_OBJECT"
+
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "get-returns-the-same-crc32c"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/checksum/crc32c"
+headers = { "x-amz-checksum-mode" = "ENABLED" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-checksum-crc32c" = "yZRlqg=="
+"x-amz-checksum-type" = "FULL_OBJECT"
+
+[exchanges.expect.body]
+exact_utf8 = "hello world"
