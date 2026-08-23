@@ -65,7 +65,7 @@ pub use codec::{
     ConditionConflictValue, ConditionalWildcardParseValue, ConditionalWildcardWriteValue, ConditionalWriteOrderValue,
     CopyValidatorScopeValue, DeleteAbsentPolicyValue, ErrorSecretFlowValue, EtagComparisonStrengthValue, HeaderToleranceValue,
     IfMatchAbsentPolicyValue, IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue, SourceRule,
-    TemporalRelationValue, UnknownElementPolicyValue, WireFormValue,
+    TemporalRelationValue, UnknownElementPolicyValue,
 };
 pub use contract_values::{
     AbsoluteOrUncPolicyValue, CaseFoldingValue, ClientIngressForbiddenCodepointsValue, ConditionFailureDetailValue, ContractRule,

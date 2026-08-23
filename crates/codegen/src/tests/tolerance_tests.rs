@@ -158,7 +158,7 @@ fn the_reading_carries_the_declared_format() {
 /// the real model rather than a fixture, because every step between the quirk and the file is a
 /// place the reference can be dropped without any test above noticing.
 #[test]
-fn the_object_family_reads_its_dates_tolerantly() {
+fn the_object_family_reads_dates_tolerantly_and_leaves_etags_to_the_operation_parser() {
     let artifacts = super::codegen_tests::artifacts();
     for operation in ["get_object", "head_object"] {
         let path = format!("codec/ops/{operation}.rs");
@@ -182,8 +182,12 @@ fn the_object_family_reads_its_dates_tolerantly() {
             assert!(!assignment.contains('?'), "{path} {header} still refuses: {assignment}");
         }
         assert!(
-            text.contains("value::etag_form(raw, \"IfMatch\")?"),
-            "{path}: the entity-tag condition must stay strict"
+            text.contains("input.if_match = Some(raw.to_owned());"),
+            "{path}: IfMatch must still reach the operation"
+        );
+        assert!(
+            !text.contains("value::etag_form(raw, \"IfMatch\")?"),
+            "{path}: the codec must not duplicate the operation-owned entity-tag parser"
         );
     }
 }

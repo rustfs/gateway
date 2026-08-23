@@ -22,9 +22,9 @@
 //!
 //! # The third twin, and why it is not a decoder feature
 //!
-//! [`super::bounds`] and [`super::forms`] are the same shape as this module: the frozen IR cannot
-//! say "this integer has a range" or "this string has a grammar", so the complete typed rule
-//! stays in the overlay.
+//! [`super::bounds`] and [`super::boolean`] are the same shape as this module: the frozen IR cannot
+//! say "this integer has a range" or "this boolean has a restricted spelling", so the complete
+//! typed rule stays in the overlay.
 //!
 //! This one exists for a rule the decoder is structurally unable to express. A decoder may say
 //! "this is not the document" and nothing else — `MalformedXML` is the only code the parser owns,

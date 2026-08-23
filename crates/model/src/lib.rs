@@ -59,7 +59,7 @@ pub use overlay::{
     IfMatchAbsentPolicyValue, IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue, MutationDimension,
     Overlay, PercentDecodePassesValue, ResidualEncodedDangerousValue, RuleClassification, ShadowingDecl, SourceRule,
     StoredLegacyControlPolicyValue, TemporalRelationValue, TraversalSegmentDelimitersValue, UnicodeNormalizationValue,
-    UnknownElementPolicyValue, ValidatorAuthorityValue, ValidatorReplaceabilityValue, WireFormValue,
+    UnknownElementPolicyValue, ValidatorAuthorityValue, ValidatorReplaceabilityValue,
 };
 pub use overlay::{
     ActualAllowOriginPolicyValue, ActualExposePolicyValue, ActualPreflightHeaderPolicyValue, ActualVaryPolicyValue,

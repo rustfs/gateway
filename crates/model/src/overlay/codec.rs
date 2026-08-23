@@ -32,15 +32,6 @@ use super::precondition_contract_inputs;
 use super::select_restore_contract_inputs;
 use super::{opt_str, required_str};
 
-/// A wire-form grammar selected by a quirk's typed codec value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WireFormValue {
-    /// An RFC 9110 entity tag.
-    EntityTag,
-    /// An opaque token previously issued by the service.
-    OpaqueToken,
-}
-
 /// A tolerant header reading selected by a quirk's typed codec value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeaderToleranceValue {
@@ -73,8 +64,6 @@ pub enum BooleanSpellingValue {
 /// editing generated files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodecValue {
-    /// Grammar used to validate a string-shaped wire value.
-    WireForm(WireFormValue),
     /// Inclusive bounds applied while decoding an integer.
     IntegerRange {
         /// Smallest accepted value.

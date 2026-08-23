@@ -158,14 +158,15 @@ operations it applies to.
 
 ```toml
 [[quirk]]
-id      = "q-etag-0020"          # q-<kebab-slug>; existing numbered ids remain valid
-kind    = "etag_render"          # free-form category; new behaviour must not need a schema bump
+id      = "q-part-number-0072"   # q-<kebab-slug>; existing numbered ids remain valid
+kind    = "bounded_range"        # free-form category; new behaviour must not need a schema bump
 classification = "mutable"       # mutable | contract; always explicit, never inferred from kind
-mutation_dimension = "wire_form"
-codec_value = "entity_tag"       # typed current value consumed by codegen
-target  = "Object.ETag"          # Operation, Shape, Shape.Member or Operation.Field
+mutation_dimension = "integer_range"
+codec_min = 1                     # typed current value consumed by codegen
+codec_max = 10000
+target  = "UploadPart.PartNumber" # Operation, Shape, Shape.Member or Operation.Field
 summary = "…"                    # your own sentence, at least 16 characters
-cases   = ["c-etag-0011"]        # conformance cases that would fail if the quirk were flipped
+cases   = ["c-mpu-0024"]         # conformance cases that would fail if the quirk were flipped
 
   [[quirk.evidence]]
   kind    = "s3s-issue"          # aws-doc | smithy-spec | rfc | s3s-issue | s3s-pr | capture | observed

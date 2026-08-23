@@ -64,7 +64,7 @@ use std::fmt::Write as _;
 use rustfs_gateway_model::UnknownElementPolicyValue;
 use rustfs_gateway_model::ir::{AttributeSource, Binding, Field, OperationIr, Shape, Type};
 
-use super::{CodecRules, attribute_name, bounds, carried_as_attribute, expr, forms, media, tolerance};
+use super::{CodecRules, attribute_name, bounds, carried_as_attribute, expr, media, tolerance};
 use crate::emit::dto::naming;
 use crate::emit::error_status::Constants;
 
@@ -252,7 +252,6 @@ fn one_field(
                         op,
                         false,
                         bounds::of(field, rules, op)?,
-                        forms::of(field, rules, op)?,
                         super::boolean::of(ir, field, rules)?,
                     )?,
                 ),
@@ -277,7 +276,6 @@ fn one_field(
                 op,
                 false,
                 bounds::of(field, rules, op)?,
-                forms::of(field, rules, op)?,
                 super::boolean::of(ir, field, rules)?,
             )?;
             let _ = writeln!(out, "        // {member} — query `{wire}`, percent-decoded once.");
@@ -561,7 +559,6 @@ fn xml_member(
                 operation,
                 true,
                 bounds::of(field, rules, operation)?,
-                forms::of(field, rules, operation)?,
                 super::boolean::of(ir, field, rules)?,
             )?;
             let links = list_source(*flattened, wrapper_name.as_deref(), &wire);
@@ -625,7 +622,6 @@ fn xml_member(
                 operation,
                 true,
                 bounds::of(field, rules, operation)?,
-                forms::of(field, rules, operation)?,
                 super::boolean::of(ir, field, rules)?,
             )?;
             let _ = writeln!(out, "{pad}if let Some(raw) = {node}.child_text(\"{wire}\") {{");
@@ -658,7 +654,6 @@ fn xml_attribute_member(
         &ir.operation,
         true,
         bounds::of(field, rules, &ir.operation)?,
-        forms::of(field, rules, &ir.operation)?,
         super::boolean::of(ir, field, rules)?,
     )?;
     let mut out = String::new();

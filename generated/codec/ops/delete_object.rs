@@ -69,7 +69,7 @@ impl OperationCodec for dto::DeleteObject {
         // IfMatch — header `if-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-match") {
             let raw = raw.as_ref();
-            input.if_match = Some(value::etag_form(raw, "IfMatch")?.to_owned());
+            input.if_match = Some(raw.to_owned());
         }
         // IfMatchLastModifiedTime — header `x-amz-if-match-last-modified-time`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-if-match-last-modified-time") {

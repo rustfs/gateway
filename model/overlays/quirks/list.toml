@@ -428,9 +428,7 @@ cases   = ["c-list-0016", "c-list-0044"]
 [[quirk]]
 id      = "q-token-form-0075"
 kind    = "wire_form"
-classification = "mutable"
-codec_value = "opaque_token"
-mutation_dimension = "wire_form"
+classification = "contract"
 target  = "ListObjectsV2.ContinuationToken"
 summary = "A cursor is a value this service minted, so one longer than anything it mints, one whose percent-decoded bytes are not text, and one spelling a parent traversal are all malformed input refused before the listing runs, rather than opaque bytes carried into whatever the listing does with them."
 cases   = ["c-list-0029", "c-list-0030", "c-list-0031"]

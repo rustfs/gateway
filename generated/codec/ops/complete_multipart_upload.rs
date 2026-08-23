@@ -83,12 +83,12 @@ impl OperationCodec for dto::CompleteMultipartUpload {
         // IfMatch — header `if-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-match") {
             let raw = raw.as_ref();
-            input.if_match = Some(value::etag_form(raw, "IfMatch")?.to_owned());
+            input.if_match = Some(raw.to_owned());
         }
         // IfNoneMatch — header `if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-none-match") {
             let raw = raw.as_ref();
-            input.if_none_match = Some(value::etag_form(raw, "IfNoneMatch")?.to_owned());
+            input.if_none_match = Some(raw.to_owned());
         }
         // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-algorithm") {

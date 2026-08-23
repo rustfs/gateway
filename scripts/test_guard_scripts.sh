@@ -16465,7 +16465,7 @@ QUIRK_LEDGER_DIAGNOSTICS=$(cat <<'DIAGEOF'
 mut_quirk_ledger_classification_count	q-timestamp-0012: unknown classification
 mut_quirk_ledger_duplicate_source	q-restore-header-absence-0127: multiple typed sources
 mut_quirk_ledger_typed_contract_proof_removed	ledger typed_contracts: expected 160, found 159
-mut_quirk_ledger_dimension_count	ledger dimensions: expected 178, found 177
+mut_quirk_ledger_dimension_count	ledger dimensions: expected 177, found 176
 mut_quirk_ledger_misbound_emitter_dimension	q-restore-header-absence-0127: expected one declared emitter binding, found 0
 mut_quirk_ledger_capability_exclusion	capability exclusions must remain typed contract sources
 mut_quirk_ledger_mutable_consumer	q-empty-0002: mutable source is claimed by no operation overlay
@@ -16557,7 +16557,7 @@ path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_quirk_ledger.sh \
-    'one protected record leaving the 100/160/88 classification ledger' mut_quirk_ledger_classification_count
+    'one protected record leaving the 97/160/91 classification ledger' mut_quirk_ledger_classification_count
 if ! python3 - "$QUIRK_LEDGER_PARSE_CACHE" "$SANDBOX/model/overlays/quirks/object.toml" <<'PYEOF'
 import hashlib
 import pathlib
@@ -16622,7 +16622,7 @@ path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_quirk_ledger.sh \
-    'the 178-dimension ledger collapsing one independent atom' mut_quirk_ledger_dimension_count
+    'the 177-dimension ledger collapsing one independent atom' mut_quirk_ledger_dimension_count
 
 mut_quirk_ledger_misbound_emitter_dimension() {
     python3 - <<'PYEOF'
@@ -17009,7 +17009,7 @@ mut_quirk_ledger_spec_id_set() {
     mv spec/quirks/q-empty-0002.toml spec/quirks/q-empty-0002.missing
 }
 expect_fail check_quirk_ledger.sh \
-    'one generated protected ID disappearing from the 98/160 typed set' mut_quirk_ledger_spec_id_set
+    'one generated protected ID disappearing from the 95/160 typed set' mut_quirk_ledger_spec_id_set
 
 mut_quirk_ledger_signature_host_consumer() {
     python3 - <<'PYEOF'

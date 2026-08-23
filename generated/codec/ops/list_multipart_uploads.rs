@@ -69,7 +69,7 @@ impl OperationCodec for dto::ListMultipartUploads {
         // UploadIdMarker — query `upload-id-marker`, percent-decoded once.
         if let Some(raw) = request.query("upload-id-marker") {
             let raw = raw.as_ref();
-            input.upload_id_marker = Some(value::token_form(raw, "UploadIdMarker")?.to_owned());
+            input.upload_id_marker = Some(raw.to_owned());
         }
         // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {

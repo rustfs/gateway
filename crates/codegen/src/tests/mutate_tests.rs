@@ -21,9 +21,7 @@
 //! Upstream: `crate::mutate`. Downstream: nothing.
 
 use rustfs_gateway_model::ir::OperationIr;
-use rustfs_gateway_model::{
-    CodecRule, CodecValue, HeaderToleranceValue, MutationDimension, UnknownElementPolicyValue, WireFormValue,
-};
+use rustfs_gateway_model::{CodecRule, CodecValue, HeaderToleranceValue, MutationDimension, UnknownElementPolicyValue};
 
 use super::codegen_tests::{artifacts, root};
 use crate::emit::quirk_toml::{ResolvedSource, SourceValue, resolve_at};
@@ -419,18 +417,14 @@ fn a_codec_integer_range_is_flipped_to_the_unbounded_default() {
 }
 
 #[test]
-fn a_wire_form_is_flipped_to_the_unvalidated_default() {
-    let mut rules = std::collections::BTreeMap::from([(
-        "q-token-form-0075".to_owned(),
-        CodecRule {
-            current: CodecValue::WireForm(WireFormValue::OpaqueToken),
-            mutation_dimension: MutationDimension::WireForm,
-        },
-    )]);
-    let mutation = plan_codec("q-token-form-0075", &rules["q-token-form-0075"]).expect("the form is plannable");
-
-    assert!(apply_codec(&mut rules, &mutation).expect("the writer accepts its own plan"));
-    assert!(!rules.contains_key("q-token-form-0075"), "absence selects the unvalidated string parser");
+fn a_contract_wire_form_has_no_codec_mutation_plan() {
+    let artifacts = super::codegen_tests::artifacts();
+    for id in ["q-etag-form-0074", "q-token-form-0075", "q-marker-form-0076"] {
+        assert!(
+            !artifacts.codec_rules.contains_key(id),
+            "{id} must not produce a duplicate codec mutation"
+        );
+    }
 }
 
 #[test]
@@ -473,11 +467,11 @@ fn n_the_codec_writer_refuses_a_stale_plan() {
 fn n_a_codec_value_and_its_dimension_must_agree() {
     let rule = CodecRule {
         current: CodecValue::MediaType("application/json".to_owned()),
-        mutation_dimension: MutationDimension::WireForm,
+        mutation_dimension: MutationDimension::IntegerRange,
     };
 
     let error = plan_codec("q-example", &rule).expect_err("a mismatched codec declaration must not be planned");
-    assert!(error.contains("media_type") && error.contains("wire_form"), "{error}");
+    assert!(error.contains("media_type") && error.contains("integer_range"), "{error}");
 }
 
 #[test]

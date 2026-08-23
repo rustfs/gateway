@@ -295,12 +295,12 @@ fn is_framing_or_body_size(reject: &WireReject) -> bool {
 /// Negative — the query budget is not below the ceiling the listing operations enforce on a
 /// cursor.
 ///
-/// The `c-list-0030` defect in one assertion. A 4 KiB continuation token has to reach the codec
-/// for the codec to be able to call it invalid; a budget under that length answers "too big" and
-/// the codec never runs. The number 2048 is `rustfs_gateway_core::codec::value::MAX_TOKEN_LEN`,
-/// restated in `crates/core/tests/limit_layering.rs` from the side that can see both crates.
+/// The `c-list-0030` defect in one assertion. A 4 KiB continuation token has to reach the operation
+/// for the operation to be able to call it invalid; a budget under that length answers "too big"
+/// and the operation never runs. The number 2048 is the operation-owned cursor ceiling, pinned to
+/// this derivation by `crates/core/tests/limit_layering.rs`.
 #[test]
-fn the_query_budget_leaves_room_for_a_cursor_the_codec_must_refuse() {
+fn the_query_budget_leaves_room_for_a_cursor_the_operation_must_refuse() {
     let limits = Limits::default();
     let refusable_cursor = 2 * 2048;
     let query = "list-type=2&continuation-token=".len() + refusable_cursor;

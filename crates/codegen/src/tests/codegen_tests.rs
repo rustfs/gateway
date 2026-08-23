@@ -84,19 +84,6 @@ fn c_cg_0003_operations_md_carries_three_reverse_indexes() {
 }
 
 #[test]
-fn codec_quirks_are_emitted_as_reviewable_spec_data() {
-    let artifacts = artifacts();
-    let (_, quirk) = artifacts
-        .files
-        .iter()
-        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-etag-form-0074.toml"))
-        .expect("the typed quirk table is generated");
-
-    assert!(quirk.contains("codec_value = \"entity_tag\""), "{quirk}");
-    assert!(quirk.contains("mutation_dimension = \"wire_form\""), "{quirk}");
-}
-
-#[test]
 fn a_source_rule_emits_current_values_from_the_lowered_ir() {
     let artifacts = artifacts();
     let (_, quirk) = artifacts

@@ -32,7 +32,7 @@ use bytes::Bytes;
 use http::{Method, Request, StatusCode};
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_types::dto;
-use rustfs_gateway_types::{BucketName, ETag, ErrorCode, ObjectKey, OpaqueString, RangeOutcome, Timestamp};
+use rustfs_gateway_types::{BucketName, ETag, ObjectKey, OpaqueString, RangeOutcome, Timestamp};
 
 use crate::codec::response::ResponseBody;
 use crate::codec::{MetaView, OperationCodec, RequestBody};
@@ -689,17 +689,17 @@ fn the_method_reaches_the_encoder_unchanged() {
 // ---------------------------------------------------------------------------------------------
 // Wire forms
 //
-// A member whose wire spelling is stricter than the type it is stored in. Each of these is one
-// overlay quirk resolved by `crates/codegen/src/emit/codec/forms.rs`; what is asserted here is
-// the answer a caller gets, which is the half that has to stay true when the emitter changes.
+// These values are opaque to the generated codec and validated by the operation that consumes
+// them. The assertions here pin that ownership boundary; the linked conformance cases pin the
+// end-to-end refusals.
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn n_refuses_a_conditional_header_whose_entity_tag_is_unterminated() {
+fn an_unterminated_conditional_header_reaches_the_operation_parser_unchanged() {
     let request = accepted("GET", "/photos/key", &[("if-match", "\"5d41402abc4b2a76b9719d911017c592")]);
     let view = MetaView::of(&request, TargetKind::Object).expect("view");
-    let error = dto::GetObject::decode(&view, RequestBody::None).expect_err("an unbalanced quote is not an entity tag");
-    assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+    let input = dto::GetObject::decode(&view, RequestBody::None).expect("the operation parser owns the entity-tag grammar");
+    assert_eq!(input.if_match.as_deref(), Some("\"5d41402abc4b2a76b9719d911017c592"));
 }
 
 #[test]
@@ -713,10 +713,9 @@ fn accepts_every_spelling_a_conditional_header_may_legitimately_carry() {
 }
 
 #[test]
-fn n_refuses_two_conditional_headers_rather_than_evaluating_one_of_them() {
-    // RFC 9110 §5.3: the two field lines are one value with a comma in it, and that value carries
-    // an embedded quote, which no entity tag may. The refusal is what stops a guarded write from
-    // landing on whichever of the caller's two conditions happened to arrive first.
+fn repeated_conditional_headers_reach_the_operation_parser_as_one_value() {
+    // RFC 9110 §5.3 joins the two field lines. Keeping the joined value is what lets the operation
+    // parser refuse it instead of evaluating whichever field line happened to arrive first.
     let request = accepted(
         "GET",
         "/photos/key",
@@ -726,29 +725,34 @@ fn n_refuses_two_conditional_headers_rather_than_evaluating_one_of_them() {
         ],
     );
     let view = MetaView::of(&request, TargetKind::Object).expect("view");
-    let error = dto::GetObject::decode(&view, RequestBody::None).expect_err("two conditions are not a choice");
-    assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+    let input = dto::GetObject::decode(&view, RequestBody::None).expect("the operation parser owns the entity-tag grammar");
+    assert_eq!(
+        input.if_match.as_deref(),
+        Some("\"5d41402abc4b2a76b9719d911017c592\", \"0000000000000000000000000000dead\"")
+    );
 }
 
 #[test]
-fn n_refuses_a_cursor_whose_percent_decoded_bytes_are_not_text() {
+fn a_non_text_cursor_reaches_the_token_parser_after_query_decoding() {
     let request = accepted("GET", "/conf-list?list-type=2&continuation-token=%FF%FE%00%01", &[]);
     let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
-    let error = dto::ListObjectsV2::decode(&view, RequestBody::None).expect_err("a token this service mints is text");
-    assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+    let input = dto::ListObjectsV2::decode(&view, RequestBody::None).expect("the token parser owns the token grammar");
+    assert_eq!(
+        input.continuation_token.as_ref().map(OpaqueString::as_str),
+        Some("\u{fffd}\u{fffd}\0\u{1}")
+    );
 }
 
 #[test]
-fn n_refuses_a_cursor_that_spells_a_parent_traversal() {
+fn a_traversal_shaped_cursor_reaches_the_token_parser_once_decoded() {
     for target in [
         "/conf-list?list-type=2&continuation-token=..%2F..%2Fetc%2Fpasswd",
         "/conf-list?list-type=2&continuation-token=%2E%2E%2F%2E%2E%2Fetc%2Fpasswd",
     ] {
         let request = accepted("GET", target, &[]);
         let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
-        let error = dto::ListObjectsV2::decode(&view, RequestBody::None)
-            .expect_err("both spellings are one value after the single decode");
-        assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+        let input = dto::ListObjectsV2::decode(&view, RequestBody::None).expect("the token parser owns the token grammar");
+        assert_eq!(input.continuation_token.as_ref().map(OpaqueString::as_str), Some("../../etc/passwd"));
     }
 }
 
@@ -763,15 +767,15 @@ fn a_cursor_derived_from_a_key_still_decodes() {
 }
 
 #[test]
-fn n_refuses_an_upload_id_marker_that_spells_a_parent_traversal() {
+fn a_traversal_shaped_upload_id_marker_reaches_the_operation_parser() {
     let request = accepted(
         "GET",
         "/conf-mpu?uploads&key-marker=listed-upload&upload-id-marker=..%2F..%2F..%2Fetc%2Fpasswd",
         &[],
     );
     let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
-    let error = dto::ListMultipartUploads::decode(&view, RequestBody::None).expect_err("a marker is not a path");
-    assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+    let input = dto::ListMultipartUploads::decode(&view, RequestBody::None).expect("the operation parser owns marker validation");
+    assert_eq!(input.upload_id_marker.as_deref(), Some("../../../etc/passwd"));
     // The key marker beside it is a key, not a token, and is left alone.
     let ordinary = accepted("GET", "/conf-mpu?uploads&key-marker=..%2Fkey", &[]);
     let view = MetaView::of(&ordinary, TargetKind::Bucket).expect("view");

@@ -22,9 +22,7 @@ use crate::error::{Error, Result};
 use crate::toml_lite::Toml;
 
 use super::MutationDimension;
-use super::codec::{
-    BooleanSpellingValue, CodecRule, CodecValue, HeaderToleranceValue, SourceRule, UnknownElementPolicyValue, WireFormValue,
-};
+use super::codec::{BooleanSpellingValue, CodecRule, CodecValue, HeaderToleranceValue, SourceRule, UnknownElementPolicyValue};
 use super::{opt_str, required_str};
 
 pub(super) fn source_rule(table: &Toml, id: &str) -> Result<Option<SourceRule>> {
@@ -84,16 +82,6 @@ pub(super) fn codec_rule(table: &Toml, id: &str) -> Result<Option<CodecRule>> {
     }
     let spelling = dimension.ok_or_else(|| Error::Overlay(format!("{what}: missing `mutation_dimension`")))?;
     let (current, mutation_dimension) = match spelling.as_str() {
-        "wire_form" => {
-            reject_range_keys(table, &what)?;
-            let spelling = required_str(table, "codec_value", &what)?;
-            let form = match spelling.as_str() {
-                "entity_tag" => WireFormValue::EntityTag,
-                "opaque_token" => WireFormValue::OpaqueToken,
-                _ => return Err(Error::Overlay(format!("{what}: unknown wire form `{spelling}`"))),
-            };
-            (CodecValue::WireForm(form), MutationDimension::WireForm)
-        }
         "integer_range" => {
             reject_value_key(table, &what)?;
             let min = required_i32(table, "codec_min", &what)?;
