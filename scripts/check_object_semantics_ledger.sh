@@ -70,7 +70,7 @@ requirements=(
     'c-obj-0036|negative|bound|conformance/cases/object/c-object-0026.toml::/exchanges/0/expect/error/code=InvalidDigest'
     'c-obj-0037|negative|bound|conformance/cases/object/c-object-0026.toml::/exchanges/1/expect/error/code=BadDigest'
     'c-obj-0038|negative|bound|conformance/cases/object/c-object-0013.toml::/expect/error/code=InvalidRequest'
-    'c-obj-0039|negative|blocked|rustfs/backlog#1680::x-amz-sdk-checksum-algorithm with no value and no trailer is refused by nothing in this repository, and a case pinning the refusal would be pinning a rule that has no implementation to fail'
+    'c-obj-0039|negative|bound|conformance/cases/object/c-object-0044.toml::/request/headers/x-amz-sdk-checksum-algorithm=CRC32;conformance/cases/object/c-object-0044.toml::/expect/error/code=InvalidRequest;conformance/cases/object/c-object-0044.toml::/expect/request_progress/body_fully_sent=False'
     'c-obj-0040|negative|bound|conformance/cases/object/c-object-0043.toml::/exchanges/0/expect/error/code=XAmzContentChecksumMismatch'
     'c-obj-0041|negative|bound|conformance/cases/object/c-object-0043.toml::/exchanges/0/expect/error/code=XAmzContentChecksumMismatch;conformance/cases/object/c-object-0043.toml::/exchanges/1/expect/error/code=BadDigest'
     'c-obj-0042|negative|bound|conformance/cases/object/c-object-0030.toml::/expect/status=411;conformance/cases/object/c-object-0030.toml::/expect/error/code=MissingContentLength;conformance/cases/object/c-object-0030.toml::/expect/connection_after=closed'
@@ -153,6 +153,7 @@ case_polarity=(
     'conformance/cases/object/c-object-0041.toml|positive'
     'conformance/cases/object/c-object-0042.toml|positive'
     'conformance/cases/object/c-object-0043.toml|negative'
+    'conformance/cases/object/c-object-0044.toml|negative'
     'conformance/cases/tagging/c-tagging-0019.toml|positive'
 )
 

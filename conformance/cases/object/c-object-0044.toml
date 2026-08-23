@@ -1,0 +1,55 @@
+# c-object-0044 — an SDK checksum selector must name a value that actually arrived.
+
+[case]
+id = "c-object-0044"
+schema_version = 1
+title = "A declared SDK checksum algorithm without its value is refused"
+rationale = """
+The SDK selector is a promise that the request carries the named checksum. Accepting the selector
+without either the matching value header or a declared trailer silently turns an integrity-protected
+upload into an unchecked one, so the contradiction must be rejected before the body is consumed."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["checksum", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity-upload.html"
+summary = "The SDK checksum algorithm header selects the matching checksum value or trailer carried by the upload."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "checksum/declared-without-value"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-object/checksum/declared-without-value"
+headers = { "content-type" = "text/plain", "x-amz-sdk-checksum-algorithm" = "CRC32" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+headers_absent = ["etag", "x-amz-version-id", "x-amz-checksum-crc32"]
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.request_progress]
+body_fully_sent = false
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidRequest</Code>"]
