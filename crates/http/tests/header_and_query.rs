@@ -26,7 +26,7 @@ mod support;
 use http::{HeaderName, Request, header::CONTENT_TYPE, header::HOST};
 use rustfs_gateway_http::{
     CanonicalHeadersError, LimitKind, Limits, MetadataReject, SignedHeaderList, SignedHeadersError, WireReject,
-    is_significant_header, validate_metadata_key, validate_metadata_value,
+    decode_metadata_value, encode_metadata_value, is_significant_header, validate_metadata_key, validate_metadata_value,
 };
 use support::{accept, accept_with, raw_value};
 
@@ -167,6 +167,22 @@ fn c_wire_0044b_a_metadata_value_that_decodes_cleanly_is_accepted() {
     assert_eq!(validate_metadata_value(b"=?utf-8?Q?hello_world?="), Ok(()));
     assert_eq!(validate_metadata_value(b"plain text"), Ok(()));
     assert_eq!(validate_metadata_key("x-amz-meta-note"), Ok(()));
+}
+
+#[test]
+fn c_wire_0044e_metadata_encoding_splits_only_at_unicode_boundaries() {
+    let original = format!("prefix-{}-suffix", "\u{4e2d}\u{6587}".repeat(20));
+    let encoded = encode_metadata_value(&original).expect("printable Unicode encodes");
+    for word in encoded.split(' ') {
+        assert!(word.len() <= 75, "RFC 2047 caps each encoded-word: {word}");
+    }
+    assert_eq!(decode_metadata_value(&encoded).as_deref(), Ok(original.as_str()));
+}
+
+#[test]
+fn c_wire_0044f_q_and_latin1_metadata_decode_to_unicode() {
+    assert_eq!(decode_metadata_value("=?ISO-8859-1?Q?caf=E9?=").as_deref(), Ok("café"));
+    assert_eq!(decode_metadata_value("plain").as_deref(), Ok("plain"));
 }
 
 #[test]
@@ -368,6 +384,42 @@ fn c_wire_0044b_a_metadata_value_whose_encoded_word_does_not_parse_is_rejected()
             Err(MetadataReject::MalformedEncodedWord),
             "value {value:?}"
         );
+    }
+}
+
+#[test]
+fn c_wire_0044c_a_metadata_value_with_noncanonical_base64_is_rejected() {
+    for value in [
+        &b"=?utf-8?B?YQ=?="[..],
+        b"=?utf-8?B?YQ===?=",
+        b"=?utf-8?B?YR==?=",
+        b"=?utf-8?B??=",
+    ] {
+        assert_eq!(
+            validate_metadata_value(value),
+            Err(MetadataReject::MalformedEncodedWord),
+            "value {value:?}"
+        );
+    }
+}
+
+#[test]
+fn c_wire_0044d_a_raw_or_encoded_tab_in_metadata_is_rejected() {
+    assert_eq!(validate_metadata_value(b"before\tafter"), Err(MetadataReject::ControlCharacterInValue));
+    assert_eq!(
+        validate_metadata_value(b"=?utf-8?Q?before=09after?="),
+        Err(MetadataReject::ControlCharacterAfterDecoding)
+    );
+    assert_eq!(
+        validate_metadata_value(b"=?utf-8?B?CQ==?="),
+        Err(MetadataReject::ControlCharacterAfterDecoding)
+    );
+}
+
+#[test]
+fn c_wire_0044g_unsupported_or_non_text_encoded_words_are_rejected() {
+    for value in ["=?UTF-16?B?YQ==?=", "=?UTF-8?B?/w==?=", "=?US-ASCII?B?w6k=?="] {
+        assert_eq!(decode_metadata_value(value), Err(MetadataReject::MalformedEncodedWord), "value {value:?}");
     }
 }
 

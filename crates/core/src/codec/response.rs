@@ -38,6 +38,7 @@
 //! answer over their own response type, and neither can disagree about what the answer is.
 
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
+use rustfs_gateway_http::encode_metadata_value;
 use rustfs_gateway_stream::ByteStream;
 
 use crate::codec::error::CodecError;
@@ -116,7 +117,15 @@ impl EncodedResponse {
         let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {
             return;
         };
-        let Ok(value) = HeaderValue::from_str(value) else {
+        let rendered = if prefix == rustfs_gateway_http::METADATA_PREFIX {
+            let Ok(rendered) = encode_metadata_value(value) else {
+                return;
+            };
+            rendered
+        } else {
+            std::borrow::Cow::Borrowed(value)
+        };
+        let Ok(value) = HeaderValue::from_str(&rendered) else {
             return;
         };
         self.headers.insert(name, value);

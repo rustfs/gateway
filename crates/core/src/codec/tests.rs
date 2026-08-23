@@ -38,6 +38,8 @@ use crate::codec::response::ResponseBody;
 use crate::codec::{MetaView, OperationCodec, RequestBody};
 use crate::route::TargetKind;
 
+mod metadata_and_url;
+
 /// An accepted request, owned so a `MetaView` can borrow it.
 fn accepted(method: &str, target: &str, headers: &[(&str, &str)]) -> WireRequest<()> {
     let mut builder = Request::builder()
@@ -605,24 +607,6 @@ fn n_leaves_every_member_alone_when_the_request_does_not_ask() {
     assert!(body.contains("<Key>with space.txt</Key>"), "{body}");
     assert!(body.contains("<Delimiter>/</Delimiter>"), "{body}");
     assert!(!body.contains('%'), "nothing is encoded when nothing asked for it: {body}");
-}
-
-#[test]
-fn n_encodes_a_key_xml_cannot_carry_even_though_nothing_asked() {
-    // A C0 control has no XML spelling, escaped or otherwise, so writing it produces a document
-    // the client rejects in full — one badly named object would hide the whole bucket.
-    let request = accepted("GET", "/conf-list?list-type=2", &[]);
-    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
-    let output = one_entry_listing("ctrl\u{1}key.txt", "b28354b543375bfa94dabaeda722927f");
-    let response = dto::ListObjectsV2::encode(output, &view, 200).expect("encodes");
-
-    let body = body_text(&response.body);
-    assert!(!body.contains('\u{1}'), "{body}");
-    assert!(body.contains("<Key>ctrl%01key.txt</Key>"), "{body}");
-    assert!(
-        body.contains("<Name>conf-list</Name>"),
-        "only the member that could not be written is touched: {body}"
-    );
 }
 
 #[test]

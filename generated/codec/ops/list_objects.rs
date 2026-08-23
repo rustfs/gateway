@@ -90,7 +90,19 @@ impl OperationCodec for dto::ListObjects {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
-        let url_encoding = value::url_encoding(request);
+        let mut output = output;
+        let force_url_encoding = value::requires_url_encoding(&output.prefix)
+            || value::requires_url_encoding(&output.delimiter)
+            || value::requires_url_encoding(&output.marker)
+            || value::requires_url_encoding(&output.next_marker)
+            || value::any_requires_url_encoding(&output.contents, |item| &item.key)
+            || value::any_requires_url_encoding(&output.common_prefixes, |item| &item.prefix);
+        let url_encoding = value::url_encoding_for_response(request, force_url_encoding);
+        output.encoding_type = if url_encoding == value::UrlEncoding::Requested {
+            Some(dto::EncodingType::URL)
+        } else {
+            None
+        };
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.open("ListBucketResult", Some(rustfs_gateway_xml::S3_XMLNS));
         {

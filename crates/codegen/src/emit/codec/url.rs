@@ -36,6 +36,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rustfs_gateway_model::ir::{Binding, OperationIr, Type};
 
+use crate::emit::dto::naming;
+
 /// The resolved answer for one operation.
 #[derive(Debug, Default)]
 pub struct Plan {
@@ -43,6 +45,8 @@ pub struct Plan {
     root: BTreeSet<String>,
     /// Per nested shape, the members of that shape that are encoded.
     shapes: BTreeMap<String, BTreeSet<String>>,
+    /// Generated predicates that detect a returned value which forces URL encoding.
+    force_checks: Vec<String>,
 }
 
 impl Plan {
@@ -69,6 +73,11 @@ impl Plan {
     #[must_use]
     pub fn encodes_shape_member(&self, shape: &str, member: &str) -> bool {
         self.shapes.get(shape).is_some_and(|members| members.contains(member))
+    }
+
+    /// The generated predicates that detect whether an encoded member forces URL encoding.
+    pub fn force_checks(&self) -> impl Iterator<Item = &str> {
+        self.force_checks.iter().map(String::as_str)
     }
 }
 
@@ -108,6 +117,12 @@ pub fn plan(ir: &OperationIr) -> Result<Plan, String> {
             return Err(unresolved(op, path, "its first segment is not a body member of the response"));
         };
         let Some(child) = tail else {
+            plan.force_checks.push(scalar_force_check(
+                &format!("output.{}", naming::field_name(&field.name)),
+                &field.ty,
+                op,
+                path,
+            )?);
             plan.root.insert(head.to_owned());
             continue;
         };
@@ -117,12 +132,38 @@ pub fn plan(ir: &OperationIr) -> Result<Plan, String> {
         let Some(shape) = ir.shapes.get(shape_name) else {
             return Err(unresolved(op, path, "the shape its first segment names is not in the IR"));
         };
-        if !shape.fields.iter().any(|f| f.name == child) {
+        let Some(child_field) = shape.fields.iter().find(|f| f.name == child) else {
             return Err(unresolved(op, path, "its second segment is not a member of that shape"));
-        }
+        };
+        let root_source = format!("output.{}", naming::field_name(&field.name));
+        let child_source = format!("item.{}", naming::field_name(&child_field.name));
+        let child_check = scalar_force_check(&child_source, &child_field.ty, op, path)?;
+        let force_check = match &field.ty {
+            Type::List { .. } => format!(
+                "value::any_requires_url_encoding(&{root_source}, |item| &item.{})",
+                naming::field_name(&child_field.name)
+            ),
+            Type::Structure(_) if field.required => scalar_force_check(
+                &format!("{root_source}.{}", naming::field_name(&child_field.name)),
+                &child_field.ty,
+                op,
+                path,
+            )?,
+            Type::Structure(_) => format!("{root_source}.as_ref().is_some_and(|item| {child_check})"),
+            _ => return Err(unresolved(op, path, "its first segment has no scannable nested value")),
+        };
+        plan.force_checks.push(force_check);
         plan.shapes.entry(shape_name.to_owned()).or_default().insert(child.to_owned());
     }
     Ok(plan)
+}
+
+/// Renders the runtime predicate for one scalar that can be percent-encoded.
+fn scalar_force_check(source: &str, ty: &Type, operation: &str, path: &str) -> Result<String, String> {
+    if !matches!(ty, Type::String | Type::OpaqueString | Type::ObjectKey) {
+        return Err(unresolved(operation, path, "its final member is not string-shaped"));
+    }
+    Ok(format!("value::requires_url_encoding(&{source})"))
 }
 
 /// The one failure shape, so every version of it reads the same way.

@@ -35,6 +35,16 @@ bucket = "conf-list-odd"
 key = "ctrl\u0001key.txt"
 body = { utf8 = "c" }
 
+[[setup.objects]]
+bucket = "conf-list-odd"
+key = "del\u007fkey.txt"
+body = { utf8 = "d" }
+
+[[setup.objects]]
+bucket = "conf-list-odd"
+key = "with space.txt"
+body = { utf8 = "s" }
+
 [request]
 method = "GET"
 target = "/conf-list-odd?list-type=2"
@@ -45,7 +55,8 @@ kind = "response"
 status = 200
 
 [expect.body]
-not_contains_utf8 = ["\u0001"]
+contains_utf8 = ["<Key>ctrl%01key.txt</Key>", "<Key>del%7Fkey.txt</Key>", "<Key>with%20space.txt</Key>", "<EncodingType>url</EncodingType>"]
+not_contains_utf8 = ["\u0001", "\u007f"]
 
 [expect.body.xml]
 root = "ListBucketResult"

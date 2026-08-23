@@ -2695,8 +2695,8 @@ from pathlib import Path
 
 path = Path("scripts/check_object_semantics_ledger.sh")
 text = path.read_text()
-old = "    'c-obj-0011|positive|blocked|rustfs/backlog#1680::"
-new = "    'c-obj-0011|positive|blocked|someone-will-do-it::"
+old = "    'c-obj-0015|positive|blocked|rustfs/backlog#1680::"
+new = "    'c-obj-0015|positive|blocked|someone-will-do-it::"
 if text.count(old) != 1:
     raise SystemExit("blocked-row owner mutation subject is not unique")
 path.write_text(text.replace(old, new, 1))
@@ -2723,6 +2723,115 @@ probe_object_ledger_guard_missing_python() {
     fi
 }
 probe_object_ledger_guard_missing_python
+
+# -- check_response_encoding_ledger.sh -----------------------------------------------------------
+
+mut_response_encoding_ledger_row_deleted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_response_encoding_ledger.sh")
+text = path.read_text()
+line = "    'c-enc-0008|positive|bound|conformance/cases/copy/c-copy-0038.toml::/expect/status=200;conformance/cases/copy/c-copy-0038.toml::/expect/error/code=NoSuchKey;conformance/cases/copy/c-copy-0038.toml::/expect/headers_absent/3=trailer'\n"
+if text.count(line) != 1:
+    raise SystemExit("response-encoding row mutation subject is not unique")
+path.write_text(text.replace(line, "", 1))
+PYEOF
+}
+expect_fail_self_mutation check_response_encoding_ledger.sh \
+    'one of the 39 response-encoding mappings being deleted' \
+    mut_response_encoding_ledger_row_deleted
+
+mut_response_encoding_ledger_function_misspelled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_response_encoding_ledger.sh")
+text = path.read_text()
+old = "test fn a_head_keeps_the_headers_a_get_would_have_carried"
+if text.count(old) != 1:
+    raise SystemExit("response-encoding function mutation subject is not unique")
+path.write_text(text.replace(old, "test fn a_head_keeps_only_a_decoy", 1))
+PYEOF
+}
+expect_fail_self_mutation check_response_encoding_ledger.sh \
+    'a mapped Rust test naming a nonexistent function' \
+    mut_response_encoding_ledger_function_misspelled
+
+mut_response_encoding_evidence_only_in_comment_and_string() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/codec/tests/metadata_and_url.rs")
+text = path.read_text()
+name = "metadata_encoded_words_are_decoded_for_storage_and_encoded_again_on_return"
+old = f"fn {name}("
+if text.count(old) != 1:
+    raise SystemExit("response-encoding decoy mutation subject is not unique")
+text = text.replace(old, f"fn removed_{name}(", 1)
+text += f'\n// #[test] fn {name}() {{}}\nconst RESPONSE_ENCODING_DECOY: &str = "#[test] fn {name}() {{}}";\n'
+path.write_text(text)
+PYEOF
+}
+expect_fail check_response_encoding_ledger.sh \
+    'a mapped test name surviving only in a comment and string' \
+    mut_response_encoding_evidence_only_in_comment_and_string
+
+mut_response_encoding_test_cfg_disabled() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/pipeline.rs")
+text = path.read_text()
+old = "#[tokio::test]\nasync fn a_not_modified_refusal_carries_neither_content_nor_a_framing_header()"
+new = "#[cfg(any())]\n#[tokio::test]\nasync fn a_not_modified_refusal_carries_neither_content_nor_a_framing_header()"
+if text.count(old) != 1:
+    raise SystemExit("response-encoding cfg mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_response_encoding_ledger.sh \
+    'a mapped response test being cfg-disabled' \
+    mut_response_encoding_test_cfg_disabled
+
+mut_response_encoding_raw_writer_exported() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/lib.rs")
+text = path.read_text()
+text += "\npub struct ResponseWriter;\nimpl ResponseWriter { pub fn write_raw(&self, _bytes: &[u8]) {} }\n"
+path.write_text(text)
+PYEOF
+}
+expect_fail check_response_encoding_ledger.sh \
+    'a public raw response-writer escape hatch' \
+    mut_response_encoding_raw_writer_exported
+
+mut_response_encoding_trybuild_glob_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/compile_fail.rs")
+text = path.read_text()
+old = '    cases.compile_fail("tests/compile_fail/committed_*.rs");'
+if text.count(old) != 1:
+    raise SystemExit("response-encoding trybuild mutation subject is not unique")
+path.write_text(text.replace(old, '    cases.compile_fail("tests/compile_fail/removed_*.rs");', 1))
+PYEOF
+}
+expect_fail check_response_encoding_ledger.sh \
+    'the deferred-operation trybuild fixture leaving the harness' \
+    mut_response_encoding_trybuild_glob_removed
+
+mut_response_encoding_block_loses_owner() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("scripts/check_response_encoding_ledger.sh")
+text = path.read_text()
+old = "c-enc-0021|negative|blocked|rustfs/backlog#1701::"
+if text.count(old) != 1:
+    raise SystemExit("response-encoding block owner mutation subject is not unique")
+path.write_text(text.replace(old, "c-enc-0021|negative|blocked|unowned::", 1))
+PYEOF
+}
+expect_fail_self_mutation check_response_encoding_ledger.sh \
+    'a blocked response rule losing its owning issue' \
+    mut_response_encoding_block_loses_owner
 
 probe_scalar_case_guard_missing_python() {
     local output rc=0 tool_path

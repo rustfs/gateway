@@ -137,7 +137,7 @@ impl OperationCodec for dto::PutObject {
             input.write_offset_bytes = Some(value::long(raw, "WriteOffsetBytes")?);
         }
         // Metadata — every header under `x-amz-meta-`.
-        input.metadata = value::prefixed_map(request, "x-amz-meta-");
+        input.metadata = value::metadata_map(request, "x-amz-meta-", "Metadata")?;
         // ServerSideEncryption — header `x-amz-server-side-encryption`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption") {
             let raw = raw.as_ref();

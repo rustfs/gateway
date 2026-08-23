@@ -69,16 +69,13 @@ fn c_name_n003_keys_are_never_normalised() {
 
 #[test]
 fn c_name_n004_control_characters_force_url_encoding() {
-    for key in ["a\u{1}b", "a\u{7}b", "a\u{1f}b"] {
+    for key in ["a\tb", "a\nb", "a\rb", "a\u{1}b", "a\u{7}b", "a\u{1f}b", "a\u{7f}b"] {
         assert!(
             ObjectKey::new(key).expect("legal key").needs_url_encoding(),
-            "{key:?} has no XML spelling at all, escaped or otherwise"
+            "{key:?} is in the S3 control range that listings force to url encoding"
         );
     }
-    // The three characters XML *can* carry out of the C0 block do not force anything.
-    for key in ["a\tb", "a\nb", "a\rb", "a b"] {
-        assert!(!ObjectKey::new(key).expect("legal key").needs_url_encoding(), "{key:?}");
-    }
+    assert!(!ObjectKey::new("a b").expect("legal key").needs_url_encoding());
     // `&` and `<` used to be asserted here as forcing encoding. They are XML-representable, the
     // writer escapes them, and `conformance/cases/list/c-list-0036` pins that a key carrying `&`,
     // `<`, `>` and `"` comes back escaped rather than percent-encoded. The original assertion

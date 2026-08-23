@@ -352,6 +352,7 @@ async fn a_response_filter_cannot_leave_a_content_length_that_overstates_the_bod
     assert_eq!(response.status(), http::StatusCode::OK);
     assert_eq!(response.body().len(), 2);
     assert_eq!(header_of(&response, "content-length"), Some("2"));
+    assert_eq!(header_of(&response, "transfer-encoding"), None);
 }
 
 /// Negative — the framework's own four headers are written after the seam, so a filter cannot take

@@ -30,6 +30,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+use rustfs_gateway_http::decode_metadata_value;
 use rustfs_gateway_types::{
     BucketName, ChecksumError, ChecksumSpec, ContentMd5, ETag, ErrorCode, EtagRender, ObjectKey, OpaqueString, RangeSpec,
     Timestamp, TimestampFormat, is_xml_representable,
@@ -337,6 +338,56 @@ pub fn url_encoding(request: &MetaView<'_>) -> UrlEncoding {
     }
 }
 
+pub(crate) fn url_encoding_for_response(request: &MetaView<'_>, forced: bool) -> UrlEncoding {
+    if forced {
+        UrlEncoding::Requested
+    } else {
+        url_encoding(request)
+    }
+}
+
+/// Whether one listing member forces `encoding-type=url`, including C0 controls and DEL.
+#[must_use]
+pub fn needs_url_encoding(value: &str) -> bool {
+    !is_xml_representable(value) || value.chars().any(|ch| ch <= '\u{1f}' || ch == '\u{7f}')
+}
+
+pub(crate) trait UrlEncodingValue {
+    fn requires_url_encoding(&self) -> bool;
+}
+
+impl UrlEncodingValue for String {
+    fn requires_url_encoding(&self) -> bool {
+        needs_url_encoding(self)
+    }
+}
+
+impl UrlEncodingValue for OpaqueString {
+    fn requires_url_encoding(&self) -> bool {
+        needs_url_encoding(self.as_str())
+    }
+}
+
+impl UrlEncodingValue for ObjectKey {
+    fn requires_url_encoding(&self) -> bool {
+        self.needs_url_encoding()
+    }
+}
+
+impl<T: UrlEncodingValue> UrlEncodingValue for Option<T> {
+    fn requires_url_encoding(&self) -> bool {
+        self.as_ref().is_some_and(UrlEncodingValue::requires_url_encoding)
+    }
+}
+
+pub(crate) fn requires_url_encoding<T: UrlEncodingValue>(value: &T) -> bool {
+    value.requires_url_encoding()
+}
+
+pub(crate) fn any_requires_url_encoding<T, V: UrlEncodingValue>(values: &[T], field: impl Fn(&T) -> &V) -> bool {
+    values.iter().any(|value| field(value).requires_url_encoding())
+}
+
 /// The single encoding pass, shared by both renderers below.
 ///
 /// `rustfs_gateway_sig::percent_encode` rather than a second implementation: it is already the
@@ -354,7 +405,7 @@ fn percent_encoded(value: &str) -> Cow<'_, str> {
 /// chose, so a caller can put a byte in it that has no XML spelling.
 #[must_use]
 pub fn url_encoded(value: &str, encoding: UrlEncoding) -> Cow<'_, str> {
-    if encoding == UrlEncoding::Requested || !is_xml_representable(value) {
+    if encoding == UrlEncoding::Requested || needs_url_encoding(value) {
         return percent_encoded(value);
     }
     Cow::Borrowed(value)
@@ -525,6 +576,25 @@ pub fn prefixed_map(request: &MetaView<'_>, prefix: &'static str) -> BTreeMap<St
     request
         .headers_with_prefix(prefix)
         .map(|(suffix, value)| (suffix.to_owned(), value.to_owned()))
+        .collect()
+}
+
+/// Collects and RFC 2047-decodes every user-metadata header before storage sees the map.
+///
+/// # Errors
+/// [`CodecError`] when an accepted value cannot be decoded.
+pub fn metadata_map(
+    request: &MetaView<'_>,
+    prefix: &'static str,
+    member: &'static str,
+) -> Result<BTreeMap<String, String>, CodecError> {
+    request
+        .headers_with_prefix(prefix)
+        .map(|(suffix, value)| {
+            decode_metadata_value(value)
+                .map(|decoded| (suffix.to_owned(), decoded.into_owned()))
+                .map_err(|_| unusable(member))
+        })
         .collect()
 }
 
