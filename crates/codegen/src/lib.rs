@@ -318,6 +318,10 @@ pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[
     ));
     files.push((out.generated_dir.join("routes.rs"), emit::rust_files::routes(&lowered.operations)));
     files.push((
+        out.generated_dir.join("subresource_bits.rs"),
+        emit::rust_files::subresource_bits(&lowered.routing_query_keys).map_err(Error::Policy)?,
+    ));
+    files.push((
         out.generated_dir.join("route_shadowing.rs"),
         emit::rust_files::route_shadowing(&overlay.shadowing),
     ));

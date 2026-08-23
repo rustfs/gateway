@@ -14,33 +14,34 @@
 
 //! Every query key the route table routes on, as one bit each.
 //!
-//! Responsible for: [`SubresourceBits`] — assigning a bit to each routing query key and reducing a
-//! request's query string to a `u64` in one pass.
+//! Responsible for: [`SubresourceBits`] — validating that every standard selector uses the
+//! codegen-owned bit assignment and exposing that assignment to route compilation.
 //! NOT responsible for: matching (`selector`), or the value dimension — `list-type=2` sets the
 //! `list-type` bit and its value is still checked by a predicate, because a bitmap cannot hold a
 //! value.
-//! Upstream: `selector`, `rustfs-gateway-http`'s `QueryView`. Downstream: `compiled`.
+//! Upstream: `selector`, `rustfs-gateway-http`'s generated bit table. Downstream: `compiled`.
 //!
-//! # The table is its own source
+//! # Codegen is the only source
 //!
 //! The obvious implementation is a hand-written list of the forty-odd S3 subresource keywords,
 //! compiled into a perfect hash. The failure mode of that design is drift: the list and the route
 //! table are edited by different people at different times, and a key that is missing from the
 //! list silently stops contributing to the mask, which silently changes routing.
 //!
-//! So the keys are *derived from the route table itself* at compile time. There is no second list
-//! to keep in sync, a key cannot be added by hand without a selector that uses it, and the
-//! sixty-four-bit ceiling becomes a real, testable failure ([`CompileError::TooManySubresourceKeys`])
-//! rather than a silent truncation.
+//! Codegen extracts the standard keys from the lowered selectors and emits the PHF table consumed
+//! by the HTTP query index. Route compilation validates every standard selector against that
+//! authority. Third-party operations may introduce keys codegen cannot know; those remain residual
+//! predicates and take the slower, semantics-preserving path.
 //!
-//! # Why binary search and not a perfect hash
+//! # Why this type still stores keys
 //!
-//! `phf` is not a workspace dependency and this task may not add one. A sorted table of at most
-//! sixty-four short keys is six comparisons at worst, allocates nothing, and — unlike a perfect
-//! hash — needs no build script. If the key count ever approaches the ceiling, revisiting this is
-//! a measurement, not a rewrite: the interface is two methods.
+//! Compilation and explanations need to report which keys this particular table routes on. The
+//! sorted slice serves that startup-only purpose; request lookup uses the PHF-derived mask already
+//! stored in `QueryIndex` and never searches this slice.
 
-use rustfs_gateway_http::QueryView;
+use rustfs_gateway_http::subresource_bit;
+
+use crate::op::is_standard_operation_name;
 
 use super::selector::RouteEntry;
 
@@ -60,6 +61,11 @@ pub enum CompileError {
         count: usize,
         /// The first key that did not fit, for the operator who has to act on this.
         overflow: &'static str,
+    },
+    /// A selector key is absent from the codegen-owned PHF table.
+    UnknownSubresourceKey {
+        /// The selector key codegen failed to emit.
+        key: &'static str,
     },
     /// A selector names a method outside the closed HTTP vocabulary the compiled table indexes.
     UnroutableMethod {
@@ -84,6 +90,10 @@ impl std::fmt::Display for CompileError {
                  subresource mask (first key over the line: {overflow:?}); widen the mask to u128 or segment it, \
                  do not drop keys"
             ),
+            Self::UnknownSubresourceKey { key } => write!(
+                f,
+                "route selector key {key:?} is absent from the generated subresource bit table; regenerate from the lowered selectors"
+            ),
             Self::UnroutableMethod { op_name, method } => {
                 write!(f, "{op_name} routes on method {method}, which the compiled table does not index")
             }
@@ -100,26 +110,36 @@ impl std::error::Error for CompileError {}
 #[derive(Clone, Debug, Default)]
 pub struct SubresourceBits {
     keys: Box<[(&'static str, u8)]>,
+    active_mask: u64,
 }
 
 impl SubresourceBits {
-    /// Assigns a bit to every query key any selector in the table mentions.
+    /// Collects the generated bit for every standard query key the table routes on.
     ///
     /// # Errors
     ///
     /// [`CompileError::TooManySubresourceKeys`] when the table routes on more than
-    /// [`MAX_SUBRESOURCE_KEYS`] distinct keys.
+    /// [`MAX_SUBRESOURCE_KEYS`] distinct generated keys, or
+    /// [`CompileError::UnknownSubresourceKey`] when a standard selector is absent from codegen.
     pub fn derive(entries: &[RouteEntry]) -> Result<Self, CompileError> {
-        let mut keys: Vec<&'static str> = entries
-            .iter()
-            .flat_map(|entry| {
-                entry
-                    .selector
-                    .predicates()
-                    .iter()
-                    .filter_map(super::selector::Predicate::query_key)
-            })
-            .collect();
+        let mut keys = Vec::new();
+        for entry in entries {
+            for key in entry
+                .selector
+                .predicates()
+                .iter()
+                .filter_map(super::selector::Predicate::query_key)
+            {
+                let mask = subresource_bit(key);
+                if mask == 0 {
+                    if is_standard_operation_name(entry.op_name) {
+                        return Err(CompileError::UnknownSubresourceKey { key });
+                    }
+                    continue;
+                }
+                keys.push(key);
+            }
+        }
         keys.sort_unstable();
         keys.dedup();
         if keys.len() > MAX_SUBRESOURCE_KEYS {
@@ -128,13 +148,17 @@ impl SubresourceBits {
                 overflow: keys.get(MAX_SUBRESOURCE_KEYS).copied().unwrap_or(""),
             });
         }
-        let numbered = keys
-            .into_iter()
-            .enumerate()
-            .map(|(index, key)| (key, u8::try_from(index).unwrap_or(0)))
-            .collect::<Vec<_>>();
+        let mut numbered = Vec::with_capacity(keys.len());
+        let mut active_mask = 0u64;
+        for key in keys {
+            let mask = subresource_bit(key);
+            let bit = u8::try_from(mask.trailing_zeros()).unwrap_or(0);
+            numbered.push((key, bit));
+            active_mask |= mask;
+        }
         Ok(Self {
             keys: numbered.into_boxed_slice(),
+            active_mask,
         })
     }
 
@@ -156,7 +180,7 @@ impl SubresourceBits {
         &self.keys
     }
 
-    /// The single-bit mask for a key, or zero when the table does not route on it.
+    /// The single-bit mask for a generated key, or zero for an inactive or third-party key.
     ///
     /// A key with no bit is inert by construction: no selector mentions it, so it cannot change
     /// which operation is selected. That is what makes `?x-id=PutObject` and the six pagination
@@ -172,20 +196,9 @@ impl SubresourceBits {
         }
     }
 
-    /// The mask of one request's query string.
-    ///
-    /// One pass over the already-indexed parameters, no allocation. A request with no query at all
-    /// does not even enter the loop, which is the shape ninety-five percent of data-plane traffic
-    /// has.
+    /// Keeps only generated bits that this compiled table has selectors for.
     #[must_use]
-    pub fn mask_of(&self, query: QueryView<'_>) -> u64 {
-        if self.keys.is_empty() {
-            return 0;
-        }
-        let mut mask = 0u64;
-        for (key, _) in query.iter() {
-            mask |= self.mask_for(key);
-        }
-        mask
+    pub const fn restrict(&self, mask: u64) -> u64 {
+        mask & self.active_mask
     }
 }

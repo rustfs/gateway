@@ -64,6 +64,16 @@ fn c_cg_0004_two_runs_produce_identical_bytes() {
 }
 
 #[test]
+fn routing_query_bits_are_generated_from_the_lowered_selectors() {
+    let text = body(&artifacts(), "generated/subresource_bits.rs");
+    assert!(text.contains("pub(crate) static SUBRESOURCE_BITS: phf::Map"), "{text}");
+    assert!(text.contains("\"analytics\" =>"), "{text}");
+    assert!(text.contains("\"id\" =>"), "{text}");
+    assert!(text.contains("\"list-type\" =>"), "{text}");
+    assert!(!text.contains("\"prefix\" =>"), "a non-selector query key must not consume a bit");
+}
+
+#[test]
 fn c_cg_0003_operations_md_carries_three_reverse_indexes() {
     let text = body(&artifacts(), "OPERATIONS.md");
     for heading in [

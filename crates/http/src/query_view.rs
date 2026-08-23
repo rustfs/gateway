@@ -38,6 +38,18 @@ use crate::limits::{LimitKind, Limits};
 use crate::reject::WireReject;
 use crate::text::contains_forbidden_control;
 
+mod generated {
+    include!("../../../generated/subresource_bits.rs");
+}
+
+const _: () = assert!(generated::SUBRESOURCE_COUNT <= u64::BITS as usize);
+
+/// Returns the generated routing bit for one query key, or zero when no route selector uses it.
+#[must_use]
+pub fn subresource_bit(key: &str) -> u64 {
+    generated::SUBRESOURCE_BITS.get(key).copied().unwrap_or(0)
+}
+
 /// How many parameters an index holds before it reaches for the heap.
 const INLINE_PARAMS: usize = 8;
 
@@ -94,6 +106,7 @@ struct Param {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct QueryIndex {
     params: SmallVec<[Param; INLINE_PARAMS]>,
+    subresource_mask: u64,
 }
 
 impl QueryIndex {
@@ -120,6 +133,7 @@ impl QueryIndex {
         }
 
         let mut params: SmallVec<[Param; INLINE_PARAMS]> = SmallVec::new();
+        let mut subresource_mask = 0u64;
         let mut offset = 0usize;
         for segment in raw.split('&') {
             let segment_start = offset;
@@ -148,6 +162,7 @@ impl QueryIndex {
             let key_end = to_offset(segment_start.saturating_add(key.len()))?;
             let value_start = to_offset(segment_start.saturating_add(value_start_relative))?;
             let value_end = to_offset(segment_start.saturating_add(segment.len()))?;
+            subresource_mask |= subresource_bit(key);
             params.push(Param {
                 key_start,
                 key_end,
@@ -155,7 +170,10 @@ impl QueryIndex {
                 value_end,
             });
         }
-        Ok(Self { params })
+        Ok(Self {
+            params,
+            subresource_mask,
+        })
     }
 
     /// How many parameters were indexed.
@@ -176,6 +194,12 @@ impl QueryIndex {
     #[must_use]
     pub fn is_inline(&self) -> bool {
         !self.params.spilled()
+    }
+
+    /// The generated routing-key mask formed while this index scanned the query string.
+    #[must_use]
+    pub const fn subresource_mask(&self) -> u64 {
+        self.subresource_mask
     }
 }
 
@@ -241,6 +265,12 @@ impl<'a> QueryView<'a> {
         self.index.is_inline()
     }
 
+    /// The routing-key mask formed by the underlying index.
+    #[must_use]
+    pub const fn subresource_mask(&self) -> u64 {
+        self.index.subresource_mask()
+    }
+
     /// The first value for a name, still percent-encoded.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&'a str> {
@@ -269,5 +299,22 @@ impl<'a> QueryView<'a> {
             .params
             .iter()
             .map(move |param| (slice(raw, param.key_start, param.key_end), slice(raw, param.value_start, param.value_end)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{QueryIndex, subresource_bit};
+    use crate::Limits;
+
+    #[test]
+    fn routing_mask_is_formed_during_the_only_query_scan() {
+        let parsed = QueryIndex::parse("analytics&id=x&prefix=ignored", &Limits::default());
+        assert!(parsed.is_ok(), "the fixture query must parse");
+        let Some(index) = parsed.ok() else {
+            return;
+        };
+        assert_eq!(index.subresource_mask(), subresource_bit("analytics") | subresource_bit("id"));
+        assert_eq!(subresource_bit("prefix"), 0, "non-selector keys must not consume a bit");
     }
 }
