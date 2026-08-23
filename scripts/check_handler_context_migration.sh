@@ -25,7 +25,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 expected = {
     "crates/conformance/src/fixture/handlers_bucket.rs": 40,
-    "crates/conformance/src/fixture/handlers_object.rs": 31,
+    "crates/conformance/src/fixture/handlers_object.rs": 32,
     "crates/core/examples/dialect_overlay.rs": 1,
     "crates/core/tests/codec_binding.rs": 3,
     "crates/core/tests/dialect.rs": 2,
@@ -309,7 +309,7 @@ for relative, wanted in expected.items():
             fail(f"{relative} Handler impl {ordinal} drops or bypasses the migration context source")
     total += len(implementations)
 
-if total != 122:
-    fail(f"reviewed migration census is {total}, expected 122")
-print("check_handler_context_migration: 122 reviewed Handler impls preserve their context migration mode")
+if total != 123:
+    fail(f"reviewed migration census is {total}, expected 123")
+print("check_handler_context_migration: 123 reviewed Handler impls preserve their context migration mode")
 PY
