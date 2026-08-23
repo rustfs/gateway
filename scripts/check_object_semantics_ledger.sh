@@ -46,7 +46,7 @@ requirements=(
     'c-obj-0012|positive|bound|conformance/cases/object/c-object-0040.toml::/exchanges/0/request/headers/x-amz-meta-caption==?UTF-8?B?5Lit?=   =?UTF-8?B?5paH?=;conformance/cases/object/c-object-0040.toml::/exchanges/1/expect/headers_present/x-amz-meta-caption==?UTF-8?B?5Lit5paH?='
     'c-obj-0013|positive|bound|conformance/cases/object/c-object-0028.toml::/exchanges/1/expect/header_name_bytes_exact=True;conformance/cases/object/c-object-0028.toml::/exchanges/1/expect/headers_present/x-amz-meta-mixedcase=kept'
     'c-obj-0014|positive|bound|conformance/cases/object/c-object-0001.toml::/expect/headers_present/content-length=11'
-    'c-obj-0015|positive|blocked|rustfs/backlog#1680::the fixture answers every read from bytes it already holds, so no handler in this repository returns a stream of unknown length and a chunked read cannot be staged'
+    'c-obj-0015|positive|bound|crates/gateway/tests/payload_transport.rs::fn c_pay_0009_an_unknown_length_response_is_chunked_without_content_length'
     'c-obj-0016|positive|bound|conformance/cases/object/c-object-0036.toml::/exchanges/0/expect/status=204;conformance/cases/object/c-object-0036.toml::/exchanges/0/expect/headers_present/x-amz-delete-marker=true'
     'c-obj-0017|positive|bound|conformance/cases/object/c-object-0045.toml::/request/target=/conf-object-null-version/versioned/read.txt?versionId=null;conformance/cases/object/c-object-0045.toml::/expect/status=404;conformance/cases/object/c-object-0045.toml::/expect/error/code=NoSuchVersion'
     'c-obj-0018|positive|bound|conformance/cases/tagging/c-tagging-0019.toml::/exchanges/1/expect/headers_present/x-amz-tagging-count=2'
