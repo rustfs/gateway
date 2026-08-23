@@ -32,6 +32,7 @@ use crate::json::Value;
 use crate::overlay::{AttributeOverlay, FieldOverlay, OpOverlay, Overlay, ShapeOverlay, Side};
 use crate::smithy::{Model, has_trait, local_name, target_of, trait_of};
 
+mod routing_query;
 mod support;
 
 use support::{
@@ -95,81 +96,12 @@ pub fn lower(model: &Model, overlay: &Overlay) -> Result<Lowered> {
     for name in &names {
         operations.push(lower_one(model, overlay, name)?);
     }
-    let routing_query_keys = routing_query_keys(model, overlay, &model_ops)?;
+    let routing_query_keys = routing_query::keys(model, overlay, &model_ops)?;
     Ok(Lowered {
         operations,
         deferred: overlay.deferred.clone(),
         routing_query_keys,
     })
-}
-
-fn routing_query_keys(model: &Model, overlay: &Overlay, operation_names: &BTreeSet<String>) -> Result<Vec<String>> {
-    let mut keys = BTreeSet::new();
-    type RouteGroup = (String, String, Vec<(String, Option<String>)>, Vec<String>, Vec<String>);
-    let mut route_groups: BTreeMap<RouteGroup, Vec<BTreeSet<String>>> = BTreeMap::new();
-    for name in operation_names {
-        let operation = model
-            .shape_local(name)
-            .ok_or_else(|| Error::Model(format!("no operation shape `{name}`")))?;
-        let http_trait = trait_of(operation, "smithy.api#http")
-            .ok_or_else(|| Error::ir(name, "the operation carries no smithy.api#http trait"))?;
-        let uri = http_trait
-            .get("uri")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::ir(name, "smithy.api#http has no uri"))?;
-        let route = Uri::parse(uri);
-        keys.extend(route.query.iter().map(|(key, _)| key.clone()));
-        let operation_overlay = overlay.ops.get(name);
-        if let Some(operation_overlay) = operation_overlay {
-            keys.extend(operation_overlay.query_present.iter().cloned());
-            keys.extend(operation_overlay.query_absent.iter().cloned());
-        }
-
-        let query_fields = operation
-            .get("input")
-            .and_then(target_of)
-            .filter(|id| *id != UNIT_SHAPE)
-            .and_then(|id| model.shape(id))
-            .map(|shape| {
-                model
-                    .members(shape)
-                    .into_iter()
-                    .filter(|(_, member)| has_trait(member, "smithy.api#required"))
-                    .filter_map(|(_, member)| trait_of(member, "smithy.api#httpQuery").and_then(Value::as_str))
-                    .map(str::to_owned)
-                    .collect::<BTreeSet<_>>()
-            })
-            .unwrap_or_default();
-        let method = http_trait
-            .get("method")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::ir(name, "smithy.api#http has no method"))?;
-        route_groups
-            .entry((
-                method.to_owned(),
-                route.path_shape(),
-                route.query,
-                operation_overlay.map(|item| item.query_present.clone()).unwrap_or_default(),
-                operation_overlay.map(|item| item.query_absent.clone()).unwrap_or_default(),
-            ))
-            .or_default()
-            .push(query_fields);
-    }
-
-    // Deferred configuration operations can share the same literal subresource URI and differ
-    // by a required `id`-style query member. That required member is a selector even before the
-    // operation is promoted into the emitted IR. Optional pagination/filter fields are excluded:
-    // they shape one operation but never decide which operation the request selected.
-    for fields in route_groups.values().filter(|fields| fields.len() > 1) {
-        let mut union = BTreeSet::new();
-        let mut intersection = fields.first().cloned().unwrap_or_default();
-        for field_set in fields {
-            union.extend(field_set.iter().cloned());
-            intersection = intersection.intersection(field_set).cloned().collect();
-        }
-        keys.extend(union.difference(&intersection).cloned());
-    }
-    Ok(keys.into_iter().collect())
 }
 
 fn lower_one(model: &Model, overlay: &Overlay, name: &str) -> Result<OperationIr> {
