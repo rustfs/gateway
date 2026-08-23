@@ -45,7 +45,9 @@ use std::any::TypeId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use rustfs_gateway_core::{Handler, MissingHandlers, Operation, OperationCodec, OperationSet, RouterBuilder, SseConfig};
+use rustfs_gateway_core::{
+    Handler, MissingHandlers, Operation, OperationCodec, OperationSet, RedirectTarget, RouterBuilder, SseConfig,
+};
 use rustfs_gateway_http::Limits;
 #[cfg(feature = "dangerous-replace-signature-verifier")]
 use rustfs_gateway_sig::{AwsSignatureVerifier, DangerAck};
@@ -126,6 +128,7 @@ pub struct ServiceBuilder {
     cors_cache: CorsCacheConfig,
     cors_policy: CorsPolicy,
     sse: SseConfig,
+    temporary_redirect_targets: Vec<RedirectTarget>,
 }
 
 impl core::fmt::Debug for ServiceBuilder {
@@ -184,7 +187,18 @@ impl ServiceBuilder {
             cors_cache: CorsCacheConfig::default(),
             cors_policy: CorsPolicy::default(),
             sse: SseConfig::strict(),
+            temporary_redirect_targets: Vec::new(),
         }
+    }
+
+    /// Allows one exact `Location` value on a `307 Temporary Redirect` response.
+    ///
+    /// The list is fixed into the service at assembly time. A handler or response filter may
+    /// select one of these values, but cannot introduce a request-derived endpoint later.
+    #[must_use]
+    pub fn allow_temporary_redirect_target(mut self, target: RedirectTarget) -> Self {
+        self.temporary_redirect_targets.push(target);
+        self
     }
 
     /// Registers `backend` as the handler for one operation.
@@ -682,6 +696,7 @@ impl ServiceBuilder {
             cors_policy: self.cors_policy,
             sse: self.sse,
             response_body_corrections: std::sync::atomic::AtomicU64::new(0),
+            temporary_redirect_targets: Arc::from(self.temporary_redirect_targets),
         }))
     }
 

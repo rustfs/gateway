@@ -1,8 +1,8 @@
 crates/gateway/src/clock.rs:338
-crates/gateway/src/commit.rs:552
-crates/gateway/src/commit.rs:555
-crates/gateway/src/commit.rs:581
-crates/gateway/src/commit.rs:586
+crates/gateway/src/commit.rs:606
+crates/gateway/src/commit.rs:609
+crates/gateway/src/commit.rs:635
+crates/gateway/src/commit.rs:640
 crates/gateway/src/config.rs:363
 crates/gateway/src/config.rs:373
 crates/gateway/src/dispatch.rs:601
@@ -36,5 +36,5 @@ crates/gateway/src/probe.rs:69
 crates/gateway/src/request_config.rs:57
 crates/gateway/src/request_deadline.rs:297
 crates/gateway/src/request_deadline.rs:304
-crates/gateway/src/service.rs:265
-crates/gateway/src/service.rs:312
+crates/gateway/src/service.rs:266
+crates/gateway/src/service.rs:313

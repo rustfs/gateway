@@ -383,10 +383,27 @@ fn answered(encoded: EncodedResponse, status: StatusCode) -> Response<Body> {
 mod tests {
     use super::*;
     use futures_util::FutureExt as _;
+    use futures_util::task::{ArcWake, waker_ref};
     use http_body_util::BodyExt as _;
     use rustfs_gateway_core::{ErrorContext, HandlerError, MissingObject, ResourceVisibility, ResponseKind, resolve};
     use rustfs_gateway_types::ErrorCode;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct WakeCounter(Mutex<usize>);
+
+    impl WakeCounter {
+        fn count(&self) -> usize {
+            self.0.lock().map_or(0, |count| *count)
+        }
+    }
+
+    impl ArcWake for WakeCounter {
+        fn wake_by_ref(counter: &Arc<Self>) {
+            if let Ok(mut count) = counter.0.lock() {
+                *count += 1;
+            }
+        }
+    }
 
     fn trace() -> RequestTrace {
         RequestTrace::from_bits(0x0123_4567_89AB_CDEF, 0)
@@ -517,6 +534,43 @@ mod tests {
         sender.send(Bytes::from_static(b"<Done/>")).expect("the body still receives");
         assert_eq!(next_data(&mut body).await, Some(Bytes::from_static(b"<Done/>")));
         assert!(next_data(&mut body).await.is_none());
+    }
+
+    /// Negative — 512 pending committed responses schedule no early wake and exactly one wake per
+    /// response when the first five-second interval expires. The deterministic wake count is the
+    /// CPU scaling gate: doubling concurrency can at most double timer work, never square it.
+    #[tokio::test(start_paused = true)]
+    async fn c_enc_0065_five_hundred_twelve_commits_have_linear_timer_wakes() {
+        const COMMITS: usize = 512;
+        let counter = Arc::new(WakeCounter(Mutex::new(0)));
+        let waker = waker_ref(&counter);
+        let mut context = Context::from_waker(&waker);
+        let mut senders = Vec::with_capacity(COMMITS);
+        let mut streams = Vec::with_capacity(COMMITS);
+        for _ in 0..COMMITS {
+            let (sender, receiver) = oneshot::channel();
+            senders.push(sender);
+            streams.push(CommitStream::new(receiver, Bytes::from_static(b"<Error/>")));
+        }
+
+        for stream in &mut streams {
+            let Poll::Ready(Ok(PayloadRead::Chunk(bytes))) = Pin::new(&mut *stream).poll_read(&mut context) else {
+                panic!("a committed stream did not emit its prologue");
+            };
+            assert_eq!(bytes, Bytes::from_static(PROLOGUE.as_bytes()));
+            assert!(Pin::new(&mut *stream).poll_read(&mut context).is_pending());
+            assert!(stream.timer.is_some(), "a live stream must own exactly its one timer slot");
+        }
+
+        tokio::time::advance(Duration::from_secs(4)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(counter.count(), 0, "a timer woke before the five-second interval");
+        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::time::advance(Duration::from_millis(1)).await;
+        tokio::task::yield_now().await;
+        let first_wakes = counter.count();
+        assert_eq!(first_wakes, COMMITS, "one interval caused {first_wakes} wakes for {COMMITS} streams");
+        drop(senders);
     }
 
     /// Negative — losing the detached sender finishes with a document rather than silent EOF.
