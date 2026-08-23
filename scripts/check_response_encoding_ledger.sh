@@ -69,14 +69,14 @@ requirements=(
     'c-enc-0040|negative|bound|crates/stream/src/tests/pay_scale.rs::case fn c_pay_0008'
     'c-enc-0041|negative|bound|scripts/check_ci_time_gate.sh::guard'
 
-    'c-enc-0060|negative|blocked|rustfs/backlog#1701::detached work survives body drop and RST, but no CompleteMultipartUpload zero-window test observes backend completion while the client never reads'
+    'c-enc-0060|negative|bound|crates/gateway/tests/committed_progress.rs::test fn c_enc_0060_complete_multipart_upload_finishes_behind_a_zero_window'
     'c-enc-0061|negative|bound|crates/gateway/tests/committed_progress.rs::test fn a_client_reset_after_the_committed_head_does_not_cancel_backend_work'
     'c-enc-0062|negative|bound|crates/gateway/src/commit.rs::test fn the_first_keepalive_waits_a_full_interval_and_ticks_once_per_interval'
     'c-enc-0063|negative|bound|crates/gateway/src/commit.rs::test fn the_first_keepalive_waits_a_full_interval_and_ticks_once_per_interval;crates/gateway/tests/committed_progress.rs::test fn the_default_bound_is_a_whole_number_of_keepalive_intervals'
     # The issue decision permits a smaller real transfer in the PR gate when a GiB cannot finish
     # inside the 30-second feedback contract. These are real zero-window and 1,000-reader probes.
     'c-enc-0064|negative|bound|crates/gateway/tests/payload_transport.rs::test fn c_pay_0063_a_zero_window_timeout_drops_the_response_producer_and_connection;crates/server/tests/server_load.rs::test fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic'
-    'c-enc-0065|negative|blocked|rustfs/backlog#1701::the five-second cadence is deterministic, but no 512-way committed-response probe bounds timer growth and CPU scaling yet'
+    'c-enc-0065|negative|bound|crates/gateway/src/commit.rs::test fn c_enc_0065_five_hundred_twelve_commits_have_linear_timer_wakes'
 )
 
 command -v python3 >/dev/null 2>&1 || {
