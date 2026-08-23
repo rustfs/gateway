@@ -18,6 +18,7 @@ ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 #   path.sh::guard              deterministic guard, executed against ROOT
 #   fixture.rs::trybuild harness.rs
 #   rule::no_raw_response_writer
+#   rule::configured_redirect_authority
 #
 # The comments beside corrected rows are part of the reviewed decision in rustfs/backlog#1701:
 # they stop this ledger from reviving requirements superseded by the later response design.
@@ -51,7 +52,7 @@ requirements=(
     'c-enc-0029|negative|bound|crates/core/tests/response_override_safety.rs::test fn n_response_cache_control_refuses_a_value_a_header_cannot_hold;crates/core/tests/response_override_safety.rs::test fn n_response_content_disposition_refuses_a_value_a_header_cannot_hold;crates/core/tests/response_override_safety.rs::test fn n_response_content_encoding_refuses_a_value_a_header_cannot_hold;crates/core/tests/response_override_safety.rs::test fn n_response_content_language_refuses_a_value_a_header_cannot_hold;crates/core/tests/response_override_safety.rs::test fn n_response_content_type_refuses_a_value_a_header_cannot_hold;crates/core/tests/response_override_safety.rs::test fn n_response_expires_refuses_a_value_a_header_cannot_hold'
     'c-enc-0030|negative|bound|scripts/check_no_response_header_unwrap.sh::guard'
     'c-enc-0031|negative|bound|rule::no_raw_response_writer'
-    'c-enc-0032|negative|blocked|rustfs/backlog#1701::TemporaryRedirect accepts a validated public RedirectTarget, but no authority proves that its value came only from server configuration'
+    'c-enc-0032|negative|bound|crates/gateway/tests/response_invariants.rs::test fn c_enc_0032_an_unconfigured_temporary_redirect_location_is_rejected;crates/gateway/tests/response_invariants.rs::test fn c_enc_0032_one_configured_target_does_not_authorize_another_location;rule::configured_redirect_authority'
     'c-enc-0033|negative|bound|crates/core/src/codec/tests/metadata_and_url.rs::test fn metadata_encoded_words_are_decoded_for_storage_and_encoded_again_on_return;crates/core/src/codec/tests/metadata_and_url.rs::test fn nested_metadata_encoded_word_is_reencoded_before_it_reaches_a_client'
     'c-enc-0034|negative|bound|conformance/cases/list/c-list-0035.toml::/expect/body/contains_utf8/0~%01;conformance/cases/list/c-list-0035.toml::/expect/body/not_contains_utf8/0;crates/core/src/codec/tests/metadata_and_url.rs::test fn n_encodes_a_key_xml_cannot_carry_even_though_nothing_asked'
     'c-enc-0035|negative|bound|crates/core/tests/compile_fail/committed_unmarked_operation.rs::trybuild crates/core/tests/compile_fail.rs'
@@ -295,6 +296,39 @@ def check_no_raw_response_writer(identifier):
                 fail(f"{identifier}: raw response-writer API is public in {relative}")
 
 
+def check_configured_redirect_authority(identifier):
+    paths = {
+        "builder": root / "crates/gateway/src/builder.rs",
+        "service": root / "crates/gateway/src/service.rs",
+        "invariants": root / "crates/gateway/src/invariants.rs",
+    }
+    dense = {}
+    for name, path in paths.items():
+        if not path.is_file():
+            fail(f"{identifier}: configured redirect authority source is missing: {path.relative_to(root)}")
+            return
+        dense[name] = re.sub(r"\s+", "", mask_rust(path.read_text()))
+    required = {
+        "builder": (
+            "temporary_redirect_targets:Vec<RedirectTarget>",
+            "pubfnallow_temporary_redirect_target(mutself,target:RedirectTarget)->Self{self.temporary_redirect_targets.push(target);self}",
+            "temporary_redirect_targets:Arc::from(self.temporary_redirect_targets)",
+        ),
+        "service": (
+            "pub(crate)temporary_redirect_targets:Arc<[RedirectTarget]>",
+            "crate::invariants::validate(&response,&self.inner.temporary_redirect_targets)",
+        ),
+        "invariants": (
+            "pub(crate)fnvalidate(response:&Response<Body>,temporary_redirect_targets:&[RedirectTarget])->Result<(),EncodeError>",
+            "target.as_str().as_bytes()==location.as_bytes()",
+        ),
+    }
+    for name, fragments in required.items():
+        for fragment in fragments:
+            if dense[name].count(fragment) != 1:
+                fail(f"{identifier}: {paths[name].relative_to(root)} lost configured redirect authority")
+
+
 parsed = {}
 for row in rows:
     parts = row.split("|", 3)
@@ -343,6 +377,8 @@ for identifier in expected_ids:
             fail(f"{identifier}: invalid evidence entry {entry!r}")
         elif relative == "rule" and selector == "no_raw_response_writer":
             check_no_raw_response_writer(identifier)
+        elif relative == "rule" and selector == "configured_redirect_authority":
+            check_configured_redirect_authority(identifier)
         elif relative.endswith(".toml"):
             check_toml(identifier, relative, selector)
         elif relative.endswith(".sh") and selector == "guard":

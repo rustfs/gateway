@@ -121,9 +121,9 @@ use rustfs_gateway_core::cors::{
     preflight_bypasses_pipeline, preflight_refusal_for, preflight_uses_resolved_target,
 };
 use rustfs_gateway_core::{
-    BoxFuture, Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RegionLabel, ResourceShape,
-    ResponseBody, ResponseKind, RouteRequestParts, Router, SseConfig, StaticDispatchError, StaticDispatchOutcome, TargetKind,
-    TransportSecurity,
+    BoxFuture, Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel,
+    ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, Router, SseConfig, StaticDispatchError, StaticDispatchOutcome,
+    TargetKind, TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
     resolve,
 };
@@ -194,6 +194,7 @@ pub(crate) struct Inner {
     pub(crate) cors_policy: CorsPolicy,
     pub(crate) sse: SseConfig,
     pub(crate) response_body_corrections: AtomicU64,
+    pub(crate) temporary_redirect_targets: Arc<[RedirectTarget]>,
 }
 
 struct AuthorizedRoute {
@@ -383,7 +384,7 @@ impl S3Service {
         }
         // The body invariants run here on both paths; this is the only position from which
         // "a `HEAD` response has no content" covers refusals that never reached an encoder.
-        if let Err(error) = crate::invariants::validate(&response) {
+        if let Err(error) = crate::invariants::validate(&response, &self.inner.temporary_redirect_targets) {
             response = outcome.refuse_handler(error.into());
         }
         let corrections = crate::invariants::enforce(&mut response, &method);

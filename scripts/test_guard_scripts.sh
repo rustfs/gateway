@@ -2823,15 +2823,30 @@ mut_response_encoding_block_loses_owner() {
 from pathlib import Path
 path = Path("scripts/check_response_encoding_ledger.sh")
 text = path.read_text()
-old = "c-enc-0032|negative|blocked|rustfs/backlog#1701::"
+old = "c-enc-0060|negative|blocked|rustfs/backlog#1701::"
 if text.count(old) != 1:
     raise SystemExit("response-encoding block owner mutation subject is not unique")
-path.write_text(text.replace(old, "c-enc-0032|negative|blocked|unowned::", 1))
+path.write_text(text.replace(old, "c-enc-0060|negative|blocked|unowned::", 1))
 PYEOF
 }
 expect_fail_self_mutation check_response_encoding_ledger.sh \
     'a blocked response rule losing its owning issue' \
     mut_response_encoding_block_loses_owner
+
+mut_response_encoding_redirect_authority_bypassed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+old = "crate::invariants::validate(&response, &self.inner.temporary_redirect_targets)"
+if text.count(old) != 1:
+    raise SystemExit("response-encoding redirect authority mutation subject is not unique")
+path.write_text(text.replace(old, "crate::invariants::validate(&response, &[])", 1))
+PYEOF
+}
+expect_fail check_response_encoding_ledger.sh \
+    'the final response seam bypassing configured redirect authority' \
+    mut_response_encoding_redirect_authority_bypassed
 
 probe_scalar_case_guard_missing_python() {
     local output rc=0 tool_path
