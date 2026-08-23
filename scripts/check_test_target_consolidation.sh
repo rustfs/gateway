@@ -203,6 +203,7 @@ core_modules = (
     "hot_path",
     "lifecycle_roundtrip",
     "limit_layering",
+    "lock_roundtrip",
     "not_configured_declarations",
     "operation_spec_semver",
     "params_and_dispatch",
