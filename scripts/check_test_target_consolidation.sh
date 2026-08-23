@@ -205,6 +205,7 @@ core_modules = (
     "limit_layering",
     "lock_roundtrip",
     "not_configured_declarations",
+    "notification_roundtrip",
     "operation_spec_semver",
     "params_and_dispatch",
     "precondition_range",
