@@ -40,8 +40,10 @@
 //! objecting) and invisible to the golden table (nothing moved). It is visible here.
 //!
 //! The second property is the compiled/readable equivalence over the whole generated table, which
-//! `crates/core/tests/hot_path.rs` proptests over the *fixture* table only. It is asserted here
-//! rather than in a target of its own because it needs the same request and costs one more call.
+//! `crates/core/tests/hot_path.rs` proptests over the *fixture* table only. Cargo exposes this same
+//! target body as both `route_disjoint` and `route_compiled_equiv`: both properties need the same
+//! generated request alphabet, so sharing one corpus generator prevents the two fuzz gates from
+//! drifting apart while still giving each acceptance command a stable target name.
 
 #![no_main]
 

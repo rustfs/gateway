@@ -383,10 +383,9 @@ fn a_request() -> impl Strategy<Value = GeneratedRequest> {
 proptest! {
     /// c-fast-1002 — no generated request separates the two implementations.
     ///
-    /// This is the differential fuzz the issue asks for, in the only form this task can add: `fuzz/`
-    /// is outside its file scope, so the generator runs under `proptest` in the ordinary test run.
-    /// A maintainer adding `fuzz/fuzz_targets/route_compiled_equiv.rs` later can lift the body
-    /// verbatim.
+    /// This keeps a small differential sample in the ordinary test run. The 200k libFuzzer gate
+    /// is the `route_compiled_equiv` target, which reuses `route_disjoint`'s generated-table
+    /// request alphabet so the two route properties cannot drift onto different corpora.
     #[test]
     fn no_generated_request_separates_the_two_implementations(
         (method, path, target, host, query, headers) in a_request()
