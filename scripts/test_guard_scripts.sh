@@ -6078,10 +6078,10 @@ old = """      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Workspace tests (maximum 8 minutes after setup)
+      - name: Workspace tests 1/2 (maximum 8 minutes after setup)
 """
 new = """      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Workspace tests (maximum 8 minutes after setup)
+      - name: Workspace tests 1/2 (maximum 8 minutes after setup)
 """
 if text.count(old) != 1:
     raise SystemExit("the workspace-tests toolchain step is missing or ambiguous")
@@ -14543,11 +14543,23 @@ mut_ci_workspace_job_missing() {
 expect_fail check_ci_test_split.sh \
     'the workspace-tests job being renamed away' mut_ci_workspace_job_missing
 
+mut_ci_second_workspace_job_missing() {
+    replace_ci_text '  workspace-tests-2:' '  workspace-testz-2:'
+}
+expect_fail check_ci_test_split.sh \
+    'the second workspace test job being renamed away' mut_ci_second_workspace_job_missing
+
 mut_ci_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests" cargo test --workspace' 'scripts/ci_budget.sh 480 "workspace tests" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance' 'scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job running only one package' mut_ci_workspace_command_weakened
+
+mut_ci_second_workspace_command_weakened() {
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance' 'scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test -p xtask'
+}
+expect_fail check_ci_test_split.sh \
+    'the second workspace shard running the wrong package' mut_ci_second_workspace_command_weakened
 
 mut_ci_handlers_facade_fixture_removed() {
     replace_ci_text '          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
@@ -14558,8 +14570,8 @@ expect_fail check_ci_test_split.sh \
     mut_ci_handlers_facade_fixture_removed
 
 mut_ci_workspace_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests" cargo test --workspace' \
-        '          scripts/ci_budget.sh 480 "workspace tests" cargo test --workspace || true'
+    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance' \
+        '          scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance || true'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job swallowing a failure or timeout' mut_ci_workspace_failure_swallowed
@@ -14583,18 +14595,18 @@ expect_fail check_ci_test_split.sh \
     'the official signing suite runner build being replaced with a no-op' mut_ci_signing_suite_build_dropped
 
 mut_ci_signing_suite_not_aggregated() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test' \
-        'needs: [workspace-tests, guard-self-test'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test' \
+        'needs: [workspace-tests, workspace-tests-2, guard-self-test'
 }
 expect_fail check_ci_test_split.sh \
     'the official signing suite result leaving the aggregate Test check' mut_ci_signing_suite_not_aggregated
 
 mut_ci_workspace_budget_widened() {
     replace_ci_text '  workspace-tests:
-    name: Workspace tests
+    name: Workspace tests 1
     runs-on: ubuntu-latest
     timeout-minutes: 9' '  workspace-tests:
-    name: Workspace tests
+    name: Workspace tests 1
     runs-on: ubuntu-latest
     timeout-minutes: 10'
 }
@@ -14603,9 +14615,9 @@ expect_fail check_ci_test_split.sh \
 
 mut_ci_workspace_serialized() {
     replace_ci_text '  workspace-tests:
-    name: Workspace tests' '  workspace-tests:
+    name: Workspace tests 1' '  workspace-tests:
     needs: guard-self-test
-    name: Workspace tests'
+    name: Workspace tests 1'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job waiting for guard mutations' mut_ci_workspace_serialized
@@ -14893,55 +14905,55 @@ expect_fail check_ci_test_split.sh \
     'the branch-protected Test check being renamed' mut_ci_required_name_changed
 
 mut_ci_aggregate_drops_guard() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, workspace-tests-2, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
 
 mut_ci_aggregate_drops_target() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, guard-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, workspace-tests-2, guard-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for target-consolidation mutations' \
     mut_ci_aggregate_drops_target
 
 mut_ci_aggregate_drops_quirk_ledger() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, dto-compiler-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, workspace-tests-2, guard-self-test, target-consolidation-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for quirk-ledger mutations' \
     mut_ci_aggregate_drops_quirk_ledger
 
 mut_ci_aggregate_drops_dto_compiler() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, workspace-tests-2, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for DTO compiler mutations' \
     mut_ci_aggregate_drops_dto_compiler
 
 mut_ci_aggregate_drops_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, workspace-tests-2, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for build-backed mutations' \
     mut_ci_aggregate_drops_build_guard
 
 mut_ci_aggregate_drops_second_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for the second build-backed worker' \
     mut_ci_aggregate_drops_second_build_guard
 
 mut_ci_aggregate_drops_error_status() {
-    replace_ci_text 'needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
-        'needs: [workspace-tests, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, workspace-tests-2, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for error-status mutations' \
@@ -15004,12 +15016,12 @@ expect_fail check_ci_test_split.sh \
 mut_ci_aggregate_budget_widened() {
     replace_ci_text '  test:
     name: Test
-    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]
+    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1' '  test:
     name: Test
-    needs: [workspace-tests, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]
+    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2'
@@ -15022,6 +15034,12 @@ mut_ci_workspace_result_ignored() {
 }
 expect_fail check_ci_test_split.sh \
     'the aggregate check ignoring the workspace test result' mut_ci_workspace_result_ignored
+
+mut_ci_second_workspace_result_ignored() {
+    replace_ci_text 'WORKSPACE_2_RESULT: ${{ needs.workspace-tests-2.result }}' 'WORKSPACE_2_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the second workspace test result' mut_ci_second_workspace_result_ignored
 
 mut_ci_guard_result_ignored() {
     replace_ci_text 'GUARD_RESULT: ${{ needs.guard-self-test.result }}' 'GUARD_RESULT: success'
@@ -15071,6 +15089,13 @@ mut_ci_workspace_comparison_dropped() {
 expect_fail check_ci_test_split.sh \
     'the aggregate check not executing the workspace result comparison' mut_ci_workspace_comparison_dropped
 
+mut_ci_second_workspace_comparison_dropped() {
+    replace_ci_text '          test "$WORKSPACE_2_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the second workspace result comparison' \
+    mut_ci_second_workspace_comparison_dropped
+
 mut_ci_guard_comparison_dropped() {
     replace_ci_text '          test "$GUARD_RESULT" = success' '          true'
 }
@@ -15114,9 +15139,9 @@ expect_fail check_ci_test_split.sh \
 
 mut_ci_workers_share_concurrency_lane() {
     replace_ci_text '  workspace-tests:
-    name: Workspace tests' '  workspace-tests:
+    name: Workspace tests 1' '  workspace-tests:
     concurrency: split-test-lane
-    name: Workspace tests'
+    name: Workspace tests 1'
     replace_ci_text '  guard-self-test:
     name: Guard self-test' '  guard-self-test:
     concurrency: split-test-lane
@@ -15135,8 +15160,8 @@ expect_fail check_ci_test_split.sh \
     'a quoted worker dependency serializing the split jobs' mut_ci_guard_quoted_dependency
 
 mut_ci_worker_continues_on_error() {
-    replace_ci_text '      - name: Workspace tests (maximum 8 minutes after setup)' \
-        '      - name: Workspace tests (maximum 8 minutes after setup)
+    replace_ci_text '      - name: Workspace tests 1/2 (maximum 8 minutes after setup)' \
+        '      - name: Workspace tests 1/2 (maximum 8 minutes after setup)
         continue-on-error: true'
 }
 expect_fail check_ci_test_split.sh \
