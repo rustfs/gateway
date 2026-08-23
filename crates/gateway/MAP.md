@@ -79,7 +79,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `tests/authz_contract.rs` | Two authorization stages, audit, failure floor |
 | `tests/governor_runtime.rs` | Limits run before expensive work and recover |
 | `tests/cors_runtime.rs` | Preflight and actual-response CORS behavior |
-| `tests/middleware.rs` | Filter and operation-layer seams |
+| `tests/middleware.rs`, `tests/response_invariants.rs` | Filter seams, runtime correction metrics and malformed response refusal |
 | `tests/sse_runtime.rs` | TLS gate, key hygiene, multipart consistency |
 | `tests/vhost_resolution.rs` | Host boundary and fallback behavior |
 | `tests/connection_teardown.rs` | Connection intent propagation |

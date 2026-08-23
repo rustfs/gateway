@@ -4,7 +4,7 @@ crates/core/tests/route_table.rs 2250 https://github.com/rustfs/backlog/issues/1
 crates/conformance/src/socket.rs 1250 https://github.com/rustfs/backlog/issues/1742 Existing socket harness; its tests are split out into socket/tests.rs, the production half still wants splitting.
 crates/conformance/src/inprocess.rs 1700 https://github.com/rustfs/backlog/issues/1742 Existing in-process harness; split in a dedicated behavior-reviewed task.
 crates/core/tests/params_and_dispatch.rs 1350 https://github.com/rustfs/backlog/issues/1742 One response suite sharing the same operation specs and full_router; split when a second subject appears.
-crates/gateway/src/service.rs 1400 https://github.com/rustfs/backlog/issues/1742 Existing pipeline assembly; split in a dedicated behavior-reviewed task.
+crates/gateway/src/service.rs 1425 https://github.com/rustfs/backlog/issues/1742 Existing pipeline assembly; split in a dedicated behavior-reviewed task.
 crates/core/tests/dialect.rs 900 https://github.com/rustfs/backlog/issues/1742 Existing dialect matrix; split in a dedicated behavior-reviewed task.
 crates/core/tests/registration.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing registration matrix; split in a dedicated behavior-reviewed task.
 crates/model/src/lower/mod.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing lowering module; split in a dedicated behavior-reviewed task.

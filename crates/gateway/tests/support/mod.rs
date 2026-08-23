@@ -621,12 +621,37 @@ pub fn wired_at_signed_time() -> ServiceBuilder {
 /// rewriting a **signed** header still leaves the verdict alone.
 #[must_use]
 pub fn signed_with(method: http::Method, target: &str, extra: &[(&str, &str)]) -> http::Request<Bytes> {
-    use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
+    signed_body_with_payload(method, target, extra, Bytes::new(), PayloadMode::Empty)
+}
+
+/// One correctly header-signed request with an exact body digest.
+#[must_use]
+pub fn signed_target_with_body(method: http::Method, target: &str, body: Bytes) -> http::Request<Bytes> {
+    use sha2::{Digest as _, Sha256};
+
+    let digest: [u8; 32] = Sha256::digest(&body).into();
+    signed_body_with_payload(method, target, &[], body, PayloadMode::ExactSha256(digest))
+}
+
+fn signed_body_with_payload(
+    method: http::Method,
+    target: &str,
+    extra: &[(&str, &str)],
+    body: Bytes,
+    payload: PayloadMode,
+) -> http::Request<Bytes> {
+    use rustfs_gateway::sig::{AmzDate, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
 
     let (path, query) = target.split_once('?').map_or((target, ""), |(path, query)| (path, query));
 
     let mut map = http::HeaderMap::new();
     map.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
+    if !matches!(payload, PayloadMode::Empty | PayloadMode::Unsigned) {
+        map.insert(
+            http::HeaderName::from_static("x-amz-content-sha256"),
+            http::HeaderValue::from_str(payload.canonical_payload_token().as_str()).expect("a payload declaration"),
+        );
+    }
     for (name, value) in extra {
         let name: http::HeaderName = name.parse().expect("a header name");
         map.insert(name, http::HeaderValue::from_str(value).expect("a header value"));
@@ -648,15 +673,15 @@ pub fn signed_with(method: http::Method, target: &str, extra: &[(&str, &str)]) -
     let stamp = AmzDate::parse(SIGNED_AT_STAMP).expect("a SigV4 stamp");
     let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
     let mut signer = SigV4Signer::new(credentials, scope);
-    let signing = SigningRequest::new(&method, path, query, &map, accepted.host().raw_for_signing(), PayloadMode::Empty, stamp)
-        .with_wire_content_length(0);
+    let signing = SigningRequest::new(&method, path, query, &map, accepted.host().raw_for_signing(), payload, stamp)
+        .with_wire_content_length(body.len() as u64);
     let signed = signer.sign_headers(&signing).expect("a signable request");
 
     let mut builder = http::Request::builder().method(method).uri(target);
     for (name, value) in signed.headers() {
         builder = builder.header(name, value);
     }
-    builder.body(Bytes::new()).expect("a valid request")
+    builder.body(body).expect("a valid request")
 }
 
 /// [`signed_with`] with no extra headers.

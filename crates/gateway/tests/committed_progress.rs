@@ -62,12 +62,17 @@ use std::time::{Duration, Instant};
 
 use rustfs_gateway::{
     DEFAULT_COMMIT_PROGRESS_DEADLINE, ErrorCode, Handler, HandlerDeadlineConfig, HandlerError, HandlerResult, HeadPart,
-    KEEPALIVE_INTERVALS_WITHOUT_PROGRESS, Req, Resp, S3Service, ServiceConfig, commit::COMMIT_PROGRESS_EXPIRED,
-    commit::KEEPALIVE_INTERVAL_SECONDS, dto::CopyObject, dto::CopyObjectOutput,
+    KEEPALIVE_INTERVALS_WITHOUT_PROGRESS, Req, Resp, S3Service, ServiceConfig,
+    commit::COMMIT_PROGRESS_EXPIRED,
+    commit::KEEPALIVE_INTERVAL_SECONDS,
+    dto::CopyObject,
+    dto::CopyObjectOutput,
+    dto::{CompleteMultipartUpload, CompleteMultipartUploadOutput},
 };
 use rustfs_gateway_server::{RunningServer, Server, ServerConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::Notify;
 
 /// The bound this suite installs, small enough that a test can wait for it.
 const BOUND: Duration = Duration::from_millis(400);
@@ -115,6 +120,40 @@ impl Handler<CopyObject> for CommittingBackend {
     }
 }
 
+struct CompletingMultipartBackend {
+    version: Arc<str>,
+    release: Arc<Notify>,
+    started: Arc<AtomicUsize>,
+    completed: Arc<AtomicUsize>,
+}
+
+impl Handler<CompleteMultipartUpload> for CompletingMultipartBackend {
+    async fn call(&self, _request: Req<CompleteMultipartUpload>) -> HandlerResult<CompleteMultipartUpload> {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            "x-amz-version-id",
+            http::HeaderValue::from_bytes(self.version.as_bytes()).expect("the fixture version is a valid header value"),
+        );
+        let version = Arc::clone(&self.version);
+        let release = Arc::clone(&self.release);
+        let started = Arc::clone(&self.started);
+        let completed = Arc::clone(&self.completed);
+        Ok(Resp::commit(
+            HeadPart::new(headers).expect("a generated completion response header"),
+            Box::pin(async move {
+                started.fetch_add(1, Ordering::SeqCst);
+                release.notified().await;
+                let output = CompleteMultipartUploadOutput {
+                    version_id: Some(version.to_string()),
+                    ..CompleteMultipartUploadOutput::default()
+                };
+                completed.fetch_add(1, Ordering::SeqCst);
+                Ok(output)
+            }),
+        ))
+    }
+}
+
 fn committing_service(continuation: Continuation, bound: Duration) -> (S3Service, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let deadlines = HandlerDeadlineConfig::default()
         .try_with_commit_progress(bound)
@@ -146,16 +185,17 @@ fn live_server(service: S3Service, keep_alive_idle: Duration) -> RunningServer {
     Server::new(config, service).serve().expect("server starts")
 }
 
-fn request_bytes() -> Vec<u8> {
-    let request = support::copy_commit_request();
-    let mut wire = format!("{} {} HTTP/1.1\r\n", request.method(), request.uri()).into_bytes();
-    for (name, value) in request.headers() {
+fn request_bytes(request: http::Request<bytes::Bytes>) -> Vec<u8> {
+    let (parts, body) = request.into_parts();
+    let mut wire = format!("{} {} HTTP/1.1\r\n", parts.method, parts.uri).into_bytes();
+    for (name, value) in &parts.headers {
         wire.extend_from_slice(name.as_str().as_bytes());
         wire.extend_from_slice(b": ");
         wire.extend_from_slice(value.as_bytes());
         wire.extend_from_slice(b"\r\n");
     }
-    wire.extend_from_slice(b"Connection: close\r\nContent-Length: 0\r\n\r\n");
+    wire.extend_from_slice(format!("Connection: close\r\nContent-Length: {}\r\n\r\n", body.len()).as_bytes());
+    wire.extend_from_slice(&body);
     wire
 }
 
@@ -185,7 +225,10 @@ async fn exchange_over_a_socket(service: S3Service, keep_alive_idle: Duration, b
     } = live_server(service, keep_alive_idle);
     let mut stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
     let started = Instant::now();
-    stream.write_all(&request_bytes()).await.expect("the request head writes");
+    stream
+        .write_all(&request_bytes(support::copy_commit_request()))
+        .await
+        .expect("the request head writes");
 
     let mut response = Vec::new();
     let seen = match tokio::time::timeout(budget, stream.read_to_end(&mut response)).await {
@@ -348,7 +391,10 @@ async fn a_client_reset_after_the_committed_head_does_not_cancel_backend_work() 
         ..
     } = live_server(service, Duration::from_secs(30));
     let mut stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
-    stream.write_all(&request_bytes()).await.expect("the request head writes");
+    stream
+        .write_all(&request_bytes(support::copy_commit_request()))
+        .await
+        .expect("the request head writes");
 
     let mut response = Vec::new();
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -378,6 +424,92 @@ async fn a_client_reset_after_the_committed_head_does_not_cancel_backend_work() 
     .expect("backend work survives the reset and completes");
     assert_eq!(completed.load(Ordering::SeqCst), 1);
 
+    let _ = shutdown.trigger(Duration::from_millis(200)).await;
+    drop(task);
+}
+
+/// **Negative — a CompleteMultipartUpload continuation advances while the client reads nothing.**
+///
+/// The frozen response head is deliberately much larger than the client's measured receive
+/// buffer. A non-consuming peek observes that buffer fill completely before the backend is
+/// released; the client never drains a byte. Completion is observed only through backend state: a
+/// continuation owned by the response body would remain parked behind the blocked write.
+#[tokio::test]
+async fn c_enc_0060_complete_multipart_upload_finishes_behind_a_zero_window() {
+    const FROZEN_HEAD_BYTES: usize = 8 * 1024 * 1024;
+    let version: Arc<str> = "v".repeat(FROZEN_HEAD_BYTES).into();
+    let release = Arc::new(Notify::new());
+    let started = Arc::new(AtomicUsize::new(0));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let backend = Arc::new(CompletingMultipartBackend {
+        version,
+        release: Arc::clone(&release),
+        started: Arc::clone(&started),
+        completed: Arc::clone(&completed),
+    });
+    let service = support::wired_at_signed_time()
+        .register::<CompleteMultipartUpload, _>(backend)
+        .build()
+        .expect("a complete assembly");
+    let RunningServer {
+        local_addr,
+        task,
+        shutdown,
+        metrics,
+    } = live_server(service, Duration::from_secs(30));
+    let stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
+    let socket = socket2::SockRef::from(&stream);
+    socket.set_recv_buffer_size(1024).expect("the receive buffer is bounded");
+    let receive_capacity = socket.recv_buffer_size().expect("the receive buffer is observable");
+    assert!(
+        FROZEN_HEAD_BYTES > receive_capacity.saturating_mul(16),
+        "the frozen head must exhaust the measured receive buffer: {FROZEN_HEAD_BYTES} <= {receive_capacity} * 16"
+    );
+
+    let body = bytes::Bytes::from_static(
+        b"<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>\"etag\"</ETag></Part></CompleteMultipartUpload>",
+    );
+    let request = support::signed_target_with_body(http::Method::POST, "/bucket/key?uploadId=upload-one", body);
+    let mut stream = stream;
+    stream
+        .write_all(&request_bytes(request))
+        .await
+        .expect("the completion request writes");
+
+    let mut unread = vec![0; receive_capacity];
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let visible = stream.peek(&mut unread).await.expect("the unread response is observable");
+            if visible == unread.len() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the response fills the client receive window without being drained");
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while started.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("detached completion starts while the response head is blocked");
+    assert_eq!(completed.load(Ordering::SeqCst), 0, "the backend completed before release");
+
+    release.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while completed.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("backend completion is independent of the unread response");
+    assert_eq!(completed.load(Ordering::SeqCst), 1);
+    assert_eq!(metrics.active_connections(), 1, "the unread response connection ended before observation");
+
+    drop(stream);
     let _ = shutdown.trigger(Duration::from_millis(200)).await;
     drop(task);
 }

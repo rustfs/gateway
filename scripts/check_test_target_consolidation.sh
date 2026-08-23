@@ -654,6 +654,7 @@ gateway_modules = (
     "reject_rendering",
     "replication_token",
     "request_allocations",
+    "response_invariants",
     "select_restore_intent",
     "service_clone_allocations",
     "service_concurrency",

@@ -18,6 +18,7 @@ ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 #   path.sh::guard              deterministic guard, executed against ROOT
 #   fixture.rs::trybuild harness.rs
 #   rule::no_raw_response_writer
+#   rule::configured_redirect_authority
 #
 # The comments beside corrected rows are part of the reviewed decision in rustfs/backlog#1701:
 # they stop this ledger from reviving requirements superseded by the later response design.
@@ -37,10 +38,10 @@ requirements=(
     # BodylessResponse was superseded by the single final invariant seam. The executable contract
     # is the runtime correction on every method/status path, not a second response type.
     'c-enc-0020|negative|bound|crates/gateway/src/invariants.rs::test fn a_bodyless_status_loses_its_framing_headers_too;crates/gateway/tests/patch_layer_landings.rs::test fn bodyless_status_fix_is_the_response_invariant'
-    'c-enc-0021|negative|blocked|rustfs/backlog#1701::the final invariant removes a forbidden 204 body, but no response-correction metric records that backend defect yet'
+    'c-enc-0021|negative|bound|crates/gateway/tests/response_invariants.rs::test fn c_enc_0021_a_body_on_204_is_removed_and_counted'
     'c-enc-0022|negative|bound|crates/gateway/tests/pipeline.rs::test fn a_refusal_answered_to_a_head_carries_no_content_and_still_reports_the_length_it_would_have_sent'
     'c-enc-0023|negative|bound|crates/gateway/tests/pipeline.rs::test fn a_success_answered_to_a_head_carries_no_content_and_still_reports_a_length'
-    'c-enc-0024|negative|blocked|rustfs/backlog#1701::a response filter can still construct a Content-Length plus Transfer-Encoding conflict without a typed EncodeError'
+    'c-enc-0024|negative|bound|crates/gateway/src/invariants.rs::test fn c_enc_0024_content_length_with_transfer_encoding_is_a_typed_error;crates/gateway/tests/response_invariants.rs::test fn c_enc_0024_content_length_with_transfer_encoding_is_rejected'
     # A blanket ETag-on-304 guard was rejected by the issue decision. This binds the conditional
     # rule: a representation whose 200 carries an ETag keeps that validator on its 304.
     'c-enc-0025|negative|bound|crates/gateway/tests/pipeline.rs::test fn a_not_modified_refusal_carries_neither_content_nor_a_framing_header'
@@ -51,7 +52,7 @@ requirements=(
     'c-enc-0029|negative|bound|crates/core/tests/response_override_safety.rs::test fn n_response_cache_control_refuses_a_value_a_header_cannot_hold;crates/core/tests/response_override_safety.rs::test fn n_response_content_disposition_refuses_a_value_a_header_cannot_hold;crates/core/tests/response_override_safety.rs::test fn n_response_content_encoding_refuses_a_value_a_header_cannot_hold;crates/core/tests/response_override_safety.rs::test fn n_response_content_language_refuses_a_value_a_header_cannot_hold;crates/core/tests/response_override_safety.rs::test fn n_response_content_type_refuses_a_value_a_header_cannot_hold;crates/core/tests/response_override_safety.rs::test fn n_response_expires_refuses_a_value_a_header_cannot_hold'
     'c-enc-0030|negative|bound|scripts/check_no_response_header_unwrap.sh::guard'
     'c-enc-0031|negative|bound|rule::no_raw_response_writer'
-    'c-enc-0032|negative|blocked|rustfs/backlog#1701::TemporaryRedirect accepts a validated public RedirectTarget, but no authority proves that its value came only from server configuration'
+    'c-enc-0032|negative|bound|crates/gateway/tests/response_invariants.rs::test fn c_enc_0032_an_unconfigured_temporary_redirect_location_is_rejected;crates/gateway/tests/response_invariants.rs::test fn c_enc_0032_one_configured_target_does_not_authorize_another_location;rule::configured_redirect_authority'
     'c-enc-0033|negative|bound|crates/core/src/codec/tests/metadata_and_url.rs::test fn metadata_encoded_words_are_decoded_for_storage_and_encoded_again_on_return;crates/core/src/codec/tests/metadata_and_url.rs::test fn nested_metadata_encoded_word_is_reencoded_before_it_reaches_a_client'
     'c-enc-0034|negative|bound|conformance/cases/list/c-list-0035.toml::/expect/body/contains_utf8/0~%01;conformance/cases/list/c-list-0035.toml::/expect/body/not_contains_utf8/0;crates/core/src/codec/tests/metadata_and_url.rs::test fn n_encodes_a_key_xml_cannot_carry_even_though_nothing_asked'
     'c-enc-0035|negative|bound|crates/core/tests/compile_fail/committed_unmarked_operation.rs::trybuild crates/core/tests/compile_fail.rs'
@@ -68,14 +69,14 @@ requirements=(
     'c-enc-0040|negative|bound|crates/stream/src/tests/pay_scale.rs::case fn c_pay_0008'
     'c-enc-0041|negative|bound|scripts/check_ci_time_gate.sh::guard'
 
-    'c-enc-0060|negative|blocked|rustfs/backlog#1701::detached work survives body drop and RST, but no CompleteMultipartUpload zero-window test observes backend completion while the client never reads'
+    'c-enc-0060|negative|bound|crates/gateway/tests/committed_progress.rs::test fn c_enc_0060_complete_multipart_upload_finishes_behind_a_zero_window'
     'c-enc-0061|negative|bound|crates/gateway/tests/committed_progress.rs::test fn a_client_reset_after_the_committed_head_does_not_cancel_backend_work'
     'c-enc-0062|negative|bound|crates/gateway/src/commit.rs::test fn the_first_keepalive_waits_a_full_interval_and_ticks_once_per_interval'
     'c-enc-0063|negative|bound|crates/gateway/src/commit.rs::test fn the_first_keepalive_waits_a_full_interval_and_ticks_once_per_interval;crates/gateway/tests/committed_progress.rs::test fn the_default_bound_is_a_whole_number_of_keepalive_intervals'
     # The issue decision permits a smaller real transfer in the PR gate when a GiB cannot finish
     # inside the 30-second feedback contract. These are real zero-window and 1,000-reader probes.
     'c-enc-0064|negative|bound|crates/gateway/tests/payload_transport.rs::test fn c_pay_0063_a_zero_window_timeout_drops_the_response_producer_and_connection;crates/server/tests/server_load.rs::test fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_healthy_traffic'
-    'c-enc-0065|negative|blocked|rustfs/backlog#1701::the five-second cadence is deterministic, but no 512-way committed-response probe bounds timer growth and CPU scaling yet'
+    'c-enc-0065|negative|bound|crates/gateway/src/commit.rs::test fn c_enc_0065_five_hundred_twelve_commits_have_linear_timer_wakes'
 )
 
 command -v python3 >/dev/null 2>&1 || {
@@ -295,6 +296,39 @@ def check_no_raw_response_writer(identifier):
                 fail(f"{identifier}: raw response-writer API is public in {relative}")
 
 
+def check_configured_redirect_authority(identifier):
+    paths = {
+        "builder": root / "crates/gateway/src/builder.rs",
+        "service": root / "crates/gateway/src/service.rs",
+        "invariants": root / "crates/gateway/src/invariants.rs",
+    }
+    dense = {}
+    for name, path in paths.items():
+        if not path.is_file():
+            fail(f"{identifier}: configured redirect authority source is missing: {path.relative_to(root)}")
+            return
+        dense[name] = re.sub(r"\s+", "", mask_rust(path.read_text()))
+    required = {
+        "builder": (
+            "temporary_redirect_targets:Vec<RedirectTarget>",
+            "pubfnallow_temporary_redirect_target(mutself,target:RedirectTarget)->Self{self.temporary_redirect_targets.push(target);self}",
+            "temporary_redirect_targets:Arc::from(self.temporary_redirect_targets)",
+        ),
+        "service": (
+            "pub(crate)temporary_redirect_targets:Arc<[RedirectTarget]>",
+            "crate::invariants::validate(&response,&self.inner.temporary_redirect_targets)",
+        ),
+        "invariants": (
+            "pub(crate)fnvalidate(response:&Response<Body>,temporary_redirect_targets:&[RedirectTarget])->Result<(),EncodeError>",
+            "target.as_str().as_bytes()==location.as_bytes()",
+        ),
+    }
+    for name, fragments in required.items():
+        for fragment in fragments:
+            if dense[name].count(fragment) != 1:
+                fail(f"{identifier}: {paths[name].relative_to(root)} lost configured redirect authority")
+
+
 parsed = {}
 for row in rows:
     parts = row.split("|", 3)
@@ -343,6 +377,8 @@ for identifier in expected_ids:
             fail(f"{identifier}: invalid evidence entry {entry!r}")
         elif relative == "rule" and selector == "no_raw_response_writer":
             check_no_raw_response_writer(identifier)
+        elif relative == "rule" and selector == "configured_redirect_authority":
+            check_configured_redirect_authority(identifier)
         elif relative.endswith(".toml"):
             check_toml(identifier, relative, selector)
         elif relative.endswith(".sh") and selector == "guard":

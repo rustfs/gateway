@@ -110,6 +110,7 @@ use std::future::poll_fn;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::Poll;
 
 use bytes::Bytes;
@@ -120,9 +121,9 @@ use rustfs_gateway_core::cors::{
     preflight_bypasses_pipeline, preflight_refusal_for, preflight_uses_resolved_target,
 };
 use rustfs_gateway_core::{
-    BoxFuture, Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RegionLabel, ResourceShape,
-    ResponseBody, ResponseKind, RouteRequestParts, Router, SseConfig, StaticDispatchError, StaticDispatchOutcome, TargetKind,
-    TransportSecurity,
+    BoxFuture, Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel,
+    ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, Router, SseConfig, StaticDispatchError, StaticDispatchOutcome,
+    TargetKind, TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
     resolve,
 };
@@ -192,6 +193,8 @@ pub(crate) struct Inner {
     pub(crate) cors: Arc<CachedCorsSource>,
     pub(crate) cors_policy: CorsPolicy,
     pub(crate) sse: SseConfig,
+    pub(crate) response_body_corrections: AtomicU64,
+    pub(crate) temporary_redirect_targets: Arc<[RedirectTarget]>,
 }
 
 struct AuthorizedRoute {
@@ -255,6 +258,12 @@ impl S3Service {
     #[must_use]
     pub fn security_posture(&self) -> SecurityPosture {
         self.inner.security_posture
+    }
+
+    /// Number of forbidden response bodies removed by this service's final invariant pass.
+    #[must_use]
+    pub fn response_body_corrections_total(&self) -> u64 {
+        self.inner.response_body_corrections.load(Ordering::Relaxed)
     }
 
     /// Answers one request.
@@ -375,7 +384,13 @@ impl S3Service {
         }
         // The body invariants run here on both paths; this is the only position from which
         // "a `HEAD` response has no content" covers refusals that never reached an encoder.
-        crate::invariants::enforce(&mut response, &method);
+        if let Err(error) = crate::invariants::validate(&response, &self.inner.temporary_redirect_targets) {
+            response = outcome.refuse_handler(error.into());
+        }
+        let corrections = crate::invariants::enforce(&mut response, &method);
+        if corrections.removed_forbidden_body() {
+            self.inner.response_body_corrections.fetch_add(1, Ordering::Relaxed);
+        }
         // Stamp last on both paths. A refusal already has the same identifiers; success encoders
         // and filters cannot replace this final value.
         crate::stamp::stamp(response.headers_mut(), &trace, now);

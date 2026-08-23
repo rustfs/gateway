@@ -14,9 +14,10 @@
 
 //! The response invariants, applied once to every response the service produces.
 //!
-//! Responsible for: [`enforce`] — dropping the content a response is forbidden to carry, and the
-//! two headers it is forbidden to carry, on the answered path and the refused path alike, after
-//! the body has been chosen and before it is written out.
+//! Responsible for: [`validate`] — refusing conflicting framing or an unconfigured temporary
+//! redirect — and [`enforce`] — dropping the content a response is forbidden to carry, and the two
+//! headers it is forbidden to carry, on the answered path and the refused path alike, after the
+//! body has been chosen and before it is written out.
 //! NOT responsible for: deciding the rule. That is
 //! [`rustfs_gateway_core::body_allowance`], a function of the method and the status, so that this
 //! file and `EncodedResponse::enforce_http_invariants` cannot come to different conclusions.
@@ -71,8 +72,62 @@
 //! headers and not an encoder's, which is the half of the surface that matters here.
 
 use http::{HeaderName, Method, Response};
-use rustfs_gateway_core::{response_body_allowed, response_framing_allowed};
+use rustfs_gateway_core::{HandlerError, RedirectTarget, response_body_allowed, response_framing_allowed};
 use rustfs_gateway_stream::Body;
+
+/// A malformed response shape that must be refused rather than repaired.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EncodeError {
+    /// Two framing authorities were present on one response.
+    ContentLengthWithTransferEncoding,
+    /// A temporary redirect named no assembly-approved target.
+    UnconfiguredTemporaryRedirect,
+}
+
+impl From<EncodeError> for HandlerError {
+    fn from(error: EncodeError) -> Self {
+        match error {
+            EncodeError::ContentLengthWithTransferEncoding => {
+                Self::internal_error("the response carried both Content-Length and Transfer-Encoding")
+            }
+            EncodeError::UnconfiguredTemporaryRedirect => {
+                Self::internal_error("the temporary redirect target was not configured by the service")
+            }
+        }
+    }
+}
+
+/// What the final invariant pass had to repair.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CorrectionReport {
+    removed_forbidden_body: bool,
+}
+
+impl CorrectionReport {
+    pub(crate) const fn removed_forbidden_body(self) -> bool {
+        self.removed_forbidden_body
+    }
+}
+
+/// Refuses two framing authorities or a temporary redirect outside the assembly-time allowlist.
+pub(crate) fn validate(response: &Response<Body>, temporary_redirect_targets: &[RedirectTarget]) -> Result<(), EncodeError> {
+    let headers = response.headers();
+    if headers.contains_key(http::header::CONTENT_LENGTH) && headers.contains_key(http::header::TRANSFER_ENCODING) {
+        return Err(EncodeError::ContentLengthWithTransferEncoding);
+    }
+    if response.status() == http::StatusCode::TEMPORARY_REDIRECT {
+        let Some(location) = headers.get(http::header::LOCATION) else {
+            return Err(EncodeError::UnconfiguredTemporaryRedirect);
+        };
+        if !temporary_redirect_targets
+            .iter()
+            .any(|target| target.as_str().as_bytes() == location.as_bytes())
+        {
+            return Err(EncodeError::UnconfiguredTemporaryRedirect);
+        }
+    }
+    Ok(())
+}
 
 /// Drops whatever content and whichever headers this response is forbidden to carry, and corrects
 /// a length it cannot honour.
@@ -80,10 +135,11 @@ use rustfs_gateway_stream::Body;
 /// Idempotent, and deliberately so: the generated encoders already applied the body decision to
 /// their own output, and this call is what extends it to the refusal path without the two paths
 /// holding two copies of the rule.
-pub(crate) fn enforce(response: &mut Response<Body>, method: &Method) {
+pub(crate) fn enforce(response: &mut Response<Body>, method: &Method) -> CorrectionReport {
     strip_customer_keys(response.headers_mut());
     let body_allowed = response_body_allowed(method, response.status());
     let framing_allowed = response_framing_allowed(method, response.status());
+    let removed_forbidden_body = !body_allowed && !response.body().is_empty();
     if !body_allowed {
         *response.body_mut() = Body::empty();
     }
@@ -94,6 +150,7 @@ pub(crate) fn enforce(response: &mut Response<Body>, method: &Method) {
     } else if body_allowed {
         reconcile_length(response);
     }
+    CorrectionReport { removed_forbidden_body }
 }
 
 /// Makes `Content-Length` agree with a body whose length is known.
@@ -212,6 +269,17 @@ mod tests {
                 assert!(response.headers().get(TRANSFER_ENCODING).is_none());
             }
         }
+    }
+
+    /// Negative — a response with both framing authorities is rejected as one typed encode
+    /// failure, rather than repaired by choosing whichever header happened to be read first.
+    #[test]
+    fn c_enc_0024_content_length_with_transfer_encoding_is_a_typed_error() {
+        let mut response = five_bytes(StatusCode::OK);
+        response
+            .headers_mut()
+            .insert(TRANSFER_ENCODING, http::HeaderValue::from_static("chunked"));
+        assert_eq!(validate(&response, &[]), Err(EncodeError::ContentLengthWithTransferEncoding));
     }
 
     /// Negative — a `GET` that is allowed content keeps every byte of it. A rule that dropped
