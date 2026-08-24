@@ -1980,7 +1980,9 @@ mut_xtask_core_fast_scope_loses_compile_fail_skip() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '''                "--".to_owned(),
                 "--skip".to_owned(),
@@ -2001,7 +2003,9 @@ mut_xtask_core_fast_scope_drops_library_tests() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '''                package.to_owned(),
                 "--lib".to_owned(),
@@ -2023,7 +2027,9 @@ mut_xtask_core_fast_scope_drops_integration_tests() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '''                "--lib".to_owned(),
                 "--test".to_owned(),
@@ -2044,7 +2050,9 @@ mut_xtask_gateway_fast_scope_loses_compile_fail_skip() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '''    if package == "rustfs-gateway" {
         test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);
@@ -2072,7 +2080,9 @@ mut_xtask_gateway_fast_scope_drops_library_tests() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);'
 new = '        test_step.extend(["--test".to_owned(), "integration".to_owned()]);'
@@ -2089,7 +2099,9 @@ mut_xtask_gateway_fast_scope_drops_integration_tests() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);'
 new = '        test_step.push("--lib".to_owned());'
@@ -2206,7 +2218,9 @@ mut_xtask_core_fast_scope_renames_compile_fail_skip() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '"compile_fail::compile_time_contracts_are_not_openable".to_owned(),'
 new = '"compile_fail::renamed_contract".to_owned(),'
@@ -2223,7 +2237,9 @@ mut_xtask_compile_fail_skip_applies_to_every_crate() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '    if package == "rustfs-gateway-core" {'
 new = '    if !package.is_empty() {'
@@ -2240,7 +2256,9 @@ mut_xtask_conformance_fast_scope_loses_library_limit() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '''    } else if package == "rustfs-gateway-conformance" {
         test_step.push("--lib".to_owned());
@@ -2260,7 +2278,9 @@ mut_xtask_conformance_scope_restores_all_target_clippy() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '            "rustfs-gateway-conformance" => "--lib",'
 new = '            "rustfs-gateway-conformance-disabled" => "--lib",'
@@ -2277,7 +2297,9 @@ mut_xtask_workspace_target_reuse_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = 'let target_scope = ["--workspace", "--bin", "xtask", "--test", "xtask-integration"];'
 new = 'let target_scope = ["--bin", "xtask", "--test", "xtask-integration"];'
@@ -2294,7 +2316,9 @@ mut_xtask_clippy_omits_the_integration_target() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("xtask/src/verify.rs")
+path = Path("xtask/src/verify/selection.rs")
+if not path.exists():
+    path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '''            std::iter::once("clippy")
                 .chain(target_scope)
