@@ -19,6 +19,7 @@ Agent entry point for repository automation commands.
 | `src/sigsuite.rs` | Pinned external signing-suite fetch and run process boundary. | Official signing-suite checkout or invocation changes. |
 | `src/verify.rs` | Light crate verification and full operation/workspace verification selection; core compile-fail contracts stay in the full workspace gate. | A crate/op/all verification command is wrong. |
 | `src/verify/process.rs` | Deadline-aware child supervision and output capture. | Verification children block, leak, or report out of order. |
+| `src/verify/selection.rs` | Crate-local Cargo test and Clippy target selection. | A crate's bounded verification scope is wrong or too slow. |
 | `src/verify/tests.rs` | Verification selection and scheduling unit contracts. | A bounded verification scope or schedule changes. |
 | `src/why.rs` | Reverse trace and stable text/JSON rendering. | A `why` namespace or section changes. |
 | `src/why/distance.rs` | Edit-distance ranking for nearby reverse-trace targets. | Unknown-target suggestions drift. |

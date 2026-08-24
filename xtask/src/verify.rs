@@ -20,6 +20,7 @@
 
 mod launcher;
 mod process;
+mod selection;
 
 use std::collections::HashSet;
 use std::fmt;
@@ -30,6 +31,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 use launcher::launcher_started;
+use selection::crate_steps;
 
 #[cfg(feature = "full")]
 use crate::{catalog, codegen};
@@ -128,61 +130,6 @@ fn crate_step_batches(package: &str) -> Vec<Vec<Vec<String>>> {
 
 fn standalone_crate_case(package: &str) -> Option<&'static str> {
     (package != "rustfs-gateway").then(|| crate_case(package)).flatten()
-}
-
-fn crate_steps(package: &str) -> Vec<Vec<String>> {
-    if package == "xtask" {
-        let target_scope = ["--workspace", "--bin", "xtask", "--test", "xtask-integration"];
-        return vec![
-            std::iter::once("test").chain(target_scope).map(str::to_owned).collect(),
-            std::iter::once("clippy")
-                .chain(target_scope)
-                .chain(["--", "-D", "warnings"])
-                .map(str::to_owned)
-                .collect(),
-        ];
-    }
-    let clippy_step = vec![
-        "clippy".to_owned(),
-        "-p".to_owned(),
-        package.to_owned(),
-        match package {
-            "rustfs-gateway-conformance" => "--lib",
-            _ => "--all-targets",
-        }
-        .to_owned(),
-        "--".to_owned(),
-        "-D".to_owned(),
-        "warnings".to_owned(),
-    ];
-    if package == "rustfs-gateway-core" {
-        return vec![
-            vec![
-                "test".to_owned(),
-                "-p".to_owned(),
-                package.to_owned(),
-                "--lib".to_owned(),
-                "--test".to_owned(),
-                "integration".to_owned(),
-                "--".to_owned(),
-                "--skip".to_owned(),
-                "compile_fail::compile_time_contracts_are_not_openable".to_owned(),
-            ],
-            clippy_step,
-        ];
-    }
-    let mut test_step = vec!["test".to_owned(), "-p".to_owned(), package.to_owned()];
-    if package == "rustfs-gateway" {
-        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);
-        test_step.extend([
-            "--".to_owned(),
-            "--skip".to_owned(),
-            "compile_fail::gateway_compile_fail_contracts_are_enforced".to_owned(),
-        ]);
-    } else if package == "rustfs-gateway-conformance" {
-        test_step.push("--lib".to_owned());
-    }
-    vec![test_step, clippy_step]
 }
 
 #[cfg(feature = "full")]
