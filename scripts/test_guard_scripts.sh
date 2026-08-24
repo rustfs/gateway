@@ -2054,19 +2054,13 @@ path = Path("xtask/src/verify/selection.rs")
 if not path.exists():
     path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '''    if package == "rustfs-gateway" {
-        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);
-        test_step.extend([
+old = '''        test_step.extend([
             "--".to_owned(),
             "--skip".to_owned(),
             "compile_fail::gateway_compile_fail_contracts_are_enforced".to_owned(),
         ]);
-    } else if package == "rustfs-gateway-conformance" {
 '''
-new = '''    if package == "rustfs-gateway" {
-        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);
-    } else if package == "rustfs-gateway-conformance" {
-'''
+new = ''''''
 if text.count(old) != 1:
     raise SystemExit("gateway compile-fail fast-scope skip is missing")
 path.write_text(text.replace(old, new, 1))
