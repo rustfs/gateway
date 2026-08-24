@@ -1651,12 +1651,55 @@ expect_fail check_xtask_codegen_surface.sh \
     mut_xtask_codegen_alias_bypasses_launcher
 
 mut_xtask_crate_runner_returns_to_light_graph() {
-    perl -0pi -e 's/&\["--features", "full"\]/\&["--no-default-features"]/' \
+    perl -0pi -e 's/const FULL_RUNNER: &\[&str\] = &\["--features", "full"\];/const FULL_RUNNER: \&[\&str] = \&["--no-default-features"];/' \
         xtask-launcher/src/main.rs
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'crate verification rebuilding the light runner after the workspace gate' \
+    'non-facade crate verification rebuilding the light runner after the workspace gate' \
     mut_xtask_crate_runner_returns_to_light_graph
+
+mut_xtask_facade_runner_returns_to_full_graph() {
+    perl -0pi -e 's/Some\("rustfs-gateway" \| "s3gate"\) \| None => LIGHT_RUNNER,/None => LIGHT_RUNNER,/' \
+        xtask-launcher/src/main.rs
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'facade verification re-entering the full dependency graph' \
+    mut_xtask_facade_runner_returns_to_full_graph
+
+mut_xtask_selection_module_becomes_full_only() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+verify = Path("xtask/src/verify.rs")
+selection = Path("xtask/src/verify/selection.rs")
+text = verify.read_text()
+if not selection.exists():
+    start = text.index("fn crate_steps")
+    body = text.index("{", start)
+    depth = 0
+    end = None
+    for index in range(body, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+    if end is None:
+        raise SystemExit("crate_steps body is unbalanced")
+    selection.write_text("pub(super) " + text[start:end] + "\n")
+    text = text[:start] + text[end:]
+    text = text.replace("mod process;", "mod process;\n#[cfg(feature = \"full\")]\nmod selection;", 1)
+    text = text.replace("use launcher::launcher_started;", "use launcher::launcher_started;\nuse selection::crate_steps;", 1)
+else:
+    text = text.replace("mod selection;", '#[cfg(feature = "full")]\nmod selection;', 1)
+verify.write_text(text)
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the extracted crate-step selection becoming full-only' \
+    mut_xtask_selection_module_becomes_full_only
 
 mut_xtask_launcher_timestamp_removed() {
     perl -0pi -e 's/started\.as_nanos\(\)\.to_string\(\)/"0".to_owned()/' xtask-launcher/src/main.rs

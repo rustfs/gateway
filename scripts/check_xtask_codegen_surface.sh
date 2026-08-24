@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WHAT: Keeps codegen and exact crate verification on a bounded xtask dependency surface.
+# WHAT: Keeps codegen and facade verification on a bounded xtask dependency surface.
 # WHY: Cargo builds every normal xtask dependency before dispatch, so one heavy dependency makes
 # code generation pay for the facade, core and conformance crates before generation can start.
-# HOW TO EXEMPT: There is no exemption. Keep the command and split new full-only work behind `full`.
+# HOW TO EXEMPT: There is no further exemption. Keep other exact crate requests on the full runner.
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
@@ -414,26 +414,45 @@ def compact(text):
 source = (root / "xtask/src/main.rs").read_text()
 comments_removed, syntax = rust_views(source)
 launcher_comments, launcher_syntax = rust_views((root / "xtask-launcher/src/main.rs").read_text())
-launcher_request = functions_named("is_crate_request", launcher_syntax, launcher_comments)
+launcher_request = functions_named("crate_request_name", launcher_syntax, launcher_comments)
 expected_launcher_request = compact('''
 if arguments.first().map(String::as_str) != Some("verify") {
-    return false;
+    return None;
 }
 let mut verify_arguments = arguments[1..].iter().map(String::as_str).filter(|argument| *argument != "--json");
-matches!((verify_arguments.next(), verify_arguments.next(), verify_arguments.next()), (Some("--crate"), Some(_), None))
+match (verify_arguments.next(), verify_arguments.next(), verify_arguments.next()) {
+    (Some("--crate"), Some(name), None) => Some(name),
+    _ => None,
+}
 ''')
 if len(launcher_request) != 1 or compact(launcher_request[0][1]) != expected_launcher_request:
-    fail("the launcher must select the full runner only for an exact crate request")
+    fail("the launcher must identify only an exact crate request")
+launcher_runner = functions_named("runner_for_request", launcher_syntax, launcher_comments)
+expected_launcher_runner = compact('''
+match crate_request_name(arguments) {
+    Some("rustfs-gateway" | "s3gate") | None => LIGHT_RUNNER,
+    Some(_) => FULL_RUNNER,
+}
+''')
+if len(launcher_runner) != 1 or compact(launcher_runner[0][1]) != expected_launcher_runner:
+    fail("the launcher must keep only facade verification on the light runner")
+launcher_source = compact(launcher_comments)
+launcher_constants = {
+    'const FULL_RUNNER: &[&str] = &["--features", "full"];',
+    'const LIGHT_RUNNER: &[&str] = &["--no-default-features"];',
+}
+if any(compact(constant) not in launcher_source for constant in launcher_constants):
+    fail("the launcher runner arguments drifted")
 launcher_main = functions_named("main", launcher_syntax, launcher_comments)
 launcher_body = compact(launcher_main[0][1]) if len(launcher_main) == 1 else ""
 launcher_fragments = {
-    "runner split": 'let runner: &[&str] = if is_crate_request(&arguments) { &["--features", "full"] } else { &["--no-default-features"] };',
+    "runner split": 'let runner = runner_for_request(&arguments);',
     "startup clock": 'Ok(started) => started.as_nanos().to_string()',
     "budget handoff": '.env(STARTED_ENV, started)',
     "xtask child": '.args(["run", "--quiet", "--package", "xtask"]).args(runner).arg("--").args(arguments)',
 }
 if not launcher_body or any(compact(fragment) not in launcher_body for fragment in launcher_fragments.values()):
-    fail("the launcher must preserve light codegen, reuse the full crate runner, and record startup")
+    fail("the launcher must preserve runner selection, child arguments, and startup recording")
 dispatches = functions_named("dispatch", syntax, comments_removed)
 expected_full_attribute = compact('#[cfg(feature = "full")]')
 expected_light_attribute = compact('#[cfg(not(feature = "full"))]')
@@ -554,10 +573,26 @@ for relative, test_name in (
     if len(pattern.findall(test_syntax)) != 1:
         fail(f"workspace-only fast-scope contract is missing or inactive: {test_name}")
 comments_removed, syntax = verify_comments, verify_syntax
-for name in ("verify", "verify_crate", "crate_steps", "conformance_test_step"):
+for name in ("verify", "verify_crate", "conformance_test_step"):
     items = functions_named(name, syntax, comments_removed)
     if len(items) != 1 or items[0][0]:
         fail(f"verify item {name} must remain on the light crate-verification surface")
+selection_path = root / "xtask/src/verify/selection.rs"
+selection_modules = top_level_items(r"\bmod\s+selection\s*;")
+selection_imports = top_level_items(r"\buse\s+selection\s*::\s*crate_steps\s*;")
+if selection_path.is_file():
+    if len(selection_modules) != 1 or selection_modules[0][1] or len(selection_imports) != 1 or selection_imports[0][1]:
+        fail("the crate-step selection module must remain unconditionally available to the light runner")
+    if functions_named("crate_steps", syntax, comments_removed):
+        fail("crate_steps must have one source of truth")
+    selection_comments, selection_syntax = rust_views(selection_path.read_text())
+    crate_steps_items = functions_named("crate_steps", selection_syntax, selection_comments)
+else:
+    if selection_modules or selection_imports:
+        fail("the crate-step selection module wiring requires its source file")
+    crate_steps_items = functions_named("crate_steps", syntax, comments_removed)
+if len(crate_steps_items) != 1 or crate_steps_items[0][0]:
+    fail("verify item crate_steps must remain on the light crate-verification surface")
 request_items = functions_named("is_crate_request", syntax, comments_removed)
 request_declarations = top_level_items(r"\bpub\s*\(\s*crate\s*\)\s+fn\s+is_crate_request\s*\(")
 if len(request_items) != 1 or len(request_declarations) != 1 or [compact(attr) for attr in request_declarations[0][1]] != [expected_light_attribute]:
@@ -631,7 +666,6 @@ run_step_batches(
 ''')
 if compact(verify_crate_items[0][1]) != expected_verify_crate_body:
     fail("crate verification must disclose each fast-scope boundary and keep the 30-second deadline")
-crate_steps_items = functions_named("crate_steps", syntax, comments_removed)
 expected_crate_steps_body = compact('''
 if package == "xtask" {
     let target_scope = ["--workspace", "--bin", "xtask", "--test", "xtask-integration"];
@@ -805,5 +839,5 @@ expected_tests_attribute = compact('#[cfg(all(test, feature = "full"))]')
 if len(tests_items) != 1 or [compact(attr) for attr in tests_items[0][1]] != [expected_tests_attribute]:
     fail("verify module tests must require the full feature")
 
-print("OK: cargo xtask keeps codegen light and reuses the warmed runner for crate verification")
+print("OK: cargo xtask keeps codegen and facade verification light while other crates reuse the full runner")
 PYEOF
