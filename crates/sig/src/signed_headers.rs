@@ -44,6 +44,7 @@
 
 use http::HeaderMap;
 use http::header::{CONTENT_LENGTH, HOST, HeaderName};
+use smallvec::SmallVec;
 
 use crate::verdict::AuthError;
 
@@ -75,9 +76,14 @@ pub const UNSIGNED_HEADER_EXEMPTIONS: [&str; 6] = [
 /// [`SignedHeaderSet::parse_and_enforce`], so a set in hand has been through all six rules. A
 /// public `Vec<HeaderName>` would let a caller assemble precisely the states the rules exist to
 /// reject.
+///
+/// The original list is retained for allocation-free canonical writing. Up to eight parsed names
+/// stay inline, so the usual request still pays one heap allocation rather than adding a second
+/// one for the borrowed HTTP writer's input.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SignedHeaderSet {
-    names: Vec<HeaderName>,
+    raw: String,
+    names: SmallVec<[HeaderName; 8]>,
 }
 
 impl SignedHeaderSet {
@@ -114,7 +120,7 @@ impl SignedHeaderSet {
             return Err(AuthError::SignatureDoesNotMatch);
         }
 
-        let mut names: Vec<HeaderName> = Vec::new();
+        let mut names: SmallVec<[HeaderName; 8]> = SmallVec::new();
         for token in raw.split(';') {
             if !is_lowercase_token(token) {
                 return Err(AuthError::AuthorizationHeaderMalformed);
@@ -129,7 +135,10 @@ impl SignedHeaderSet {
             names.push(name);
         }
 
-        let set = Self { names };
+        let set = Self {
+            raw: raw.to_owned(),
+            names,
+        };
 
         if !set.contains(&HOST) {
             return Err(AuthError::SignatureDoesNotMatch);
@@ -201,17 +210,16 @@ impl SignedHeaderSet {
         self.names.is_empty()
     }
 
-    /// The `SignedHeaders` line of the canonical request: names joined with `;`.
+    /// The validated `SignedHeaders` line exactly as supplied.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.raw
+    }
+
+    /// An owned `SignedHeaders` line for callers that need to retain it independently.
     #[must_use]
     pub fn canonical_list(&self) -> String {
-        let mut out = String::new();
-        for (index, name) in self.names.iter().enumerate() {
-            if index > 0 {
-                out.push(';');
-            }
-            out.push_str(name.as_str());
-        }
-        out
+        self.raw.clone()
     }
 
     /// Whether a header may be left unsigned. See [`UNSIGNED_HEADER_EXEMPTIONS`].
@@ -252,6 +260,8 @@ mod tests {
     fn a_minimal_well_formed_list_is_accepted() {
         let map = headers(&[("x-amz-date", "20150830T123600Z")]);
         let set = SignedHeaderSet::parse_and_enforce("host;x-amz-date", &map, None).expect("valid");
+        let canonical: &str = set.as_str();
+        assert_eq!(canonical, "host;x-amz-date");
         assert_eq!(set.canonical_list(), "host;x-amz-date");
         assert_eq!(set.len(), 2);
         assert!(!set.is_empty());

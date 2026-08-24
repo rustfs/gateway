@@ -49,8 +49,11 @@
 use core::fmt;
 
 use http::Method;
-use http::header::{HOST, HeaderMap, HeaderName};
-use rustfs_gateway_http::RawHost;
+use http::header::HeaderMap;
+use rustfs_gateway_http::{CanonicalHeadersError, HeaderView, RawHost, SignedHeaderList};
+
+#[cfg(test)]
+use http::header::HeaderName;
 
 use crate::contracts::{SIGNATURE_CANONICAL_HOST_RAW, SIGNATURE_RAW_PATH_FALLBACK};
 use sha2::{Digest, Sha256};
@@ -217,6 +220,20 @@ pub struct CanonicalRequestSpec<'r> {
     exclusion: QueryExclusion,
 }
 
+struct CanonicalHost<'a>(&'a str);
+
+impl fmt::Display for CanonicalHost<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if SIGNATURE_CANONICAL_HOST_RAW {
+            return f.write_str(self.0);
+        }
+        for character in self.0.trim_end_matches('.').chars() {
+            fmt::Write::write_char(f, character.to_ascii_lowercase())?;
+        }
+        Ok(())
+    }
+}
+
 impl<'r> CanonicalRequestSpec<'r> {
     /// Gathers the inputs. Nothing is computed yet; [`CanonicalRequestSpec::candidates`] does that.
     #[must_use]
@@ -263,19 +280,17 @@ impl<'r> CanonicalRequestSpec<'r> {
     /// a header named in the allow-list has vanished from the map between enforcement and here.
     pub fn candidates(&self) -> Result<CanonicalCandidates, AuthError> {
         let canonical_query = self.query.canonical(self.exclusion)?;
+        let signed = SignedHeaderList::parse(self.signed.as_str()).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
 
         let mut tail = String::new();
         tail.push('\n');
         tail.push_str(&canonical_query);
         tail.push('\n');
-        for name in self.signed.names() {
-            tail.push_str(name.as_str());
-            tail.push(':');
-            tail.push_str(&self.canonical_value(name)?);
-            tail.push('\n');
-        }
+        HeaderView::new(self.headers)
+            .write_canonical_headers_with_host(&signed, &CanonicalHost(self.host.as_str()), &mut tail)
+            .map_err(canonical_headers_error)?;
         tail.push('\n');
-        tail.push_str(&self.signed.canonical_list());
+        tail.push_str(signed.as_str());
         tail.push('\n');
         tail.push_str(self.payload_token.as_str());
 
@@ -287,60 +302,13 @@ impl<'r> CanonicalRequestSpec<'r> {
             next: 0,
         })
     }
-
-    /// The canonical value of one signed header.
-    ///
-    /// `host` is answered from the [`RawHost`], never from the header map: an HTTP/2 request need
-    /// not carry a `host` header at all, and where it does, the map's copy has already been
-    /// cross-checked against the authority by [`crate::effective_host`]. Reading the map here would
-    /// be a second derivation of the one value that must have exactly one.
-    fn canonical_value(&self, name: &HeaderName) -> Result<String, AuthError> {
-        if name == HOST {
-            return Ok(if SIGNATURE_CANONICAL_HOST_RAW {
-                self.host.as_str().to_owned()
-            } else {
-                self.host.as_str().trim_end_matches('.').to_ascii_lowercase()
-            });
-        }
-        let mut out = String::new();
-        let mut seen = false;
-        for value in self.headers.get_all(name) {
-            if seen {
-                out.push(',');
-            }
-            seen = true;
-            let text = core::str::from_utf8(value.as_bytes()).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
-            out.push_str(&collapse_whitespace(text));
-        }
-        if !seen {
-            return Err(AuthError::SignatureDoesNotMatch);
-        }
-        Ok(out)
-    }
 }
 
-/// Trims a header value and collapses every run of whitespace inside it to a single space (R3).
-///
-/// Collapsing is unconditional, quotes included: the AWS signing test suite's
-/// `get-header-value-trim` case sends `"a     b    c"` and expects `"a b c"`, so a quote-aware
-/// implementation would disagree with every signer built against that suite. It also folds the
-/// obsolete line-folding form (`get-header-value-multiline`), where a value continued across lines
-/// canonicalises to one space-separated line.
-fn collapse_whitespace(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    let mut pending_space = false;
-    for ch in value.trim_matches(|c: char| c.is_ascii_whitespace()).chars() {
-        if ch.is_ascii_whitespace() {
-            pending_space = true;
-            continue;
-        }
-        if pending_space {
-            out.push(' ');
-            pending_space = false;
-        }
-        out.push(ch);
+fn canonical_headers_error(error: CanonicalHeadersError) -> AuthError {
+    match error {
+        CanonicalHeadersError::MissingSignedHeader => AuthError::SignatureDoesNotMatch,
+        _ => AuthError::AuthorizationHeaderMalformed,
     }
-    out
 }
 
 /// The canonical requests to verify against, in order: decoded spelling, then raw spelling.
@@ -585,9 +553,22 @@ mod tests {
 
     #[test]
     fn whitespace_is_trimmed_and_collapsed_including_inside_quotes() {
-        assert_eq!(collapse_whitespace("  value1  "), "value1");
-        assert_eq!(collapse_whitespace("\"a     b    c\""), "\"a b c\"");
-        assert_eq!(collapse_whitespace("value1\n value2\n  value3"), "value1 value2 value3");
+        let map = headers(&[("x-amz-meta-note", "  value1  \"a     b    c\"  value3  ")]);
+        let signed = SignedHeaderSet::parse_and_enforce("host;x-amz-meta-note", &map, None).expect("valid");
+        let paths = UriPathCandidates::new("/").expect("valid");
+        let query = RawQuery::new("");
+        let host = host();
+        let spec = CanonicalRequestSpec::new(
+            &Method::GET,
+            &paths,
+            &query,
+            &map,
+            &signed,
+            &host,
+            PayloadMode::Empty.canonical_payload_token(),
+        );
+        let request = spec.candidates().expect("built").next().expect("one");
+        assert!(request.text().contains("x-amz-meta-note:value1 \"a b c\" value3\n"));
     }
 
     #[test]

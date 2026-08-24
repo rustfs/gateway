@@ -304,9 +304,9 @@ impl<'a> HeaderView<'a> {
     /// One `name:value\n` line per signed name, in the list's order — which
     /// [`SignedHeaderList::parse`] has already proved ascending, so nothing is sorted here.
     /// Values are trimmed of leading and trailing whitespace and have internal whitespace runs
-    /// collapsed to a single space, except inside a quoted string, where SigV4 preserves it. A
-    /// name that appears several times is written once, its values joined with `,` in the order
-    /// they arrived.
+    /// collapsed to a single space. Quoted text is not exempt: quotes are ordinary signed bytes,
+    /// and the AWS canonical-request vectors collapse whitespace inside them too. A name that
+    /// appears several times is written once, its values joined with `,` in arrival order.
     ///
     /// Nothing is allocated: the caller owns the buffer, and this walks the map in place.
     ///
@@ -319,9 +319,52 @@ impl<'a> HeaderView<'a> {
         signed: &SignedHeaderList<'_>,
         out: &mut W,
     ) -> Result<(), CanonicalHeadersError> {
+        self.write_canonical_headers_inner(signed, out, |_| Ok(false))
+    }
+
+    /// Writes canonical headers while taking `host` from the caller.
+    ///
+    /// HTTP/2 can carry only `:authority`, so the signature layer owns the effective raw host and
+    /// must not derive it again from the map. `host` implements [`fmt::Display`] so callers can
+    /// stream normalization directly into `out` without allocating a temporary string.
+    ///
+    /// # Errors
+    ///
+    /// The same [`CanonicalHeadersError`] conditions as [`HeaderView::write_canonical_headers`].
+    pub fn write_canonical_headers_with_host<W, H>(
+        &self,
+        signed: &SignedHeaderList<'_>,
+        host: &H,
+        out: &mut W,
+    ) -> Result<(), CanonicalHeadersError>
+    where
+        W: fmt::Write,
+        H: fmt::Display + ?Sized,
+    {
+        self.write_canonical_headers_inner(signed, out, |out| {
+            out.write_fmt(format_args!("{host}"))
+                .map_err(|_| CanonicalHeadersError::Write)?;
+            Ok(true)
+        })
+    }
+
+    fn write_canonical_headers_inner<W, F>(
+        &self,
+        signed: &SignedHeaderList<'_>,
+        out: &mut W,
+        mut write_host: F,
+    ) -> Result<(), CanonicalHeadersError>
+    where
+        W: fmt::Write,
+        F: FnMut(&mut W) -> Result<bool, CanonicalHeadersError>,
+    {
         for name in signed.iter() {
             out.write_str(name).map_err(|_| CanonicalHeadersError::Write)?;
             out.write_char(':').map_err(|_| CanonicalHeadersError::Write)?;
+            if name == "host" && write_host(out)? {
+                out.write_char('\n').map_err(|_| CanonicalHeadersError::Write)?;
+                continue;
+            }
             let mut seen_any = false;
             for value in self.map.get_all(name) {
                 if seen_any {
@@ -343,14 +386,10 @@ impl<'a> HeaderView<'a> {
 /// Writes one header value in canonical form: trimmed, internal whitespace collapsed.
 fn write_canonical_value<W: fmt::Write>(value: &str, out: &mut W) -> Result<(), CanonicalHeadersError> {
     let trimmed = value.trim_matches(|character: char| character == ' ' || character == '\t');
-    let mut in_quote = false;
     let mut run_start: Option<usize> = None;
     let mut pending_space = false;
     for (index, character) in trimmed.char_indices() {
-        let is_space = !in_quote && (character == ' ' || character == '\t');
-        if character == '"' {
-            in_quote = !in_quote;
-        }
+        let is_space = character == ' ' || character == '\t';
         if is_space {
             if let Some(start) = run_start.take() {
                 out.write_str(trimmed.get(start..index).unwrap_or(""))

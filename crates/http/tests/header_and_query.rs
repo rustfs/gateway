@@ -97,6 +97,7 @@ fn an_absent_or_empty_boolean_header_is_none_rather_than_an_error() {
     assert_eq!(accepted.headers().bool_flag(&name("x-amz-mfa")), Ok(None));
 }
 
+/// c-fast-0006: canonical output follows the validated signed-name order without sorting.
 #[test]
 fn canonical_headers_are_written_without_sorting_anything() {
     let request = put(vec![
@@ -108,7 +109,7 @@ fn canonical_headers_are_written_without_sorting_anything() {
     let mut out = String::new();
     accepted
         .headers()
-        .write_canonical_headers(&signed, &mut out)
+        .write_canonical_headers_with_host(&signed, &"b.example.com", &mut out)
         .expect("every signed header is present and readable");
     assert_eq!(
         out,
@@ -117,7 +118,7 @@ fn canonical_headers_are_written_without_sorting_anything() {
 }
 
 #[test]
-fn canonical_values_keep_whitespace_inside_a_quoted_string() {
+fn canonical_values_collapse_whitespace_inside_a_quoted_string() {
     let request = put(vec![(name("x-amz-meta-note"), raw_value(b"a  \"b   c\"  d"))]);
     let accepted = accept(request).expect("valid fixture");
     let signed = SignedHeaderList::parse("host;x-amz-meta-note").expect("ascending list");
@@ -126,9 +127,22 @@ fn canonical_values_keep_whitespace_inside_a_quoted_string() {
         .headers()
         .write_canonical_headers(&signed, &mut out)
         .expect("readable");
-    assert_eq!(out, "host:b.example.com\nx-amz-meta-note:a \"b   c\" d\n");
+    assert_eq!(out, "host:b.example.com\nx-amz-meta-note:a \"b c\" d\n");
 }
 
+#[test]
+fn canonical_headers_use_the_callers_effective_host() {
+    let accepted = accept(put(vec![])).expect("valid fixture");
+    let signed = SignedHeaderList::parse("host").expect("ascending list");
+    let mut out = String::new();
+    accepted
+        .headers()
+        .write_canonical_headers_with_host(&signed, &"authority.example.com:9443", &mut out)
+        .expect("the caller supplies host");
+    assert_eq!(out, "host:authority.example.com:9443\n");
+}
+
+/// c-fast-0007: repeated values retain their wire arrival order.
 #[test]
 fn a_repeated_multi_valued_header_is_joined_in_arrival_order() {
     let request = put(vec![
@@ -140,7 +154,7 @@ fn a_repeated_multi_valued_header_is_joined_in_arrival_order() {
     let mut out = String::new();
     accepted
         .headers()
-        .write_canonical_headers(&signed, &mut out)
+        .write_canonical_headers_with_host(&signed, &"b.example.com", &mut out)
         .expect("readable");
     assert_eq!(out, "host:b.example.com\nx-amz-checksum-algorithm:crc32,sha256\n");
 }
@@ -326,17 +340,21 @@ fn c_wire_0043b_an_unreadable_header_that_is_signed_fails_canonicalisation() {
     );
 }
 
+/// c-fast-1007: supplying the effective host does not hide another missing signed header.
 #[test]
 fn a_signed_header_that_is_absent_fails_canonicalisation() {
     let accepted = accept(put(vec![])).expect("valid fixture");
     let signed = SignedHeaderList::parse("host;x-amz-date").expect("ascending list");
     let mut out = String::new();
     assert_eq!(
-        accepted.headers().write_canonical_headers(&signed, &mut out),
+        accepted
+            .headers()
+            .write_canonical_headers_with_host(&signed, &"b.example.com", &mut out),
         Err(CanonicalHeadersError::MissingSignedHeader)
     );
 }
 
+/// c-fast-1005 and c-fast-1006: nonascending and repeated signed names are both rejected.
 #[test]
 fn a_signed_headers_list_that_is_not_strictly_ascending_is_rejected() {
     for (raw, expected) in [
