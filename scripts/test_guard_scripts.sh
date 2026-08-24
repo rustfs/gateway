@@ -2214,6 +2214,22 @@ expect_fail check_xtask_codegen_surface.sh \
     'the workspace gate dropping the gateway million-key RSS contract' \
     mut_xtask_gateway_rss_contract_disappears
 
+mut_xtask_sig_fast_scope_loses_exact_matching() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify/selection.rs")
+text = path.read_text()
+old = '                "--exact",\n'
+if text.count(old) != 1:
+    raise SystemExit("signature fast-scope exact selector is missing")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the signature fast scope broadening its statistical timing skips' \
+    mut_xtask_sig_fast_scope_loses_exact_matching
+
 mut_xtask_core_fast_scope_renames_compile_fail_skip() {
     python3 - <<'PYEOF'
 from pathlib import Path

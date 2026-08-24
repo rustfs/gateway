@@ -718,13 +718,29 @@ if package == "rustfs-gateway" {
         "--skip".to_owned(),
         "compile_fail::gateway_compile_fail_contracts_are_enforced".to_owned(),
     ]);
+} else if package == "rustfs-gateway-sig" {
+    test_step.extend(
+        [
+            "--",
+            "--skip",
+            "timing::c_sig_0552_sigv2_difference_position_does_not_change_the_latency",
+            "--skip",
+            "timing::c_sig_0111_an_unknown_key_costs_the_same_as_a_bad_signature",
+            "--skip",
+            "timing::a_match_and_a_mismatch_cost_the_same",
+            "--skip",
+            "timing::c_sig_0107_and_0108_the_position_of_the_difference_does_not_change_the_latency",
+            "--exact",
+        ]
+        .map(str::to_owned),
+    );
 } else if package == "rustfs-gateway-conformance" {
     test_step.push("--lib".to_owned());
 }
 vec![test_step, clippy_step]
 ''')
 if compact(crate_steps_items[0][1]) != expected_crate_steps_body:
-    fail("crate verification steps must preserve xtask workspace target reuse, both core runtime targets, gateway library and integration targets, compile-fail skips, and conformance library-only test and clippy scopes")
+    fail("crate verification steps must preserve xtask workspace target reuse, both core runtime targets, gateway library and integration targets, exact signature timing skips, compile-fail skips, and conformance library-only test and clippy scopes")
 conformance_test_items = functions_named("conformance_test_step", syntax, comments_removed)
 expected_conformance_test_body = compact('''
 vec![
