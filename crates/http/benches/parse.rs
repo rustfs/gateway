@@ -73,10 +73,11 @@ fn main() {
         .expect("the signed-header fixture is ordered");
     let mut output = String::with_capacity(512);
     let capacity = output.capacity();
+    // c-fast-0006: the exact host-override writer used by SigV4 allocates no heap blocks.
     assert_zero_allocations("parse/canonical_headers_signed", || {
         accepted
             .headers()
-            .write_canonical_headers(&signed, &mut output)
+            .write_canonical_headers_with_host(&signed, &"b.example.com", &mut output)
             .expect("every signed header is present");
     });
     assert_eq!(output.capacity(), capacity);

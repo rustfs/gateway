@@ -83,7 +83,7 @@ fn writing_canonical_headers_does_not_grow_the_callers_buffer() {
     let capacity_before = out.capacity();
     accepted
         .headers()
-        .write_canonical_headers(&signed, &mut out)
+        .write_canonical_headers_with_host(&signed, &"b.example.com", &mut out)
         .expect("every signed header is present");
     assert_eq!(
         out.capacity(),

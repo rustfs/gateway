@@ -427,7 +427,7 @@ impl SigV4Signer {
         let authorization = format!(
             "{ALGORITHM_SIGV4} Credential={}, SignedHeaders={}, Signature={signature_hex}",
             self.scope.credential_value(self.credentials.access_key_id()),
-            signed.canonical_list(),
+            signed.as_str(),
         );
         set_header(&mut headers, AUTHORIZATION_HEADER, &authorization)?;
 
@@ -477,7 +477,7 @@ impl SigV4Signer {
         );
         push_param(&mut query, X_AMZ_DATE, request.timestamp.as_str());
         push_param(&mut query, X_AMZ_EXPIRES, &expires_in_seconds.to_string());
-        push_param(&mut query, X_AMZ_SIGNED_HEADERS, &signed.canonical_list());
+        push_param(&mut query, X_AMZ_SIGNED_HEADERS, signed.as_str());
         if let Some(token) = self.credentials.session_token() {
             let token = core::str::from_utf8(token.expose()).map_err(|_| SignerError::UnrepresentableHeader)?;
             push_param(&mut query, X_AMZ_SECURITY_TOKEN, token);
