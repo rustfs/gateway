@@ -42,12 +42,12 @@ case_dir = root / "conformance/cases"
 
 EXPECTED = {
     "records": 348,
-    "mutable": 97,
+    "mutable": 98,
     "typed_contracts": 160,
-    "untyped_contracts": 91,
-    "typed_sources": 257,
+    "untyped_contracts": 90,
+    "typed_sources": 258,
     "dimensions": 177,
-    "wired": 255,
+    "wired": 256,
     "emitted_constants": 170,
 }
 CAPABILITY_BLOCKS = {"q-cors-0006", "q-cors-0047"}
@@ -953,5 +953,5 @@ if errors:
         print(f"check_quirk_ledger: {error}", file=sys.stderr)
     raise SystemExit(1)
 
-print("OK: quirk ledger 348 overlay facts = 257 proven sources (97 mutable + 160 typed contracts) + 91 deferred; 177 dimensions; 255 wired; 2 capability blocks")
+print("OK: quirk ledger 348 overlay facts = 258 proven sources (98 mutable + 160 typed contracts) + 90 deferred; 177 dimensions; 256 wired; 2 capability blocks")
 PYEOF
