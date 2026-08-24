@@ -2054,19 +2054,13 @@ path = Path("xtask/src/verify/selection.rs")
 if not path.exists():
     path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '''    if package == "rustfs-gateway" {
-        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);
-        test_step.extend([
+old = '''        test_step.extend([
             "--".to_owned(),
             "--skip".to_owned(),
             "compile_fail::gateway_compile_fail_contracts_are_enforced".to_owned(),
         ]);
-    } else if package == "rustfs-gateway-conformance" {
 '''
-new = '''    if package == "rustfs-gateway" {
-        test_step.extend(["--lib".to_owned(), "--test".to_owned(), "integration".to_owned()]);
-    } else if package == "rustfs-gateway-conformance" {
-'''
+new = ''''''
 if text.count(old) != 1:
     raise SystemExit("gateway compile-fail fast-scope skip is missing")
 path.write_text(text.replace(old, new, 1))
@@ -2213,6 +2207,22 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'the workspace gate dropping the gateway million-key RSS contract' \
     mut_xtask_gateway_rss_contract_disappears
+
+mut_xtask_sig_fast_scope_loses_exact_matching() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify/selection.rs")
+text = path.read_text()
+old = '                "--exact",\n'
+if text.count(old) != 1:
+    raise SystemExit("signature fast-scope exact selector is missing")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the signature fast scope broadening its statistical timing skips' \
+    mut_xtask_sig_fast_scope_loses_exact_matching
 
 mut_xtask_core_fast_scope_renames_compile_fail_skip() {
     python3 - <<'PYEOF'
