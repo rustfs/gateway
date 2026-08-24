@@ -165,6 +165,48 @@ fn conformance_fast_scope_keeps_integration_contracts_in_the_workspace_gate() {
 }
 
 #[test]
+fn sig_fast_scope_keeps_statistical_timing_contracts_in_the_workspace_gate() {
+    let batches = crate_step_batches("rustfs-gateway-sig");
+    let timing = include_str!("../../../crates/sig/tests/timing.rs");
+    let statistical_tests = [
+        "c_sig_0552_sigv2_difference_position_does_not_change_the_latency",
+        "c_sig_0111_an_unknown_key_costs_the_same_as_a_bad_signature",
+        "a_match_and_a_mismatch_cost_the_same",
+        "c_sig_0107_and_0108_the_position_of_the_difference_does_not_change_the_latency",
+    ];
+
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].len(), 2);
+    let test_step = &batches[0][0];
+    for test in statistical_tests {
+        assert!(timing.contains(&format!("fn {test}")), "the workspace timing contract must remain active");
+    }
+    assert_eq!(
+        test_step,
+        &[
+            "test",
+            "-p",
+            "rustfs-gateway-sig",
+            "--",
+            "--skip",
+            "timing::c_sig_0552_sigv2_difference_position_does_not_change_the_latency",
+            "--skip",
+            "timing::c_sig_0111_an_unknown_key_costs_the_same_as_a_bad_signature",
+            "--skip",
+            "timing::a_match_and_a_mismatch_cost_the_same",
+            "--skip",
+            "timing::c_sig_0107_and_0108_the_position_of_the_difference_does_not_change_the_latency",
+            "--exact",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+    );
+    assert_eq!(standalone_crate_case("rustfs-gateway-sig"), Some("c-sig-0001"));
+    assert_eq!(batches[0][1][0], "clippy");
+}
+
+#[test]
 fn core_fast_scope_runs_both_runtime_targets_concurrently() {
     let batches = crate_step_batches("rustfs-gateway-core");
     let steps = &batches[0];
