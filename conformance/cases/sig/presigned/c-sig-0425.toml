@@ -1,0 +1,70 @@
+# c-sig-0425 — Presigned PUT with body hash mismatch must be rejected.
+#
+# Schema dimensions exercised: presigned.body_hash_mismatch (negative), signature.presigned
+
+[case]
+id = "c-sig-0425"
+schema_version = 1
+title = "A presigned PUT with body replaced after signing must fail and not write the object"
+rationale = """
+P3: If x-amz-content-sha256 is present and in SignedHeaders, the body must be stream-verified \
+against that hash. A mismatch must reject the request and NOT write the object. This is the \
+s3s#622 regression: the canonical used UNSIGNED-PAYLOAD, the actual hash was silently discarded, \
+and the body could be replaced. (s3s#622)"""
+polarity = "negative"
+operation = "PutObject"
+tags = ["signature", "presigned", "sigv4", "security", "body-hash"]
+timeout_ms = 15000
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/622"
+summary = "Presigned PUT body hash was silently discarded, allowing body replacement."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "presigned-body-tamper"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-sig/presigned-body-tamper"
+headers = { "content-type" = "application/octet-stream" }
+
+[request.sign]
+mode = "sigv4_presigned"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+expires = 3600
+payload_hash = "computed"
+
+# Sign with the correct body, then replace it.
+[[request.chunks]]
+utf8 = "original body"
+
+[request.sign.tamper]
+action = "replace_body"
+new_body = "tampered body content"
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "closed"
+
+[expect.error]
+code = "SignatureDoesNotMatch"
+request_id_present = true
+
+# Critical assertion: the object must NOT have been written.
+[expect.object]
+bucket = "conf-sig"
+key = "presigned-body-tamper"
+absent = true

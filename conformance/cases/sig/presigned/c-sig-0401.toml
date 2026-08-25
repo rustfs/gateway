@@ -1,0 +1,56 @@
+# c-sig-0401 — Valid presigned GET URL.
+#
+# Schema dimensions exercised: presigned.get (positive), signature.presigned
+
+[case]
+id = "c-sig-0401"
+schema_version = 1
+title = "A valid presigned GET URL returns 200"
+rationale = """
+Presigned URLs are the standard way to grant temporary access to S3 objects. A correctly \
+generated presigned GET URL must be accepted and return the object. This case verifies the \
+basic presigned URL flow works end-to-end. (s3s#402 regression)"""
+polarity = "positive"
+operation = "GetObject"
+tags = ["signature", "presigned", "sigv4", "security"]
+timeout_ms = 15000
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/402"
+summary = "Presigned URL verification was incomplete and lacked tests."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html"
+summary = "AWS documentation for presigned URL authentication using query string parameters."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "presigned-get"
+body = "hello world"
+
+[request]
+method = "GET"
+target = "/conf-sig/presigned-get"
+
+[request.sign]
+mode = "sigv4_presigned"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+expires = 3600
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = "hello world"

@@ -1,0 +1,60 @@
+# c-sig-0420 — Presigned URL with appended query parameter must be rejected.
+#
+# Schema dimensions exercised: presigned.tamper.query (negative), signature.presigned
+
+[case]
+id = "c-sig-0420"
+schema_version = 1
+title = "A presigned URL with an appended query parameter must be rejected"
+rationale = """
+P1: The canonical query must be rebuilt from all parameters (except X-Amz-Signature). \
+Any new parameter appended to a presigned URL must invalidate the signature. This is \
+the most common real signature bypass: an attacker appends &response-content-disposition=... \
+or &versionId=... to a presigned URL. (S-4)"""
+polarity = "negative"
+operation = "GetObject"
+tags = ["signature", "presigned", "sigv4", "security", "tamper"]
+timeout_ms = 15000
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html"
+summary = "Every query parameter except X-Amz-Signature must be included in the canonical query."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "presigned-tamper"
+body = "hello"
+
+[request]
+method = "GET"
+target = "/conf-sig/presigned-tamper"
+
+[request.sign]
+mode = "sigv4_presigned"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+expires = 3600
+
+# Tamper: append a query parameter after signing.
+[request.sign.tamper]
+action = "append_query"
+param = "response-content-disposition"
+value = "attachment;filename=evil.txt"
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "closed"
+
+[expect.error]
+code = "SignatureDoesNotMatch"
+request_id_present = true

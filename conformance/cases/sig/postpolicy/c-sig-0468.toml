@@ -1,0 +1,78 @@
+# c-sig-0468 — POST exceeding content-length-range must be rejected.
+#
+# Schema dimensions exercised: post_policy.content_length_range (negative), signature.post_policy
+
+[case]
+id = "c-sig-0468"
+schema_version = 1
+title = "A POST exceeding policy content-length-range must abort at the limit"
+rationale = """
+Q5: content-length-range must be enforced BEFORE reading the file. The reader must stop \
+at min(config.max, policy.content-length-range.max) bytes. This prevents a DoS where \
+the policy limits 1KB but the attacker sends 1GB. (s3s#473/#502)"""
+polarity = "negative"
+operation = "PostObject"
+tags = ["signature", "post-policy", "sigv4", "security", "dos", "size-limit"]
+timeout_ms = 15000
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/473"
+summary = "POST policy was enforced after reading the entire body, allowing DoS."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/502"
+summary = "content-length-range error code was wrong (should be EntityTooLarge)."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[request]
+method = "POST"
+target = "/conf-sig"
+content_type = "multipart/form-data"
+
+[request.form]
+key = "uploads/size-test"
+bucket = "conf-sig"
+success_action_status = "201"
+x-amz-algorithm = "AWS4-HMAC-SHA256"
+x-amz-credential = "AKIAIOSFODNN7EXAMPLE/20260102/us-east-1/s3/aws4_request"
+x-amz-date = "20260102T030405Z"
+
+[request.form.policy]
+expiration = "2026-01-02T04:04:05Z"
+conditions = [
+    ["eq", "$bucket", "conf-sig"],
+    ["starts-with", "$key", "uploads/"],
+    ["eq", "$success_action_status", "201"],
+    ["content-length-range", 1, 1024]
+]
+
+[request.sign]
+mode = "post_policy"
+credential = "valid"
+
+# Send 2KB, exceeding the 1KB limit.
+[request.body]
+utf8 = "A"
+repeat = 2048
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "closed"
+
+[expect.error]
+code = "EntityTooLarge"
+request_id_present = true
+
+# Critical: actual bytes read must be approximately the limit, not the full body.
+[expect.request_progress]
+body_bytes_read_approx = 1024
+tolerance_bytes = 65536
