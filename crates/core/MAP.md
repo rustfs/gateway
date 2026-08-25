@@ -37,6 +37,8 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/cors/` | CORS rule and response primitives. | CORS semantics change. |
 | `src/sse/` | Server-side encryption proof and rejection types. | SSE headers or key handling change. |
 | `tests/route_table.rs` | Route-table positive/negative matrix. | Any route row changes. |
+| `tests/route_sizes.rs` | Independent compile-time size ceiling for the copied hot-path bucket. | The compiled router's bucket layout changes. |
+| `benches/route.rs` | Allocation gate and non-blocking timing record for compiled route lookup. | Routing hot-path cost changes. |
 | `tests/params_and_dispatch.rs` | Dispatch and required-parameter matrix. | Registry or dispatch changes. |
 | `tests/configuration_error_declarations.rs` | Static unconfigured-error declarations for operation triples. | A configuration operation's missing-state error changes. |
 | `tests/registration.rs` | Registration rejection matrix. | Handler registration changes. |

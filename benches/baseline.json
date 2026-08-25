@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-25T06:33:40Z",
+  "source_base_commit": "ecb52edd5b7abb0f1dea5b7579b8b7996bfeee1d",
+  "source_state": "P4-03 Slice D working tree based on source_base_commit",
+  "environment": {
+    "cpu": "Apple M4 Pro",
+    "os": "Darwin 25.5.0 arm64",
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)"
+  },
+  "policy": {
+    "allocation_and_size_measurements_block": true,
+    "wall_clock_measurements_block": false,
+    "note": "Wall-clock values are review records only and are never CI thresholds."
+  },
+  "measurements": [
+    {
+      "name": "route/get_object_no_query",
+      "kind": "allocations",
+      "value": 0,
+      "unit": "heap_blocks",
+      "blocking": true
+    },
+    {
+      "name": "route/list_objects_v2_6params",
+      "kind": "allocations",
+      "value": 0,
+      "unit": "heap_blocks",
+      "blocking": true
+    },
+    {
+      "name": "parse/query_view_8params",
+      "kind": "allocations",
+      "value": 0,
+      "unit": "heap_blocks",
+      "blocking": true
+    },
+    {
+      "name": "parse/canonical_headers_signed",
+      "kind": "allocations",
+      "value": 0,
+      "unit": "heap_blocks",
+      "blocking": true
+    },
+    {
+      "name": "route/RouteBucket",
+      "kind": "size",
+      "value": 8,
+      "ceiling": 64,
+      "unit": "bytes",
+      "blocking": true
+    },
+    {
+      "name": "route/get_object_no_query",
+      "kind": "wall_clock",
+      "value": 6.798,
+      "unit": "nanoseconds_per_iteration",
+      "iterations": 1000000,
+      "blocking": false
+    },
+    {
+      "name": "route/list_objects_v2_6params",
+      "kind": "wall_clock",
+      "value": 25.562,
+      "unit": "nanoseconds_per_iteration",
+      "iterations": 1000000,
+      "blocking": false
+    },
+    {
+      "name": "parse/query_view_8params",
+      "kind": "wall_clock",
+      "value": 382.402,
+      "unit": "nanoseconds_per_iteration",
+      "iterations": 100000,
+      "blocking": false
+    },
+    {
+      "name": "parse/canonical_headers_signed",
+      "kind": "wall_clock",
+      "value": 147.132,
+      "unit": "nanoseconds_per_iteration",
+      "iterations": 100000,
+      "blocking": false
+    }
+  ]
+}

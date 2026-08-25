@@ -17,9 +17,14 @@
 //! Upstream: `http` fixtures and `dhat`.
 //! Downstream: the HTTP crate's CI benchmark gate.
 
+use std::hint::black_box;
+use std::time::Instant;
+
 use http::Request;
 use http::header::HOST;
-use rustfs_gateway_http::{Limits, SignedHeaderList, WireRequest};
+use rustfs_gateway_http::{Limits, QueryIndex, SignedHeaderList, WireRequest};
+
+const ITERATIONS: u32 = 100_000;
 
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
@@ -33,6 +38,16 @@ fn assert_zero_allocations(name: &str, action: impl FnOnce()) {
     assert_eq!(stats.total_blocks, 0, "{name} allocated {} heap blocks", stats.total_blocks);
     assert_eq!(stats.total_bytes, 0, "{name} allocated {} heap bytes", stats.total_bytes);
     println!("{name}: 0 allocs");
+}
+
+fn record_time(name: &str, iterations: u32, mut action: impl FnMut()) {
+    let started = Instant::now();
+    for _ in 0..iterations {
+        action();
+    }
+    let elapsed = started.elapsed();
+    let nanos_per_iteration = elapsed.as_secs_f64() * 1_000_000_000.0 / f64::from(iterations);
+    println!("{name}: {nanos_per_iteration:.3} ns/iteration ({iterations} iterations; record-only, non-blocking)");
 }
 
 fn query_request() -> Request<()> {
@@ -82,4 +97,20 @@ fn main() {
     });
     assert_eq!(output.capacity(), capacity);
     assert!(!output.is_empty());
+
+    let query = concat!(
+        "list-type=2&prefix=logs%2F&delimiter=%2F&max-keys=1000",
+        "&continuation-token=abc&encoding-type=url&fetch-owner=true&start-after=x"
+    );
+    record_time("parse/query_view_8params", ITERATIONS, || {
+        black_box(QueryIndex::parse(black_box(query), black_box(&limits)).expect("the query fixture is accepted"));
+    });
+    record_time("parse/canonical_headers_signed", ITERATIONS, || {
+        output.clear();
+        accepted
+            .headers()
+            .write_canonical_headers_with_host(&signed, &"b.example.com", &mut output)
+            .expect("every signed header is present");
+        black_box(output.as_str());
+    });
 }

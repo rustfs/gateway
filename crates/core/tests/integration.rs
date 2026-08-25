@@ -98,6 +98,9 @@ mod replication_roundtrip;
 #[path = "response_override_safety.rs"]
 mod response_override_safety;
 
+#[path = "route_sizes.rs"]
+mod route_sizes;
+
 #[path = "route_table.rs"]
 mod route_table;
 

@@ -214,6 +214,7 @@ core_modules = (
     "registration",
     "replication_roundtrip",
     "response_override_safety",
+    "route_sizes",
     "route_table",
     "static_dispatch",
     "tagging_contract",
