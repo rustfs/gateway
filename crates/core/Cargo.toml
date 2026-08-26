@@ -53,6 +53,13 @@ serde_json = { workspace = true }
 # request they disagree about.
 proptest = { workspace = true }
 trybuild = { workspace = true }
+# The route benchmark uses the same safe external allocation instrument as the HTTP and facade
+# probes. The measured lookup itself contains no allocator implementation in this repository.
+dhat = { workspace = true }
+
+[[bench]]
+name = "route"
+harness = false
 
 [[test]]
 name = "integration"
