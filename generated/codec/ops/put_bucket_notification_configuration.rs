@@ -109,7 +109,7 @@ fn read_lambda_function_configuration(
     if let Some(raw) = node.child_text("CloudFunction") {
         shape.lambda_function_arn = raw.to_owned();
     } else {
-        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("CloudFunction"));
+        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("LambdaFunctionArn"));
     }
     for item in node.children_named("Event") {
         let raw = item.text.as_str();
@@ -167,7 +167,7 @@ fn read_queue_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Q
     if let Some(raw) = node.child_text("Queue") {
         shape.queue_arn = raw.to_owned();
     } else {
-        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Queue"));
+        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("QueueArn"));
     }
     for item in node.children_named("Event") {
         let raw = item.text.as_str();
@@ -201,7 +201,7 @@ fn read_topic_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::T
     if let Some(raw) = node.child_text("Topic") {
         shape.topic_arn = raw.to_owned();
     } else {
-        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Topic"));
+        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("TopicArn"));
     }
     for item in node.children_named("Event") {
         let raw = item.text.as_str();
