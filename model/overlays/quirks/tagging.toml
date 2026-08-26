@@ -19,10 +19,17 @@
 [[quirk]]
 id      = "q-tag-wrapped-0088"
 kind    = "wire_form"
-classification = "contract"
+classification = "mutable"
+mutation_dimension = "wrap_strategy"
+mutation_sources = [
+  "GetBucketTagging.output.TagSet.list_flattened",
+  "GetObjectTagging.output.TagSet.list_flattened",
+]
 target  = "GetBucketTagging"
 summary = "The tag collection is wrapped — `<TagSet>` encloses `<Tag>` members — where the listing families flatten `Contents` and `Rule` directly into their parent, so an encoder that reuses the flattened shape here silently drops the enclosing element."
-cases   = ["c-tagging-0001", "c-tagging-0004", "c-tagging-0005", "c-tagging-0018"]
+cases   = ["c-tagging-0001", "c-tagging-0004", "c-tagging-0005", "c-tagging-0007", "c-tagging-0018",
+           "c-tagging-0021", "c-tagging-0023", "c-tagging-0024", "c-tagging-0025", "c-tagging-0027",
+           "c-tagging-0028"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
