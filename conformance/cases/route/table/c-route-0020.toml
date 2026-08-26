@@ -1,0 +1,23 @@
+# c-route-0020 — GET /bucket?key-marker routes to ListObjects with parameters.
+#
+# Schema dimensions exercised: route.table.list_with_params (positive)
+
+[case]
+id = "c-route-0020"
+schema_version = 1
+title = "GET /bucket with list parameters routes to ListObjects"
+rationale = """
+List parameters like key-marker, max-keys, prefix, delimiter do not change routing — \
+they are consumed by the handler, not the router."""
+polarity = "positive"
+operation = "ListObjects"
+tags = ["routing", "parameters"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket?prefix=logs/&max-keys=100&delimiter=/"
+
+[expect]
+kind = "route"
+operation = "ListObjects"

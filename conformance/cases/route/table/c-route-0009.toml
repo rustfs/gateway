@@ -1,0 +1,22 @@
+# c-route-0009 — GET /bucket?tagging routes to GetBucketTagging.
+#
+# Schema dimensions exercised: route.table.bucket_tagging (positive)
+
+[case]
+id = "c-route-0009"
+schema_version = 1
+title = "GET /bucket?tagging routes to GetBucketTagging"
+rationale = """
+The tagging subresource on a bucket routes to GetBucketTagging."""
+polarity = "positive"
+operation = "GetBucketTagging"
+tags = ["routing", "subresource", "tagging"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket?tagging"
+
+[expect]
+kind = "route"
+operation = "GetBucketTagging"

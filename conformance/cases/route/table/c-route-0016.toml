@@ -1,0 +1,22 @@
+# c-route-0016 — GET /bucket?uploads routes to ListMultipartUploads.
+#
+# Schema dimensions exercised: route.table.list_multipart_uploads (positive)
+
+[case]
+id = "c-route-0016"
+schema_version = 1
+title = "GET /bucket?uploads routes to ListMultipartUploads"
+rationale = """
+The uploads subresource routes to ListMultipartUploads."""
+polarity = "positive"
+operation = "ListMultipartUploads"
+tags = ["routing", "subresource", "multipart"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket?uploads"
+
+[expect]
+kind = "route"
+operation = "ListMultipartUploads"

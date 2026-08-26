@@ -1,0 +1,22 @@
+# c-route-0012 — GET /bucket?policy routes to GetBucketPolicy.
+#
+# Schema dimensions exercised: route.table.bucket_policy (positive)
+
+[case]
+id = "c-route-0012"
+schema_version = 1
+title = "GET /bucket?policy routes to GetBucketPolicy"
+rationale = """
+The policy subresource routes to GetBucketPolicy."""
+polarity = "positive"
+operation = "GetBucketPolicy"
+tags = ["routing", "subresource", "policy"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket?policy"
+
+[expect]
+kind = "route"
+operation = "GetBucketPolicy"

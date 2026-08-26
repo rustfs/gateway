@@ -1,0 +1,24 @@
+# c-route-0001 — GET /bucket/key routes to GetObject.
+#
+# Schema dimensions exercised: route.table.basic_get (positive)
+
+[case]
+id = "c-route-0001"
+schema_version = 1
+title = "GET /bucket/key routes to GetObject"
+rationale = """
+The most common data-plane request: a plain object read with no query parameters. \
+This must route to GetObject with zero predicate evaluations (compiled fast path)."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["routing", "hot-path"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket/my-key"
+
+[expect]
+kind = "route"
+operation = "GetObject"
+evaluations = 0

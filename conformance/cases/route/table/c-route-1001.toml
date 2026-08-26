@@ -1,0 +1,22 @@
+# c-route-1001 — Unknown operation returns 501.
+#
+# Schema dimensions exercised: route.table.unknown (negative)
+
+[case]
+id = "c-route-1001"
+schema_version = 1
+title = "An unrecognized request shape returns 501 NotImplemented"
+rationale = """
+When no route entry matches, the gateway must return 501 NotImplemented with a helpful message."""
+polarity = "negative"
+operation = "Unknown"
+tags = ["routing", "error"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/"
+
+[expect]
+kind = "route"
+status = 501

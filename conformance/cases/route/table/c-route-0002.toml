@@ -1,0 +1,22 @@
+# c-route-0002 — PUT /bucket/key routes to PutObject.
+#
+# Schema dimensions exercised: route.table.basic_put (positive)
+
+[case]
+id = "c-route-0002"
+schema_version = 1
+title = "PUT /bucket/key routes to PutObject"
+rationale = """
+Basic object write with no query parameters. Must route to PutObject."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["routing", "hot-path"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/my-bucket/my-key"
+
+[expect]
+kind = "route"
+operation = "PutObject"

@@ -1,0 +1,22 @@
+# c-route-0017 — PUT /bucket routes to CreateBucket.
+#
+# Schema dimensions exercised: route.table.create_bucket (positive)
+
+[case]
+id = "c-route-0017"
+schema_version = 1
+title = "PUT /bucket routes to CreateBucket"
+rationale = """
+PUT on a bucket without subresources routes to CreateBucket."""
+polarity = "positive"
+operation = "CreateBucket"
+tags = ["routing", "bucket"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/my-bucket"
+
+[expect]
+kind = "route"
+operation = "CreateBucket"

@@ -1,0 +1,22 @@
+# c-route-0018 — DELETE /bucket routes to DeleteBucket.
+#
+# Schema dimensions exercised: route.table.delete_bucket (positive)
+
+[case]
+id = "c-route-0018"
+schema_version = 1
+title = "DELETE /bucket routes to DeleteBucket"
+rationale = """
+DELETE on a bucket without subresources routes to DeleteBucket."""
+polarity = "positive"
+operation = "DeleteBucket"
+tags = ["routing", "bucket"]
+timeout_ms = 5000
+
+[request]
+method = "DELETE"
+target = "/my-bucket"
+
+[expect]
+kind = "route"
+operation = "DeleteBucket"

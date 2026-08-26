@@ -1,0 +1,22 @@
+# c-route-0010 — GET /bucket?lifecycle routes to GetBucketLifecycleConfiguration.
+#
+# Schema dimensions exercised: route.table.bucket_lifecycle (positive)
+
+[case]
+id = "c-route-0010"
+schema_version = 1
+title = "GET /bucket?lifecycle routes to GetBucketLifecycleConfiguration"
+rationale = """
+The lifecycle subresource routes to GetBucketLifecycleConfiguration."""
+polarity = "positive"
+operation = "GetBucketLifecycleConfiguration"
+tags = ["routing", "subresource", "lifecycle"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket?lifecycle"
+
+[expect]
+kind = "route"
+operation = "GetBucketLifecycleConfiguration"

@@ -1,0 +1,22 @@
+# c-route-0006 — GET /bucket?list-type=2 routes to ListObjectsV2.
+#
+# Schema dimensions exercised: route.table.list_objects_v2 (positive)
+
+[case]
+id = "c-route-0006"
+schema_version = 1
+title = "GET /bucket?list-type=2 routes to ListObjectsV2"
+rationale = """
+The list-type=2 query parameter discriminates ListObjectsV2 from ListObjects."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["routing", "subresource"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket?list-type=2"
+
+[expect]
+kind = "route"
+operation = "ListObjectsV2"

@@ -1,0 +1,22 @@
+# c-route-0005 — GET /bucket routes to ListObjects.
+#
+# Schema dimensions exercised: route.table.list_objects (positive)
+
+[case]
+id = "c-route-0005"
+schema_version = 1
+title = "GET /bucket routes to ListObjects"
+rationale = """
+Bucket-level GET without query parameters routes to ListObjects (v1)."""
+polarity = "positive"
+operation = "ListObjects"
+tags = ["routing"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket"
+
+[expect]
+kind = "route"
+operation = "ListObjects"

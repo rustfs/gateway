@@ -1,0 +1,22 @@
+# c-route-0014 — GET /bucket?encryption routes to GetBucketEncryption.
+#
+# Schema dimensions exercised: route.table.bucket_encryption (positive)
+
+[case]
+id = "c-route-0014"
+schema_version = 1
+title = "GET /bucket?encryption routes to GetBucketEncryption"
+rationale = """
+The encryption subresource routes to GetBucketEncryption."""
+polarity = "positive"
+operation = "GetBucketEncryption"
+tags = ["routing", "subresource", "encryption"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket?encryption"
+
+[expect]
+kind = "route"
+operation = "GetBucketEncryption"

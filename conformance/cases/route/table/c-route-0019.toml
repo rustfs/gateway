@@ -1,0 +1,22 @@
+# c-route-0019 — HEAD /bucket routes to HeadBucket.
+#
+# Schema dimensions exercised: route.table.head_bucket (positive)
+
+[case]
+id = "c-route-0019"
+schema_version = 1
+title = "HEAD /bucket routes to HeadBucket"
+rationale = """
+HEAD on a bucket routes to HeadBucket (bucket existence check)."""
+polarity = "positive"
+operation = "HeadBucket"
+tags = ["routing", "bucket"]
+timeout_ms = 5000
+
+[request]
+method = "HEAD"
+target = "/my-bucket"
+
+[expect]
+kind = "route"
+operation = "HeadBucket"

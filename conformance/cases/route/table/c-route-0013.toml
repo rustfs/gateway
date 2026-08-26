@@ -1,0 +1,22 @@
+# c-route-0013 — GET /bucket?cors routes to GetBucketCors.
+#
+# Schema dimensions exercised: route.table.bucket_cors (positive)
+
+[case]
+id = "c-route-0013"
+schema_version = 1
+title = "GET /bucket?cors routes to GetBucketCors"
+rationale = """
+The cors subresource routes to GetBucketCors."""
+polarity = "positive"
+operation = "GetBucketCors"
+tags = ["routing", "subresource", "cors"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket?cors"
+
+[expect]
+kind = "route"
+operation = "GetBucketCors"

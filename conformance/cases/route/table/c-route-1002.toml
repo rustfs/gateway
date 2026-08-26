@@ -1,0 +1,22 @@
+# c-route-1002 — Wrong method returns 405 or routes differently.
+#
+# Schema dimensions exercised: route.table.method_mismatch (negative)
+
+[case]
+id = "c-route-1002"
+schema_version = 1
+title = "POST /bucket/key does not route to PutObject"
+rationale = """
+POST is not PUT. POST /bucket/key must not route to PutObject."""
+polarity = "negative"
+operation = "PostObject"
+tags = ["routing", "method"]
+timeout_ms = 5000
+
+[request]
+method = "POST"
+target = "/my-bucket/my-key"
+
+[expect]
+kind = "route"
+operation_not = "PutObject"

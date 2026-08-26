@@ -1,0 +1,22 @@
+# c-route-0007 — PUT /bucket?acl routes to PutBucketAcl.
+#
+# Schema dimensions exercised: route.table.bucket_acl (positive)
+
+[case]
+id = "c-route-0007"
+schema_version = 1
+title = "PUT /bucket?acl routes to PutBucketAcl"
+rationale = """
+The acl subresource on a bucket routes to PutBucketAcl."""
+polarity = "positive"
+operation = "PutBucketAcl"
+tags = ["routing", "subresource", "acl"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/my-bucket?acl"
+
+[expect]
+kind = "route"
+operation = "PutBucketAcl"

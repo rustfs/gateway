@@ -1,0 +1,22 @@
+# c-route-0011 — GET /bucket?versioning routes to GetBucketVersioning.
+#
+# Schema dimensions exercised: route.table.bucket_versioning (positive)
+
+[case]
+id = "c-route-0011"
+schema_version = 1
+title = "GET /bucket?versioning routes to GetBucketVersioning"
+rationale = """
+The versioning subresource routes to GetBucketVersioning."""
+polarity = "positive"
+operation = "GetBucketVersioning"
+tags = ["routing", "subresource", "versioning"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket?versioning"
+
+[expect]
+kind = "route"
+operation = "GetBucketVersioning"

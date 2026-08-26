@@ -1,0 +1,22 @@
+# c-route-0004 — DELETE /bucket/key routes to DeleteObject.
+#
+# Schema dimensions exercised: route.table.basic_delete (positive)
+
+[case]
+id = "c-route-0004"
+schema_version = 1
+title = "DELETE /bucket/key routes to DeleteObject"
+rationale = """
+Basic object deletion. Must route to DeleteObject."""
+polarity = "positive"
+operation = "DeleteObject"
+tags = ["routing", "hot-path"]
+timeout_ms = 5000
+
+[request]
+method = "DELETE"
+target = "/my-bucket/my-key"
+
+[expect]
+kind = "route"
+operation = "DeleteObject"

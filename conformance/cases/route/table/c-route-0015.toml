@@ -1,0 +1,22 @@
+# c-route-0015 — GET /bucket?location routes to GetBucketLocation.
+#
+# Schema dimensions exercised: route.table.bucket_location (positive)
+
+[case]
+id = "c-route-0015"
+schema_version = 1
+title = "GET /bucket?location routes to GetBucketLocation"
+rationale = """
+The location subresource routes to GetBucketLocation."""
+polarity = "positive"
+operation = "GetBucketLocation"
+tags = ["routing", "subresource", "location"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket?location"
+
+[expect]
+kind = "route"
+operation = "GetBucketLocation"

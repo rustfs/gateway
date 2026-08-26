@@ -1,0 +1,22 @@
+# c-route-0008 — GET /bucket/key?acl routes to GetObjectAcl.
+#
+# Schema dimensions exercised: route.table.object_acl (positive)
+
+[case]
+id = "c-route-0008"
+schema_version = 1
+title = "GET /bucket/key?acl routes to GetObjectAcl"
+rationale = """
+The acl subresource on an object routes to GetObjectAcl."""
+polarity = "positive"
+operation = "GetObjectAcl"
+tags = ["routing", "subresource", "acl"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/my-bucket/my-key?acl"
+
+[expect]
+kind = "route"
+operation = "GetObjectAcl"

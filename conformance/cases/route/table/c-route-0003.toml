@@ -1,0 +1,22 @@
+# c-route-0003 — HEAD /bucket/key routes to HeadObject.
+#
+# Schema dimensions exercised: route.table.basic_head (positive)
+
+[case]
+id = "c-route-0003"
+schema_version = 1
+title = "HEAD /bucket/key routes to HeadObject"
+rationale = """
+Basic object metadata read. Must route to HeadObject."""
+polarity = "positive"
+operation = "HeadObject"
+tags = ["routing", "hot-path"]
+timeout_ms = 5000
+
+[request]
+method = "HEAD"
+target = "/my-bucket/my-key"
+
+[expect]
+kind = "route"
+operation = "HeadObject"
