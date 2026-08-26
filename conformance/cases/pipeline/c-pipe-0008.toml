@@ -1,0 +1,30 @@
+# c-pipe-0008 — Encoded stage produces wire response.
+#
+# Schema dimensions exercised: pipeline.encoded.response (positive)
+
+[case]
+id = "c-pipe-0008"
+schema_version = 1
+title = "Encoded stage produces correct response headers"
+rationale = """
+The encoded stage converts the operation's output into a wire response
+with correct headers, status, and body formatting."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["pipeline", "encoded"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket/key"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 200
+headers_present = ["etag", "content-type"]

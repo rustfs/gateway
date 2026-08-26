@@ -1,0 +1,37 @@
+# c-pipe-0016 — Pipeline handles streaming upload.
+#
+# Schema dimensions exercised: pipeline.guarded.streaming (positive)
+
+[case]
+id = "c-pipe-0016"
+schema_version = 1
+title = "Pipeline handles streaming upload with chunked encoding"
+rationale = """
+The guarded stage must handle streaming uploads with proper chunk verification."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["pipeline", "guarded", "streaming"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/bucket/key"
+headers = {
+    "content-type" = "application/octet-stream",
+    "x-amz-content-sha256" = "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
+    "x-amz-decoded-content-length" = "12"
+}
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+payload_hash = "literal:STREAMING-AWS4-HMAC-SHA256-PAYLOAD"
+
+[[request.chunks]]
+utf8 = "chunk body"
+
+[expect]
+kind = "response"
+status = 200

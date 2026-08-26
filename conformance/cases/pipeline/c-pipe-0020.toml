@@ -1,0 +1,28 @@
+# c-pipe-0020 — Pipeline handles tagging operations.
+#
+# Schema dimensions exercised: pipeline.decoded.tagging (positive)
+
+[case]
+id = "c-pipe-0020"
+schema_version = 1
+title = "Pipeline handles GetBucketTagging"
+rationale = """
+The pipeline must handle tagging subresource operations."""
+polarity = "positive"
+operation = "GetBucketTagging"
+tags = ["pipeline", "decoded", "tagging"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket?tagging"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 200

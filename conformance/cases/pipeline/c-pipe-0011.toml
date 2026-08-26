@@ -1,0 +1,30 @@
+# c-pipe-0011 — Pipeline handles conditional requests.
+#
+# Schema dimensions exercised: pipeline.decoded.conditional (positive)
+
+[case]
+id = "c-pipe-0011"
+schema_version = 1
+title = "Pipeline handles If-Match conditional request"
+rationale = """
+The decoded stage must parse conditional headers for precondition checks."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["pipeline", "decoded", "conditional"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket/key"
+headers = { "if-match" = "\"etag123\"" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+# Could be 200 or 412 depending on etag match
+status_not_in = [400, 403, 500]

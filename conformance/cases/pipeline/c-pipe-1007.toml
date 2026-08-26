@@ -1,0 +1,34 @@
+# c-pipe-1007 — Pipeline rejects oversized body.
+#
+# Schema dimensions exercised: pipeline.guarded.oversized (negative)
+
+[case]
+id = "c-pipe-1007"
+schema_version = 1
+title = "Pipeline rejects body exceeding size limit"
+rationale = """
+The guarded stage must reject bodies that exceed configured limits."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["pipeline", "guarded", "limits"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/bucket/key"
+headers = { "content-type" = "application/octet-stream" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+payload_hash = "computed"
+
+[request.body]
+utf8 = "A"
+repeat = 10737418240
+
+[expect]
+kind = "response"
+status = 400

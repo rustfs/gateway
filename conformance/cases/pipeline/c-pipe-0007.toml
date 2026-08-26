@@ -1,0 +1,29 @@
+# c-pipe-0007 — Authorized stage checks permissions.
+#
+# Schema dimensions exercised: pipeline.authorized.permission (positive)
+
+[case]
+id = "c-pipe-0007"
+schema_version = 1
+title = "Authorized stage permits access with valid credentials"
+rationale = """
+The authorized stage verifies that the authenticated identity has
+permission to perform the requested operation on the target resource."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["pipeline", "authorized", "authz"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket/key"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 200

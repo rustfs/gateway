@@ -1,0 +1,23 @@
+# c-pipe-0003 — Routed stage determines the operation.
+#
+# Schema dimensions exercised: pipeline.routed.operation (positive)
+
+[case]
+id = "c-pipe-0003"
+schema_version = 1
+title = "Routed stage correctly identifies GetObject"
+rationale = """
+The routed stage must determine which operation the request targets
+based on method, path, and query parameters."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["pipeline", "routed"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket/key"
+
+[expect]
+kind = "route"
+operation = "GetObject"

@@ -1,0 +1,24 @@
+# c-pipe-0002 — Targeted stage resolves host and endpoint family.
+#
+# Schema dimensions exercised: pipeline.targeted.host_resolution (positive)
+
+[case]
+id = "c-pipe-0002"
+schema_version = 1
+title = "Targeted stage resolves virtual-hosted bucket correctly"
+rationale = """
+The targeted stage must resolve the host to determine the bucket name
+and endpoint family (standard, object-lambda, etc.)."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["pipeline", "targeted", "host"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/key"
+headers = { "host" = "my-bucket.s3.amazonaws.com" }
+
+[expect]
+kind = "response"
+status = 200

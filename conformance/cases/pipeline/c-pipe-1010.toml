@@ -1,0 +1,36 @@
+# c-pipe-1010 — Pipeline rejects unsigned x-amz header in presigned request.
+#
+# Schema dimensions exercised: pipeline.meta_auth.unsigned_header (negative)
+
+[case]
+id = "c-pipe-1010"
+schema_version = 1
+title = "Pipeline rejects unsigned x-amz header in presigned request"
+rationale = """
+The meta-auth stage must reject presigned requests with unsigned x-amz headers."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["pipeline", "meta_auth", "presigned", "security"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/bucket/key"
+headers = {
+    "content-type" = "application/octet-stream",
+    "x-amz-acl" = "public-read"
+}
+
+[request.sign]
+mode = "sigv4_presigned"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+expires = 3600
+
+[[request.chunks]]
+utf8 = "body"
+
+[expect]
+kind = "response"
+status = 403

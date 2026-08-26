@@ -1,0 +1,28 @@
+# c-pipe-0021 — Pipeline handles lifecycle operations.
+#
+# Schema dimensions exercised: pipeline.decoded.lifecycle (positive)
+
+[case]
+id = "c-pipe-0021"
+schema_version = 1
+title = "Pipeline handles GetBucketLifecycleConfiguration"
+rationale = """
+The pipeline must handle lifecycle subresource operations."""
+polarity = "positive"
+operation = "GetBucketLifecycleConfiguration"
+tags = ["pipeline", "decoded", "lifecycle"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket?lifecycle"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 200

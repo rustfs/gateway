@@ -1,0 +1,30 @@
+# c-pipe-0006 — Decoded stage produces typed input.
+#
+# Schema dimensions exercised: pipeline.decoded.typed_input (positive)
+
+[case]
+id = "c-pipe-0006"
+schema_version = 1
+title = "Decoded stage produces typed GetObjectInput"
+rationale = """
+The decoded stage converts wire data into the operation's typed input
+structure, including headers, query parameters, and path segments."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["pipeline", "decoded"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket/key"
+headers = { "range" = "bytes=0-100" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 200

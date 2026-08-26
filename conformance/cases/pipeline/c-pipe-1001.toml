@@ -1,0 +1,32 @@
+# c-pipe-1001 — Pipeline rejects request with invalid signature.
+#
+# Schema dimensions exercised: pipeline.meta_auth.invalid_signature (negative)
+
+[case]
+id = "c-pipe-1001"
+schema_version = 1
+title = "Pipeline rejects request with invalid signature"
+rationale = """
+The meta-auth stage must reject requests with invalid signatures
+before the body is read."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["pipeline", "meta_auth", "signature", "security"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket/key"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "invalid"
+
+[expect]
+kind = "response"
+status = 403
+
+[expect.error]
+code = "SignatureDoesNotMatch"

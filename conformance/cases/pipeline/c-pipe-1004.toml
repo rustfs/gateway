@@ -1,0 +1,41 @@
+# c-pipe-1004 — Pipeline rejects body hash mismatch.
+#
+# Schema dimensions exercised: pipeline.guarded.hash_mismatch (negative)
+
+[case]
+id = "c-pipe-1004"
+schema_version = 1
+title = "Pipeline rejects presigned PUT with body hash mismatch"
+rationale = """
+The guarded stage must reject requests where the body hash doesn't
+match the signed hash."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["pipeline", "guarded", "body", "security"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/bucket/key"
+headers = { "content-type" = "application/octet-stream" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+payload_hash = "computed"
+
+[[request.chunks]]
+utf8 = "original body"
+
+[request.sign.tamper]
+action = "replace_body"
+new_body = "tampered body"
+
+[expect]
+kind = "response"
+status = 403
+
+[expect.error]
+code = "SignatureDoesNotMatch"

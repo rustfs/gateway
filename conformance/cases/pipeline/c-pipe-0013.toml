@@ -1,0 +1,29 @@
+# c-pipe-0013 — Pipeline handles multipart upload.
+#
+# Schema dimensions exercised: pipeline.multipart.upload (positive)
+
+[case]
+id = "c-pipe-0013"
+schema_version = 1
+title = "Pipeline handles CreateMultipartUpload"
+rationale = """
+The pipeline must handle multipart upload initiation."""
+polarity = "positive"
+operation = "CreateMultipartUpload"
+tags = ["pipeline", "multipart"]
+timeout_ms = 5000
+
+[request]
+method = "POST"
+target = "/bucket/key?uploads"
+headers = { "content-type" = "application/octet-stream" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 200

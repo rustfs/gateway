@@ -1,0 +1,28 @@
+# c-pipe-0014 — Pipeline handles bucket operations.
+#
+# Schema dimensions exercised: pipeline.bucket.create (positive)
+
+[case]
+id = "c-pipe-0014"
+schema_version = 1
+title = "Pipeline handles CreateBucket"
+rationale = """
+The pipeline must handle bucket-level operations."""
+polarity = "positive"
+operation = "CreateBucket"
+tags = ["pipeline", "bucket"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/new-bucket"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status_not_in = [400, 500]

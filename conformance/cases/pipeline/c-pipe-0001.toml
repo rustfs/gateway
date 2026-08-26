@@ -1,0 +1,24 @@
+# c-pipe-0001 — Wire stage rejects malformed Host header.
+#
+# Schema dimensions exercised: pipeline.wire.host (positive)
+
+[case]
+id = "c-pipe-0001"
+schema_version = 1
+title = "Wire stage rejects requests with malformed Host header"
+rationale = """
+The wire stage must reject requests with malformed or missing Host headers
+before any other processing occurs. This is the first line of defense."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["pipeline", "wire", "host"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket/key"
+headers = { "host" = "" }
+
+[expect]
+kind = "response"
+status = 400

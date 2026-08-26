@@ -1,0 +1,30 @@
+# c-pipe-0012 — Pipeline handles range requests.
+#
+# Schema dimensions exercised: pipeline.decoded.range (positive)
+
+[case]
+id = "c-pipe-0012"
+schema_version = 1
+title = "Pipeline handles Range request header"
+rationale = """
+The decoded stage must parse Range headers for partial content."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["pipeline", "decoded", "range"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket/key"
+headers = { "range" = "bytes=0-100" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+# Could be 200 or 206 depending on implementation
+status_not_in = [400, 403, 500]

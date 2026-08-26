@@ -1,0 +1,28 @@
+# c-pipe-0019 — Pipeline handles ACL operations.
+#
+# Schema dimensions exercised: pipeline.decoded.acl (positive)
+
+[case]
+id = "c-pipe-0019"
+schema_version = 1
+title = "Pipeline handles GetBucketAcl"
+rationale = """
+The pipeline must handle ACL subresource operations."""
+polarity = "positive"
+operation = "GetBucketAcl"
+tags = ["pipeline", "decoded", "acl"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket?acl"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 200

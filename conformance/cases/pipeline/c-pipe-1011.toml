@@ -1,0 +1,22 @@
+# c-pipe-1011 — Pipeline rejects wrong method for operation.
+#
+# Schema dimensions exercised: pipeline.routed.wrong_method (negative)
+
+[case]
+id = "c-pipe-1011"
+schema_version = 1
+title = "Pipeline rejects wrong HTTP method for operation"
+rationale = """
+The routed stage must reject requests with wrong HTTP methods."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["pipeline", "routed", "method"]
+timeout_ms = 5000
+
+[request]
+method = "POST"
+target = "/bucket/key"
+
+[expect]
+kind = "response"
+operation_not = "GetObject"
