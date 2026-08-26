@@ -17,7 +17,7 @@
 //! Responsible for: the six presigned rules (P1–P6), the body-hash obligation for presigned PUT,
 //! and the `STREAMING-*` → `NotImplemented` gate.
 //! NOT responsible for: clock skew / `X-Amz-Expires` ceiling / privileged-surface rejection /
-//! duplicate-parameter rejection (those are `P2-04`'s H1/H2/H3/H6, called through [`SecurityFloor`]),
+//! duplicate-parameter rejection (those are `P2-04`'s H1/H2/H3/H6, called through the security floor),
 //! POST policy (that is [`crate::post_policy`]), or multipart framing (P3-02).
 //! Upstream: [`crate::floor::SecurityFloor`], [`crate::query::RawQuery`], [`crate::mode::PayloadMode`].
 //! Downstream: `rustfs-gateway-core`'s authentication stage, and the ingest pipeline (P3-03).
