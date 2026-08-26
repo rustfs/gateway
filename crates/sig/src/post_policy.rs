@@ -707,9 +707,7 @@ pub fn build_success_action_redirect(
 
     // Extract host for allowlist check.
     let after_scheme = &raw[scheme_end + 3..];
-    let host_end = after_scheme
-        .find(['/', '?', '#'])
-        .unwrap_or(after_scheme.len());
+    let host_end = after_scheme.find(['/', '?', '#']).unwrap_or(after_scheme.len());
     let host = &after_scheme[..host_end];
 
     // Strip port for allowlist comparison.
