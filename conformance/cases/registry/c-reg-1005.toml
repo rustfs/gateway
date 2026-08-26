@@ -1,0 +1,19 @@
+# c-reg-1005 — Operation with invalid name fails.
+#
+# Schema dimensions exercised: registry.invalid_name.reject (negative)
+
+[case]
+id = "c-reg-1005"
+schema_version = 1
+title = "Operation with invalid name is rejected"
+rationale = """
+Operation names must follow naming conventions."""
+polarity = "negative"
+operation = "invalid name"
+tags = ["registry", "naming"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "invalid name"
+error = "InvalidOperationName"

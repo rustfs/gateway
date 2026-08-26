@@ -1,0 +1,18 @@
+# c-reg-1011 — Compile-fail: missing handler implementation.
+#
+# Schema dimensions exercised: registry.compile_fail.missing (negative)
+
+[case]
+id = "c-reg-1011"
+schema_version = 1
+title = "Missing handler implementation fails to compile"
+rationale = """
+The type system must prevent registering operations without handlers."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["registry", "compile_fail"]
+timeout_ms = 5000
+
+[expect]
+kind = "compile_fail"
+error = "E0277"

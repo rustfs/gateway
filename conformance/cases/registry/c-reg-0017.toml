@@ -1,0 +1,20 @@
+# c-reg-0017 — Operation with target kind registers.
+#
+# Schema dimensions exercised: registry.target.register (positive)
+
+[case]
+id = "c-reg-0017"
+schema_version = 1
+title = "Operation with target kind registers"
+rationale = """
+Operations must declare their target kind (Service, Bucket, Object)."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["registry", "target"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetObject"
+registered = true
+target = "Object"

@@ -1,0 +1,18 @@
+# c-reg-1014 — Compile-fail: handler wrong output type.
+#
+# Schema dimensions exercised: registry.compile_fail.output (negative)
+
+[case]
+id = "c-reg-1014"
+schema_version = 1
+title = "Handler with wrong output type fails to compile"
+rationale = """
+The type system must enforce correct output types."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["registry", "compile_fail"]
+timeout_ms = 5000
+
+[expect]
+kind = "compile_fail"
+error = "E0308"

@@ -1,0 +1,19 @@
+# c-reg-1009 — Handler cancellation is propagated.
+#
+# Schema dimensions exercised: registry.handler.cancel (negative)
+
+[case]
+id = "c-reg-1009"
+schema_version = 1
+title = "Handler cancellation is propagated correctly"
+rationale = """
+Request cancellation must be propagated to handlers."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["registry", "handler", "cancel"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+handler_cancelled = true
+error = "RequestAborted"

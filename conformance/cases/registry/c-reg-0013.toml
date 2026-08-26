@@ -1,0 +1,20 @@
+# c-reg-0013 — Operation with payload config registers.
+#
+# Schema dimensions exercised: registry.payload.register (positive)
+
+[case]
+id = "c-reg-0013"
+schema_version = 1
+title = "Operation with payload configuration registers"
+rationale = """
+Operations must declare their payload handling."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["registry", "payload"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "PutObject"
+registered = true
+has_payload_config = true

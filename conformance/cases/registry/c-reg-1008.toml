@@ -1,0 +1,19 @@
+# c-reg-1008 — Handler timeout is enforced.
+#
+# Schema dimensions exercised: registry.handler.timeout (negative)
+
+[case]
+id = "c-reg-1008"
+schema_version = 1
+title = "Handler timeout is enforced"
+rationale = """
+Handler deadlines must be enforced."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["registry", "handler", "timeout"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+handler_timeout = true
+error = "HandlerDeadlineExceeded"

@@ -1,0 +1,20 @@
+# c-reg-0016 — Operation with errors config registers.
+#
+# Schema dimensions exercised: registry.errors.register (positive)
+
+[case]
+id = "c-reg-0016"
+schema_version = 1
+title = "Operation with errors configuration registers"
+rationale = """
+Operations must declare their error codes."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["registry", "errors"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetObject"
+registered = true
+has_errors_config = true

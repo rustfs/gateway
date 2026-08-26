@@ -1,0 +1,20 @@
+# c-reg-1002 — Operation without auth requirement fails.
+#
+# Schema dimensions exercised: registry.no_auth.reject (negative)
+
+[case]
+id = "c-reg-1002"
+schema_version = 1
+title = "Operation without auth requirement is rejected"
+rationale = """
+Operations must declare authorization requirements to prevent bypass."""
+polarity = "negative"
+operation = "custom:NoAuth"
+tags = ["registry", "auth", "security"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "custom:NoAuth"
+no_auth_requirement = true
+error = "MissingAuthRequirement"

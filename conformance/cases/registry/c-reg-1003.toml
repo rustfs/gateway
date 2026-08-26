@@ -1,0 +1,20 @@
+# c-reg-1003 — Operation without handler deadline fails.
+#
+# Schema dimensions exercised: registry.no_deadline.reject (negative)
+
+[case]
+id = "c-reg-1003"
+schema_version = 1
+title = "Operation without handler deadline is rejected"
+rationale = """
+Operations must declare handler deadline class."""
+polarity = "negative"
+operation = "custom:NoDeadline"
+tags = ["registry", "deadline"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "custom:NoDeadline"
+no_deadline = true
+error = "MissingHandlerDeadlineClass"

@@ -1,0 +1,20 @@
+# c-reg-0004 — Operation with auth requirement registers.
+#
+# Schema dimensions exercised: registry.auth.register (positive)
+
+[case]
+id = "c-reg-0004"
+schema_version = 1
+title = "Operation with auth requirement registers successfully"
+rationale = """
+Operations must declare their authorization requirements."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["registry", "auth"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetObject"
+registered = true
+has_auth = true

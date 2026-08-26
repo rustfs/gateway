@@ -1,0 +1,20 @@
+# c-reg-0022 — Operation with all fields registers.
+#
+# Schema dimensions exercised: registry.complete.register (positive)
+
+[case]
+id = "c-reg-0022"
+schema_version = 1
+title = "Operation with all required fields registers"
+rationale = """
+Operations with all required fields must register successfully."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["registry", "complete"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetObject"
+registered = true
+complete = true

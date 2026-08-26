@@ -1,0 +1,19 @@
+# c-reg-0003 — Operation with required params registers.
+#
+# Schema dimensions exercised: registry.params.register (positive)
+
+[case]
+id = "c-reg-0003"
+schema_version = 1
+title = "Operation with required params registers successfully"
+rationale = """
+Operations with required parameters must register and validate correctly."""
+polarity = "positive"
+operation = "PutBucketAnalyticsConfiguration"
+tags = ["registry", "params"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "PutBucketAnalyticsConfiguration"
+registered = true

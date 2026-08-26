@@ -1,0 +1,20 @@
+# c-reg-0007 — Operation with not_configured_error registers.
+#
+# Schema dimensions exercised: registry.not_configured.register (positive)
+
+[case]
+id = "c-reg-0007"
+schema_version = 1
+title = "Operation with not_configured_error registers"
+rationale = """
+Operations can declare a not_configured_error for missing subresources."""
+polarity = "positive"
+operation = "GetBucketLifecycleConfiguration"
+tags = ["registry", "not_configured"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetBucketLifecycleConfiguration"
+registered = true
+has_not_configured_error = true

@@ -1,0 +1,19 @@
+# c-reg-0002 — Custom operation registers with valid spec.
+#
+# Schema dimensions exercised: registry.custom.register (positive)
+
+[case]
+id = "c-reg-0002"
+schema_version = 1
+title = "Custom operation registers with valid OperationSpec"
+rationale = """
+Third-party operations must be able to register with a valid spec."""
+polarity = "positive"
+operation = "custom:Ping"
+tags = ["registry", "custom"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "custom:Ping"
+registered = true

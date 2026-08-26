@@ -1,0 +1,19 @@
+# c-reg-0006 — All standard operations register.
+#
+# Schema dimensions exercised: registry.completeness.all (positive)
+
+[case]
+id = "c-reg-0006"
+schema_version = 1
+title = "All 73 standard operations register successfully"
+rationale = """
+The registry must be able to register all standard S3 operations."""
+polarity = "positive"
+operation = "All"
+tags = ["registry", "completeness"]
+timeout_ms = 30000
+
+[expect]
+kind = "registry"
+all_registered = true
+count = 73

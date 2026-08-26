@@ -1,0 +1,20 @@
+# c-reg-0014 — Operation with input bindings registers.
+#
+# Schema dimensions exercised: registry.input.register (positive)
+
+[case]
+id = "c-reg-0014"
+schema_version = 1
+title = "Operation with input bindings registers"
+rationale = """
+Operations must declare their input field bindings."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["registry", "input"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetObject"
+registered = true
+has_input_bindings = true

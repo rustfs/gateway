@@ -1,0 +1,20 @@
+# c-reg-0009 — Operation with predicates registers.
+#
+# Schema dimensions exercised: registry.predicates.register (positive)
+
+[case]
+id = "c-reg-0009"
+schema_version = 1
+title = "Operation with route predicates registers"
+rationale = """
+Operations must declare their route predicates."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["registry", "predicates"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "ListObjectsV2"
+registered = true
+has_predicates = true

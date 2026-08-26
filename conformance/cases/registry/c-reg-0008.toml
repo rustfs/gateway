@@ -1,0 +1,20 @@
+# c-reg-0008 — Operation with success_status registers.
+#
+# Schema dimensions exercised: registry.success_status.register (positive)
+
+[case]
+id = "c-reg-0008"
+schema_version = 1
+title = "Operation with custom success_status registers"
+rationale = """
+Operations can declare custom success status codes."""
+polarity = "positive"
+operation = "DeleteObject"
+tags = ["registry", "success_status"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "DeleteObject"
+registered = true
+success_status = 204

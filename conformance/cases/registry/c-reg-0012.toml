@@ -1,0 +1,20 @@
+# c-reg-0012 — Operation with checksum config registers.
+#
+# Schema dimensions exercised: registry.checksum.register (positive)
+
+[case]
+id = "c-reg-0012"
+schema_version = 1
+title = "Operation with checksum configuration registers"
+rationale = """
+Operations must declare their checksum requirements."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["registry", "checksum"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "PutObject"
+registered = true
+has_checksum_config = true

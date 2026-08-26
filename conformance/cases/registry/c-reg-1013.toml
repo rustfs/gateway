@@ -1,0 +1,18 @@
+# c-reg-1013 — Handler produces correct output.
+#
+# Schema dimensions exercised: registry.handler.output (positive)
+
+[case]
+id = "c-reg-1013"
+schema_version = 1
+title = "Handler produces correctly encoded output"
+rationale = """
+Handlers must produce output that can be encoded correctly."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["registry", "handler", "output"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+handler_output_correct = true

@@ -1,0 +1,20 @@
+# c-reg-0020 — Operation with precedence registers.
+#
+# Schema dimensions exercised: registry.precedence.register (positive)
+
+[case]
+id = "c-reg-0020"
+schema_version = 1
+title = "Operation with precedence registers"
+rationale = """
+Operations must declare their route precedence."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["registry", "precedence"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetObject"
+registered = true
+has_precedence = true

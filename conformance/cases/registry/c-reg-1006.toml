@@ -1,0 +1,19 @@
+# c-reg-1006 — Missing required operations fails.
+#
+# Schema dimensions exercised: registry.require.reject (negative)
+
+[case]
+id = "c-reg-1006"
+schema_version = 1
+title = "Missing required operations is detected"
+rationale = """
+The require() check must detect missing operations."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["registry", "require"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+require_missing = ["PutObject", "DeleteObject"]
+error = "MissingHandlers"

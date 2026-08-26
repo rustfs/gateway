@@ -1,0 +1,20 @@
+# c-reg-0011 — Operation with XML config registers.
+#
+# Schema dimensions exercised: registry.xml.register (positive)
+
+[case]
+id = "c-reg-0011"
+schema_version = 1
+title = "Operation with XML configuration registers"
+rationale = """
+Operations must declare their XML serialization config."""
+polarity = "positive"
+operation = "GetBucketLifecycleConfiguration"
+tags = ["registry", "xml"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetBucketLifecycleConfiguration"
+registered = true
+has_xml_config = true

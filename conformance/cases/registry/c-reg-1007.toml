@@ -1,0 +1,19 @@
+# c-reg-1007 — Handler returns correct error code.
+#
+# Schema dimensions exercised: registry.handler.error (negative)
+
+[case]
+id = "c-reg-1007"
+schema_version = 1
+title = "Handler returns correct error code for failure"
+rationale = """
+Handlers must return appropriate error codes."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["registry", "handler", "error"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+handler_error = "NoSuchKey"
+status = 404

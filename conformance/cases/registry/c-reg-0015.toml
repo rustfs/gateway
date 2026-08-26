@@ -1,0 +1,20 @@
+# c-reg-0015 — Operation with output bindings registers.
+#
+# Schema dimensions exercised: registry.output.register (positive)
+
+[case]
+id = "c-reg-0015"
+schema_version = 1
+title = "Operation with output bindings registers"
+rationale = """
+Operations must declare their output field bindings."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["registry", "output"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetObject"
+registered = true
+has_output_bindings = true

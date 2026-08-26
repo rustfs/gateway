@@ -1,0 +1,18 @@
+# c-reg-1012 — Handler receives correct input.
+#
+# Schema dimensions exercised: registry.handler.input (positive)
+
+[case]
+id = "c-reg-1012"
+schema_version = 1
+title = "Handler receives correctly decoded input"
+rationale = """
+Handlers must receive the correctly decoded typed input."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["registry", "handler", "input"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+handler_input_correct = true

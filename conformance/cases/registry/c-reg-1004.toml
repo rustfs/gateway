@@ -1,0 +1,20 @@
+# c-reg-1004 — Third-party shadowing standard operation fails.
+#
+# Schema dimensions exercised: registry.shadow.reject (negative)
+
+[case]
+id = "c-reg-1004"
+schema_version = 1
+title = "Third-party cannot shadow standard operation"
+rationale = """
+Third-party operations must not be able to shadow standard S3 operations."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["registry", "shadow", "security"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetObject"
+third_party_shadow = true
+error = "StandardOperationShadowed"

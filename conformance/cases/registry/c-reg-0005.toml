@@ -1,0 +1,20 @@
+# c-reg-0005 — Operation with handler deadline registers.
+#
+# Schema dimensions exercised: registry.deadline.register (positive)
+
+[case]
+id = "c-reg-0005"
+schema_version = 1
+title = "Operation with handler deadline registers successfully"
+rationale = """
+Operations must declare their handler deadline class."""
+polarity = "positive"
+operation = "CompleteMultipartUpload"
+tags = ["registry", "deadline"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "CompleteMultipartUpload"
+registered = true
+has_deadline = true

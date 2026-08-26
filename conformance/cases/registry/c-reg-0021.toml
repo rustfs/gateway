@@ -1,0 +1,20 @@
+# c-reg-0021 — Operation with service registers.
+#
+# Schema dimensions exercised: registry.service.register (positive)
+
+[case]
+id = "c-reg-0021"
+schema_version = 1
+title = "Operation with service registers"
+rationale = """
+Operations must declare their service (s3, s3express, etc.)."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["registry", "service"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetObject"
+registered = true
+service = "s3"

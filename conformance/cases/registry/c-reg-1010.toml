@@ -1,0 +1,20 @@
+# c-reg-1010 — Handler panic is caught.
+#
+# Schema dimensions exercised: registry.handler.panic (negative)
+
+[case]
+id = "c-reg-1010"
+schema_version = 1
+title = "Handler panic is caught and returns error"
+rationale = """
+Handler panics must be caught and converted to errors."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["registry", "handler", "panic"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+handler_panicked = true
+error = "InternalError"
+status = 500

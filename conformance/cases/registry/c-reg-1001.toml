@@ -1,0 +1,20 @@
+# c-reg-1001 — Duplicate operation registration fails.
+#
+# Schema dimensions exercised: registry.duplicate.reject (negative)
+
+[case]
+id = "c-reg-1001"
+schema_version = 1
+title = "Duplicate operation registration is rejected"
+rationale = """
+Registering the same operation twice must fail to prevent shadowing."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["registry", "duplicate", "security"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetObject"
+register_twice = true
+error = "already registered"

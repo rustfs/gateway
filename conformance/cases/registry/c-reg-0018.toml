@@ -1,0 +1,20 @@
+# c-reg-0018 — Operation with method registers.
+#
+# Schema dimensions exercised: registry.method.register (positive)
+
+[case]
+id = "c-reg-0018"
+schema_version = 1
+title = "Operation with HTTP method registers"
+rationale = """
+Operations must declare their HTTP method."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["registry", "method"]
+timeout_ms = 5000
+
+[expect]
+kind = "registry"
+operation = "GetObject"
+registered = true
+method = "GET"
