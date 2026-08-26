@@ -88,7 +88,7 @@ Use this map rather than guessing a broader command:
 | One operation, its codec, or its route | `cargo xtask verify --op <OperationName>` |
 | One crate | `cargo xtask verify --crate <crate-name>` |
 | The pinned model, an overlay, or code generation | `cargo xtask codegen --check` |
-| One conformance case | `cargo xtask conformance validate --filter '<case-id>'` |
+| One conformance case | `cargo xtask conformance run --filter '<case-id>'` |
 | Cross-crate wiring, scripts, or CI | `cargo xtask verify --all` |
 
 `verify --op` and `verify --crate` have a 30-second budget. `verify --all` is the CI surface and has
