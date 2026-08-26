@@ -1,0 +1,31 @@
+# c-pipe-0009 — Pipeline processes HEAD request correctly.
+#
+# Schema dimensions exercised: pipeline.head.method (positive)
+
+[case]
+id = "c-pipe-0009"
+schema_version = 1
+title = "Pipeline processes HEAD request with no body in response"
+rationale = """
+HEAD requests must return status and headers but no body."""
+polarity = "positive"
+operation = "HeadObject"
+tags = ["pipeline", "head"]
+timeout_ms = 5000
+
+[request]
+method = "HEAD"
+target = "/bucket/key"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+length = 0

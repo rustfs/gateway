@@ -1,0 +1,29 @@
+# c-pipe-0004 — Meta-auth stage verifies signature metadata.
+#
+# Schema dimensions exercised: pipeline.meta_auth.signature (positive)
+
+[case]
+id = "c-pipe-0004"
+schema_version = 1
+title = "Meta-auth stage accepts valid signature metadata"
+rationale = """
+The meta-auth stage verifies signature-related metadata (clock skew,
+expiry, etc.) before reading the body."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["pipeline", "meta_auth", "signature"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket/key"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 200

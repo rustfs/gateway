@@ -1,0 +1,35 @@
+# c-pipe-1008 — Pipeline rejects malformed XML.
+#
+# Schema dimensions exercised: pipeline.decoded.malformed_xml (negative)
+
+[case]
+id = "c-pipe-1008"
+schema_version = 1
+title = "Pipeline rejects malformed XML body"
+rationale = """
+The decoded stage must reject requests with malformed XML."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["pipeline", "decoded", "xml"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/bucket?lifecycle"
+headers = { "content-type" = "application/xml" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[request.body]
+utf8 = "<invalid>xml"
+
+[expect]
+kind = "response"
+status = 400
+
+[expect.error]
+code = "MalformedXML"

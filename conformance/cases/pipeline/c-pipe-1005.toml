@@ -1,0 +1,32 @@
+# c-pipe-1005 — Pipeline rejects missing required parameter.
+#
+# Schema dimensions exercised: pipeline.decoded.missing_param (negative)
+
+[case]
+id = "c-pipe-1005"
+schema_version = 1
+title = "Pipeline rejects request missing required parameter"
+rationale = """
+The decoded stage must reject requests missing required parameters."""
+polarity = "negative"
+operation = "PutBucketAnalyticsConfiguration"
+tags = ["pipeline", "decoded", "params"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/bucket?analytics"
+headers = { "content-type" = "application/xml" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 400
+
+[expect.error]
+code = "InvalidArgument"

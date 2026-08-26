@@ -1,0 +1,31 @@
+# c-pipe-0017 — Pipeline handles copy operation.
+#
+# Schema dimensions exercised: pipeline.decoded.copy (positive)
+
+[case]
+id = "c-pipe-0017"
+schema_version = 1
+title = "Pipeline handles CopyObject"
+rationale = """
+The pipeline must handle copy operations with x-amz-copy-source."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["pipeline", "decoded", "copy"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/bucket/dest-key"
+headers = {
+    "x-amz-copy-source" = "/bucket/source-key"
+}
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status_not_in = [400, 500]

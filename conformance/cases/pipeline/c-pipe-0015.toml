@@ -1,0 +1,45 @@
+# c-pipe-0015 — Pipeline handles POST Object form upload.
+#
+# Schema dimensions exercised: pipeline.post_object.form (positive)
+
+[case]
+id = "c-pipe-0015"
+schema_version = 1
+title = "Pipeline handles POST Object form upload"
+rationale = """
+The pipeline must handle POST Object with multipart/form-data."""
+polarity = "positive"
+operation = "PostObject"
+tags = ["pipeline", "post_object", "form"]
+timeout_ms = 5000
+
+[request]
+method = "POST"
+target = "/bucket"
+content_type = "multipart/form-data"
+
+[request.form]
+key = "uploads/test"
+bucket = "bucket"
+success_action_status = "201"
+x-amz-algorithm = "AWS4-HMAC-SHA256"
+x-amz-credential = "AKIAIOSFODNN7EXAMPLE/20260102/us-east-1/s3/aws4_request"
+x-amz-date = "20260102T030405Z"
+
+[request.form.policy]
+expiration = "2026-01-02T04:04:05Z"
+conditions = [
+    ["eq", "$bucket", "bucket"],
+    ["starts-with", "$key", "uploads/"]
+]
+
+[request.sign]
+mode = "post_policy"
+credential = "valid"
+
+[request.body]
+utf8 = "form body"
+
+[expect]
+kind = "response"
+status = 201

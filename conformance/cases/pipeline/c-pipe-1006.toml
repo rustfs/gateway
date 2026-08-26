@@ -1,0 +1,22 @@
+# c-pipe-1006 — Pipeline rejects unknown operation.
+#
+# Schema dimensions exercised: pipeline.routed.unknown (negative)
+
+[case]
+id = "c-pipe-1006"
+schema_version = 1
+title = "Pipeline rejects unknown operation with 501"
+rationale = """
+The routed stage must reject requests that don't match any known operation."""
+polarity = "negative"
+operation = "Unknown"
+tags = ["pipeline", "routed", "error"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/"
+
+[expect]
+kind = "response"
+status = 501

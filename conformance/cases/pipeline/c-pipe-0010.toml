@@ -1,0 +1,28 @@
+# c-pipe-0010 — Pipeline processes DELETE request correctly.
+#
+# Schema dimensions exercised: pipeline.delete.idempotent (positive)
+
+[case]
+id = "c-pipe-0010"
+schema_version = 1
+title = "Pipeline processes DELETE as idempotent 204"
+rationale = """
+DELETE on non-existent key returns 204 (idempotent)."""
+polarity = "positive"
+operation = "DeleteObject"
+tags = ["pipeline", "delete", "idempotent"]
+timeout_ms = 5000
+
+[request]
+method = "DELETE"
+target = "/bucket/key"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 204

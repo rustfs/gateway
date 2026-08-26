@@ -1,0 +1,28 @@
+# c-pipe-0018 — Pipeline handles list operations.
+#
+# Schema dimensions exercised: pipeline.decoded.list (positive)
+
+[case]
+id = "c-pipe-0018"
+schema_version = 1
+title = "Pipeline handles ListObjectsV2"
+rationale = """
+The pipeline must handle list operations with query parameters."""
+polarity = "positive"
+operation = "ListObjectsV2"
+tags = ["pipeline", "decoded", "list"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket?list-type=2&prefix=logs/&max-keys=100"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 200

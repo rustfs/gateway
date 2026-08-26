@@ -1,0 +1,35 @@
+# c-pipe-1009 — Pipeline rejects clock skew.
+#
+# Schema dimensions exercised: pipeline.meta_auth.clock_skew (negative)
+
+[case]
+id = "c-pipe-1009"
+schema_version = 1
+title = "Pipeline rejects request with excessive clock skew"
+rationale = """
+The meta-auth stage must reject requests with clock skew beyond the allowed window."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["pipeline", "meta_auth", "clock", "security"]
+timeout_ms = 5000
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T04:04:05Z"
+
+[request]
+method = "GET"
+target = "/bucket/key"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 403
+
+[expect.error]
+code = "RequestTimeTooSkewed"

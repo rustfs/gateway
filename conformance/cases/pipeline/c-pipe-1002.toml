@@ -1,0 +1,36 @@
+# c-pipe-1002 — Pipeline rejects expired presigned URL.
+#
+# Schema dimensions exercised: pipeline.meta_auth.expired (negative)
+
+[case]
+id = "c-pipe-1002"
+schema_version = 1
+title = "Pipeline rejects expired presigned URL"
+rationale = """
+The meta-auth stage must reject presigned URLs that have expired."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["pipeline", "meta_auth", "presigned", "security"]
+timeout_ms = 5000
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-03T03:04:05Z"
+
+[request]
+method = "GET"
+target = "/bucket/key"
+
+[request.sign]
+mode = "sigv4_presigned"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+expires = 3600
+
+[expect]
+kind = "response"
+status = 403
+
+[expect.error]
+code = "AccessDenied"

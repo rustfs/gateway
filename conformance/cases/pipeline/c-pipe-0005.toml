@@ -1,0 +1,34 @@
+# c-pipe-0005 — Guarded stage wraps body with security guards.
+#
+# Schema dimensions exercised: pipeline.guarded.body_guard (positive)
+
+[case]
+id = "c-pipe-0005"
+schema_version = 1
+title = "Guarded stage applies body hash verification for presigned PUT"
+rationale = """
+The guarded stage wraps the request body with security guards
+(hash verification, chunk signing, etc.) based on PayloadMode."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["pipeline", "guarded", "body"]
+timeout_ms = 5000
+
+[request]
+method = "PUT"
+target = "/bucket/key"
+headers = { "content-type" = "application/octet-stream" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+payload_hash = "computed"
+
+[[request.chunks]]
+utf8 = "test body"
+
+[expect]
+kind = "response"
+status = 200

@@ -1,0 +1,28 @@
+# c-pipe-1012 — Pipeline rejects path traversal attempt.
+#
+# Schema dimensions exercised: pipeline.targeted.path_traversal (negative)
+
+[case]
+id = "c-pipe-1012"
+schema_version = 1
+title = "Pipeline rejects path traversal in key"
+rationale = """
+The targeted stage must reject path traversal attempts in the key."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["pipeline", "targeted", "security"]
+timeout_ms = 5000
+
+[request]
+method = "GET"
+target = "/bucket/../other/key"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 403
