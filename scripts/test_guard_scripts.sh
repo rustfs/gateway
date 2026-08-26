@@ -12386,6 +12386,8 @@ expect_fail check_cors_credentials_exclusive.sh \
 # -----------------------------------------------------------------------------
 
 fi
+# Keep the scanner-budget probes in the single-process build mode: they measure subprocesses in a
+# reused sandbox, so earlier mutations in the broader general corpus can disturb the observation.
 if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then
 mut_agpl_licence_text() {
     printf '\n// Licensed under the GNU \x41FFERO GENERAL PUBLIC LICENSE Version 3\n' \
@@ -14366,7 +14368,9 @@ expect_fail check_no_signing_key_cache.sh \
 
 fi
 
-if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then
+# These workflow mutations parse YAML and shell text without compiling. The general shards own
+# them so the build-backed shards contain only cases whose guards genuinely invoke Cargo.
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
 
 replace_ci_text() {
     python3 - "$1" "$2" <<'PYEOF'
