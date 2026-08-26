@@ -534,16 +534,16 @@ fn n_a_wrapped_event_list_leaves_a_destination_subscribed_to_nothing() {
 /// the model name from being half of a pair that round-trips and speaks to nobody.
 ///
 /// The refusal names `TopicArn` and `QueueArn` — the **model's** names, not `<Topic>` and
-/// `<Queue>`, which are the elements the client actually had to send. That reaches the client:
-/// `error_resolution.rs` turns `CodecError::member()` into the `<Resource>` of the error body, so
-/// a developer who got the rename wrong is told to look for the name they already used. Filed as
-/// rustfs/gateway#295 and pinned here in the direction it has, so the pin goes red when the
-/// repair lands rather than the repair going unnoticed.
+/// not the model names `TopicArn` and `QueueArn`. This is the fix for rustfs/gateway#295.
+/// 
+/// 
+/// 
+/// 
 #[test]
-fn n_the_model_names_for_the_renamed_scalars_are_not_wire_elements() {
+fn n_the_wire_names_for_the_renamed_scalars_are_used_in_refusals() {
     for (holder, element, refusal) in [
-        ("TopicConfiguration", "<TopicArn>arn:t</TopicArn>", "TopicArn"),
-        ("QueueConfiguration", "<QueueArn>arn:q</QueueArn>", "QueueArn"),
+        ("TopicConfiguration", "<TopicArn>arn:t</TopicArn>", "Topic"),
+        ("QueueConfiguration", "<QueueArn>arn:q</QueueArn>", "Queue"),
     ] {
         let document = format!(
             "<NotificationConfiguration><{holder}>{element}<Event>s3:ObjectCreated:*</Event></{holder}>\
@@ -556,7 +556,7 @@ fn n_the_model_names_for_the_renamed_scalars_are_not_wire_elements() {
         assert_eq!(
             error.member(),
             Some(refusal),
-            "rustfs/gateway#295: the refusal names the model member rather than the wire element"
+            "rustfs/gateway#295: the refusal now names the wire element"
         );
     }
 }
@@ -596,7 +596,7 @@ fn n_a_destination_with_no_arn_is_refused_by_the_decoder() {
 
     assert_eq!(
         error.member(),
-        Some("QueueArn"),
+        Some("Queue"),
         "rustfs/gateway#295: the element the client had to send is <Queue>, and the refusal does not say so"
     );
 }
