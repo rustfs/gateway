@@ -12386,9 +12386,9 @@ expect_fail check_cors_credentials_exclusive.sh \
 # -----------------------------------------------------------------------------
 
 fi
-# Keep the scanner-budget probes in the single-process build mode: they measure subprocesses in a
-# reused sandbox, so earlier mutations in the broader general corpus can disturb the observation.
-if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then
+# These provenance mutations scan text and manifests without compiling. The general shards own
+# them so a cold Cargo cache cannot spend the build-backed budget on repository scans.
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
 mut_agpl_licence_text() {
     printf '\n// Licensed under the GNU \x41FFERO GENERAL PUBLIC LICENSE Version 3\n' \
         >>crates/core/src/dialect/overlay.rs
@@ -12465,6 +12465,10 @@ mut_binary_untracked_manifest() {
 expect_fail_unstaged check_no_minio_source.sh \
     'an untracked NUL-bearing Cargo.toml hiding a minio dependency' mut_binary_untracked_manifest
 
+fi
+# Keep the scanner-budget probes in the single-process build mode: they measure subprocesses in a
+# reused sandbox, so earlier mutations in the broader general corpus can disturb the observation.
+if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then
 SCANNER_TOOLS=(grep rg awk sed perl find git)
 
 write_scanner_shim() {
