@@ -74,7 +74,7 @@ enum ContentSha256 {
 impl PresignedRequest {
     /// Parses and enforces P1–P6 for a presigned request.
     ///
-    /// This runs **after** [`SecurityFloor::admit`] has already enforced H1–H6 (clock skew,
+    /// This runs **after** the security floor has already enforced H1–H6 (clock skew,
     /// expiry ceiling, privileged-surface rejection, duplicate parameters). The six rules here
     /// are the presigned-specific increment.
     ///
