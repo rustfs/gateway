@@ -1,0 +1,50 @@
+# c-err-0003 — GetObject on non-existent key returns 404 NoSuchKey.
+#
+# Schema dimensions exercised: error.status.no_such_key (positive), error.mapping
+
+[case]
+id = "c-err-0003"
+schema_version = 1
+title = "GetObject on a non-existent key returns 404 NoSuchKey"
+rationale = """
+When the caller has ListBucket permission and the key does not exist, GetObject must \
+return 404 NoSuchKey. This is the standard 'not found' behavior for object storage."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["error", "status", "not-found"]
+timeout_ms = 15000
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "If the object does not exist, Amazon S3 returns a 404 NoSuchKey error."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-err"
+
+[[setup.objects]]
+bucket = "conf-err"
+key = "exists"
+body = "hello"
+
+[request]
+method = "GET"
+target = "/conf-err/not-exists"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 404
+
+[expect.error]
+code = "NoSuchKey"
+request_id_present = true

@@ -1,0 +1,54 @@
+# c-err-0004 — DeleteObject on non-existent key returns 204 (idempotent).
+#
+# Schema dimensions exercised: error.status.delete_idempotent (positive), error.mapping
+
+[case]
+id = "c-err-0004"
+schema_version = 1
+title = "DeleteObject on a non-existent key returns 204 No Content"
+rationale = """
+DeleteObject is idempotent: deleting a non-existent key succeeds with 204, not 404. \
+This is a critical behavioral difference from GetObject. (s3s#552 regression)"""
+polarity = "positive"
+operation = "DeleteObject"
+tags = ["error", "status", "idempotent", "delete"]
+timeout_ms = 15000
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/552"
+summary = "DeleteObject on non-existent key returned NoSuchKey instead of 204."
+kind = "s3s-issue"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html"
+summary = "DeleteObject returns 204 even if the object does not exist."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-err"
+
+[[setup.objects]]
+bucket = "conf-err"
+key = "exists"
+body = "hello"
+
+[request]
+method = "DELETE"
+target = "/conf-err/not-exists"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 204
+
+[expect.body]
+length = 0

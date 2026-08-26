@@ -1,0 +1,53 @@
+# c-err-1007 — HEAD request error response has no body.
+#
+# Schema dimensions exercised: error.status.head_no_body (negative), error.rendering
+
+[case]
+id = "c-err-1007"
+schema_version = 1
+title = "HEAD request error response has no body"
+rationale = """
+HEAD responses must never have a body, even for errors. Clients determine the error \
+from the status code and headers alone. (AWS评审 G1(a))"""
+polarity = "negative"
+operation = "GetObject"
+tags = ["error", "status", "head", "rendering"]
+timeout_ms = 15000
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html"
+summary = "HEAD responses do not include a message body."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-err"
+
+[[setup.objects]]
+bucket = "conf-err"
+key = "exists"
+body = "hello"
+
+[request]
+method = "HEAD"
+target = "/conf-err/not-exists"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[expect]
+kind = "response"
+status = 404
+
+# Critical: body must be empty for HEAD.
+[expect.body]
+length = 0
+
+[expect.headers_present]
+"content-type" = "application/xml"

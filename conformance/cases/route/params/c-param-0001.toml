@@ -1,0 +1,47 @@
+# c-param-0001 — Valid request with required parameter passes.
+#
+# Schema dimensions exercised: route.params.valid (positive), routing.validation
+
+[case]
+id = "c-param-0001"
+schema_version = 1
+title = "A request with all required parameters passes validation"
+rationale = """
+When an operation requires a parameter (e.g., PutBucketAnalyticsConfiguration requires 'id'), \
+a request that includes it must pass parameter validation and proceed to decoding. This \
+verifies the happy path for required parameter checking."""
+polarity = "positive"
+operation = "PutBucketAnalyticsConfiguration"
+tags = ["routing", "params", "validation"]
+timeout_ms = 15000
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html"
+summary = "The 'id' query parameter is required for this operation."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-route"
+
+[request]
+method = "PUT"
+target = "/conf-route?analytics&id=test-config"
+headers = { "content-type" = "application/xml" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[request.body]
+contains_utf8 = ["<AnalyticsConfiguration>"]
+
+[expect]
+kind = "response"
+# Should NOT be 400 or 501 — parameter validation passes.
+status_not_in = [400, 501]

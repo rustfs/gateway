@@ -1,0 +1,57 @@
+# c-param-1001 — Missing required parameter returns 400, not 501.
+#
+# Schema dimensions exercised: route.params.missing (negative), routing.validation
+
+[case]
+id = "c-param-1001"
+schema_version = 1
+title = "A request missing a required parameter returns 400 InvalidArgument, not 501"
+rationale = """
+P4-02: When an operation requires a parameter (e.g., PutBucketAnalyticsConfiguration requires \
+'id'), a request missing it must return 400 InvalidArgument — NOT 501 NotImplemented. \
+501 means 'this service does not support the operation', which would cause clients to disable \
+the feature rather than fix the request. (AWS评审 F1 反例 2)"""
+polarity = "negative"
+operation = "PutBucketAnalyticsConfiguration"
+tags = ["routing", "params", "validation", "error-codes"]
+timeout_ms = 15000
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketAnalyticsConfiguration.html"
+summary = "The 'id' query parameter is required; missing it is a parameter error, not 'operation not supported'."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-route"
+
+[request]
+method = "PUT"
+target = "/conf-route?analytics"
+headers = { "content-type" = "application/xml" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[request.body]
+contains_utf8 = ["<AnalyticsConfiguration>"]
+
+[expect]
+kind = "response"
+# Must be 400, NOT 501.
+status = 400
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+# Message must be static, not echo user input.
+not_contains_utf8 = ["?analytics"]

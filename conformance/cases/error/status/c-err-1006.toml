@@ -1,0 +1,56 @@
+# c-err-1006 — GetObject without ListBucket permission returns 403, not 404.
+#
+# Schema dimensions exercised: error.status.auth_masking (negative), error.mapping
+
+[case]
+id = "c-err-1006"
+schema_version = 1
+title = "GetObject without ListBucket permission returns 403 AccessDenied, not 404"
+rationale = """
+When the caller lacks ListBucket permission, GetObject on a non-existent key must return \
+403 AccessDenied — NOT 404 NoSuchKey. Returning 404 would reveal whether the object exists, \
+creating an enumeration oracle. (security评审 F-6)"""
+polarity = "negative"
+operation = "GetObject"
+tags = ["error", "status", "security", "auth-masking"]
+timeout_ms = 15000
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "If you don't have s3:ListBucket permissions, Amazon S3 returns 403 AccessDenied."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-err"
+
+[[setup.objects]]
+bucket = "conf-err"
+key = "exists"
+body = "hello"
+
+[request]
+method = "GET"
+target = "/conf-err/not-exists"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid_no_list_bucket"
+
+[expect]
+kind = "response"
+# Must be 403, NOT 404.
+status = 403
+
+[expect.error]
+code = "AccessDenied"
+request_id_present = true
+
+# Must NOT reveal that the key doesn't exist.
+[expect.body]
+not_contains_utf8 = ["NoSuchKey", "not-exists"]
