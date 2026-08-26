@@ -11161,7 +11161,7 @@ PYEOF
 }
 expect_fail_with_diagnostic check_op_file_shape.sh \
     'a Shares: declaration whose far end never agreed to it' \
-    '`Members:` does not name it' \
+    '\`Members:\` does not name it' \
     mut_op_shape_shares_link_without_membership
 
 mut_op_shape_members_without_shares() {
