@@ -535,10 +535,10 @@ fn n_a_wrapped_event_list_leaves_a_destination_subscribed_to_nothing() {
 ///
 /// The refusal names `TopicArn` and `QueueArn` — the **model's** names, not `<Topic>` and
 /// not the model names `TopicArn` and `QueueArn`. This is the fix for rustfs/gateway#295.
-/// 
-/// 
-/// 
-/// 
+///
+///
+///
+///
 #[test]
 fn n_the_wire_names_for_the_renamed_scalars_are_used_in_refusals() {
     for (holder, element, refusal) in [
