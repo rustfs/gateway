@@ -35,11 +35,7 @@ absent = true
 [request]
 method = "PUT"
 target = "/conf-sig/presigned-streaming"
-headers = {
-    "content-type" = "application/octet-stream",
-    "x-amz-content-sha256" = "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
-    "x-amz-decoded-content-length" = "12"
-}
+headers = { "content-type" = "application/octet-stream", "x-amz-content-sha256" = "STREAMING-AWS4-HMAC-SHA256-PAYLOAD", "x-amz-decoded-content-length" = "12" }
 
 [request.sign]
 mode = "sigv4_presigned"
