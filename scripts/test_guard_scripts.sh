@@ -94,6 +94,11 @@ GUARD_BUDGET_STOP=$((GUARD_BUDGET_SECONDS - 30))
 # early rather than on the pull request that crosses the line.
 GUARD_BUDGET_WARN=$((GUARD_BUDGET_SECONDS * 4 / 5))
 
+# Reset SECONDS to measure elapsed time from this point, not from when the
+# parent shell started. Without this, inheriting SECONDS from the environment
+# (e.g., SECONDS=582) causes guard_case_owned to immediately report OUT OF TIME.
+SECONDS=0
+
 # guard_budget_verdict <elapsed> <stop> <warn>
 # Pure: the whole budget policy in one testable place.
 guard_budget_verdict() {
