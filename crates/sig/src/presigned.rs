@@ -81,10 +81,7 @@ impl PresignedRequest {
     /// # Errors
     ///
     /// [`AuthError`] for any P1–P6 violation.
-    pub fn enforce(
-        headers: &HeaderMap,
-        signed_headers: &SignedHeaderSet,
-    ) -> Result<Self, AuthError> {
+    pub fn enforce(headers: &HeaderMap, signed_headers: &SignedHeaderSet) -> Result<Self, AuthError> {
         // P2: SignedHeaders must contain `host` and must not be empty.
         if signed_headers.is_empty() {
             return Err(AuthError::AuthorizationQueryParametersError);
@@ -147,10 +144,7 @@ impl PresignedRequest {
 /// `x-amz-copy-source` / `x-amz-acl` / `x-amz-tagging` / SSE-C header to a presigned request.
 /// The signature does not cover it, so the server accepts it as "unsigned extra" — but the
 /// operation interprets it as a semantic directive.
-fn enforce_no_unsigned_amz_headers(
-    headers: &HeaderMap,
-    signed_headers: &SignedHeaderSet,
-) -> Result<(), AuthError> {
+fn enforce_no_unsigned_amz_headers(headers: &HeaderMap, signed_headers: &SignedHeaderSet) -> Result<(), AuthError> {
     for name in headers.keys() {
         if name.as_str().starts_with(AMZ_HEADER_PREFIX) && !signed_headers.contains(name) {
             return Err(AuthError::AccessDenied);
@@ -171,9 +165,7 @@ fn parse_content_sha256(headers: &HeaderMap) -> Result<Option<ContentSha256>, Au
     let Some(raw) = headers.get(&X_AMZ_CONTENT_SHA256) else {
         return Ok(None);
     };
-    let value = raw
-        .to_str()
-        .map_err(|_| AuthError::SignatureDoesNotMatch)?;
+    let value = raw.to_str().map_err(|_| AuthError::SignatureDoesNotMatch)?;
 
     if value == "UNSIGNED-PAYLOAD" {
         return Ok(None);
@@ -239,10 +231,7 @@ mod tests {
 
     #[test]
     fn p2_rejects_unsigned_amz_header() {
-        let headers = make_headers(&[
-            ("host", "bucket.s3.amazonaws.com"),
-            ("x-amz-copy-source", "bucket/key"),
-        ]);
+        let headers = make_headers(&[("host", "bucket.s3.amazonaws.com"), ("x-amz-copy-source", "bucket/key")]);
         // SignedHeaders only contains "host", not "x-amz-copy-source"
         // parse_and_enforce will catch this, but let's test our enforce() too
         // by creating a signed set that doesn't include x-amz-copy-source
@@ -255,10 +244,7 @@ mod tests {
 
     #[test]
     fn p2_accepts_signed_amz_header() {
-        let headers = make_headers(&[
-            ("host", "bucket.s3.amazonaws.com"),
-            ("x-amz-copy-source", "bucket/key"),
-        ]);
+        let headers = make_headers(&[("host", "bucket.s3.amazonaws.com"), ("x-amz-copy-source", "bucket/key")]);
         let signed = make_signed("host;x-amz-copy-source", &headers);
         let result = PresignedRequest::enforce(&headers, &signed);
         assert!(result.is_ok());
@@ -269,10 +255,7 @@ mod tests {
         // SignedHeaderSet::parse_and_enforce already rejects missing host.
         // This is a compile-time guarantee from the type system.
         // We verify that our enforce() also checks for host presence.
-        let headers = make_headers(&[
-            ("host", "bucket.s3.amazonaws.com"),
-            ("x-amz-date", "20260101T000000Z"),
-        ]);
+        let headers = make_headers(&[("host", "bucket.s3.amazonaws.com"), ("x-amz-date", "20260101T000000Z")]);
         // We can't easily create a SignedHeaderSet without host through the public API,
         // because parse_and_enforce rejects it. This is the correct behavior.
         // The test verifies that parse_and_enforce enforces the host requirement.
@@ -302,18 +285,18 @@ mod tests {
     #[test]
     fn p3_real_hash_requires_verification() {
         let hash_hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-        let headers = make_headers(&[
-            ("host", "bucket.s3.amazonaws.com"),
-            ("x-amz-content-sha256", hash_hex),
-        ]);
+        let headers = make_headers(&[("host", "bucket.s3.amazonaws.com"), ("x-amz-content-sha256", hash_hex)]);
         let signed = make_signed("host;x-amz-content-sha256", &headers);
         let req = PresignedRequest::enforce(&headers, &signed).unwrap();
         match req.payload_obligation() {
             PayloadObligation::VerifyBodyHash(hash) => {
-                assert_eq!(hash, [0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
-                                   0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
-                                   0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
-                                   0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55]);
+                assert_eq!(
+                    hash,
+                    [
+                        0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24, 0x27,
+                        0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55
+                    ]
+                );
             }
             other => panic!("expected VerifyBodyHash, got {other:?}"),
         }
@@ -328,17 +311,10 @@ mod tests {
             STREAMING_ECDSA,
             STREAMING_ECDSA_TRAILER,
         ] {
-            let headers = make_headers(&[
-                ("host", "bucket.s3.amazonaws.com"),
-                ("x-amz-content-sha256", token),
-            ]);
+            let headers = make_headers(&[("host", "bucket.s3.amazonaws.com"), ("x-amz-content-sha256", token)]);
             let signed = make_signed("host;x-amz-content-sha256", &headers);
             let req = PresignedRequest::enforce(&headers, &signed).unwrap();
-            assert_eq!(
-                req.payload_obligation(),
-                PayloadObligation::StreamingNotImplemented,
-                "token={token}"
-            );
+            assert_eq!(req.payload_obligation(), PayloadObligation::StreamingNotImplemented, "token={token}");
         }
     }
 
@@ -357,10 +333,7 @@ mod tests {
     fn p3_hash_not_in_signed_headers_rejected() {
         // P2 should reject: x-amz-content-sha256 is present but not in SignedHeaders.
         let hash_hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-        let headers = make_headers(&[
-            ("host", "bucket.s3.amazonaws.com"),
-            ("x-amz-content-sha256", hash_hex),
-        ]);
+        let headers = make_headers(&[("host", "bucket.s3.amazonaws.com"), ("x-amz-content-sha256", hash_hex)]);
         // Create a signed set without x-amz-content-sha256
         let headers_for_parse = make_headers(&[("host", "bucket.s3.amazonaws.com")]);
         let signed = make_signed("host", &headers_for_parse);

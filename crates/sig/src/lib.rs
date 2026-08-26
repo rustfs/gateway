@@ -139,7 +139,9 @@ pub use parse::{
     AmzDate, CredentialScope, PresignedParams, SCOPE_TERMINATOR, ScopeDate, SigV4Authorization, X_AMZ_ALGORITHM,
     X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,
 };
-pub use post_policy::{PostPolicy, PostPolicyEnforcement, PostPolicyError, PostPolicyLimits, SigV2PostPolicy, build_success_action_redirect};
+pub use post_policy::{
+    PostPolicy, PostPolicyEnforcement, PostPolicyError, PostPolicyLimits, SigV2PostPolicy, build_success_action_redirect,
+};
 pub use presigned::{PayloadObligation, PresignedRequest};
 pub use query::{QueryExclusion, RawQuery, X_AMZ_SIGNATURE, percent_decode, percent_encode};
 pub use secret::{SessionTokenMatch, TokenMismatch};
