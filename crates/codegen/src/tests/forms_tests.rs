@@ -43,7 +43,7 @@ fn decoder(name: &str) -> String {
 
 #[test]
 fn a_field_with_no_quirk_at_all_has_no_wire_form() {
-    let conversion = crate::emit::codec::expr::from_wire(&Type::String, "Value", "Fixture", false, None, None)
+    let conversion = crate::emit::codec::expr::from_wire(&Type::String, "Value", "Fixture", false, None, None, "names")
         .expect("a string has a plain decoder");
     assert_eq!(conversion, "raw.to_owned()");
 }
@@ -74,12 +74,12 @@ fn a_wire_form_comes_from_the_contract_record_not_a_codec_rule() {
 #[test]
 fn the_storage_is_composed_without_a_codec_owned_checker() {
     assert_eq!(
-        crate::emit::codec::expr::from_wire(&Type::OpaqueString, "ContinuationToken", "Fixture", false, None, None)
+        crate::emit::codec::expr::from_wire(&Type::OpaqueString, "ContinuationToken", "Fixture", false, None, None, "names",)
             .expect("an opaque string is preserved"),
         "value::opaque(raw)"
     );
     assert_eq!(
-        crate::emit::codec::expr::from_wire(&Type::String, "UploadIdMarker", "Fixture", false, None, None)
+        crate::emit::codec::expr::from_wire(&Type::String, "UploadIdMarker", "Fixture", false, None, None, "names")
             .expect("a string is preserved"),
         "raw.to_owned()"
     );

@@ -627,10 +627,21 @@ pub fn signed_with(method: http::Method, target: &str, extra: &[(&str, &str)]) -
 /// One correctly header-signed request with an exact body digest.
 #[must_use]
 pub fn signed_target_with_body(method: http::Method, target: &str, body: Bytes) -> http::Request<Bytes> {
+    signed_target_with_body_and_headers(method, target, &[], body)
+}
+
+/// One correctly header-signed request with an exact body digest and additional signed headers.
+#[must_use]
+pub fn signed_target_with_body_and_headers(
+    method: http::Method,
+    target: &str,
+    extra: &[(&str, &str)],
+    body: Bytes,
+) -> http::Request<Bytes> {
     use sha2::{Digest as _, Sha256};
 
     let digest: [u8; 32] = Sha256::digest(&body).into();
-    signed_body_with_payload(method, target, &[], body, PayloadMode::ExactSha256(digest))
+    signed_body_with_payload(method, target, extra, body, PayloadMode::ExactSha256(digest))
 }
 
 fn signed_body_with_payload(

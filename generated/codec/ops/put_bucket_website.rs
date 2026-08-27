@@ -58,7 +58,7 @@ impl OperationCodec for dto::PutBucketWebsite {
         if !["WebsiteConfiguration"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("WebsiteConfiguration"));
         }
-        input.website_configuration = read_website_configuration(&root)?;
+        input.website_configuration = read_website_configuration(&root, request.names())?;
         // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
             let raw = raw.as_ref();
@@ -96,10 +96,13 @@ fn read_condition(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Condition, 
 
 /// Reads one `ErrorDocument` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_error_document(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ErrorDocument, CodecError> {
+fn read_error_document(
+    node: &rustfs_gateway_xml::XmlNode,
+    names: &rustfs_gateway_types::NamePolicy,
+) -> Result<dto::ErrorDocument, CodecError> {
     let mut shape = dto::ErrorDocument { ..Default::default() };
     if let Some(raw) = node.child_text("Key") {
-        shape.key = value::object_key(raw, "Key")?;
+        shape.key = value::object_key(raw, "Key", names)?;
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Key"));
     }
@@ -177,10 +180,13 @@ fn read_routing_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::RoutingR
 
 /// Reads one `WebsiteConfiguration` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_website_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::WebsiteConfiguration, CodecError> {
+fn read_website_configuration(
+    node: &rustfs_gateway_xml::XmlNode,
+    names: &rustfs_gateway_types::NamePolicy,
+) -> Result<dto::WebsiteConfiguration, CodecError> {
     let mut shape = dto::WebsiteConfiguration { ..Default::default() };
     if let Some(child) = node.child("ErrorDocument") {
-        shape.error_document = Some(read_error_document(child)?);
+        shape.error_document = Some(read_error_document(child, names)?);
     }
     if let Some(child) = node.child("IndexDocument") {
         shape.index_document = Some(read_index_document(child)?);

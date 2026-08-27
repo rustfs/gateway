@@ -76,6 +76,7 @@ pub fn from_wire(
     in_xml: bool,
     bound: Option<Bound>,
     boolean_spelling: Option<BooleanSpelling>,
+    name_policy: &str,
 ) -> Result<String, String> {
     Ok(match ty {
         Type::String => "raw.to_owned()".to_owned(),
@@ -96,7 +97,7 @@ pub fn from_wire(
         // tag is always quoted, an XML one is quoted in every body but `GetObjectAttributes`.
         Type::ETag(ETagRender::HeaderQuoted) => format!("value::etag_header(raw, \"{member}\")?"),
         Type::ETag(_) => format!("value::etag_xml(raw, \"{member}\")?"),
-        Type::ObjectKey => format!("value::object_key(raw, \"{member}\")?"),
+        Type::ObjectKey => format!("value::object_key(raw, \"{member}\", {name_policy})?"),
         Type::BucketName => format!("value::bucket_name(raw, \"{member}\")?"),
         Type::Range => "value::byte_range(raw)".to_owned(),
         Type::StringEnum(_) => format!("dto::{}::custom(raw.to_owned())", naming::type_name(member)),

@@ -253,6 +253,7 @@ fn one_field(
                         false,
                         bounds::of(field, rules, op)?,
                         super::boolean::of(ir, field, rules)?,
+                        "request.names()",
                     )?,
                 ),
             };
@@ -277,6 +278,7 @@ fn one_field(
                 false,
                 bounds::of(field, rules, op)?,
                 super::boolean::of(ir, field, rules)?,
+                "request.names()",
             )?;
             let _ = writeln!(out, "        // {member} — query `{wire}`, percent-decoded once.");
             let _ = writeln!(out, "        if let Some(raw) = request.query(\"{wire}\") {{");
@@ -361,7 +363,8 @@ fn one_field(
                 }
                 let _ = writeln!(out, "{indent}}}");
                 let indent_len = indent.len();
-                out.push_str(&assign(indent_len, &target, &wrap(field, &format!("{reader}(&root)?"))));
+                let read = super::name_policy::shape_reader_call(ir, shape, &reader, "&root", Some("request.names()"))?;
+                out.push_str(&assign(indent_len, &target, &wrap(field, &read)));
                 out.push_str(close);
             }
             // A text payload is the body verbatim, once it is text at all. The decoder's whole
@@ -392,7 +395,7 @@ fn one_field(
             if open_document {
                 out.push_str(&open_request_document(ir, super::unknown_element_policy(ir, rules)?)?);
             }
-            out.push_str(&xml_member(ir, field, &target, rules, "root", 8)?);
+            out.push_str(&xml_member(ir, field, &target, rules, "root", Some("request.names()"), 8)?);
         }
         Binding::StatusCode => {
             return Err(expr::unsupported(op, member, "a status code is a response member"));
@@ -539,6 +542,7 @@ fn xml_member(
     target: &str,
     rules: &CodecRules,
     node: &str,
+    name_policy: Option<&str>,
     indent: usize,
 ) -> Result<String, String> {
     let operation = &ir.operation;
@@ -560,6 +564,7 @@ fn xml_member(
                 true,
                 bounds::of(field, rules, operation)?,
                 super::boolean::of(ir, field, rules)?,
+                name_policy.unwrap_or("names"),
             )?;
             let links = list_source(*flattened, wrapper_name.as_deref(), &wire);
             out.push_str(&for_header(indent, node, &links));
@@ -582,7 +587,8 @@ fn xml_member(
             let reader = format!("read_{}", naming::module_name(entry_name));
             let links = list_source(*flattened, wrapper_name.as_deref(), &wire);
             out.push_str(&for_header(indent, node, &links));
-            out.push_str(&push_stmt(inner, target, &format!("{reader}(item)?")));
+            let read = super::name_policy::shape_reader_call(ir, entry_name, &reader, "item", name_policy)?;
+            out.push_str(&push_stmt(inner, target, &read));
             let _ = writeln!(out, "{pad}}}");
             // Only the model's own `required` reaches here, and only `MalformedXML` can come
             // out of it. See the module documentation: an overlay that makes a list required in
@@ -612,7 +618,8 @@ fn xml_member(
         Type::Structure(entry_name) => {
             let reader = format!("read_{}", naming::module_name(entry_name));
             let _ = writeln!(out, "{pad}if let Some(child) = {node}.child(\"{wire}\") {{");
-            out.push_str(&assign(inner, target, &wrap(field, &format!("{reader}(child)?"))));
+            let read = super::name_policy::shape_reader_call(ir, entry_name, &reader, "child", name_policy)?;
+            out.push_str(&assign(inner, target, &wrap(field, &read)));
             out.push_str(&required_member_refusal(field, member, indent));
         }
         other => {
@@ -623,6 +630,7 @@ fn xml_member(
                 true,
                 bounds::of(field, rules, operation)?,
                 super::boolean::of(ir, field, rules)?,
+                name_policy.unwrap_or("names"),
             )?;
             let _ = writeln!(out, "{pad}if let Some(raw) = {node}.child_text(\"{wire}\") {{");
             out.push_str(&assign(inner, target, &wrap(field, &conversion)));
@@ -644,6 +652,7 @@ fn xml_attribute_member(
     field: &Field,
     target: &str,
     rules: &CodecRules,
+    name_policy: Option<&str>,
 ) -> Result<String, String> {
     let member = &field.name;
     let qualified = attribute_name(shape, member);
@@ -655,6 +664,7 @@ fn xml_attribute_member(
         true,
         bounds::of(field, rules, &ir.operation)?,
         super::boolean::of(ir, field, rules)?,
+        name_policy.unwrap_or("names"),
     )?;
     let mut out = String::new();
     let _ = writeln!(out, "    // {member} — the `{qualified}` attribute, not a child element.");
@@ -722,21 +732,8 @@ pub fn shape_reader(
     } else {
         format!("let mut shape = dto::{type_name} {{ ..Default::default() }};")
     };
-    // rustfmt's normal form: the signature stays on one line until it would cross `max_width`,
-    // then the parameter gets its own line. A lifecycle shape name is what first crossed it.
-    let single = format!(
-        "fn read_{}({node}: &rustfs_gateway_xml::XmlNode) -> Result<dto::{type_name}, CodecError> {{",
-        naming::module_name(name)
-    );
-    if single.len() <= MAX_WIDTH {
-        let _ = writeln!(out, "{single}");
-    } else {
-        let _ = writeln!(
-            out,
-            "fn read_{}(\n    {node}: &rustfs_gateway_xml::XmlNode,\n) -> Result<dto::{type_name}, CodecError> {{",
-            naming::module_name(name)
-        );
-    }
+    let (signature, needs_names) = super::name_policy::shape_reader_signature(ir, name, node, &type_name, MAX_WIDTH);
+    out.push_str(&signature);
     let _ = writeln!(out, "    {construct}");
 
     if unknown_elements == UnknownElementPolicyValue::Reject && !empty {
@@ -755,10 +752,18 @@ pub fn shape_reader(
         // from the attribute — under the namespace the shape's own `xmlns:` constant binds, never
         // under the prefix, which is the sender's private alias.
         if carried_as_attribute(shape, &field.name) {
-            out.push_str(&xml_attribute_member(ir, name, shape, field, &target, rules)?);
+            out.push_str(&xml_attribute_member(
+                ir,
+                name,
+                shape,
+                field,
+                &target,
+                rules,
+                needs_names.then_some("names"),
+            )?);
             continue;
         }
-        out.push_str(&xml_member(ir, field, &target, rules, "node", 4)?);
+        out.push_str(&xml_member(ir, field, &target, rules, "node", needs_names.then_some("names"), 4)?);
     }
     out.push_str("    value::exit(shape.check_required())?;\n    Ok(shape)\n}\n");
     Ok(out)

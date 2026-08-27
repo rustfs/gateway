@@ -49,7 +49,7 @@ impl OperationCodec for dto::DeleteObjects {
         if !["Delete"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("Delete"));
         }
-        input.delete = read_delete(&root)?;
+        input.delete = read_delete(&root, request.names())?;
         // MFA — header `x-amz-mfa`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-mfa") {
             let raw = raw.as_ref();
@@ -112,10 +112,10 @@ impl OperationCodec for dto::DeleteObjects {
 
 /// Reads one `Delete` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_delete(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Delete, CodecError> {
+fn read_delete(node: &rustfs_gateway_xml::XmlNode, names: &rustfs_gateway_types::NamePolicy) -> Result<dto::Delete, CodecError> {
     let mut shape = dto::Delete { ..Default::default() };
     for item in node.children_named("Object") {
-        shape.objects.push(read_object_identifier(item)?);
+        shape.objects.push(read_object_identifier(item, names)?);
     }
     if shape.objects.is_empty() {
         return Err(CodecError::malformed_xml("the body carries no entry for a member that requires one").about("Objects"));
@@ -163,10 +163,13 @@ fn write_error(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Error) -
 
 /// Reads one `ObjectIdentifier` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_object_identifier(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ObjectIdentifier, CodecError> {
+fn read_object_identifier(
+    node: &rustfs_gateway_xml::XmlNode,
+    names: &rustfs_gateway_types::NamePolicy,
+) -> Result<dto::ObjectIdentifier, CodecError> {
     let mut shape = dto::ObjectIdentifier { ..Default::default() };
     if let Some(raw) = node.child_text("Key") {
-        shape.key = value::object_key(raw, "Key")?;
+        shape.key = value::object_key(raw, "Key", names)?;
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Key"));
     }
