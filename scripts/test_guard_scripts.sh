@@ -14975,22 +14975,22 @@ expect_fail check_ci_test_split.sh \
     'the DTO compiler job swallowing a failure or timeout' mut_ci_dto_compiler_failure_swallowed
 
 mut_ci_build_guard_command_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 270 "build-backed guards 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
-        'scripts/ci_budget.sh 270 "build-backed guards 1/3" true'
+    replace_ci_text 'scripts/ci_budget.sh 380 "build-backed guards 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 380 "build-backed guards 1/3" true'
 }
 expect_fail check_ci_test_split.sh \
     'the build-backed mutation suite being replaced with a no-op' mut_ci_build_guard_command_dropped
 
 mut_ci_build_guard_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 270 "build-backed guards 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
-        '          scripts/ci_budget.sh 270 "build-backed guards 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 380 "build-backed guards 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 380 "build-backed guards 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the build-backed guard job swallowing a failure or timeout' mut_ci_build_guard_failure_swallowed
 
 mut_ci_build_guard_second_shard_duplicated() {
-    replace_ci_text 'scripts/ci_budget.sh 270 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh' \
-        'scripts/ci_budget.sh 270 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh'
+    replace_ci_text 'scripts/ci_budget.sh 380 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 380 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh'
 }
 expect_fail check_ci_test_split.sh \
     'the second build-backed worker repeating the first half' \
@@ -14998,16 +14998,16 @@ expect_fail check_ci_test_split.sh \
     'build-guard-self-test-2 command changed, lost its shard, or can hide a failure'
 
 mut_ci_build_guard_second_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 270 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh' \
-        '          scripts/ci_budget.sh 270 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 380 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 380 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the second build-backed worker swallowing a failure or timeout' \
     mut_ci_build_guard_second_failure_swallowed
 
 mut_ci_build_guard_third_shard_duplicated() {
-    replace_ci_text 'scripts/ci_budget.sh 270 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh' \
-        'scripts/ci_budget.sh 270 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh'
+    replace_ci_text 'scripts/ci_budget.sh 380 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 380 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh'
 }
 expect_fail check_ci_test_split.sh \
     'the third build-backed worker repeating the first third' \
@@ -15015,8 +15015,8 @@ expect_fail check_ci_test_split.sh \
     'build-guard-self-test-3 command changed, lost its shard, or can hide a failure'
 
 mut_ci_build_guard_third_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 270 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh' \
-        '          scripts/ci_budget.sh 270 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 380 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 380 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the third build-backed worker swallowing a failure or timeout' \

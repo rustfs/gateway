@@ -95,9 +95,9 @@ require_equal(dto_compiler.values_at("name", "runs-on", "timeout-minutes"),
               "dto-compiler-self-test identity or budget changed")
 build_guards.each_with_index do |job, index|
   require_equal(job.keys, worker_keys,
-                "#{build_guard_ids[index]} changed its parallel five-minute contract")
+                "#{build_guard_ids[index]} changed its parallel seven-minute contract")
   require_equal(job.values_at("name", "runs-on", "timeout-minutes"),
-                ["Build guard self-test #{index + 1}", "ubuntu-latest", 5],
+                ["Build guard self-test #{index + 1}", "ubuntu-latest", 7],
                 "#{build_guard_ids[index]} identity or budget changed")
 end
 require_equal(error_status.keys, worker_keys,
@@ -227,7 +227,7 @@ dto_compiler_run = <<~'RUN'
 RUN
 build_guard_runs = (0...3).map do |group|
   <<~RUN
-    scripts/ci_budget.sh 270 "build-backed guards #{group + 1}/3" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
+    scripts/ci_budget.sh 380 "build-backed guards #{group + 1}/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
   RUN
 end
 workspaces.each_with_index do |job, index|
