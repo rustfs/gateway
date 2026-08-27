@@ -27,6 +27,7 @@ ALLOWLIST_5XX=(
     "SlowDown"
     "RequestTimeout"
     "RequestTimeTooSkewed"
+    "NotImplemented"
 )
 
 echo "Checking error code status mapping..."
