@@ -10,7 +10,7 @@ rationale = """
 P4-02: When an operation requires a parameter (e.g., PutBucketAnalyticsConfiguration requires \
 'id'), a request missing it must return 400 InvalidArgument — NOT 501 NotImplemented. \
 501 means 'this service does not support the operation', which would cause clients to disable \
-the feature rather than fix the request. (AWS评审 F1 反例 2)"""
+the feature rather than fix the request. (AWS review F1 counterexample 2)"""
 polarity = "negative"
 operation = "PutBucketAnalyticsConfiguration"
 tags = ["routing", "params", "validation", "error-codes"]

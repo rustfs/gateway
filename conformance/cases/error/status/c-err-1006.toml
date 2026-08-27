@@ -9,7 +9,7 @@ title = "GetObject without ListBucket permission returns 403 AccessDenied, not 4
 rationale = """
 When the caller lacks ListBucket permission, GetObject on a non-existent key must return \
 403 AccessDenied — NOT 404 NoSuchKey. Returning 404 would reveal whether the object exists, \
-creating an enumeration oracle. (security评审 F-6)"""
+creating an enumeration oracle. (security review F-6)"""
 polarity = "negative"
 operation = "GetObject"
 tags = ["error", "status", "security", "auth-masking"]
