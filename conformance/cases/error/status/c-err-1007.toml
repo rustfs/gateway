@@ -8,7 +8,7 @@ schema_version = 1
 title = "HEAD request error response has no body"
 rationale = """
 HEAD responses must never have a body, even for errors. Clients determine the error \
-from the status code and headers alone. (AWS评审 G1(a))"""
+from the status code and headers alone. (AWS review G1(a))"""
 polarity = "negative"
 operation = "GetObject"
 tags = ["error", "status", "head", "rendering"]
