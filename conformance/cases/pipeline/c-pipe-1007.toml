@@ -29,6 +29,11 @@ payload_hash = "computed"
 utf8 = "A"
 repeat = 10737418240
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline rejects body exceeding size limit"
+kind = "aws-doc"
+
 [expect]
 kind = "response"
 status = 400

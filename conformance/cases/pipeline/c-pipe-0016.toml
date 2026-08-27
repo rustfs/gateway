@@ -16,11 +16,7 @@ timeout_ms = 5000
 [request]
 method = "PUT"
 target = "/bucket/key"
-headers = {
-    "content-type" = "application/octet-stream",
-    "x-amz-content-sha256" = "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
-    "x-amz-decoded-content-length" = "12"
-}
+headers = { "content-type" = "application/octet-stream", "x-amz-content-sha256" = "STREAMING-AWS4-HMAC-SHA256-PAYLOAD", "x-amz-decoded-content-length" = "12" }
 
 [request.sign]
 mode = "sigv4_header"
@@ -31,6 +27,11 @@ payload_hash = "literal:STREAMING-AWS4-HMAC-SHA256-PAYLOAD"
 
 [[request.chunks]]
 utf8 = "chunk body"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline handles streaming upload with chunked encoding"
+kind = "aws-doc"
 
 [expect]
 kind = "response"

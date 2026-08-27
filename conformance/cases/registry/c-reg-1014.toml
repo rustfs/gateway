@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "compile_fail"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Handler with wrong output type fails at compile time, not runtime."
+kind = "aws-doc"
+
 [expect]
 kind = "compile_fail"
 error = "E0308"

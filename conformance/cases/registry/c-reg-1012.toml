@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "handler", "input"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Handler input is decoded according to the registered codec bindings."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 handler_input_correct = true

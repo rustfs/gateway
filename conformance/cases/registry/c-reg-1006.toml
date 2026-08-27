@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "require"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Missing required operations are detected at registration time."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 require_missing = ["PutObject", "DeleteObject"]

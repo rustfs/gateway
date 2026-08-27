@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "path"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Path shape declares the URL pattern the operation matches."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "GetObject"

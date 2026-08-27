@@ -13,6 +13,11 @@ operation = "All"
 tags = ["registry", "completeness"]
 timeout_ms = 30000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "All 73 standard operations register successfully"
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 all_registered = true

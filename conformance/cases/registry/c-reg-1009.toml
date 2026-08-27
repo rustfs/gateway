@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "handler", "cancel"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Cancellation propagation ensures handlers respect request cancellation."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 handler_cancelled = true

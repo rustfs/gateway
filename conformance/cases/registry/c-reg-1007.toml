@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "handler", "error"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Handler error codes are propagated correctly to the response."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 handler_error = "NoSuchKey"

@@ -13,6 +13,11 @@ operation = "GetBucketLifecycleConfiguration"
 tags = ["registry", "xml"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "XML configuration operations require input/output codec bindings."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "GetBucketLifecycleConfiguration"

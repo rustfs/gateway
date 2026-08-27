@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "quirks"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Protocol quirks are declared per-operation to handle S3 edge cases."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "GetObject"

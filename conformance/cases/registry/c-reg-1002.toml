@@ -13,6 +13,11 @@ operation = "custom:NoAuth"
 tags = ["registry", "auth", "security"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Operations must declare an auth requirement; omitting it is rejected."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "custom:NoAuth"

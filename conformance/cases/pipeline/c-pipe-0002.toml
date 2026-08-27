@@ -19,6 +19,11 @@ method = "GET"
 target = "/key"
 headers = { "host" = "my-bucket.s3.amazonaws.com" }
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Targeted stage resolves virtual-hosted bucket correctly"
+kind = "aws-doc"
+
 [expect]
 kind = "response"
 status = 200

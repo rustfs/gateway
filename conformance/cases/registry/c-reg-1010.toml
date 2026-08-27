@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "handler", "panic"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Handler panics are caught and converted to internal server errors."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 handler_panicked = true

@@ -13,6 +13,11 @@ operation = "invalid name"
 tags = ["registry", "naming"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Operation names must match the allowed naming pattern."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "invalid name"

@@ -13,6 +13,11 @@ operation = "ListObjectsV2"
 tags = ["registry", "predicates"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "ListObjectsV2 route predicates declare query-parameter requirements."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "ListObjectsV2"

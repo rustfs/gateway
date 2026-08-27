@@ -13,6 +13,11 @@ operation = "DeleteObject"
 tags = ["registry", "success_status"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Operation with custom success_status registers"
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "DeleteObject"

@@ -16,12 +16,7 @@ timeout_ms = 5000
 [request]
 method = "PUT"
 target = "/bucket/key"
-headers = {
-    "content-type" = "application/octet-stream",
-    "x-amz-server-side-encryption-customer-algorithm" = "AES256",
-    "x-amz-server-side-encryption-customer-key" = "base64key",
-    "x-amz-server-side-encryption-customer-key-MD5" = "base64md5"
-}
+headers = { "content-type" = "application/octet-stream", "x-amz-server-side-encryption-customer-algorithm" = "AES256", "x-amz-server-side-encryption-customer-key" = "base64key", "x-amz-server-side-encryption-customer-key-MD5" = "base64md5" }
 
 [request.sign]
 mode = "sigv4_header"
@@ -32,6 +27,11 @@ payload_hash = "computed"
 
 [[request.chunks]]
 utf8 = "body"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline rejects SSE-C headers without TLS"
+kind = "aws-doc"
 
 [expect]
 kind = "response"

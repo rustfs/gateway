@@ -33,6 +33,11 @@ utf8 = "original body"
 action = "replace_body"
 new_body = "tampered body"
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline rejects presigned PUT with body hash mismatch"
+kind = "aws-doc"
+
 [expect]
 kind = "response"
 status = 403

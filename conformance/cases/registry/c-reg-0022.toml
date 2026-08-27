@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "complete"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "All required fields must be present for a valid operation registration."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "GetObject"

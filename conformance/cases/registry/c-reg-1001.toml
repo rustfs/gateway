@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "duplicate", "security"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Duplicate operation registration is a hard error to prevent silent shadowing."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "GetObject"

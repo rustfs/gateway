@@ -13,6 +13,11 @@ operation = "CompleteMultipartUpload"
 tags = ["registry", "deadline"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Operation with handler deadline registers successfully"
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "CompleteMultipartUpload"

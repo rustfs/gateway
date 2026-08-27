@@ -13,6 +13,11 @@ operation = "custom:NoDeadline"
 tags = ["registry", "deadline"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Operations must declare a handler deadline for timeout enforcement."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "custom:NoDeadline"

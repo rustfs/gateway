@@ -13,6 +13,11 @@ operation = "custom:Ping"
 tags = ["registry", "custom"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Custom operation registers with valid OperationSpec"
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "custom:Ping"

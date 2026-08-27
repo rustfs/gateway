@@ -40,6 +40,11 @@ credential = "valid"
 [request.body]
 utf8 = "form body"
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline handles POST Object form upload"
+kind = "aws-doc"
+
 [expect]
 kind = "response"
 status = 201

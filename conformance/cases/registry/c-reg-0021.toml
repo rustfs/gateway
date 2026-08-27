@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "service"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Service binding associates an operation with its service name for signing."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "GetObject"

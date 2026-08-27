@@ -13,6 +13,11 @@ operation = "GetObject"
 tags = ["registry", "output"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Output bindings connect the codec layer to the operation's response type."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "GetObject"

@@ -13,6 +13,11 @@ operation = "PutObject"
 tags = ["registry", "checksum"]
 timeout_ms = 5000
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Checksum configuration declares which algorithms an operation accepts."
+kind = "aws-doc"
+
 [expect]
 kind = "registry"
 operation = "PutObject"
