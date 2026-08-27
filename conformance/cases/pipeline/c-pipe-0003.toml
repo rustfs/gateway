@@ -18,6 +18,11 @@ timeout_ms = 5000
 method = "GET"
 target = "/bucket/key"
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Routed stage correctly identifies GetObject"
+kind = "aws-doc"
+
 [expect]
 kind = "route"
 operation = "GetObject"

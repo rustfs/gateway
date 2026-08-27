@@ -17,6 +17,11 @@ timeout_ms = 5000
 method = "GET"
 target = "/"
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline rejects unknown operation with 501"
+kind = "aws-doc"
+
 [expect]
 kind = "response"
 status = 501

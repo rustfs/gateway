@@ -23,6 +23,11 @@ service = "s3"
 region = "us-east-1"
 credential = "valid_no_access"
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline rejects unauthorized access to private bucket"
+kind = "aws-doc"
+
 [expect]
 kind = "response"
 status = 403

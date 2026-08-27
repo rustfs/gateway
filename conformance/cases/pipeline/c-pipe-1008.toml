@@ -27,6 +27,11 @@ credential = "valid"
 [request.body]
 utf8 = "<invalid>xml"
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline rejects malformed XML body"
+kind = "aws-doc"
+
 [expect]
 kind = "response"
 status = 400

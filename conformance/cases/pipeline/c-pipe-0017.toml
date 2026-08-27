@@ -16,15 +16,18 @@ timeout_ms = 5000
 [request]
 method = "PUT"
 target = "/bucket/dest-key"
-headers = {
-    "x-amz-copy-source" = "/bucket/source-key"
-}
+headers = { "x-amz-copy-source" = "/bucket/source-key" }
 
 [request.sign]
 mode = "sigv4_header"
 service = "s3"
 region = "us-east-1"
 credential = "valid"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline handles CopyObject"
+kind = "aws-doc"
 
 [expect]
 kind = "response"

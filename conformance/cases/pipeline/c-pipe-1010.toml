@@ -16,10 +16,7 @@ timeout_ms = 5000
 [request]
 method = "PUT"
 target = "/bucket/key"
-headers = {
-    "content-type" = "application/octet-stream",
-    "x-amz-acl" = "public-read"
-}
+headers = { "content-type" = "application/octet-stream", "x-amz-acl" = "public-read" }
 
 [request.sign]
 mode = "sigv4_presigned"
@@ -30,6 +27,11 @@ expires = 3600
 
 [[request.chunks]]
 utf8 = "body"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline rejects unsigned x-amz header in presigned request"
+kind = "aws-doc"
 
 [expect]
 kind = "response"

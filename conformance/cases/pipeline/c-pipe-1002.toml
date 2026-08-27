@@ -28,6 +28,11 @@ region = "us-east-1"
 credential = "valid"
 expires = 3600
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline rejects expired presigned URL"
+kind = "aws-doc"
+
 [expect]
 kind = "response"
 status = 403

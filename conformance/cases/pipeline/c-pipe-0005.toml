@@ -29,6 +29,11 @@ payload_hash = "computed"
 [[request.chunks]]
 utf8 = "test body"
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Guarded stage applies body hash verification for presigned PUT"
+kind = "aws-doc"
+
 [expect]
 kind = "response"
 status = 200

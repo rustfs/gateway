@@ -27,6 +27,11 @@ service = "s3"
 region = "us-east-1"
 credential = "valid"
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline rejects request with excessive clock skew"
+kind = "aws-doc"
+
 [expect]
 kind = "response"
 status = 403

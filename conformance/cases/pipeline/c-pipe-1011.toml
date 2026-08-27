@@ -17,6 +17,11 @@ timeout_ms = 5000
 method = "POST"
 target = "/bucket/key"
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+summary = "Pipeline rejects wrong HTTP method for operation"
+kind = "aws-doc"
+
 [expect]
 kind = "response"
 operation_not = "GetObject"
