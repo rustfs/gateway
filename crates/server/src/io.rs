@@ -127,6 +127,8 @@ struct Linger {
     /// Whether any block was ever ready. See [`ProgressIo::poll_drain`] for why this gates the
     /// drain rather than merely reporting on it.
     started: bool,
+    /// Whether the application proved that it stopped before the request body reached its end.
+    body_unfinished: Arc<AtomicBool>,
     /// Where the octets this drain discards are reported, so that what the drain accepted is
     /// observable from the server rather than inferred from how much a peer got out of its own
     /// send buffer. Wired to `ServerMetrics::lingering_octets_drained`; a `ProgressIo` built
@@ -162,6 +164,7 @@ impl<I> ProgressIo<I> {
                 deadline: Instant::now(),
                 quiet: Box::pin(sleep(LINGER_QUIET)),
                 started: false,
+                body_unfinished: Arc::new(AtomicBool::new(false)),
                 drained: Arc::new(AtomicU64::new(0)),
             },
             #[cfg(test)]
@@ -177,6 +180,12 @@ impl<I> ProgressIo<I> {
     pub(crate) fn count_octets_into(mut self, transport_read: Arc<AtomicU64>, drained: Arc<AtomicU64>) -> Self {
         self.transport_read = transport_read;
         self.linger.drained = drained;
+        self
+    }
+
+    /// Points this connection's lingering start decision at the application-owned body state.
+    pub(crate) fn request_body_unfinished(mut self, body_unfinished: Arc<AtomicBool>) -> Self {
+        self.linger.body_unfinished = body_unfinished;
         self
     }
 
@@ -312,15 +321,17 @@ impl<I: AsyncRead + Unpin> ProgressIo<I> {
     /// `400` answered over a one-mebibyte body that the service never read reached the client, and
     /// the next read on that socket returned `ECONNRESET` rather than end of stream.
     ///
-    /// # Why a read that is not ready ends it
+    /// # Why a read that is not ready usually ends it
     ///
-    /// The first poll decides whether there is a drain at all. This is nginx's `lingering_close
-    /// on` default, whose condition is that the connection's read event is already ready (or that
-    /// a body discard is known to be unfinished, which is a signal this layer does not have): a
-    /// close with nothing in flight has nothing to linger over, and lingering anyway would hold a
-    /// connection slot — and its `active_connections()` seat — for a budget it cannot spend. Every
-    /// keep-alive expiry and every graceful shutdown reaches this function, so the common path has
-    /// to cost nothing.
+    /// The first poll decides whether there is a drain at all. Like nginx's `lingering_close on`
+    /// default, an already-ready read starts it; this runtime also accepts the independently known
+    /// unfinished-body condition nginx documents beside that readiness check. A close with nothing
+    /// in flight has nothing to linger over, and lingering anyway would hold a connection slot —
+    /// and its `active_connections()` seat — for a budget it cannot spend. The exception is an
+    /// application that attached [`crate::UnfinishedRequestBody`] to its response:
+    /// then an initially pending read gets the same quiet grace as a drain that already consumed a
+    /// block. Every keep-alive expiry and graceful shutdown reaches this function, so the unmarked
+    /// common path still costs nothing.
     fn poll_drain(&mut self, context: &mut Context<'_>) -> Poll<()> {
         let mut buffer = [0_u8; LINGER_BLOCK];
         for _ in 0..LINGER_BLOCKS_PER_POLL {
@@ -341,7 +352,7 @@ impl<I: AsyncRead + Unpin> ProgressIo<I> {
                     self.linger.quiet.as_mut().reset(Instant::now() + LINGER_QUIET);
                 }
                 Poll::Pending => {
-                    if !self.linger.started {
+                    if !self.linger.started && !self.linger.body_unfinished.load(Ordering::Acquire) {
                         return Poll::Ready(());
                     }
                     return if self.linger.quiet.as_mut().poll(context).is_ready() {
@@ -426,7 +437,12 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
             ready!(Pin::new(&mut this.inner).poll_shutdown(context))?;
             this.linger.write_shut = true;
             this.linger.deadline = Instant::now() + this.linger.budget;
-            this.linger.quiet.as_mut().reset(this.linger.deadline);
+            let quiet_deadline = if this.linger.body_unfinished.load(Ordering::Acquire) {
+                Instant::now() + LINGER_QUIET
+            } else {
+                this.linger.deadline
+            };
+            this.linger.quiet.as_mut().reset(quiet_deadline);
         }
         ready!(this.poll_drain(context));
         Poll::Ready(Ok(()))
@@ -465,6 +481,106 @@ mod tests {
     use super::*;
 
     use tokio::io::AsyncWriteExt;
+
+    struct DelayedReader {
+        ready: Pin<Box<Sleep>>,
+        body: Option<&'static [u8]>,
+    }
+
+    impl DelayedReader {
+        fn new(delay: Duration, body: &'static [u8]) -> Self {
+            Self {
+                ready: Box::pin(sleep(delay)),
+                body: Some(body),
+            }
+        }
+    }
+
+    impl AsyncRead for DelayedReader {
+        fn poll_read(mut self: Pin<&mut Self>, context: &mut Context<'_>, buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+            if self.ready.as_mut().poll(context).is_pending() {
+                return Poll::Pending;
+            }
+            if let Some(body) = self.body.take() {
+                buffer.put_slice(body);
+            }
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl AsyncWrite for DelayedReader {
+        fn poll_write(self: Pin<&mut Self>, _context: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
+            Poll::Ready(Ok(bytes.len()))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    fn delayed_lingering_io(
+        delay: Duration,
+        body: &'static [u8],
+        body_unfinished: bool,
+        drained: Arc<AtomicU64>,
+    ) -> ProgressIo<DelayedReader> {
+        ProgressIo::new(
+            DelayedReader::new(delay, body),
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicBool::new(true)),
+            deadline_after(Duration::from_secs(60)),
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+            Duration::from_secs(2),
+        )
+        .request_body_unfinished(Arc::new(AtomicBool::new(body_unfinished)))
+        .count_octets_into(Arc::new(AtomicU64::new(0)), drained)
+    }
+
+    /// Positive — an early refusal waits for a body already known to be unfinished even when the
+    /// first transport read loses the arrival race.
+    #[tokio::test(start_paused = true)]
+    async fn a_known_unfinished_body_that_arrives_after_shutdown_starts_is_drained() {
+        let drained = Arc::new(AtomicU64::new(0));
+        let mut io = delayed_lingering_io(LINGER_QUIET / 2, b"late body", true, Arc::clone(&drained));
+        let shutdown = tokio::spawn(async move { io.shutdown().await });
+        tokio::task::yield_now().await;
+        assert!(!shutdown.is_finished(), "the initial Pending abandoned a body known to be unfinished");
+        tokio::time::advance(LINGER_QUIET / 2).await;
+        shutdown.await.expect("shutdown task joins").expect("shutdown succeeds");
+        assert_eq!(drained.load(Ordering::Relaxed), 9);
+    }
+
+    /// Negative — an ordinary close with no unfinished-body proof still retires immediately.
+    #[tokio::test(start_paused = true)]
+    async fn an_initially_pending_transport_without_body_proof_does_not_linger() {
+        let started = Instant::now();
+        let mut io = delayed_lingering_io(Duration::from_secs(60), b"not owed", false, Arc::new(AtomicU64::new(0)));
+        io.shutdown().await.expect("a bodyless close retires immediately");
+        assert_eq!(started.elapsed(), Duration::ZERO, "the bodyless close spent a linger interval");
+    }
+
+    /// Negative — an unfinished peer that sends nothing gets only the existing quiet grace, not
+    /// the whole outer linger budget.
+    #[tokio::test(start_paused = true)]
+    async fn a_known_unfinished_body_that_stays_silent_is_bounded_by_the_quiet_grace() {
+        let started = Instant::now();
+        let mut io = delayed_lingering_io(Duration::from_secs(60), b"never arrives", true, Arc::new(AtomicU64::new(0)));
+        let shutdown = tokio::spawn(async move { io.shutdown().await });
+        tokio::task::yield_now().await;
+        assert!(!shutdown.is_finished(), "the unfinished body was abandoned without its quiet grace");
+        tokio::time::advance(LINGER_QUIET + Duration::from_millis(1)).await;
+        shutdown.await.expect("shutdown task joins").expect("shutdown succeeds");
+        assert_eq!(
+            started.elapsed(),
+            LINGER_QUIET + Duration::from_millis(1),
+            "the silent body was charged more than the existing quiet grace"
+        );
+    }
 
     struct StalledWriter;
 

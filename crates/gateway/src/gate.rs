@@ -69,6 +69,25 @@ use crate::integrity::checksum_refusal;
 use crate::render::{S3Error, from_handler, from_transport_limit};
 use crate::wire_read::{WireFrames, WireProgress, WireReader};
 
+/// Typed proof that a refusing stage stopped before request-body completion.
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub(crate) struct RequestBodyUnfinished(bool);
+
+impl RequestBodyUnfinished {
+    pub(crate) const fn proven() -> Self {
+        Self(true)
+    }
+
+    pub(crate) fn attach<B>(self, response: &mut http::Response<B>) {
+        #[cfg(feature = "server")]
+        if self.0 {
+            response.extensions_mut().insert(rustfs_gateway_server::UnfinishedRequestBody);
+        }
+        #[cfg(not(feature = "server"))]
+        let _ = (self, response);
+    }
+}
+
 /// Evidence that a request's signature reached a verdict and the verdict was not a rejection.
 ///
 /// Borrows the verdict rather than copying anything out of it, so one cannot be built beside a
@@ -389,23 +408,27 @@ pub(crate) const MAX_DELETE_OBJECTS_BODY_BYTES: u64 = 2 * 1024 * 1024;
 /// refusal exists to avoid — `crate::close::after_body_ceiling` is where that judgement is
 /// written down. `c-object-0015` is the case.
 pub(crate) fn past_declared_cap() -> S3Error {
-    from_handler(
+    let mut refusal = from_handler(
         HandlerError::new(ErrorCode::INVALID_REQUEST, "the request body is larger than this operation permits"),
         ResponseKind::Other,
         crate::close::after_body_ceiling(),
-    )
+    );
+    refusal.body_unfinished = RequestBodyUnfinished::proven();
+    refusal
 }
 
 /// The refusal for a body larger than this assembly will hold.
 pub(crate) fn past_buffered_ceiling() -> S3Error {
-    from_transport_limit(
+    let mut refusal = from_transport_limit(
         HandlerError::new(
             ErrorCode::ENTITY_TOO_LARGE,
             "the declared request body is larger than this service will hold",
         ),
         StatusCode::PAYLOAD_TOO_LARGE,
         crate::close::after_body_ceiling(),
-    )
+    );
+    refusal.body_unfinished = RequestBodyUnfinished::proven();
+    refusal
 }
 
 /// The refusal for a body that stopped early or ran on: both mean the body that arrived is not the
@@ -459,3 +482,42 @@ pub(crate) fn body_quota_refusal() -> S3Error {
 #[cfg(test)]
 #[path = "gate_tests.rs"]
 mod tests;
+
+#[cfg(all(test, feature = "server"))]
+mod unfinished_body_tests {
+    use rustfs_gateway_core::{HandlerError, ResponseKind};
+    use rustfs_gateway_server::UnfinishedRequestBody;
+    use rustfs_gateway_types::ErrorCode;
+
+    use super::past_buffered_ceiling;
+    use crate::close::ConnectionIntent;
+    use crate::render::{from_handler, render};
+    use crate::trace::RequestTrace;
+
+    /// Positive — the early body ceiling is a proof that the service stopped before the body
+    /// ended, independently of the connection-close verdict it also carries.
+    #[test]
+    fn an_early_body_ceiling_marks_the_rendered_response_as_unfinished() {
+        let response = render(&past_buffered_ceiling(), &RequestTrace::from_bits(1, 2));
+        assert!(
+            response.extensions().get::<UnfinishedRequestBody>().is_some(),
+            "the server cannot distinguish an arriving body from an ordinary close"
+        );
+    }
+
+    /// Negative — a close verdict alone says nothing about whether a body exists or reached its
+    /// end, so it must never synthesize the server marker.
+    #[test]
+    fn a_generic_close_does_not_claim_that_the_request_body_is_unfinished() {
+        let error = from_handler(
+            HandlerError::new(ErrorCode::INTERNAL_ERROR, "generic close"),
+            ResponseKind::Other,
+            ConnectionIntent::Close,
+        );
+        let response = render(&error, &RequestTrace::from_bits(1, 2));
+        assert!(
+            response.extensions().get::<UnfinishedRequestBody>().is_none(),
+            "ConnectionIntent::Close was treated as body-progress evidence"
+        );
+    }
+}

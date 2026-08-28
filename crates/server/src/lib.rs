@@ -40,7 +40,9 @@ mod tls;
 
 pub use config::{ConfigError, ServerConfig, WriteStrategy, conn_memory_budget};
 pub use conn::{Server, ServerError};
-pub use connection_service::{ConnectionBody, ConnectionError, ConnectionResponseBody, ConnectionService, ResponseCompletion};
+pub use connection_service::{
+    ConnectionBody, ConnectionError, ConnectionResponseBody, ConnectionService, ResponseCompletion, UnfinishedRequestBody,
+};
 pub use dispatch::PrefixDispatch;
 pub use driver::{
     AcceptedConnection, ConnectionDriver, ConnectionFuture, ConnectionInfo, DriverValidationError, HyperConnectionDriver,

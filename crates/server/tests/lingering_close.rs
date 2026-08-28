@@ -49,7 +49,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use http::{Request, Response, StatusCode};
 use http_body_util::Full;
-use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ServerMetrics};
+use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ServerMetrics, UnfinishedRequestBody};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::net::tcp::OwnedWriteHalf;
@@ -152,7 +152,14 @@ fn plaintext_config() -> ServerConfig {
 /// with a plain `200` that says nothing about the connection.
 fn refusing_server(config: ServerConfig) -> RunningServer {
     let service = service_fn(|request: Request<hyper::body::Incoming>| async move {
-        let response = if request.uri().path() == "/refuse" {
+        let is_refusal = request.uri().path() == "/refuse";
+        let body_is_unfinished = request
+            .headers()
+            .get(http::header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .is_some_and(|length| length != 0);
+        let mut response = (if is_refusal {
             Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(http::header::CONNECTION, "close")
@@ -161,8 +168,12 @@ fn refusing_server(config: ServerConfig) -> RunningServer {
             Response::builder()
                 .status(StatusCode::OK)
                 .body(Full::new(Bytes::from_static(b"ok")))
-        };
-        Ok::<_, Infallible>(response.expect("the response is well formed"))
+        })
+        .expect("the response is well formed");
+        if is_refusal && body_is_unfinished {
+            response.extensions_mut().insert(UnfinishedRequestBody);
+        }
+        Ok::<_, Infallible>(response)
     });
     Server::new(config, service).serve().expect("server starts")
 }

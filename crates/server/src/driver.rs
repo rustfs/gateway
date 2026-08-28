@@ -208,6 +208,7 @@ impl<S> AcceptedConnection<S> {
             Arc::clone(&self.state.request_capacity),
             Arc::clone(&self.state.request_stats),
             Arc::clone(&self.state.connection_in_flight),
+            Arc::clone(&self.state.request_body_unfinished),
         );
         let inner = ProgressIo::new(
             self.state.stream,
@@ -218,6 +219,7 @@ impl<S> AcceptedConnection<S> {
             self.state.config.write_progress_timeout,
             self.state.config.lingering_close_time,
         )
+        .request_body_unfinished(Arc::clone(&self.state.request_body_unfinished))
         .count_octets_into(
             Arc::clone(&self.state.metrics.transport_read),
             Arc::clone(&self.state.metrics.lingering_drained),

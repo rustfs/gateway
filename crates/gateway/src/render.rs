@@ -60,6 +60,7 @@ pub struct S3Error {
     resource: Option<Box<str>>,
     etag: Option<ETag>,
     connection: ConnectionIntent,
+    pub(crate) body_unfinished: crate::gate::RequestBodyUnfinished,
     extras: Option<Box<Extras>>,
 }
 
@@ -84,6 +85,7 @@ impl PartialEq for S3Error {
             && self.etag == other.etag
             && self.body_policy == other.body_policy
             && self.connection == other.connection
+            && self.body_unfinished == other.body_unfinished
             && self.headers() == other.headers()
             && self.details() == other.details()
             && signature_details_eq(self.extras.as_deref(), other.extras.as_deref())
@@ -109,10 +111,7 @@ const NO_HEADERS: &[ErrorHeader] = &[];
 const NO_DETAILS: &[ErrorDetail] = &[];
 
 impl S3Error {
-    /// What this refusal does to the connection.
-    ///
-    /// Closing protects the next request from unread request-body bytes. [`render`] carries the
-    /// intent in an extension; a transport acts on it and a harness must observe the socket.
+    /// What this refusal does to the connection; [`render`] carries it to the transport.
     #[must_use]
     pub const fn connection_intent(&self) -> ConnectionIntent {
         self.connection
@@ -178,6 +177,7 @@ impl From<ErrorResolution> for S3Error {
             resource: resolution.resource().map(Box::from),
             etag: resolution.etag().cloned(),
             connection: crate::close::after_refusal_code(resolution.code()),
+            body_unfinished: crate::gate::RequestBodyUnfinished::default(),
             extras,
         }
     }
@@ -401,6 +401,7 @@ fn unreachable_internal_resolution() -> S3Error {
         resource: None,
         etag: None,
         connection: ConnectionIntent::MayKeepAlive,
+        body_unfinished: crate::gate::RequestBodyUnfinished::default(),
         extras: None,
     }
 }
@@ -480,12 +481,9 @@ pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
         headers.insert(ETAG, value);
     }
     trace.apply(headers);
-    // The connection verdict travels in the response's extensions, not in its headers.
-    //
-    // The transport owns the hop-by-hop `Connection` header.
-    //
-    // Only a transport turns this extension into a header and socket action.
+    // Only the transport turns these typed extensions into socket action.
     response.extensions_mut().insert(error.connection);
+    error.body_unfinished.attach(&mut response);
     response
 }
 
