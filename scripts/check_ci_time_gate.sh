@@ -98,10 +98,10 @@ expected_feedback_prebuild = <<~SHELL
   cargo test -p xtask --bin xtask --no-run
   cargo build -p xtask --no-default-features
   cargo build -p xtask-launcher
-  cargo build -p xtask --features full
+  cargo run --quiet -p xtask --features full -- codegen --check
 SHELL
 require_equal(feedback_prebuild&.fetch("run", nil), expected_feedback_prebuild,
-              "operation verification must prebuild every exact runner and leave the full xtask feature graph warm")
+              "operation verification must prebuild its exact runners and leave the full codegen scan warm")
 
 static_steps = jobs.fetch("static").fetch("steps")
 require_equal(static_steps.first(3).map(&:keys), [["uses", "with"], ["uses", "with"], ["run"]],

@@ -14525,6 +14525,13 @@ mut_ci_time_feedback_prebuild_drops_light_runner() {
 expect_fail check_ci_time_gate.sh \
     'operation verification dropping the exact light runner prebuild' mut_ci_time_feedback_prebuild_drops_light_runner
 
+mut_ci_time_feedback_prebuild_skips_codegen_warmup() {
+    replace_ci_text '          cargo run --quiet -p xtask --features full -- codegen --check' \
+        '          cargo build -p xtask --features full'
+}
+expect_fail check_ci_time_gate.sh \
+    'operation verification skipping its codegen warmup' mut_ci_time_feedback_prebuild_skips_codegen_warmup
+
 mut_ci_time_msrv_timeout_removed() {
     replace_ci_text '  msrv:
     name: MSRV
