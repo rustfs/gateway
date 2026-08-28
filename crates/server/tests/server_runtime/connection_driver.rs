@@ -22,6 +22,7 @@
 
 use std::convert::Infallible;
 use std::future::Future;
+use std::marker::PhantomPinned;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -30,8 +31,10 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
-use http::{Request, Response, StatusCode};
+use http::{Request, Response, StatusCode, header};
+use http_body::{Body, Frame};
 use http_body_util::{BodyExt, Full};
+use pin_project_lite::pin_project;
 use rustfs_gateway_server::{
     AcceptedConnection, ConnectionDriver, ConnectionFuture, ConnectionInfo, RequestCancellation, Server, ServerConfig,
 };
@@ -113,7 +116,8 @@ async fn wait_until(mut predicate: impl FnMut() -> bool) {
 #[derive(Clone, Copy)]
 enum ServiceBehavior {
     Respond,
-    Panic,
+    PanicInCall,
+    PanicInFuture,
     BlockFirst,
 }
 
@@ -148,7 +152,7 @@ impl Service<Request<Full<Bytes>>> for LifecycleService {
     }
 
     fn call(&mut self, request: Request<Full<Bytes>>) -> Self::Future {
-        if matches!(self.behavior, ServiceBehavior::Panic) {
+        if matches!(self.behavior, ServiceBehavior::PanicInCall) {
             panic!("connection service must isolate application panics");
         }
         let ordinal = self.calls.fetch_add(1, Ordering::Relaxed);
@@ -160,13 +164,16 @@ impl Service<Request<Full<Bytes>>> for LifecycleService {
         let first_entered = Arc::clone(&self.first_entered);
         let release_first = Arc::clone(&self.release_first);
         Box::pin(async move {
+            if matches!(behavior, ServiceBehavior::PanicInFuture) {
+                panic!("connection service must isolate asynchronous application panics");
+            }
             if matches!(behavior, ServiceBehavior::BlockFirst) && ordinal == 0 {
                 first_entered.notify_one();
                 release_first.notified().await;
             }
             Ok(Response::builder()
                 .status(StatusCode::NO_CONTENT)
-                .body(Full::new(Bytes::new()))
+                .body(Full::new(Bytes::from_static(b"application-body")))
                 .expect("static response is valid"))
         })
     }
@@ -184,14 +191,46 @@ impl ConnectionDriver<LifecycleService> for ManagedRequestDriver {
                 .await
                 .expect("lifecycle service is infallible");
             let status = response.status().as_u16();
-            let _ = response
-                .into_body()
-                .collect()
-                .await
-                .expect("managed response body is readable");
-            let wire = format!("HTTP/1.1 {status}\r\nConnection: close\r\n\r\n");
+            let content_type = response.headers().get(header::CONTENT_TYPE).cloned();
+            let (body, completion) = response.into_body().into_parts();
+            let payload = match body.into_result() {
+                Ok(application_body) => application_body
+                    .collect()
+                    .await
+                    .expect("application response body is readable")
+                    .to_bytes(),
+                Err(panic_body) => panic_body
+                    .collect()
+                    .await
+                    .expect("panic response body is readable")
+                    .to_bytes(),
+            };
+            let content_type = content_type
+                .map(|value| format!("Content-Type: {}\r\n", value.to_str().expect("static content type is visible")))
+                .unwrap_or_default();
+            let wire = format!("HTTP/1.1 {status}\r\n{content_type}Connection: close\r\n\r\n");
             stream.write_all(wire.as_bytes()).await.expect("managed response writes");
+            stream.write_all(&payload).await.expect("managed response payload writes");
+            completion.complete();
         })
+    }
+}
+
+pin_project! {
+    struct PinnedBody {
+        #[pin]
+        inner: Full<Bytes>,
+        #[pin]
+        _pinned: PhantomPinned,
+    }
+}
+
+impl Body for PinnedBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        self.project().inner.poll_frame(context)
     }
 }
 
@@ -263,6 +302,7 @@ async fn custom_driver_uses_the_managed_connection_service() {
     let mut response = Vec::new();
     client.read_to_end(&mut response).await.expect("managed response is complete");
     assert!(response.starts_with(b"HTTP/1.1 204\r\n"));
+    assert!(response.ends_with(b"application-body"));
     assert!(service.saw_context.load(Ordering::Acquire));
     let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
     assert!(running.task.await.expect("server task joins").is_ok());
@@ -271,7 +311,7 @@ async fn custom_driver_uses_the_managed_connection_service() {
 /// Negative control: application panics cannot escape a takeover driver's managed service.
 #[tokio::test]
 async fn custom_driver_cannot_bypass_panic_isolation() {
-    let service = LifecycleService::new(ServiceBehavior::Panic);
+    let service = LifecycleService::new(ServiceBehavior::PanicInCall);
     let running = Server::new(plaintext_config(), service)
         .serve_with(ManagedRequestDriver)
         .expect("managed-driver server starts");
@@ -279,6 +319,44 @@ async fn custom_driver_cannot_bypass_panic_isolation() {
     let mut response = Vec::new();
     client.read_to_end(&mut response).await.expect("panic response is complete");
     assert!(response.starts_with(b"HTTP/1.1 500\r\n"));
+    assert!(
+        response
+            .windows(b"Content-Type: text/plain; charset=utf-8\r\n".len())
+            .any(|window| { window == b"Content-Type: text/plain; charset=utf-8\r\n" })
+    );
+    assert!(response.ends_with(b"Service panicked"));
+    let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(running.task.await.expect("server task joins").is_ok());
+}
+
+/// Negative control: panics raised while polling an application future are isolated too.
+#[tokio::test]
+async fn custom_driver_isolates_asynchronous_application_panics() {
+    let service = LifecycleService::new(ServiceBehavior::PanicInFuture);
+    let running = Server::new(plaintext_config(), service)
+        .serve_with(ManagedRequestDriver)
+        .expect("managed-driver server starts");
+    let mut client = TcpStream::connect(running.local_addr).await.expect("client connects");
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.expect("panic response is complete");
+    assert!(response.starts_with(b"HTTP/1.1 500\r\n"));
+    assert!(response.ends_with(b"Service panicked"));
+    let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
+    assert!(running.task.await.expect("server task joins").is_ok());
+}
+
+/// Positive control: preserving the concrete body must not add an `Unpin` service restriction.
+#[tokio::test]
+async fn default_driver_accepts_a_pinned_application_body() {
+    let service = tower::service_fn(|_: Request<hyper::body::Incoming>| async {
+        Ok::<_, Infallible>(Response::new(PinnedBody {
+            inner: Full::new(Bytes::new()),
+            _pinned: PhantomPinned,
+        }))
+    });
+    let running = Server::new(plaintext_config(), service)
+        .serve()
+        .expect("server accepts a pinned response body");
     let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
     assert!(running.task.await.expect("server task joins").is_ok());
 }
