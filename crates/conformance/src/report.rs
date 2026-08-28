@@ -37,6 +37,13 @@ pub enum Verdict {
     Failed,
     /// The case did not run, and why is recorded.
     Skipped,
+    /// The case is internally consistent, and no assertion in it was evaluated.
+    ///
+    /// This is what `validate` produces, and it is deliberately not [`Verdict::Passed`]. A corpus
+    /// check that reached the same verdict as an executed case made a newly written case whose
+    /// every assertion was wrong read green through the one command the feedback-loop table sends
+    /// an agent to after changing a case.
+    Validated,
 }
 
 impl Verdict {
@@ -47,6 +54,7 @@ impl Verdict {
             Verdict::Passed => "passed",
             Verdict::Failed => "failed",
             Verdict::Skipped => "skipped",
+            Verdict::Validated => "validated",
         }
     }
 
@@ -54,12 +62,16 @@ impl Verdict {
     ///
     /// A pass is evidence the behaviour holds. A skip is the absence of evidence. A failure is
     /// evidence the behaviour does not hold, and it is the bottom rung because it is the one a
-    /// reader must act on. Deliberately not the derived `Ord`, whose order is the declaration
+    /// reader must act on. A validation sits beside the failure: it also evaluated no assertion,
+    /// so it pays off nothing — it can never be the improvement a recorded failure waits for.
+    /// Deliberately not the derived `Ord`, whose order is the declaration
     /// order of the variants and means nothing.
     #[must_use]
     pub fn rank(self) -> u8 {
         match self {
-            Verdict::Failed => 0,
+            // A validation evaluated no assertion, so like a failure it pays off nothing: it can
+            // never be the improvement a recorded failure waits for.
+            Verdict::Failed | Verdict::Validated => 0,
             Verdict::Skipped => 1,
             Verdict::Passed => 2,
         }
@@ -168,6 +180,12 @@ pub struct Report {
     pub notes: Vec<String>,
     /// Negative and positive case counts, for the corpus-wide polarity requirement.
     pub polarity: (usize, usize),
+    /// Whether the run stopped after the corpus checks, without touching the target.
+    ///
+    /// The renderer needs this and not only the verdicts: `target`, `transport` and `profile`
+    /// describe a target this run never contacted, and printing them over a corpus check is the
+    /// half of the defect the verdict alone does not cover.
+    pub validate_only: bool,
 }
 
 impl Report {
@@ -251,26 +269,42 @@ impl Report {
     #[must_use]
     pub fn render_text(&self, baseline: Option<&Baseline>) -> String {
         let mut out = String::new();
-        out.push_str(&format!("conformance: {} cases\n", self.outcomes.len()));
-        out.push_str(&format!("  target    {}\n", self.target));
-        out.push_str(&format!("  transport {}\n", self.transport));
-        out.push_str(&format!("  profile   {}\n", self.profile));
+        if self.validate_only {
+            // Deliberately not the run banner. `target`, `transport` and `profile` describe a
+            // target this run never contacted, and a header that names one reports an intention as
+            // an observation. The last line names the command that does measure, because a reader
+            // who wanted a measurement is holding the wrong report.
+            out.push_str(&format!("conformance: {} case(s) validated, none executed\n", self.outcomes.len()));
+            out.push_str("  checked   the frozen schema and the corpus conventions\n");
+            out.push_str("  not run   no case was executed, and no assertion in one was evaluated\n");
+            out.push_str("  to run    conformance run --filter '<case-id>'\n");
+        } else {
+            out.push_str(&format!("conformance: {} cases\n", self.outcomes.len()));
+            out.push_str(&format!("  target    {}\n", self.target));
+            out.push_str(&format!("  transport {}\n", self.transport));
+            out.push_str(&format!("  profile   {}\n", self.profile));
+        }
         if self.filtered_out > 0 {
             out.push_str(&format!("  filtered  {} case(s) excluded by --filter\n", self.filtered_out));
         }
         out.push('\n');
 
         for (domain, outcomes) in self.by_domain() {
-            let passed = outcomes.iter().filter(|o| o.verdict == Verdict::Passed).count();
-            let failed = outcomes.iter().filter(|o| o.verdict == Verdict::Failed).count();
-            let skipped = outcomes.iter().filter(|o| o.verdict == Verdict::Skipped).count();
-            out.push_str(&format!(
-                "{domain}/  {} case(s): {passed} passed, {failed} failed, {skipped} skipped\n",
-                outcomes.len()
-            ));
+            let count = |verdict: Verdict| outcomes.iter().filter(|o| o.verdict == verdict).count();
+            let tally = if self.validate_only {
+                format!("{} validated, {} failed", count(Verdict::Validated), count(Verdict::Failed))
+            } else {
+                format!(
+                    "{} passed, {} failed, {} skipped",
+                    count(Verdict::Passed),
+                    count(Verdict::Failed),
+                    count(Verdict::Skipped)
+                )
+            };
+            out.push_str(&format!("{domain}/  {} case(s): {tally}\n", outcomes.len()));
             for outcome in outcomes {
                 out.push_str(&format!(
-                    "  {:<8} {:<16} {}\n",
+                    "  {:<9} {:<16} {}\n",
                     outcome.verdict.as_str(),
                     outcome.id,
                     outcome.title.as_deref().unwrap_or("")
@@ -306,12 +340,20 @@ impl Report {
 
         let tally = self.tally();
         let count = |verdict: Verdict| tally.get(&verdict).copied().unwrap_or(0);
-        out.push_str(&format!(
-            "summary: {} passed, {} failed, {} skipped\n",
-            count(Verdict::Passed),
-            count(Verdict::Failed),
-            count(Verdict::Skipped)
-        ));
+        if self.validate_only {
+            out.push_str(&format!(
+                "summary: {} validated, {} failed — no case was executed\n",
+                count(Verdict::Validated),
+                count(Verdict::Failed)
+            ));
+        } else {
+            out.push_str(&format!(
+                "summary: {} passed, {} failed, {} skipped\n",
+                count(Verdict::Passed),
+                count(Verdict::Failed),
+                count(Verdict::Skipped)
+            ));
+        }
         let (negative, positive) = self.polarity;
         out.push_str(&format!(
             "polarity: {negative} negative, {positive} positive ({})\n",
@@ -347,9 +389,16 @@ impl Report {
     #[must_use]
     pub fn render_json(&self) -> String {
         let mut out = String::from("{\n");
-        out.push_str(&format!("  \"target\": {},\n", quote(&self.target)));
-        out.push_str(&format!("  \"transport\": {},\n", quote(&self.transport)));
-        out.push_str(&format!("  \"profile\": {},\n", quote(&self.profile)));
+        out.push_str(&format!("  \"validate_only\": {},\n", self.validate_only));
+        // `null`, not the name, and not the field's absence. A validate-only run contacted no
+        // target, so there is no value here that is true; a consumer holding this file and nothing
+        // else would read the run banner's claim off `target` exactly as a reader of the text
+        // report did before it was split. The keys stay present so that reading one is never a
+        // missing-key error in a consumer that does not branch on `validate_only`.
+        let named = |value: &str| if self.validate_only { "null".to_owned() } else { quote(value) };
+        out.push_str(&format!("  \"target\": {},\n", named(&self.target)));
+        out.push_str(&format!("  \"transport\": {},\n", named(&self.transport)));
+        out.push_str(&format!("  \"profile\": {},\n", named(&self.profile)));
         out.push_str("  \"cases\": [\n");
         for (index, outcome) in self.outcomes.iter().enumerate() {
             let comma = if index + 1 == self.outcomes.len() { "" } else { "," };
@@ -373,7 +422,13 @@ impl Report {
     #[must_use]
     pub fn render_junit(&self) -> String {
         let failures = self.outcomes.iter().filter(|o| o.verdict == Verdict::Failed).count();
-        let skipped = self.outcomes.iter().filter(|o| o.verdict == Verdict::Skipped).count();
+        // A validated case counts as skipped, never as a JUnit pass: JUnit has no third colour,
+        // and a bare `<testcase/>` is how a CI dashboard renders "this ran and held".
+        let skipped = self
+            .outcomes
+            .iter()
+            .filter(|o| matches!(o.verdict, Verdict::Skipped | Verdict::Validated))
+            .count();
         let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         out.push_str(&format!(
             "<testsuite name=\"conformance\" tests=\"{}\" failures=\"{failures}\" skipped=\"{skipped}\">\n",
@@ -387,6 +442,14 @@ impl Report {
             ));
             match outcome.verdict {
                 Verdict::Passed => out.push_str("/>\n"),
+                Verdict::Validated => {
+                    out.push_str(">\n");
+                    out.push_str(
+                        "    <skipped message=\"validated against the schema and the conventions; \
+                         no assertion was evaluated\"/>\n",
+                    );
+                    out.push_str("  </testcase>\n");
+                }
                 Verdict::Skipped => {
                     out.push_str(">\n");
                     out.push_str(&format!(
@@ -495,247 +558,4 @@ fn escape_xml(text: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn outcome(id: &str, domain: &str, verdict: Verdict) -> CaseOutcome {
-        CaseOutcome {
-            id: id.to_owned(),
-            domain: domain.to_owned(),
-            relative: format!("cases/{domain}/{id}.toml"),
-            title: Some("a title".to_owned()),
-            verdict,
-            phase: Phase::Execute,
-            skip_reason: (verdict == Verdict::Skipped).then(|| "no target".to_owned()),
-            diagnostics: if verdict == Verdict::Failed {
-                vec![Diagnostic::deny(
-                    "expect/status",
-                    "/expect/status",
-                    "expected 200, observed 500",
-                )]
-            } else {
-                Vec::new()
-            },
-            quirks: vec!["q-etag-0001".to_owned()],
-            evidence: vec!["https://example.test/a".to_owned()],
-        }
-    }
-
-    fn report() -> Report {
-        Report {
-            target: "scripted".to_owned(),
-            transport: "hyper".to_owned(),
-            profile: "aws".to_owned(),
-            outcomes: vec![
-                outcome("c-etag-0001", "etag", Verdict::Passed),
-                outcome("c-sig-0001", "sig", Verdict::Failed),
-                outcome("c-mpu-0001", "mpu", Verdict::Skipped),
-            ],
-            filtered_out: 0,
-            notes: vec!["the facade must expose: a service entry point".to_owned()],
-            polarity: (2, 1),
-        }
-    }
-
-    #[test]
-    fn the_text_report_groups_by_capability_domain() {
-        let rendered = report().render_text(None);
-        assert!(rendered.contains("etag/  1 case(s)"));
-        assert!(rendered.contains("sig/  1 case(s)"));
-        assert!(rendered.contains("summary: 1 passed, 1 failed, 1 skipped"));
-    }
-
-    #[test]
-    fn a_failure_carries_the_file_the_quirks_and_the_evidence() {
-        let rendered = report().render_text(None);
-        assert!(rendered.contains("file: cases/sig/c-sig-0001.toml"));
-        assert!(rendered.contains("quirks: q-etag-0001"));
-        assert!(rendered.contains("evidence: https://example.test/a"));
-    }
-
-    #[test]
-    fn a_skip_always_states_its_reason() {
-        let rendered = report().render_text(None);
-        assert!(rendered.contains("reason: no target"));
-    }
-
-    #[test]
-    fn without_a_baseline_every_failure_is_a_regression() {
-        assert_eq!(report().regressions(None).len(), 1);
-    }
-
-    /// The baseline that records exactly what [`report`] concludes, which is the shape the
-    /// repository's own `conformance/baseline.json` is required to have: a row per case.
-    fn matching_baseline() -> Baseline {
-        Baseline::from_json(r#"{"cases": {"c-etag-0001": "passed", "c-sig-0001": "failed", "c-mpu-0001": "skipped"}}"#)
-            .expect("valid baseline")
-    }
-
-    #[test]
-    fn a_baseline_tolerates_a_recorded_failure() {
-        assert!(report().regressions(Some(&matching_baseline())).is_empty());
-    }
-
-    #[test]
-    fn a_baseline_does_not_tolerate_a_new_failure() {
-        let baseline =
-            Baseline::from_json(r#"{"cases": {"c-etag-0001": "failed", "c-sig-0001": "passed", "c-mpu-0001": "skipped"}}"#)
-                .expect("valid baseline");
-        let subject = report();
-        let regressions = subject.regressions(Some(&baseline));
-        assert_eq!(regressions.len(), 1);
-        assert_eq!(regressions[0].id, "c-sig-0001");
-    }
-
-    /// The rule that makes a `passed` row worth writing down.
-    ///
-    /// Under the previous comparison this read green: only a failure could regress, so a family
-    /// that stopped executing altogether — rustfs/gateway#203's `object/` domain against
-    /// `Unwired`, rustfs/gateway#214's thirty-nine lost `acl` cases — was indistinguishable from
-    /// a family that ran and passed.
-    #[test]
-    fn a_recorded_pass_that_now_skips_is_a_regression() {
-        let baseline =
-            Baseline::from_json(r#"{"cases": {"c-etag-0001": "passed", "c-sig-0001": "failed", "c-mpu-0001": "passed"}}"#)
-                .expect("valid baseline");
-        let subject = report();
-        let regressions = subject.regressions(Some(&baseline));
-        assert_eq!(regressions.len(), 1);
-        assert_eq!(regressions[0].id, "c-mpu-0001");
-    }
-
-    /// A skip the baseline already records is not news, and neither is one that turns into a pass.
-    #[test]
-    fn a_recorded_skip_may_keep_skipping_and_may_improve() {
-        assert!(report().regressions(Some(&matching_baseline())).is_empty());
-        let recovered =
-            Baseline::from_json(r#"{"cases": {"c-etag-0001": "skipped", "c-sig-0001": "failed", "c-mpu-0001": "skipped"}}"#)
-                .expect("valid baseline");
-        let subject = report();
-        let improvements = subject.improvements(Some(&recovered));
-        assert_eq!(improvements.len(), 1);
-        assert_eq!(improvements[0].id, "c-etag-0001");
-    }
-
-    /// A case with no row is read as one that ought to pass, so forgetting the row cannot buy
-    /// silence for a case that skips.
-    ///
-    /// This is the half that makes the completeness policy enforceable rather than decorative:
-    /// without it, deleting a row is strictly weaker than editing one, and
-    /// `scripts/check_baseline_ratchet.sh` only ever looked at the rows that were there.
-    #[test]
-    fn a_case_with_no_row_is_expected_to_pass() {
-        let baseline = Baseline::from_json(r#"{"cases": {"c-sig-0001": "failed"}}"#).expect("valid baseline");
-        let subject = report();
-        let regressions = subject.regressions(Some(&baseline));
-        assert_eq!(regressions.len(), 1);
-        assert_eq!(regressions[0].id, "c-mpu-0001", "an unrecorded skip is a regression");
-    }
-
-    /// A case that declares it does not apply to this run is not evidence about the target, in
-    /// either direction.
-    ///
-    /// The shape this stops: a baseline recorded under `--profile aws` replayed under
-    /// `--profile minio` would otherwise report every `aws`-only case as a regression, because
-    /// the *run's own options* turned it into a skip before any request went out.
-    #[test]
-    fn a_case_that_does_not_apply_to_this_run_is_neither_a_regression_nor_an_improvement() {
-        let mut subject = report();
-        subject.outcomes[2].phase = Phase::Convention;
-        subject.outcomes[2].skip_reason = Some("case.applies_to.profiles is [aws]".to_owned());
-        let baseline =
-            Baseline::from_json(r#"{"cases": {"c-etag-0001": "passed", "c-sig-0001": "failed", "c-mpu-0001": "passed"}}"#)
-                .expect("valid baseline");
-        assert!(
-            subject.regressions(Some(&baseline)).is_empty(),
-            "a profile-gated skip is the run's own doing, not the target's"
-        );
-        assert!(subject.improvements(Some(&baseline)).is_empty());
-    }
-
-    /// The control for the case above: the same verdict reached at [`Phase::Execute`] — the target
-    /// was asked and could not answer — is a regression.
-    #[test]
-    fn a_skip_the_target_caused_is_still_a_regression() {
-        let subject = report();
-        assert_eq!(subject.outcomes[2].phase, Phase::Execute);
-        let baseline =
-            Baseline::from_json(r#"{"cases": {"c-etag-0001": "passed", "c-sig-0001": "failed", "c-mpu-0001": "passed"}}"#)
-                .expect("valid baseline");
-        let regressions = subject.regressions(Some(&baseline));
-        assert_eq!(regressions.len(), 1);
-        assert_eq!(regressions[0].id, "c-mpu-0001");
-    }
-
-    /// A regression line names the verdict, because a regression is no longer always a failure.
-    ///
-    /// Without it a reader who sees `regression: c-mpu-0001` goes looking for a failed assertion
-    /// that does not exist, and the actual finding — the case stopped running at all — is the one
-    /// thing the line does not say.
-    #[test]
-    fn a_regression_line_says_which_verdict_it_is() {
-        let baseline =
-            Baseline::from_json(r#"{"cases": {"c-etag-0001": "passed", "c-sig-0001": "failed", "c-mpu-0001": "passed"}}"#)
-                .expect("valid baseline");
-        let rendered = report().render_text(Some(&baseline));
-        assert!(
-            rendered.contains("regression: c-mpu-0001 is skipped (cases/mpu/c-mpu-0001.toml)"),
-            "{rendered}"
-        );
-    }
-
-    #[test]
-    fn the_verdict_ladder_puts_a_skip_between_a_failure_and_a_pass() {
-        assert!(Verdict::Failed.rank() < Verdict::Skipped.rank());
-        assert!(Verdict::Skipped.rank() < Verdict::Passed.rank());
-    }
-
-    #[test]
-    fn an_improvement_is_reported_so_the_ratchet_can_tighten() {
-        let baseline = Baseline::from_json(r#"{"cases": {"c-etag-0001": "failed"}}"#).expect("valid baseline");
-        assert_eq!(report().improvements(Some(&baseline)).len(), 1);
-    }
-
-    #[test]
-    fn a_baseline_with_an_unknown_verdict_is_refused() {
-        assert!(Baseline::from_json(r#"{"cases": {"c-etag-0001": "flaky"}}"#).is_err());
-    }
-
-    #[test]
-    fn a_rendered_baseline_reloads() {
-        let rendered = Baseline::render(&report());
-        let baseline = Baseline::from_json(&rendered).expect("round trip");
-        assert_eq!(baseline.expected("c-sig-0001"), Some(Verdict::Failed));
-    }
-
-    #[test]
-    fn the_junit_document_escapes_and_counts() {
-        let rendered = report().render_junit();
-        assert!(rendered.contains("tests=\"3\" failures=\"1\" skipped=\"1\""));
-        assert!(rendered.contains("<skipped message=\"no target\"/>"));
-        assert!(rendered.contains("<failure message=\"expect/status\">"));
-    }
-
-    #[test]
-    fn junit_escapes_markup_in_a_failure_message() {
-        let mut subject = report();
-        subject.outcomes[1].diagnostics = vec![Diagnostic::deny(
-            "expect/body",
-            "/expect/body",
-            "expected <Prefix/> observed <Prefix></Prefix>",
-        )];
-        let rendered = subject.render_junit();
-        assert!(rendered.contains("&lt;Prefix/&gt;"));
-        assert!(!rendered.contains("observed <Prefix>"));
-    }
-
-    #[test]
-    fn the_json_report_is_parseable() {
-        let rendered = report().render_json();
-        let parsed = json::parse(&rendered).expect("valid JSON");
-        assert_eq!(parsed.path("cases").and_then(Value::as_array).map(<[Value]>::len), Some(3));
-    }
 }

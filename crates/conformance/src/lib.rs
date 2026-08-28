@@ -75,6 +75,8 @@ pub mod md5;
 pub mod observation;
 pub mod pattern;
 pub mod report;
+#[cfg(test)]
+mod report_tests;
 pub mod runner;
 pub mod schema;
 pub mod sha256;
