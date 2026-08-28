@@ -79,6 +79,25 @@ pub(crate) fn verify_entry(name: &str) -> Result<VerifyEntry, String> {
 }
 
 #[cfg(feature = "full")]
+pub(crate) fn verify_operation_contract(name: &str, mapped_cases: &[String]) -> Result<(), String> {
+    let cases = operation_cases(&repo_root().join("conformance/cases"))?;
+    let discovered = cases.get(name).map(Vec::as_slice).unwrap_or_default();
+    verify_case_mapping(name, mapped_cases, discovered)?;
+    crate::route::verify_operation_route(name)
+}
+
+#[cfg(feature = "full")]
+fn verify_case_mapping(name: &str, mapped: &[String], discovered: &[String]) -> Result<(), String> {
+    if mapped == discovered {
+        Ok(())
+    } else {
+        Err(format!(
+            "{name} maps cases {mapped:?}, but the corpus contains {discovered:?}; run `cargo xtask codegen`"
+        ))
+    }
+}
+
+#[cfg(feature = "full")]
 pub(crate) fn scaffold_entry(name: &str) -> Result<Option<ScaffoldEntry>, String> {
     let root = repo_root().join("xtask/scaffolds");
     let entries = match fs::read_dir(&root) {
@@ -209,6 +228,16 @@ mod tests {
     use rustfs_gateway_core::route::generated_entries;
 
     #[test]
+    fn operation_contract_rejects_a_missing_mapped_case() {
+        assert!(verify_case_mapping("GetObject", &[], &["c-object-0001".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn operation_contract_rejects_an_unmapped_extra_case() {
+        assert!(verify_case_mapping("GetObject", &["c-object-0001".to_owned()], &[]).is_err());
+    }
+
+    #[test]
     fn generated_map_lists_all_cases_without_a_fake_shared_test() {
         let rendered = render_verify_map(&operations().expect("the operation catalog must load"))
             .expect("the repository case catalog must load");
@@ -239,7 +268,6 @@ mod tests {
     fn selected_operation_has_runtime_route_contract() {
         let selected = std::env::var("RUSTFS_GATEWAY_VERIFY_OPERATION").ok();
         let operations = operations().expect("the operation catalog must load");
-        let cases = operation_cases(&repo_root().join("conformance/cases")).expect("the case catalog must load");
         let names = operations
             .iter()
             .map(|operation| operation.operation.as_str())
@@ -247,8 +275,7 @@ mod tests {
         let mut checked = 0;
         for name in names {
             let entry = verify_entry(name).expect("the operation must have a generated verification entry");
-            assert_eq!(entry.cases, cases.get(name).cloned().unwrap_or_default());
-            crate::route::verify_operation_route(name).unwrap_or_else(|error| panic!("{name}: {error}"));
+            verify_operation_contract(name, &entry.cases).unwrap_or_else(|error| panic!("{name}: {error}"));
             checked += 1;
         }
         assert_eq!(checked, selected.as_ref().map_or(operations.len(), |_| 1));

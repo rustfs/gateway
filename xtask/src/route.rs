@@ -18,7 +18,6 @@
 //! table, then rendering their observations. NOT responsible for: reimplementing routing rules.
 //! Upstream: the `route explain` command. Downstream: the public gateway diagnostic APIs.
 
-#[cfg(test)]
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
@@ -29,7 +28,6 @@ use http::Request;
 use rustfs_gateway::{HostResolver, Limits, PathStyleOnly, VirtualHostStyle, WireRequest};
 use rustfs_gateway_conformance::toml;
 use rustfs_gateway_core::route::{Explanation, Predicate, RouteRequestParts, RouteTable, SHADOWING, generated_entries};
-#[cfg(test)]
 use rustfs_gateway_core::route::{HostClass, TargetKind};
 
 use crate::codegen::repo_root;
@@ -192,7 +190,6 @@ fn candidates(table: &RouteTable, request: &RouteRequestParts<'_>) -> Vec<Candid
         .collect()
 }
 
-#[cfg(test)]
 pub(crate) fn verify_operation_route(name: &str) -> Result<(), String> {
     let entries = generated_entries().map_err(|error| error.to_string())?;
     let entry = entries

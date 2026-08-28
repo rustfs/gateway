@@ -19,15 +19,18 @@
 //! Upstream: `Server::serve_with`. Downstream: the built-in Hyper driver or an external driver.
 
 use std::future::Future;
+use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use http::{Request, Response};
 use http_body::Body;
 use hyper::body::Incoming;
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tower::Service as TowerService;
@@ -35,6 +38,10 @@ use tower::Service as TowerService;
 use crate::config::ServerConfig;
 use crate::conn::{BoxError, ConnectionState, run_connection};
 use crate::connection_service::ConnectionService;
+use crate::io::ProgressIo;
+
+/// A startup refusal reported by a connection driver before the listener is bound.
+pub type DriverValidationError = Box<dyn std::error::Error + Send + Sync>;
 
 /// An owned connection-driver task.
 pub type ConnectionFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
@@ -44,8 +51,56 @@ pub type ConnectionFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 /// A server selects the driver once for the listener. The returned future owns the connection
 /// until it completes; connection admission is not released before then.
 pub trait ConnectionDriver<S>: Clone + Send + 'static {
+    /// Validates that this driver can honor the selected listener transport.
+    ///
+    /// The default accepts every valid server configuration. A specialized driver overrides this
+    /// when a mismatch would otherwise make it silently discard accepted sockets.
+    fn validate(&self, _config: &ServerConfig, _tls_configured: bool) -> Result<(), DriverValidationError> {
+        Ok(())
+    }
+
     /// Starts driving one accepted connection.
     fn drive(&self, accepted: AcceptedConnection<S>) -> ConnectionFuture;
+}
+
+/// Cleartext socket I/O with the server's progress deadlines, lingering close and counters.
+///
+/// A self-held protocol driver receives this instead of the raw socket so taking ownership does
+/// not bypass listener-wide timeout or close behavior.
+pub struct PlaintextConnection {
+    inner: ProgressIo<TcpStream>,
+}
+
+impl AsyncRead for PlaintextConnection {
+    fn poll_read(mut self: Pin<&mut Self>, context: &mut Context<'_>, buffer: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_read(context, buffer)
+    }
+}
+
+impl AsyncWrite for PlaintextConnection {
+    fn poll_write(mut self: Pin<&mut Self>, context: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(context, bytes)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(context)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(context)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffers: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write_vectored(context, buffers)
+    }
 }
 
 /// One accepted socket and the generic server facts captured with it.
@@ -112,7 +167,7 @@ impl<S> AcceptedConnection<S> {
     ///
     /// Returns [`PlaintextTakeoverError`] when TLS is configured. TLS and HTTP/2 remain owned by
     /// [`HyperConnectionDriver`].
-    pub fn into_plaintext(self) -> Result<(TcpStream, ConnectionService<S>), PlaintextTakeoverError> {
+    pub fn into_plaintext(self) -> Result<(PlaintextConnection, ConnectionService<S>), PlaintextTakeoverError> {
         if self.state.tls.is_some() {
             return Err(PlaintextTakeoverError);
         }
@@ -129,7 +184,20 @@ impl<S> AcceptedConnection<S> {
             Arc::clone(&self.state.request_stats),
             Arc::clone(&self.state.connection_in_flight),
         );
-        Ok((self.state.stream, service))
+        let inner = ProgressIo::new(
+            self.state.stream,
+            Arc::clone(&self.state.connection_in_flight),
+            Arc::clone(&self.state.request_seen),
+            self.state.header_deadline,
+            self.state.config.keep_alive_idle,
+            self.state.config.write_progress_timeout,
+            self.state.config.lingering_close_time,
+        )
+        .count_octets_into(
+            Arc::clone(&self.state.metrics.transport_read),
+            Arc::clone(&self.state.metrics.lingering_drained),
+        );
+        Ok((PlaintextConnection { inner }, service))
     }
 }
 

@@ -169,7 +169,7 @@ fn verify_operation(name: &str, json: bool) -> ExitCode {
         Ok(entry) => entry,
         Err(error) => return diagnostic("generated verification mapping is unavailable", "xtask/verify-map.toml", &error),
     };
-    if let Err(error) = run_operation_contract(name) {
+    if let Err(error) = run_operation_contract(name, &entry.cases) {
         return diagnostic(
             "operation-specific unit contract failed",
             &format!("runtime route and generated mapping for {name}"),
@@ -204,24 +204,20 @@ fn verify_operation(name: &str, json: bool) -> ExitCode {
 #[cfg(feature = "full")]
 fn run_representative_case(name: &str, cases: &[String], json: bool) -> Result<Option<String>, ExitCode> {
     for case in cases {
-        let output = Command::new(env!("CARGO")).args(conformance_step("run", case)).output();
-        match output {
-            Ok(output) if output.status.success() => return Ok(Some(case.clone())),
-            Ok(output) if output.status.code() == Some(3) => continue,
-            Ok(output) => {
-                print_cargo_failure(&output);
+        let report = match rustfs_gateway_conformance::cli::run_filtered(case) {
+            Ok(report) => report,
+            Err(_) => continue,
+        };
+        match rustfs_gateway_conformance::cli::status_code(&report, None, rustfs_gateway_conformance::cli::Command::Run) {
+            rustfs_gateway_conformance::cli::exit::SUCCESS => return Ok(Some(case.clone())),
+            rustfs_gateway_conformance::cli::exit::ENVIRONMENT => continue,
+            code => {
+                eprint!("{}", report.render_text(None));
                 print_json_failure(json, "operation conformance case failed", case);
                 return Err(diagnostic(
                     "operation conformance case failed",
                     case,
-                    &format!("a-xt-0002 requires {name} conformance evidence; cargo exited with {}", output.status),
-                ));
-            }
-            Err(error) => {
-                return Err(diagnostic(
-                    "cargo could not be started",
-                    case,
-                    &format!("a-xt-0002 requires {name} conformance evidence; {error}"),
+                    &format!("a-xt-0002 requires {name} conformance evidence; conformance exited with {code}"),
                 ));
             }
         }
@@ -238,30 +234,8 @@ fn run_representative_case(name: &str, cases: &[String], json: bool) -> Result<O
 }
 
 #[cfg(feature = "full")]
-fn run_operation_contract(name: &str) -> Result<(), String> {
-    let output = Command::new(env!("CARGO"))
-        .env("RUSTFS_GATEWAY_VERIFY_OPERATION", name)
-        .args([
-            "test",
-            "-p",
-            "xtask",
-            "--bin",
-            "xtask",
-            "catalog::tests::selected_operation_has_runtime_route_contract",
-            "--",
-            "--exact",
-        ])
-        .output()
-        .map_err(|error| format!("cargo could not start: {error}"))?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !output.status.success() {
-        print_cargo_failure(&output);
-        return Err(format!("cargo exited with {}", output.status));
-    }
-    if !stdout.contains("running 1 test") || !stdout.contains("1 passed") {
-        return Err("the exact filter matched zero tests".to_owned());
-    }
-    Ok(())
+fn run_operation_contract(name: &str, mapped_cases: &[String]) -> Result<(), String> {
+    catalog::verify_operation_contract(name, mapped_cases)
 }
 
 #[cfg(feature = "full")]
@@ -448,22 +422,6 @@ fn crate_case(package: &str) -> Option<&'static str> {
         "rustfs-gateway-core" | "rustfs-gateway" => Some("c-object-0001"),
         _ => None,
     }
-}
-
-#[cfg(feature = "full")]
-fn conformance_step(command: &str, case: &str) -> Vec<String> {
-    vec![
-        "run".to_owned(),
-        "--quiet".to_owned(),
-        "-p".to_owned(),
-        "rustfs-gateway-conformance".to_owned(),
-        "--bin".to_owned(),
-        "rustfs-gateway-conformance".to_owned(),
-        "--".to_owned(),
-        command.to_owned(),
-        "--filter".to_owned(),
-        case.to_owned(),
-    ]
 }
 
 fn conformance_test_step(case: &str) -> Vec<String> {

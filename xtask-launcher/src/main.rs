@@ -89,6 +89,7 @@ mod tests {
         assert_eq!(runner_for_request(&strings(&["verify", "--crate", "core"])), FULL_RUNNER);
         assert_eq!(runner_for_request(&strings(&["codegen"])), LIGHT_RUNNER);
         assert_eq!(runner_for_request(&strings(&["verify", "--op", "GetObject"])), LIGHT_RUNNER);
+        assert_eq!(runner_for_request(&strings(&["verify", "--json", "--op", "GetObject"])), LIGHT_RUNNER);
         assert_eq!(runner_for_request(&strings(&["verify", "--crate", "core", "extra"])), LIGHT_RUNNER);
     }
 }

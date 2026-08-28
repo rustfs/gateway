@@ -1663,6 +1663,28 @@ expect_fail check_xtask_codegen_surface.sh \
     'non-facade crate verification rebuilding the light runner after the workspace gate' \
     mut_xtask_crate_runner_returns_to_light_graph
 
+mut_xtask_operation_runner_bypasses_light_exec() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask-launcher/src/main.rs")
+text = path.read_text()
+old = '''fn runner_for_request(arguments: &[String]) -> &'static [&'static str] {
+    match crate_request_name(arguments) {'''
+new = '''fn runner_for_request(arguments: &[String]) -> &'static [&'static str] {
+    if arguments.iter().any(|argument| argument == "--op") {
+        return FULL_RUNNER;
+    }
+    match crate_request_name(arguments) {'''
+if text.count(old) != 1:
+    raise SystemExit("the operation runner selection is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'operation verification bypassing the light-to-full exec handoff' \
+    mut_xtask_operation_runner_bypasses_light_exec
+
 mut_xtask_facade_runner_returns_to_full_graph() {
     perl -0pi -e 's/Some\("rustfs-gateway" \| "s3gate"\) \| None => LIGHT_RUNNER,/None => LIGHT_RUNNER,/' \
         xtask-launcher/src/main.rs
@@ -1947,22 +1969,22 @@ expect_fail check_xtask_codegen_surface.sh \
     'an operation-only verifier leaking into the light crate surface' \
     mut_xtask_verify_operation_loses_full_gate
 
-mut_xtask_conformance_runner_leaks_into_light_surface() {
+mut_xtask_operation_conformance_runner_leaks_into_light_surface() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '#[cfg(feature = "full")]\nfn conformance_step'
-new = 'fn conformance_step'
+old = '#[cfg(feature = "full")]\nfn run_representative_case'
+new = 'fn run_representative_case'
 if text.count(old) != 1:
-    raise SystemExit("full-only conformance runner is missing")
+    raise SystemExit("full-only operation conformance runner is missing")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'the standalone conformance runner leaking into the light crate surface' \
-    mut_xtask_conformance_runner_leaks_into_light_surface
+    'the operation conformance runner leaking into the light crate surface' \
+    mut_xtask_operation_conformance_runner_leaks_into_light_surface
 
 mut_xtask_full_verify_uses_unstable_slice_conversion() {
     python3 - <<'PYEOF'
@@ -4888,8 +4910,10 @@ path = Path("scripts/check_layer_dependencies.sh")
 text = path.read_text()
 old = '''            "rustfs-gateway-http",
             "rustfs-gateway-macros",
+            "rustfs-gateway-server",
             "rustfs-gateway-types",'''
 new = '''            "rustfs-gateway-http",
+            "rustfs-gateway-server",
             "rustfs-gateway-types",'''
 if text.count(old) != 1:
     raise SystemExit("the gateway macro edge is not unique")
@@ -4900,6 +4924,26 @@ expect_fail_self_mutation check_layer_dependencies.sh \
     'the public facade macro edge disappearing from the executable layer matrix' \
     mut_gateway_macro_layer_edge_deleted
 
+mut_gateway_server_layer_edge_deleted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_layer_dependencies.sh")
+text = path.read_text()
+old = '''            "rustfs-gateway-macros",
+            "rustfs-gateway-server",
+            "rustfs-gateway-types",'''
+new = '''            "rustfs-gateway-macros",
+            "rustfs-gateway-types",'''
+if text.count(old) != 1:
+    raise SystemExit("the gateway server edge is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail_self_mutation check_layer_dependencies.sh \
+    'the self-held server edge disappearing from the executable layer matrix' \
+    mut_gateway_server_layer_edge_deleted
+
 mut_gateway_macro_agents_edge_deleted() {
     sed '/rustfs-gateway.*rustfs-gateway-macros.*public facade re-export/d' AGENTS.md >AGENTS.md.mut
     mv AGENTS.md.mut AGENTS.md
@@ -4907,6 +4951,14 @@ mut_gateway_macro_agents_edge_deleted() {
 expect_fail check_layer_dependencies.sh \
     'the public facade macro edge disappearing from the AGENTS dependency graph' \
     mut_gateway_macro_agents_edge_deleted
+
+mut_gateway_server_agents_edge_deleted() {
+    sed '/rustfs-gateway.*rustfs-gateway-server.*optional self-held listener assembly/d' AGENTS.md >AGENTS.md.mut
+    mv AGENTS.md.mut AGENTS.md
+}
+expect_fail check_layer_dependencies.sh \
+    'the self-held server edge disappearing from the AGENTS dependency graph' \
+    mut_gateway_server_agents_edge_deleted
 
 mut_handlers_facade_expansion_reaches_core() {
     python3 - <<'PYEOF'
@@ -14465,6 +14517,20 @@ mut_ci_time_feedback_timeout_removed() {
 }
 expect_fail check_ci_time_gate.sh \
     'a non-required pull-request job becoming unbounded' mut_ci_time_feedback_timeout_removed
+
+mut_ci_time_feedback_prebuild_drops_light_runner() {
+    replace_ci_text '          cargo build -p xtask --no-default-features
+' ''
+}
+expect_fail check_ci_time_gate.sh \
+    'operation verification dropping the exact light runner prebuild' mut_ci_time_feedback_prebuild_drops_light_runner
+
+mut_ci_time_feedback_prebuild_skips_codegen_warmup() {
+    replace_ci_text '          cargo run --quiet -p xtask --features full -- codegen --check' \
+        '          cargo build -p xtask --features full'
+}
+expect_fail check_ci_time_gate.sh \
+    'operation verification skipping its codegen warmup' mut_ci_time_feedback_prebuild_skips_codegen_warmup
 
 mut_ci_time_msrv_timeout_removed() {
     replace_ci_text '  msrv:

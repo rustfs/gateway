@@ -87,6 +87,7 @@ pub mod close;
 pub mod commit;
 mod commit_task;
 mod config;
+mod conn;
 mod dispatch;
 mod ext;
 mod gate;
@@ -123,6 +124,7 @@ pub use crate::config::{
     DEFAULT_STANDARD_HANDLER_DEADLINE, HandlerDeadlineConfig, HandlerDeadlineConfigError, KEEPALIVE_INTERVALS_WITHOUT_PROGRESS,
     RequestBodyDeadlineConfig, ServiceConfig,
 };
+pub use crate::conn::{SelfHeldHttp1Driver, SelfHeldRequestBody};
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
     AuthzRequest, AuthzStage, BaseDomain, BodyQuota, BodyQuotaExceeded, CORS_PREFLIGHT, CachedCorsSource, ChunkSink,
