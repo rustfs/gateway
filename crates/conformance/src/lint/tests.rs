@@ -24,10 +24,20 @@
 use super::*;
 use crate::corpus::{Case, Corpus};
 use crate::diagnostic::Severity;
+use std::sync::OnceLock;
+
+fn corpus() -> Corpus {
+    static CORPUS: OnceLock<Corpus> = OnceLock::new();
+    CORPUS
+        .get_or_init(|| {
+            let root = Corpus::discover_root().expect("the repository corpus");
+            Corpus::load(&root).expect("the corpus loads")
+        })
+        .clone()
+}
 
 fn linted() -> Corpus {
-    let root = Corpus::discover_root().expect("the repository corpus");
-    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    let mut corpus = corpus();
     lint(&mut corpus);
     corpus
 }
@@ -75,8 +85,7 @@ fn every_case_declares_a_rationale_and_evidence() {
 
 #[test]
 fn a_case_whose_identifier_disagrees_with_its_file_is_denied() {
-    let root = Corpus::discover_root().expect("the repository corpus");
-    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    let mut corpus = corpus();
     let case = &mut corpus.cases_mut()[0];
     if let Some(document) = case.document.as_mut()
         && let Some(meta) = document.get_mut("case")
@@ -90,8 +99,7 @@ fn a_case_whose_identifier_disagrees_with_its_file_is_denied() {
 
 #[test]
 fn an_unresolved_capture_reference_is_denied() {
-    let root = Corpus::discover_root().expect("the repository corpus");
-    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    let mut corpus = corpus();
     for case in corpus.cases_mut() {
         if case.id != "c-cond-0001" {
             continue;
@@ -117,8 +125,7 @@ fn an_unresolved_capture_reference_is_denied() {
 
 #[test]
 fn a_computed_interpolation_form_is_denied_rather_than_invented() {
-    let root = Corpus::discover_root().expect("the repository corpus");
-    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    let mut corpus = corpus();
     for case in corpus.cases_mut() {
         if case.id != "c-cond-0001" {
             continue;
@@ -314,8 +321,7 @@ fn the_committed_operations_are_the_ones_the_model_lowered() {
 /// wording is wrong.
 #[test]
 fn a_fault_after_a_commit_on_an_operation_that_does_not_commit_is_denied() {
-    let root = Corpus::discover_root().expect("the repository corpus");
-    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    let mut corpus = corpus();
     for case in corpus.cases_mut() {
         if case.id != "c-copy-0038" {
             continue;
@@ -348,8 +354,7 @@ fn a_fault_after_a_commit_on_an_operation_that_does_not_commit_is_denied() {
 /// it is the one this drives.
 #[test]
 fn a_stall_after_a_commit_on_an_operation_that_does_not_commit_is_denied() {
-    let root = Corpus::discover_root().expect("the repository corpus");
-    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    let mut corpus = corpus();
     for case in corpus.cases_mut() {
         if case.id != "c-mpu-0040" {
             continue;
@@ -384,8 +389,7 @@ fn a_stall_after_a_commit_on_an_operation_that_does_not_commit_is_denied() {
 /// at. Without this, the test above would be satisfied by a rule that denied every stall.
 #[test]
 fn the_stall_the_corpus_declares_is_not_denied() {
-    let root = Corpus::discover_root().expect("the repository corpus");
-    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    let mut corpus = corpus();
     lint(&mut corpus);
     let case = corpus
         .cases()
@@ -406,8 +410,7 @@ fn the_stall_the_corpus_declares_is_not_denied() {
 /// rule above would be satisfied by a check that denied every fault it saw.
 #[test]
 fn a_fault_at_no_declared_point_is_not_denied_for_the_operation_that_carries_it() {
-    let root = Corpus::discover_root().expect("the repository corpus");
-    let mut corpus = Corpus::load(&root).expect("the corpus loads");
+    let mut corpus = corpus();
     for case in corpus.cases_mut() {
         if case.id != "c-copy-0038" {
             continue;

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WHAT: Keeps codegen and facade verification on a bounded xtask dependency surface.
+# WHAT: Keeps codegen, facade and conformance verification on a bounded xtask dependency surface.
 # WHY: Cargo builds every normal xtask dependency before dispatch, so one heavy dependency makes
 # code generation pay for the facade, core and conformance crates before generation can start.
 # HOW TO EXEMPT: There is no further exemption. Keep other exact crate requests on the full runner.
@@ -438,12 +438,14 @@ if matches!(arguments, [command, flag, _] if command == "verify" && flag == "--o
     return OPERATION_RUNNER;
 }
 match crate_request_name(arguments) {
-    Some("rustfs-gateway" | "s3gate") | None => LIGHT_RUNNER,
+    Some("rustfs-gateway" | "s3gate" | "rustfs-gateway-conformance" | "s3gate-conformance" | "conformance") | None => {
+        LIGHT_RUNNER
+    }
     Some(_) => FULL_RUNNER,
 }
 ''')
 if len(launcher_runner) != 1 or compact(launcher_runner[0][1]) != expected_launcher_runner:
-    fail("the launcher must select the bounded operation runner exactly")
+    fail("the launcher must select each bounded runner exactly")
 launcher_source = compact(launcher_comments)
 launcher_constants = {
     'const FULL_RUNNER: &[&str] = &["--features", "full"];',
@@ -918,5 +920,5 @@ expected_tests_attribute = compact('#[cfg(all(test, feature = "full"))]')
 if len(tests_items) != 1 or [compact(attr) for attr in tests_items[0][1]] != [expected_tests_attribute]:
     fail("verify module tests must require the full feature")
 
-print("OK: cargo xtask keeps codegen and facade verification light while other crates reuse the full runner")
+print("OK: cargo xtask keeps codegen, facade and conformance verification light while other crates reuse the full runner")
 PYEOF

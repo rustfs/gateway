@@ -23,17 +23,27 @@
 use super::*;
 use crate::observation::Observation;
 use crate::sut::{Scripted, Unwired};
+use std::sync::OnceLock;
 
-fn corpus() -> Corpus {
-    let root = Corpus::discover_root().expect("the repository corpus");
-    prepare_corpus(&root).expect("the corpus loads")
+fn corpus() -> &'static Corpus {
+    static CORPUS: OnceLock<Corpus> = OnceLock::new();
+    CORPUS.get_or_init(|| {
+        let root = Corpus::discover_root().expect("the repository corpus");
+        prepare_corpus(&root).expect("the corpus loads")
+    })
+}
+
+/// Negative — parallel runner tests share one prepared corpus instead of reparsing it per test.
+#[test]
+fn the_repository_corpus_fixture_is_initialized_once() {
+    assert!(std::ptr::eq(corpus(), corpus()));
 }
 
 #[test]
 fn every_case_in_the_repository_corpus_reaches_a_conclusion() {
     let corpus = corpus();
     let mut sut = Unwired;
-    let report = run(&corpus, &mut sut, &RunOptions::default());
+    let report = run(corpus, &mut sut, &RunOptions::default());
     assert_eq!(report.outcomes.len(), corpus.cases().len());
     assert!(report.outcomes.len() >= 22, "only {} cases", report.outcomes.len());
     for outcome in &report.outcomes {
@@ -49,7 +59,7 @@ fn every_case_in_the_repository_corpus_reaches_a_conclusion() {
 fn with_no_target_every_runnable_case_is_skipped_and_says_why() {
     let corpus = corpus();
     let mut sut = Unwired;
-    let report = run(&corpus, &mut sut, &RunOptions::default());
+    let report = run(corpus, &mut sut, &RunOptions::default());
     let skipped: Vec<&CaseOutcome> = report.outcomes.iter().filter(|o| o.verdict == Verdict::Skipped).collect();
     assert_eq!(skipped.len(), report.outcomes.len(), "no case may pass without a target");
     assert!(
@@ -67,7 +77,7 @@ fn validate_only_validates_the_corpus_without_touching_a_target() {
         validate_only: true,
         ..RunOptions::default()
     };
-    let report = run(&corpus, &mut sut, &options);
+    let report = run(corpus, &mut sut, &options);
     let failed: Vec<&str> = report
         .outcomes
         .iter()
@@ -92,7 +102,7 @@ fn a_validate_only_run_never_renders_as_an_execution_result() {
         filter: Some("c-etag-0001".to_owned()),
         ..RunOptions::default()
     };
-    let rendered = run(&corpus, &mut sut, &options).render_text(None);
+    let rendered = run(corpus, &mut sut, &options).render_text(None);
     assert!(
         !rendered.contains("passed"),
         "a validate-only report claims a pass, and nothing was executed:\n{rendered}"
@@ -120,7 +130,7 @@ fn a_validate_only_verdict_is_not_the_verdict_an_executed_case_gets() {
         validate_only: true,
         ..RunOptions::default()
     };
-    let report = run(&corpus, &mut sut, &options);
+    let report = run(corpus, &mut sut, &options);
     assert!(!report.outcomes.is_empty(), "the corpus is empty");
     let claimed: Vec<&str> = report
         .outcomes
@@ -142,7 +152,7 @@ fn a_filter_selects_by_directory_prefix() {
         filter: Some("etag/".to_owned()),
         ..RunOptions::default()
     };
-    let report = run(&corpus, &mut sut, &options);
+    let report = run(corpus, &mut sut, &options);
     assert_eq!(report.outcomes.len(), 1);
     assert_eq!(report.outcomes[0].id, "c-etag-0001");
     assert!(report.filtered_out > 0);
@@ -156,7 +166,7 @@ fn a_filter_that_matches_nothing_runs_nothing() {
         filter: Some("no-such-domain/".to_owned()),
         ..RunOptions::default()
     };
-    assert!(run(&corpus, &mut sut, &options).outcomes.is_empty());
+    assert!(run(corpus, &mut sut, &options).outcomes.is_empty());
 }
 
 #[test]
@@ -177,7 +187,7 @@ fn a_profile_gate_skips_with_the_gate_named() {
         filter: Some("etag/".to_owned()),
         ..RunOptions::default()
     };
-    let report = run(&corpus, &mut sut, &options);
+    let report = run(corpus, &mut sut, &options);
     assert_eq!(report.outcomes.len(), 1);
     assert_eq!(report.outcomes[0].verdict, Verdict::Skipped);
     assert!(
@@ -206,7 +216,7 @@ fn a_scripted_target_that_answers_correctly_makes_a_case_pass() {
         filter: Some("c-object-0001".to_owned()),
         ..RunOptions::default()
     };
-    let report = run(&corpus, &mut sut, &options);
+    let report = run(corpus, &mut sut, &options);
     assert_eq!(report.outcomes.len(), 1);
     assert_eq!(report.outcomes[0].verdict, Verdict::Passed, "{:?}", report.outcomes[0].diagnostics);
 }
@@ -234,7 +244,7 @@ fn a_run_that_executes_records_a_pass_not_a_validation() {
         filter: Some("c-object-0001".to_owned()),
         ..RunOptions::default()
     };
-    let report = run(&corpus, &mut sut, &options);
+    let report = run(corpus, &mut sut, &options);
     assert!(!report.validate_only, "this run is not a corpus check");
     let outcome = report.outcomes.first().expect("c-object-0001 is selected");
     assert_ne!(
@@ -253,7 +263,7 @@ fn a_scripted_target_that_answers_wrongly_makes_the_same_case_fail() {
         filter: Some("c-object-0001".to_owned()),
         ..RunOptions::default()
     };
-    let report = run(&corpus, &mut sut, &options);
+    let report = run(corpus, &mut sut, &options);
     assert_eq!(report.outcomes[0].verdict, Verdict::Failed);
     let rules: Vec<&str> = report.outcomes[0].failures().iter().map(|d| d.rule.as_str()).collect();
     assert!(rules.contains(&"expect/status"), "{rules:?}");
@@ -270,7 +280,7 @@ fn a_failure_names_the_exchange_it_came_from() {
         filter: Some("c-object-0002".to_owned()),
         ..RunOptions::default()
     };
-    let report = run(&corpus, &mut sut, &options);
+    let report = run(corpus, &mut sut, &options);
     let messages: Vec<&str> = report.outcomes[0].failures().iter().map(|d| d.message.as_str()).collect();
     assert!(messages.iter().any(|m| m.starts_with("exchange #1 head")), "{messages:?}");
     assert!(messages.iter().any(|m| m.starts_with("exchange #2 get-agrees")), "{messages:?}");
@@ -290,7 +300,7 @@ fn a_capture_from_one_exchange_is_substituted_into_the_next_request() {
         filter: Some("c-list-0001".to_owned()),
         ..RunOptions::default()
     };
-    let _ = run(&corpus, &mut sut, &options);
+    let _ = run(corpus, &mut sut, &options);
     let second = sut.seen.get(1).expect("a second request was sent");
     let target = second.get("target").and_then(Value::as_str).unwrap_or_default();
     assert!(target.contains("continuation-token=tok-99"), "{target}");
@@ -309,7 +319,7 @@ fn an_unbound_capture_fails_the_case_instead_of_sending_a_literal_placeholder() 
         filter: Some("c-list-0001".to_owned()),
         ..RunOptions::default()
     };
-    let report = run(&corpus, &mut sut, &options);
+    let report = run(corpus, &mut sut, &options);
     assert_eq!(report.outcomes[0].verdict, Verdict::Failed);
     let rules: Vec<&str> = report.outcomes[0].failures().iter().map(|d| d.rule.as_str()).collect();
     assert!(rules.contains(&"runner/interpolation"), "{rules:?}");
@@ -326,7 +336,7 @@ fn setup_captures_reach_the_first_request() {
         filter: Some("c-mpu-0001".to_owned()),
         ..RunOptions::default()
     };
-    let _ = run(&corpus, &mut sut, &options);
+    let _ = run(corpus, &mut sut, &options);
     let first = sut.seen.first().expect("a request was sent");
     let target = first.get("target").and_then(Value::as_str).unwrap_or_default();
     assert!(target.contains("uploadId=upload-42"), "{target}");
@@ -350,7 +360,7 @@ fn an_environment_failure_is_a_skip_not_a_red_case() {
         filter: Some("c-cond-0001".to_owned()),
         ..RunOptions::default()
     };
-    let report = run(&corpus, &mut sut, &options);
+    let report = run(corpus, &mut sut, &options);
     assert_eq!(report.outcomes[0].verdict, Verdict::Skipped);
     assert!(
         report.outcomes[0]
