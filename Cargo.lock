@@ -1572,6 +1572,7 @@ version = "0.2.0"
 dependencies = [
  "arc-swap",
  "bytes",
+ "futures-util",
  "http",
  "http-body",
  "http-body-util",

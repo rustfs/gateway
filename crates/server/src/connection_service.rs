@@ -18,18 +18,21 @@
 //! shutdown accounting around every transport-dispatched request. NOT responsible for: parsing
 //! HTTP or writing response frames. Upstream: accepted connection drivers. Downstream: services.
 
+use std::any::Any;
 use std::future::{Future, poll_fn};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll, ready};
 
 use bytes::Bytes;
+use futures_util::FutureExt;
 use http::{Request, Response};
 use http_body::{Body, Frame, SizeHint};
+use pin_project_lite::pin_project;
 use tower::Service;
-use tower_http::body::UnsyncBoxBody;
-use tower_http::catch_panic::{CatchPanic, DefaultResponseForPanic};
+use tower_http::catch_panic::{DefaultResponseForPanic, ResponseForPanic};
 
 use crate::driver::ConnectionInfo;
 use crate::request_capacity::{RequestCancellationFuture, RequestCancellationSource, RequestCapacity, RequestPermit};
@@ -37,25 +40,122 @@ use crate::request_capacity::{RequestCancellationFuture, RequestCancellationSour
 /// The erased error returned to a connection driver.
 pub type ConnectionError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Response body that holds request capacity and shutdown accounting until transport completion.
-pub struct ConnectionBody {
-    body: UnsyncBoxBody<Bytes, ConnectionError>,
-    permit: Option<RequestPermit>,
-    guard: Option<RequestGuard>,
+pin_project! {
+    /// Response body that holds request capacity and shutdown accounting until transport completion.
+    pub struct ConnectionBody<B> {
+        #[pin]
+        body: B,
+        completion: ResponseCompletion,
+    }
 }
 
-impl Body for ConnectionBody {
+pin_project! {
+    #[project = ConnectionResponseBodyProj]
+    #[allow(missing_docs)] // pin-project-lite cannot carry rustdoc on projected enum fields.
+    /// Preserves an application's concrete response body while representing an isolated panic.
+    pub enum ConnectionResponseBody<B> {
+        /// The response returned by the configured application service.
+        Application {
+            #[pin]
+            body: B,
+        },
+        /// The framework-generated body for an isolated application panic.
+        Panic {
+            #[pin]
+            body: tower_http::body::Full,
+        },
+    }
+}
+
+impl<B> ConnectionResponseBody<B> {
+    /// Returns the application body, or the panic body when the application did not produce one.
+    pub fn into_result(self) -> Result<B, tower_http::body::Full> {
+        match self {
+            Self::Application { body } => Ok(body),
+            Self::Panic { body } => Err(body),
+        }
+    }
+}
+
+impl<B> Body for ConnectionResponseBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<ConnectionError>,
+{
     type Data = Bytes;
     type Error = ConnectionError;
 
     fn poll_frame(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let this = self.get_mut();
-        let frame = ready!(Pin::new(&mut this.body).poll_frame(context));
-        if frame.is_none() || this.body.is_end_stream() {
-            this.permit.take();
-            if let Some(mut guard) = this.guard.take() {
-                guard.complete();
-            }
+        match self.project() {
+            ConnectionResponseBodyProj::Application { body } => body
+                .poll_frame(context)
+                .map(|frame| frame.map(|result| result.map_err(Into::into))),
+            ConnectionResponseBodyProj::Panic { body } => body
+                .poll_frame(context)
+                .map(|frame| frame.map(|result| result.map_err(Into::into))),
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        match self {
+            Self::Application { body } => body.is_end_stream(),
+            Self::Panic { body } => body.is_end_stream(),
+        }
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        match self {
+            Self::Application { body } => body.size_hint(),
+            Self::Panic { body } => body.size_hint(),
+        }
+    }
+}
+
+impl<B> ConnectionBody<B> {
+    /// Separates the concrete response body from its lifecycle token.
+    ///
+    /// A self-held transport uses this method so payload capabilities remain available while the
+    /// request permit and shutdown guard stay alive until the transport reports completion.
+    #[must_use]
+    pub fn into_parts(self) -> (B, ResponseCompletion) {
+        let Self { body, completion } = self;
+        (body, completion)
+    }
+}
+
+/// Holds generic request lifecycle state until a self-held transport finishes the response.
+pub struct ResponseCompletion {
+    permit: Option<RequestPermit>,
+    guard: Option<RequestGuard>,
+}
+
+impl ResponseCompletion {
+    fn complete_inner(&mut self) {
+        self.permit.take();
+        if let Some(mut guard) = self.guard.take() {
+            guard.complete();
+        }
+    }
+
+    /// Marks the response body as completely written and releases its request capacity.
+    pub fn complete(mut self) {
+        self.complete_inner();
+    }
+}
+
+impl<B> Body for ConnectionBody<B>
+where
+    B: Body<Data = Bytes>,
+    B::Error: Into<ConnectionError>,
+{
+    type Data = B::Data;
+    type Error = ConnectionError;
+
+    fn poll_frame(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let mut this = self.project();
+        let frame = ready!(this.body.as_mut().poll_frame(context)).map(|result| result.map_err(Into::into));
+        if frame.is_none() || this.body.as_ref().is_end_stream() {
+            this.completion.complete_inner();
         }
         Poll::Ready(frame)
     }
@@ -75,7 +175,7 @@ impl Body for ConnectionBody {
 /// a parsed request to the configured application service.
 #[derive(Clone)]
 pub struct ConnectionService<S> {
-    inner: CatchPanic<S, DefaultResponseForPanic>,
+    inner: S,
     connection: ConnectionInfo,
     request_seen: Arc<AtomicBool>,
     request_capacity: Arc<RequestCapacity>,
@@ -93,7 +193,7 @@ impl<S> ConnectionService<S> {
         connection_in_flight: Arc<AtomicUsize>,
     ) -> Self {
         Self {
-            inner: CatchPanic::new(inner),
+            inner,
             connection,
             request_seen,
             request_capacity,
@@ -112,9 +212,9 @@ where
     ResponseBody: Body<Data = Bytes> + Send + 'static,
     ResponseBody::Error: Into<ConnectionError>,
 {
-    type Response = Response<ConnectionBody>;
+    type Response = Response<ConnectionBody<ConnectionResponseBody<ResponseBody>>>;
     type Error = ConnectionError;
-    type Future = Pin<Box<dyn Future<Output = Result<Response<ConnectionBody>, ConnectionError>> + Send + 'static>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, ConnectionError>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -137,17 +237,29 @@ where
                 .map_err(|error| Box::new(error) as ConnectionError)?;
             poll_fn(|context| service.poll_ready(context)).await.map_err(Into::into)?;
             let mut guard = RequestGuard::new(request_stats, connection_in_flight);
-            let response = match RequestCancellationFuture::new(service.call(request), cancellation_source, force_abort).await {
-                Ok(response) => response,
-                Err(error) => {
-                    guard.complete();
-                    return Err(error.into());
-                }
+            let response = match catch_unwind(AssertUnwindSafe(|| service.call(request))) {
+                Ok(future) => match RequestCancellationFuture::new(
+                    AssertUnwindSafe(future).catch_unwind(),
+                    cancellation_source,
+                    force_abort,
+                )
+                .await
+                {
+                    Ok(Ok(response)) => response.map(|body| ConnectionResponseBody::Application { body }),
+                    Ok(Err(error)) => {
+                        guard.complete();
+                        return Err(error.into());
+                    }
+                    Err(panic) => panic_response(panic),
+                },
+                Err(panic) => panic_response(panic),
             };
             Ok(response.map(|body| ConnectionBody {
                 body,
-                permit: Some(permit),
-                guard: Some(guard),
+                completion: ResponseCompletion {
+                    permit: Some(permit),
+                    guard: Some(guard),
+                },
             }))
         })
     }
@@ -162,14 +274,21 @@ where
     ResponseBody: Body<Data = Bytes> + Send + 'static,
     ResponseBody::Error: Into<ConnectionError>,
 {
-    type Response = Response<ConnectionBody>;
+    type Response = Response<ConnectionBody<ConnectionResponseBody<ResponseBody>>>;
     type Error = ConnectionError;
-    type Future = Pin<Box<dyn Future<Output = Result<Response<ConnectionBody>, ConnectionError>> + Send + 'static>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, ConnectionError>> + Send + 'static>>;
 
     fn call(&self, request: Request<RequestBody>) -> Self::Future {
         let mut service = self.clone();
         Service::call(&mut service, request)
     }
+}
+
+fn panic_response<B>(panic: Box<dyn Any + Send + 'static>) -> Response<ConnectionResponseBody<B>> {
+    let mut handler = DefaultResponseForPanic::default();
+    handler
+        .response_for_panic(panic)
+        .map(|body| ConnectionResponseBody::Panic { body })
 }
 
 #[derive(Default)]
