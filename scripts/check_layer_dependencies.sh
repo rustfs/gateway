@@ -53,6 +53,7 @@ layers = [
             "rustfs-gateway-stream",
         },
     ),
+    ("rustfs-gateway-server", set()),
     (
         "rustfs-gateway",
         {
@@ -60,13 +61,13 @@ layers = [
             "rustfs-gateway-sig",
             "rustfs-gateway-http",
             "rustfs-gateway-macros",
+            "rustfs-gateway-server",
             "rustfs-gateway-types",
             "rustfs-gateway-xml",
             "rustfs-gateway-stream",
         },
     ),
     ("rustfs-gateway-conformance", {"rustfs-gateway"}),
-    ("rustfs-gateway-server", set()),
     (
         "xtask",
         {
@@ -91,6 +92,7 @@ required_agents_fragments = [
     "  runtime host, with no internal crate dependency:\n        rustfs-gateway-server                    listener, TLS, hyper, admission, shutdown",
     "        rustfs-gateway-types ──▶ rustfs-gateway-stream ──▶ bitflags / bytes / http / http-body",
     "        rustfs-gateway ──▶ rustfs-gateway-macros          public facade re-export of optional registration sugar",
+    "        rustfs-gateway ──▶ rustfs-gateway-server          optional self-held listener assembly; server remains internally independent",
     "        rustfs-gateway-xtask-dispatch (crates/xtask-dispatch)   std-only cargo xtask process selection",
     "        xtask ──▶ gateway + conformance + core + codegen + model   generation and diagnostics only",
 ]

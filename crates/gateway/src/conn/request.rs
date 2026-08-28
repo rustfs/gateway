@@ -15,8 +15,10 @@
 //! HTTP/1.1 syntax parsing and streaming request-body frames for the self-held driver.
 //!
 //! Responsible for: strict parser-level syntax, lossless duplicate headers, fixed-length and
-//! transfer-chunk decoding. NOT responsible for: request acceptance, signing, routing or S3 body
-//! semantics. Upstream: the accepted TCP socket. Downstream: `S3Service`'s sole wire acceptance.
+//! transfer-chunk decoding.
+//! NOT responsible for: request acceptance, signing, routing or S3 body semantics.
+//! Upstream: the accepted TCP socket.
+//! Downstream: `S3Service`'s sole wire acceptance.
 
 use std::future::Future;
 use std::io;
@@ -24,6 +26,7 @@ use std::pin::Pin;
 use std::str;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use bytes::{Buf, Bytes, BytesMut};
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Uri, Version, header};
@@ -312,11 +315,25 @@ pub(super) enum Expectation {
     Unsupported,
 }
 
+pub(super) enum HeaderTimeout {
+    At(tokio::time::Instant),
+    After(Duration),
+}
+
 pub(super) async fn read_request(
     io: Arc<Mutex<ConnectionIo>>,
     max_head_bytes: usize,
-    deadline: tokio::time::Instant,
+    timeout: HeaderTimeout,
 ) -> io::Result<Option<ParsedRequest>> {
+    let read = read_request_inner(io, max_head_bytes);
+    match timeout {
+        HeaderTimeout::At(deadline) => tokio::time::timeout_at(deadline, read).await,
+        HeaderTimeout::After(duration) => tokio::time::timeout(duration, read).await,
+    }
+    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "HTTP/1.1 request head timed out"))?
+}
+
+async fn read_request_inner(io: Arc<Mutex<ConnectionIo>>, max_head_bytes: usize) -> io::Result<Option<ParsedRequest>> {
     let mut locked = io.lock().await;
     loop {
         if !locked.buffer.is_empty() && HTTP2_PREFACE.starts_with(&locked.buffer) {
@@ -360,9 +377,7 @@ pub(super) async fn read_request(
         if locked.buffer.len() >= max_head_bytes {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "HTTP/1.1 request head exceeds its limit"));
         }
-        let read = tokio::time::timeout_at(deadline, locked.fill())
-            .await
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "HTTP/1.1 request head timed out"))??;
+        let read = locked.fill().await?;
         if !read {
             return if locked.buffer.is_empty() {
                 Ok(None)

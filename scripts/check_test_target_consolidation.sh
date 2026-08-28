@@ -657,6 +657,7 @@ gateway_modules = (
     "request_allocations",
     "response_invariants",
     "select_restore_intent",
+    "self_held_http1",
     "service_clone_allocations",
     "service_concurrency",
     "service_config",

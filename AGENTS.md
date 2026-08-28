@@ -324,6 +324,7 @@ closes the cycle.
 
   runtime host, with no internal crate dependency:
         rustfs-gateway-server                    listener, TLS, hyper, admission, shutdown
+        rustfs-gateway ──▶ rustfs-gateway-server          optional self-held listener assembly; server remains internally independent
         xtask ──▶ gateway + conformance + core + codegen + model   generation and diagnostics only
 ```
 

@@ -15,9 +15,10 @@
 //! Production self-held plaintext HTTP/1.1 connection driver.
 //!
 //! Responsible for: selecting the cleartext connection path once, sequencing HTTP/1.1 requests,
-//! invoking the mandatory server lifecycle service and closing the real socket when required. NOT
-//! responsible for: S3 request acceptance, signing, routing, XML or response policy. Upstream: the
-//! generic server's accepted-connection seam. Downstream: the common gateway service.
+//! invoking the mandatory server lifecycle service and closing the real socket when required.
+//! NOT responsible for: S3 request acceptance, signing, routing, XML or response policy.
+//! Upstream: the generic server's accepted-connection seam.
+//! Downstream: the common gateway service.
 
 mod request;
 mod response;
@@ -36,7 +37,7 @@ use tokio::sync::Mutex;
 use tower::Service;
 
 pub use request::SelfHeldRequestBody;
-use request::{ConnectionIo, Expectation, read_request};
+use request::{ConnectionIo, Expectation, HeaderTimeout, read_request};
 use response::{write_bad_request, write_continue, write_expectation_failed, write_response};
 
 /// Driver for an explicitly configured plaintext HTTP/1.1 listener.
@@ -84,11 +85,10 @@ where
         if *shutdown.borrow() {
             break;
         }
-        let deadline = if first_request {
-            first_header_deadline
+        let header_timeout = if first_request {
+            HeaderTimeout::At(first_header_deadline)
         } else {
-            let now = tokio::time::Instant::now();
-            now + config.keep_alive_idle.min(config.header_read_timeout)
+            HeaderTimeout::After(config.keep_alive_idle.min(config.header_read_timeout))
         };
         let head = tokio::select! {
             changed = shutdown.changed() => {
@@ -97,7 +97,7 @@ where
                 }
                 break;
             }
-            result = read_request(Arc::clone(&io), config.h1_max_buf_size, deadline) => result,
+            result = read_request(Arc::clone(&io), config.h1_max_buf_size, header_timeout) => result,
         };
         let parsed = match head {
             Ok(None) => break,

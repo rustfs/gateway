@@ -4888,8 +4888,10 @@ path = Path("scripts/check_layer_dependencies.sh")
 text = path.read_text()
 old = '''            "rustfs-gateway-http",
             "rustfs-gateway-macros",
+            "rustfs-gateway-server",
             "rustfs-gateway-types",'''
 new = '''            "rustfs-gateway-http",
+            "rustfs-gateway-server",
             "rustfs-gateway-types",'''
 if text.count(old) != 1:
     raise SystemExit("the gateway macro edge is not unique")
@@ -4900,6 +4902,26 @@ expect_fail_self_mutation check_layer_dependencies.sh \
     'the public facade macro edge disappearing from the executable layer matrix' \
     mut_gateway_macro_layer_edge_deleted
 
+mut_gateway_server_layer_edge_deleted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_layer_dependencies.sh")
+text = path.read_text()
+old = '''            "rustfs-gateway-macros",
+            "rustfs-gateway-server",
+            "rustfs-gateway-types",'''
+new = '''            "rustfs-gateway-macros",
+            "rustfs-gateway-types",'''
+if text.count(old) != 1:
+    raise SystemExit("the gateway server edge is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail_self_mutation check_layer_dependencies.sh \
+    'the self-held server edge disappearing from the executable layer matrix' \
+    mut_gateway_server_layer_edge_deleted
+
 mut_gateway_macro_agents_edge_deleted() {
     sed '/rustfs-gateway.*rustfs-gateway-macros.*public facade re-export/d' AGENTS.md >AGENTS.md.mut
     mv AGENTS.md.mut AGENTS.md
@@ -4907,6 +4929,14 @@ mut_gateway_macro_agents_edge_deleted() {
 expect_fail check_layer_dependencies.sh \
     'the public facade macro edge disappearing from the AGENTS dependency graph' \
     mut_gateway_macro_agents_edge_deleted
+
+mut_gateway_server_agents_edge_deleted() {
+    sed '/rustfs-gateway.*rustfs-gateway-server.*optional self-held listener assembly/d' AGENTS.md >AGENTS.md.mut
+    mv AGENTS.md.mut AGENTS.md
+}
+expect_fail check_layer_dependencies.sh \
+    'the self-held server edge disappearing from the AGENTS dependency graph' \
+    mut_gateway_server_agents_edge_deleted
 
 mut_handlers_facade_expansion_reaches_core() {
     python3 - <<'PYEOF'

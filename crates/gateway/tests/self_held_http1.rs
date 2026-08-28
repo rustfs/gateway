@@ -34,10 +34,10 @@ use bytes::Bytes;
 use http::{Method, Request, Response, StatusCode, header};
 use http_body_util::BodyExt;
 use rustfs_gateway::{Body, ConnectionIntent, S3Service, SelfHeldHttp1Driver, SelfHeldRequestBody};
-use rustfs_gateway_server::{ConnectionDriver, Server, ServerConfig, ServerMetrics};
+use rustfs_gateway_server::{ConnectionDriver, Server, ServerConfig, ServerError, ServerMetrics};
 use rustfs_gateway_stream::{AsyncPayloadRead, PayloadCaps, ReadProgress, StreamError, TrailingHeaders};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, task::JoinError};
 use tower::Service;
 
 #[derive(Clone, Default)]
@@ -260,10 +260,12 @@ impl AsyncPayloadRead for UnknownBodyReader {
 
 struct RunningServer {
     addr: SocketAddr,
-    task: tokio::task::JoinHandle<Result<(), rustfs_gateway_server::ServerError>>,
+    task: ServerTask,
     shutdown: rustfs_gateway_server::ShutdownTrigger,
     metrics: ServerMetrics,
 }
+
+type ServerTask = Pin<Box<dyn Future<Output = Result<Result<(), ServerError>, JoinError>> + Send>>;
 
 fn start(service: TestService) -> RunningServer {
     let config = ServerConfig {
@@ -281,7 +283,7 @@ fn start_with_config(service: TestService, config: ServerConfig) -> RunningServe
         .expect("self-held server starts");
     RunningServer {
         addr: running.local_addr,
-        task: running.task,
+        task: Box::pin(running.task),
         shutdown: running.shutdown,
         metrics: running.metrics,
     }
@@ -299,7 +301,7 @@ fn start_gateway(service: S3Service) -> RunningServer {
         .expect("self-held gateway server starts");
     RunningServer {
         addr: running.local_addr,
-        task: running.task,
+        task: Box::pin(running.task),
         shutdown: running.shutdown,
         metrics: running.metrics,
     }

@@ -15,7 +15,8 @@
 //! HTTP/1.1 response head, body framing and socket-progress writes.
 //!
 //! Responsible for: status lines, response headers, fixed/chunked frames, trailers and truthful
-//! close announcements. NOT responsible for: producing status, headers or payload semantics.
+//! close announcements.
+//! NOT responsible for: producing status, headers or payload semantics.
 //! Upstream: the managed `S3Service` response. Downstream: the accepted plaintext TCP socket.
 
 use std::io;
