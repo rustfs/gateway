@@ -126,6 +126,9 @@ where
         D: ConnectionDriver<S>,
     {
         self.config.validate(self.tls.is_some())?;
+        driver
+            .validate(&self.config, self.tls.is_some())
+            .map_err(ServerError::Driver)?;
         let listener = Listener::bind(&self.config)?;
         let local_addr = listener.local_addr()?;
         let listener = listener.into_tokio()?;
@@ -160,6 +163,9 @@ pub enum ServerError {
     /// Configuration would weaken a transport invariant or contains an invalid bound.
     #[error("server configuration is invalid")]
     Config(#[from] ConfigError),
+    /// The selected connection driver cannot honor the listener transport.
+    #[error("connection driver rejected the server configuration")]
+    Driver(#[source] crate::driver::DriverValidationError),
     /// Listener setup or accept failed.
     #[error("server I/O failed")]
     Io(#[from] std::io::Error),
@@ -384,7 +390,7 @@ pub(crate) struct ConnectionState {
     pub(crate) request_seen: Arc<AtomicBool>,
     pub(crate) header_deadline: tokio::time::Instant,
     /// The listener's counters, so the lingering drain can report the octets it discards.
-    metrics: Arc<MetricsInner>,
+    pub(crate) metrics: Arc<MetricsInner>,
     #[cfg(test)]
     deadline_observer: Option<deadline_test::DeadlineArmObserver>,
 }

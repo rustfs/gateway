@@ -34,6 +34,7 @@ workspace = true
 rustfs-gateway-core = { workspace = true }
 rustfs-gateway-http = { workspace = true }
 rustfs-gateway-macros = { workspace = true }
+rustfs-gateway-server = { workspace = true }
 rustfs-gateway-sig = { workspace = true }
 rustfs-gateway-stream = { workspace = true }
 rustfs-gateway-types = { workspace = true }
@@ -46,14 +47,14 @@ futures-util = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
+httparse = { workspace = true }
 hyper = { workspace = true }
 sha2 = { workspace = true }
 tower = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "net", "sync", "time"] }
 
 [dev-dependencies]
 dhat = { workspace = true }
-rustfs-gateway-server = { workspace = true }
 socket2 = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
 trybuild = { workspace = true }

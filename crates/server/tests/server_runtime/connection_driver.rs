@@ -36,7 +36,8 @@ use http_body::{Body, Frame};
 use http_body_util::{BodyExt, Full};
 use pin_project_lite::pin_project;
 use rustfs_gateway_server::{
-    AcceptedConnection, ConnectionDriver, ConnectionFuture, ConnectionInfo, RequestCancellation, Server, ServerConfig,
+    AcceptedConnection, ConnectionDriver, ConnectionFuture, ConnectionInfo, DriverValidationError, RequestCancellation, Server,
+    ServerConfig, ServerError,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -100,6 +101,19 @@ impl ConnectionDriver<()> for ProbeDriver {
                 () = release.notified() => {}
             }
         })
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RejectingDriver;
+
+impl ConnectionDriver<()> for RejectingDriver {
+    fn validate(&self, _config: &ServerConfig, _tls_configured: bool) -> Result<(), DriverValidationError> {
+        Err(Box::new(std::io::Error::other("test driver rejects startup")))
+    }
+
+    fn drive(&self, _accepted: AcceptedConnection<()>) -> ConnectionFuture {
+        Box::pin(async {})
     }
 }
 
@@ -250,6 +264,13 @@ async fn custom_driver_owns_the_plaintext_socket() {
     wait_until(|| running.metrics.active_connections() == 0).await;
     let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
     assert!(running.task.await.expect("server task joins").is_ok());
+}
+
+/// Negative control: a driver mismatch is reported before the listener is created.
+#[test]
+fn custom_driver_can_reject_server_assembly() {
+    let result = Server::new(plaintext_config(), ()).serve_with(RejectingDriver);
+    assert!(matches!(result, Err(ServerError::Driver(_))));
 }
 
 /// Negative control: an active custom driver must observe explicit shutdown before it is aborted.

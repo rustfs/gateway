@@ -46,6 +46,7 @@ hmac = "0.13"
 http = "1.5"
 http-body = "1.1"                                   # the body trait every tower/hyper service is generic over
 http-body-util = "0.1"                              # `Limited` and `collect`; the facade does not hand-roll a body reader
+httparse = "1.10"
 # default-features off: the facade only implements `hyper::service::Service`. It listens on
 # nothing and speaks no protocol version itself, so http1/http2/client/server belong to P7-02.
 hyper = { version = "1.11", default-features = false }

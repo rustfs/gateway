@@ -90,6 +90,8 @@ mod request_allocations;
 mod response_invariants;
 #[path = "select_restore_intent.rs"]
 mod select_restore_intent;
+#[path = "self_held_http1.rs"]
+mod self_held_http1;
 #[path = "service_clone_allocations.rs"]
 mod service_clone_allocations;
 #[path = "service_concurrency.rs"]

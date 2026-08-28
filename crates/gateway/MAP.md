@@ -1,8 +1,8 @@
 # rustfs-gateway facade crate map
 
-The public facade. It assembles the protocol kernel into one non-generic `S3Service` and re-exports
-the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`; read
-`src/service.rs` for request order and `docs/assembly-order.md` for extension call counts.
+The public facade assembles the protocol kernel into one non-generic `S3Service` and re-exports the
+consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`; read `src/service.rs`
+for request order and `docs/assembly-order.md` for extension call counts.
 
 ## Runtime and assembly
 
@@ -14,6 +14,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `src/service.rs` | Ordered pipeline and `S3Service` | Moving a stage or tracing a response |
 | `src/service_tests.rs` | The pipeline's own unit suite, split out at the 800-line limit | Changing what is decidable without a request |
 | `src/adapt.rs` | tower and hyper adapters | Wiring a server or checking `Infallible` |
+| `src/conn/**` | Optional plaintext HTTP/1.1 request framing and response transport | Auditing the self-held socket path or adding file-region transfer |
 | `src/assembly.rs` | `AssemblyError` and `asm-*` rule refs | Adding an assembly refusal |
 | `src/dispatch.rs` | Codec-aware operation erasure and dispatch table | A route cannot decode or invoke |
 | `src/gate.rs` | Authentication proof, sealed body, the two ceilings' and two deadlines' values, and the four refusals they produce | Moving work around the body read |
@@ -82,7 +83,7 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `tests/middleware.rs`, `tests/response_invariants.rs` | Filter seams, runtime correction metrics and malformed response refusal |
 | `tests/sse_runtime.rs` | TLS gate, key hygiene, multipart consistency |
 | `tests/vhost_resolution.rs` | Host boundary and fallback behavior |
-| `tests/connection_teardown.rs` | Connection intent propagation |
+| `tests/connection_teardown.rs`, `tests/self_held_http1.rs` | Connection intent and production self-held HTTP/1.1 wire controls |
 | `tests/payload_transport.rs` | Payload framing and cancellation observed through real HTTP/1 sockets |
 | `tests/compat_aliases.rs` | Input-parameterized compatibility aliases remain identical to operation requests |
 | `tests/refusal_order_guards.rs` | Body-proof source guards |
@@ -90,11 +91,10 @@ the consumer surface. Ring 1: no rustfs crate dependency. Start at `src/lib.rs`;
 | `tests/custom_signature_verifier.rs` | Custom verifier wiring and AWS sealed-path isolation |
 | `tests/support/mod.rs` | Shared operations, backends, signing, probes |
 | `examples/minimal.rs` | Minimal complete assembly and two requests |
-
 ## Known gaps
 
 - Request bodies are buffered, bounded by `ServiceConfig::max_buffered_body_bytes` and operation caps.
 - `SseEnforced` is positional rather than carried on `Req<O>`; changing that needs a core API ADR.
-- This crate declares connection intent; only a transport can observe a socket close.
+- Hyper consumes connection intent in the server runtime; the optional self-held driver observes it on its owned socket.
 - The header map is cloned once because `WireRequest` does not expose the accepted signing view.
 - `x-amz-id-2` is a fixed uppercase-hex token, intentionally not AWS-shaped.

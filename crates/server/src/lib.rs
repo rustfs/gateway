@@ -41,8 +41,8 @@ pub use conn::{Server, ServerError};
 pub use connection_service::{ConnectionBody, ConnectionError, ConnectionResponseBody, ConnectionService, ResponseCompletion};
 pub use dispatch::PrefixDispatch;
 pub use driver::{
-    AcceptedConnection, ConnectionDriver, ConnectionFuture, ConnectionInfo, HyperConnectionDriver, PlaintextTakeoverError,
-    TransportKind,
+    AcceptedConnection, ConnectionDriver, ConnectionFuture, ConnectionInfo, DriverValidationError, HyperConnectionDriver,
+    PlaintextConnection, PlaintextTakeoverError, TransportKind,
 };
 pub use listener::{Listener, ListenerOptions};
 pub use request_capacity::RequestCancellation;
