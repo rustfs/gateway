@@ -14517,6 +14517,16 @@ mut_ci_time_feedback_timeout_removed() {
 expect_fail check_ci_time_gate.sh \
     'a non-required pull-request job becoming unbounded' mut_ci_time_feedback_timeout_removed
 
+mut_ci_time_feedback_prebuild_cools_full_graph() {
+    replace_ci_text '          cargo build -p rustfs-gateway-conformance --bin rustfs-gateway-conformance
+          cargo test -p xtask --bin xtask --no-run
+          cargo build -p xtask' '          cargo build -p xtask
+          cargo test -p xtask --bin xtask --no-run
+          cargo build -p rustfs-gateway-conformance --bin rustfs-gateway-conformance'
+}
+expect_fail check_ci_time_gate.sh \
+    'operation verification cooling the full xtask graph after prebuild' mut_ci_time_feedback_prebuild_cools_full_graph
+
 mut_ci_time_msrv_timeout_removed() {
     replace_ci_text '  msrv:
     name: MSRV

@@ -265,9 +265,9 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Prebuild operation verification targets
         run: |
-          cargo build -p xtask
-          cargo test -p xtask --bin xtask --no-run
           cargo build -p rustfs-gateway-conformance --bin rustfs-gateway-conformance
+          cargo test -p xtask --bin xtask --no-run
+          cargo build -p xtask
       - name: Three operation samples (maximum 30 seconds each)
         run: |
           timeout 30s cargo xtask verify --op GetObject
