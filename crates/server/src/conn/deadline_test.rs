@@ -263,9 +263,8 @@ async fn c_lim_0032_a_srv_0010_one_byte_per_second_header_closes_at_ten_seconds(
     tokio::time::advance(Duration::from_secs(1)).await;
     let disconnected = tokio::task::spawn_blocking(move || -> io::Result<bool> {
         let mut stream = stream.into_std()?;
-        let observation_deadline = Instant::now() + Duration::from_secs(1);
         let mut byte = [0_u8; 1];
-        loop {
+        for _ in 0..1_000 {
             match stream.read(&mut byte) {
                 Ok(0) => return Ok(true),
                 Err(error)
@@ -275,13 +274,13 @@ async fn c_lim_0032_a_srv_0010_one_byte_per_second_header_closes_at_ten_seconds(
                 }
                 Ok(_) => return Ok(false),
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < observation_deadline => {
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(1));
                 }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
                 Err(error) => return Err(error),
             }
         }
+        Ok(false)
     })
     .await
     .expect("socket close observer task joins")
