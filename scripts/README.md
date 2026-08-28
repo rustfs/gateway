@@ -169,6 +169,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_test_target_consolidation.sh` | Core, gateway and conformance integration sources each remain one explicit Cargo target, with gateway compile-fail fixtures sharing one trybuild batch | P0-04 |
 | `check_xtask_test_target_consolidation.sh` | All four xtask integration sources remain active and unique in one explicit Cargo target | P0 |
 | `check_sig_test_target_consolidation.sh` | All nine sig integration sources remain active and unique in one explicit Cargo target | P0 |
+| `check_server_test_target_consolidation.sh` | All six server integration sources remain active and unique in one explicit Cargo target | P0 |
 | `check_test_target_coverage.sh` | Every workspace member shipping integration tests is either held in one target by a named consolidation guard or carries an exception row with its target count, a tracking issue and a reason; the counts are a ratchet | P0-04 |
 | `check_no_host_normalize.sh` | Ring-1 server source never mutates Host or URI authority | P7-02 |
 | `check_timeout_layer_ownership.sh` | Server owns three of six idle-timeout layers; `c-lim-0032` binds the ten-second slow-header close; `c-lim-0037` holds per-IP rejection and other-IP p99 under ten thousand half-open attempts; connection lifetime remains a separate safety valve; `c-lim-0061` keeps the write-progress layer's thousand-slow-reader closure, healthy p99 and resident-memory evidence executable | P3-05, P7-02 |

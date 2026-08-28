@@ -30,8 +30,8 @@ initialize_sandbox() {
     cp "$REPO_ROOT/Cargo.toml" "$SANDBOX/Cargo.toml"
     # Every consolidation guard the coverage table points at, so a row that names a guard which
     # does not exist can be told apart from one whose guard stopped naming its crate.
-    for guard in check_test_target_consolidation.sh check_sig_test_target_consolidation.sh \
-        check_xtask_test_target_consolidation.sh; do
+    for guard in check_test_target_consolidation.sh check_server_test_target_consolidation.sh \
+        check_sig_test_target_consolidation.sh check_xtask_test_target_consolidation.sh; do
         cp "$REPO_ROOT/scripts/$guard" "$SANDBOX/scripts/"
     done
     # The member set is resolved from the root manifest's own patterns, not listed here. A list
@@ -300,10 +300,10 @@ expect_fail 'a missing workspace manifest fails closed rather than passing with 
 # reason to route around it.
 # --------------------------------------------------------------------------------------------
 mut_excepted_crate_sheds_a_target_and_updates_its_row() {
-    rm crates/server/tests/tls_h2.rs
-    edit_guard '    "crates/server": (
-        6,' '    "crates/server": (
-        5,'
+    rm crates/macros/tests/op_names.rs
+    edit_guard '    "crates/macros": (
+        2,' '    "crates/macros": (
+        1,'
 }
 expect_pass 'an excepted crate that sheds a target and updates its row is accepted' \
     mut_excepted_crate_sheds_a_target_and_updates_its_row

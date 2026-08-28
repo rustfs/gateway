@@ -130,8 +130,9 @@ fn run_isolated(test_name: &str) -> bool {
     if std::env::var_os(RSS_CHILD_MARKER).is_some() {
         return true;
     }
+    let qualified_name = format!("server_load::{test_name}");
     let output = Command::new(std::env::current_exe().expect("test executable path is available"))
-        .args(["--exact", test_name, "--nocapture", "--test-threads=1"])
+        .args(["--exact", &qualified_name, "--nocapture", "--test-threads=1"])
         .env(RSS_CHILD_MARKER, "1")
         .output()
         .expect("the isolated child starts");

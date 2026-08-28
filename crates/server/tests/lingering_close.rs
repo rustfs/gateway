@@ -519,7 +519,7 @@ async fn a_server_that_closes_without_lingering_is_observed_reset() {
         .expect("octets the bare server chose not to read");
     served.join().expect("the bare server thread joins");
     assert_eq!(
-        observe(&mut reader, OBSERVE).await,
+        observe(&mut reader, PATIENT_BUDGET).await,
         ConnectionState::Reset,
         "an abortive close must still be reported as one, or `closed` stops being a claim"
     );

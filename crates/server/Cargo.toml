@@ -3,12 +3,17 @@
 name = "rustfs-gateway-server"
 description = "General-purpose HTTP server runtime for rustfs-gateway"
 version = "0.2.0"
+autotests = false
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 publish = false
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [package.metadata.gateway]
 ring = 1
