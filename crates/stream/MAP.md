@@ -32,7 +32,7 @@ shape. Four dependencies (`bitflags`, `bytes`, `http`, `http-body`), zero intern
 | `src/read.rs` | Pull half: `AsyncPayloadRead`, `ReadProgress`, `BoxPayloadReader` | Writing a consumer that owns its buffer |
 | `src/adapt.rs` | `AdaptCost`, `Adapt`, `MemoryStream`, `MemoryReader`, `StreamToReader` (Copy), `ReaderToStream` (Buffer) | Changing what an adaptation costs, or adding an adapter |
 | `src/metrics.rs` | `StreamMetrics`: `adapt_copies_total`, `adapt_copied_bytes_total`, `adapt_buffers_total`, `zero_copy_refusals(reason)`, `zero_copy_refused_bytes_total` | Wiring the counters into an exporter, or writing a zero-copy gate |
-| `src/body.rs` | `Body`: the one owned body type layers above name and its truthful `http_body::Body` view | Passing a body through a pipeline stage or into an HTTP server |
+| `src/body.rs` | `Body`: the owned body and truthful `http_body::Body` view; `BodyTransport` → `RefusedBodyTransport` → `CopiedFileBody`: the opaque typestate that keeps verification attached while selecting kernel, streaming or copied delivery | Passing a body through a stage, negotiating response delivery, or implementing a copied file writer |
 | `src/byte_stream.rs` | `ByteStream` + `RemainingLength`: declared-length bookkeeping; short body ⇒ `IncompleteBody`, overlong ⇒ `LengthMismatch` | Wrapping a producer whose length was announced up front |
 | `src/trailers.rs` | `TrailingHeaders` | Building a trailer section at the end of a decoded body |
 | `src/error.rs` | `StreamError` + `StreamErrorKind`, and `bytes_before_error` | Deciding what an aborted transfer may still commit |
@@ -59,7 +59,7 @@ shape. Four dependencies (`bitflags`, `bytes`, `http`, `http-body`), zero intern
 ## Verify
 
 ```bash
-cargo test -p rustfs-gateway-stream            # 87 tests
+cargo test -p rustfs-gateway-stream            # 89 tests
 cargo clippy -p rustfs-gateway-stream --all-targets -- -D warnings
 bash scripts/check_layer_dependencies.sh
 ```

@@ -22,10 +22,13 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
 /// Why a response left the preferred file-region kernel-transfer path.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResponseFallbackReason {
     /// The application response was not backed by a file region.
     NotFileBacked,
+    /// The response bytes still require user-space observation before they reach the socket.
+    VerificationRequired,
     /// The compiled target has no supported file-to-socket syscall backend.
     PlatformUnsupported,
 }
@@ -35,6 +38,7 @@ pub enum ResponseFallbackReason {
 pub struct ResponseTransportMetrics {
     selected_connections: AtomicU64,
     fallback_not_file_backed: AtomicU64,
+    fallback_verification_required: AtomicU64,
     fallback_platform_unsupported: AtomicU64,
     copied_payload_bytes: AtomicU64,
     kernel_transfer_calls: AtomicU64,
@@ -80,7 +84,9 @@ impl ResponseTransportMetrics {
     /// How many responses took any fallback path.
     #[must_use]
     pub fn fallback_responses_total(&self) -> u64 {
-        read_counter(&self.fallback_not_file_backed).saturating_add(read_counter(&self.fallback_platform_unsupported))
+        read_counter(&self.fallback_not_file_backed)
+            .saturating_add(read_counter(&self.fallback_verification_required))
+            .saturating_add(read_counter(&self.fallback_platform_unsupported))
     }
 
     /// Payload bytes confirmed written through a copied response path.
@@ -104,6 +110,7 @@ impl ResponseTransportMetrics {
     fn fallback_counter(&self, reason: ResponseFallbackReason) -> &AtomicU64 {
         match reason {
             ResponseFallbackReason::NotFileBacked => &self.fallback_not_file_backed,
+            ResponseFallbackReason::VerificationRequired => &self.fallback_verification_required,
             ResponseFallbackReason::PlatformUnsupported => &self.fallback_platform_unsupported,
         }
     }

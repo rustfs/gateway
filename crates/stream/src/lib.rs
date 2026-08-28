@@ -72,7 +72,9 @@ mod zero_copy;
 mod tests;
 
 pub use crate::adapt::{Adapt, AdaptCost, MemoryReader, MemoryStream, ReaderToStream, StreamToReader};
-pub use crate::body::Body;
+pub use crate::body::{Body, BodyTransport};
+#[cfg(unix)]
+pub use crate::body::{CopiedFileBody, RefusedBodyTransport};
 pub use crate::byte_stream::{ByteStream, RemainingLength};
 pub use crate::caps::{CapsInconsistency, PayloadCaps, validate_caps};
 pub use crate::error::{StreamError, StreamErrorKind};

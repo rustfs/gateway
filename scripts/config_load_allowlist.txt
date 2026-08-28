@@ -30,7 +30,7 @@ crates/gateway/src/ext/governor/default.rs:531
 crates/gateway/src/ext/governor/meter.rs:63
 crates/gateway/src/ext/governor/meter.rs:90
 crates/gateway/src/ext/oplayer.rs:286
-crates/gateway/src/conn/metrics.rs:113
+crates/gateway/src/conn/metrics.rs:120
 crates/gateway/src/operation_mode.rs:290
 crates/gateway/src/probe.rs:60
 crates/gateway/src/probe.rs:69

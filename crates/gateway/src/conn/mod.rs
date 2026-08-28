@@ -20,6 +20,8 @@
 //! Upstream: the generic server's accepted-connection seam.
 //! Downstream: the common gateway service.
 
+mod body_plan;
+mod chunk;
 mod metrics;
 mod request;
 mod response;

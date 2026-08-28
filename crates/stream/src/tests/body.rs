@@ -21,15 +21,16 @@
 //! Upstream: `support`. Downstream: nothing.
 
 use bytes::Bytes;
+use http_body::Body as _;
 
 use crate::body::Body;
 use crate::byte_stream::{ByteStream, RemainingLength};
 use crate::caps::PayloadCaps;
-use crate::metrics::StreamMetrics;
 use crate::payload::Payload;
 use crate::stream::PayloadStream;
 use crate::tests::support::{ScriptedStream, Step, drain_stream, joined};
 use crate::trailers::TrailingHeaders;
+use crate::zero_copy::VerificationObligation;
 
 #[test]
 fn an_empty_body_carries_no_bytes() {
@@ -38,7 +39,7 @@ fn an_empty_body_carries_no_bytes() {
     assert!(body.is_empty());
     assert_eq!(body.len_hint(), Some(0));
     assert!(body.caps().contains(PayloadCaps::KNOWN_LENGTH));
-    assert!(matches!(body.into_payload(), Payload::Empty));
+    assert!(body.is_empty());
 }
 
 #[test]
@@ -47,26 +48,19 @@ fn a_body_hands_its_payload_back_unchanged() {
 
     assert_eq!(body.len_hint(), Some(12));
     assert!(!body.is_empty());
-    assert_eq!(body.payload().len_hint(), Some(12));
+    assert_eq!(body.len_hint(), Some(12));
 
-    let payload = body.into_payload();
-    let (chunks, _) = drain_stream(
-        payload
-            .try_into_stream(&StreamMetrics::new())
-            .expect("in-memory payload converts")
-            .0,
-    )
-    .expect("body ends cleanly");
-    assert_eq!(joined(&chunks), b"twelve bytes");
+    let segments = body.try_as_vectored().expect("in-memory body stays vectored");
+    assert_eq!(segments, &[Bytes::from_static(b"twelve bytes")]);
 }
 
 #[test]
 fn a_body_from_empty_bytes_normalises_to_the_empty_payload() {
     let body = Body::from_bytes(Bytes::new());
-    assert!(matches!(body.into_payload(), Payload::Empty));
+    assert!(body.is_empty());
 
     let body = Body::from_segments([Bytes::new(), Bytes::new()]);
-    assert!(matches!(body.into_payload(), Payload::Empty));
+    assert!(body.is_empty());
 }
 
 /// A producer whose capability claims contradict its length hint is refused at the boundary,
@@ -116,14 +110,16 @@ fn wrapping_a_byte_stream_in_a_body_keeps_the_length_check() {
 
     assert_eq!(body.len_hint(), Some(9));
 
-    let (stream, cost) = body
-        .into_payload()
-        .try_into_stream(&StreamMetrics::new())
-        .expect("a push body stays a push body");
-    assert!(cost.is_free());
-
-    let err = drain_stream(stream).expect_err("a short body must fail");
+    let metrics = std::sync::Arc::clone(body.stream_metrics());
+    let mut body = body.into_transport().into_body();
+    let waker = std::task::Waker::noop();
+    let mut context = core::task::Context::from_waker(waker);
+    let first = core::pin::Pin::new(&mut body).poll_frame(&mut context);
+    assert!(matches!(first, core::task::Poll::Ready(Some(Ok(_)))));
+    let second = core::pin::Pin::new(&mut body).poll_frame(&mut context);
+    let core::task::Poll::Ready(Some(Err(err))) = second else { panic!("a short body must fail") };
     assert!(matches!(err.kind(), crate::error::StreamErrorKind::IncompleteBody));
+    assert_eq!(metrics.adapt_copies_total(), 0);
 }
 
 #[test]
@@ -142,14 +138,41 @@ fn a_byte_stream_without_a_declared_length_accepts_any_length() {
 }
 
 #[test]
-fn a_body_converts_from_and_into_a_payload() {
+fn a_body_converts_from_payload_forms() {
     let body: Body = Bytes::from_static(b"four").into();
-    let payload: Payload = body.into();
-    assert_eq!(payload.len_hint(), Some(4));
+    assert_eq!(body.len_hint(), Some(4));
 
+    let payload = Payload::from_bytes(Bytes::from_static(b"four"));
     let body: Body = payload.into();
     assert_eq!(body.len_hint(), Some(4));
 
     let body: Body = vec![1u8, 2, 3].into();
     assert_eq!(body.len_hint(), Some(3));
+}
+
+#[test]
+fn response_transport_ownership_cannot_downgrade_an_outstanding_obligation() {
+    let body = Body::from_bytes(Bytes::from_static(b"observed"))
+        .requiring_verification()
+        .into_transport()
+        .into_body();
+
+    assert_eq!(body.verification_obligation(), VerificationObligation::Present);
+    assert_eq!(body.len_hint(), Some(8));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_refused_transport_returns_the_obligated_body_without_a_lossy_tuple() {
+    use crate::tests::pay_cases::file_payload;
+    use crate::zero_copy::{NoZeroCopy, TransportCaps};
+
+    let refused = Body::from_payload(file_payload(8))
+        .requiring_verification()
+        .into_transport()
+        .try_into_file_region_for(TransportCaps::SENDFILE)
+        .expect_err("verification must refuse kernel transfer");
+
+    assert_eq!(refused.reason(), NoZeroCopy::VerificationObligationPresent);
+    assert_eq!(refused.into_body().verification_obligation(), VerificationObligation::Present);
 }

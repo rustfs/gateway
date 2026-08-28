@@ -21,27 +21,18 @@
 
 use std::io;
 use std::io::IoSlice;
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
-use std::io::SeekFrom;
-use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use http::{HeaderMap, Method, Response, StatusCode, header};
 use http_body::{Body as HttpBody, SizeHint};
 use http_body_util::BodyExt;
 use rustfs_gateway_server::{ConnectionBody, ConnectionResponseBody, PlaintextConnection};
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
-use rustfs_gateway_stream::AdaptCost;
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
-use rustfs_gateway_stream::PayloadCaps;
-use rustfs_gateway_stream::{Body, Payload};
-#[cfg(unix)]
-use rustfs_gateway_stream::{NoZeroCopy, TransportCaps, VerificationObligation, ZeroCopyQuery};
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use rustfs_gateway_stream::Body;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::MutexGuard;
 
+use super::body_plan::{ApplicationBodyPlan, plan_application_body};
+use super::chunk::encode_chunk_prefix;
 use super::metrics::{ResponseFallbackReason, ResponseTransportMetrics};
 use super::request::ConnectionIo;
 use crate::close::ConnectionIntent;
@@ -69,12 +60,20 @@ pub(super) async fn write_response(
     let response_body = response_body.into_result();
     #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
     if let Ok(body) = &response_body
-        && let Payload::File(region) = body.payload()
+        && let Some(end_offset) = body.file_region_end_offset()
     {
-        i64::try_from(region.end_offset())
+        i64::try_from(end_offset)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "file region end exceeds sendfile range"))?;
     }
     let framing = prepare_headers(&mut parts.headers, parts.status, suppress_body, close, size_hint)?;
+    let body_plan = if suppress_body {
+        None
+    } else {
+        Some(match response_body {
+            Ok(body) => Ok(plan_application_body(body)?),
+            Err(body) => Err(body),
+        })
+    };
     let head = encode_head(parts.status, &parts.headers)?;
     write_all_progress(&mut io.stream, &head).await?;
 
@@ -83,8 +82,8 @@ pub(super) async fn write_response(
         return Ok(close);
     }
 
-    match response_body {
-        Ok(body) => write_application_body(&mut io.stream, body, framing, transport_metrics).await?,
+    match body_plan.ok_or_else(|| io::Error::other("response body plan is absent after suppression was rejected"))? {
+        Ok(plan) => write_application_body(&mut io.stream, plan, framing, transport_metrics).await?,
         Err(body) => {
             record_fallback(transport_metrics, ResponseFallbackReason::NotFileBacked);
             write_body(&mut io.stream, body, framing, transport_metrics).await?;
@@ -96,90 +95,42 @@ pub(super) async fn write_response(
 
 async fn write_application_body(
     writer: &mut PlaintextConnection,
-    body: Body,
+    plan: ApplicationBodyPlan,
     framing: ResponseFraming,
     transport_metrics: Option<&ResponseTransportMetrics>,
 ) -> io::Result<()> {
-    let metrics = Arc::clone(body.stream_metrics());
-    let payload = body.into_payload();
-    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
-    {
-        let query = ZeroCopyQuery::new(TransportCaps::SENDFILE, VerificationObligation::None);
-        match payload.try_into_file_region_for(&query, &metrics) {
-            Ok(region) => return write_file_region(writer, region, framing, transport_metrics).await,
-            Err((payload, NoZeroCopy::NotFileBacked)) => {
-                record_fallback(transport_metrics, ResponseFallbackReason::NotFileBacked);
-                return write_non_file_payload(writer, payload, framing, metrics, transport_metrics).await;
-            }
-            Err((_, reason)) => Err(io::Error::other(reason)),
+    match plan {
+        #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+        ApplicationBodyPlan::KernelFile(region) => write_file_region(writer, region, framing, transport_metrics).await,
+        #[cfg(unix)]
+        ApplicationBodyPlan::CopiedFile { source, fallback } => {
+            record_fallback(transport_metrics, fallback);
+            write_file_region_copied(writer, source, framing, transport_metrics).await
         }
-    }
-    #[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
-    if payload.caps().contains(PayloadCaps::FILE_REGION) {
-        let query = ZeroCopyQuery::new(TransportCaps::empty(), VerificationObligation::None);
-        let (payload, reason) = match payload.try_into_file_region_for(&query, &metrics) {
-            Err(refusal) => refusal,
-            Ok(_) => return Err(io::Error::other("transport without kernel transfer accepted a file region")),
-        };
-        if reason != NoZeroCopy::TransportLacksSendfile {
-            return Err(io::Error::other(reason));
+        ApplicationBodyPlan::Payload { body, fallback } => {
+            record_fallback(transport_metrics, fallback);
+            write_non_file_body(writer, body, framing, transport_metrics).await
         }
-        let Payload::File(region) = payload else {
-            return Err(io::Error::other("file capability did not contain a file region"));
-        };
-        metrics.record_adapt(&AdaptCost::Copy {
-            est_bytes: Some(region.len()),
-        });
-        record_fallback(transport_metrics, ResponseFallbackReason::PlatformUnsupported);
-        return write_file_region_fallback(writer, region, framing, transport_metrics).await;
-    }
-    #[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
-    {
-        record_fallback(transport_metrics, ResponseFallbackReason::NotFileBacked);
-        return write_non_file_payload(writer, payload, framing, metrics, transport_metrics).await;
-    }
-    #[cfg(not(unix))]
-    {
-        record_fallback(transport_metrics, ResponseFallbackReason::NotFileBacked);
-        write_non_file_payload(writer, payload, framing, metrics, transport_metrics).await
     }
 }
 
-async fn write_non_file_payload<W>(
+async fn write_non_file_body<W>(
     writer: &mut W,
-    payload: Payload,
+    body: Body,
     framing: ResponseFraming,
-    stream_metrics: Arc<rustfs_gateway_stream::StreamMetrics>,
     transport_metrics: Option<&ResponseTransportMetrics>,
 ) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
-    match payload {
-        Payload::Empty => write_memory_segments(writer, &[], framing, transport_metrics).await,
-        Payload::Bytes(bytes) => write_memory_segments(writer, &[bytes], framing, transport_metrics).await,
-        Payload::Vectored(segments) => write_memory_segments(writer, &segments, framing, transport_metrics).await,
-        #[cfg(unix)]
-        Payload::File(_) => Err(io::Error::other("file capability was not negotiated before response writing")),
-        Payload::Reader(reader) => {
-            write_body(
-                writer,
-                Body::from_payload_with_metrics(Payload::Reader(reader), stream_metrics),
-                framing,
-                transport_metrics,
-            )
-            .await
-        }
-        Payload::Stream(stream) => {
-            write_body(
-                writer,
-                Body::from_payload_with_metrics(Payload::Stream(stream), stream_metrics),
-                framing,
-                transport_metrics,
-            )
-            .await
-        }
+    if let Some(segments) = body.try_as_vectored() {
+        return write_memory_segments(writer, segments, framing, transport_metrics).await;
     }
+    #[cfg(unix)]
+    if body.file_region_end_offset().is_some() {
+        return Err(io::Error::other("file capability was not negotiated before response writing"));
+    }
+    write_body(writer, body, framing, transport_metrics).await
 }
 
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
@@ -235,34 +186,39 @@ async fn write_file_region(
     Ok(())
 }
 
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
-async fn write_file_region_fallback(
+#[cfg(unix)]
+async fn write_file_region_copied(
     writer: &mut PlaintextConnection,
-    region: rustfs_gateway_stream::FileRegion,
+    mut source: rustfs_gateway_stream::CopiedFileBody,
     framing: ResponseFraming,
     transport_metrics: Option<&ResponseTransportMetrics>,
 ) -> io::Result<()> {
-    let offset = region.offset();
-    let len = region.len();
-    let mut remaining = len;
-    let mut file = tokio::fs::File::from_std(std::fs::File::from(region.into_fd()));
-    file.seek(SeekFrom::Start(offset)).await?;
+    source.record_copy_adaptation();
     let mut buffer = vec![0_u8; 64 * 1024];
-    while remaining != 0 {
-        let wanted = usize::try_from(remaining.min(buffer.len() as u64)).map_err(io::Error::other)?;
-        let read = file.read(&mut buffer[..wanted]).await?;
+    while !source.is_empty() {
+        let (next_source, next_buffer, read) = tokio::task::spawn_blocking(move || {
+            let read = source.read_blocking(&mut buffer);
+            (source, buffer, read)
+        })
+        .await
+        .map_err(io::Error::other)?;
+        source = next_source;
+        buffer = next_buffer;
+        let read = read?;
         if read == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "file region ended before the declared response length",
             ));
         }
+        let chunk = buffer
+            .get(..read)
+            .ok_or_else(|| io::Error::other("copied file read reported impossible progress"))?;
         match framing {
             ResponseFraming::Suppressed => return Ok(()),
-            ResponseFraming::Fixed(_) => write_all_payload_progress(writer, &buffer[..read], transport_metrics).await?,
-            ResponseFraming::Chunked => write_chunk(writer, &buffer[..read], transport_metrics).await?,
+            ResponseFraming::Fixed(_) => write_all_payload_progress(writer, chunk, transport_metrics).await?,
+            ResponseFraming::Chunked => write_chunk(writer, chunk, transport_metrics).await?,
         }
-        remaining -= u64::try_from(read).map_err(io::Error::other)?;
     }
     if matches!(framing, ResponseFraming::Chunked) {
         write_all_progress(writer, b"0\r\n\r\n").await?;
@@ -474,39 +430,6 @@ where
         transport_metrics,
     )
     .await
-}
-
-fn encode_chunk_prefix(length: u64, output: &mut [u8; 18]) -> io::Result<&[u8]> {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut value = length;
-    let mut cursor: usize = 16;
-    loop {
-        cursor = cursor
-            .checked_sub(1)
-            .ok_or_else(|| io::Error::other("chunk size exceeds encoder capacity"))?;
-        let digit = HEX
-            .get(usize::try_from(value & 0x0f).map_err(io::Error::other)?)
-            .copied()
-            .ok_or_else(|| io::Error::other("chunk size produced an invalid hexadecimal digit"))?;
-        let slot = output
-            .get_mut(cursor)
-            .ok_or_else(|| io::Error::other("chunk prefix cursor exceeds encoder capacity"))?;
-        *slot = digit;
-        value >>= 4;
-        if value == 0 {
-            break;
-        }
-    }
-    let suffix = output
-        .get_mut(16..)
-        .ok_or_else(|| io::Error::other("chunk prefix suffix exceeds encoder capacity"))?;
-    if suffix.len() != 2 {
-        return Err(io::Error::other("chunk prefix suffix has an impossible length"));
-    }
-    suffix.copy_from_slice(b"\r\n");
-    output
-        .get(cursor..)
-        .ok_or_else(|| io::Error::other("chunk prefix result exceeds encoder capacity"))
 }
 
 pub(super) async fn write_bad_request(io: &mut ConnectionIo) -> io::Result<()> {
