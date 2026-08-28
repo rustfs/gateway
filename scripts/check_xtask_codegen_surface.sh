@@ -427,15 +427,31 @@ match (verify_arguments.next(), verify_arguments.next(), verify_arguments.next()
 ''')
 if len(launcher_request) != 1 or compact(launcher_request[0][1]) != expected_launcher_request:
     fail("the launcher must identify only an exact crate request")
+launcher_operation_request = functions_named("operation_request_name", launcher_syntax, launcher_comments)
+expected_launcher_operation_request = compact('''
+if arguments.first().map(String::as_str) != Some("verify") {
+    return None;
+}
+let mut verify_arguments = arguments[1..].iter().map(String::as_str).filter(|argument| *argument != "--json");
+match (verify_arguments.next(), verify_arguments.next(), verify_arguments.next()) {
+    (Some("--op"), Some(name), None) => Some(name),
+    _ => None,
+}
+''')
+if len(launcher_operation_request) != 1 or compact(launcher_operation_request[0][1]) != expected_launcher_operation_request:
+    fail("the launcher must identify only an exact operation request")
 launcher_runner = functions_named("runner_for_request", launcher_syntax, launcher_comments)
 expected_launcher_runner = compact('''
+if operation_request_name(arguments).is_some() {
+    return FULL_RUNNER;
+}
 match crate_request_name(arguments) {
     Some("rustfs-gateway" | "s3gate") | None => LIGHT_RUNNER,
     Some(_) => FULL_RUNNER,
 }
 ''')
 if len(launcher_runner) != 1 or compact(launcher_runner[0][1]) != expected_launcher_runner:
-    fail("the launcher must keep only facade verification on the light runner")
+    fail("the launcher must route operation verification directly to the full runner")
 launcher_source = compact(launcher_comments)
 launcher_constants = {
     'const FULL_RUNNER: &[&str] = &["--features", "full"];',

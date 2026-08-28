@@ -1663,6 +1663,27 @@ expect_fail check_xtask_codegen_surface.sh \
     'non-facade crate verification rebuilding the light runner after the workspace gate' \
     mut_xtask_crate_runner_returns_to_light_graph
 
+mut_xtask_operation_runner_returns_to_light_graph() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask-launcher/src/main.rs")
+text = path.read_text()
+old = '''    if operation_request_name(arguments).is_some() {
+        return FULL_RUNNER;
+    }'''
+new = '''    if operation_request_name(arguments).is_some() {
+        return LIGHT_RUNNER;
+    }'''
+if text.count(old) != 1:
+    raise SystemExit("the operation runner selection is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'operation verification rebuilding the light runner inside its thirty-second budget' \
+    mut_xtask_operation_runner_returns_to_light_graph
+
 mut_xtask_facade_runner_returns_to_full_graph() {
     perl -0pi -e 's/Some\("rustfs-gateway" \| "s3gate"\) \| None => LIGHT_RUNNER,/None => LIGHT_RUNNER,/' \
         xtask-launcher/src/main.rs
