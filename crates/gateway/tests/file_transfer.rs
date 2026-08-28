@@ -142,6 +142,7 @@ mod unix {
         assert_eq!(transport_metrics.fallback_responses_total(), 0);
         assert_eq!(transport_metrics.copied_payload_bytes(), 0);
         assert_eq!(metrics.adapt_copies_total(), 0);
+        assert_eq!(metrics.zero_copy_refusals(NoZeroCopy::VerificationObligationPresent), 0);
         let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
         assert!(running.task.await.expect("server task joins").is_ok());
     }
@@ -248,6 +249,110 @@ mod unix {
         assert_eq!(metrics.copied_payload_bytes(), 8);
         assert_eq!(metrics.kernel_transfer_calls(), 0);
         assert_eq!(stream_metrics.zero_copy_refusals(NoZeroCopy::NotFileBacked), 1);
+        let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
+        assert!(running.task.await.expect("server task joins").is_ok());
+    }
+
+    /// Negative control: bytes that still owe verification never take the kernel-side path.
+    #[tokio::test]
+    async fn production_driver_copies_a_file_region_with_a_verification_obligation() {
+        let fixture = FixtureFile::new(b"verified-copy");
+        let stream_metrics = Arc::new(StreamMetrics::new());
+        let service_path = Arc::clone(&fixture.path);
+        let service_metrics = Arc::clone(&stream_metrics);
+        let service = service_fn(move |_request: Request<SelfHeldRequestBody>| {
+            let file = File::open(service_path.as_ref()).expect("fixture file remains openable");
+            let region = FileRegion::new(OwnedFd::from(file), 0, 13).expect("fixture range does not overflow");
+            let body =
+                Body::from_payload_with_metrics(Payload::File(region), Arc::clone(&service_metrics)).requiring_verification();
+            async move {
+                Ok::<_, Infallible>(
+                    Response::builder()
+                        .header(header::CONTENT_LENGTH, 13)
+                        .body(body)
+                        .expect("fixture response is valid"),
+                )
+            }
+        });
+        let config = ServerConfig {
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            plaintext: true,
+            tcp_nodelay: true,
+            ..ServerConfig::default()
+        };
+        let metrics = Arc::new(ResponseTransportMetrics::new());
+        let running = Server::new(config, service)
+            .serve_with(SelfHeldHttp1Driver::with_metrics(Arc::clone(&metrics)))
+            .expect("self-held server starts");
+        let mut client = TcpStream::connect(running.local_addr).await.expect("client connects");
+        client
+            .write_all(b"GET /verified HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("request writes");
+        let mut response = Vec::new();
+        client
+            .read_to_end(&mut response)
+            .await
+            .expect("copied response reaches an observable close");
+        assert!(response.ends_with(b"verified-copy"));
+        assert_eq!(stream_metrics.zero_copy_refusals(NoZeroCopy::VerificationObligationPresent), 1);
+        assert_eq!(metrics.kernel_transfer_calls(), 0);
+        assert_eq!(metrics.kernel_transferred_bytes(), 0);
+        assert_eq!(metrics.fallback_responses(ResponseFallbackReason::VerificationRequired), 1);
+        assert_eq!(metrics.fallback_responses_total(), 1);
+        assert_eq!(metrics.copied_payload_bytes(), 13);
+        let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
+        assert!(running.task.await.expect("server task joins").is_ok());
+    }
+
+    /// Negative control: a rejected response never reports a body path that did not run.
+    #[tokio::test]
+    async fn production_driver_does_not_report_a_fallback_for_rejected_framing() {
+        let fixture = FixtureFile::new(b"verified-copy");
+        let stream_metrics = Arc::new(StreamMetrics::new());
+        let service_path = Arc::clone(&fixture.path);
+        let service_metrics = Arc::clone(&stream_metrics);
+        let service = service_fn(move |_request: Request<SelfHeldRequestBody>| {
+            let file = File::open(service_path.as_ref()).expect("fixture file remains openable");
+            let region = FileRegion::new(OwnedFd::from(file), 0, 13).expect("fixture range does not overflow");
+            let body =
+                Body::from_payload_with_metrics(Payload::File(region), Arc::clone(&service_metrics)).requiring_verification();
+            async move {
+                Ok::<_, Infallible>(
+                    Response::builder()
+                        .header(header::CONTENT_LENGTH, 13)
+                        .header(header::TRANSFER_ENCODING, "chunked")
+                        .body(body)
+                        .expect("fixture response is representable before transport validation"),
+                )
+            }
+        });
+        let config = ServerConfig {
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            plaintext: true,
+            tcp_nodelay: true,
+            ..ServerConfig::default()
+        };
+        let metrics = Arc::new(ResponseTransportMetrics::new());
+        let running = Server::new(config, service)
+            .serve_with(SelfHeldHttp1Driver::with_metrics(Arc::clone(&metrics)))
+            .expect("self-held server starts");
+        let mut client = TcpStream::connect(running.local_addr).await.expect("client connects");
+        client
+            .write_all(b"GET /invalid HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("request writes");
+        let mut response = Vec::new();
+        client
+            .read_to_end(&mut response)
+            .await
+            .expect("rejected response closes the connection");
+        assert!(response.is_empty(), "invalid framing commits no response head");
+        assert_eq!(metrics.fallback_responses_total(), 0);
+        assert_eq!(metrics.copied_payload_bytes(), 0);
+        assert_eq!(metrics.kernel_transfer_calls(), 0);
+        assert_eq!(stream_metrics.adapt_copies_total(), 0);
+        assert_eq!(stream_metrics.zero_copy_refusals(NoZeroCopy::VerificationObligationPresent), 0);
         let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
         assert!(running.task.await.expect("server task joins").is_ok());
     }

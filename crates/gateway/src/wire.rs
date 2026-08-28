@@ -42,7 +42,8 @@
 use bytes::Bytes;
 use http::header::{HeaderMap, HeaderName, HeaderValue};
 use http::{Response, StatusCode};
-use rustfs_gateway_stream::{Body, PayloadRead, PayloadStream, StreamError, StreamMetrics, TrailingHeaders};
+use http_body_util::BodyExt;
+use rustfs_gateway_stream::{Body, StreamError, TrailingHeaders};
 
 /// A header section in emission order.
 ///
@@ -137,23 +138,27 @@ fn ordered(map: &HeaderMap) -> OrderedHeaders {
 }
 
 /// Reads a body to its end, in whichever shape it arrived.
-async fn drain(body: Body) -> Result<(Bytes, TrailingHeaders), StreamError> {
-    let payload = body.into_payload();
+async fn drain(mut body: Body) -> Result<(Bytes, TrailingHeaders), StreamError> {
     // An in-memory payload needs no driver and no adaptation. Taking this branch first is what
     // keeps the ordinary case — every XML response this framework produces — free of the
     // adaptation cost the metrics below would otherwise record.
-    if let Some(segments) = payload.try_as_vectored() {
+    if let Some(segments) = body.try_as_vectored() {
         return Ok((concatenate(segments), TrailingHeaders::empty()));
     }
-    let metrics = StreamMetrics::new();
-    let (stream, _cost) = payload
-        .try_into_stream(&metrics)
-        .map_err(|(_payload, refusal)| StreamError::upstream(Box::new(refusal)))?;
-    Drain {
-        stream,
-        collected: Vec::new(),
+    let mut collected = Vec::new();
+    let mut trailers = TrailingHeaders::empty();
+    while let Some(frame) = body.frame().await {
+        let frame = frame?;
+        match frame.into_data() {
+            Ok(bytes) => collected.push(bytes),
+            Err(frame) => {
+                if let Ok(map) = frame.into_trailers() {
+                    trailers = TrailingHeaders::from_header_map(map);
+                }
+            }
+        }
     }
-    .await
+    Ok((concatenate(&collected), trailers))
 }
 
 /// Joins segments, avoiding the copy when there is nothing to join.
@@ -168,38 +173,6 @@ fn concatenate(segments: &[Bytes]) -> Bytes {
                 out.extend_from_slice(segment);
             }
             Bytes::from(out)
-        }
-    }
-}
-
-/// The future that polls a push-model body to end-of-stream.
-///
-/// Hand-written rather than built from a combinator because this crate forbids `unsafe` and every
-/// field here is `Unpin` — `Pin<Box<dyn PayloadStream + Send>>` is `Unpin` by construction, which
-/// is exactly why `rustfs-gateway-stream` boxes it pinned.
-struct Drain {
-    stream: rustfs_gateway_stream::BoxPayloadStream,
-    collected: Vec<Bytes>,
-}
-
-impl core::future::Future for Drain {
-    type Output = Result<(Bytes, TrailingHeaders), StreamError>;
-
-    fn poll(self: core::pin::Pin<&mut Self>, context: &mut core::task::Context<'_>) -> core::task::Poll<Self::Output> {
-        use core::task::Poll;
-
-        let this = self.get_mut();
-        loop {
-            match core::pin::Pin::new(&mut this.stream).poll_read(context) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
-                Poll::Ready(Ok(PayloadRead::Chunk(bytes))) => this.collected.push(bytes),
-                Poll::Ready(Ok(PayloadRead::Eof { trailers })) => {
-                    let bytes = concatenate(&this.collected);
-                    this.collected = Vec::new();
-                    return Poll::Ready(Ok((bytes, trailers)));
-                }
-            }
         }
     }
 }
