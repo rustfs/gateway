@@ -232,9 +232,16 @@ jobs:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build documentation without warnings
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+        run: scripts/ci_budget.sh 240 "documentation build" env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
       - name: Run README and API examples
-        run: cargo test --doc --workspace
+        run: |
+          scripts/ci_budget.sh 240 "README and API examples" bash -c '
+            set -euo pipefail
+            cargo test --doc --workspace
+            cargo build --examples --workspace
+            cargo test -p rustfs-gateway --example minimal
+            bash scripts/run_minimal_listener_smoke.sh
+          '
 
   bootstrap:
     name: Cold bootstrap
@@ -496,11 +503,11 @@ jobs:
         run: |
           scripts/ci_budget.sh 60 "error status self-test" env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
 
-  # Branch protection requires this exact check name. It aggregates all fifteen parallel jobs and must
+  # Branch protection requires this exact check name. It aggregates all sixteen parallel jobs and must
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]
+    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -522,6 +529,7 @@ jobs:
           BUILD_GUARD_3_RESULT: ${{ needs.build-guard-self-test-3.result }}
           ERROR_STATUS_RESULT: ${{ needs.error-status-self-test.result }}
           TSAN_RESULT: ${{ needs.gateway-tsan.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
         run: |
           test "$WORKSPACE_RESULT" = success
           test "$WORKSPACE_2_RESULT" = success
@@ -538,3 +546,4 @@ jobs:
           test "$BUILD_GUARD_3_RESULT" = success
           test "$ERROR_STATUS_RESULT" = success
           test "$TSAN_RESULT" = success
+          test "$DOCS_RESULT" = success

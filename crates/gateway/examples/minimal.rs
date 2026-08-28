@@ -14,14 +14,12 @@
 
 // a-asm-0003: this complete assembly is compiled and line-counted by its guard.
 
-//! The smallest backend that proves the assembly path carries a request end to end.
+//! The smallest backend that proves the assembly path carries a request through a real listener.
 //!
-//! Responsible for: showing what a deployment writes — a handler, a builder, one request — and
-//! asserting two outcomes that together cover the whole pipeline: a request that reaches the
-//! handler and comes back encoded, and a request that is stopped by the security floor.
-//! NOT responsible for: storing anything, listening on a socket (P7-02), or being a template for a
-//! real backend's error handling.
-//! Upstream: `rustfs-gateway`. Downstream: nothing; this is a leaf.
+//! Responsible for: showing what a deployment writes — a handler, a builder, and the P7-02 server
+//! listener — with explicit plaintext opt-in and graceful shutdown.
+//! NOT responsible for: storing anything, TLS configuration, or production backend error handling.
+//! Upstream: `rustfs-gateway` and `rustfs-gateway-server`. Downstream: a TCP S3 client.
 //!
 //! # Why the reachable operation is a third-party one
 //!
@@ -32,9 +30,13 @@
 //! reachable, in the one method whose name says what it costs. The `ListBuckets` request below is
 //! what a standard operation does with an unsigned request, and it is asserted too.
 //!
-//! Run it with `cargo run -p rustfs-gateway --example minimal`.
+//! Run it with `cargo run -p rustfs-gateway --example minimal -- --host 127.0.0.1 --port 9000`.
 
+use std::env;
+use std::io;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
 
 use rustfs_gateway::dto::{Bucket, ListBuckets, ListBucketsOutput};
 use rustfs_gateway::{
@@ -43,6 +45,7 @@ use rustfs_gateway::{
     RouteSelector, ServiceBuilder, SigService, SigV4Authenticator, StaticCredentials, TargetKind, allow_when,
 };
 use rustfs_gateway_core::HandlerDeadlineClass;
+use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ServerError};
 
 // ── the vendor operation, which is what a dialect or an admin API looks like ────────────────────
 
@@ -174,8 +177,7 @@ impl Handler<ListBuckets> for InMemory {
 
 // ── the assembly ───────────────────────────────────────────────────────────────────────────────
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn build_service() -> Result<rustfs_gateway::S3Service, Box<dyn std::error::Error>> {
     // BEGIN MINIMAL ASSEMBLY
     let credentials = Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret")?));
     let backend = Arc::new(InMemory {
@@ -194,36 +196,106 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .authorizer(allow_when(|request| request.operation == "example:Ping"))
         .build()?;
     // END MINIMAL ASSEMBLY
-
-    // The whole pipeline, end to end: accepted, resolved, routed, governed, admitted, decoded,
-    // authorised, dispatched, encoded.
-    let answered = exchange(&service, http::Method::POST, "/").await?;
-    println!("POST /  -> {} {}", answered.0, answered.1);
-    assert_eq!(answered.0, http::StatusCode::OK, "the handler must have answered: {}", answered.1);
-    assert!(answered.1.contains("<Ping>2 buckets</Ping>"), "{}", answered.1);
-
-    // The same assembly, one stage earlier: an AWS operation with no signature never reaches the
-    // handler, because its allow-list does not admit an anonymous request.
-    let refused = exchange(&service, http::Method::GET, "/").await?;
-    println!("GET  /  -> {} {}", refused.0, refused.1);
-    assert_eq!(refused.0, http::StatusCode::FORBIDDEN, "{}", refused.1);
-    assert!(refused.1.contains("<Code>AccessDenied</Code>"), "{}", refused.1);
-
-    Ok(())
+    Ok(service)
 }
 
-/// One request in, one status and body out.
-async fn exchange(
-    service: &rustfs_gateway::S3Service,
-    method: http::Method,
-    uri: &str,
-) -> Result<(http::StatusCode, String), Box<dyn std::error::Error>> {
-    let request = http::Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("host", "s3.example.com")
-        .body(bytes::Bytes::new())?;
-    let response = rustfs_gateway::collect(service.call_bytes(request).await).await?;
-    let body = String::from_utf8(response.body().to_vec())?;
-    Ok((response.status(), body))
+// BEGIN MINIMAL LISTENER
+fn server_config_from<I, S>(arguments: I) -> Result<ServerConfig, Box<dyn std::error::Error>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut host = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    let mut port = 9000_u16;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.as_ref() {
+            "--host" => {
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "--host requires an IP address"))?;
+                host = value.as_ref().parse()?;
+            }
+            "--port" => {
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "--port requires a number"))?;
+                port = value.as_ref().parse()?;
+            }
+            unknown => {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unknown argument: {unknown}")).into());
+            }
+        }
+    }
+    Ok(ServerConfig {
+        bind_addr: SocketAddr::new(host, port),
+        plaintext: true,
+        ..ServerConfig::default()
+    })
+}
+
+fn start_server(config: ServerConfig, service: rustfs_gateway::S3Service) -> Result<RunningServer, ServerError> {
+    Server::new(config, service).serve()
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let running = start_server(server_config_from(env::args().skip(1))?, build_service()?)?;
+    println!("listening on http://{}", running.local_addr);
+    tokio::signal::ctrl_c().await?;
+    let report = running.shutdown.trigger(Duration::from_secs(30)).await;
+    println!("shutdown: drained={}, aborted={}", report.drained, report.aborted);
+    running.task.await??;
+    Ok(())
+}
+// END MINIMAL LISTENER
+
+#[cfg(test)]
+async fn tcp_exchange(address: SocketAddr, request: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut stream = tokio::net::TcpStream::connect(address).await?;
+    stream.write_all(request).await?;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await?;
+    Ok(String::from_utf8(response)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use super::{build_service, server_config_from, start_server, tcp_exchange};
+
+    #[test]
+    fn cli_refuses_missing_port_value() {
+        assert!(server_config_from(["--port"]).is_err());
+    }
+
+    #[test]
+    fn cli_refuses_unknown_argument() {
+        assert!(server_config_from(["--listen-everywhere"]).is_err());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn listener_observes_positive_and_negative_wire_paths() -> Result<(), Box<dyn Error>> {
+        let config = server_config_from(["--host", "127.0.0.1", "--port", "0"])?;
+        let running = start_server(config, build_service()?)?;
+
+        let answered = tcp_exchange(
+            running.local_addr,
+            b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )
+        .await?;
+        assert!(answered.starts_with("HTTP/1.1 200"), "{answered}");
+        assert!(answered.contains("<Ping>2 buckets</Ping>"), "{answered}");
+
+        let refused = tcp_exchange(running.local_addr, b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").await?;
+        assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
+        assert!(refused.contains("<Code>AccessDenied</Code>"), "{refused}");
+
+        let _report = running.shutdown.trigger(std::time::Duration::from_secs(1)).await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), running.task).await???;
+        Ok(())
+    }
 }

@@ -23,10 +23,11 @@ EXAMPLE="${ROOT_DIR}/crates/gateway/examples/minimal.rs"
     exit 1
 }
 
-count="$({
-    awk '
-        /\/\/ BEGIN MINIMAL ASSEMBLY/ { begins++; inside = 1; next }
-        /\/\/ END MINIMAL ASSEMBLY/ { ends++; inside = 0; next }
+count_section() {
+    local begin_marker="$1" end_marker="$2"
+    awk -v begin_marker="$begin_marker" -v end_marker="$end_marker" '
+        index($0, begin_marker) { begins++; inside = 1; next }
+        index($0, end_marker) { ends++; inside = 0; next }
         inside {
             line = $0
             sub(/^[[:space:]]+/, "", line)
@@ -37,15 +38,27 @@ count="$({
             print count + 0
         }
     ' "$EXAMPLE"
-} || true)"
+}
 
-[[ "$count" =~ ^[0-9]+$ ]] || {
+assembly_count="$(count_section '// BEGIN MINIMAL ASSEMBLY' '// END MINIMAL ASSEMBLY' || true)"
+[[ "$assembly_count" =~ ^[0-9]+$ ]] || {
     printf 'check_minimal_assembly_lines: expected exactly one complete marker pair in %s\n' "$EXAMPLE" >&2
     exit 1
 }
-[[ "$count" -le 20 ]] || {
-    printf 'check_minimal_assembly_lines: assembly uses %s effective lines, limit is 20\n' "$count" >&2
+[[ "$assembly_count" -le 20 ]] || {
+    printf 'check_minimal_assembly_lines: assembly uses %s effective lines, limit is 20\n' "$assembly_count" >&2
     exit 1
 }
 
-printf 'OK: minimal ServiceBuilder assembly uses %s/20 effective lines\n' "$count"
+listener_count="$(count_section '// BEGIN MINIMAL LISTENER' '// END MINIMAL LISTENER' || true)"
+[[ "$listener_count" =~ ^[0-9]+$ ]] || {
+    printf 'check_minimal_assembly_lines: expected exactly one complete listener marker pair in %s\n' "$EXAMPLE" >&2
+    exit 1
+}
+[[ "$listener_count" -le 46 ]] || {
+    printf 'check_minimal_assembly_lines: listener path uses %s effective lines, current ratchet is 46 and the 20-line target is tracked by gateway#424\n' "$listener_count" >&2
+    exit 1
+}
+
+printf 'OK: minimal assembly=%s/20; listener=%s/46 effective lines (20-line listener target: gateway#424)\n' \
+    "$assembly_count" "$listener_count"

@@ -58,7 +58,7 @@ tokio = { workspace = true, features = ["fs", "io-util", "net", "sync", "time"] 
 [dev-dependencies]
 dhat = { workspace = true }
 socket2 = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal", "test-util"] }
 trybuild = { workspace = true }
 
 [[test]]
@@ -70,3 +70,6 @@ name = "minimal"
 
 [[example]]
 name = "custom_authorizer"
+
+[[example]]
+name = "custom_credential_provider"

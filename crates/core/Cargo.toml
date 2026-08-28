@@ -64,3 +64,6 @@ harness = false
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+[[example]]
+name = "dialect_overlay"

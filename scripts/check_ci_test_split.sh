@@ -300,8 +300,8 @@ end
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "workspace-tests-2", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "error-status-self-test", "gateway-tsan"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all fifteen workers within the budget")
+              ["Test", ["workspace-tests", "workspace-tests-2", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "error-status-self-test", "gateway-tsan", "docs"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all sixteen workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
@@ -320,7 +320,8 @@ expected_env = {
   "BUILD_GUARD_2_RESULT" => "${{ needs.build-guard-self-test-2.result }}",
   "BUILD_GUARD_3_RESULT" => "${{ needs.build-guard-self-test-3.result }}",
   "ERROR_STATUS_RESULT" => "${{ needs.error-status-self-test.result }}",
-  "TSAN_RESULT" => "${{ needs.gateway-tsan.result }}"
+  "TSAN_RESULT" => "${{ needs.gateway-tsan.result }}",
+  "DOCS_RESULT" => "${{ needs.docs.result }}"
 }
 require_equal(steps.first.fetch("env"), expected_env, "the Test step does not bind all worker results")
 expected_run = <<~'RUN'
@@ -339,6 +340,7 @@ expected_run = <<~'RUN'
   test "$BUILD_GUARD_3_RESULT" = success
   test "$ERROR_STATUS_RESULT" = success
   test "$TSAN_RESULT" = success
+  test "$DOCS_RESULT" = success
 RUN
 require_equal(steps.first.fetch("run"), expected_run, "the Test step does not execute all comparisons")
 RUBY

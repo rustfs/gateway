@@ -4271,6 +4271,66 @@ PY
 expect_fail check_minimal_assembly_lines.sh \
     'the assembly measurement loses its opening marker' mut_minimal_assembly_marker_removed
 
+mut_minimal_listener_exceeds_ratchet() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/examples/minimal.rs")
+text = path.read_text()
+extra = "".join(f"let _listener_extra_{index} = {index};\n" for index in range(47))
+path.write_text(text.replace("// END MINIMAL LISTENER", extra + "// END MINIMAL LISTENER", 1))
+PY
+}
+expect_fail check_minimal_assembly_lines.sh \
+    'the runnable listener path grows beyond its measured ratchet' mut_minimal_listener_exceeds_ratchet
+
+mut_minimal_listener_marker_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/examples/minimal.rs")
+path.write_text(path.read_text().replace("// BEGIN MINIMAL LISTENER\n", "", 1))
+PY
+}
+expect_fail check_minimal_assembly_lines.sh \
+    'the listener measurement loses its opening marker' mut_minimal_listener_marker_removed
+
+# ── check_example_contracts.sh (P7-04) ───────────────────────────────────────
+
+mut_example_target_becomes_implicit() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/Cargo.toml")
+section = '\n[[example]]\nname = "custom_credential_provider"\n'
+path.write_text(path.read_text().replace(section, "", 1))
+PY
+}
+expect_fail check_example_contracts.sh \
+    'a Rust example target becomes implicit Cargo discovery' mut_example_target_becomes_implicit
+
+mut_example_teaches_panic_handling() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/examples/minimal.rs")
+path.write_text(path.read_text() + '\nfn panic_shaped_example() { Some(()).expect("copied into production"); }\n')
+PY
+}
+expect_fail check_example_contracts.sh \
+    'a Rust example teaches consumers to panic on recoverable input' mut_example_teaches_panic_handling
+
+mut_example_teaches_ufcs_panic_handling() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/examples/minimal.rs")
+path.write_text(path.read_text() + '\nfn ufcs_panic_example() { Option::expect(Some(()), "copied into production"); }\n')
+PY
+}
+expect_fail check_example_contracts.sh \
+    'a Rust example hides panic handling behind UFCS syntax' mut_example_teaches_ufcs_panic_handling
+
 # Exercise selective staging in a tiny repository so the control measures only index semantics.
 # The Git shim records every invocation and rejects a regression to repository-wide `git add -A`.
 stage_helper_contract() {
@@ -15114,14 +15174,14 @@ expect_fail check_ci_test_split.sh \
     'the branch-protected Test check being renamed' mut_ci_required_name_changed
 
 mut_ci_aggregate_drops_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]' \
         'needs: [workspace-tests, workspace-tests-2, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
 
 mut_ci_aggregate_drops_target() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]' \
         'needs: [workspace-tests, workspace-tests-2, guard-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15129,7 +15189,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_target
 
 mut_ci_aggregate_drops_quirk_ledger() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]' \
         'needs: [workspace-tests, workspace-tests-2, guard-self-test, target-consolidation-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15137,7 +15197,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_quirk_ledger
 
 mut_ci_aggregate_drops_dto_compiler() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]' \
         'needs: [workspace-tests, workspace-tests-2, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15145,7 +15205,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_dto_compiler
 
 mut_ci_aggregate_drops_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]' \
         'needs: [workspace-tests, workspace-tests-2, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15153,7 +15213,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_build_guard
 
 mut_ci_aggregate_drops_second_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]' \
         'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15161,7 +15221,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_second_build_guard
 
 mut_ci_aggregate_drops_third_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]' \
         'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15169,7 +15229,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_third_build_guard
 
 mut_ci_aggregate_drops_error_status() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]' \
         'needs: [workspace-tests, workspace-tests-2, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15233,12 +15293,12 @@ expect_fail check_ci_test_split.sh \
 mut_ci_aggregate_budget_widened() {
     replace_ci_text '  test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]
+    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1' '  test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]
+    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2'
@@ -15308,11 +15368,23 @@ expect_fail check_ci_test_split.sh \
     'the aggregate check ignoring the third build-backed guard result' \
     mut_ci_third_build_guard_result_ignored
 
+mut_ci_docs_result_ignored() {
+    replace_ci_text 'DOCS_RESULT: ${{ needs.docs.result }}' 'DOCS_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the documentation and example result' mut_ci_docs_result_ignored
+
 mut_ci_workspace_comparison_dropped() {
     replace_ci_text '          test "$WORKSPACE_RESULT" = success' '          true'
 }
 expect_fail check_ci_test_split.sh \
     'the aggregate check not executing the workspace result comparison' mut_ci_workspace_comparison_dropped
+
+mut_ci_docs_comparison_dropped() {
+    replace_ci_text '          test "$DOCS_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the documentation result comparison' mut_ci_docs_comparison_dropped
 
 mut_ci_second_workspace_comparison_dropped() {
     replace_ci_text '          test "$WORKSPACE_2_RESULT" = success' '          true'
@@ -16104,7 +16176,7 @@ expect_fail check_gateway_tsan_wiring.sh \
     'CI no longer invoking the TSAN runner' mut_tsan_ci_call_deleted
 
 mut_tsan_aggregate_drops_tsan() {
-    replace_ci_text ', gateway-tsan]' ']'
+    replace_ci_text ', gateway-tsan, docs]' ', docs]'
 }
 expect_fail check_gateway_tsan_wiring.sh \
     'the required aggregate no longer waiting for TSAN' \
