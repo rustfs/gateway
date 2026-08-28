@@ -639,6 +639,7 @@ gateway_modules = (
     "custom_signature_verifier",
     "error_context_filters",
     "facade_probe",
+    "file_transfer",
     "governor_runtime",
     "governor_streaming",
     "handler_panic",

@@ -126,7 +126,9 @@ pub use crate::config::{
     RequestBodyDeadlineConfig, ServiceConfig,
 };
 #[cfg(feature = "server")]
-pub use crate::conn::{SelfHeldHttp1Driver, SelfHeldRequestBody};
+pub use crate::conn::{
+    MeasuredSelfHeldHttp1Driver, ResponseFallbackReason, ResponseTransportMetrics, SelfHeldHttp1Driver, SelfHeldRequestBody,
+};
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
     AuthzRequest, AuthzStage, BaseDomain, BodyQuota, BodyQuotaExceeded, CORS_PREFLIGHT, CachedCorsSource, ChunkSink,

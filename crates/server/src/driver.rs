@@ -21,6 +21,8 @@
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+use std::os::fd::BorrowedFd;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -69,6 +71,29 @@ pub trait ConnectionDriver<S>: Clone + Send + 'static {
 /// not bypass listener-wide timeout or close behavior.
 pub struct PlaintextConnection {
     inner: ProgressIo<TcpStream>,
+}
+
+impl PlaintextConnection {
+    /// Attempts one file-to-socket transfer without copying its bytes through user space, while
+    /// retaining the connection's write-progress deadline.
+    ///
+    /// The file descriptor is borrowed only for this call. HTTP framing and payload policy remain
+    /// the caller's responsibility.
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+    pub async fn send_file_once(&mut self, file: BorrowedFd<'_>, offset: u64, len: u64) -> io::Result<usize> {
+        use std::future::poll_fn;
+
+        if len == 0 {
+            return Ok(0);
+        }
+        let end = offset
+            .checked_add(len)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file region end overflows"))?;
+        let _ = nix::libc::off_t::try_from(end)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "file region end exceeds sendfile range"))?;
+        let count = usize::try_from(len.min(crate::sendfile::MAX_CHUNK)).map_err(io::Error::other)?;
+        poll_fn(|context| Pin::new(&mut self.inner).poll_send_file(context, file, offset, count)).await
+    }
 }
 
 impl AsyncRead for PlaintextConnection {
