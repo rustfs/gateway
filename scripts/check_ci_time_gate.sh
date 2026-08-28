@@ -94,14 +94,12 @@ end
 feedback_steps = jobs.fetch("feedback-loop").fetch("steps")
 feedback_prebuild = feedback_steps.find { |step| step["name"] == "Prebuild operation verification targets" }
 expected_feedback_prebuild = <<~SHELL
-  cargo build -p rustfs-gateway-conformance --bin rustfs-gateway-conformance
-  cargo test -p xtask --bin xtask --no-run
-  cargo build -p xtask --no-default-features
+  cargo test -p xtask --no-default-features --features operation --bin xtask --no-run
   cargo build -p xtask-launcher
-  cargo run --quiet -p xtask --features full -- codegen --check
+  cargo build -p xtask --no-default-features --features operation
 SHELL
 require_equal(feedback_prebuild&.fetch("run", nil), expected_feedback_prebuild,
-              "operation verification must prebuild its exact runners and leave the full codegen scan warm")
+              "operation verification must prebuild its exact bounded feature graph")
 
 static_steps = jobs.fetch("static").fetch("steps")
 require_equal(static_steps.first(3).map(&:keys), [["uses", "with"], ["uses", "with"], ["run"]],

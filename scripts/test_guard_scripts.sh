@@ -1663,27 +1663,22 @@ expect_fail check_xtask_codegen_surface.sh \
     'non-facade crate verification rebuilding the light runner after the workspace gate' \
     mut_xtask_crate_runner_returns_to_light_graph
 
-mut_xtask_operation_runner_bypasses_light_exec() {
+mut_xtask_operation_runner_uses_full_graph() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
 path = Path("xtask-launcher/src/main.rs")
 text = path.read_text()
-old = '''fn runner_for_request(arguments: &[String]) -> &'static [&'static str] {
-    match crate_request_name(arguments) {'''
-new = '''fn runner_for_request(arguments: &[String]) -> &'static [&'static str] {
-    if arguments.iter().any(|argument| argument == "--op") {
-        return FULL_RUNNER;
-    }
-    match crate_request_name(arguments) {'''
+old = '        return OPERATION_RUNNER;'
+new = '        return FULL_RUNNER;'
 if text.count(old) != 1:
     raise SystemExit("the operation runner selection is not unique")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'operation verification bypassing the light-to-full exec handoff' \
-    mut_xtask_operation_runner_bypasses_light_exec
+    'operation verification returning to the production server graph' \
+    mut_xtask_operation_runner_uses_full_graph
 
 mut_xtask_facade_runner_returns_to_full_graph() {
     perl -0pi -e 's/Some\("rustfs-gateway" \| "s3gate"\) \| None => LIGHT_RUNNER,/None => LIGHT_RUNNER,/' \
@@ -1875,14 +1870,14 @@ from pathlib import Path
 
 path = Path("xtask/src/catalog.rs")
 text = path.read_text()
-old = '#[cfg(feature = "full")]\npub(crate) fn nearest'
+old = '#[cfg(feature = "operation")]\npub(crate) fn nearest'
 if text.count(old) != 1:
-    raise SystemExit("full-only catalog helper is missing")
+    raise SystemExit("operation-only catalog helper is missing")
 path.write_text(text.replace(old, "pub(crate) fn nearest", 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'the light runner compiling a full-only catalog helper' \
+    'the light runner compiling an operation-only catalog helper' \
     mut_xtask_light_builds_full_catalog_helper
 
 mut_xtask_light_builds_full_usage() {
@@ -1907,8 +1902,8 @@ from pathlib import Path
 
 path = Path("xtask/src/main.rs")
 text = path.read_text()
-old = 'Some("verify") if verify::is_crate_request(&rest) => verify::verify(&rest),'
-new = 'Some("verify") if verify::is_crate_request(&rest) => run_full(first, &rest),'
+old = 'Some("verify") if verify::is_available_request(&rest) => verify::verify(&rest),'
+new = 'Some("verify") if verify::is_available_request(&rest) => run_full(first, &rest),'
 if text.count(old) != 1:
     raise SystemExit("expected exactly one light crate-verification dispatch arm")
 path.write_text(text.replace(old, new, 1))
@@ -1924,8 +1919,8 @@ from pathlib import Path
 
 path = Path("xtask/src/main.rs")
 text = path.read_text()
-old = 'Some("verify") if verify::is_crate_request(&rest) => verify::verify(&rest),'
-new = 'Some("verify") if verify::is_crate_request(&rest) => verify::verify(&[]),'
+old = 'Some("verify") if verify::is_available_request(&rest) => verify::verify(&rest),'
+new = 'Some("verify") if verify::is_available_request(&rest) => verify::verify(&[]),'
 if text.count(old) != 1:
     raise SystemExit("expected exactly one light crate-verification dispatch arm")
 path.write_text(text.replace(old, new, 1))
@@ -1952,22 +1947,22 @@ expect_fail check_xtask_codegen_surface.sh \
     'the crate-verification process supervisor becoming full-only' \
     mut_xtask_process_supervisor_becomes_full_only
 
-mut_xtask_verify_operation_loses_full_gate() {
+mut_xtask_verify_operation_loses_operation_gate() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '#[cfg(feature = "full")]\nfn verify_operation'
+old = '#[cfg(feature = "operation")]\nfn verify_operation'
 new = 'fn verify_operation'
 if text.count(old) != 1:
-    raise SystemExit("full-only operation verifier is missing")
+    raise SystemExit("operation-only verifier is missing")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
     'an operation-only verifier leaking into the light crate surface' \
-    mut_xtask_verify_operation_loses_full_gate
+    mut_xtask_verify_operation_loses_operation_gate
 
 mut_xtask_operation_conformance_runner_leaks_into_light_surface() {
     python3 - <<'PYEOF'
@@ -1975,7 +1970,7 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '#[cfg(feature = "full")]\nfn run_representative_case'
+old = '#[cfg(feature = "operation")]\nfn run_representative_case'
 new = 'fn run_representative_case'
 if text.count(old) != 1:
     raise SystemExit("full-only operation conformance runner is missing")
@@ -2379,8 +2374,8 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '#[cfg(not(feature = "full"))]\npub(crate) fn is_crate_request'
-new = 'pub(crate) fn is_crate_request'
+old = '#[cfg(not(feature = "full"))]\npub(crate) fn is_available_request'
+new = 'pub(crate) fn is_available_request'
 if text.count(old) != 1:
     raise SystemExit("light-only crate classifier is missing")
 path.write_text(text.replace(old, new, 1))
@@ -2502,7 +2497,7 @@ from pathlib import Path
 # was not testing for is one nobody trusts the next time.
 path = Path("Cargo.toml")
 text = path.read_text()
-pattern = re.compile(r'^rustfs-gateway = \{ path = "crates/gateway", version = "[0-9]+\.[0-9]+\.[0-9]+" \}$', re.M)
+pattern = re.compile(r'^rustfs-gateway = \{ path = "crates/gateway", version = "[0-9]+\.[0-9]+\.[0-9]+", default-features = false \}$', re.M)
 found = pattern.findall(text)
 if len(found) != 1:
     raise SystemExit("workspace facade dependency is missing")
@@ -2513,6 +2508,13 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'the workspace facade dependency injecting its dangerous authorizer feature' \
     mut_xtask_inherits_dangerous_facade_feature
+
+mut_xtask_operation_restores_server_default() {
+    perl -0pi -e 's/, default-features = false//' Cargo.toml
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'operation verification restoring the facade server default' \
+    mut_xtask_operation_restores_server_default
 
 mut_xtask_inherits_jsonschema_default_features() {
     python3 - <<'PYEOF'
@@ -14518,19 +14520,12 @@ mut_ci_time_feedback_timeout_removed() {
 expect_fail check_ci_time_gate.sh \
     'a non-required pull-request job becoming unbounded' mut_ci_time_feedback_timeout_removed
 
-mut_ci_time_feedback_prebuild_drops_light_runner() {
-    replace_ci_text '          cargo build -p xtask --no-default-features
+mut_ci_time_feedback_prebuild_drops_operation_runner() {
+    replace_ci_text '          cargo build -p xtask --no-default-features --features operation
 ' ''
 }
 expect_fail check_ci_time_gate.sh \
-    'operation verification dropping the exact light runner prebuild' mut_ci_time_feedback_prebuild_drops_light_runner
-
-mut_ci_time_feedback_prebuild_skips_codegen_warmup() {
-    replace_ci_text '          cargo run --quiet -p xtask --features full -- codegen --check' \
-        '          cargo build -p xtask --features full'
-}
-expect_fail check_ci_time_gate.sh \
-    'operation verification skipping its codegen warmup' mut_ci_time_feedback_prebuild_skips_codegen_warmup
+    'operation verification dropping the exact bounded runner prebuild' mut_ci_time_feedback_prebuild_drops_operation_runner
 
 mut_ci_time_msrv_timeout_removed() {
     replace_ci_text '  msrv:

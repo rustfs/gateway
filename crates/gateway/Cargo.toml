@@ -20,6 +20,8 @@ ring = 1
 # rustfs crates, which ring-2 then depends on. Enforced by check_ring_boundaries.sh.
 
 [features]
+default = ["server"]
+server = ["dep:rustfs-gateway-server"]
 dangerous-allow-all-authorizer = []
 dangerous-replace-signature-verifier = ["rustfs-gateway-sig/dangerous-replace-signature-verifier"]
 
@@ -34,7 +36,7 @@ workspace = true
 rustfs-gateway-core = { workspace = true }
 rustfs-gateway-http = { workspace = true }
 rustfs-gateway-macros = { workspace = true }
-rustfs-gateway-server = { workspace = true }
+rustfs-gateway-server = { workspace = true, optional = true }
 rustfs-gateway-sig = { workspace = true }
 rustfs-gateway-stream = { workspace = true }
 rustfs-gateway-types = { workspace = true }

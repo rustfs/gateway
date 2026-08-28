@@ -85,7 +85,7 @@ def dependency(alias_name, local):
             "serde": ["derive"],
             "syn": ["full", "extra-traits", "visit"],
         }.get(alias_name)
-        expected_default_features = False if alias_name == "jsonschema" else None
+        expected_default_features = False if alias_name in {"jsonschema", "rustfs-gateway"} else None
         actual_features = inherited.get("features")
         actual_default_features = inherited.get("default-features")
         if actual_features != expected_features or actual_default_features != expected_default_features:
@@ -169,6 +169,9 @@ full_dependencies = feature_closure("full", set())
 optional_aliases = {name for name, _, optional in resolved if optional}
 if full_dependencies != optional_aliases:
     fail("the full feature must enable every and only full-only optional dependency")
+operation_dependencies = feature_closure("operation", set())
+if operation_dependencies != {"http", "jsonschema", "rustfs-gateway", "rustfs-gateway-conformance", "rustfs-gateway-core"}:
+    fail("the operation feature must carry only its in-process verification graph")
 
 def rust_views(text):
     comments_removed = list(text)
@@ -429,17 +432,23 @@ if len(launcher_request) != 1 or compact(launcher_request[0][1]) != expected_lau
     fail("the launcher must identify only an exact crate request")
 launcher_runner = functions_named("runner_for_request", launcher_syntax, launcher_comments)
 expected_launcher_runner = compact('''
+if matches!(arguments, [command, flag, _] if command == "verify" && flag == "--op")
+    || matches!(arguments, [command, json, flag, _] if command == "verify" && json == "--json" && flag == "--op")
+{
+    return OPERATION_RUNNER;
+}
 match crate_request_name(arguments) {
     Some("rustfs-gateway" | "s3gate") | None => LIGHT_RUNNER,
     Some(_) => FULL_RUNNER,
 }
 ''')
 if len(launcher_runner) != 1 or compact(launcher_runner[0][1]) != expected_launcher_runner:
-    fail("the launcher must let operation verification exec from the light runner into the prebuilt full runner")
+    fail("the launcher must select the bounded operation runner exactly")
 launcher_source = compact(launcher_comments)
 launcher_constants = {
     'const FULL_RUNNER: &[&str] = &["--features", "full"];',
     'const LIGHT_RUNNER: &[&str] = &["--no-default-features"];',
+    'const OPERATION_RUNNER: &[&str] = &["--no-default-features", "--features", "operation"];',
 }
 if any(compact(constant) not in launcher_source for constant in launcher_constants):
     fail("the launcher runner arguments drifted")
@@ -456,6 +465,7 @@ if not launcher_body or any(compact(fragment) not in launcher_body for fragment 
 dispatches = functions_named("dispatch", syntax, comments_removed)
 expected_full_attribute = compact('#[cfg(feature = "full")]')
 expected_light_attribute = compact('#[cfg(not(feature = "full"))]')
+expected_operation_attribute = compact('#[cfg(feature = "operation")]')
 full_dispatches = [body for attrs, body in dispatches if [compact(attr) for attr in attrs] == [expected_full_attribute]]
 light_dispatches = [body for attrs, body in dispatches if [compact(attr) for attr in attrs] == [expected_light_attribute]]
 if len(full_dispatches) != 1 or len(light_dispatches) != 1 or len(dispatches) != 2:
@@ -465,12 +475,12 @@ expected_light_dispatch = compact('''
 match first.as_deref() {
     Some("codegen") => codegen::codegen(&rest),
     Some("spec") if rest.first().map(String::as_str) == Some("verify") => codegen::verify(&rest[1..]),
-    Some("verify") if verify::is_crate_request(&rest) => verify::verify(&rest),
+    Some("verify") if verify::is_available_request(&rest) => verify::verify(&rest),
     _ => run_full(first, &rest),
 }
 ''')
 if compact(light_dispatches[0]) != expected_light_dispatch:
-    fail("the light dispatcher must directly handle codegen, spec verify and exact crate verification")
+    fail("the bounded dispatcher must directly handle codegen, crate, and operation verification")
 
 run_full_functions = functions_named("run_full", syntax, comments_removed)
 if len(run_full_functions) != 1 or [compact(attr) for attr in run_full_functions[0][0]] != [expected_light_attribute]:
@@ -535,19 +545,19 @@ catalog_comments, catalog_syntax = rust_views(catalog_source)
 main_comments, main_syntax = comments_removed, syntax
 comments_removed, syntax = catalog_comments, catalog_syntax
 light_catalog_items = ["operations", "verify_map_path", "render_verify_map", "quoted_value", "operation_cases", "collect_toml"]
-full_catalog_items = ["nearest", "verify_entry", "scaffold_entry", "parse_verify_map", "split_cases", "quoted_field", "distance"]
+operation_catalog_items = ["nearest", "verify_entry", "scaffold_entry", "parse_verify_map", "split_cases", "quoted_field", "distance"]
 for name in light_catalog_items:
     items = top_level_items(rf"(?:\bpub\s*\(\s*crate\s*\)\s+)?\bfn\s+{name}\s*\(")
     if len(items) != 1 or items[0][1]:
         fail(f"catalog item {name} must remain on the light codegen surface")
-for name in full_catalog_items:
+for name in operation_catalog_items:
     items = top_level_items(rf"(?:\bpub\s*\(\s*crate\s*\)\s+)?\bfn\s+{name}\s*\(")
-    if len(items) != 1 or [compact(attr) for attr in items[0][1]] != [expected_full_attribute]:
-        fail(f"catalog item {name} must remain full-only")
+    if len(items) != 1 or [compact(attr) for attr in items[0][1]] != [expected_operation_attribute]:
+        fail(f"catalog item {name} must remain operation-only")
 for name in ("VerifyEntry", "ScaffoldEntry"):
     items = top_level_items(rf"(?:\bpub\s*\(\s*crate\s*\)\s+)?\bstruct\s+{name}\b")
-    if len(items) != 1 or [compact(attr) for attr in items[0][1]] != [expected_full_attribute]:
-        fail(f"catalog item {name} must remain full-only")
+    if len(items) != 1 or [compact(attr) for attr in items[0][1]] != [expected_operation_attribute]:
+        fail(f"catalog item {name} must remain operation-only")
 comments_removed, syntax = main_comments, main_syntax
 
 verify_source = (root / "xtask/src/verify.rs").read_text()
@@ -593,16 +603,17 @@ else:
     crate_steps_items = functions_named("crate_steps", syntax, comments_removed)
 if len(crate_steps_items) != 1 or crate_steps_items[0][0]:
     fail("verify item crate_steps must remain on the light crate-verification surface")
-request_items = functions_named("is_crate_request", syntax, comments_removed)
-request_declarations = top_level_items(r"\bpub\s*\(\s*crate\s*\)\s+fn\s+is_crate_request\s*\(")
+request_items = functions_named("is_available_request", syntax, comments_removed)
+request_declarations = top_level_items(r"\bpub\s*\(\s*crate\s*\)\s+fn\s+is_available_request\s*\(")
 if len(request_items) != 1 or len(request_declarations) != 1 or [compact(attr) for attr in request_declarations[0][1]] != [expected_light_attribute]:
-    fail("crate-request classification must remain light-only")
+    fail("bounded-request classification must remain non-full-only")
 expected_request_body = compact('''
 let (args, _) = take_json(args);
 matches!(args.as_slice(), [flag, _] if flag == "--crate")
+    || cfg!(feature = "operation") && matches!(args.as_slice(), [flag, _] if flag == "--op")
 ''')
 if compact(request_items[0][1]) != expected_request_body:
-    fail("light crate verification must recognize only one crate pair with optional JSON output")
+    fail("bounded verification must recognize only exact crate and enabled operation pairs")
 verify_items = functions_named("verify", syntax, comments_removed)
 expected_verify_body = compact('''
 let (args, json) = take_json(args);
@@ -616,11 +627,15 @@ match args.as_slice() {
 }
 #[cfg(not(feature = "full"))]
 {
+    #[cfg(feature = "operation")]
+    if let [flag, name] = args.as_slice() && flag == "--op" {
+        return verify_operation(name, json);
+    }
     usage()
 }
 ''')
 if compact(verify_items[0][1]) != expected_verify_body:
-    fail("verify must execute exact crate requests before delegating full-only forms")
+    fail("verify must execute exact crate and operation requests on their bounded surfaces")
 verify_crate_items = functions_named("verify_crate", syntax, comments_removed)
 expected_verify_crate_body = compact('''
 let started = match launcher_started() {
@@ -802,12 +817,18 @@ expected_standalone_case = compact('''
 if compact(standalone_case_items[0][1]) != expected_standalone_case:
     fail("gateway representative evidence must run exactly once inside its bounded batch")
 for name in (
-    "verify_full",
     "verify_operation",
     "run_representative_case",
     "run_operation_contract",
     "verify_scaffold",
     "snake_case",
+    "run_steps",
+):
+    items = functions_named(name, syntax, comments_removed)
+    if len(items) != 1 or [compact(attr) for attr in items[0][0]] != [expected_operation_attribute]:
+        fail(f"verify item {name} must remain operation-only")
+for name in (
+    "verify_full",
     "run_all",
     "run_setup_then_concurrently",
     "run_commands_concurrently",
@@ -887,8 +908,8 @@ for pattern, description in (
     (r"\buse\s+crate\s*::\s*\{\s*catalog\s*,\s*codegen\s*\}\s*;", "the operation catalog imports"),
 ):
     items = top_level_items(pattern)
-    if len(items) != 1 or [compact(attr) for attr in items[0][1]] != [expected_full_attribute]:
-        fail(f"{description} must remain full-only")
+    if len(items) != 1 or [compact(attr) for attr in items[0][1]] != [expected_operation_attribute]:
+        fail(f"{description} must remain operation-only")
 output_imports = top_level_items(r"\buse\s+std\s*::\s*process\s*::\s*\{[^}]*\bOutput\b[^}]*\}\s*;")
 if len(output_imports) != 1 or output_imports[0][1]:
     fail("the process output import must remain on the light crate-verification surface")

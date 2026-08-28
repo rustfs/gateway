@@ -15,12 +15,15 @@ autobenches = false
 [features]
 default = ["full"]
 full = [
-    "dep:http",
+    "operation",
     "dep:proc-macro2",
+    "dep:syn",
+]
+operation = [
+    "dep:http",
     "dep:rustfs-gateway",
     "dep:rustfs-gateway-conformance",
     "dep:rustfs-gateway-core",
-    "dep:syn",
     "ir-validation",
 ]
 ir-validation = ["dep:jsonschema"]

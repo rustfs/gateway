@@ -35,6 +35,8 @@ mod new_op;
 mod operation_spec_guard;
 #[cfg(feature = "full")]
 mod route;
+#[cfg(feature = "operation")]
+mod route_contract;
 #[cfg(feature = "full")]
 mod security_posture;
 #[cfg(feature = "full")]
@@ -94,7 +96,7 @@ fn dispatch(first: Option<String>, rest: Vec<String>) -> ExitCode {
     match first.as_deref() {
         Some("codegen") => codegen::codegen(&rest),
         Some("spec") if rest.first().map(String::as_str) == Some("verify") => codegen::verify(&rest[1..]),
-        Some("verify") if verify::is_crate_request(&rest) => verify::verify(&rest),
+        Some("verify") if verify::is_available_request(&rest) => verify::verify(&rest),
         _ => run_full(first, &rest),
     }
 }
