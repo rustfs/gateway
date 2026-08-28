@@ -15,9 +15,10 @@ Agent entry point for repository automation commands.
 | `src/mutate/tests.rs` | Verdict-order controls for the mutation classifier, including the two shapes of ledger row that certify nothing (`UNWITNESSED`) and the live-case control that keeps `SURVIVED` meaning a corpus gap. | A guard in front of `SURVIVED` changes. |
 | `src/new_op.rs` | Intentionally-red operation scaffold. | Scaffold contents or collision checks change. |
 | `src/route.rs` | Route explanation CLI rendering. | `route explain` output changes. |
+| `src/route_contract.rs` | Bounded operation-route witness shared with the route CLI. | `verify --op` pulls in the production server graph or selects the wrong route. |
 | `src/security_posture.rs` | Fail-closed dry-run preview derived from standard operation-floor sources. | The security-posture command or standard floor inventory changes. |
 | `src/sigsuite.rs` | Pinned external signing-suite fetch and run process boundary. | Official signing-suite checkout or invocation changes. |
-| `src/verify.rs` | Light crate verification and full operation/workspace verification selection; core compile-fail contracts stay in the full workspace gate. | A crate/op/all verification command is wrong. |
+| `src/verify.rs` | Bounded crate/operation verification and full workspace verification selection; core compile-fail contracts stay in the full workspace gate. | A crate/op/all verification command is wrong. |
 | `src/verify/process.rs` | Deadline-aware child supervision and output capture. | Verification children block, leak, or report out of order. |
 | `src/verify/selection.rs` | Crate-local Cargo test and Clippy target selection. | A crate's bounded verification scope is wrong or too slow. |
 | `src/verify/tests.rs` | Verification selection and scheduling unit contracts. | A bounded verification scope or schedule changes. |

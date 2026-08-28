@@ -48,7 +48,7 @@ dhat = { workspace = true }
 proptest = { workspace = true }
 
 [dependencies]
-rustfs-gateway = { workspace = true }
+rustfs-gateway = { workspace = true, features = ["server"] }
 
 # The two crates whose types appear in the signature of the facade's own entry point:
 # `S3Service::call_bytes(http::Request<bytes::Bytes>)`. A caller cannot name that call without

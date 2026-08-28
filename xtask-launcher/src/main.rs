@@ -25,6 +25,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const STARTED_ENV: &str = "RUSTFS_GATEWAY_XTASK_STARTED_UNIX_NANOS";
 const FULL_RUNNER: &[&str] = &["--features", "full"];
 const LIGHT_RUNNER: &[&str] = &["--no-default-features"];
+const OPERATION_RUNNER: &[&str] = &["--no-default-features", "--features", "operation"];
 
 fn crate_request_name(arguments: &[String]) -> Option<&str> {
     if arguments.first().map(String::as_str) != Some("verify") {
@@ -41,6 +42,11 @@ fn crate_request_name(arguments: &[String]) -> Option<&str> {
 }
 
 fn runner_for_request(arguments: &[String]) -> &'static [&'static str] {
+    if matches!(arguments, [command, flag, _] if command == "verify" && flag == "--op")
+        || matches!(arguments, [command, json, flag, _] if command == "verify" && json == "--json" && flag == "--op")
+    {
+        return OPERATION_RUNNER;
+    }
     match crate_request_name(arguments) {
         Some("rustfs-gateway" | "s3gate") | None => LIGHT_RUNNER,
         Some(_) => FULL_RUNNER,
@@ -76,7 +82,7 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{FULL_RUNNER, LIGHT_RUNNER, runner_for_request};
+    use super::{FULL_RUNNER, LIGHT_RUNNER, OPERATION_RUNNER, runner_for_request};
 
     #[test]
     fn the_facade_uses_the_light_runner_without_changing_other_selection() {
@@ -88,8 +94,8 @@ mod tests {
         }
         assert_eq!(runner_for_request(&strings(&["verify", "--crate", "core"])), FULL_RUNNER);
         assert_eq!(runner_for_request(&strings(&["codegen"])), LIGHT_RUNNER);
-        assert_eq!(runner_for_request(&strings(&["verify", "--op", "GetObject"])), LIGHT_RUNNER);
-        assert_eq!(runner_for_request(&strings(&["verify", "--json", "--op", "GetObject"])), LIGHT_RUNNER);
+        assert_eq!(runner_for_request(&strings(&["verify", "--op", "GetObject"])), OPERATION_RUNNER);
+        assert_eq!(runner_for_request(&strings(&["verify", "--json", "--op", "GetObject"])), OPERATION_RUNNER);
         assert_eq!(runner_for_request(&strings(&["verify", "--crate", "core", "extra"])), LIGHT_RUNNER);
     }
 }

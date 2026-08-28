@@ -87,6 +87,7 @@ pub mod close;
 pub mod commit;
 mod commit_task;
 mod config;
+#[cfg(feature = "server")]
 mod conn;
 mod dispatch;
 mod ext;
@@ -124,6 +125,7 @@ pub use crate::config::{
     DEFAULT_STANDARD_HANDLER_DEADLINE, HandlerDeadlineConfig, HandlerDeadlineConfigError, KEEPALIVE_INTERVALS_WITHOUT_PROGRESS,
     RequestBodyDeadlineConfig, ServiceConfig,
 };
+#[cfg(feature = "server")]
 pub use crate::conn::{SelfHeldHttp1Driver, SelfHeldRequestBody};
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,

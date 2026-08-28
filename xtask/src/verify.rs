@@ -33,15 +33,16 @@ use serde::Deserialize;
 use launcher::launcher_started;
 use selection::crate_steps;
 
-#[cfg(feature = "full")]
+#[cfg(feature = "operation")]
 use crate::{catalog, codegen};
 
 const GATEWAY_RSS_TEST: &str = "cors_runtime::a_million_unique_keys_keep_rss_within_the_entry_budget";
 
 #[cfg(not(feature = "full"))]
-pub(crate) fn is_crate_request(args: &[String]) -> bool {
+pub(crate) fn is_available_request(args: &[String]) -> bool {
     let (args, _) = take_json(args);
     matches!(args.as_slice(), [flag, _] if flag == "--crate")
+        || cfg!(feature = "operation") && matches!(args.as_slice(), [flag, _] if flag == "--op")
 }
 
 pub(crate) fn verify(args: &[String]) -> ExitCode {
@@ -56,6 +57,12 @@ pub(crate) fn verify(args: &[String]) -> ExitCode {
     }
     #[cfg(not(feature = "full"))]
     {
+        #[cfg(feature = "operation")]
+        if let [flag, name] = args.as_slice()
+            && flag == "--op"
+        {
+            return verify_operation(name, json);
+        }
         usage()
     }
 }
@@ -148,7 +155,7 @@ fn verify_full(args: &[String], json: bool) -> ExitCode {
     }
 }
 
-#[cfg(feature = "full")]
+#[cfg(feature = "operation")]
 fn verify_operation(name: &str, json: bool) -> ExitCode {
     let started = Instant::now();
     let operations = match catalog::operations() {
@@ -201,7 +208,7 @@ fn verify_operation(name: &str, json: bool) -> ExitCode {
     )
 }
 
-#[cfg(feature = "full")]
+#[cfg(feature = "operation")]
 fn run_representative_case(name: &str, cases: &[String], json: bool) -> Result<Option<String>, ExitCode> {
     for case in cases {
         let report = match rustfs_gateway_conformance::cli::run_filtered(case) {
@@ -233,12 +240,12 @@ fn run_representative_case(name: &str, cases: &[String], json: bool) -> Result<O
     ))
 }
 
-#[cfg(feature = "full")]
+#[cfg(feature = "operation")]
 fn run_operation_contract(name: &str, mapped_cases: &[String]) -> Result<(), String> {
     catalog::verify_operation_contract(name, mapped_cases)
 }
 
-#[cfg(feature = "full")]
+#[cfg(feature = "operation")]
 fn verify_scaffold(entry: &catalog::ScaffoldEntry, json: bool) -> ExitCode {
     let snake = snake_case(&entry.name);
     let output = Command::new(env!("CARGO"))
@@ -397,7 +404,7 @@ fn workspace_package_names() -> Result<Vec<String>, String> {
         .collect())
 }
 
-#[cfg(feature = "full")]
+#[cfg(feature = "operation")]
 fn snake_case(name: &str) -> String {
     let mut out = String::new();
     for (index, byte) in name.bytes().enumerate() {
@@ -436,7 +443,7 @@ fn conformance_test_step(case: &str) -> Vec<String> {
     ]
 }
 
-#[cfg(feature = "full")]
+#[cfg(feature = "operation")]
 fn run_steps(steps: &[Vec<String>], budget: Duration, subject: &str, rule: &str, options: RunOptions<'_>) -> ExitCode {
     run_step_batches(&[steps.to_vec()], budget, subject, rule, options)
 }
