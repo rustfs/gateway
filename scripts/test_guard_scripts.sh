@@ -16790,6 +16790,29 @@ PYEOF
 expect_fail check_sig_test_target_consolidation.sh \
     'a sig integration source loading the shared fixture as a second module' mut_sig_shared_fixture_loaded_twice
 
+mut_server_autotests_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/server/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("autotests = false\n", "autotests = true\n", 1))
+PYEOF
+}
+expect_fail check_server_test_target_consolidation.sh \
+    'restoring server implicit test discovery' mut_server_autotests_restored
+
+mut_server_registration_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/server/tests/integration.rs")
+text = path.read_text()
+text = text.replace('#[path = "lingering_close.rs"]\nmod lingering_close;\n', '', 1)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_server_test_target_consolidation.sh \
+    'an omitted server integration registration' mut_server_registration_omitted
+
 fi
 
 if [[ "$QUIRK_LEDGER_ONLY" == 1 ]]; then

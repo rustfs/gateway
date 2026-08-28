@@ -43,6 +43,7 @@ COVERED = {
     "crates/conformance": "check_test_target_consolidation.sh",
     "crates/core": "check_test_target_consolidation.sh",
     "crates/gateway": "check_test_target_consolidation.sh",
+    "crates/server": "check_server_test_target_consolidation.sh",
     "crates/sig": "check_sig_test_target_consolidation.sh",
     "xtask": "check_xtask_test_target_consolidation.sh",
 }
@@ -55,12 +56,6 @@ EXCEPTIONS = {
         "rustfs/gateway#277",
         "thirteen wire-layer suites; the largest single block of the remaining debt and the first "
         "crate phase 2 consolidates",
-    ),
-    "crates/server": (
-        6,
-        "rustfs/gateway#277",
-        "server_load.rs and lingering_close.rs are load-bearing timing evidence spoken for by "
-        "rustfs/gateway#274, so this crate is consolidated last",
     ),
     "crates/macros": (
         2,

@@ -195,9 +195,17 @@ async fn a_srv_0003_listener_options_are_read_back_from_the_socket() {
 #[tokio::test]
 async fn a_srv_0006_in_flight_request_drains_before_grace() {
     const EXPECTED_BODY_LEN: usize = 100 * 1024 * 1024;
-    let service = service_fn(|_request: Request<hyper::body::Incoming>| async {
-        tokio::time::sleep(Duration::from_millis(40)).await;
-        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(vec![b'x'; 100 * 1024 * 1024]))))
+    let handler_entered = Arc::new(Notify::new());
+    let service = service_fn({
+        let handler_entered = Arc::clone(&handler_entered);
+        move |_request: Request<hyper::body::Incoming>| {
+            let handler_entered = Arc::clone(&handler_entered);
+            async move {
+                handler_entered.notify_one();
+                tokio::time::sleep(Duration::from_millis(40)).await;
+                Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(vec![b'x'; 100 * 1024 * 1024]))))
+            }
+        }
     });
     let RunningServer {
         local_addr,
@@ -206,7 +214,9 @@ async fn a_srv_0006_in_flight_request_drains_before_grace() {
         ..
     } = Server::new(plaintext_config(), service).serve().expect("server starts");
     let client = tokio::spawn(get(local_addr));
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    tokio::time::timeout(Duration::from_secs(1), handler_entered.notified())
+        .await
+        .expect("the handler starts before shutdown");
     let report = shutdown.trigger(Duration::from_secs(2)).await;
     assert_eq!(report, ShutdownReport { drained: 1, aborted: 0 });
     let response = client.await.expect("client task completes");
