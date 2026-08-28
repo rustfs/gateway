@@ -43,6 +43,9 @@ tower = { workspace = true, features = ["util"] }
 tower-http = { workspace = true, features = ["catch-panic", "compression-gzip", "request-id", "trace"] }
 tracing = { workspace = true }
 
+[target.'cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))'.dependencies]
+nix = { workspace = true }
+
 [dev-dependencies]
 hyper = { workspace = true, features = ["client", "http2"] }
 rcgen = { workspace = true }

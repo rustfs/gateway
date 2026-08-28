@@ -33,6 +33,8 @@ mod io;
 pub mod layers;
 mod listener;
 mod request_capacity;
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+mod sendfile;
 mod shutdown;
 mod tls;
 

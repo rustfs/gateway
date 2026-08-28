@@ -14,9 +14,8 @@
 
 //! Live controls for the production self-held plaintext HTTP/1.1 driver.
 //!
-//! Responsible for: real-socket request parsing, body streaming, response framing and connection
-//! reuse controls. NOT responsible for: file-region kernel transfer, which has its own syscall
-//! evidence. Upstream: the gateway integration harness. Downstream: production cleartext assembly.
+//! Responsible for: socket request, response and reuse controls. NOT responsible for: file-region
+//! kernel transfer. Upstream: the integration harness. Downstream: production cleartext assembly.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -460,8 +459,9 @@ async fn production_driver_refuses_an_unsupported_expectation() {
 #[test]
 fn production_driver_refuses_tls_during_driver_validation() {
     let config = ServerConfig::default();
-    assert!(<SelfHeldHttp1Driver as ConnectionDriver<TestService>>::validate(&SelfHeldHttp1Driver, &config, true).is_err());
-    assert!(<SelfHeldHttp1Driver as ConnectionDriver<TestService>>::validate(&SelfHeldHttp1Driver, &config, false).is_ok());
+    let driver = SelfHeldHttp1Driver;
+    assert!(<SelfHeldHttp1Driver as ConnectionDriver<TestService>>::validate(&driver, &config, true).is_err());
+    assert!(<SelfHeldHttp1Driver as ConnectionDriver<TestService>>::validate(&driver, &config, false).is_ok());
 }
 
 /// Positive control: two requests already buffered together are dispatched in wire order.

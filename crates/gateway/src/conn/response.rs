@@ -21,17 +21,28 @@
 
 use std::io;
 use std::io::IoSlice;
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
+use std::io::SeekFrom;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use http::{HeaderMap, Method, Response, StatusCode, header};
 use http_body::{Body as HttpBody, SizeHint};
 use http_body_util::BodyExt;
-use rustfs_gateway_server::{ConnectionBody, ConnectionResponseBody};
+use rustfs_gateway_server::{ConnectionBody, ConnectionResponseBody, PlaintextConnection};
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
+use rustfs_gateway_stream::AdaptCost;
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
+use rustfs_gateway_stream::PayloadCaps;
 use rustfs_gateway_stream::{Body, Payload};
+#[cfg(unix)]
+use rustfs_gateway_stream::{NoZeroCopy, TransportCaps, VerificationObligation, ZeroCopyQuery};
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::MutexGuard;
 
+use super::metrics::{ResponseFallbackReason, ResponseTransportMetrics};
 use super::request::ConnectionIo;
 use crate::close::ConnectionIntent;
 
@@ -42,6 +53,7 @@ pub(super) async fn write_response(
     response: ManagedResponse,
     request_method: &Method,
     force_close: bool,
+    transport_metrics: Option<&ResponseTransportMetrics>,
 ) -> io::Result<bool> {
     let (mut parts, managed_body) = response.into_parts();
     let (response_body, completion) = managed_body.into_parts();
@@ -55,15 +67,12 @@ pub(super) async fn write_response(
         || header_has_token(&parts.headers, header::CONNECTION, "close");
     let size_hint = HttpBody::size_hint(&response_body);
     let response_body = response_body.into_result();
-    #[cfg(unix)]
-    if response_body
-        .as_ref()
-        .is_ok_and(|body| matches!(body.payload(), Payload::File(_)))
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+    if let Ok(body) = &response_body
+        && let Payload::File(region) = body.payload()
     {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "file-backed response requires the self-held kernel transfer backend",
-        ));
+        i64::try_from(region.end_offset())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "file region end exceeds sendfile range"))?;
     }
     let framing = prepare_headers(&mut parts.headers, parts.status, suppress_body, close, size_hint)?;
     let head = encode_head(parts.status, &parts.headers)?;
@@ -75,52 +84,213 @@ pub(super) async fn write_response(
     }
 
     match response_body {
-        Ok(body) => write_application_body(&mut io.stream, body, framing).await?,
-        Err(body) => write_body(&mut io.stream, body, framing).await?,
+        Ok(body) => write_application_body(&mut io.stream, body, framing, transport_metrics).await?,
+        Err(body) => {
+            record_fallback(transport_metrics, ResponseFallbackReason::NotFileBacked);
+            write_body(&mut io.stream, body, framing, transport_metrics).await?;
+        }
     }
     completion.complete();
     Ok(close)
 }
 
-async fn write_application_body<W>(writer: &mut W, body: Body, framing: ResponseFraming) -> io::Result<()>
+async fn write_application_body(
+    writer: &mut PlaintextConnection,
+    body: Body,
+    framing: ResponseFraming,
+    transport_metrics: Option<&ResponseTransportMetrics>,
+) -> io::Result<()> {
+    let metrics = Arc::clone(body.stream_metrics());
+    let payload = body.into_payload();
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+    {
+        let query = ZeroCopyQuery::new(TransportCaps::SENDFILE, VerificationObligation::None);
+        match payload.try_into_file_region_for(&query, &metrics) {
+            Ok(region) => return write_file_region(writer, region, framing, transport_metrics).await,
+            Err((payload, NoZeroCopy::NotFileBacked)) => {
+                record_fallback(transport_metrics, ResponseFallbackReason::NotFileBacked);
+                return write_non_file_payload(writer, payload, framing, metrics, transport_metrics).await;
+            }
+            Err((_, reason)) => Err(io::Error::other(reason)),
+        }
+    }
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
+    if payload.caps().contains(PayloadCaps::FILE_REGION) {
+        let query = ZeroCopyQuery::new(TransportCaps::empty(), VerificationObligation::None);
+        let (payload, reason) = match payload.try_into_file_region_for(&query, &metrics) {
+            Err(refusal) => refusal,
+            Ok(_) => return Err(io::Error::other("transport without kernel transfer accepted a file region")),
+        };
+        if reason != NoZeroCopy::TransportLacksSendfile {
+            return Err(io::Error::other(reason));
+        }
+        let Payload::File(region) = payload else {
+            return Err(io::Error::other("file capability did not contain a file region"));
+        };
+        metrics.record_adapt(&AdaptCost::Copy {
+            est_bytes: Some(region.len()),
+        });
+        record_fallback(transport_metrics, ResponseFallbackReason::PlatformUnsupported);
+        return write_file_region_fallback(writer, region, framing, transport_metrics).await;
+    }
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
+    {
+        record_fallback(transport_metrics, ResponseFallbackReason::NotFileBacked);
+        return write_non_file_payload(writer, payload, framing, metrics, transport_metrics).await;
+    }
+    #[cfg(not(unix))]
+    {
+        record_fallback(transport_metrics, ResponseFallbackReason::NotFileBacked);
+        write_non_file_payload(writer, payload, framing, metrics, transport_metrics).await
+    }
+}
+
+async fn write_non_file_payload<W>(
+    writer: &mut W,
+    payload: Payload,
+    framing: ResponseFraming,
+    stream_metrics: Arc<rustfs_gateway_stream::StreamMetrics>,
+    transport_metrics: Option<&ResponseTransportMetrics>,
+) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
-    let metrics = Arc::clone(body.stream_metrics());
-    match body.into_payload() {
-        Payload::Empty => write_memory_segments(writer, &[], framing).await,
-        Payload::Bytes(bytes) => write_memory_segments(writer, &[bytes], framing).await,
-        Payload::Vectored(segments) => write_memory_segments(writer, &segments, framing).await,
+    match payload {
+        Payload::Empty => write_memory_segments(writer, &[], framing, transport_metrics).await,
+        Payload::Bytes(bytes) => write_memory_segments(writer, &[bytes], framing, transport_metrics).await,
+        Payload::Vectored(segments) => write_memory_segments(writer, &segments, framing, transport_metrics).await,
         #[cfg(unix)]
-        Payload::File(_) => Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "file-backed response requires the self-held kernel transfer backend",
-        )),
+        Payload::File(_) => Err(io::Error::other("file capability was not negotiated before response writing")),
         Payload::Reader(reader) => {
-            write_body(writer, Body::from_payload_with_metrics(Payload::Reader(reader), metrics), framing).await
+            write_body(
+                writer,
+                Body::from_payload_with_metrics(Payload::Reader(reader), stream_metrics),
+                framing,
+                transport_metrics,
+            )
+            .await
         }
         Payload::Stream(stream) => {
-            write_body(writer, Body::from_payload_with_metrics(Payload::Stream(stream), metrics), framing).await
+            write_body(
+                writer,
+                Body::from_payload_with_metrics(Payload::Stream(stream), stream_metrics),
+                framing,
+                transport_metrics,
+            )
+            .await
         }
     }
 }
 
-async fn write_memory_segments<W>(writer: &mut W, segments: &[Bytes], framing: ResponseFraming) -> io::Result<()>
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+async fn write_file_region(
+    writer: &mut PlaintextConnection,
+    region: rustfs_gateway_stream::FileRegion,
+    framing: ResponseFraming,
+    transport_metrics: Option<&ResponseTransportMetrics>,
+) -> io::Result<()> {
+    let len = region.len();
+    match framing {
+        ResponseFraming::Suppressed => return Ok(()),
+        ResponseFraming::Fixed(expected) if expected != len => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "file region length contradicts response framing",
+            ));
+        }
+        ResponseFraming::Fixed(_) => {}
+        ResponseFraming::Chunked if len != 0 => {
+            let mut prefix_storage = [0_u8; 18];
+            let prefix = encode_chunk_prefix(len, &mut prefix_storage)?;
+            write_all_progress(writer, prefix).await?;
+        }
+        ResponseFraming::Chunked => {}
+    }
+    if len != 0 {
+        let mut sent = 0_u64;
+        while sent < len {
+            let written = writer.send_file_once(region.fd(), region.offset() + sent, len - sent).await?;
+            if written == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "file region ended before the declared response length",
+                ));
+            }
+            let written = u64::try_from(written).map_err(io::Error::other)?;
+            sent = sent
+                .checked_add(written)
+                .ok_or_else(|| io::Error::other("sendfile progress overflowed"))?;
+            if let Some(metrics) = transport_metrics {
+                metrics.record_kernel_progress(written);
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+    if matches!(framing, ResponseFraming::Chunked) {
+        if len != 0 {
+            write_all_progress(writer, b"\r\n").await?;
+        }
+        write_all_progress(writer, b"0\r\n\r\n").await?;
+    }
+    Ok(())
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))))]
+async fn write_file_region_fallback(
+    writer: &mut PlaintextConnection,
+    region: rustfs_gateway_stream::FileRegion,
+    framing: ResponseFraming,
+    transport_metrics: Option<&ResponseTransportMetrics>,
+) -> io::Result<()> {
+    let offset = region.offset();
+    let len = region.len();
+    let mut remaining = len;
+    let mut file = tokio::fs::File::from_std(std::fs::File::from(region.into_fd()));
+    file.seek(SeekFrom::Start(offset)).await?;
+    let mut buffer = vec![0_u8; 64 * 1024];
+    while remaining != 0 {
+        let wanted = usize::try_from(remaining.min(buffer.len() as u64)).map_err(io::Error::other)?;
+        let read = file.read(&mut buffer[..wanted]).await?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "file region ended before the declared response length",
+            ));
+        }
+        match framing {
+            ResponseFraming::Suppressed => return Ok(()),
+            ResponseFraming::Fixed(_) => write_all_payload_progress(writer, &buffer[..read], transport_metrics).await?,
+            ResponseFraming::Chunked => write_chunk(writer, &buffer[..read], transport_metrics).await?,
+        }
+        remaining -= u64::try_from(read).map_err(io::Error::other)?;
+    }
+    if matches!(framing, ResponseFraming::Chunked) {
+        write_all_progress(writer, b"0\r\n\r\n").await?;
+    }
+    Ok(())
+}
+
+async fn write_memory_segments<W>(
+    writer: &mut W,
+    segments: &[Bytes],
+    framing: ResponseFraming,
+    transport_metrics: Option<&ResponseTransportMetrics>,
+) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
+    let length = segments.iter().try_fold(0_u64, |total, segment| {
+        total
+            .checked_add(u64::try_from(segment.len()).map_err(io::Error::other)?)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "response body length overflows"))
+    })?;
     match framing {
-        ResponseFraming::Suppressed => Ok(()),
+        ResponseFraming::Suppressed => return Ok(()),
         ResponseFraming::Fixed(_) => {
             let mut slices: Vec<IoSlice<'_>> = segments.iter().map(|segment| IoSlice::new(segment)).collect();
-            write_all_vectored_progress(writer, &mut slices).await
+            write_all_vectored_payload_progress(writer, &mut slices, 0, length, transport_metrics).await?;
         }
         ResponseFraming::Chunked => {
-            let length = segments.iter().try_fold(0_usize, |total, segment| {
-                total
-                    .checked_add(segment.len())
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "response body length overflows"))
-            })?;
             if length != 0 {
                 let mut prefix_storage = [0_u8; 18];
                 let prefix = encode_chunk_prefix(length, &mut prefix_storage)?;
@@ -128,11 +298,19 @@ where
                 slices.push(IoSlice::new(prefix));
                 slices.extend(segments.iter().map(|segment| IoSlice::new(segment)));
                 slices.push(IoSlice::new(b"\r\n"));
-                write_all_vectored_progress(writer, &mut slices).await?;
+                write_all_vectored_payload_progress(
+                    writer,
+                    &mut slices,
+                    u64::try_from(prefix.len()).map_err(io::Error::other)?,
+                    length,
+                    transport_metrics,
+                )
+                .await?;
             }
-            write_all_progress(writer, b"0\r\n\r\n").await
+            write_all_progress(writer, b"0\r\n\r\n").await?;
         }
     }
+    Ok(())
 }
 
 fn prepare_headers(
@@ -218,7 +396,12 @@ fn encode_head(status: StatusCode, headers: &HeaderMap) -> io::Result<Bytes> {
     Ok(encoded.freeze())
 }
 
-async fn write_body<W, B>(writer: &mut W, mut body: B, framing: ResponseFraming) -> io::Result<()>
+async fn write_body<W, B>(
+    writer: &mut W,
+    mut body: B,
+    framing: ResponseFraming,
+    transport_metrics: Option<&ResponseTransportMetrics>,
+) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
     B: HttpBody<Data = Bytes> + Unpin,
@@ -242,10 +425,10 @@ where
                     if data_len > *left {
                         return Err(io::Error::new(io::ErrorKind::InvalidData, "response body exceeds Content-Length"));
                     }
-                    write_all_progress(writer, &data).await?;
+                    write_all_payload_progress(writer, &data, transport_metrics).await?;
                     *left -= data_len;
                 } else {
-                    write_chunk(writer, &data).await?;
+                    write_chunk(writer, &data, transport_metrics).await?;
                 }
             }
             Err(frame) => {
@@ -276,17 +459,24 @@ where
     Ok(())
 }
 
-async fn write_chunk<W>(writer: &mut W, data: &[u8]) -> io::Result<()>
+async fn write_chunk<W>(writer: &mut W, data: &[u8], transport_metrics: Option<&ResponseTransportMetrics>) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
     let mut prefix_storage = [0_u8; 18];
-    let prefix = encode_chunk_prefix(data.len(), &mut prefix_storage)?;
+    let prefix = encode_chunk_prefix(u64::try_from(data.len()).map_err(io::Error::other)?, &mut prefix_storage)?;
     let mut slices = [IoSlice::new(prefix), IoSlice::new(data), IoSlice::new(b"\r\n")];
-    write_all_vectored_progress(writer, &mut slices).await
+    write_all_vectored_payload_progress(
+        writer,
+        &mut slices,
+        u64::try_from(prefix.len()).map_err(io::Error::other)?,
+        u64::try_from(data.len()).map_err(io::Error::other)?,
+        transport_metrics,
+    )
+    .await
 }
 
-fn encode_chunk_prefix(length: usize, output: &mut [u8; 18]) -> io::Result<&[u8]> {
+fn encode_chunk_prefix(length: u64, output: &mut [u8; 18]) -> io::Result<&[u8]> {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut value = length;
     let mut cursor: usize = 16;
@@ -295,7 +485,7 @@ fn encode_chunk_prefix(length: usize, output: &mut [u8; 18]) -> io::Result<&[u8]
             .checked_sub(1)
             .ok_or_else(|| io::Error::other("chunk size exceeds encoder capacity"))?;
         let digit = HEX
-            .get(value & 0x0f)
+            .get(usize::try_from(value & 0x0f).map_err(io::Error::other)?)
             .copied()
             .ok_or_else(|| io::Error::other("chunk size produced an invalid hexadecimal digit"))?;
         let slot = output
@@ -355,19 +545,75 @@ where
     Ok(())
 }
 
-async fn write_all_vectored_progress<W>(writer: &mut W, buffers: &mut [IoSlice<'_>]) -> io::Result<()>
+async fn write_all_payload_progress<W>(
+    writer: &mut W,
+    mut bytes: &[u8],
+    transport_metrics: Option<&ResponseTransportMetrics>,
+) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
+    while !bytes.is_empty() {
+        let written = writer.write(bytes).await?;
+        if written == 0 {
+            return Err(io::Error::new(io::ErrorKind::WriteZero, "HTTP/1.1 response socket wrote zero bytes"));
+        }
+        record_copied_progress(transport_metrics, written)?;
+        bytes = bytes
+            .get(written..)
+            .ok_or_else(|| io::Error::other("socket reported impossible write progress"))?;
+    }
+    Ok(())
+}
+
+async fn write_all_vectored_payload_progress<W>(
+    writer: &mut W,
+    buffers: &mut [IoSlice<'_>],
+    payload_start: u64,
+    payload_len: u64,
+    transport_metrics: Option<&ResponseTransportMetrics>,
+) -> io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    let payload_end = payload_start
+        .checked_add(payload_len)
+        .ok_or_else(|| io::Error::other("payload byte range overflowed"))?;
+    let mut progress = 0_u64;
     let mut remaining = buffers;
     while !remaining.is_empty() {
         let written = writer.write_vectored(remaining).await?;
         if written == 0 {
             return Err(io::Error::new(io::ErrorKind::WriteZero, "HTTP/1.1 response socket wrote zero bytes"));
         }
+        let next = progress
+            .checked_add(u64::try_from(written).map_err(io::Error::other)?)
+            .ok_or_else(|| io::Error::other("response write progress overflowed"))?;
+        let copied = next.min(payload_end).saturating_sub(progress.max(payload_start));
+        if copied != 0 {
+            record_copied_progress_u64(transport_metrics, copied);
+        }
+        progress = next;
         IoSlice::advance_slices(&mut remaining, written);
     }
     Ok(())
+}
+
+fn record_fallback(metrics: Option<&ResponseTransportMetrics>, reason: ResponseFallbackReason) {
+    if let Some(metrics) = metrics {
+        metrics.record_fallback(reason);
+    }
+}
+
+fn record_copied_progress(metrics: Option<&ResponseTransportMetrics>, written: usize) -> io::Result<()> {
+    record_copied_progress_u64(metrics, u64::try_from(written).map_err(io::Error::other)?);
+    Ok(())
+}
+
+fn record_copied_progress_u64(metrics: Option<&ResponseTransportMetrics>, written: u64) {
+    if let Some(metrics) = metrics {
+        metrics.record_copied_progress(written);
+    }
 }
 
 fn parse_content_length(value: &http::HeaderValue) -> io::Result<u64> {
@@ -424,6 +670,29 @@ mod tests {
         first_vectored_slices: Option<usize>,
     }
 
+    struct PartialThenErrorWriter {
+        first: bool,
+    }
+
+    impl AsyncWrite for PartialThenErrorWriter {
+        fn poll_write(mut self: Pin<&mut Self>, _context: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
+            if self.first {
+                self.first = false;
+                Poll::Ready(Ok(bytes.len().min(2)))
+            } else {
+                Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "fixture peer reset")))
+            }
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
     impl AsyncWrite for ObservedWriter {
         fn poll_write(mut self: Pin<&mut Self>, _context: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
             self.scalar_calls += 1;
@@ -468,7 +737,7 @@ mod tests {
             Bytes::from_static(b"ef"),
         ];
         assert!(
-            write_memory_segments(&mut writer, &segments, ResponseFraming::Fixed(6))
+            write_memory_segments(&mut writer, &segments, ResponseFraming::Fixed(6), None)
                 .await
                 .is_ok(),
             "observed writer accepts the payload"
@@ -482,10 +751,29 @@ mod tests {
     #[tokio::test]
     async fn chunk_prefix_data_and_delimiter_share_one_vectored_write() {
         let mut writer = ObservedWriter::default();
-        assert!(write_chunk(&mut writer, b"hello").await.is_ok(), "observed writer accepts the chunk");
+        assert!(
+            write_chunk(&mut writer, b"hello", None).await.is_ok(),
+            "observed writer accepts the chunk"
+        );
         assert_eq!(writer.vectored_calls, 1);
         assert_eq!(writer.scalar_calls, 0);
         assert_eq!(writer.first_vectored_slices, Some(3));
         assert_eq!(writer.bytes, b"5\r\nhello\r\n");
+    }
+
+    #[test]
+    fn chunk_prefix_encodes_the_entire_protocol_length_range() {
+        let mut storage = [0_u8; 18];
+        assert_eq!(encode_chunk_prefix(u64::MAX, &mut storage).ok(), Some(&b"FFFFFFFFFFFFFFFF\r\n"[..]));
+    }
+
+    #[tokio::test]
+    async fn copied_payload_progress_survives_a_later_socket_error() {
+        let mut writer = PartialThenErrorWriter { first: true };
+        let metrics = ResponseTransportMetrics::new();
+        let result =
+            write_memory_segments(&mut writer, &[Bytes::from_static(b"four")], ResponseFraming::Fixed(4), Some(&metrics)).await;
+        assert_eq!(result.as_ref().err().map(io::Error::kind), Some(io::ErrorKind::BrokenPipe));
+        assert_eq!(metrics.copied_payload_bytes(), 2);
     }
 }

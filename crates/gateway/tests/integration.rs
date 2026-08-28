@@ -54,6 +54,8 @@ mod custom_signature_verifier;
 mod error_context_filters;
 #[path = "facade_probe.rs"]
 mod facade_probe;
+#[path = "file_transfer.rs"]
+mod file_transfer;
 #[path = "governor_runtime.rs"]
 mod governor_runtime;
 #[path = "governor_streaming.rs"]

@@ -22,13 +22,19 @@
 //! Upstream: a plaintext or TLS stream. Downstream: Hyper's Tokio adapter.
 
 use std::io;
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+use std::os::fd::BorrowedFd;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+use tokio::io::Interest;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+use tokio::net::TcpStream;
 use tokio::time::{Instant, Sleep, sleep};
 
 /// How long the drain waits for the *next* block once it has started reading.
@@ -189,6 +195,13 @@ impl<I> ProgressIo<I> {
         self.write_waiting = false;
     }
 
+    fn record_write_progress(&mut self, written: usize) {
+        if written > 0 {
+            self.reset_idle();
+            self.reset_write();
+        }
+    }
+
     fn check_idle(&mut self, context: &mut Context<'_>) -> io::Result<()> {
         if !self.request_seen.load(Ordering::Acquire) {
             let deadline = self.idle_sleep.as_mut().poll(context);
@@ -227,6 +240,58 @@ impl<I> ProgressIo<I> {
             Err(io::Error::new(io::ErrorKind::TimedOut, "response write made no progress"))
         } else {
             Ok(())
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+fn writable_repoll_needs_retry<T>(poll: Poll<io::Result<T>>) -> io::Result<bool> {
+    match poll {
+        Poll::Ready(Ok(_)) => Ok(true),
+        Poll::Pending => Ok(false),
+        Poll::Ready(Err(error)) => Err(error),
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+impl ProgressIo<TcpStream> {
+    pub(crate) fn poll_send_file(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        file: BorrowedFd<'_>,
+        offset: u64,
+        count: usize,
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        match this.inner.poll_write_ready(context) {
+            Poll::Pending => {
+                this.mark_write_pending(context)?;
+                return Poll::Pending;
+            }
+            Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+            Poll::Ready(Ok(_)) => {}
+        }
+        match this
+            .inner
+            .try_io(Interest::WRITABLE, || crate::sendfile::send_file(&this.inner, file, offset, count))
+        {
+            Ok(written) => {
+                this.record_write_progress(written);
+                Poll::Ready(Ok(written))
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if writable_repoll_needs_retry(this.inner.poll_write_ready(context))? {
+                    context.waker().wake_by_ref();
+                }
+                this.mark_write_pending(context)?;
+                Poll::Pending
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                this.mark_write_pending(context)?;
+                context.waker().wake_by_ref();
+                Poll::Pending
+            }
+            Err(error) => Poll::Ready(Err(error)),
         }
     }
 }
@@ -316,10 +381,7 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
         let this = self.get_mut();
         match Pin::new(&mut this.inner).poll_write(context, bytes) {
             Poll::Ready(Ok(written)) => {
-                if written > 0 {
-                    this.reset_idle();
-                    this.reset_write();
-                }
+                this.record_write_progress(written);
                 Poll::Ready(Ok(written))
             }
             Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
@@ -518,5 +580,18 @@ mod tests {
             .expect("every sub-interval write makes progress");
         assert_eq!(written.load(Ordering::Relaxed), BODY_LEN);
         assert!(started.elapsed() >= Duration::from_millis(900));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+    #[test]
+    fn writable_readiness_seen_after_would_block_requires_an_immediate_retry() {
+        assert!(writable_repoll_needs_retry(Poll::Ready(Ok(()))).expect("ready state is valid"));
+        assert!(!writable_repoll_needs_retry::<()>(Poll::Pending).expect("pending state is valid"));
+        let error = writable_repoll_needs_retry::<()>(Poll::Ready(Err(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "fixture readiness error",
+        ))))
+        .expect_err("readiness errors remain errors");
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
     }
 }

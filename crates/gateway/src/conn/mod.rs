@@ -20,6 +20,7 @@
 //! Upstream: the generic server's accepted-connection seam.
 //! Downstream: the common gateway service.
 
+mod metrics;
 mod request;
 mod response;
 
@@ -36,6 +37,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tower::Service;
 
+pub use metrics::{ResponseFallbackReason, ResponseTransportMetrics};
 pub use request::SelfHeldRequestBody;
 use request::{ConnectionIo, Expectation, HeaderTimeout, read_request};
 use response::{write_bad_request, write_continue, write_expectation_failed, write_response};
@@ -47,6 +49,28 @@ use response::{write_bad_request, write_continue, write_expectation_failed, writ
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SelfHeldHttp1Driver;
 
+impl SelfHeldHttp1Driver {
+    /// Builds a driver whose transport observations are recorded into `metrics`.
+    #[must_use]
+    pub fn with_metrics(metrics: Arc<ResponseTransportMetrics>) -> MeasuredSelfHeldHttp1Driver {
+        MeasuredSelfHeldHttp1Driver { metrics }
+    }
+}
+
+/// Self-held plaintext HTTP/1.1 driver with a caller-owned observation handle.
+#[derive(Clone, Debug)]
+pub struct MeasuredSelfHeldHttp1Driver {
+    metrics: Arc<ResponseTransportMetrics>,
+}
+
+impl MeasuredSelfHeldHttp1Driver {
+    /// The transport observations shared by every connection driven by this value.
+    #[must_use]
+    pub fn metrics(&self) -> &Arc<ResponseTransportMetrics> {
+        &self.metrics
+    }
+}
+
 impl<S> ConnectionDriver<S> for SelfHeldHttp1Driver
 where
     S: Service<Request<SelfHeldRequestBody>, Response = Response<Body>> + Clone + Send + 'static,
@@ -54,19 +78,38 @@ where
     S::Error: Into<ConnectionError> + Send + 'static,
 {
     fn validate(&self, _config: &ServerConfig, tls_configured: bool) -> Result<(), DriverValidationError> {
-        if tls_configured {
-            Err(Box::new(PlaintextTakeoverError))
-        } else {
-            Ok(())
-        }
+        validate_plaintext(tls_configured)
     }
 
     fn drive(&self, accepted: AcceptedConnection<S>) -> ConnectionFuture {
-        Box::pin(run(accepted))
+        Box::pin(run(accepted, None))
     }
 }
 
-async fn run<S>(accepted: AcceptedConnection<S>)
+impl<S> ConnectionDriver<S> for MeasuredSelfHeldHttp1Driver
+where
+    S: Service<Request<SelfHeldRequestBody>, Response = Response<Body>> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Into<ConnectionError> + Send + 'static,
+{
+    fn validate(&self, _config: &ServerConfig, tls_configured: bool) -> Result<(), DriverValidationError> {
+        validate_plaintext(tls_configured)
+    }
+
+    fn drive(&self, accepted: AcceptedConnection<S>) -> ConnectionFuture {
+        Box::pin(run(accepted, Some(Arc::clone(&self.metrics))))
+    }
+}
+
+fn validate_plaintext(tls_configured: bool) -> Result<(), DriverValidationError> {
+    if tls_configured {
+        Err(Box::new(PlaintextTakeoverError))
+    } else {
+        Ok(())
+    }
+}
+
+async fn run<S>(accepted: AcceptedConnection<S>, transport_metrics: Option<Arc<ResponseTransportMetrics>>)
 where
     S: Service<Request<SelfHeldRequestBody>, Response = Response<Body>> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -78,6 +121,9 @@ where
     let Ok((stream, mut service)) = accepted.into_plaintext() else {
         return;
     };
+    if let Some(metrics) = &transport_metrics {
+        metrics.record_selected_connection();
+    }
     let io = Arc::new(Mutex::new(ConnectionIo::new(stream)));
     let mut first_request = true;
 
@@ -139,7 +185,7 @@ where
         if !locked.body_complete() {
             force_close = true;
         }
-        match write_response(locked, response, &method, force_close).await {
+        match write_response(locked, response, &method, force_close, transport_metrics.as_deref()).await {
             Ok(true) | Err(_) => {
                 close_socket(&io).await;
                 return;
