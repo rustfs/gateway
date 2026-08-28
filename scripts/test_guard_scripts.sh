@@ -1663,26 +1663,27 @@ expect_fail check_xtask_codegen_surface.sh \
     'non-facade crate verification rebuilding the light runner after the workspace gate' \
     mut_xtask_crate_runner_returns_to_light_graph
 
-mut_xtask_operation_runner_returns_to_light_graph() {
+mut_xtask_operation_runner_bypasses_light_exec() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
 path = Path("xtask-launcher/src/main.rs")
 text = path.read_text()
-old = '''    if operation_request_name(arguments).is_some() {
+old = '''fn runner_for_request(arguments: &[String]) -> &'static [&'static str] {
+    match crate_request_name(arguments) {'''
+new = '''fn runner_for_request(arguments: &[String]) -> &'static [&'static str] {
+    if arguments.iter().any(|argument| argument == "--op") {
         return FULL_RUNNER;
-    }'''
-new = '''    if operation_request_name(arguments).is_some() {
-        return LIGHT_RUNNER;
-    }'''
+    }
+    match crate_request_name(arguments) {'''
 if text.count(old) != 1:
     raise SystemExit("the operation runner selection is not unique")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'operation verification rebuilding the light runner inside its thirty-second budget' \
-    mut_xtask_operation_runner_returns_to_light_graph
+    'operation verification bypassing the light-to-full exec handoff' \
+    mut_xtask_operation_runner_bypasses_light_exec
 
 mut_xtask_facade_runner_returns_to_full_graph() {
     perl -0pi -e 's/Some\("rustfs-gateway" \| "s3gate"\) \| None => LIGHT_RUNNER,/None => LIGHT_RUNNER,/' \
@@ -14517,15 +14518,12 @@ mut_ci_time_feedback_timeout_removed() {
 expect_fail check_ci_time_gate.sh \
     'a non-required pull-request job becoming unbounded' mut_ci_time_feedback_timeout_removed
 
-mut_ci_time_feedback_prebuild_cools_full_graph() {
-    replace_ci_text '          cargo build -p rustfs-gateway-conformance --bin rustfs-gateway-conformance
-          cargo test -p xtask --bin xtask --no-run
-          cargo build -p xtask' '          cargo build -p xtask
-          cargo test -p xtask --bin xtask --no-run
-          cargo build -p rustfs-gateway-conformance --bin rustfs-gateway-conformance'
+mut_ci_time_feedback_prebuild_drops_light_runner() {
+    replace_ci_text '          cargo build -p xtask --no-default-features
+' ''
 }
 expect_fail check_ci_time_gate.sh \
-    'operation verification cooling the full xtask graph after prebuild' mut_ci_time_feedback_prebuild_cools_full_graph
+    'operation verification dropping the exact light runner prebuild' mut_ci_time_feedback_prebuild_drops_light_runner
 
 mut_ci_time_msrv_timeout_removed() {
     replace_ci_text '  msrv:

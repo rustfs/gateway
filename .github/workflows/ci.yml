@@ -267,7 +267,9 @@ jobs:
         run: |
           cargo build -p rustfs-gateway-conformance --bin rustfs-gateway-conformance
           cargo test -p xtask --bin xtask --no-run
-          cargo build -p xtask
+          cargo build -p xtask --no-default-features
+          cargo build -p xtask-launcher
+          cargo build -p xtask --features full
       - name: Three operation samples (maximum 30 seconds each)
         run: |
           timeout 30s cargo xtask verify --op GetObject

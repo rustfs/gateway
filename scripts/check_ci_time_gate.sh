@@ -96,10 +96,12 @@ feedback_prebuild = feedback_steps.find { |step| step["name"] == "Prebuild opera
 expected_feedback_prebuild = <<~SHELL
   cargo build -p rustfs-gateway-conformance --bin rustfs-gateway-conformance
   cargo test -p xtask --bin xtask --no-run
-  cargo build -p xtask
+  cargo build -p xtask --no-default-features
+  cargo build -p xtask-launcher
+  cargo build -p xtask --features full
 SHELL
 require_equal(feedback_prebuild&.fetch("run", nil), expected_feedback_prebuild,
-              "operation verification must leave the full xtask feature graph warm")
+              "operation verification must prebuild every exact runner and leave the full xtask feature graph warm")
 
 static_steps = jobs.fetch("static").fetch("steps")
 require_equal(static_steps.first(3).map(&:keys), [["uses", "with"], ["uses", "with"], ["run"]],

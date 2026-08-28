@@ -40,24 +40,7 @@ fn crate_request_name(arguments: &[String]) -> Option<&str> {
     }
 }
 
-fn operation_request_name(arguments: &[String]) -> Option<&str> {
-    if arguments.first().map(String::as_str) != Some("verify") {
-        return None;
-    }
-    let mut verify_arguments = arguments[1..]
-        .iter()
-        .map(String::as_str)
-        .filter(|argument| *argument != "--json");
-    match (verify_arguments.next(), verify_arguments.next(), verify_arguments.next()) {
-        (Some("--op"), Some(name), None) => Some(name),
-        _ => None,
-    }
-}
-
 fn runner_for_request(arguments: &[String]) -> &'static [&'static str] {
-    if operation_request_name(arguments).is_some() {
-        return FULL_RUNNER;
-    }
     match crate_request_name(arguments) {
         Some("rustfs-gateway" | "s3gate") | None => LIGHT_RUNNER,
         Some(_) => FULL_RUNNER,
@@ -105,8 +88,8 @@ mod tests {
         }
         assert_eq!(runner_for_request(&strings(&["verify", "--crate", "core"])), FULL_RUNNER);
         assert_eq!(runner_for_request(&strings(&["codegen"])), LIGHT_RUNNER);
-        assert_eq!(runner_for_request(&strings(&["verify", "--op", "GetObject"])), FULL_RUNNER);
-        assert_eq!(runner_for_request(&strings(&["verify", "--json", "--op", "GetObject"])), FULL_RUNNER);
+        assert_eq!(runner_for_request(&strings(&["verify", "--op", "GetObject"])), LIGHT_RUNNER);
+        assert_eq!(runner_for_request(&strings(&["verify", "--json", "--op", "GetObject"])), LIGHT_RUNNER);
         assert_eq!(runner_for_request(&strings(&["verify", "--crate", "core", "extra"])), LIGHT_RUNNER);
     }
 }
