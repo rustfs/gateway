@@ -202,7 +202,7 @@ the cheapest way to make a suite green.
 See [`cases/README.md`](cases/README.md) for the procedure. To check the corpus:
 
 ```bash
-cargo xtask conformance validate          # schema + naming + golden references
+cargo xtask conformance validate          # schema + naming + golden references; executes nothing
 cargo xtask conformance run --filter 'etag/'
 ```
 

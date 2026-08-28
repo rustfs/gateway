@@ -109,6 +109,7 @@ pub fn run(corpus: &Corpus, sut: &mut dyn Sut, options: &RunOptions) -> Report {
         filtered_out,
         notes,
         polarity: lint::polarity_balance(corpus),
+        validate_only: options.validate_only,
     }
 }
 
@@ -148,8 +149,13 @@ fn run_case(
         };
         return outcome;
     }
+    // `Verdict::Validated`, never `Verdict::Passed`. Nothing below this line ran, so the case has
+    // no observation to have been judged against: recording the verdict an executed case gets is
+    // reporting an intention as an observation, and it made four separate mutations of a new case
+    // — a wrong status, a wrong error code, a required header flipped, a header moved to
+    // `headers_absent` — all read green through `conformance validate --filter '<case-id>'`.
     if options.validate_only {
-        outcome.verdict = Verdict::Passed;
+        outcome.verdict = Verdict::Validated;
         outcome.phase = Phase::Convention;
         return outcome;
     }

@@ -52,7 +52,8 @@ usage: rustfs-gateway-conformance <command> [options]
 commands:
   run                       load the corpus and run it against a target
   validate                  load the corpus and check it against the frozen schema and the
-                            conventions, without touching a target
+                            conventions, without touching a target; every case it accepts is
+                            reported `validated`, never `passed`, because nothing was executed
   baseline                  print a baseline document for the current results
   audit-keys                run the corpus, then check that every key the frozen schema declares
                             is one this harness actually reads
@@ -205,6 +206,17 @@ fn status(report: &Report, baseline: Option<&Baseline>, command: Command) -> u8 
     if regressions > 0 {
         return exit::REGRESSION;
     }
+    // A selector that named no case is an environment problem for every command, `validate`
+    // included. `--filter '<case-id>'` is how the feedback-loop table selects one case, so a typo
+    // in the id checked nothing and exited 0 — the same shape as a command that checked something.
+    if report.outcomes.is_empty() {
+        eprintln!(
+            "conformance: no case was selected — {} case(s) were excluded. \
+             Nothing was checked, so this run asserts nothing.",
+            report.filtered_out
+        );
+        return exit::ENVIRONMENT;
+    }
     // A run in which nothing executed is an environment problem, not a pass. Reporting it as
     // success is how a suite quietly stops asserting anything.
     if command == Command::Run
@@ -330,23 +342,108 @@ mod tests {
         list.iter().map(|item| (*item).to_owned()).collect()
     }
 
-    fn assert_feedback_case(case: &str) {
-        assert_eq!(main(&args(&["validate", "--filter", case])), ExitCode::SUCCESS);
+    /// The feedback-loop evidence for one crate, and it must be an execution.
+    ///
+    /// This used to invoke `validate`, which reaches the corpus checks and stops. `xtask verify
+    /// --crate` prints the result as "{crate} conformance case {id}", so the one command AGENTS.md
+    /// sends an agent to after a crate change named a case no target had answered. Switching to
+    /// `run` turned two of the three red at once: `c-sig-0001` asserts a closed connection, which
+    /// only the socket transport can observe, and `c-chunked-0001` executes on neither transport
+    /// because streaming-trailer signing is not wired — it is skipped with its reason on both, so
+    /// it is no longer this crate's evidence.
+    ///
+    /// Exit 0 is sufficient evidence on its own: an all-skipped run exits `ENVIRONMENT`, a filter
+    /// naming no case exits `ENVIRONMENT`, and a failed assertion exits `REGRESSION`.
+    fn assert_feedback_case(case: &str, transport: &str) {
+        assert_eq!(
+            main(&args(&["run", "--transport", transport, "--filter", case])),
+            ExitCode::SUCCESS,
+            "{case} is a crate's feedback evidence and did not execute green over {transport}"
+        );
     }
 
     #[test]
     fn feedback_case_c_sig_0001() {
-        assert_feedback_case("c-sig-0001");
+        assert_feedback_case("c-sig-0001", "conn");
     }
 
     #[test]
-    fn feedback_case_c_chunked_0001() {
-        assert_feedback_case("c-chunked-0001");
+    fn feedback_case_c_checksum_0001() {
+        assert_feedback_case("c-checksum-0001", "hyper");
     }
 
     #[test]
     fn feedback_case_c_object_0001() {
-        assert_feedback_case("c-object-0001");
+        assert_feedback_case("c-object-0001", "hyper");
+    }
+
+    /// One set of options, so the two commands are compared on the same case and the same target.
+    fn one_case(command: Command) -> Options {
+        Options {
+            command,
+            filter: Some("c-object-0001".to_owned()),
+            transport: Transport::Hyper,
+            profile: Profile::Aws,
+            root: None,
+            endpoint: None,
+            baseline: None,
+            json: None,
+            junit: None,
+            exclude_slow: false,
+        }
+    }
+
+    /// Negative — `validate` stays green on a case a target answered wrongly, and `run` does not.
+    ///
+    /// rustfs/gateway#245 asked for exactly this assertion: a case that is red under `run` must not
+    /// produce a success under the documented single-case workflow, "otherwise the fix is itself
+    /// unfalsifiable". Both halves run against one target that answers `c-object-0001` with a 500
+    /// and the wrong body, so the difference between the two exit codes is the difference between
+    /// the two commands and not between two cases.
+    ///
+    /// This is the reason the feedback-loop table in `AGENTS.md` now names `run`: no wording change
+    /// to `validate`'s report can make it detect a wrong assertion, because it evaluates none.
+    #[test]
+    fn validate_stays_green_on_a_case_run_finds_red_which_is_why_the_table_names_run() {
+        let wrong = crate::observation::Observation::response(
+            500,
+            vec![("content-type".to_owned(), "application/xml".to_owned())],
+            b"<Error><Code>InternalError</Code></Error>".to_vec(),
+        );
+        let mut under_run = crate::sut::Scripted::new().with("c-object-0001", 0, wrong.clone());
+        assert_eq!(
+            execute(&one_case(Command::Run), &mut under_run),
+            ExitCode::from(exit::REGRESSION),
+            "the documented command did not go red on a case whose target answered wrongly"
+        );
+        let mut under_validate = crate::sut::Scripted::new().with("c-object-0001", 0, wrong);
+        assert_eq!(
+            execute(&one_case(Command::Validate), &mut under_validate),
+            ExitCode::SUCCESS,
+            "validate is a corpus check and this case is internally consistent"
+        );
+        assert!(
+            under_validate.seen.is_empty(),
+            "validate handed a request to the target: {:?}",
+            under_validate.seen
+        );
+    }
+
+    /// Negative — a filter that names no case must not exit green.
+    ///
+    /// `--filter '<case-id>'` is how the feedback-loop table selects one case. A typo in the id
+    /// selected nothing, printed `conformance: 0 cases`, and exited 0 — a command that cannot
+    /// fail, reported in the same shape as one that checked something.
+    #[test]
+    fn a_filter_that_selects_no_case_is_an_environment_failure_not_a_pass() {
+        assert_eq!(
+            main(&args(&["validate", "--filter", "c-no-such-case-9999"])),
+            ExitCode::from(exit::ENVIRONMENT)
+        );
+        assert_eq!(
+            main(&args(&["run", "--filter", "c-no-such-case-9999"])),
+            ExitCode::from(exit::ENVIRONMENT)
+        );
     }
 
     #[test]
@@ -431,6 +528,7 @@ mod tests {
             filtered_out: 0,
             notes: Vec::new(),
             polarity: (1, 0),
+            validate_only: false,
         };
         assert_eq!(status(&report, None, Command::Run), exit::ENVIRONMENT);
         assert_eq!(status(&report, None, Command::Validate), exit::SUCCESS);
