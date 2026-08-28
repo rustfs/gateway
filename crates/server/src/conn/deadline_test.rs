@@ -33,7 +33,7 @@ use http::{Request, Response};
 use http_body_util::Full;
 use hyper::rt::{Sleep as HyperSleep, Timer};
 use hyper_util::rt::TokioTimer;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::Notify;
 use tower::service_fn;
@@ -260,12 +260,30 @@ async fn c_lim_0032_a_srv_0010_one_byte_per_second_header_closes_at_ten_seconds(
     }
     assert_eq!(started.elapsed(), Duration::from_secs(9), "nine paced bytes do not close early");
     tokio::time::advance(Duration::from_secs(1)).await;
-    let mut byte = [0_u8; 1];
-    let disconnected = match tokio::time::timeout(Duration::from_millis(1), stream.read(&mut byte)).await {
-        Ok(Ok(0)) => true,
-        Ok(Err(error)) => matches!(error.kind(), std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted),
-        Ok(Ok(_)) | Err(_) => false,
-    };
+    let disconnected = tokio::task::spawn_blocking(move || -> std::io::Result<bool> {
+        let mut stream = stream.into_std()?;
+        let mut byte = [0_u8; 1];
+        for _ in 0..1_000 {
+            match std::io::Read::read(&mut stream, &mut byte) {
+                Ok(0) => return Ok(true),
+                Err(error)
+                    if matches!(error.kind(), std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted) =>
+                {
+                    return Ok(true);
+                }
+                Ok(_) => return Ok(false),
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(false)
+    })
+    .await
+    .expect("socket close observer task joins")
+    .expect("socket close observer reads");
     assert!(disconnected, "the socket closes at the header deadline");
     assert!(
         started.elapsed() >= Duration::from_secs(10) && started.elapsed() < Duration::from_secs(11),
