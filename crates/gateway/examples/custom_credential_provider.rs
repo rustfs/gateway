@@ -79,49 +79,39 @@ impl CredentialProvider for DirectoryProvider {
 ///
 /// It can answer nothing a hand-written implementation cannot — in particular it cannot produce a
 /// verdict, because the trait does not return one.
-fn closure_form() -> impl CredentialProvider {
-    fn_credential_provider(|access_key_id: &str| {
+fn closure_form() -> Result<impl CredentialProvider, rustfs_gateway::CredentialsError> {
+    let credentials = Credentials::new("AKIDLONGTERMEXAMPLE", b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")?;
+    Ok(fn_credential_provider(move |access_key_id: &str| {
         let found = if access_key_id == "AKIDLONGTERMEXAMPLE" {
-            CredentialLookup::Found(
-                Credentials::new("AKIDLONGTERMEXAMPLE", b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
-                    .expect("the fixture access key is valid"),
-            )
+            CredentialLookup::Found(credentials.clone_credentials())
         } else {
             CredentialLookup::NotFound
         };
         Box::pin(async move { Ok(found) })
-    })
+    }))
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut principals = HashMap::new();
 
     // A long-term principal: an access key and a secret, and nothing else. It carries no session
     // token, so a request that presents one is refused rather than run as this principal.
-    let long_term = Credentials::new("AKIDLONGTERMEXAMPLE", b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
-        .expect("a well-formed access key id"); // Fixture literals; a real store validates what it read.
+    let long_term = Credentials::new("AKIDLONGTERMEXAMPLE", b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")?;
     principals.insert("AKIDLONGTERMEXAMPLE".to_owned(), long_term);
 
     // A temporary principal, from this deployment's own STS. The token and the lifetime go in
     // together: there is no method that takes one without the other, so "a session that never
     // expires" is not a state the framework can hold. The issuer and the policy handle are
     // opaque — the framework stores them for the audit record and parses neither.
-    let binding = SessionBinding::new("sts.example.com", 4_102_444_800)
-        .expect("a well-formed issuer")
-        .with_inline_policy("policy-blob-7")
-        .expect("a well-formed handle");
-    let session = Credentials::new("ASIDSESSIONEXAMPLE", b"5ZXcQfQm9nY0hK7wLpRs2VtBnMxJ4uEaCvDgHiKl")
-        .expect("a well-formed access key id")
-        .with_session("FQoGZXIvYXdzEExampleSessionTokenValue", binding)
-        .expect("a non-empty token");
+    let binding = SessionBinding::new("sts.example.com", 4_102_444_800)?.with_inline_policy("policy-blob-7")?;
+    let session = Credentials::new("ASIDSESSIONEXAMPLE", b"5ZXcQfQm9nY0hK7wLpRs2VtBnMxJ4uEaCvDgHiKl")?
+        .with_session("FQoGZXIvYXdzEExampleSessionTokenValue", binding)?;
     principals.insert("ASIDSESSIONEXAMPLE".to_owned(), session);
 
     // A principal that exists and has been switched off. It is answered exactly as an access key
     // that does not exist is — same status, same code, same bytes — because "this key exists but
     // is disabled" confirms the key exists to whoever is guessing.
-    let retired = Credentials::new("AKIDRETIREDEXAMPLE", b"CzQeXvBn4mKp8sLw1RtYu6IoAd3FgHjKl9MnBvCx")
-        .expect("a well-formed access key id")
-        .disable();
+    let retired = Credentials::new("AKIDRETIREDEXAMPLE", b"CzQeXvBn4mKp8sLw1RtYu6IoAd3FgHjKl9MnBvCx")?.disable();
     principals.insert("AKIDRETIREDEXAMPLE".to_owned(), retired);
 
     let provider = Arc::new(DirectoryProvider {
@@ -130,9 +120,10 @@ fn main() {
     });
 
     // Either form drops straight into the assembly.
-    let regions = RegionSet::new(["us-east-1"]).expect("a non-empty region set");
+    let regions = RegionSet::new(["us-east-1"])?;
     let _authenticator = SigV4Authenticator::new(Arc::clone(&provider) as Arc<dyn CredentialProvider>, regions.clone());
-    let _closure_authenticator = SigV4Authenticator::new(Arc::new(closure_form()), regions);
+    let _closure_authenticator = SigV4Authenticator::new(Arc::new(closure_form()?), regions);
 
     println!("credential provider wired: 3 principals, one of them a session and one of them disabled");
+    Ok(())
 }

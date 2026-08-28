@@ -154,6 +154,8 @@ fixed now so that the same check does not get written twice under two names.
 | `check_governor_fast_path.sh` | `c-lim-0004` binds an admitted request to the synchronous Governor path and structurally rejects allocation operations there | P3-05 |
 | `check_default_doc.sh` | Every public extension `Default` implementation states its security consequence; derived subjects are discovered rather than listed by hand | P7-01 |
 | `check_minimal_assembly_lines.sh` | The complete assembly in the minimal example stays within twenty effective Rust lines | P7-01 |
+| `check_example_contracts.sh` | Every Rust example is an explicit Cargo target and propagates recoverable errors instead of teaching panic-shaped handling | P7-04 |
+| `run_minimal_listener_smoke.sh` | Runs the minimal example as a process, exercises its real TCP allow/refuse paths, and proves SIGINT reaches a clean shutdown | P7-04 |
 | `check_gateway_tsan_wiring.sh` | The TSAN job keeps sanitizer/build-std flags, runs in required CI, and drives exactly 100 completed OS threads | P7-01 |
 | `check_monomorphic_dispatch.sh` | The public static assembly emits direct operation codec and concrete handler calls, with no erased dispatch callback in that call chain | P7-01 |
 | `check_handler_context_migration.sh` | Reviewed handlers keep legacy `call` beside an explicit `call_with_context`; core wrappers also retain the framework cancellation source through delegation | P3-03 |
