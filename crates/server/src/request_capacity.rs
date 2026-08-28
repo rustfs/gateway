@@ -23,10 +23,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::{Context, Poll, ready};
+use std::task::{Context, Poll};
 
-use http_body::{Body, Frame, SizeHint};
-use pin_project_lite::pin_project;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore, watch};
 
 /// A request-local signal that becomes `true` when the transport stops waiting for the response.
@@ -148,7 +146,7 @@ impl RequestCapacity {
     }
 }
 
-pub(super) struct RequestPermit {
+pub(crate) struct RequestPermit {
     capacity: Arc<RequestCapacity>,
     permit: Option<OwnedSemaphorePermit>,
 }
@@ -157,44 +155,5 @@ impl Drop for RequestPermit {
     fn drop(&mut self) {
         self.permit.take();
         let _ = self.capacity.available.send(self.capacity.semaphore.available_permits());
-    }
-}
-
-pin_project! {
-    pub(super) struct RequestPermitBody<B> {
-        #[pin]
-        body: B,
-        permit: Option<RequestPermit>,
-    }
-}
-
-impl<B> RequestPermitBody<B> {
-    pub(super) fn new(body: B, permit: RequestPermit) -> Self {
-        Self {
-            body,
-            permit: Some(permit),
-        }
-    }
-}
-
-impl<B: Body> Body for RequestPermitBody<B> {
-    type Data = B::Data;
-    type Error = B::Error;
-
-    fn poll_frame(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let mut this = self.project();
-        let frame = ready!(this.body.as_mut().poll_frame(context));
-        if frame.is_none() || this.body.is_end_stream() {
-            this.permit.take();
-        }
-        Poll::Ready(frame)
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.body.is_end_stream()
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        self.body.size_hint()
     }
 }

@@ -26,16 +26,25 @@
 
 mod config;
 mod conn;
+mod connection_service;
 mod dispatch;
+mod driver;
 mod io;
 pub mod layers;
 mod listener;
+mod request_capacity;
 mod shutdown;
 mod tls;
 
 pub use config::{ConfigError, ServerConfig, WriteStrategy, conn_memory_budget};
-pub use conn::{ConnectionInfo, RequestCancellation, Server, ServerError, TransportKind};
+pub use conn::{Server, ServerError};
+pub use connection_service::{ConnectionBody, ConnectionError, ConnectionService};
 pub use dispatch::PrefixDispatch;
+pub use driver::{
+    AcceptedConnection, ConnectionDriver, ConnectionFuture, ConnectionInfo, HyperConnectionDriver, PlaintextTakeoverError,
+    TransportKind,
+};
 pub use listener::{Listener, ListenerOptions};
+pub use request_capacity::RequestCancellation;
 pub use shutdown::{RunningServer, ServerMetrics, ShutdownReport, ShutdownTrigger};
 pub use tls::{TlsHandle, TlsMaterial, TlsReloadError};

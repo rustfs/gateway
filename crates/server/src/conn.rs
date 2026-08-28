@@ -19,45 +19,39 @@
 //! Upstream: `ServerConfig`, optional `TlsHandle`, and a tower service. Downstream: sockets.
 
 use std::collections::HashMap;
-use std::future::{Future, poll_fn};
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::task::{Context, Poll, ready};
 
 use bytes::Bytes;
 use http::{Request, Response};
-use http_body::{Body, Frame, SizeHint};
+use http_body::Body;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use hyper_util::server::conn::auto;
-use pin_project_lite::pin_project;
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 use tower::Service as TowerService;
-use tower_http::catch_panic::CatchPanic;
 
 use crate::config::{ConfigError, ServerConfig, WriteStrategy};
+use crate::connection_service::{ConnectionError, ConnectionService, RequestStats};
+use crate::driver::{AcceptedConnection, ConnectionDriver, ConnectionInfo, HyperConnectionDriver, TransportKind};
 use crate::io::{BoxTransport, ProgressIo, deadline_after, deadline_remaining};
 use crate::listener::Listener;
 use crate::shutdown::{MetricsInner, RunningServer, ServerMetrics, ShutdownCommand, ShutdownReport, ShutdownTrigger};
 use crate::tls::TlsHandle;
 
-#[path = "request_capacity.rs"]
-mod request_capacity;
-pub use request_capacity::RequestCancellation;
-use request_capacity::{RequestCancellationFuture, RequestCancellationSource, RequestCapacity, RequestPermitBody};
+use crate::request_capacity::RequestCapacity;
 
 #[cfg(test)]
 #[allow(clippy::expect_used)] // Test-only synchronization failures terminate the scenario; no value comes from external input.
 mod deadline_test;
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
+pub(crate) type BoxError = ConnectionError;
 
 /// Generic HTTP server runtime for a cloneable tower service.
 pub struct Server<S> {
@@ -66,43 +60,6 @@ pub struct Server<S> {
     tls: Option<TlsHandle>,
     #[cfg(test)]
     deadline_observer: Option<deadline_test::DeadlineArmObserver>,
-}
-
-/// Transport facts observed at accept and inserted into every request's extensions.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ConnectionInfo {
-    peer_addr: SocketAddr,
-    transport: TransportKind,
-    tcp_nodelay: bool,
-}
-
-impl ConnectionInfo {
-    /// Returns the peer socket address observed by the listener.
-    #[must_use]
-    pub const fn peer_addr(self) -> SocketAddr {
-        self.peer_addr
-    }
-
-    /// Returns whether this connection completed TLS or was explicitly cleartext.
-    #[must_use]
-    pub const fn transport(self) -> TransportKind {
-        self.transport
-    }
-
-    /// Returns the accepted socket's observed `TCP_NODELAY` value.
-    #[must_use]
-    pub const fn tcp_nodelay(self) -> bool {
-        self.tcp_nodelay
-    }
-}
-
-/// Security of the accepted transport, independent of any forwarded header.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TransportKind {
-    /// Cleartext was explicitly enabled in [`ServerConfig`].
-    Plaintext,
-    /// A Rustls server handshake completed before Hyper saw the connection.
-    Tls,
 }
 
 impl<S> Server<S> {
@@ -147,6 +104,27 @@ where
     /// Returns [`ServerError`] for invalid configuration or listener setup failure. No task is
     /// spawned after either failure.
     pub fn serve(self) -> Result<RunningServer, ServerError> {
+        self.serve_with(HyperConnectionDriver)
+    }
+}
+
+impl<S> Server<S>
+where
+    S: Clone + Send + 'static,
+{
+    /// Binds the listener and starts it with one explicit driver for every accepted connection.
+    ///
+    /// The driver is selected once for this server. Each returned driver future owns its
+    /// connection admission permit until that future exits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError`] for invalid configuration or listener setup failure. No task is
+    /// spawned after either failure.
+    pub fn serve_with<D>(self, driver: D) -> Result<RunningServer, ServerError>
+    where
+        D: ConnectionDriver<S>,
+    {
         self.config.validate(self.tls.is_some())?;
         let listener = Listener::bind(&self.config)?;
         let local_addr = listener.local_addr()?;
@@ -156,12 +134,15 @@ where
         let task_metrics = metrics.clone();
         let task = tokio::spawn(run_server(
             listener,
-            self.config,
-            self.service,
-            self.tls,
-            task_metrics,
-            #[cfg(test)]
-            self.deadline_observer,
+            ServerTask {
+                config: self.config,
+                service: self.service,
+                tls: self.tls,
+                driver,
+                metrics: task_metrics,
+                #[cfg(test)]
+                deadline_observer: self.deadline_observer,
+            },
             command_receiver,
         ));
         Ok(RunningServer {
@@ -184,22 +165,34 @@ pub enum ServerError {
     Io(#[from] std::io::Error),
 }
 
-async fn run_server<S, B>(
-    listener: tokio::net::TcpListener,
+struct ServerTask<S, D> {
     config: ServerConfig,
     service: S,
     tls: Option<TlsHandle>,
+    driver: D,
     metrics: ServerMetrics,
-    #[cfg(test)] deadline_observer: Option<deadline_test::DeadlineArmObserver>,
+    #[cfg(test)]
+    deadline_observer: Option<deadline_test::DeadlineArmObserver>,
+}
+
+async fn run_server<S, D>(
+    listener: tokio::net::TcpListener,
+    task: ServerTask<S, D>,
     command_receiver: oneshot::Receiver<ShutdownCommand>,
 ) -> Result<(), ServerError>
 where
-    S: TowerService<Request<Incoming>, Response = Response<B>> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-    S::Error: Into<BoxError> + Send + Sync + 'static,
-    B: Body<Data = Bytes> + Send + 'static,
-    B::Error: Into<BoxError>,
+    S: Clone + Send + 'static,
+    D: ConnectionDriver<S>,
 {
+    let ServerTask {
+        config,
+        service,
+        tls,
+        driver,
+        metrics,
+        #[cfg(test)]
+        deadline_observer,
+    } = task;
     let semaphore = Arc::new(Semaphore::new(config.max_connections));
     let (request_capacity, mut request_capacity_receiver) = RequestCapacity::new(config.max_global_inflight_requests);
     let ip_counts = Arc::new(IpCounts::new(config.max_connections_per_ip));
@@ -298,6 +291,16 @@ where
         let accepted_ordinal = metrics.inner.accepted.fetch_add(1, Ordering::Relaxed) + 1;
         #[cfg(not(test))]
         metrics.inner.accepted.fetch_add(1, Ordering::Relaxed);
+        if stream.set_nodelay(config.tcp_nodelay).is_err() {
+            drop(stream);
+            drop(permit);
+            continue;
+        }
+        let Ok(tcp_nodelay) = stream.nodelay() else {
+            drop(stream);
+            drop(permit);
+            continue;
+        };
         let Some(ip_lease) = ip_counts.try_acquire(peer.ip()) else {
             metrics.inner.per_ip_rejected.fetch_add(1, Ordering::Relaxed);
             drop(stream);
@@ -311,15 +314,20 @@ where
             _ip: ip_lease,
         };
         let connection_config = config.clone();
-        let connection = run_connection(
+        let connection_in_flight = Arc::new(AtomicUsize::new(0));
+        let request_seen = Arc::new(AtomicBool::new(false));
+        let connection = driver.clone().drive(AcceptedConnection::new(
             ConnectionState {
                 stream,
                 peer_addr: peer,
+                tcp_nodelay,
                 config: connection_config.clone(),
                 tls: tls.clone(),
                 shutdown: shutdown_sender.subscribe(),
                 request_stats: Arc::clone(&request_stats),
                 request_capacity: Arc::clone(&request_capacity),
+                connection_in_flight,
+                request_seen,
                 header_deadline,
                 metrics: Arc::clone(&metrics.inner),
                 #[cfg(test)]
@@ -327,11 +335,11 @@ where
                     .as_ref()
                     .filter(|observer| observer.target_accepted() == accepted_ordinal)
                     .cloned(),
-                _active: active,
             },
             service.clone(),
-        );
+        ));
         connections.spawn(async move {
+            let _active = active;
             if let Some(lifetime) = connection_config.connection_lifetime {
                 let _ = tokio::time::timeout(lifetime, connection).await;
             } else {
@@ -347,39 +355,41 @@ where
         return Ok(());
     };
 
-    request_stats.shutting_down.store(true, Ordering::Release);
+    request_stats.begin_shutdown();
     let _ = shutdown_sender.send(true);
     let drained = async { while connections.join_next().await.is_some() {} };
     if tokio::time::timeout(command.grace, drained).await.is_err() {
-        request_stats.force_abort.store(true, Ordering::Release);
+        request_stats.force_abort();
         connections.abort_all();
         while connections.join_next().await.is_some() {}
     }
     let report = ShutdownReport {
-        drained: request_stats.drained.load(Ordering::Relaxed),
-        aborted: request_stats.aborted.load(Ordering::Relaxed),
+        drained: request_stats.drained(),
+        aborted: request_stats.aborted(),
     };
     let _ = command.reply.send(report);
     Ok(())
 }
 
-struct ConnectionState {
-    stream: TcpStream,
-    peer_addr: SocketAddr,
-    config: ServerConfig,
-    tls: Option<TlsHandle>,
-    shutdown: watch::Receiver<bool>,
-    request_stats: Arc<RequestStats>,
-    request_capacity: Arc<RequestCapacity>,
-    header_deadline: tokio::time::Instant,
+pub(crate) struct ConnectionState {
+    pub(crate) stream: TcpStream,
+    pub(crate) peer_addr: SocketAddr,
+    pub(crate) tcp_nodelay: bool,
+    pub(crate) config: ServerConfig,
+    pub(crate) tls: Option<TlsHandle>,
+    pub(crate) shutdown: watch::Receiver<bool>,
+    pub(crate) request_stats: Arc<RequestStats>,
+    pub(crate) request_capacity: Arc<RequestCapacity>,
+    pub(crate) connection_in_flight: Arc<AtomicUsize>,
+    pub(crate) request_seen: Arc<AtomicBool>,
+    pub(crate) header_deadline: tokio::time::Instant,
     /// The listener's counters, so the lingering drain can report the octets it discards.
     metrics: Arc<MetricsInner>,
     #[cfg(test)]
     deadline_observer: Option<deadline_test::DeadlineArmObserver>,
-    _active: ActiveConnection,
 }
 
-async fn run_connection<S, B>(state: ConnectionState, service: S)
+pub(crate) async fn run_connection<S, B>(state: ConnectionState, service: S)
 where
     S: TowerService<Request<Incoming>, Response = Response<B>> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -390,23 +400,19 @@ where
     let ConnectionState {
         stream,
         peer_addr,
+        tcp_nodelay,
         config,
         tls,
         mut shutdown,
         request_stats,
         request_capacity,
+        connection_in_flight,
+        request_seen,
         header_deadline,
         metrics,
         #[cfg(test)]
         deadline_observer,
-        _active,
     } = state;
-    if stream.set_nodelay(config.tcp_nodelay).is_err() {
-        return;
-    }
-    let Ok(tcp_nodelay) = stream.nodelay() else {
-        return;
-    };
     let (transport, transport_kind): (BoxTransport, TransportKind) = match tls {
         Some(tls) => {
             let acceptor = TlsAcceptor::from(tls.begin_handshake());
@@ -434,11 +440,9 @@ where
         None => (Box::new(stream), TransportKind::Plaintext),
     };
 
-    let per_connection = Arc::new(AtomicUsize::new(0));
-    let request_seen = Arc::new(AtomicBool::new(false));
     let io = ProgressIo::new(
         transport,
-        Arc::clone(&per_connection),
+        Arc::clone(&connection_in_flight),
         Arc::clone(&request_seen),
         header_deadline,
         config.keep_alive_idle,
@@ -452,19 +456,18 @@ where
         None => io,
     };
     let io = TokioIo::new(io);
-    let force_abort = Arc::clone(&request_stats.force_abort);
-    let tracked = TrackedService::new(CatchPanic::new(service), request_stats, per_connection);
-    let service = TowerToHyper {
-        inner: tracked,
-        connection: ConnectionInfo {
+    let service = ConnectionService::new(
+        service,
+        ConnectionInfo {
             peer_addr,
             transport: transport_kind,
             tcp_nodelay,
         },
         request_seen,
         request_capacity,
-        force_abort,
-    };
+        request_stats,
+        connection_in_flight,
+    );
     let mut builder = auto::Builder::new(TokioExecutor::new());
     #[cfg(test)]
     match &deadline_observer {
@@ -520,190 +523,6 @@ where
 fn log_connection_result(result: Result<(), BoxError>) {
     if let Err(error) = result {
         tracing::debug!(error = %error, "HTTP connection closed with an error");
-    }
-}
-
-#[derive(Clone)]
-struct TowerToHyper<S> {
-    inner: S,
-    connection: ConnectionInfo,
-    request_seen: Arc<AtomicBool>,
-    request_capacity: Arc<RequestCapacity>,
-    force_abort: Arc<AtomicBool>,
-}
-
-impl<S, RequestBody, ResponseBody> hyper::service::Service<Request<RequestBody>> for TowerToHyper<S>
-where
-    S: TowerService<Request<RequestBody>, Response = Response<ResponseBody>> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-    S::Error: Into<BoxError> + Send + 'static,
-    RequestBody: Send + 'static,
-    ResponseBody: Body + Send + 'static,
-{
-    type Response = Response<RequestPermitBody<ResponseBody>>;
-    type Error = BoxError;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn call(&self, mut request: Request<RequestBody>) -> Self::Future {
-        self.request_seen.store(true, Ordering::Release);
-        request.extensions_mut().insert(self.connection);
-        let (cancellation_source, cancellation) = RequestCancellationSource::pair();
-        request.extensions_mut().insert(cancellation);
-        let mut service = self.inner.clone();
-        let request_capacity = Arc::clone(&self.request_capacity);
-        let force_abort = Arc::clone(&self.force_abort);
-        Box::pin(async move {
-            let permit = request_capacity
-                .acquire()
-                .await
-                .map_err(|error| Box::new(error) as BoxError)?;
-            poll_fn(|context| service.poll_ready(context)).await.map_err(Into::into)?;
-            let response = RequestCancellationFuture::new(service.call(request), cancellation_source, force_abort)
-                .await
-                .map_err(Into::into)?;
-            Ok(response.map(|body| RequestPermitBody::new(body, permit)))
-        })
-    }
-}
-
-#[derive(Default)]
-struct RequestStats {
-    shutting_down: AtomicBool,
-    force_abort: Arc<AtomicBool>,
-    drained: AtomicUsize,
-    aborted: AtomicUsize,
-}
-
-#[derive(Clone)]
-struct TrackedService<S> {
-    inner: S,
-    stats: Arc<RequestStats>,
-    connection_in_flight: Arc<AtomicUsize>,
-}
-
-impl<S> TrackedService<S> {
-    fn new(inner: S, stats: Arc<RequestStats>, connection_in_flight: Arc<AtomicUsize>) -> Self {
-        Self {
-            inner,
-            stats,
-            connection_in_flight,
-        }
-    }
-}
-
-impl<S, R, B> TowerService<R> for TrackedService<S>
-where
-    S: TowerService<R, Response = Response<B>>,
-{
-    type Response = Response<TrackedBody<B>>;
-    type Error = S::Error;
-    type Future = TrackedFuture<S::Future>;
-
-    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(context)
-    }
-
-    fn call(&mut self, request: R) -> Self::Future {
-        self.connection_in_flight.fetch_add(1, Ordering::Relaxed);
-        TrackedFuture {
-            future: self.inner.call(request),
-            guard: Some(RequestGuard {
-                stats: Arc::clone(&self.stats),
-                connection_in_flight: Arc::clone(&self.connection_in_flight),
-                completed: false,
-            }),
-        }
-    }
-}
-
-pin_project! {
-    struct TrackedFuture<F> {
-        #[pin]
-        future: F,
-        guard: Option<RequestGuard>,
-    }
-}
-
-impl<F, B, E> Future for TrackedFuture<F>
-where
-    F: Future<Output = Result<Response<B>, E>>,
-{
-    type Output = Result<Response<TrackedBody<B>>, E>;
-
-    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-        match ready!(this.future.as_mut().poll(context)) {
-            Ok(response) => {
-                let guard = this.guard.take();
-                Poll::Ready(Ok(response.map(|body| TrackedBody { body, guard })))
-            }
-            Err(error) => {
-                if let Some(mut guard) = this.guard.take() {
-                    guard.complete();
-                }
-                Poll::Ready(Err(error))
-            }
-        }
-    }
-}
-
-pin_project! {
-    struct TrackedBody<B> {
-        #[pin]
-        body: B,
-        guard: Option<RequestGuard>,
-    }
-}
-
-impl<B: Body> Body for TrackedBody<B> {
-    type Data = B::Data;
-    type Error = B::Error;
-
-    fn poll_frame(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        let mut this = self.project();
-        let frame = ready!(this.body.as_mut().poll_frame(context));
-        if (frame.is_none() || this.body.is_end_stream())
-            && let Some(mut guard) = this.guard.take()
-        {
-            guard.complete();
-        }
-        Poll::Ready(frame)
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.body.is_end_stream()
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        self.body.size_hint()
-    }
-}
-
-struct RequestGuard {
-    stats: Arc<RequestStats>,
-    connection_in_flight: Arc<AtomicUsize>,
-    completed: bool,
-}
-
-impl RequestGuard {
-    fn complete(&mut self) {
-        self.completed = true;
-        self.connection_in_flight.fetch_sub(1, Ordering::Relaxed);
-        if self.stats.shutting_down.load(Ordering::Acquire) {
-            self.stats.drained.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-}
-
-impl Drop for RequestGuard {
-    fn drop(&mut self) {
-        if self.completed {
-            return;
-        }
-        self.connection_in_flight.fetch_sub(1, Ordering::Relaxed);
-        if self.stats.force_abort.load(Ordering::Acquire) {
-            self.stats.aborted.fetch_add(1, Ordering::Relaxed);
-        }
     }
 }
 
