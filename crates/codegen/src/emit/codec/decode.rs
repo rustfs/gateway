@@ -613,7 +613,7 @@ fn xml_member(
             let reader = format!("read_{}", naming::module_name(entry_name));
             let _ = writeln!(out, "{pad}if let Some(child) = {node}.child(\"{wire}\") {{");
             out.push_str(&assign(inner, target, &wrap(field, &format!("{reader}(child)?"))));
-            out.push_str(&required_member_refusal(field, member, indent));
+            out.push_str(&required_member_refusal(field, &wire, indent));
         }
         other => {
             let conversion = expr::from_wire(
@@ -626,7 +626,7 @@ fn xml_member(
             )?;
             let _ = writeln!(out, "{pad}if let Some(raw) = {node}.child_text(\"{wire}\") {{");
             out.push_str(&assign(inner, target, &wrap(field, &conversion)));
-            out.push_str(&required_member_refusal(field, member, indent));
+            out.push_str(&required_member_refusal(field, &wire, indent));
         }
     }
     Ok(out)
@@ -660,7 +660,7 @@ fn xml_attribute_member(
     let _ = writeln!(out, "    // {member} — the `{qualified}` attribute, not a child element.");
     let _ = writeln!(out, "    if let Some(raw) = node.{accessor} {{");
     out.push_str(&assign(8, target, &wrap(field, &conversion)));
-    out.push_str(&required_member_refusal(field, member, 4));
+    out.push_str(&required_member_refusal(field, &qualified, 4));
     Ok(out)
 }
 
@@ -771,7 +771,7 @@ pub fn shape_reader(
 /// the placeholder default, and the decoder's exit check turned a client's malformed document
 /// into this side's `500 InternalError`; the omission of a required element is a schema
 /// violation and answers `MalformedXML` like every other one.
-fn required_member_refusal(field: &Field, member: &str, indent: usize) -> String {
+fn required_member_refusal(field: &Field, wire: &str, indent: usize) -> String {
     let pad = " ".repeat(indent);
     if !field.required {
         return format!("{pad}}}\n");
@@ -779,7 +779,7 @@ fn required_member_refusal(field: &Field, member: &str, indent: usize) -> String
     let mut out = String::new();
     let _ = writeln!(out, "{pad}}} else {{");
     let inner = " ".repeat(indent.saturating_add(4));
-    let refusal = format!("CodecError::malformed_xml(\"the body omits a member the schema requires\").about(\"{member}\")");
+    let refusal = format!("CodecError::malformed_xml(\"the body omits a member the schema requires\").about(\"{wire}\")");
     let single = format!("{inner}return Err({refusal});");
     if single.len() <= MAX_WIDTH {
         let _ = writeln!(out, "{single}");
