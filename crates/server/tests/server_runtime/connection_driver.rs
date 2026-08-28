@@ -16,7 +16,7 @@
 //!
 //! Responsible for: proving a configured driver owns each accepted socket until its future exits.
 //! NOT responsible for: HTTP parsing or response encoding, which belong to concrete drivers.
-//! Upstream: `Server::serve_with`. Downstream: the gateway self-held HTTP/1.1 transport.
+//! Upstream: the `server_runtime` harness. Downstream: the gateway self-held HTTP/1.1 transport.
 
 #![allow(clippy::expect_used, clippy::panic)]
 

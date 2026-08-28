@@ -20,6 +20,9 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+#[path = "server_runtime/connection_driver.rs"]
+mod connection_driver;
+
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 #[cfg(target_os = "linux")]

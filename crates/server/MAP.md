@@ -18,6 +18,6 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/layers.rs` | General tower layer attachment points | Wiring panic, request ID, trace or compression |
 | `tests/acceptance.rs` | Deterministic config, dispatch and TLS reload cases | A source-only contract regresses |
 | `tests/server_runtime.rs` | Live h1 admission and shutdown cases | Socket lifecycle behaviour regresses |
-| `tests/connection_driver.rs` | Live custom-driver ownership, managed-service and shutdown controls | `serve_with` releases admission or bypasses request lifecycle |
+| `tests/server_runtime/connection_driver.rs` | Live custom-driver ownership, managed-service and shutdown controls | `serve_with` releases admission or bypasses request lifecycle |
 | `tests/tls_h2.rs` | Live TLS and h2 cases | Reload, TLS admission or h2 flow control regresses |
 | `tests/lingering_close.rs` | How a refused connection ends, on a real socket: closed, open or reset | A client reads `ECONNRESET` instead of the refusal, or a close costs a connection slot |
