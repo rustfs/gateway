@@ -14975,22 +14975,22 @@ expect_fail check_ci_test_split.sh \
     'the DTO compiler job swallowing a failure or timeout' mut_ci_dto_compiler_failure_swallowed
 
 mut_ci_build_guard_command_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 270 "build-backed guards 1/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
-        'scripts/ci_budget.sh 270 "build-backed guards 1/2" true'
+    replace_ci_text 'scripts/ci_budget.sh 380 "build-backed guards 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 380 "build-backed guards 1/3" true'
 }
 expect_fail check_ci_test_split.sh \
     'the build-backed mutation suite being replaced with a no-op' mut_ci_build_guard_command_dropped
 
 mut_ci_build_guard_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 270 "build-backed guards 1/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
-        '          scripts/ci_budget.sh 270 "build-backed guards 1/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 380 "build-backed guards 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 380 "build-backed guards 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the build-backed guard job swallowing a failure or timeout' mut_ci_build_guard_failure_swallowed
 
 mut_ci_build_guard_second_shard_duplicated() {
-    replace_ci_text 'scripts/ci_budget.sh 270 "build-backed guards 2/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh' \
-        'scripts/ci_budget.sh 270 "build-backed guards 2/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh'
+    replace_ci_text 'scripts/ci_budget.sh 380 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 380 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh'
 }
 expect_fail check_ci_test_split.sh \
     'the second build-backed worker repeating the first half' \
@@ -14998,12 +14998,29 @@ expect_fail check_ci_test_split.sh \
     'build-guard-self-test-2 command changed, lost its shard, or can hide a failure'
 
 mut_ci_build_guard_second_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 270 "build-backed guards 2/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh' \
-        '          scripts/ci_budget.sh 270 "build-backed guards 2/2" env GATEWAY_GUARD_BUDGET_SECONDS=270 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=2 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 380 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 380 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the second build-backed worker swallowing a failure or timeout' \
     mut_ci_build_guard_second_failure_swallowed
+
+mut_ci_build_guard_third_shard_duplicated() {
+    replace_ci_text 'scripts/ci_budget.sh 380 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 380 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh'
+}
+expect_fail check_ci_test_split.sh \
+    'the third build-backed worker repeating the first third' \
+    mut_ci_build_guard_third_shard_duplicated \
+    'build-guard-self-test-3 command changed, lost its shard, or can hide a failure'
+
+mut_ci_build_guard_third_failure_swallowed() {
+    replace_ci_text '          scripts/ci_budget.sh 380 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 380 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh || true'
+}
+expect_fail check_ci_test_split.sh \
+    'the third build-backed worker swallowing a failure or timeout' \
+    mut_ci_build_guard_third_failure_swallowed
 
 mut_ci_build_guard_macro_control_dropped() {
     python3 - <<'PYEOF'
@@ -15036,14 +15053,14 @@ expect_fail check_ci_test_split.sh \
     'the branch-protected Test check being renamed' mut_ci_required_name_changed
 
 mut_ci_aggregate_drops_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, workspace-tests-2, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
 
 mut_ci_aggregate_drops_target() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, workspace-tests-2, guard-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15051,7 +15068,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_target
 
 mut_ci_aggregate_drops_quirk_ledger() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, workspace-tests-2, guard-self-test, target-consolidation-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15059,7 +15076,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_quirk_ledger
 
 mut_ci_aggregate_drops_dto_compiler() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, workspace-tests-2, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15067,7 +15084,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_dto_compiler
 
 mut_ci_aggregate_drops_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, workspace-tests-2, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15075,15 +15092,23 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_build_guard
 
 mut_ci_aggregate_drops_second_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for the second build-backed worker' \
     mut_ci_aggregate_drops_second_build_guard
 
+mut_ci_aggregate_drops_third_build_guard() {
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
+        'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]'
+}
+expect_fail check_ci_test_split.sh \
+    'the required Test check no longer waiting for the third build-backed worker' \
+    mut_ci_aggregate_drops_third_build_guard
+
 mut_ci_aggregate_drops_error_status() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]' \
         'needs: [workspace-tests, workspace-tests-2, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -15147,12 +15172,12 @@ expect_fail check_ci_test_split.sh \
 mut_ci_aggregate_budget_widened() {
     replace_ci_text '  test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]
+    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1' '  test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]
+    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2'
@@ -15214,6 +15239,14 @@ expect_fail check_ci_test_split.sh \
     'the aggregate check ignoring the second build-backed guard result' \
     mut_ci_second_build_guard_result_ignored
 
+mut_ci_third_build_guard_result_ignored() {
+    replace_ci_text 'BUILD_GUARD_3_RESULT: ${{ needs.build-guard-self-test-3.result }}' \
+        'BUILD_GUARD_3_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the third build-backed guard result' \
+    mut_ci_third_build_guard_result_ignored
+
 mut_ci_workspace_comparison_dropped() {
     replace_ci_text '          test "$WORKSPACE_RESULT" = success' '          true'
 }
@@ -15267,6 +15300,13 @@ mut_ci_second_build_guard_comparison_dropped() {
 expect_fail check_ci_test_split.sh \
     'the aggregate check not executing the second build-backed guard result comparison' \
     mut_ci_second_build_guard_comparison_dropped
+
+mut_ci_third_build_guard_comparison_dropped() {
+    replace_ci_text '          test "$BUILD_GUARD_3_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check not executing the third build-backed guard result comparison' \
+    mut_ci_third_build_guard_comparison_dropped
 
 mut_ci_workers_share_concurrency_lane() {
     replace_ci_text '  workspace-tests:
@@ -16001,6 +16041,13 @@ PYEOF
 }
 expect_fail check_gateway_tsan_wiring.sh \
     'CI no longer invoking the TSAN runner' mut_tsan_ci_call_deleted
+
+mut_tsan_aggregate_drops_tsan() {
+    replace_ci_text ', gateway-tsan]' ']'
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the required aggregate no longer waiting for TSAN' \
+    mut_tsan_aggregate_drops_tsan
 
 mut_default_security_doc_deleted() {
     python3 - <<'PYEOF'
