@@ -51,7 +51,7 @@ pub trait ConnectionDriver<S>: Clone + Send + 'static {
 /// One accepted socket and the generic server facts captured with it.
 ///
 /// The value is owned and `'static`. Drivers may copy the observed facts and then consume the
-/// socket with [`Self::into_stream`].
+/// socket with [`Self::into_plaintext`].
 pub struct AcceptedConnection<S> {
     state: ConnectionState,
     service: S,
