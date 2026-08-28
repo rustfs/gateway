@@ -69,6 +69,7 @@ second copy is a second thing to keep in sync.
 | 0011 | Handler deadlines propagate explicit cancellation | Accepted |
 | 0012 | Verified request bodies cross the handler boundary as streams | Accepted |
 | 0013 | Freeze committed response heads before detached work | Accepted |
+| 0014 | Self-held HTTP/1.1 response transport | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.
