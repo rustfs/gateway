@@ -356,7 +356,7 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
     ///
     /// What a drain in progress holds is the connection: its `max_connections` permit, its per-IP
     /// lease, and its seat in `ServerMetrics::active_connections`. It does **not** hold a request
-    /// permit — `RequestPermitBody` releases that when the response body ends, which is before
+    /// permit — `ConnectionBody` releases that when the response body ends, which is before
     /// anything here runs — so a lingering close cannot starve the global in-flight ceiling.
     fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
