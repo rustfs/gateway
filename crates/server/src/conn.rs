@@ -322,6 +322,7 @@ where
         let connection_config = config.clone();
         let connection_in_flight = Arc::new(AtomicUsize::new(0));
         let request_seen = Arc::new(AtomicBool::new(false));
+        let request_body_unfinished = Arc::new(AtomicBool::new(false));
         let connection = driver.clone().drive(AcceptedConnection::new(
             ConnectionState {
                 stream,
@@ -334,6 +335,7 @@ where
                 request_capacity: Arc::clone(&request_capacity),
                 connection_in_flight,
                 request_seen,
+                request_body_unfinished,
                 header_deadline,
                 metrics: Arc::clone(&metrics.inner),
                 #[cfg(test)]
@@ -388,6 +390,7 @@ pub(crate) struct ConnectionState {
     pub(crate) request_capacity: Arc<RequestCapacity>,
     pub(crate) connection_in_flight: Arc<AtomicUsize>,
     pub(crate) request_seen: Arc<AtomicBool>,
+    pub(crate) request_body_unfinished: Arc<AtomicBool>,
     pub(crate) header_deadline: tokio::time::Instant,
     /// The listener's counters, so the lingering drain can report the octets it discards.
     pub(crate) metrics: Arc<MetricsInner>,
@@ -414,6 +417,7 @@ where
         request_capacity,
         connection_in_flight,
         request_seen,
+        request_body_unfinished,
         header_deadline,
         metrics,
         #[cfg(test)]
@@ -455,6 +459,7 @@ where
         config.write_progress_timeout,
         config.lingering_close_time,
     )
+    .request_body_unfinished(Arc::clone(&request_body_unfinished))
     .count_octets_into(Arc::clone(&metrics.transport_read), Arc::clone(&metrics.lingering_drained));
     #[cfg(test)]
     let io = match &deadline_observer {
@@ -473,6 +478,7 @@ where
         request_capacity,
         request_stats,
         connection_in_flight,
+        request_body_unfinished,
     );
     let mut builder = auto::Builder::new(TokioExecutor::new());
     #[cfg(test)]

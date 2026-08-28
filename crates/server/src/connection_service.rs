@@ -40,6 +40,19 @@ use crate::request_capacity::{RequestCancellationFuture, RequestCancellationSour
 /// The erased error returned to a connection driver.
 pub type ConnectionError = Box<dyn std::error::Error + Send + Sync>;
 
+/// Response extension proving that the application stopped before the request body reached its end.
+///
+/// A service inserts this zero-sized marker into the response only when it independently knows
+/// that request-body octets may still arrive after the response starts. The server then gives an
+/// initially empty socket the existing per-block linger grace instead of abandoning the drain on
+/// its first `Pending` read.
+///
+/// This is deliberately not inferred from `Connection: close`, a status code, or any other close
+/// verdict: ordinary closes include bodyless requests and requests whose bodies were completely
+/// consumed. Inserting the marker is an explicit application assertion, not a transport guess.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UnfinishedRequestBody;
+
 pin_project! {
     /// Response body that holds request capacity and shutdown accounting until transport completion.
     pub struct ConnectionBody<B> {
@@ -181,6 +194,7 @@ pub struct ConnectionService<S> {
     request_capacity: Arc<RequestCapacity>,
     request_stats: Arc<RequestStats>,
     connection_in_flight: Arc<AtomicUsize>,
+    request_body_unfinished: Arc<AtomicBool>,
 }
 
 impl<S> ConnectionService<S> {
@@ -191,6 +205,7 @@ impl<S> ConnectionService<S> {
         request_capacity: Arc<RequestCapacity>,
         request_stats: Arc<RequestStats>,
         connection_in_flight: Arc<AtomicUsize>,
+        request_body_unfinished: Arc<AtomicBool>,
     ) -> Self {
         Self {
             inner,
@@ -199,6 +214,7 @@ impl<S> ConnectionService<S> {
             request_capacity,
             request_stats,
             connection_in_flight,
+            request_body_unfinished,
         }
     }
 }
@@ -230,6 +246,7 @@ where
         let force_abort = Arc::clone(&self.request_stats.force_abort);
         let request_stats = Arc::clone(&self.request_stats);
         let connection_in_flight = Arc::clone(&self.connection_in_flight);
+        let request_body_unfinished = Arc::clone(&self.request_body_unfinished);
         Box::pin(async move {
             let permit = request_capacity
                 .acquire()
@@ -254,6 +271,9 @@ where
                 },
                 Err(panic) => panic_response(panic),
             };
+            if response.extensions().get::<UnfinishedRequestBody>().is_some() {
+                request_body_unfinished.store(true, Ordering::Release);
+            }
             Ok(response.map(|body| ConnectionBody {
                 body,
                 completion: ResponseCompletion {
