@@ -138,6 +138,40 @@ fn every_naming_contract_changes_the_generated_consumer_input() {
     );
 }
 
+#[test]
+fn every_generated_object_key_decoder_uses_the_request_name_policy() {
+    let artifacts = artifacts();
+    let mut call_sites = 0usize;
+    for (path, generated) in &artifacts.files {
+        if !path.to_string_lossy().contains("generated/codec/ops/") {
+            continue;
+        }
+        let calls: Vec<&str> = generated.lines().filter(|line| line.contains("value::object_key(")).collect();
+        if calls.is_empty() {
+            continue;
+        }
+        assert!(
+            generated.contains("request.names()"),
+            "{} decodes an object key without receiving the request policy",
+            path.display()
+        );
+        for call in calls {
+            call_sites = call_sites.saturating_add(1);
+            assert!(
+                call.contains(", names)") || call.contains(", request.names())"),
+                "{} has an object-key bypass: {call}",
+                path.display()
+            );
+        }
+        assert!(
+            !generated.contains("NamePolicy::default()"),
+            "{} replaces the deployment policy with the default",
+            path.display()
+        );
+    }
+    assert!(call_sites > 0, "the check found no generated object-key decoder to inspect");
+}
+
 fn assert_mutation(rules: &BTreeMap<String, ContractRule>, dimension: MutationDimension, value: ContractValue, expected: &str) {
     let mut mutant = rules.clone();
     mutant

@@ -43,6 +43,7 @@ pub mod decode;
 pub mod encode;
 pub mod expr;
 pub mod media;
+pub mod name_policy;
 pub mod tolerance;
 pub mod url;
 

@@ -41,12 +41,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
+use rustfs_gateway::dto::DeleteObjects;
 use rustfs_gateway::{
     Authorizer, AuthzRequest, AwsNameValidator, BoxFuture, BucketName, Credentials, Decision, ErrorCode, Handler, HandlerResult,
     InputAuthzRequest, InputDecisions, Limits, MetaView, NamePolicy, NameRejection, NameValidator, ObjectKey, OperationCodec,
     RegionSet, Req, RequestBody, RequestContext, Resp, S3Service, ServiceBuilder, SigV4Authenticator, SlashPolicy,
     StaticCredentials, Stricter, TargetKind, WireRequest, dto,
 };
+
+use super::support::{signed_target_with_body_and_headers, wired_at_signed_time};
 
 // ── validators ─────────────────────────────────────────────────────────────────────────────────
 
@@ -199,6 +202,40 @@ fn a_stricter_validator_narrows_and_still_cannot_widen() {
     assert_eq!(key_of("/bucket/tenant/../etc", &strict), Err(ErrorCode::INVALID_ARGUMENT));
 }
 
+/// c-naming-0024: object keys carried in an XML body use the deployment's validator too.
+///
+/// `DeleteObjects` is the load-bearing operation: its keys exist only in the body, so applying
+/// `TenantPrefixOnly` to the URI while decoding these values under the default policy would give
+/// one deployment two naming authorities.
+#[test]
+fn c_naming_0024_delete_objects_body_uses_the_deployment_validator() {
+    let strict = NamePolicy::default().with_validator(Arc::new(TenantPrefixOnly));
+    let request = http::Request::builder()
+        .method("POST")
+        .uri("http://host.invalid/bucket?delete")
+        .header("host", "host.invalid")
+        .header("x-amz-checksum-crc32", "AAAAAA==")
+        .body(())
+        .expect("the fixture request is well formed");
+    let request = WireRequest::accept(request, &Limits::default()).expect("the fixture request is acceptable");
+    let view = MetaView::of_with(&request, TargetKind::Bucket, &strict).expect("the bucket is acceptable");
+
+    let accepted = dto::DeleteObjects::decode(
+        &view,
+        RequestBody::Buffered(Bytes::from_static(b"<Delete><Object><Key>tenant/kept.txt</Key></Object></Delete>")),
+    )
+    .expect("the positive control must cross the body naming boundary");
+    assert_eq!(accepted.delete.objects[0].key.as_str(), "tenant/kept.txt");
+
+    let error = dto::DeleteObjects::decode(
+        &view,
+        RequestBody::Buffered(Bytes::from_static(b"<Delete><Object><Key>foreign/refused.txt</Key></Object></Delete>")),
+    )
+    .expect_err("the deployment validator must cover body-carried object keys");
+    assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+    assert_eq!(error.member(), Some("Key"));
+}
+
 #[test]
 fn the_length_limit_is_bytes_and_the_boundary_is_inclusive() {
     let at_limit = "k".repeat(1024);
@@ -347,6 +384,38 @@ impl Handler<dto::GetObject> for CountingBackend {
     }
 }
 
+struct CountingInputAuthorizer(Arc<Counter>);
+
+impl Authorizer for CountingInputAuthorizer {
+    fn authorize_route<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        _request: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
+        Box::pin(async { Decision::Allow })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        self.0.hit();
+        let decisions = request.decide_all(Decision::Allow, |_| Decision::Allow);
+        Box::pin(async move { decisions })
+    }
+}
+
+struct CountingDeleteBackend(Arc<Counter>);
+
+#[rustfs_gateway::handlers]
+impl CountingDeleteBackend {
+    async fn delete_objects(&self, _request: Req<DeleteObjects>) -> HandlerResult<DeleteObjects> {
+        self.0.hit();
+        Ok(Resp::new(dto::DeleteObjectsOutput::default()))
+    }
+}
+
 fn assembled() -> (S3Service, Arc<Counter>, Arc<Counter>) {
     let authorizer_calls = Arc::new(Counter::default());
     let backend_calls = Arc::new(Counter::default());
@@ -418,6 +487,52 @@ async fn every_refused_spelling_is_refused_at_the_same_stage() {
     }
     assert_eq!(authorizer.calls(), 0);
     assert_eq!(backend.calls(), 0);
+}
+
+#[tokio::test]
+async fn a_body_key_refusal_precedes_input_authorization_and_dispatch() {
+    const ACCEPTED_BODY: &[u8] = b"<Delete><Object><Key>tenant/kept.txt</Key></Object></Delete>";
+    const ACCEPTED_MD5: &str = "yXiORcVKOHBxgnqf2R/IKg==";
+    const REFUSED_BODY: &[u8] = b"<Delete><Object><Key>foreign/refused.txt</Key></Object></Delete>";
+    const REFUSED_MD5: &str = "czY71Zl5VDGJMMbtWh/iCw==";
+
+    let input_authorizer_calls = Arc::new(Counter::default());
+    let backend_calls = Arc::new(Counter::default());
+    let service = wired_at_signed_time()
+        .name_validator(TenantPrefixOnly)
+        .authorizer(CountingInputAuthorizer(Arc::clone(&input_authorizer_calls)))
+        .register::<dto::DeleteObjects, _>(Arc::new(CountingDeleteBackend(Arc::clone(&backend_calls))))
+        .build()
+        .expect("a complete assembly");
+
+    let accepted = signed_target_with_body_and_headers(
+        http::Method::POST,
+        "/bucket?delete",
+        &[("content-md5", ACCEPTED_MD5)],
+        Bytes::from_static(ACCEPTED_BODY),
+    );
+    let accepted = service.call_bytes(accepted).await;
+    assert_eq!(accepted.status(), http::StatusCode::OK, "the positive control must reach the handler");
+    assert_eq!(input_authorizer_calls.calls(), 1);
+    assert_eq!(backend_calls.calls(), 1);
+
+    let refused = signed_target_with_body_and_headers(
+        http::Method::POST,
+        "/bucket?delete",
+        &[("content-md5", REFUSED_MD5)],
+        Bytes::from_static(REFUSED_BODY),
+    );
+    let refused = service.call_bytes(refused).await;
+    assert_eq!(refused.status(), http::StatusCode::BAD_REQUEST);
+    let refused = rustfs_gateway::collect(refused).await.expect("an in-memory refusal");
+    assert!(
+        refused
+            .body()
+            .windows(b"<Code>InvalidArgument</Code>".len())
+            .any(|window| { window == b"<Code>InvalidArgument</Code>" })
+    );
+    assert_eq!(input_authorizer_calls.calls(), 1, "the refused body must not reach input authorization");
+    assert_eq!(backend_calls.calls(), 1, "the refused body must not reach dispatch");
 }
 
 #[test]

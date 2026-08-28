@@ -19193,6 +19193,118 @@ shard_case 'a runner strides across its own workers too' \
 shard_case 'four runners of two workers split the ordinals into eight equal shares' \
     shard_partition_holds 4 2 64
 
+# -----------------------------------------------------------------------------
+# Expected diagnostics are compared as strings, which is only safe while the
+# argument reaches the comparison un-executed. A double-quoted argument hands
+# its backticks to command substitution: the span between them runs, its output
+# replaces the span, stderr gains a "command not found", and the weakened
+# remainder can still match the guard's real diagnostic — the case then proves
+# less than it claims while reading green (rustfs/gateway#334). The scanner
+# below reads this suite's own source and reports any double-quoted argument of
+# the diagnostic-expecting helpers that contains a backtick, so the regression
+# cannot return as a quoting typo. Single-quoted and $'...' arguments keep
+# backticks literal and are the blessed spellings.
+# -----------------------------------------------------------------------------
+
+# diagnostic_arguments_stay_literal <path>
+# Exit 0 when no expect_*_with_diagnostic argument in <path> is double-quoted
+# around a backtick; exit 1 naming each offender otherwise.
+diagnostic_arguments_stay_literal() {
+    local subject="$1"
+    python3 - "$subject" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+call_start = re.compile(r"^(expect_fail_with_diagnostic|expect_cargo_test_fail_with_diagnostic)\s")
+violations = []
+in_call = False
+for number, line in enumerate(text.splitlines(), start=1):
+    stripped = line.strip()
+    if stripped.endswith("\\"):
+        body = stripped[:-1]
+    else:
+        body = stripped
+    if call_start.match(line):
+        in_call = stripped.endswith("\\")
+        subject = body
+    elif in_call:
+        subject = body
+        in_call = stripped.endswith("\\")
+    else:
+        continue
+    # Walk the line honouring single quotes: inside them, double quotes and
+    # backticks are literal. `$'...'` is treated the same way.
+    index = 0
+    singles = 0
+    while index < len(subject):
+        char = subject[index]
+        if char == "'":
+            singles += 1
+            index += 1
+        elif char == '"' and singles % 2 == 0:
+            end = subject.find('"', index + 1)
+            if end < 0:
+                end = len(subject)
+            if "`" in subject[index + 1 : end]:
+                violations.append((number, subject.strip()))
+            index = end + 1
+        else:
+            index += 1
+if violations:
+    for number, offender in violations:
+        print(f"line {number}: a double-quoted diagnostic argument contains a backtick: {offender}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
+shard_case 'expected diagnostics keep every backtick out of double quotes' \
+    diagnostic_arguments_stay_literal "${SCRIPT_DIR}/test_guard_scripts.sh"
+
+# double_quoted_backtick_is_caught / single_quoted_backtick_is_literal
+# The two directions of the scan, on synthetic sources: the exact spelling that
+# silently executed on #334 must be reported, and the blessed single-quoted
+# spelling of the same diagnostic must not be.
+double_quoted_backtick_is_caught() {
+    local tmp
+    tmp="$(mktemp "${TMPDIR:-/tmp}/gateway-diag-quote.XXXXXX")"
+    {
+        printf '%s\n' 'expect_fail_with_diagnostic check_example.sh \'
+        printf '%s\n' '    "a case whose expected diagnostic was weakened" \'
+        printf '%s\n' '    "`Members:` does not name it" \'
+        printf '%s\n' '    mut_noop'
+    } >"$tmp"
+    if diagnostic_arguments_stay_literal "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    rm -f "$tmp"
+    return 0
+}
+
+single_quoted_backtick_is_literal() {
+    local tmp
+    tmp="$(mktemp "${TMPDIR:-/tmp}/gateway-diag-quote.XXXXXX")"
+    {
+        printf '%s\n' 'expect_fail_with_diagnostic check_example.sh \'
+        printf '%s\n' '    "a case whose expected diagnostic was weakened" \'
+        printf '%s\n' "    '\`Members:\` does not name it' \\"
+        printf '%s\n' '    mut_noop'
+    } >"$tmp"
+    if diagnostic_arguments_stay_literal "$tmp"; then
+        rm -f "$tmp"
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
+shard_case 'the diagnostic scanner catches the double-quoted backtick spelling of #334' \
+    double_quoted_backtick_is_caught
+shard_case 'the diagnostic scanner leaves the single-quoted spelling alone' \
+    single_quoted_backtick_is_literal
+
 # ledger_report_is <complete|defective> <considered> <groups> <group>
 #                  <comma-separated ordinals per worker>...
 ledger_report_is() {

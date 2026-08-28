@@ -76,13 +76,14 @@ the value the storage layer used, and the difference between the two was the vul
 **What the framework guarantees.** A bucket label and an object key are turned into a
 `BucketName` and an `ObjectKey` in exactly one place — `crates/types/src/scalar/naming.rs`, reached
 through `ObjectKey::materialize`, `ObjectKey::materialize_decoded` and `BucketName::materialize`.
-That one place decodes percent-encoding exactly once, applies the deployment's `SlashPolicy`, runs
-a safety floor no configuration can lower, and only then consults the deployment's
-`NameValidator`. The value it produces is the value the authorizer is shown, the value the codec
-puts into the operation input, and the value the backend receives. Nothing downstream is handed
-the request path to parse again. `scripts/check_single_normalization.sh` fails the build if a
-second normalisation, a second percent decoder, or a `Deref`/`AsRef<str>`/`From<String>` on
-`ObjectKey` appears.
+For a path label, that one place decodes percent-encoding exactly once and applies the deployment's
+`SlashPolicy`. For a body element or query value that its own reader has already decoded, it keeps
+the literal key and does neither operation again. Every entry runs a safety floor no configuration
+can lower and only then consult the deployment's `NameValidator`. The value produced is the value
+the authorizer is shown, the value the codec puts into the operation input, and the value the
+backend receives. Nothing downstream is handed the request path to parse again.
+`scripts/check_single_normalization.sh` fails the build if a second normalisation, a second percent
+decoder, or a `Deref`/`AsRef<str>`/`From<String>` on `ObjectKey` appears.
 
 The floor refuses, whatever the validator says: an empty key, a key over 1024 UTF-8 bytes, a NUL,
 a control character, a `..` segment delimited by `/` or `\`, a drive-letter or UNC root, a value
@@ -113,10 +114,12 @@ may not name one containing a control character. Neither restricts what a backen
 object already stored under such a key is still listable, because the floor governs the naming
 path and not the representation.
 
-One gap, stated rather than hidden: keys arriving in a request **body** — `DeleteObjects` names its
-keys there — get the floor but not the deployment's `NameValidator`, because a generated decoder
-has no policy to hand. The floor is uniform; a custom validator today covers the request path and
-`x-amz-copy-source`.
+Keys arriving in a request **body** use the same floor and deployment validator. `DeleteObjects` is
+the load-bearing case: its generated decoder receives `MetaView::names()`, threads it through every
+nested XML reader and calls `ObjectKey::materialize_decoded`. The body text is already the literal
+key, not an encoded path, so this entry neither percent-decodes it nor applies path-only
+`SlashPolicy` rewriting. A custom validator therefore covers the request path, `x-amz-copy-source`,
+and body-carried object keys under one authority without changing the body key's identity.
 
 ## Server-side encryption: your responsibilities
 

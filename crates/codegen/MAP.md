@@ -34,6 +34,7 @@ and the zero-diff gate needs no temporary directory.
 | `src/emit/codec/encode.rs` | The response half: headers with their `omit_when` suppression, the XML body in `element_order` with its `empty_value_policy`, and the per-shape writers. | A response byte is wrong. |
 | `src/emit/codec/bounds.rs` | Resolves inclusive integer ranges from typed codec rules; free-text quirk kinds are not codec inputs. | A bounded member's typed current value is wrong. |
 | `src/emit/codec/boolean.rs` | Resolves field-level boolean spelling from typed codec rules, failing ambiguous operation-level attachments. | A boolean header's accepted spelling is wrong. |
+| `src/emit/codec/name_policy.rs` | Finds input XML shapes containing object keys and renders the policy-bearing reader call and signature. | A body-carried object key does not use the deployment name policy, or a generated reader has the wrong signature. |
 | `src/emit/codec/forms.rs` | Resolves string wire grammars from typed codec rules; free-text quirk kinds are not codec inputs. | A member's wire spelling is wrong. |
 | `src/emit/codec/tolerance.rs` | Resolves tolerant header readings from typed codec rules; free-text quirk kinds are not codec inputs. | A header must be ignored rather than refused. |
 | `src/emit/quirk_toml.rs` | Disjoint `spec/quirks/<id>.toml` mutable rules and `spec/contracts/<id>.toml` typed runtime contracts; deferred overlay facts are not emitted. | A mutation input is missing or a deferred fact leaked into a protected table. |

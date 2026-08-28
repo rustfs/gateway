@@ -32,8 +32,8 @@ use std::collections::BTreeMap;
 
 use rustfs_gateway_http::decode_metadata_value;
 use rustfs_gateway_types::{
-    BucketName, ChecksumError, ChecksumSpec, ContentMd5, ETag, ErrorCode, EtagRender, ObjectKey, OpaqueString, RangeSpec,
-    Timestamp, TimestampFormat, is_xml_representable,
+    BucketName, ChecksumError, ChecksumSpec, ContentMd5, ETag, ErrorCode, EtagRender, NamePolicy, ObjectKey, OpaqueString,
+    RangeSpec, Timestamp, TimestampFormat, is_xml_representable,
 };
 
 use crate::codec::error::CodecError;
@@ -284,16 +284,14 @@ pub fn render_etag(value: &ETag, context: EtagRender) -> String {
 /// No decode happens: the XML or query reader that produced this value already performed the one
 /// decode, and a second one is the `%252e%252e` trap.
 ///
-/// The *validator* half of the policy is not applied here, only the floor: a generated decoder has
-/// no deployment policy to hand, and inventing a default would make the assembled service's
-/// validator disagree with this one. See the note in `docs/security-model.md`.
+/// The deployment policy is required rather than defaulted: body-carried keys and URI-carried keys
+/// must pass the same validator, or one assembled service would have two naming authorities.
 ///
 /// # Errors
 ///
 /// [`CodecError`] naming the member.
-pub fn object_key(value: &str, member: &'static str) -> Result<ObjectKey, CodecError> {
-    rustfs_gateway_types::floor_check_key(value).map_err(|_| unusable(member))?;
-    ObjectKey::new(value.to_owned()).map_err(|_| unusable(member))
+pub fn object_key(value: &str, member: &'static str, names: &NamePolicy) -> Result<ObjectKey, CodecError> {
+    ObjectKey::materialize_decoded(value, names).map_err(|_| unusable(member))
 }
 
 /// Parses a bucket name.

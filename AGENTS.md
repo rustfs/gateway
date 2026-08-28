@@ -88,12 +88,17 @@ Use this map rather than guessing a broader command:
 | One operation, its codec, or its route | `cargo xtask verify --op <OperationName>` |
 | One crate | `cargo xtask verify --crate <crate-name>` |
 | The pinned model, an overlay, or code generation | `cargo xtask codegen --check` |
-| One conformance case | `cargo xtask conformance validate --filter '<case-id>'` |
+| One conformance case | `cargo xtask conformance run --filter '<case-id>'` |
 | Cross-crate wiring, scripts, or CI | `cargo xtask verify --all` |
 
 `verify --op` and `verify --crate` have a 30-second budget. `verify --all` is the CI surface and has
 a 10-minute budget. A budget failure is a tooling defect; do not replace the command with a wider,
 slower one.
+
+`conformance validate` checks the corpus — the frozen schema and the conventions — and stops. It is
+the right command after editing `case.schema.json` or a lint rule, and the wrong one after editing a
+case: it contacts no target and evaluates no assertion in a case, so it reports `N validated` rather
+than `N passed` and names no target or transport. Only `conformance run` measures anything.
 
 ### TDD
 
