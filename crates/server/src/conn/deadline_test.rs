@@ -20,7 +20,6 @@
 
 use std::convert::Infallible;
 use std::future::Future;
-use std::io::{self, Read};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::process::Command;
@@ -257,15 +256,15 @@ async fn c_lim_0032_a_srv_0010_one_byte_per_second_header_closes_at_ten_seconds(
             .expect("one paced header byte writes before the deadline");
         let mut probe = [0_u8; 1];
         let error = stream.try_read(&mut probe).expect_err("the header deadline has not elapsed");
-        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
     }
     assert_eq!(started.elapsed(), Duration::from_secs(9), "nine paced bytes do not close early");
     tokio::time::advance(Duration::from_secs(1)).await;
-    let disconnected = tokio::task::spawn_blocking(move || -> io::Result<bool> {
+    let disconnected = tokio::task::spawn_blocking(move || -> std::io::Result<bool> {
         let mut stream = stream.into_std()?;
         let mut byte = [0_u8; 1];
         for _ in 0..1_000 {
-            match stream.read(&mut byte) {
+            match std::io::Read::read(&mut stream, &mut byte) {
                 Ok(0) => return Ok(true),
                 Err(error)
                     if matches!(error.kind(), std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted) =>
@@ -273,8 +272,8 @@ async fn c_lim_0032_a_srv_0010_one_byte_per_second_header_closes_at_ten_seconds(
                     return Ok(true);
                 }
                 Ok(_) => return Ok(false),
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(1));
                 }
                 Err(error) => return Err(error),
