@@ -93,6 +93,9 @@ pub fn run(corpus: &Corpus, sut: &mut dyn Sut, options: &RunOptions) -> Report {
     let goldens = CorpusGoldens(corpus);
     let mut outcomes = Vec::new();
     let mut notes = Vec::new();
+    if options.validate_only {
+        notes.push("validate: schema check only — no cases were executed".to_owned());
+    }
     let mut filtered_out = 0;
     for case in corpus.cases() {
         if !selected(case, options) {
