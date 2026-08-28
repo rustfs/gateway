@@ -1969,22 +1969,22 @@ expect_fail check_xtask_codegen_surface.sh \
     'an operation-only verifier leaking into the light crate surface' \
     mut_xtask_verify_operation_loses_full_gate
 
-mut_xtask_conformance_runner_leaks_into_light_surface() {
+mut_xtask_operation_conformance_runner_leaks_into_light_surface() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '#[cfg(feature = "full")]\nfn conformance_step'
-new = 'fn conformance_step'
+old = '#[cfg(feature = "full")]\nfn run_representative_case'
+new = 'fn run_representative_case'
 if text.count(old) != 1:
-    raise SystemExit("full-only conformance runner is missing")
+    raise SystemExit("full-only operation conformance runner is missing")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'the standalone conformance runner leaking into the light crate surface' \
-    mut_xtask_conformance_runner_leaks_into_light_surface
+    'the operation conformance runner leaking into the light crate surface' \
+    mut_xtask_operation_conformance_runner_leaks_into_light_surface
 
 mut_xtask_full_verify_uses_unstable_slice_conversion() {
     python3 - <<'PYEOF'

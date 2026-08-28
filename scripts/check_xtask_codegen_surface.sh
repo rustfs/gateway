@@ -806,7 +806,6 @@ for name in (
     "verify_operation",
     "run_representative_case",
     "run_operation_contract",
-    "conformance_step",
     "verify_scaffold",
     "snake_case",
     "run_all",
@@ -817,6 +816,49 @@ for name in (
     items = functions_named(name, syntax, comments_removed)
     if len(items) != 1 or [compact(attr) for attr in items[0][0]] != [expected_full_attribute]:
         fail(f"verify item {name} must remain full-only")
+run_representative_body = functions_named("run_representative_case", syntax, comments_removed)[0][1]
+expected_run_representative_body = compact('''
+for case in cases {
+    let report = match rustfs_gateway_conformance::cli::run_filtered(case) {
+        Ok(report) => report,
+        Err(_) => continue,
+    };
+    match rustfs_gateway_conformance::cli::status_code(
+        &report,
+        None,
+        rustfs_gateway_conformance::cli::Command::Run
+    ) {
+        rustfs_gateway_conformance::cli::exit::SUCCESS => return Ok(Some(case.clone())),
+        rustfs_gateway_conformance::cli::exit::ENVIRONMENT => continue,
+        code => {
+            eprint!("{}", report.render_text(None));
+            print_json_failure(json, "operation conformance case failed", case);
+            return Err(diagnostic(
+                "operation conformance case failed",
+                case,
+                &format!("a-xt-0002 requires {name} conformance evidence; conformance exited with {code}"),
+            ));
+        }
+    }
+}
+if cases.is_empty() {
+    return Ok(None);
+}
+print_json_failure(json, "no mapped conformance case could execute", name);
+Err(diagnostic(
+    "no mapped conformance case could execute",
+    name,
+    "a-xt-0002 requires an observed conformance result, not a skipped case",
+))
+''')
+if compact(run_representative_body) != expected_run_representative_body:
+    fail("operation conformance verification must stay on the reviewed in-process, fail-closed path")
+run_operation_contract_body = functions_named("run_operation_contract", syntax, comments_removed)[0][1]
+expected_run_operation_contract_body = compact('''
+catalog::verify_operation_contract(name, mapped_cases)
+''')
+if compact(run_operation_contract_body) != expected_run_operation_contract_body:
+    fail("operation route verification must stay a direct in-process catalog contract")
 verify_full_items = functions_named("verify_full", syntax, comments_removed)
 expected_verify_full_body = compact('''
 match args {

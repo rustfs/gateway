@@ -122,6 +122,28 @@ pub fn main(args: &[String]) -> ExitCode {
     }
 }
 
+/// Runs a filtered case selection against the bundled in-process target without rendering it.
+///
+/// This quiet library boundary uses the same corpus, runner, target, transport, profile, and
+/// slow-case policy as `run --filter <filter>`, while the caller retains control of stdout and
+/// decides how to render the returned report.
+///
+/// # Errors
+///
+/// Returns an environment diagnostic when the corpus cannot be discovered or prepared.
+pub fn run_filtered(filter: &str) -> Result<Report, String> {
+    let root = Corpus::discover_root().map_err(|error| error.to_string())?;
+    let corpus = runner::prepare_corpus(&root).map_err(|error| error.to_string())?;
+    let options = RunOptions {
+        filter: Some(filter.to_owned()),
+        transport: Transport::Hyper,
+        profile: Profile::Aws,
+        include_slow: true,
+        validate_only: false,
+    };
+    Ok(runner::run(&corpus, &mut InProcess::new(root), &options))
+}
+
 /// The corpus directory this run reads, from `--root` or by discovery.
 fn resolve_root(options: &Options) -> Result<PathBuf, String> {
     options
@@ -202,6 +224,31 @@ pub fn execute(options: &Options, sut: &mut dyn Sut) -> ExitCode {
 }
 
 fn status(report: &Report, baseline: Option<&Baseline>, command: Command) -> u8 {
+    let code = status_code(report, baseline, command);
+    if code != exit::ENVIRONMENT {
+        return code;
+    }
+    if report.outcomes.is_empty() {
+        eprintln!(
+            "conformance: no case was selected — {} case(s) were excluded. \
+             Nothing was checked, so this run asserts nothing.",
+            report.filtered_out
+        );
+    } else {
+        eprintln!(
+            "conformance: no case executed — every case was skipped. \
+             The corpus loaded and validated, but nothing was measured."
+        );
+    }
+    code
+}
+
+/// Classifies a report without rendering diagnostics or mutating output streams.
+///
+/// This is the exit classification used by [`execute`]. Embedders use it to retain the command's
+/// fail-closed distinction between a regression, an empty selection, and an all-skipped run.
+#[must_use]
+pub fn status_code(report: &Report, baseline: Option<&Baseline>, command: Command) -> u8 {
     let regressions = report.regressions(baseline).len();
     if regressions > 0 {
         return exit::REGRESSION;
@@ -210,11 +257,6 @@ fn status(report: &Report, baseline: Option<&Baseline>, command: Command) -> u8 
     // included. `--filter '<case-id>'` is how the feedback-loop table selects one case, so a typo
     // in the id checked nothing and exited 0 — the same shape as a command that checked something.
     if report.outcomes.is_empty() {
-        eprintln!(
-            "conformance: no case was selected — {} case(s) were excluded. \
-             Nothing was checked, so this run asserts nothing.",
-            report.filtered_out
-        );
         return exit::ENVIRONMENT;
     }
     // A run in which nothing executed is an environment problem, not a pass. Reporting it as
@@ -223,10 +265,6 @@ fn status(report: &Report, baseline: Option<&Baseline>, command: Command) -> u8 
         && !report.outcomes.is_empty()
         && report.outcomes.iter().all(|outcome| outcome.verdict == Verdict::Skipped)
     {
-        eprintln!(
-            "conformance: no case executed — every case was skipped. \
-             The corpus loaded and validated, but nothing was measured."
-        );
         return exit::ENVIRONMENT;
     }
     exit::SUCCESS
@@ -531,6 +569,57 @@ mod tests {
             validate_only: false,
         };
         assert_eq!(status(&report, None, Command::Run), exit::ENVIRONMENT);
+        assert_eq!(status_code(&report, None, Command::Run), exit::ENVIRONMENT);
         assert_eq!(status(&report, None, Command::Validate), exit::SUCCESS);
+    }
+
+    #[test]
+    fn quiet_status_rejects_an_empty_selection() {
+        let report = Report {
+            target: "none".to_owned(),
+            transport: "hyper".to_owned(),
+            profile: "aws".to_owned(),
+            outcomes: Vec::new(),
+            filtered_out: 1,
+            notes: Vec::new(),
+            polarity: (1, 0),
+            validate_only: false,
+        };
+        assert_eq!(status_code(&report, None, Command::Run), exit::ENVIRONMENT);
+    }
+
+    #[test]
+    fn quiet_status_rejects_a_failed_assertion() {
+        let mut report = Report {
+            target: "scripted".to_owned(),
+            transport: "hyper".to_owned(),
+            profile: "aws".to_owned(),
+            outcomes: Vec::new(),
+            filtered_out: 0,
+            notes: Vec::new(),
+            polarity: (1, 0),
+            validate_only: false,
+        };
+        report.outcomes.push(crate::report::CaseOutcome {
+            id: "c-object-0001".to_owned(),
+            domain: "object".to_owned(),
+            relative: "cases/object/c-object-0001.toml".to_owned(),
+            title: None,
+            verdict: Verdict::Failed,
+            phase: crate::report::Phase::Execute,
+            skip_reason: None,
+            diagnostics: Vec::new(),
+            quirks: Vec::new(),
+            evidence: Vec::new(),
+        });
+        assert_eq!(status_code(&report, None, Command::Run), exit::REGRESSION);
+    }
+
+    #[test]
+    fn quiet_filtered_run_executes_exactly_one_observed_case() {
+        let report = run_filtered("c-object-0001").expect("the bundled target must run");
+        assert_eq!(report.outcomes.len(), 1);
+        assert_eq!(report.outcomes[0].id, "c-object-0001");
+        assert_eq!(report.outcomes[0].verdict, Verdict::Passed);
     }
 }
