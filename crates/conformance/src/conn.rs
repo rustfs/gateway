@@ -69,6 +69,8 @@ use crate::observation::{
     ConnectionState, Observation, Outcome, StreamTermination, decode_event_stream, has_event_stream_content_type,
     late_error_offset,
 };
+#[cfg(feature = "production-transports")]
+use crate::production::{ProductionDriver, ProductionServer};
 use crate::socket::{Announce, Connection, Demand, Listener, Pacer, ReadFailure, honour_the_services_intent, parse_head};
 use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::value::Value;
@@ -95,6 +97,10 @@ pub struct Conn {
     inner: InProcess,
     listener: Option<Listener>,
     connection: Option<Connection>,
+    #[cfg(feature = "production-transports")]
+    production: Option<ProductionServer>,
+    #[cfg(feature = "production-transports")]
+    driver: Option<ProductionDriver>,
     pacer: Arc<Pacer>,
 }
 
@@ -106,6 +112,24 @@ impl Conn {
             inner: InProcess::new(root),
             listener: None,
             connection: None,
+            #[cfg(feature = "production-transports")]
+            production: None,
+            #[cfg(feature = "production-transports")]
+            driver: None,
+            pacer: Arc::new(Pacer::new()),
+        }
+    }
+
+    /// Builds a target backed by one real production connection driver.
+    #[cfg(feature = "production-transports")]
+    #[must_use]
+    pub fn production(root: std::path::PathBuf, driver: ProductionDriver) -> Conn {
+        Conn {
+            inner: InProcess::new(root),
+            listener: None,
+            connection: None,
+            production: None,
+            driver: Some(driver),
             pacer: Arc::new(Pacer::new()),
         }
     }
@@ -124,6 +148,22 @@ impl Conn {
         self.listener
             .as_ref()
             .ok_or_else(|| SutError::Environment("the listener vanished between starting and using it".to_owned()))
+    }
+
+    fn addr(&mut self, at_unix_seconds: i64, skew_ms: i64) -> Result<std::net::SocketAddr, SutError> {
+        #[cfg(feature = "production-transports")]
+        if let Some(driver) = self.driver {
+            if self.production.is_none() {
+                let service = self.inner.assemble(at_unix_seconds, skew_ms)?;
+                self.production = Some(ProductionServer::start(service, driver)?);
+            }
+            return self
+                .production
+                .as_ref()
+                .ok_or_else(|| SutError::Environment("the production listener vanished after starting".to_owned()))?
+                .addr();
+        }
+        Ok(self.listener(at_unix_seconds, skew_ms)?.addr())
     }
 }
 
@@ -300,7 +340,16 @@ struct BodyProgress {
 
 impl Sut for Conn {
     fn describe(&self) -> String {
-        "rustfs-gateway served over a loopback TCP connection, over a fixture backend".to_owned()
+        #[cfg(feature = "production-transports")]
+        match self.driver {
+            Some(ProductionDriver::Hyper) => "rustfs-gateway production Hyper driver over loopback TCP".to_owned(),
+            Some(ProductionDriver::SelfHeld) => {
+                "rustfs-gateway production self-held HTTP/1.1 driver over loopback TCP".to_owned()
+            }
+            None => "rustfs-gateway test socket harness over loopback TCP".to_owned(),
+        }
+        #[cfg(not(feature = "production-transports"))]
+        return "rustfs-gateway test socket harness over loopback TCP".to_owned();
     }
 
     fn prepare(&mut self, case_id: &str, setup: Option<&Value>) -> Result<Captures, SutError> {
@@ -309,6 +358,10 @@ impl Sut for Conn {
         // measured something nobody described.
         self.connection = None;
         self.listener = None;
+        #[cfg(feature = "production-transports")]
+        {
+            self.production = None;
+        }
         self.inner.prepare(case_id, setup)
     }
 
@@ -333,7 +386,7 @@ impl Sut for Conn {
         let head = self.head(&wire, &request_time)?;
         let budget = budget_of(plan.timeout_ms);
 
-        let addr = self.listener(fixed.unix_seconds, skew_ms)?.addr();
+        let addr = self.addr(fixed.unix_seconds, skew_ms)?;
         // A connection that the previous exchange left closed is replaced rather than written to.
         // `connection_after` has already recorded the state it was in, so nothing is hidden by
         // opening another one; writing into a dead socket would turn a measured close into an
@@ -346,7 +399,6 @@ impl Sut for Conn {
         if fresh {
             self.connection = None;
             let pacer = Arc::new(Pacer::new());
-            self.listener(fixed.unix_seconds, skew_ms)?.enqueue_pacer(&pacer);
             self.pacer = pacer;
             self.connection = Some(Connection::open(addr)?);
         } else {
@@ -355,6 +407,16 @@ impl Sut for Conn {
             self.pacer.reset();
         }
         let pacer = Arc::clone(&self.pacer);
+        #[cfg(feature = "production-transports")]
+        if let Some(production) = &self.production {
+            production.enqueue_pacer(&pacer);
+        } else if fresh {
+            self.listener(fixed.unix_seconds, skew_ms)?.enqueue_pacer(&pacer);
+        }
+        #[cfg(not(feature = "production-transports"))]
+        if fresh {
+            self.listener(fixed.unix_seconds, skew_ms)?.enqueue_pacer(&pacer);
+        }
         let connection = self
             .connection
             .as_mut()

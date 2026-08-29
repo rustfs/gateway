@@ -283,6 +283,15 @@ fn finish_socket_handoff<T>(mut guard: SocketAbortGuard, result: io::Result<T>) 
 }
 
 impl PlaintextConnection {
+    /// Records transport-owned proof that request octets remain before an orderly close.
+    ///
+    /// A self-held parser has stronger information than an application response: it owns the
+    /// framing state and can see that the peer still owes body bytes. Recording that fact makes
+    /// shutdown linger after its write-side FIN instead of dropping unread octets with a reset.
+    pub fn mark_request_body_unfinished(&self) {
+        self.inner.mark_request_body_unfinished();
+    }
+
     /// Attempts one file-to-socket transfer without copying its bytes through user space, while
     /// retaining the connection's write-progress deadline.
     ///

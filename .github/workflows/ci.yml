@@ -310,6 +310,20 @@ jobs:
         run: |
           scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance
 
+  transport-parity:
+    name: Production transport parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Compare production transports (maximum 8 minutes after setup)
+        run: |
+          scripts/ci_budget.sh 480 "production transport parity" cargo run --package rustfs-gateway-conformance --bin rustfs-gateway-conformance -- diff-transports --exclude-slow
+
   signing-suite:
     name: Official signing suite
     runs-on: ubuntu-latest
@@ -461,9 +475,9 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Build-backed guards 1 of 3 (maximum 6.5 minutes after setup)
+      - name: Build-backed guards 1 of 5 (maximum 6.5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 380 "build-backed guards 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 380 "build-backed guards 1/5" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
 
   build-guard-self-test-2:
     name: Build guard self-test 2
@@ -475,9 +489,9 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Build-backed guards 2 of 3 (maximum 6.5 minutes after setup)
+      - name: Build-backed guards 2 of 5 (maximum 6.5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 380 "build-backed guards 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 380 "build-backed guards 2/5" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
 
   build-guard-self-test-3:
     name: Build guard self-test 3
@@ -489,9 +503,37 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Build-backed guards 3 of 3 (maximum 6.5 minutes after setup)
+      - name: Build-backed guards 3 of 5 (maximum 6.5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 380 "build-backed guards 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 380 "build-backed guards 3/5" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
+
+  build-guard-self-test-4:
+    name: Build guard self-test 4
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build-backed guards 4 of 5 (maximum 6.5 minutes after setup)
+        run: |
+          scripts/ci_budget.sh 380 "build-backed guards 4/5" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=3 bash scripts/test_guard_scripts.sh
+
+  build-guard-self-test-5:
+    name: Build guard self-test 5
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Build-backed guards 5 of 5 (maximum 6.5 minutes after setup)
+        run: |
+          scripts/ci_budget.sh 380 "build-backed guards 5/5" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=4 bash scripts/test_guard_scripts.sh
 
   error-status-self-test:
     name: Error status self-test
@@ -503,11 +545,11 @@ jobs:
         run: |
           scripts/ci_budget.sh 60 "error status self-test" env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
 
-  # Branch protection requires this exact check name. It aggregates all sixteen parallel jobs and must
+  # Branch protection requires this exact check name. It aggregates all nineteen parallel jobs and must
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, error-status-self-test, gateway-tsan, docs]
+    needs: [workspace-tests, workspace-tests-2, transport-parity, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -516,6 +558,7 @@ jobs:
         env:
           WORKSPACE_RESULT: ${{ needs.workspace-tests.result }}
           WORKSPACE_2_RESULT: ${{ needs.workspace-tests-2.result }}
+          TRANSPORT_PARITY_RESULT: ${{ needs.transport-parity.result }}
           SIGNING_SUITE_RESULT: ${{ needs.signing-suite.result }}
           GUARD_RESULT: ${{ needs.guard-self-test.result }}
           GUARD_2_RESULT: ${{ needs.guard-self-test-2.result }}
@@ -527,12 +570,15 @@ jobs:
           BUILD_GUARD_RESULT: ${{ needs.build-guard-self-test.result }}
           BUILD_GUARD_2_RESULT: ${{ needs.build-guard-self-test-2.result }}
           BUILD_GUARD_3_RESULT: ${{ needs.build-guard-self-test-3.result }}
+          BUILD_GUARD_4_RESULT: ${{ needs.build-guard-self-test-4.result }}
+          BUILD_GUARD_5_RESULT: ${{ needs.build-guard-self-test-5.result }}
           ERROR_STATUS_RESULT: ${{ needs.error-status-self-test.result }}
           TSAN_RESULT: ${{ needs.gateway-tsan.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
         run: |
           test "$WORKSPACE_RESULT" = success
           test "$WORKSPACE_2_RESULT" = success
+          test "$TRANSPORT_PARITY_RESULT" = success
           test "$SIGNING_SUITE_RESULT" = success
           test "$GUARD_RESULT" = success
           test "$GUARD_2_RESULT" = success
@@ -544,6 +590,8 @@ jobs:
           test "$BUILD_GUARD_RESULT" = success
           test "$BUILD_GUARD_2_RESULT" = success
           test "$BUILD_GUARD_3_RESULT" = success
+          test "$BUILD_GUARD_4_RESULT" = success
+          test "$BUILD_GUARD_5_RESULT" = success
           test "$ERROR_STATUS_RESULT" = success
           test "$TSAN_RESULT" = success
           test "$DOCS_RESULT" = success

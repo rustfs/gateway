@@ -155,7 +155,10 @@ pub use crate::trace::{
 };
 pub use crate::transport::Transport;
 pub use crate::wire::{OrderedHeaders, WireResponse, collect};
+pub use rustfs_gateway_http::MAX_LINGER_DRAIN_BYTES;
 pub use rustfs_gateway_macros::handlers;
+#[cfg(feature = "server")]
+pub use rustfs_gateway_server::{RunningServer, Server, ServerConfig};
 
 /// The generated request and response types, and the operation markers they belong to.
 ///
@@ -431,6 +434,8 @@ pub use rustfs_gateway_core::ops::create_bucket::REGION_MATCH_POLICY;
 pub use rustfs_gateway_http::{EffectiveHost, Limits, WireReject, WireRequest};
 pub use rustfs_gateway_sig::{Identity, OperationFloor, RegionSet, RequestNow, SecurityFloor, SigService, SkewWindow, Verdict};
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};
+/// Tower's service trait, exposed so facade-only consumers can wrap [`S3Service`].
+pub use tower::Service as TowerService;
 // `ETag`, `Timestamp` and the checksum types are here because a backend cannot answer without
 // them: `Object`, `ObjectVersion`, `Part` and `Bucket` all require one, so without these a
 // listing entry is unbuildable and `PutObject` cannot return an etag from outside this

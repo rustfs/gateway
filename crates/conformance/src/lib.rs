@@ -73,7 +73,11 @@ pub mod keys;
 pub mod lint;
 pub mod md5;
 pub mod observation;
+#[cfg(feature = "production-transports")]
+pub mod parity;
 pub mod pattern;
+#[cfg(feature = "production-transports")]
+pub mod production;
 pub mod report;
 #[cfg(test)]
 mod report_tests;

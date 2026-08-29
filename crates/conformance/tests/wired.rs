@@ -26,11 +26,16 @@
 use rustfs_gateway_conformance::conn::Conn;
 use rustfs_gateway_conformance::corpus::Corpus;
 use rustfs_gateway_conformance::inprocess::InProcess;
+use rustfs_gateway_conformance::production::ProductionDriver;
 use rustfs_gateway_conformance::report::{CaseOutcome, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
 use rustfs_gateway_conformance::sut::Transport;
+use std::sync::Mutex;
+
+static WIRE_RUN: Mutex<()> = Mutex::new(());
 
 fn run(filter: &str) -> rustfs_gateway_conformance::report::Report {
+    let _wire = WIRE_RUN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let root = Corpus::discover_root().expect("a corpus sits next to this crate");
     let corpus = runner::prepare_corpus(&root).expect("the corpus loads");
     let mut sut = InProcess::new(root);
@@ -43,12 +48,29 @@ fn run(filter: &str) -> rustfs_gateway_conformance::report::Report {
 
 /// The same, over a real TCP connection.
 fn run_over_a_socket(filter: &str) -> rustfs_gateway_conformance::report::Report {
+    let _wire = WIRE_RUN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let root = Corpus::discover_root().expect("a corpus sits next to this crate");
     let corpus = runner::prepare_corpus(&root).expect("the corpus loads");
     let mut sut = Conn::new(root);
     let options = RunOptions {
         filter: Some(filter.to_owned()),
         transport: Transport::Conn,
+        ..RunOptions::default()
+    };
+    runner::run(&corpus, &mut sut, &options)
+}
+
+fn run_over_production(filter: &str, driver: ProductionDriver) -> rustfs_gateway_conformance::report::Report {
+    let _wire = WIRE_RUN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let root = Corpus::discover_root().expect("a corpus sits next to this crate");
+    let corpus = runner::prepare_corpus(&root).expect("the corpus loads");
+    let mut sut = Conn::production(root, driver);
+    let options = RunOptions {
+        filter: Some(filter.to_owned()),
+        transport: match driver {
+            ProductionDriver::Hyper => Transport::Hyper,
+            ProductionDriver::SelfHeld => Transport::Conn,
+        },
         ..RunOptions::default()
     };
     runner::run(&corpus, &mut sut, &options)
@@ -261,6 +283,27 @@ fn a_refusal_over_a_drainable_body_keeps_the_connection_over_a_socket() {
     let report = run_over_a_socket("c-object-0013");
     let outcome = only(&report);
     assert_eq!(outcome.verdict, Verdict::Passed, "{:?}", failures(outcome));
+}
+
+/// Positive — both production drivers drain a bounded remainder before reusing the connection.
+#[test]
+fn both_production_drivers_keep_alive_after_a_small_drainable_body() {
+    for driver in [ProductionDriver::Hyper, ProductionDriver::SelfHeld] {
+        let report = run_over_production("c-object-0013", driver);
+        let outcome = only(&report);
+        assert_eq!(outcome.verdict, Verdict::Passed, "{driver:?}: {:?}", failures(outcome));
+    }
+}
+
+/// Positive — the raw observer must decode the chunked body both production writers use for an
+/// application response whose length is not frozen in advance.
+#[test]
+fn both_production_drivers_expose_a_chunked_copy_result_body() {
+    for driver in [ProductionDriver::Hyper, ProductionDriver::SelfHeld] {
+        let report = run_over_production("c-copy-0004", driver);
+        let outcome = only(&report);
+        assert_eq!(outcome.verdict, Verdict::Passed, "{driver:?}: {:?}", failures(outcome));
+    }
 }
 
 /// **Negative — the in-process control for both of the above.**

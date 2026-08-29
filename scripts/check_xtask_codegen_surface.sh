@@ -15,7 +15,8 @@ fail() {
 
 command -v python3 >/dev/null 2>&1 || fail 'python3 is required'
 for required in .cargo/config.toml Cargo.toml xtask-launcher/Cargo.toml xtask-launcher/src/main.rs xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs xtask/src/verify/launcher.rs \
-    crates/conformance/src/cli.rs crates/gateway/tests/cors_runtime.rs crates/server/tests/server_load.rs \
+    crates/conformance/Cargo.toml crates/conformance/src/cli.rs scripts/check_case_keys_honoured.sh \
+    crates/gateway/tests/cors_runtime.rs crates/server/tests/server_load.rs \
     crates/server/tests/server_load/per_ip.rs; do
     [[ -f "${ROOT}/${required}" ]] || fail "required input is missing: ${required}"
 done
@@ -46,6 +47,7 @@ if alias != expected_alias:
 workspace = load("Cargo.toml")
 manifest = load("xtask/Cargo.toml")
 launcher_manifest = load("xtask-launcher/Cargo.toml")
+conformance_manifest = load("crates/conformance/Cargo.toml")
 if launcher_manifest.get("package", {}).get("name") != "xtask-launcher":
     fail("the xtask launcher package name drifted")
 if launcher_manifest.get("dependencies", {}):
@@ -54,6 +56,17 @@ members = workspace.get("workspace", {}).get("members", [])
 default_members = workspace.get("workspace", {}).get("default-members", [])
 if "xtask-launcher" not in members or "xtask-launcher" not in default_members:
     fail("workspace tests must prebuild the xtask launcher")
+conformance_features = conformance_manifest.get("features", {})
+if conformance_features.get("default") != ["production-transports"] or conformance_features.get(
+    "production-transports"
+) != ["rustfs-gateway/server"]:
+    fail("conformance must default to the production transport graph behind one feature")
+if conformance_manifest.get("dependencies", {}).get("rustfs-gateway") != {"workspace": True}:
+    fail("conformance must enable the facade server only through production-transports")
+case_keys_guard = (root / "scripts/check_case_keys_honoured.sh").read_text()
+audit_command = "cargo run -q -p rustfs-gateway-conformance --no-default-features --bin rustfs-gateway-conformance -- audit-keys"
+if case_keys_guard.count(audit_command) != 1:
+    fail("the case-key audit must stay off the production transport compile graph")
 features = manifest.get("features")
 if not isinstance(features, dict):
     fail("xtask must have dependency and feature tables")
@@ -85,7 +98,9 @@ def dependency(alias_name, local):
             "serde": ["derive"],
             "syn": ["full", "extra-traits", "visit"],
         }.get(alias_name)
-        expected_default_features = False if alias_name in {"jsonschema", "rustfs-gateway"} else None
+        expected_default_features = (
+            False if alias_name in {"jsonschema", "rustfs-gateway", "rustfs-gateway-conformance"} else None
+        )
         actual_features = inherited.get("features")
         actual_default_features = inherited.get("default-features")
         if actual_features != expected_features or actual_default_features != expected_default_features:

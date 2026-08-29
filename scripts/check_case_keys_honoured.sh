@@ -78,7 +78,7 @@ cd "$REPO_DIR"
 output=""
 status=0
 output="$(RUSTFS_GATEWAY_CONFORMANCE_ROOT="$CORPUS_DIR" \
-    cargo run -q -p rustfs-gateway-conformance --bin rustfs-gateway-conformance -- audit-keys 2>&1)" || status=$?
+    cargo run -q -p rustfs-gateway-conformance --no-default-features --bin rustfs-gateway-conformance -- audit-keys 2>&1)" || status=$?
 
 if [[ "$status" -ne 0 ]]; then
     printf '%s\n' "$output" >&2

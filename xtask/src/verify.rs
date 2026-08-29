@@ -540,7 +540,12 @@ fn run_all(json: bool) -> ExitCode {
     let commands = vec![
         (
             env!("CARGO").to_owned(),
-            vec!["test".to_owned(), "--workspace".to_owned()],
+            vec![
+                "test".to_owned(),
+                "--workspace".to_owned(),
+                "--".to_owned(),
+                "--test-threads=1".to_owned(),
+            ],
             "workspace tests".to_owned(),
         ),
         (

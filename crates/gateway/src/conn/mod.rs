@@ -39,6 +39,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tower::Service;
 
+use crate::MAX_LINGER_DRAIN_BYTES;
+use crate::close::ConnectionIntent;
 pub use metrics::{ResponseFallbackReason, ResponseTransportMetrics};
 pub use request::SelfHeldRequestBody;
 use request::{ConnectionIo, Expectation, HeaderTimeout, read_request};
@@ -183,9 +185,17 @@ where
                 return;
             }
         };
-        let locked = io.lock().await;
-        if !locked.body_complete() {
+        let response_must_close = response
+            .extensions()
+            .get::<ConnectionIntent>()
+            .copied()
+            .is_some_and(ConnectionIntent::must_close);
+        let mut locked = io.lock().await;
+        if !locked.body_complete()
+            && (force_close || response_must_close || !locked.drain_request_body(MAX_LINGER_DRAIN_BYTES).await.unwrap_or(false))
+        {
             force_close = true;
+            locked.stream.mark_request_body_unfinished();
         }
         match write_response(locked, response, &method, force_close, transport_metrics.as_deref()).await {
             Ok(true) | Err(_) => {

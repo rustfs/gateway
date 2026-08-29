@@ -63,6 +63,23 @@ impl ConnectionIo {
             || matches!(self.body, BodyState::Fixed { remaining: 0 })
     }
 
+    pub(super) async fn drain_request_body(&mut self, limit: u64) -> io::Result<bool> {
+        let mut drained = 0_u64;
+        while !self.body_complete() {
+            match self.read_body_frame().await? {
+                BodyFrame::Data(bytes) => {
+                    drained = drained.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+                    if drained > limit {
+                        return Ok(false);
+                    }
+                }
+                BodyFrame::Trailers(_) => {}
+                BodyFrame::Eof => return Ok(true),
+            }
+        }
+        Ok(true)
+    }
+
     async fn fill(&mut self) -> io::Result<bool> {
         self.buffer.reserve(READ_CHUNK_BYTES);
         self.stream.read_buf(&mut self.buffer).await.map(|read| read != 0)
@@ -87,7 +104,7 @@ impl ConnectionIo {
             }
             BodyState::Chunked(state) => self.read_chunked_frame(state).await,
         };
-        self.body = body;
+        self.body = if result.is_err() { BodyState::Invalid } else { body };
         result
     }
 

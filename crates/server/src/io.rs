@@ -197,6 +197,10 @@ impl<I> ProgressIo<I> {
         self
     }
 
+    pub(crate) fn mark_request_body_unfinished(&self) {
+        self.linger.body_unfinished.store(true, Ordering::Release);
+    }
+
     #[cfg(test)]
     pub(crate) fn observe_header_pending(mut self, observer: HeaderPendingObserver) -> Self {
         self.header_pending_observer = Some(observer);

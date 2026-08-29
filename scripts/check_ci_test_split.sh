@@ -50,7 +50,13 @@ guard_groups = guard_group_ids.map { |job_id| jobs.fetch(job_id) }
 target = jobs.fetch("target-consolidation-self-test")
 quirk_ledger = jobs.fetch("quirk-ledger-self-test")
 dto_compiler = jobs.fetch("dto-compiler-self-test")
-build_guard_ids = ["build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3"]
+build_guard_ids = [
+  "build-guard-self-test",
+  "build-guard-self-test-2",
+  "build-guard-self-test-3",
+  "build-guard-self-test-4",
+  "build-guard-self-test-5"
+]
 build_guards = build_guard_ids.map { |job_id| jobs.fetch(job_id) }
 error_status = jobs.fetch("error-status-self-test")
 aggregate = jobs.fetch("test")
@@ -225,9 +231,9 @@ RUN
 dto_compiler_run = <<~'RUN'
   scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
 RUN
-build_guard_runs = (0...3).map do |group|
+build_guard_runs = (0...5).map do |group|
   <<~RUN
-    scripts/ci_budget.sh 380 "build-backed guards #{group + 1}/3" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
+    scripts/ci_budget.sh 380 "build-backed guards #{group + 1}/5" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
   RUN
 end
 workspaces.each_with_index do |job, index|
@@ -258,8 +264,8 @@ build_guards.each_with_index do |job, index|
   require_equal(job.fetch("steps").last.fetch("run"), build_guard_runs.fetch(index),
                 "#{build_guard_ids[index]} command changed, lost its shard, or can hide a failure")
 end
-require_equal(build_guard_runs.uniq.length, 3,
-              "the build-backed guard runners do not cover three distinct shards")
+require_equal(build_guard_runs.uniq.length, 5,
+              "the build-backed guard runners do not cover five distinct shards")
 require_equal(error_status.fetch("steps").last.fetch("run"), error_status_run,
               "error-status-self-test command changed or can hide a failure")
 
@@ -300,14 +306,15 @@ end
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "workspace-tests-2", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "error-status-self-test", "gateway-tsan", "docs"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all sixteen workers within the budget")
+              ["Test", ["workspace-tests", "workspace-tests-2", "transport-parity", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all nineteen workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
 expected_env = {
   "WORKSPACE_RESULT" => "${{ needs.workspace-tests.result }}",
   "WORKSPACE_2_RESULT" => "${{ needs.workspace-tests-2.result }}",
+  "TRANSPORT_PARITY_RESULT" => "${{ needs.transport-parity.result }}",
   "SIGNING_SUITE_RESULT" => "${{ needs.signing-suite.result }}",
   "GUARD_RESULT" => "${{ needs.guard-self-test.result }}",
   "GUARD_2_RESULT" => "${{ needs.guard-self-test-2.result }}",
@@ -319,6 +326,8 @@ expected_env = {
   "BUILD_GUARD_RESULT" => "${{ needs.build-guard-self-test.result }}",
   "BUILD_GUARD_2_RESULT" => "${{ needs.build-guard-self-test-2.result }}",
   "BUILD_GUARD_3_RESULT" => "${{ needs.build-guard-self-test-3.result }}",
+  "BUILD_GUARD_4_RESULT" => "${{ needs.build-guard-self-test-4.result }}",
+  "BUILD_GUARD_5_RESULT" => "${{ needs.build-guard-self-test-5.result }}",
   "ERROR_STATUS_RESULT" => "${{ needs.error-status-self-test.result }}",
   "TSAN_RESULT" => "${{ needs.gateway-tsan.result }}",
   "DOCS_RESULT" => "${{ needs.docs.result }}"
@@ -327,6 +336,7 @@ require_equal(steps.first.fetch("env"), expected_env, "the Test step does not bi
 expected_run = <<~'RUN'
   test "$WORKSPACE_RESULT" = success
   test "$WORKSPACE_2_RESULT" = success
+  test "$TRANSPORT_PARITY_RESULT" = success
   test "$SIGNING_SUITE_RESULT" = success
   test "$GUARD_RESULT" = success
   test "$GUARD_2_RESULT" = success
@@ -338,6 +348,8 @@ expected_run = <<~'RUN'
   test "$BUILD_GUARD_RESULT" = success
   test "$BUILD_GUARD_2_RESULT" = success
   test "$BUILD_GUARD_3_RESULT" = success
+  test "$BUILD_GUARD_4_RESULT" = success
+  test "$BUILD_GUARD_5_RESULT" = success
   test "$ERROR_STATUS_RESULT" = success
   test "$TSAN_RESULT" = success
   test "$DOCS_RESULT" = success
@@ -433,9 +445,9 @@ if len(regular_shards) != 4:
     raise SystemExit(
         f"ERROR: expected four guard shard invocations in CI, found {len(regular_shards)}"
     )
-if len(build_shards) != 3:
+if len(build_shards) != 5:
     raise SystemExit(
-        f"ERROR: expected three build-backed guard shard invocations in CI, found {len(build_shards)}"
+        f"ERROR: expected five build-backed guard shard invocations in CI, found {len(build_shards)}"
     )
 for seconds, env in regular_shards + build_shards:
     declared = re.search(r"GATEWAY_GUARD_BUDGET_SECONDS=([0-9]+)", env)
@@ -461,10 +473,10 @@ build_groups = sorted(
     int(re.search(r"GATEWAY_GUARD_SHARD_GROUP=([0-9]+)", env).group(1))
     for _, env in build_shards
 )
-if build_groups != [0, 1, 2]:
+if build_groups != [0, 1, 2, 3, 4]:
     raise SystemExit(
-        f"ERROR: the build-backed guard shards cover groups {build_groups}, not every third"
+        f"ERROR: the build-backed guard shards cover groups {build_groups}, not every fifth"
     )
 PY
 
-printf 'OK: two workspace shards, signing suite, four guard shards, target-consolidation, quirk-ledger, DTO compiler, three build guard shards, error-status and TSAN workers are parallel behind Test\n'
+printf 'OK: two workspace shards, transport parity, signing suite, four guard shards, target-consolidation, quirk-ledger, DTO compiler, five build guard shards, error-status and TSAN workers are parallel behind Test\n'
