@@ -3067,8 +3067,7 @@ impl Stub {
 
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        let upload_id = UploadIdClaim::from_wire(input.upload_id.clone());
-        let (handle, _) = require_upload(&fixture, &upload_id, &input.bucket, &input.key)?;
+        let (handle, _) = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
         let (found, source_version) = read_copy_source(&fixture, &source)?;
         guard_copy_source(
             &found,

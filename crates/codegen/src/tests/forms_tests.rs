@@ -120,7 +120,7 @@ fn upload_id_capabilities_use_the_owned_claim_decoder_and_have_no_response_form(
 }
 
 #[test]
-fn exactly_the_four_upload_ownership_inputs_are_capabilities() {
+fn exactly_the_five_upload_ownership_inputs_are_capabilities() {
     let mut actual: Vec<_> = artifacts()
         .operations
         .iter()
@@ -139,9 +139,16 @@ fn exactly_the_four_upload_ownership_inputs_are_capabilities() {
             ("CompleteMultipartUpload", "UploadId"),
             ("ListParts", "UploadId"),
             ("UploadPart", "UploadId"),
+            ("UploadPartCopy", "UploadId"),
         ]
     );
-    for operation in ["AbortMultipartUpload", "CompleteMultipartUpload", "ListParts", "UploadPart"] {
+    for operation in [
+        "AbortMultipartUpload",
+        "CompleteMultipartUpload",
+        "ListParts",
+        "UploadPart",
+        "UploadPartCopy",
+    ] {
         assert!(
             decoder(operation).contains("input.upload_id = rustfs_gateway_types::UploadIdClaim::from_wire(raw);"),
             "{operation} must construct the owned claim at the wire boundary"

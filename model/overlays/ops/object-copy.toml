@@ -18,8 +18,8 @@
 # source-resource extraction that makes copy a two-stage authorization — none of which the model
 # states. `UploadPartCopy` lives here rather than in `ops/multipart.toml` because the half of it
 # that goes wrong is the copy half: it shares `x-amz-copy-source`, the four copy-source conditions
-# and the source authorization with `CopyObject`, and shares only the part numbering with the
-# multipart family.
+# and the source authorization with `CopyObject`; it shares the part numbering and upload-id
+# capability exchange with the multipart family.
 #
 # This file is the conflict unit for the family. Nothing outside it may declare these operations.
 
@@ -275,6 +275,12 @@ output_hot = ["CopySourceVersionId"]
 # structure form in today's encoder. The root name is the fact worth keeping — it is neither the
 # operation name nor the shape name (q-copy-part-root-0084).
 output_drop = ["CopyPartResult"]
+
+[[op.UploadPartCopy.field]]
+side = "input"
+name = "UploadId"
+type = "Capability:upload_id"
+quirks = ["q-mpu-upload-id-0037"]
 
 [[op.UploadPartCopy.field]]
 side = "output"

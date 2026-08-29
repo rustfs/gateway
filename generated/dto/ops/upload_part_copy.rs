@@ -78,8 +78,8 @@ pub struct Input {
     pub key: crate::ObjectKey,
     /// Wire `partNumber`, bound as Query. Required.
     pub part_number: i32,
-    /// Wire `uploadId`, bound as Query. Required.
-    pub upload_id: String,
+    /// Wire `uploadId`, bound as Query. Required. Secret: `Debug` prints a placeholder.
+    pub upload_id: crate::UploadIdClaim,
     /// Wire `x-amz-server-side-encryption-customer-algorithm`, bound as Header. Optional.
     pub sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-key`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
@@ -141,7 +141,7 @@ impl std::fmt::Debug for Input {
             .field("copy_source_range", &self.copy_source_range)
             .field("key", &self.key)
             .field("part_number", &self.part_number)
-            .field("upload_id", &self.upload_id)
+            .field("upload_id", &"<redacted>")
             .field("sse_customer_algorithm", &self.sse_customer_algorithm)
             .field("sse_customer_key", &redact(&self.sse_customer_key))
             .field("sse_customer_key_md5", &self.sse_customer_key_md5)
@@ -292,7 +292,7 @@ impl InputBuilder {
 
     /// Sets `UploadId`.
     #[must_use]
-    pub fn upload_id(mut self, value: String) -> Self {
+    pub fn upload_id(mut self, value: crate::UploadIdClaim) -> Self {
         self.input.upload_id = value;
         self
     }
