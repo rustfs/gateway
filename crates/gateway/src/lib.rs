@@ -212,9 +212,9 @@ pub use rustfs_gateway_core::ops::shared::pagination::{CursorKind, CursorSpec, M
 // what the facade exports.
 pub use rustfs_gateway_core::ops::shared::etag::{ConditionalHeader, EtagComparison, etag_matches, parse_conditional_etag};
 pub use rustfs_gateway_core::ops::shared::precondition::{
-    ConditionalOutcome, IfRange, ObjectValidators, PreconditionRejection, Preconditions, RangeDecision, RangeSelectors,
-    RequestKind, completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_target_uses_source_validators,
-    evaluate, evaluate_range,
+    ConditionalOutcome, FailedCondition, IfRange, ObjectValidators, PreconditionRejection, Preconditions, RangeDecision,
+    RangeSelectors, RequestKind, completion_failure_retains_upload, conditional_write_guards_before_mutation,
+    copy_target_uses_source_validators, evaluate, evaluate_range,
 };
 // The other half of the range contract. `evaluate_range` stops at a part *selector* because the
 // part table is a fact only the handler has; this is what a backend resolves it with.

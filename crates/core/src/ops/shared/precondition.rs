@@ -167,6 +167,34 @@ pub enum RequestKind {
     Write,
 }
 
+/// Which of the four conditional headers `evaluate` was in the middle of when it failed.
+///
+/// RFC 9110 §13.2.2 fixes the evaluation order, and `evaluate` returns as soon as one condition is
+/// false — so this is the step that was actually running, not a guess reconstructed from which
+/// headers a request carried. No `IfModifiedSince` variant: on a read it can only ever produce
+/// [`ConditionalOutcome::NotModified`], and it is never evaluated on a write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FailedCondition {
+    /// `If-Match`.
+    IfMatch,
+    /// `If-Unmodified-Since`.
+    IfUnmodifiedSince,
+    /// `If-None-Match`.
+    IfNoneMatch,
+}
+
+impl FailedCondition {
+    /// The canonical mixed-case spelling AWS uses inside `<Condition>`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::IfMatch => "If-Match",
+            Self::IfUnmodifiedSince => "If-Unmodified-Since",
+            Self::IfNoneMatch => "If-None-Match",
+        }
+    }
+}
+
 /// The verdict on a request's preconditions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConditionalOutcome {
@@ -174,8 +202,9 @@ pub enum ConditionalOutcome {
     Proceed,
     /// `304`: the client's copy is current. Read requests only.
     NotModified,
-    /// `412`: a condition was false.
-    PreconditionFailed,
+    /// `412`: a condition was false. Carries the header that decided it, except from
+    /// [`ConditionalOutcome::lost_race`], where no header was compared at all.
+    PreconditionFailed(Option<FailedCondition>),
     /// `409`: the condition held when it was evaluated and another writer won the race.
     ///
     /// The framework only names this outcome. Detecting the race is the storage layer's job, and
@@ -224,11 +253,13 @@ impl PreconditionRejection {
 
 impl ConditionalOutcome {
     /// Outcome adapters use after a condition held but the storage compare-and-swap lost its race.
+    ///
+    /// Names no condition: the compare-and-swap is storage's own retry guard, not a header compared.
     #[must_use]
     pub const fn lost_race() -> Self {
         match CONDITIONAL_RACE_OUTCOME_POLICY {
             ConditionalRaceOutcomePolicy::Conflict => Self::Conflict,
-            ConditionalRaceOutcomePolicy::PreconditionFailed => Self::PreconditionFailed,
+            ConditionalRaceOutcomePolicy::PreconditionFailed => Self::PreconditionFailed(None),
         }
     }
 
@@ -245,7 +276,7 @@ impl ConditionalOutcome {
         match self {
             Self::Proceed => None,
             Self::NotModified => Some(StatusCode::NOT_MODIFIED),
-            Self::PreconditionFailed => Some(StatusCode::PRECONDITION_FAILED),
+            Self::PreconditionFailed(_) => Some(StatusCode::PRECONDITION_FAILED),
             Self::Conflict => Some(StatusCode::CONFLICT),
         }
     }
@@ -258,7 +289,7 @@ impl ConditionalOutcome {
     pub fn error_code(self) -> Option<ErrorCode> {
         match self {
             Self::Proceed | Self::NotModified => None,
-            Self::PreconditionFailed => Some(ErrorCode::PRECONDITION_FAILED),
+            Self::PreconditionFailed(_) => Some(ErrorCode::PRECONDITION_FAILED),
             Self::Conflict => Some(ErrorCode::CONDITIONAL_REQUEST_CONFLICT),
         }
     }
@@ -295,7 +326,7 @@ pub fn evaluate(
         // `If-None-Match` is true for every value including `*` — which is what makes
         // `If-None-Match: *` the create-if-absent primitive.
         if conditions.if_match.is_some() && matches!(IF_MATCH_ABSENT_POLICY, IfMatchAbsentPolicy::PreconditionFailed) {
-            return Ok(ConditionalOutcome::PreconditionFailed);
+            return Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfMatch)));
         }
         return Ok(ConditionalOutcome::Proceed);
     }
@@ -310,7 +341,7 @@ pub fn evaluate(
         // nothing to compare it against.
         (Some(requested), None) => {
             if !requested.is_any() {
-                return Ok(ConditionalOutcome::PreconditionFailed);
+                return Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfMatch)));
             }
             true
         }
@@ -319,7 +350,7 @@ pub fn evaluate(
             if !etag_matches(comparison, requested, current)
                 && matches!(IF_MATCH_MISS_OUTCOME, IfMatchMissOutcomePolicy::PreconditionFailed)
             {
-                return Ok(ConditionalOutcome::PreconditionFailed);
+                return Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfMatch)));
             }
             true
         }
@@ -332,11 +363,11 @@ pub fn evaluate(
         match (conditions.if_unmodified_since, validators.last_modified) {
             (Some(bound), Some(modified)) => {
                 if modified > bound {
-                    return Ok(ConditionalOutcome::PreconditionFailed);
+                    return Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfUnmodifiedSince)));
                 }
                 true
             }
-            (Some(_), None) => return Ok(ConditionalOutcome::PreconditionFailed),
+            (Some(_), None) => return Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfUnmodifiedSince))),
             (None, _) => false,
         }
     };
@@ -360,7 +391,7 @@ pub fn evaluate(
         if hit {
             return Ok(match kind {
                 RequestKind::Read => ConditionalOutcome::NotModified,
-                RequestKind::Write => ConditionalOutcome::PreconditionFailed,
+                RequestKind::Write => ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfNoneMatch)),
             });
         }
         // S3 deviation: a missed `If-None-Match` alongside a satisfied `If-Unmodified-Since` is a
@@ -669,7 +700,7 @@ fn if_range_matches(if_range: &IfRange, validators: &ObjectValidators) -> bool {
 /// inherit the widening.
 #[cfg(test)]
 mod wildcard_without_an_entity_tag {
-    use super::{ConditionalOutcome, ObjectValidators, Preconditions, RequestKind, evaluate};
+    use super::{ConditionalOutcome, FailedCondition, ObjectValidators, Preconditions, RequestKind, evaluate};
     use rustfs_gateway_types::{ETag, Timestamp};
 
     /// A representation that exists and reports no entity tag.
@@ -698,7 +729,7 @@ mod wildcard_without_an_entity_tag {
         };
         assert_eq!(
             evaluate(&conditions, &untagged(), RequestKind::Write),
-            Ok(ConditionalOutcome::PreconditionFailed),
+            Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfNoneMatch))),
             "create-if-absent guards the key, not the entity tag; proceeding here overwrites the \
              object the client asked us not to touch"
         );
@@ -747,7 +778,7 @@ mod wildcard_without_an_entity_tag {
         };
         assert_eq!(
             evaluate(&conditions, &untagged(), RequestKind::Write),
-            Ok(ConditionalOutcome::PreconditionFailed)
+            Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfMatch)))
         );
     }
 
