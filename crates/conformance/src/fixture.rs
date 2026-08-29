@@ -115,19 +115,19 @@ use rustfs_gateway::dto;
 use rustfs_gateway::{
     AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec,
     ChecksumType as PackedChecksumType, ConditionalOutcome, CopyRange, CopySourceRejection, ETag, ErrorCode, EventSequence,
-    GranteeType, Handler, HandlerError, HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators,
-    Operation, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision,
-    RangeSelectors, RecordedUpload, RegionLabel, RegionSet, Req, RequestKind, ResolvedUploadId, ResourceVisibility, Resp,
-    RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee, collect,
-    completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_source_guards_before_target_write,
-    copy_source_if_match_miss_proceeds, copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate,
-    evaluate_range, format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag,
-    parse_tagging_header, permanent_redirect_for, resolve_copy_range, resolve_input as resolve_acl_input,
-    resolve_location_constraint, resolve_part, resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document,
-    validate_accelerate, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
-    validate_lock_configuration, validate_logging, validate_notification, validate_policy, validate_public_access_block,
-    validate_replication, validate_request_payment, validate_restore, validate_retention, validate_select, validate_tag_set,
-    validate_versioning, validate_website,
+    FailedCondition, GranteeType, Handler, HandlerError, HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey,
+    ObjectValidators, Operation, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY,
+    RangeDecision, RangeSelectors, RecordedUpload, RegionLabel, RegionSet, Req, RequestKind, ResolvedUploadId,
+    ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp, UploadIdClaim,
+    canonicalize_grantee, collect, completion_failure_retains_upload, conditional_write_guards_before_mutation,
+    copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, copy_target_uses_source_validators,
+    encryption_delete_absent_succeeds, evaluate, evaluate_range, format_optional_restore_status,
+    object_lock_requires_enabled_bucket, parse_conditional_etag, parse_tagging_header, permanent_redirect_for,
+    resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint, resolve_part, resolve_upload,
+    select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate, validate_cors, validate_encryption,
+    validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging, validate_notification,
+    validate_policy, validate_public_access_block, validate_replication, validate_request_payment, validate_restore,
+    validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
 mod committed;
@@ -1451,40 +1451,8 @@ fn refused(rejection: PreconditionRejection) -> HandlerError {
     HandlerError::new(rejection.code().clone(), rejection.reason())
 }
 
-/// The destination-side conditional headers, spelled as AWS spells them inside `<Condition>`.
-///
-/// The canonical mixed case, not the lowercase wire name [`rustfs_gateway::ConditionalHeader`]
-/// carries: `<Condition>If-None-Match</Condition>` is what the error document reads, and a client
-/// that switches on the element sees `if-none-match` as a value it has no branch for.
-const DESTINATION_CONDITIONS: [&str; 4] = ["If-Match", "If-Unmodified-Since", "If-None-Match", "If-Modified-Since"];
-
-/// The header a `412` names, when the request carried exactly one condition.
-///
-/// # Why only one, and why this is not the evaluation order
-///
-/// [`ConditionalOutcome::PreconditionFailed`] says *that* a condition was false and not *which*,
-/// so the name has to come from somewhere else. The only thing this backend knows for certain is
-/// which headers arrived: when exactly one did, it is the one that failed, and that is a fact
-/// rather than a deduction. When two or more arrived, naming one means re-deriving RFC 9110
-/// §13.2.2's precedence here — a second copy of a rule [`rustfs_gateway::evaluate`] already holds,
-/// which is exactly the kind of mirror this file exists to avoid. So the element is omitted
-/// instead, and a case that wants it for a multi-condition request stays red until the outcome
-/// carries the header it was decided by.
-fn sole_condition(names: &[&'static str; 4], present: [bool; 4]) -> Option<&'static str> {
-    let mut only = None;
-    for (name, present) in names.iter().zip(present) {
-        if !present {
-            continue;
-        }
-        if only.is_some() {
-            return None;
-        }
-        only = Some(*name);
-    }
-    only
-}
-
-/// A `412`, worded as AWS words it, naming the condition when [`sole_condition`] could.
+/// A `412`, worded as AWS words it, naming the condition [`ConditionalOutcome::PreconditionFailed`]
+/// carried when the caller chooses to report it.
 ///
 /// The name goes in `<Condition>` and never into `<Message>`: a message assembled per failure
 /// would make the two byte-exact conditional cases differ in the element they are *not* about, and
@@ -1494,6 +1462,16 @@ fn precondition(condition: Option<&'static str>) -> HandlerError {
         Some(name) => HandlerError::precondition_failed(name),
         None => HandlerError::new(ErrorCode::PRECONDITION_FAILED, PRECONDITION_FAILED_MESSAGE),
     }
+}
+
+/// The destination-side spelling of a failed condition, exactly as `<Condition>` reads it.
+///
+/// [`FailedCondition::as_str`] already returns this spelling — `evaluate` is the sole authority on
+/// which header failed, so there is nothing left for a backend to reconstruct from which headers a
+/// request happened to carry. [`guard_copy_source`] deliberately does not call this: its own
+/// `<Condition>` is always `None`, because ADR-0008 admits no spelling for the copy-source side.
+fn destination_condition(failed: Option<FailedCondition>) -> Option<&'static str> {
+    failed.map(FailedCondition::as_str)
 }
 
 /// Evaluates a write's conditions against the representation it would replace.
@@ -1507,8 +1485,7 @@ fn guard_write(
     if_none_match: Option<&str>,
     now: i64,
 ) -> Result<(), HandlerError> {
-    let named = sole_condition(&DESTINATION_CONDITIONS, [if_match.is_some(), false, if_none_match.is_some(), false]);
-    settle_write(object, &conditions(if_match, None, if_none_match, None, now)?, named)
+    settle_write(object, &conditions(if_match, None, if_none_match, None, now)?, destination_condition)
 }
 
 /// The copy-source conditions, evaluated against the source representation.
@@ -1517,8 +1494,8 @@ fn guard_write(
 /// `412` and never a `304`, which would tell the client its copy is up to date when no copy was
 /// ever made. The four names are spelled the same as the destination's and name a different
 /// object, which is why they are evaluated in their own call rather than merged into one — and why
-/// the `<Condition>` this reports is the `x-amz-copy-source-` spelling: a client told `If-Match`
-/// failed would look at the header it sent for the destination.
+/// the `<Condition>` this reports is nothing at all, whatever `evaluate` names: a client told
+/// `If-Match` failed would look at the header it sent for the destination.
 fn guard_copy_source(
     found: &StoredObject,
     if_match: Option<&str>,
@@ -1528,15 +1505,15 @@ fn guard_copy_source(
     now: i64,
 ) -> Result<(), HandlerError> {
     let conditions = conditions(if_match, if_unmodified_since, if_none_match, if_modified_since, now)?;
-    // No `<Condition>`, even when exactly one header arrived and the failed one is therefore known.
-    // ADR-0008 closes that element to `If-Match`, `If-None-Match`, `If-Modified-Since` and
+    // No `<Condition>`, even though `evaluate` now always knows which header failed. ADR-0008
+    // closes that element to `If-Match`, `If-None-Match`, `If-Modified-Since` and
     // `If-Unmodified-Since`, and a refusal carrying anything else is not trimmed by the resolver —
     // the whole `412` is replaced by a static `InternalError`. Naming the source header would
     // therefore turn a precondition failure into a `500`, which is what it did until this comment
     // existed. The destination's four spellings are in the set and are still named; there is simply
     // no admitted spelling for the source side, so the element is omitted rather than mis-attributed
     // to the destination header of the same shape.
-    let result = settle_write(Some(found), &conditions, None);
+    let result = settle_write(Some(found), &conditions, |_| None);
     let only_if_match =
         if_match.is_some() && if_unmodified_since.is_none() && if_none_match.is_none() && if_modified_since.is_none();
     if only_if_match && copy_source_if_match_miss_proceeds() {
@@ -1547,18 +1524,23 @@ fn guard_copy_source(
 }
 
 /// Turns the contract's verdict on a write into this backend's answer.
+///
+/// `name` decides whether the failing header reaches `<Condition>` at all — [`guard_write`] passes
+/// [`destination_condition`], [`guard_copy_source`] passes a function that always answers `None` —
+/// but never *which* header failed: that fact comes from `evaluate` alone, once, here.
 fn settle_write(
     object: Option<&StoredObject>,
     conditions: &Preconditions,
-    condition: Option<&'static str>,
+    name: impl Fn(Option<FailedCondition>) -> Option<&'static str>,
 ) -> Result<(), HandlerError> {
     let validators = validators_of(object)?;
     match evaluate(conditions, &validators, RequestKind::Write).map_err(refused)? {
         ConditionalOutcome::Proceed => Ok(()),
         // A write is never answered `304`, and the contract guarantees it. The arm is spelled out
         // rather than folded into a catch-all so that an outcome added later cannot arrive here as
-        // a silent success.
-        ConditionalOutcome::NotModified | ConditionalOutcome::PreconditionFailed => Err(precondition(condition)),
+        // a silent success. Unreachable in practice, so it names nothing.
+        ConditionalOutcome::NotModified => Err(precondition(None)),
+        ConditionalOutcome::PreconditionFailed(failed) => Err(precondition(name(failed))),
         // Named, and unreachable from this fixture: detecting a lost race is the storage layer's
         // job, and a fixture behind one mutex never has two writers in flight to lose one.
         ConditionalOutcome::Conflict => Err(conflict()),
@@ -1594,18 +1576,9 @@ fn guard_read(
 ) -> Result<ConditionalOutcome, HandlerError> {
     let conditions = conditions(if_match, if_unmodified_since, if_none_match, if_modified_since, now)?;
     let validators = validators_of(object)?;
-    let named = sole_condition(
-        &DESTINATION_CONDITIONS,
-        [
-            if_match.is_some(),
-            if_unmodified_since.is_some(),
-            if_none_match.is_some(),
-            if_modified_since.is_some(),
-        ],
-    );
     match evaluate(&conditions, &validators, RequestKind::Read).map_err(refused)? {
         outcome @ (ConditionalOutcome::Proceed | ConditionalOutcome::NotModified) => Ok(outcome),
-        ConditionalOutcome::PreconditionFailed => Err(precondition(named)),
+        ConditionalOutcome::PreconditionFailed(failed) => Err(precondition(destination_condition(failed))),
         ConditionalOutcome::Conflict => Err(conflict()),
     }
 }
@@ -5509,23 +5482,58 @@ mod tests {
     /// against the resolved response rather than against the proposal.
     #[test]
     fn a_single_condition_is_named_by_the_header_that_carried_it() {
+        let current_etag = crate::md5::hex_digest(b"original");
+        let error = guard_write(
+            Some(&StoredObject::new(b"original".to_vec(), None, 0)),
+            None,
+            Some(&format!("\"{current_etag}\"")),
+            0,
+        )
+        .expect_err("If-None-Match names the object's own entity tag, so it must not proceed");
         assert_eq!(
-            sole_condition(&DESTINATION_CONDITIONS, [false, false, true, false]),
-            Some("If-None-Match")
+            resolved(&error),
+            (412, ErrorCode::PRECONDITION_FAILED, vec![("Condition", "If-None-Match".to_owned())])
         );
-        assert_eq!(sole_condition(&DESTINATION_CONDITIONS, [true, false, false, false]), Some("If-Match"));
+
+        let error = refusal(guard_write(
+            Some(&StoredObject::new(b"original".to_vec(), None, 0)),
+            Some("\"0000000000000000000000000000dead\""),
+            None,
+            0,
+        ));
+        assert_eq!(
+            resolved(&error),
+            (412, ErrorCode::PRECONDITION_FAILED, vec![("Condition", "If-Match".to_owned())])
+        );
     }
 
-    /// Negative — a request that carried two conditions, or none, is not attributed to one.
-    ///
-    /// Picking one of two would mean re-deriving RFC 9110 §13.2.2's precedence in this file, and a
-    /// backend that guesses tells the client to fix a header that was holding fine. The element is
-    /// dropped instead, which leaves any case that wants it red rather than wrong.
+    /// Negative — a request with no conditional headers at all cannot produce a named `412`,
+    /// because `evaluate` cannot fail a condition that was never sent.
     #[test]
-    fn no_condition_is_named_when_the_request_carried_more_than_one() {
-        assert_eq!(sole_condition(&DESTINATION_CONDITIONS, [true, false, true, false]), None);
-        assert_eq!(sole_condition(&DESTINATION_CONDITIONS, [true, true, true, true]), None);
-        assert_eq!(sole_condition(&DESTINATION_CONDITIONS, [false, false, false, false]), None);
+    fn no_condition_is_named_when_the_request_carried_none() {
+        assert_eq!(destination_condition(None), None);
+    }
+
+    /// Positive — the failed condition is named even when a second, unrelated condition also
+    /// arrived on the same request.
+    ///
+    /// RFC 9110 §13.2.2 fixes the evaluation order at `If-Match`, `If-Unmodified-Since`,
+    /// `If-None-Match`, `If-Modified-Since`. A request carrying `If-Unmodified-Since` and
+    /// `If-None-Match` together fails at the second step without `evaluate` ever looking at the
+    /// third, so the header that decided the outcome is `If-Unmodified-Since` however many other
+    /// conditional headers rode along. A heuristic that only trusted a request carrying exactly
+    /// one header could not say that — this case would have answered `412` with no `<Condition>`
+    /// at all until the outcome itself started carrying the header it was decided by.
+    #[test]
+    fn a_condition_is_named_even_when_a_second_one_also_arrived() {
+        let object = StoredObject::new(b"hello".to_vec(), None, 1_700_000_000);
+        let error = guard_read(Some(&object), None, Some(1_700_000_000 - 1), Some("\"deliberately-different\""), None, 0)
+            .expect_err("If-Unmodified-Since is not satisfied");
+        assert_eq!(
+            resolved(&error),
+            (412, ErrorCode::PRECONDITION_FAILED, vec![("Condition", "If-Unmodified-Since".to_owned())]),
+            "If-Unmodified-Since decided the outcome before If-None-Match was ever evaluated"
+        );
     }
 
     /// Negative — an unnameable condition produces a `412` with no `<Condition>` at all, and above

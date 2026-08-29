@@ -14,19 +14,18 @@
 
 //! The precondition and range contract, asserted as a pure function.
 //!
-//! Responsible for: every conditional outcome the object and copy families depend on, the two
-//! points where S3 answers differently from RFC 9110, and the range decision including the
-//! boundaries a fuzzer would find — 17 positive and 27 negative tests, plus three properties.
-//! NOT responsible for: the wire binding, which reaches these values through the generated
-//! decoder, and the storage race behind `Conflict`, which no pure function can observe.
+//! Responsible for: every conditional outcome — including which header a `412` names — the object
+//! and copy families depend on, the two points where S3 answers differently from RFC 9110, and the
+//! range decision including the boundaries a fuzzer would find. NOT responsible for: the wire
+//! binding, and the storage race behind `Conflict`, which no pure function can observe.
 //! Upstream: `rustfs_gateway_core::ops::shared`. Downstream: nothing.
 
 use http::{Method, StatusCode};
 use proptest::prelude::*;
 use rustfs_gateway_core::ops::shared::etag::{ConditionalHeader, EtagComparison, etag_matches, parse_conditional_etag};
 use rustfs_gateway_core::ops::shared::precondition::{
-    ConditionalOutcome, IfRange, ObjectValidators, Preconditions, RangeDecision, RangeSelectors, RequestKind, evaluate,
-    evaluate_range,
+    ConditionalOutcome, FailedCondition, IfRange, ObjectValidators, Preconditions, RangeDecision, RangeSelectors, RequestKind,
+    evaluate, evaluate_range,
 };
 use rustfs_gateway_core::{BodyAllowance, body_allowance};
 use rustfs_gateway_types::{ETag, ErrorCode, Timestamp, TimestampFormat};
@@ -94,7 +93,7 @@ fn a_failing_if_match_is_a_412_and_not_a_404() {
     };
     assert_eq!(
         evaluate(&conditions, &present(), RequestKind::Write),
-        Ok(ConditionalOutcome::PreconditionFailed)
+        Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfMatch)))
     );
 }
 
@@ -107,7 +106,7 @@ fn if_match_against_a_missing_object_always_fails() {
         };
         assert_eq!(
             evaluate(&conditions, &absent(), RequestKind::Write),
-            Ok(ConditionalOutcome::PreconditionFailed),
+            Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfMatch))),
             "with no representation there is nothing for If-Match to match, wildcard included"
         );
     }
@@ -125,7 +124,7 @@ fn a_weak_stored_tag_never_satisfies_if_match() {
     };
     assert_eq!(
         evaluate(&conditions, &validators, RequestKind::Write),
-        Ok(ConditionalOutcome::PreconditionFailed),
+        Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfMatch))),
         "If-Match is a compare-and-swap guard, and a weak validator cannot carry that promise"
     );
 }
@@ -143,7 +142,7 @@ fn an_object_with_no_entity_tag_fails_if_match() {
     };
     assert_eq!(
         evaluate(&conditions, &validators, RequestKind::Read),
-        Ok(ConditionalOutcome::PreconditionFailed)
+        Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfMatch)))
     );
 }
 
@@ -169,7 +168,7 @@ fn if_none_match_wildcard_on_an_existing_object_is_a_412() {
     };
     assert_eq!(
         evaluate(&conditions, &present(), RequestKind::Write),
-        Ok(ConditionalOutcome::PreconditionFailed),
+        Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfNoneMatch))),
         "whoever loses the compare-and-create must be told the key was taken, not that the write succeeded"
     );
 }
@@ -209,7 +208,7 @@ fn a_matching_if_none_match_write_is_a_412_and_never_a_304() {
     };
     assert_eq!(
         evaluate(&conditions, &present(), RequestKind::Write),
-        Ok(ConditionalOutcome::PreconditionFailed),
+        Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfNoneMatch))),
         "a 304 on a write tells the client its object is unchanged when it was never written"
     );
 }
@@ -267,7 +266,7 @@ fn an_if_unmodified_since_before_the_object_is_a_412() {
     };
     assert_eq!(
         evaluate(&conditions, &present(), RequestKind::Write),
-        Ok(ConditionalOutcome::PreconditionFailed)
+        Ok(ConditionalOutcome::PreconditionFailed(Some(FailedCondition::IfUnmodifiedSince)))
     );
 }
 
@@ -376,8 +375,11 @@ fn a_malformed_entity_tag_is_a_parse_error_and_not_a_panic() {
 #[test]
 fn conditional_outcomes_carry_the_status_and_code_the_client_branches_on() {
     assert_eq!(ConditionalOutcome::Proceed.status(), None);
-    assert_eq!(ConditionalOutcome::PreconditionFailed.error_code(), Some(ErrorCode::PRECONDITION_FAILED));
-    assert_eq!(ConditionalOutcome::PreconditionFailed.status(), Some(StatusCode::PRECONDITION_FAILED));
+    for carried in [None, Some(FailedCondition::IfMatch)] {
+        let outcome = ConditionalOutcome::PreconditionFailed(carried);
+        assert_eq!(outcome.error_code(), Some(ErrorCode::PRECONDITION_FAILED));
+        assert_eq!(outcome.status(), Some(StatusCode::PRECONDITION_FAILED));
+    }
     let conflict = ConditionalOutcome::Conflict;
     assert_eq!(conflict.status(), Some(StatusCode::CONFLICT));
     assert_eq!(conflict.error_code(), Some(ErrorCode::CONDITIONAL_REQUEST_CONFLICT));
