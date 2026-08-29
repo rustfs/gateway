@@ -41,6 +41,7 @@ pub struct ResponseTransportMetrics {
     fallback_verification_required: AtomicU64,
     fallback_platform_unsupported: AtomicU64,
     copied_payload_bytes: AtomicU64,
+    kernel_transfer_handoffs: AtomicU64,
     kernel_transfer_calls: AtomicU64,
     kernel_transferred_bytes: AtomicU64,
 }
@@ -64,8 +65,9 @@ impl ResponseTransportMetrics {
         self.copied_payload_bytes.fetch_add(bytes, Ordering::Relaxed);
     }
 
-    pub(crate) fn record_kernel_progress(&self, bytes: u64) {
-        self.kernel_transfer_calls.fetch_add(1, Ordering::Relaxed);
+    pub(crate) fn record_kernel_progress(&self, bytes: u64, handoffs: u64, calls: u64) {
+        self.kernel_transfer_handoffs.fetch_add(handoffs, Ordering::Relaxed);
+        self.kernel_transfer_calls.fetch_add(calls, Ordering::Relaxed);
         self.kernel_transferred_bytes.fetch_add(bytes, Ordering::Relaxed);
     }
 
@@ -95,7 +97,13 @@ impl ResponseTransportMetrics {
         read_counter(&self.copied_payload_bytes)
     }
 
-    /// Successful kernel-transfer calls that returned positive progress.
+    /// Blocking handoffs attempted before positive kernel-transfer progress was returned.
+    #[must_use]
+    pub fn kernel_transfer_handoffs(&self) -> u64 {
+        read_counter(&self.kernel_transfer_handoffs)
+    }
+
+    /// Kernel-transfer syscall attempts made before positive progress was returned.
     #[must_use]
     pub fn kernel_transfer_calls(&self) -> u64 {
         read_counter(&self.kernel_transfer_calls)

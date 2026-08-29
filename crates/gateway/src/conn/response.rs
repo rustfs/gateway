@@ -158,9 +158,13 @@ async fn write_file_region(
         ResponseFraming::Chunked => {}
     }
     if len != 0 {
+        let offset = region.offset();
+        let mut file = region.into_fd();
         let mut sent = 0_u64;
         while sent < len {
-            let written = writer.send_file_once(region.fd(), region.offset() + sent, len - sent).await?;
+            let (next_file, progress) = writer.send_file_owned_once(file, offset + sent, len - sent).await?;
+            file = next_file;
+            let written = progress.bytes();
             if written == 0 {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
@@ -172,7 +176,11 @@ async fn write_file_region(
                 .checked_add(written)
                 .ok_or_else(|| io::Error::other("sendfile progress overflowed"))?;
             if let Some(metrics) = transport_metrics {
-                metrics.record_kernel_progress(written);
+                metrics.record_kernel_progress(
+                    written,
+                    u64::try_from(progress.blocking_handoffs()).map_err(io::Error::other)?,
+                    u64::try_from(progress.kernel_calls()).map_err(io::Error::other)?,
+                );
             }
             tokio::task::yield_now().await;
         }

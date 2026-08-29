@@ -35,6 +35,7 @@ mod listener;
 mod request_capacity;
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
 mod sendfile;
+mod sendfile_task;
 mod shutdown;
 mod tls;
 
@@ -44,6 +45,8 @@ pub use connection_service::{
     ConnectionBody, ConnectionError, ConnectionResponseBody, ConnectionService, ResponseCompletion, UnfinishedRequestBody,
 };
 pub use dispatch::PrefixDispatch;
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+pub use driver::FileTransferProgress;
 pub use driver::{
     AcceptedConnection, ConnectionDriver, ConnectionFuture, ConnectionInfo, DriverValidationError, HyperConnectionDriver,
     PlaintextConnection, PlaintextTakeoverError, TransportKind,
