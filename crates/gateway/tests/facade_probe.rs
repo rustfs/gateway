@@ -24,8 +24,8 @@
 
 #[allow(unused_imports)]
 use rustfs_gateway::{
-    Body, ByteStream, Clock, Credentials, HandlerResult, Req, Resp, RouterBuilder, S3Service, ServiceBuilder, Transport,
-    WireRequest, WireResponse, dto::GetObject, handlers,
+    Body, ByteStream, ChecksumAlgorithm, Checksummer, Clock, Credentials, HandlerResult, Req, Resp, RouterBuilder, S3Service,
+    ServiceBuilder, Transport, WireRequest, WireResponse, dto::GetObject, handlers,
 };
 
 struct FacadeMacroBackend;
@@ -74,4 +74,14 @@ fn every_required_facade_export_resolves() {
 #[test]
 fn handlers_macro_is_reexported_by_the_facade() {
     let _: fn(&std::sync::Arc<FacadeMacroBackend>, RouterBuilder) -> RouterBuilder = FacadeMacroBackend::register;
+}
+
+/// A backend can name and drive the streaming checksum contract through the facade alone.
+#[test]
+fn checksummer_is_reexported_by_the_facade() {
+    let mut checksummer: Box<dyn Checksummer> = ChecksumAlgorithm::Crc32.checksummer();
+    assert_eq!(checksummer.size(), 4);
+    checksummer.update(b"1234");
+    checksummer.update(b"56789");
+    assert_eq!(checksummer.finalize().as_ref(), &[0xcb, 0xf4, 0x39, 0x26]);
 }
