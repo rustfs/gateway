@@ -1,0 +1,60 @@
+# c-acl-0040 — XML 1.0 line-end normalization reaches a generated operation decoder.
+
+[case]
+id = "c-acl-0040"
+schema_version = 1
+title = "Literal CRLF is normalised while a carriage-return reference is preserved"
+rationale = """
+Line-end translation applies to literal document bytes before parsing, not to a carriage return
+created later from a numeric character reference. Normalising neither makes this gateway disagree
+with every conforming client; normalising both destroys a character the caller explicitly encoded.
+The write followed by a byte-exact read binds both directions to an S3 operation instead of only
+asking the generic XML parser what tree it produced."""
+polarity = "negative"
+operation = "PutBucketAcl"
+tags = ["acl", "xml", "wire-bytes"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://www.w3.org/TR/xml/#sec-line-ends"
+summary = "XML 1.0 translates literal CR and CRLF before parsing, so a later numeric character reference is not part of that translation."
+kind = "other"
+
+[[setup.buckets]]
+name = "conf-acl"
+
+[[exchanges]]
+name = "write-both-spellings"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-acl?acl"
+headers = { "content-type" = "application/xml", "content-md5" = "wnl7Kuic/uqZaT+mO9sbtA==" }
+body = { utf8 = "<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>owner\r\nname</DisplayName></Owner><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>grant&#13;name</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
+exact_utf8 = ""
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-acl?acl"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<AccessControlPolicy xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>owner\nname</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"CanonicalUser\"><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>grant&#13;name</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>"

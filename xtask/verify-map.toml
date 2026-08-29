@@ -198,7 +198,7 @@ cases = "c-bucketconfig-0004,c-bucketconfig-0041,c-bucketconfig-0044"
 
 [[operation]]
 name = "PutBucketAcl"
-cases = "c-acl-0002,c-acl-0005,c-acl-0006,c-acl-0007,c-acl-0008,c-acl-0009,c-acl-0012,c-acl-0013,c-acl-0014,c-acl-0015,c-acl-0017,c-acl-0019,c-acl-0020,c-acl-0021,c-acl-0022,c-acl-0023,c-acl-0024,c-acl-0025,c-acl-0026,c-acl-0027,c-acl-0030,c-acl-0031,c-acl-0035,c-acl-0037,c-acl-0038,c-acl-0039"
+cases = "c-acl-0002,c-acl-0005,c-acl-0006,c-acl-0007,c-acl-0008,c-acl-0009,c-acl-0012,c-acl-0013,c-acl-0014,c-acl-0015,c-acl-0017,c-acl-0019,c-acl-0020,c-acl-0021,c-acl-0022,c-acl-0023,c-acl-0024,c-acl-0025,c-acl-0026,c-acl-0027,c-acl-0030,c-acl-0031,c-acl-0035,c-acl-0037,c-acl-0038,c-acl-0039,c-acl-0040"
 
 [[operation]]
 name = "PutBucketCors"
