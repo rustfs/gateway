@@ -16850,7 +16850,7 @@ QUIRK_LEDGER_DIAGNOSTICS=$(cat <<'DIAGEOF'
 mut_quirk_ledger_classification_count	q-timestamp-0012: unknown classification
 mut_quirk_ledger_duplicate_source	q-restore-header-absence-0127: multiple typed sources
 mut_quirk_ledger_typed_contract_proof_removed	ledger typed_contracts: expected 160, found 159
-mut_quirk_ledger_dimension_count	ledger dimensions: expected 178, found 177
+mut_quirk_ledger_dimension_count	ledger dimensions: expected 179, found 178
 mut_quirk_ledger_misbound_emitter_dimension	q-restore-header-absence-0127: expected one declared emitter binding, found 0
 mut_quirk_ledger_capability_exclusion	capability exclusions must remain typed contract sources
 mut_quirk_ledger_mutable_consumer	q-empty-0002: mutable source is claimed by no operation overlay
@@ -17007,7 +17007,7 @@ path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_quirk_ledger.sh \
-    'the 178-dimension ledger collapsing one independent atom' mut_quirk_ledger_dimension_count
+    'the 179-dimension ledger collapsing one independent atom' mut_quirk_ledger_dimension_count
 
 mut_quirk_ledger_misbound_emitter_dimension() {
     python3 - <<'PYEOF'
