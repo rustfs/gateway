@@ -738,15 +738,12 @@ fn read_connection(connection: Option<&Value>) -> Result<(), SutError> {
 
 /// One step of a body, in the order the case wrote it.
 ///
-/// A body is not always bytes: `conformance/case.schema.json` lets a chunk sequence carry a control
-/// action, and "close the connection here" is as much a part of what a case sends as the payload
-/// around it. Modelled as one sequence rather than as bytes plus a footnote, because the two are
-/// ordered with respect to each other and a transport that flattened them would lose the ordering
-/// that `c-mpu-0043` — bytes, then a half-close — exists to send.
+/// A body is bytes and ordered control actions in one sequence. Keeping both here prevents a
+/// transport from flattening the bytes-before-half-close ordering that `c-mpu-0043` depends on.
 #[derive(Debug, Clone)]
 pub(crate) enum ChunkStep {
-    /// Payload bytes, written and flushed as one frame.
-    Data(Vec<u8>),
+    /// Payload bytes and their not-before delay, written and flushed as one frame.
+    Data(Vec<u8>, u64),
     /// A connection-level act.
     Control {
         /// The `controlChunk.action` spelling.
@@ -760,10 +757,8 @@ pub(crate) enum ChunkStep {
 
 /// One request, read out of the case and ready to be signed.
 ///
-/// Deliberately transport-neutral: it records everything a case wrote, including the shapes an
-/// in-process call cannot send, and each transport refuses what it cannot carry out **by name**.
-/// Reading and refusing used to be the same function, which meant the socket transport could not
-/// reuse the reader without also inheriting a refusal of the very cases it exists to run.
+/// Transport-neutral: records every shape the case wrote, then lets each transport refuse what it
+/// cannot carry out **by name**.
 #[derive(Debug)]
 pub(crate) struct Wire {
     pub(crate) method: String,
@@ -777,12 +772,9 @@ pub(crate) struct Wire {
     pub(crate) http_version: Option<String>,
     /// The whole body, which is what the signature and `Content-Length` are stated over.
     pub(crate) body: Vec<u8>,
-    /// The same bytes, still in the pieces the case wrote them in.
-    ///
-    /// Kept apart from `body` because the pieces are what makes "the server stopped asking part
-    /// way through" observable: a body handed over as one frame can only be all-or-nothing.
+    /// The same bytes, kept in pieces so a server that stops asking part way is observable.
     pub(crate) frames: Vec<Vec<u8>>,
-    /// The body as the case wrote it, control acts included.
+    /// The ordered body and control acts.
     pub(crate) steps: Vec<ChunkStep>,
     pub(crate) sign: Option<Value>,
 }
@@ -792,7 +784,7 @@ impl Wire {
     pub(crate) fn control_actions(&self) -> impl Iterator<Item = &str> {
         self.steps.iter().filter_map(|step| match step {
             ChunkStep::Control { action, .. } => Some(action.as_str()),
-            ChunkStep::Data(_) => None,
+            ChunkStep::Data(_, _) => None,
         })
     }
 }
@@ -897,14 +889,14 @@ impl InProcess {
         let declared_body = request.read("requestSpec.body");
         let declared_chunks = request.read("requestSpec.chunks");
         let steps = match (declared_body, declared_chunks) {
-            (Some(payload), _) => vec![ChunkStep::Data(self.payload(payload)?)],
+            (Some(payload), _) => vec![ChunkStep::Data(self.payload(payload)?, 0)],
             (None, Some(Value::Array(chunks))) => self.chunks(chunks)?,
             _ => Vec::new(),
         };
         let frames: Vec<Vec<u8>> = steps
             .iter()
             .filter_map(|step| match step {
-                ChunkStep::Data(bytes) => Some(bytes.clone()),
+                ChunkStep::Data(bytes, _) => Some(bytes.clone()),
                 ChunkStep::Control { .. } => None,
             })
             .collect();
@@ -926,15 +918,7 @@ impl InProcess {
 
     /// Reads a chunk sequence into the steps it was written as.
     ///
-    /// `delay_ms` is not read here by either transport, and the reason has moved rather than gone
-    /// away: the in-process target observes no arrival timing at all, and the socket target paces on
-    /// the peer instead of on the clock — see `crate::socket`'s module documentation for why a sleep
-    /// would make a case's own `terminate_within_ms` a function of the build machine.
-    /// `crate::keys::DECLARED` carries the entry that says so.
-    ///
-    /// What survives here is the *shape* — one frame per chunk, and one per repetition — which is
-    /// the half a socketless transport can still measure: a server that stops pulling at the third
-    /// of fifty thousand frames is distinguishable from one that drains them all.
+    /// Socket waits for peer demand and `delay_ms`; in-process reports timing as unobserved.
     fn chunks(&self, chunks: &[Value]) -> Result<Vec<ChunkStep>, SutError> {
         let mut steps = Vec::new();
         for chunk in chunks {
@@ -955,9 +939,14 @@ impl InProcess {
                 continue;
             }
             let repeat = usize::try_from(chunk.read("dataChunk.repeat").and_then(Value::as_integer).unwrap_or(1)).unwrap_or(1);
+            let delay_ms = chunk
+                .read("dataChunk.delay_ms")
+                .and_then(Value::as_integer)
+                .unwrap_or(0)
+                .unsigned_abs();
             let unit = self.chunk_bytes(chunk)?;
             for _ in 0..repeat {
-                steps.push(ChunkStep::Data(unit.clone()));
+                steps.push(ChunkStep::Data(unit.clone(), delay_ms));
             }
         }
         Ok(steps)
@@ -1313,6 +1302,10 @@ impl Sut for InProcess {
         }
         let service = self.assemble(fixed.unix_seconds, skew_ms)?;
         let wire = self.read_request(&plan.request)?;
+        let arrival_timing_unobserved = wire
+            .steps
+            .iter()
+            .any(|step| matches!(step, ChunkStep::Data(_, delay_ms) if *delay_ms > 0));
 
         let mut headers = wire.headers.clone();
         if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("host")) {
@@ -1418,6 +1411,13 @@ impl Sut for InProcess {
             ),
         };
 
+        let mut notes = notes;
+        if arrival_timing_unobserved {
+            notes.push(
+                "this in-process target receives an assembled body, so dataChunk.delay_ms arrival timing was not observed"
+                    .to_owned(),
+            );
+        }
         Ok(Observation {
             outcome,
             stream_termination: termination,

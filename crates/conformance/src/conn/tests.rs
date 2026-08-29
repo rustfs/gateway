@@ -21,7 +21,12 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use super::*;
+use crate::socket::SERVER_READ_TIMEOUT;
 use crate::toml;
+use std::io::Read;
+use std::net::TcpListener as RawTcpListener;
+use std::sync::mpsc;
+use std::time::Instant;
 
 fn block(source: &str) -> Value {
     toml::parse(source).expect("valid TOML")
@@ -175,9 +180,65 @@ fn an_unperformed_control_action_is_refused_rather_than_dropped() {
     let pacer = Arc::new(Pacer::new());
     listener.enqueue_pacer(&pacer);
     let mut connection = Connection::open(listener.addr()).expect("the listener accepts");
-    let error =
-        control(&mut connection, &pacer, &mut 0, "stop_reading", 0, 10, Duration::from_millis(50)).expect_err("must be refused");
+    let error = control(
+        &mut connection,
+        &pacer,
+        &mut 0,
+        "stop_reading",
+        0,
+        10,
+        Instant::now() + Duration::from_millis(50),
+    )
+    .expect_err("must be refused");
     assert!(format!("{error}").contains("stop_reading"), "{error}");
+}
+
+/// Negative — peer handover and a teardown delay share one absolute exchange budget.
+#[test]
+fn a_control_delay_cannot_outlive_the_exchange_deadline() {
+    for action in ["half_close", "close"] {
+        let listener = RawTcpListener::bind("127.0.0.1:0").expect("a loopback listener binds");
+        let addr = listener.local_addr().expect("the listener has an address");
+        let server = std::thread::spawn(move || listener.accept().expect("the client connects"));
+        let mut connection = Connection::open(addr).expect("the listener accepts");
+        let (mut peer, _) = server.join().expect("the listener exits");
+        let error = control(
+            &mut connection,
+            &Arc::new(Pacer::new()),
+            &mut 0,
+            action,
+            80,
+            0,
+            Instant::now() + Duration::from_millis(100),
+        )
+        .expect_err("the delay exceeds the deadline");
+        assert!(format!("{error}").contains("exhausted its declared timeout"), "{action}: {error}");
+        assert!(!connection.torn_down(), "{action}: an invalid delay must not tear down the socket");
+
+        peer.set_read_timeout(Some(Duration::from_millis(20)))
+            .expect("the peer gets an observation budget");
+        let mut byte = [0_u8; 1];
+        let read = peer.read(&mut byte);
+        assert!(
+            matches!(
+                read,
+                Err(ref error)
+                    if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+            ),
+            "{action}: the peer observed a premature socket change: {read:?}"
+        );
+    }
+}
+
+/// Negative and positive control — teardown delay is reserved before waiting on the peer.
+#[test]
+fn teardown_delay_is_subtracted_from_the_peer_handover_budget() {
+    assert_eq!(
+        teardown_handover_budget("half_close", 80, Duration::from_millis(100)).expect("the delay fits"),
+        Duration::from_millis(20)
+    );
+    let error = teardown_handover_budget("close", 101, Duration::from_millis(100)).expect_err("the delay does not fit");
+    assert!(format!("{error}").contains("close control chunk"), "{error}");
 }
 
 /// Negative — a control chunk the case wrote survives into the step list beside its bytes, in order.
@@ -198,14 +259,161 @@ fn a_chunk_sequence_keeps_its_control_acts_in_order() {
         .steps
         .iter()
         .map(|step| match step {
-            ChunkStep::Data(bytes) => format!("data:{}", bytes.len()),
+            ChunkStep::Data(bytes, delay_ms) => format!("data:{}:{delay_ms}", bytes.len()),
             ChunkStep::Control { action, delay_ms, .. } => format!("{action}:{delay_ms}"),
         })
         .collect();
-    assert_eq!(shape, vec!["data:3", "half_close:50", "data:2"]);
+    assert_eq!(shape, vec!["data:3:0", "half_close:50", "data:2:0"]);
+}
+
+/// Positive and negative control — data-chunk delay is an arrival deadline, not inert prose.
+///
+/// The first byte has no delay and is released as soon as the real peer asks for it. The second
+/// byte carries a 50 ms delay, so the listener must not observe it before that interval has passed.
+/// Measuring both bytes on the accepted socket rules out a parser-only implementation that reads
+/// `delay_ms` but still writes both chunks together.
+#[test]
+fn data_chunk_delay_sets_a_not_before_arrival_deadline() {
+    let request = block(concat!(
+        "method = \"PUT\"\ntarget = \"/conf/k\"\n",
+        "[[chunks]]\nraw_utf8 = \"a\"\ndelay_ms = 0\n",
+        "[[chunks]]\nraw_utf8 = \"b\"\ndelay_ms = 50\n",
+        "[[chunks]]\nraw_utf8 = \"c\"\ndelay_ms = 250\n",
+    ));
+    let wire = target().inner.read_wire(&request).expect("the request is read");
+    let listener = RawTcpListener::bind("127.0.0.1:0").expect("a loopback listener binds");
+    let addr = listener.local_addr().expect("the listener has an address");
+    let pacer = Arc::new(Pacer::new());
+    let server_pacer = Arc::clone(&pacer);
+    let (observed_tx, observed_rx) = mpsc::sync_channel(1);
+
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("the client connects");
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut byte = [0_u8; 1];
+            stream.read_exact(&mut byte).expect("the request head arrives");
+            head.push(byte[0]);
+        }
+
+        let mut body = [0_u8; 3];
+        server_pacer.server_wants_body();
+        stream.read_exact(&mut body[..1]).expect("the zero-delay chunk arrives");
+        server_pacer.server_wants_body();
+        stream.read_exact(&mut body[1..2]).expect("the delayed chunk arrives");
+        let second_arrival = Instant::now();
+        std::thread::sleep(Duration::from_millis(300));
+        server_pacer.server_wants_body();
+        stream.read_exact(&mut body[2..]).expect("the already eligible chunk arrives");
+        observed_tx.send((body, second_arrival)).expect("the observation is returned");
+    });
+
+    let mut connection = Connection::open(addr).expect("the listener accepts");
+    connection
+        .write(b"PUT /conf/k HTTP/1.1\r\nhost: s3.example.com\r\ncontent-length: 3\r\n\r\n")
+        .expect("the request head is written");
+    let write_started = Instant::now();
+    write_body(&mut connection, &pacer, &wire, 3, write_started + Duration::from_secs(1)).expect("the paced body is written");
+
+    let (body, second_arrival) = observed_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("the listener reports arrival times");
+    server.join().expect("the listener exits");
+    assert_eq!(body, *b"abc", "timing controls must not change payload bytes");
+    assert!(
+        second_arrival.duration_since(write_started) >= Duration::from_millis(45),
+        "the 50 ms chunk arrived only {:?} after the writer started",
+        second_arrival.duration_since(write_started)
+    );
+    assert_eq!(pacer.delay_waits_started(), 1, "only the 50 ms chunk should enter a non-zero delay wait");
+}
+
+/// Negative — an early response cancels the production writer's not-before wait.
+///
+/// The server waits until the writer has entered the five-second delay before answering, so a
+/// direct sleep in the writer cannot satisfy the test through scheduling luck.
+#[test]
+fn an_answer_interrupts_the_production_body_writer() {
+    let request = block(concat!(
+        "method = \"PUT\"\ntarget = \"/conf/k\"\n",
+        "[[chunks]]\nraw_utf8 = \"a\"\ndelay_ms = 0\n",
+        "[[chunks]]\nraw_utf8 = \"b\"\ndelay_ms = 5000\n",
+    ));
+    let wire = target().inner.read_wire(&request).expect("the request is read");
+    let listener = RawTcpListener::bind("127.0.0.1:0").expect("a loopback listener binds");
+    let addr = listener.local_addr().expect("the listener has an address");
+    let pacer = Arc::new(Pacer::new());
+    let server_pacer = Arc::clone(&pacer);
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("the client connects");
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut byte = [0_u8; 1];
+            stream.read_exact(&mut byte).expect("the request head arrives");
+            head.push(byte[0]);
+        }
+        let mut first = [0_u8; 1];
+        server_pacer.server_wants_body();
+        stream.read_exact(&mut first).expect("the first chunk arrives");
+        server_pacer.server_wants_body();
+        assert!(server_pacer.await_delay_wait(Duration::from_secs(1)), "the writer entered its delay");
+        server_pacer.server_answered();
+        let mut catch_up = [0_u8; 1];
+        stream.read_exact(&mut catch_up).expect("the catch-up byte arrives");
+    });
+
+    let mut connection = Connection::open(addr).expect("the listener accepts");
+    connection
+        .write(b"PUT /conf/k HTTP/1.1\r\nhost: s3.example.com\r\ncontent-length: 2\r\n\r\n")
+        .expect("the request head is written");
+    let started = Instant::now();
+    let progress =
+        write_body(&mut connection, &pacer, &wire, 2, started + Duration::from_secs(6)).expect("the answer interrupts the delay");
+    server.join().expect("the listener exits");
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "the answer was held for {:?}",
+        started.elapsed()
+    );
+    assert_eq!(progress.sent_at_response, 1, "the delayed byte was not sent before the answer");
+    assert_eq!(connection.body_written(), 2, "catch-up preserves the reusable-connection contract");
+}
+
+/// Negative — an authored delay longer than the remaining exchange budget fails immediately.
+#[test]
+fn a_data_chunk_delay_cannot_outlive_the_exchange_deadline() {
+    let request = block(concat!(
+        "method = \"PUT\"\ntarget = \"/conf/k\"\n",
+        "[[chunks]]\nraw_utf8 = \"a\"\ndelay_ms = 100\n",
+    ));
+    let wire = target().inner.read_wire(&request).expect("the request is read");
+    let listener = RawTcpListener::bind("127.0.0.1:0").expect("a loopback listener binds");
+    let addr = listener.local_addr().expect("the listener has an address");
+    let server = std::thread::spawn(move || listener.accept().expect("the client connects"));
+    let mut connection = Connection::open(addr).expect("the listener accepts");
+    let error = write_body(
+        &mut connection,
+        &Arc::new(Pacer::new()),
+        &wire,
+        1,
+        Instant::now() + Duration::from_millis(20),
+    )
+    .expect_err("the delay exceeds the deadline");
+    server.join().expect("the listener exits");
+    assert!(format!("{error}").contains("beyond the remaining exchange timeout"), "{error}");
+    assert_eq!(connection.body_written(), 0);
 }
 
 // -- The safety net -----------------------------------------------------------------------------
+
+/// Negative — the listener safety net must never preempt a delay the exchange budget accepts.
+#[test]
+fn the_server_read_timeout_outlives_every_accepted_exchange() {
+    assert!(
+        SERVER_READ_TIMEOUT > budget_of(Some(i64::MAX)),
+        "the server read timeout {SERVER_READ_TIMEOUT:?} can preempt the maximum exchange budget {MAX_BUDGET:?}"
+    );
+}
 
 /// Negative — the budget is capped however long a case declares, because a wedged exchange must not
 /// hold a whole run.
@@ -240,7 +448,8 @@ fn a_wedged_exchange_is_reported_as_unmeasured_rather_than_as_a_count() {
     // signalled — a peer that says nothing, which is what the net is for.
     let pacer = Arc::new(Pacer::new());
     let mut connection = Connection::open(listener.addr()).expect("the listener accepts");
-    let error = write_body(&mut connection, &pacer, &wire, 14, Duration::from_millis(30)).expect_err("must not report");
+    let error =
+        write_body(&mut connection, &pacer, &wire, 14, Instant::now() + Duration::from_millis(30)).expect_err("must not report");
     assert!(format!("{error}").contains("wedged"), "{error}");
     assert_eq!(connection.body_written(), 0);
 }
