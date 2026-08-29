@@ -198,6 +198,7 @@ core_modules = (
     "cors_roundtrip",
     "dialect",
     "dto_cold_split",
+    "encryption_roundtrip",
     "error_resolution",
     "golden",
     "hot_path",
