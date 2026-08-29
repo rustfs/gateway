@@ -1,5 +1,5 @@
 {
-  "ir_version": "1",
+  "ir_version": "2",
   "operation": "DeleteObjects",
   "http": {
             "method": "POST",

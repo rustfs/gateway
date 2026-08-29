@@ -23,7 +23,7 @@
 
 use std::sync::OnceLock;
 
-use rustfs_gateway_model::ir::Type;
+use rustfs_gateway_model::ir::{Binding, Field, Type};
 use rustfs_gateway_model::overlay::RuleClassification;
 
 fn artifacts() -> &'static crate::Artifacts {
@@ -83,6 +83,70 @@ fn the_storage_is_composed_without_a_codec_owned_checker() {
             .expect("a string is preserved"),
         "raw.to_owned()"
     );
+}
+
+#[test]
+fn upload_id_capabilities_use_the_owned_claim_decoder_and_have_no_response_form() {
+    let capability = Type::Capability {
+        exchange: "upload_id".to_owned(),
+    };
+    assert_eq!(crate::emit::dto::registry::Registry::rust_type(&capability), "crate::UploadIdClaim");
+    assert_eq!(crate::emit::spec_toml::type_name(&capability), "Capability(upload_id)");
+    assert_eq!(
+        crate::emit::codec::expr::from_wire(&capability, "UploadId", "UploadPart", false, None, None, "names")
+            .expect("an upload-id capability is constructed from the untrusted wire value"),
+        "rustfs_gateway_types::UploadIdClaim::from_wire(raw)"
+    );
+    assert!(
+        crate::emit::codec::expr::to_wire(&capability, "UploadId", "UploadPart").is_err(),
+        "a request-only capability must have no response encoder"
+    );
+    let claim_field = Field {
+        name: "UploadId".to_owned(),
+        wire_name: Some("uploadId".to_owned()),
+        required: false,
+        binding: Binding::Query,
+        ty: capability,
+        hot: true,
+        default: None,
+        omit_when: None,
+        missing_error: None,
+        quirk_refs: vec!["q-mpu-upload-id-0037".to_owned()],
+    };
+    assert!(
+        crate::emit::dto::registry::is_redacted(&claim_field),
+        "generated Debug must not disclose an untrusted capability token"
+    );
+}
+
+#[test]
+fn exactly_the_four_upload_ownership_inputs_are_capabilities() {
+    let mut actual: Vec<_> = artifacts()
+        .operations
+        .iter()
+        .flat_map(|operation| {
+            operation.input.iter().filter_map(|field| {
+                matches!(field.ty, Type::Capability { ref exchange } if exchange == "upload_id")
+                    .then_some((operation.operation.as_str(), field.name.as_str()))
+            })
+        })
+        .collect();
+    actual.sort_unstable();
+    assert_eq!(
+        actual,
+        [
+            ("AbortMultipartUpload", "UploadId"),
+            ("CompleteMultipartUpload", "UploadId"),
+            ("ListParts", "UploadId"),
+            ("UploadPart", "UploadId"),
+        ]
+    );
+    for operation in ["AbortMultipartUpload", "CompleteMultipartUpload", "ListParts", "UploadPart"] {
+        assert!(
+            decoder(operation).contains("input.upload_id = rustfs_gateway_types::UploadIdClaim::from_wire(raw);"),
+            "{operation} must construct the owned claim at the wire boundary"
+        );
+    }
 }
 
 #[test]

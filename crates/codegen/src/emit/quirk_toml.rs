@@ -283,6 +283,7 @@ pub fn render(
         None => {}
     }
     match contract_rule.map(|rule| &rule.current) {
+        Some(ContractValue::UploadIdCapabilityScope(value)) => out.push_str(super::upload_id_contracts::quirk_toml_entry(*value)),
         Some(ContractValue::SignaturePolicy(true)) => match contract_rule.map(|rule| rule.mutation_dimension) {
             Some(rustfs_gateway_model::MutationDimension::SignatureCanonicalHostPolicy) => {
                 out.push_str("contract_value = \"raw_host_bytes\"\n")

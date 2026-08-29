@@ -24,7 +24,7 @@ use crate::toml_lite::Toml;
 use super::MutationDimension;
 use super::contract_values::{
     ConditionFailureDetailValue, ContractRule, ContractValue, CopySourceGuardOrderValue, CopySourceIfMatchMissValue,
-    ErrorRootNamespaceValue, HeadBodyPolicyValue,
+    ErrorRootNamespaceValue, HeadBodyPolicyValue, UploadIdCapabilityScopeValue,
 };
 use super::cors_contract_inputs;
 use super::naming_contract_inputs;
@@ -314,6 +314,14 @@ pub(super) fn contract_rule(table: &Toml, id: &str) -> Result<Option<ContractRul
         ("sigv2_query_coverage_policy", "include_unlisted_query") => {
             (ContractValue::SignaturePolicy(false), MutationDimension::SigV2QueryCoveragePolicy)
         }
+        ("upload_id_capability_scope", "bucket_and_key") => (
+            ContractValue::UploadIdCapabilityScope(UploadIdCapabilityScopeValue::BucketAndKey),
+            MutationDimension::UploadIdCapabilityScope,
+        ),
+        ("upload_id_capability_scope", "upload_id_only") => (
+            ContractValue::UploadIdCapabilityScope(UploadIdCapabilityScopeValue::UploadIdOnly),
+            MutationDimension::UploadIdCapabilityScope,
+        ),
         ("grantee_discriminator_policy", "derive_from_identifying_member") => (
             ContractValue::GranteeTypeFromIdentifyingMember,
             MutationDimension::GranteeDiscriminatorPolicy,

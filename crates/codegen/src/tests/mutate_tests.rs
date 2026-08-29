@@ -312,6 +312,47 @@ fn a_contract_mutation_changes_the_generated_signature_input() {
 }
 
 #[test]
+fn an_upload_id_scope_mutation_changes_the_generated_types_input() {
+    let root = root();
+    let input = CodegenInput::at(&root);
+    let out = CodegenOutput::at(&root);
+    let plain = generate(&input, &out).expect("codegen runs");
+    let rule = plain
+        .contract_rules
+        .get("q-mpu-upload-id-0037")
+        .expect("the upload-id scope contract exists");
+    let mutation = plan_contract("q-mpu-upload-id-0037", rule).expect("the ownership scope is plannable");
+
+    let mutated = generate_mutated(&input, &out, std::slice::from_ref(&mutation)).expect("codegen runs");
+
+    assert_ne!(plain.files, mutated.files, "the ownership mutation must reach a generated types input");
+    let current = plain
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("generated/upload_id_contracts.rs"))
+        .expect("the upload-id contracts are emitted for the types exchange");
+    let mutant = mutated
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("generated/upload_id_contracts.rs"))
+        .expect("the mutant upload-id contracts are emitted for the types exchange");
+    assert!(current.1.contains("UPLOAD_ID_REQUIRES_BUCKET_AND_KEY: bool = true"));
+    assert!(mutant.1.contains("UPLOAD_ID_REQUIRES_BUCKET_AND_KEY: bool = false"));
+    let current_record = plain
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-mpu-upload-id-0037.toml"))
+        .expect("the upload-id mutable rule is emitted");
+    let mutant_record = mutated
+        .files
+        .iter()
+        .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-mpu-upload-id-0037.toml"))
+        .expect("the mutant upload-id mutable rule is emitted");
+    assert!(current_record.1.contains("contract_value = \"bucket_and_key\""));
+    assert!(mutant_record.1.contains("contract_value = \"upload_id_only\""));
+}
+
+#[test]
 fn every_quirk_belongs_to_exactly_one_overlay_family() {
     let families = quirk_families(&root().join("model/overlays")).expect("the overlay families load");
     assert_eq!(

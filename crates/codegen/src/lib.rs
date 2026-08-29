@@ -335,6 +335,10 @@ pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[
         emit::range_contracts::render(&overlay.contract_rules).map_err(Error::Policy)?,
     ));
     files.push((
+        out.generated_dir.join("upload_id_contracts.rs"),
+        emit::upload_id_contracts::render(&overlay.contract_rules).map_err(Error::Policy)?,
+    ));
+    files.push((
         out.generated_dir.join("contracts.rs"),
         emit::runtime_contracts::render(&overlay.contract_rules).map_err(Error::Policy)?,
     ));

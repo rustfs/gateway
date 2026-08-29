@@ -38,7 +38,7 @@ use rustfs_gateway_model::ir::{EmptyValue, TimestampFormat};
 use rustfs_gateway_model::toml_lite::{self, Toml};
 use rustfs_gateway_model::{
     AllUnknownChildrenValue, BooleanSpellingValue, CodecRule, CodecValue, ContractRule, ContractValue, HeaderToleranceValue,
-    MutationDimension, UnknownElementPolicyValue,
+    MutationDimension, UnknownElementPolicyValue, UploadIdCapabilityScopeValue,
 };
 
 use crate::emit::quirk_toml::{ResolvedSource, SourceValue};
@@ -132,7 +132,7 @@ pub fn plan(quirk: &str, dimension: MutationDimension, source: &ResolvedSource) 
 ///
 /// Returns the reason when the contract has no reviewed mechanical opposite.
 pub fn plan_contract(quirk: &str, rule: &ContractRule) -> std::result::Result<Mutation, String> {
-    let current = contract_source(&rule.current)?;
+    let current = contract_source(&rule.current, rule.mutation_dimension)?;
     let to = alternative(rule.mutation_dimension, &current, &format!("{CONTRACT_PATH_PREFIX}{quirk}"))?;
     Mutation::new(quirk, &format!("{CONTRACT_PATH_PREFIX}{quirk}"), current, to)
 }
@@ -364,7 +364,7 @@ pub(crate) fn apply_contract(
     let rule = rules
         .get_mut(id)
         .ok_or_else(|| format!("contract mutation names unknown rule `{id}`"))?;
-    let found = contract_source(&rule.current)?;
+    let found = contract_source(&rule.current, rule.mutation_dimension)?;
     if found != mutation.from {
         return Err(format!(
             "contract `{id}` carries {found:?}, but the mutation plan replaces {:?}; the ledger and \
@@ -372,26 +372,59 @@ pub(crate) fn apply_contract(
             mutation.from
         ));
     }
-    rule.current = contract_value(&mutation.to)?;
-    let written = contract_source(&rule.current)?;
+    rule.current = contract_value(&mutation.to, rule.mutation_dimension)?;
+    let written = contract_source(&rule.current, rule.mutation_dimension)?;
     if written != mutation.to {
         return Err(format!("contract `{id}` does not read back as {:?}; found {written:?}", mutation.to));
     }
     Ok(true)
 }
 
-fn contract_source(value: &ContractValue) -> std::result::Result<SourceValue, String> {
-    match value {
-        ContractValue::SignaturePolicy(value) => Ok(SourceValue::Bool(*value)),
-        _ => Err("this typed runtime contract has no mechanical mutation writer".to_owned()),
+fn contract_source(value: &ContractValue, dimension: MutationDimension) -> std::result::Result<SourceValue, String> {
+    match (value, dimension) {
+        (ContractValue::SignaturePolicy(value), dimension) if is_signature_policy(dimension) => Ok(SourceValue::Bool(*value)),
+        (
+            ContractValue::UploadIdCapabilityScope(UploadIdCapabilityScopeValue::BucketAndKey),
+            MutationDimension::UploadIdCapabilityScope,
+        ) => Ok(SourceValue::Bool(true)),
+        (
+            ContractValue::UploadIdCapabilityScope(UploadIdCapabilityScopeValue::UploadIdOnly),
+            MutationDimension::UploadIdCapabilityScope,
+        ) => Ok(SourceValue::Bool(false)),
+        _ => Err(format!(
+            "typed runtime contract `{}` has no matching mechanical mutation writer",
+            dimension.as_str()
+        )),
     }
 }
 
-fn contract_value(value: &SourceValue) -> std::result::Result<ContractValue, String> {
-    match value {
-        SourceValue::Bool(value) => Ok(ContractValue::SignaturePolicy(*value)),
-        _ => Err("a signature runtime contract requires a boolean replacement".to_owned()),
+fn contract_value(value: &SourceValue, dimension: MutationDimension) -> std::result::Result<ContractValue, String> {
+    match (value, dimension) {
+        (SourceValue::Bool(value), dimension) if is_signature_policy(dimension) => Ok(ContractValue::SignaturePolicy(*value)),
+        (SourceValue::Bool(true), MutationDimension::UploadIdCapabilityScope) => {
+            Ok(ContractValue::UploadIdCapabilityScope(UploadIdCapabilityScopeValue::BucketAndKey))
+        }
+        (SourceValue::Bool(false), MutationDimension::UploadIdCapabilityScope) => {
+            Ok(ContractValue::UploadIdCapabilityScope(UploadIdCapabilityScopeValue::UploadIdOnly))
+        }
+        _ => Err(format!(
+            "typed runtime contract `{}` requires its reviewed boolean replacement",
+            dimension.as_str()
+        )),
     }
+}
+
+fn is_signature_policy(dimension: MutationDimension) -> bool {
+    matches!(
+        dimension,
+        MutationDimension::SignatureCanonicalHostPolicy
+            | MutationDimension::SignaturePathFallbackPolicy
+            | MutationDimension::SignaturePayloadTokenPolicy
+            | MutationDimension::SigV2IncludedQueryPolicy
+            | MutationDimension::SigV2DateSlotPolicy
+            | MutationDimension::SigV2ExpiresAbsolutePolicy
+            | MutationDimension::SigV2QueryCoveragePolicy
+    )
 }
 
 fn alternative(dimension: MutationDimension, current: &SourceValue, path: &str) -> std::result::Result<SourceValue, String> {

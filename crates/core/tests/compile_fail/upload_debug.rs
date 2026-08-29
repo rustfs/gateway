@@ -22,7 +22,7 @@
 
 use rustfs_gateway_core::ops::shared::upload_id::{ResolvedUploadId, UploadIdClaim};
 
-fn expose_claim(claim: &UploadIdClaim<'_>) {
+fn expose_claim(claim: &UploadIdClaim) {
     println!("{claim:?}");
 }
 

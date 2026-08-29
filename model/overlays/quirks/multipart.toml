@@ -188,10 +188,12 @@ cases   = ["c-mpu-0002", "c-mpu-0018"]
 [[quirk]]
 id      = "q-mpu-upload-id-0037"
 kind    = "capability_token"
-classification = "contract"
+classification = "mutable"
+mutation_dimension = "upload_id_capability_scope"
+contract_value = "bucket_and_key"
 target  = "UploadPart.UploadId"
 summary = "An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured."
-cases   = ["c-mpu-0028", "c-mpu-0029", "c-mpu-0030", "c-mpu-0031", "c-mpu-0049", "c-mpu-0050", "c-mpu-0051", "c-mpu-0052"]
+cases   = ["c-mpu-0028", "c-mpu-0029", "c-mpu-0030", "c-mpu-0031", "c-mpu-0032", "c-mpu-0043", "c-mpu-0047", "c-mpu-0049", "c-mpu-0050", "c-mpu-0051", "c-mpu-0052"]
 
   [[quirk.evidence]]
   kind    = "s3s-issue"

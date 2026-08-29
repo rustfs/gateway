@@ -231,6 +231,7 @@ pub fn type_name(ty: &Type) -> String {
         Type::ObjectKey => "ObjectKey".into(),
         Type::BucketName => "BucketName".into(),
         Type::Range => "Range".into(),
+        Type::Capability { exchange } => format!("Capability({exchange})"),
         Type::StringEnum(_) => "StringEnum".into(),
         Type::Structure(name) => format!("Structure({name})"),
         Type::Union(name) => format!("Union({name})"),

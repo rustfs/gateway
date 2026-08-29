@@ -191,11 +191,22 @@ pub enum CaseFoldingValue {
     Lowercase,
 }
 
+/// Resource scope enforced after an upload id has been resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadIdCapabilityScopeValue {
+    /// Require the resolved upload to belong to both the requested bucket and key.
+    BucketAndKey,
+    /// Mutation alternative that trusts the upload id without checking its resource owner.
+    UploadIdOnly,
+}
+
 /// A typed runtime contract value emitted into generated consumer inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContractValue {
     /// Whether a signature canonicalization policy keeps its source spelling.
     SignaturePolicy(bool),
+    /// Resource ownership enforced for a resolved upload id.
+    UploadIdCapabilityScope(UploadIdCapabilityScopeValue),
     /// A bucket-CORS runtime policy.
     Cors(CorsContractValue),
     /// A RestoreObject or SelectObjectContent runtime policy.

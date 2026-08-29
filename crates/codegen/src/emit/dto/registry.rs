@@ -232,6 +232,10 @@ impl Registry {
             // `RangeSpec` and not `ByteRange`: a `416` echoes the header as the client wrote it,
             // and a parse cannot be asked for its own source text. See `scalar::range`.
             Type::Range => "crate::RangeSpec".to_owned(),
+            Type::Capability { exchange } => match exchange.as_str() {
+                "upload_id" => "crate::UploadIdClaim".to_owned(),
+                _ => unreachable!("model lowering rejects unknown capability exchanges"),
+            },
             Type::Blob { streaming: true } => "rustfs_gateway_stream::ByteStream".to_owned(),
             Type::Blob { streaming: false } => "bytes::Bytes".to_owned(),
             Type::StringEnum(_) => unreachable!("string enumerations are named by their member, use `field_type`"),
@@ -318,8 +322,9 @@ pub const REDACTED_WIRE_NAMES: &[&str] = &[
 /// Whether a field's value is secret enough that `Debug` must not print it.
 #[must_use]
 pub fn is_redacted(field: &Field) -> bool {
-    field
-        .wire_name
-        .as_deref()
-        .is_some_and(|wire| REDACTED_WIRE_NAMES.contains(&wire))
+    matches!(&field.ty, Type::Capability { .. })
+        || field
+            .wire_name
+            .as_deref()
+            .is_some_and(|wire| REDACTED_WIRE_NAMES.contains(&wire))
 }

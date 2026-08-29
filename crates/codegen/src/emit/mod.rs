@@ -30,6 +30,7 @@ pub mod range_contracts;
 pub mod runtime_contracts;
 pub mod rust_files;
 pub mod spec_toml;
+pub mod upload_id_contracts;
 
 use rustfs_gateway_model::json::Value;
 

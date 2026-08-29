@@ -66,8 +66,8 @@ pub struct Input {
     pub key: crate::ObjectKey,
     /// The message body. Required.
     pub multipart_upload: crate::ops::shapes::CompletedMultipartUpload,
-    /// Wire `uploadId`, bound as Query. Required.
-    pub upload_id: String,
+    /// Wire `uploadId`, bound as Query. Required. Secret: `Debug` prints a placeholder.
+    pub upload_id: crate::UploadIdClaim,
     /// Every header under `x-amz-checksum-`. Optional.
     pub checksum_spec: Option<crate::ChecksumSpec>,
     /// Wire `x-amz-checksum-type`, bound as Header. Optional.
@@ -124,7 +124,7 @@ impl std::fmt::Debug for Input {
             .field("bucket", &self.bucket)
             .field("key", &self.key)
             .field("multipart_upload", &self.multipart_upload)
-            .field("upload_id", &self.upload_id)
+            .field("upload_id", &"<redacted>")
             .field("checksum_spec", &self.checksum_spec)
             .field("checksum_type", &self.checksum_type)
             .field("mpu_object_size", &self.mpu_object_size)
@@ -257,7 +257,7 @@ impl InputBuilder {
 
     /// Sets `UploadId`.
     #[must_use]
-    pub fn upload_id(mut self, value: String) -> Self {
+    pub fn upload_id(mut self, value: crate::UploadIdClaim) -> Self {
         self.input.upload_id = value;
         self
     }

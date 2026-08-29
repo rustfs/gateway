@@ -35,6 +35,8 @@ pub enum MutationDimension {
     SigV2ExpiresAbsolutePolicy,
     /// Change whether SigV2 omits arbitrary query parameters from its signature.
     SigV2QueryCoveragePolicy,
+    /// Change whether a resolved upload id must belong to the requested bucket and key.
+    UploadIdCapabilityScope,
     /// Move one or both inclusive integer bounds.
     IntegerRange,
     /// Replace the media type emitted for a text payload.
@@ -390,6 +392,7 @@ impl MutationDimension {
             Self::SigV2DateSlotPolicy => "sigv2_date_slot_policy",
             Self::SigV2ExpiresAbsolutePolicy => "sigv2_expires_absolute_policy",
             Self::SigV2QueryCoveragePolicy => "sigv2_query_coverage_policy",
+            Self::UploadIdCapabilityScope => "upload_id_capability_scope",
             Self::IntegerRange => "integer_range",
             Self::MediaType => "media_type",
             Self::HeaderTolerance => "header_tolerance",

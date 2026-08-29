@@ -1349,11 +1349,11 @@ impl RecordedUpload for StoredUpload {
 /// no handle to key one with.
 fn require_upload<'i, 'f>(
     fixture: &'f Fixture,
-    upload_id: &'i str,
+    upload_id: &'i UploadIdClaim,
     bucket: &BucketName,
     key: &ObjectKey,
 ) -> Result<(ResolvedUploadId<'i>, &'f StoredUpload), HandlerError> {
-    resolve_upload(&UploadIdClaim::from_wire(upload_id), bucket, key, |id| fixture.upload(id))
+    resolve_upload(upload_id, bucket, key, |id| fixture.upload(id))
         .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))
 }
 
@@ -3067,7 +3067,8 @@ impl Stub {
 
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        let (handle, _) = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
+        let upload_id = UploadIdClaim::from_wire(input.upload_id.clone());
+        let (handle, _) = require_upload(&fixture, &upload_id, &input.bucket, &input.key)?;
         let (found, source_version) = read_copy_source(&fixture, &source)?;
         guard_copy_source(
             &found,
@@ -5131,7 +5132,7 @@ mod tests {
         dto::CompleteMultipartUploadInput {
             bucket: name("conf-bucket"),
             key: object_key("k"),
-            upload_id: upload_id.to_owned(),
+            upload_id: UploadIdClaim::from_wire(upload_id),
             multipart_upload: dto::CompletedMultipartUpload {
                 parts: parts
                     .into_iter()
@@ -5753,35 +5754,39 @@ mod tests {
         fixture.declare_bucket("mine", false);
         fixture.declare_bucket("theirs", false);
         let id = fixture.create_upload("theirs", "someone-elses-object");
+        let claim = UploadIdClaim::from_wire(id.clone());
+        let invented_claim = UploadIdClaim::from_wire("conformance-upload-9999");
+        let traversal_claim = UploadIdClaim::from_wire("../../etc/passwd");
 
         let bucket = |name: &str| BucketName::new(name.to_owned()).expect("a fixture bucket name is valid");
         let key = |name: &str| ObjectKey::new(name.to_owned()).expect("a fixture key is valid");
 
-        assert!(require_upload(&fixture, &id, &bucket("theirs"), &key("someone-elses-object")).is_ok());
+        assert!(require_upload(&fixture, &claim, &bucket("theirs"), &key("someone-elses-object")).is_ok());
         // Same key, wrong bucket.
-        let foreign = require_upload(&fixture, &id, &bucket("mine"), &key("someone-elses-object"));
+        let foreign = require_upload(&fixture, &claim, &bucket("mine"), &key("someone-elses-object"));
         assert_eq!(foreign.err().map(|error| error.code().clone()), Some(ErrorCode::NO_SUCH_UPLOAD));
         // Right bucket, wrong key.
-        let crossed = require_upload(&fixture, &id, &bucket("theirs"), &key("another-object"));
+        let crossed = require_upload(&fixture, &claim, &bucket("theirs"), &key("another-object"));
         assert_eq!(crossed.err().map(|error| error.code().clone()), Some(ErrorCode::NO_SUCH_UPLOAD));
         // An id nothing minted.
-        let invented = require_upload(&fixture, "conformance-upload-9999", &bucket("theirs"), &key("someone-elses-object"));
+        let invented = require_upload(&fixture, &invented_claim, &bucket("theirs"), &key("someone-elses-object"));
         assert_eq!(invented.err().map(|error| error.code().clone()), Some(ErrorCode::NO_SUCH_UPLOAD));
         // A shape no minted id can have. It never reaches the store, and it is refused as the
         // other three are.
-        let traversal = require_upload(&fixture, "../../etc/passwd", &bucket("theirs"), &key("someone-elses-object"));
+        let traversal = require_upload(&fixture, &traversal_claim, &bucket("theirs"), &key("someone-elses-object"));
         assert_eq!(traversal.err().map(|error| error.code().clone()), Some(ErrorCode::NO_SUCH_UPLOAD));
 
         let rendered: Vec<String> = ["conformance-upload-9999", "../../etc/passwd"]
             .into_iter()
             .map(|spent| {
-                require_upload(&fixture, spent, &bucket("mine"), &key("someone-elses-object"))
+                let spent = UploadIdClaim::from_wire(spent);
+                require_upload(&fixture, &spent, &bucket("mine"), &key("someone-elses-object"))
                     .err()
                     .map(|error| error.message().to_owned())
-                    .unwrap_or_else(|| panic!("{spent} names no upload in mine/someone-elses-object"))
+                    .unwrap_or_else(|| panic!("the spent claim names no upload in mine/someone-elses-object"))
             })
             .chain(std::iter::once(
-                require_upload(&fixture, &id, &bucket("mine"), &key("someone-elses-object"))
+                require_upload(&fixture, &claim, &bucket("mine"), &key("someone-elses-object"))
                     .err()
                     .map(|error| error.message().to_owned())
                     .expect("a genuine id from another bucket is refused"),

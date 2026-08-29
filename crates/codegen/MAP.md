@@ -42,6 +42,7 @@ and the zero-diff gate needs no temporary directory.
 | `src/emit/runtime_contracts.rs` | `generated/contracts.rs` and `generated/signature_contracts.rs` — typed data constants selected by runtime contract rules. | A non-codec protocol rule must become the unique input to a core or signature runtime consumer. |
 | `src/emit/naming_contracts.rs` | `generated/naming_contracts.rs` — typed data constants consumed by the ring-0 naming pipeline. | A naming contract must become the unique input to key or bucket materialisation. |
 | `src/emit/range_contracts.rs` | `generated/range_contracts.rs` — typed data constants consumed by ring-0 byte-range parsing and resolution. | A range grammar or boundary contract must become a types-crate input. |
+| `src/emit/upload_id_contracts.rs` | `generated/upload_id_contracts.rs` — private ownership-scope input consumed by the types upload-id exchange. | Upload-id resolution scope or its mechanical mutant changes. |
 | `src/emit/runtime_contracts/precondition.rs` | Conditional/range half of `generated/contracts.rs`. | A precondition policy needs a new core runtime constant. |
 | `src/emit/runtime_contracts/cors.rs` | Bucket-CORS half of `generated/contracts.rs`. | A CORS policy needs a core runtime constant. |
 | `src/emit/runtime_contracts/select_restore.rs` | Select/restore half of `generated/contracts.rs`. | A SelectObjectContent or RestoreObject policy needs a core runtime constant. |

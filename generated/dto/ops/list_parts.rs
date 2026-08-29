@@ -68,8 +68,8 @@ pub struct Input {
     pub max_parts: Option<i32>,
     /// Wire `part-number-marker`, bound as Query. Optional.
     pub part_number_marker: Option<String>,
-    /// Wire `uploadId`, bound as Query. Required.
-    pub upload_id: String,
+    /// Wire `uploadId`, bound as Query. Required. Secret: `Debug` prints a placeholder.
+    pub upload_id: crate::UploadIdClaim,
     /// Wire `x-amz-request-payer`, bound as Header. Optional.
     pub request_payer: Option<crate::ops::enums::RequestPayer>,
     /// Wire `x-amz-expected-bucket-owner`, bound as Header. Optional.
@@ -116,7 +116,7 @@ impl std::fmt::Debug for Input {
             .field("key", &self.key)
             .field("max_parts", &self.max_parts)
             .field("part_number_marker", &self.part_number_marker)
-            .field("upload_id", &self.upload_id)
+            .field("upload_id", &"<redacted>")
             .field("request_payer", &self.request_payer)
             .field("expected_bucket_owner", &self.expected_bucket_owner)
             .field("sse_customer_algorithm", &self.sse_customer_algorithm)
@@ -246,7 +246,7 @@ impl InputBuilder {
 
     /// Sets `UploadId`.
     #[must_use]
-    pub fn upload_id(mut self, value: String) -> Self {
+    pub fn upload_id(mut self, value: crate::UploadIdClaim) -> Self {
         self.input.upload_id = value;
         self
     }
