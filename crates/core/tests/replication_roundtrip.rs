@@ -798,27 +798,23 @@ fn n_a_configuration_with_no_role_is_refused_by_the_decoder() {
     assert_eq!(error.member(), Some("Role"));
 }
 
-/// The leniency this family chose, seen from the other side: an element the schema does not know
-/// is skipped (`q-repl-0005`), so a `<Filter>` whose only child is misspelled — `<prefix>` for
-/// `<Prefix>`, a wrapped `<Tags><Tag>…</Tag></Tags>` — decodes as the *empty* filter. An empty
-/// filter is legal and means every object in the bucket, so a rule the sender wrote as narrow is
-/// stored as universal and every object is copied to the destination, which may be another
-/// account.
+/// Negative — leniency must not turn a written scope into replicate-everything.
 ///
-/// Nothing here is a bug in the decoder taken on its own: leniency about unknown elements is a
-/// deliberate, documented choice, and `ops::shared::replication` explains why getting stricter is
-/// an availability incident rather than a fix. What the round trip shows is that in *this* family
-/// the choice fails open, because unlike lifecycle — where a rule with no scope is refused
-/// outright — a scope-less replication rule is AWS's own replicate-everything example and cannot
-/// be refused. Pinned in the direction it has and filed as rustfs/gateway#250.
+/// Unknown elements remain forward-compatible when a known condition survives beside them. The
+/// one unsafe shape is a syntactically non-empty `<Filter>` whose children are all skipped: after
+/// decoding it is indistinguishable from the explicit empty filter that legitimately means every
+/// object. Refusing that parse-time shape closes rustfs/gateway#250 without repealing
+/// `q-repl-0005` for any document a future release might write.
 #[test]
-fn a_filter_whose_only_child_is_unknown_is_stored_as_replicate_everything() {
+fn n_a_filter_whose_only_child_is_unknown_is_refused() {
     for narrow in [
         // A single case typo in a hand-written configuration.
         "<Filter><prefix>logs/</prefix></Filter>",
         // The wrapper shape a nonconforming writer produces, which the corpus already knows makes
         // an SDK read zero members.
         "<Filter><Tags><Tag><Key>k</Key><Value>v</Value></Tag></Tags></Filter>",
+        // A future condition cannot silently erase the only scope a writer supplied.
+        "<Filter><FutureCondition>opaque</FutureCondition></Filter>",
     ] {
         let document = format!(
             "<ReplicationConfiguration><Role>{ROLE}</Role><Rule>{narrow}<Priority>1</Priority>\
@@ -827,17 +823,40 @@ fn a_filter_whose_only_child_is_unknown_is_stored_as_replicate_everything() {
              </Rule></ReplicationConfiguration>"
         );
 
-        let configuration = decode_write(&document).expect("an unknown element is skipped, not refused");
-        let filter = configuration.rules[0]
-            .filter
-            .as_ref()
-            .expect("the Filter element itself is found");
+        let error = decode_write(&document).expect_err("a written scope must not widen to every object");
 
-        assert_eq!(filter_projection(filter), (None, None, None), "every condition the sender wrote is gone");
+        assert_eq!(error.code().as_str(), "MalformedXML");
+        assert_eq!(error.member(), Some("Filter"));
+    }
+}
+
+/// Positive — the refusal is about lost parse provenance, not empty filters or unknown members.
+#[test]
+fn an_explicit_empty_filter_and_a_known_condition_beside_unknown_remain_accepted() {
+    for (filter, expected_prefix) in [
+        ("<Filter></Filter>", None),
+        (
+            "<Filter><Prefix>logs/</Prefix><FutureCondition>opaque</FutureCondition></Filter>",
+            Some("logs/"),
+        ),
+    ] {
+        let document = format!(
+            "<ReplicationConfiguration><Role>{ROLE}</Role><Rule>{filter}<Priority>1</Priority>\
+             <DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication>\
+             <Status>Enabled</Status><Destination><Bucket>{DESTINATION_ARN}</Bucket></Destination>\
+             </Rule></ReplicationConfiguration>"
+        );
+
+        let configuration = decode_write(&document).expect("the filter retains its intended known meaning");
+
+        assert_eq!(validate_replication(&configuration), Ok(()));
         assert_eq!(
-            validate_replication(&configuration),
-            Ok(()),
-            "and the scope-less rule that is left is one this family must accept"
+            configuration.rules[0]
+                .filter
+                .as_ref()
+                .and_then(|decoded| decoded.prefix.as_deref()),
+            expected_prefix,
+            "the known condition must survive while only the unknown child is skipped"
         );
     }
 }

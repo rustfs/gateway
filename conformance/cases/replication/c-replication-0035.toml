@@ -1,0 +1,44 @@
+[case]
+id = "c-replication-0035"
+schema_version = 1
+title = "A non-empty Filter with only unknown children is refused as MalformedXML"
+rationale = """
+An explicit empty Filter applies a rule to every object. If a non-empty Filter loses all of its children during tolerant decoding, a scoped rule becomes indistinguishable from that documented replicate-everything form. The write is refused before unknown-element leniency can silently widen the replication scope; a known condition beside an unknown extension remains forward-compatible."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-repl-0014"]
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/250"
+summary = "A lower-case Prefix was observed to decode as an empty filter and widen a scoped replication rule to every object."
+kind = "other"
+
+[[setup.buckets]]
+name = "conf-replication"
+
+[request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "tlKBbRaYtd3XdQCQBlmU0g==" }
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Priority>1</Priority><Filter><prefix>logs/</prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>a non-empty structure contains no recognized child element</Message><Resource>Filter</Resource><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

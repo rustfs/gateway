@@ -37,8 +37,8 @@ use std::path::Path;
 use rustfs_gateway_model::ir::{EmptyValue, TimestampFormat};
 use rustfs_gateway_model::toml_lite::{self, Toml};
 use rustfs_gateway_model::{
-    BooleanSpellingValue, CodecRule, CodecValue, ContractRule, ContractValue, HeaderToleranceValue, MutationDimension,
-    UnknownElementPolicyValue,
+    AllUnknownChildrenValue, BooleanSpellingValue, CodecRule, CodecValue, ContractRule, ContractValue, HeaderToleranceValue,
+    MutationDimension, UnknownElementPolicyValue,
 };
 
 use crate::emit::quirk_toml::{ResolvedSource, SourceValue};
@@ -177,6 +177,14 @@ pub fn plan_codec(quirk: &str, rule: &CodecRule) -> std::result::Result<Mutation
             });
             (format!("{CODEC_PATH_PREFIX}{quirk}"), from, to, MutationDimension::UnknownElementPolicy)
         }
+        CodecValue::AllUnknownChildren(value) => {
+            let from = all_unknown_children_source(*value);
+            let to = all_unknown_children_source(match value {
+                AllUnknownChildrenValue::Allow => AllUnknownChildrenValue::Reject,
+                AllUnknownChildrenValue::Reject => AllUnknownChildrenValue::Allow,
+            });
+            (format!("{CODEC_PATH_PREFIX}{quirk}"), from, to, MutationDimension::AllUnknownChildren)
+        }
         CodecValue::BooleanSpelling(value) => {
             let from = boolean_spelling_source(*value);
             let to = boolean_spelling_source(match value {
@@ -247,6 +255,7 @@ fn codec_source(value: &CodecValue) -> SourceValue {
             SourceValue::OptionalText(Some("date_condition".to_owned()))
         }
         CodecValue::UnknownElementPolicy(value) => unknown_element_policy_source(*value),
+        CodecValue::AllUnknownChildren(value) => all_unknown_children_source(*value),
         CodecValue::BooleanSpelling(value) => boolean_spelling_source(*value),
     }
 }
@@ -256,6 +265,9 @@ fn write_codec_value(current: &mut CodecValue, replacement: &SourceValue) -> std
         (CodecValue::MediaType(value), SourceValue::Text(replacement)) => replacement.clone_into(value),
         (CodecValue::UnknownElementPolicy(value), SourceValue::Text(replacement)) => {
             *value = parse_unknown_element_policy(replacement)?;
+        }
+        (CodecValue::AllUnknownChildren(value), SourceValue::Text(replacement)) => {
+            *value = parse_all_unknown_children(replacement)?;
         }
         (CodecValue::BooleanSpelling(value), SourceValue::Text(replacement)) => {
             *value = parse_boolean_spelling(replacement)?;
@@ -283,6 +295,24 @@ fn parse_unknown_element_policy(value: &str) -> std::result::Result<UnknownEleme
     }
 }
 
+fn all_unknown_children_source(value: AllUnknownChildrenValue) -> SourceValue {
+    SourceValue::Text(
+        match value {
+            AllUnknownChildrenValue::Allow => "allow",
+            AllUnknownChildrenValue::Reject => "reject",
+        }
+        .to_owned(),
+    )
+}
+
+fn parse_all_unknown_children(value: &str) -> std::result::Result<AllUnknownChildrenValue, String> {
+    match value {
+        "allow" => Ok(AllUnknownChildrenValue::Allow),
+        "reject" => Ok(AllUnknownChildrenValue::Reject),
+        _ => Err(format!("unknown codec all-unknown-children policy `{value}`")),
+    }
+}
+
 fn boolean_spelling_source(value: BooleanSpellingValue) -> SourceValue {
     SourceValue::Text(
         match value {
@@ -307,6 +337,7 @@ fn codec_kind(value: &CodecValue) -> &'static str {
         CodecValue::MediaType(_) => "media_type",
         CodecValue::HeaderTolerance(_) => "header_tolerance",
         CodecValue::UnknownElementPolicy(_) => "unknown_element_policy",
+        CodecValue::AllUnknownChildren(_) => "all_unknown_children",
         CodecValue::BooleanSpelling(_) => "boolean_spelling_policy",
     }
 }

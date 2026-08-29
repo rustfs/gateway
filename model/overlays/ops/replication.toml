@@ -105,6 +105,7 @@ quirk_refs = [
   "q-repl-0011",
   "q-repl-0012",
   "q-repl-0013",
+  "q-repl-0014",
 ]
 
 # =============================================================================================
@@ -136,6 +137,12 @@ quirk_refs = ["q-repl-0003"]
 required = ["Role", "Rules"]
 hot = ["Rules"]
 element_order = ["Role", "Rules"]
+
+[shape.ReplicationRule]
+
+[[shape.ReplicationRule.field]]
+name = "Filter"
+quirks = ["q-repl-0014"]
 
 # The destination's `Bucket` member is typed `BucketName` in the model but carries an ARN on the
 # wire — `arn:aws:s3:::bucket` — which the bucket-name grammar (no colons) would refuse in every

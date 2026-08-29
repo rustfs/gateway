@@ -21,7 +21,9 @@
 //! Upstream: `crate::mutate`. Downstream: nothing.
 
 use rustfs_gateway_model::ir::OperationIr;
-use rustfs_gateway_model::{CodecRule, CodecValue, HeaderToleranceValue, MutationDimension, UnknownElementPolicyValue};
+use rustfs_gateway_model::{
+    AllUnknownChildrenValue, CodecRule, CodecValue, HeaderToleranceValue, MutationDimension, UnknownElementPolicyValue,
+};
 
 use super::codegen_tests::{artifacts, root};
 use crate::emit::quirk_toml::{ResolvedSource, SourceValue, resolve_at};
@@ -398,6 +400,24 @@ fn a_codec_enum_is_flipped_and_read_back() {
     assert_eq!(
         rules["q-acl-0006"].current,
         CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Reject)
+    );
+}
+
+#[test]
+fn an_all_unknown_children_guard_is_flipped_and_read_back() {
+    let mut rules = std::collections::BTreeMap::from([(
+        "q-repl-0014".to_owned(),
+        CodecRule {
+            current: CodecValue::AllUnknownChildren(AllUnknownChildrenValue::Reject),
+            mutation_dimension: MutationDimension::AllUnknownChildren,
+        },
+    )]);
+    let mutation = plan_codec("q-repl-0014", &rules["q-repl-0014"]).expect("the codec rule is plannable");
+
+    assert!(apply_codec(&mut rules, &mutation).expect("the writer accepts its own plan"));
+    assert_eq!(
+        rules["q-repl-0014"].current,
+        CodecValue::AllUnknownChildren(AllUnknownChildrenValue::Allow)
     );
 }
 

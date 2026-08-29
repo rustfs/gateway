@@ -77,7 +77,6 @@ const MISSING_LIST_ENTRIES: &str = "the body carries no entry for a member that 
 const MISSING_MEMBER: &str = "the body omits a member the schema requires";
 
 /// The node iterator one list-typed member reads its entries from.
-///
 /// A flattened list repeats its entry element directly under the parent; a wrapped one sits inside
 /// an enclosing element. Which name is which comes from [`super::list_elements`] rather than from
 /// here, so the reader and the writer cannot disagree about it — they did, and the disagreement
@@ -618,6 +617,7 @@ fn xml_member(
         Type::Structure(entry_name) => {
             let reader = format!("read_{}", naming::module_name(entry_name));
             let _ = writeln!(out, "{pad}if let Some(child) = {node}.child(\"{wire}\") {{");
+            out.push_str(&super::all_unknown::guard(ir, field, rules, entry_name, "child", inner)?);
             let read = super::name_policy::shape_reader_call(ir, entry_name, &reader, "child", name_policy)?;
             out.push_str(&assign(inner, target, &wrap(field, &read)));
             out.push_str(&required_member_refusal(field, member, indent));
