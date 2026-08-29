@@ -9,11 +9,13 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/listener.rs` | socket2 bind, tuning and read-back | Bind family or socket option is wrong |
 | `src/tls.rs` | Atomic TLS config and fail-closed reload | New handshakes see the wrong certificate |
 | `src/io.rs` | Write-progress and connection-idle timers, and the lingering read on close | A slow reader is killed or never released, or a peer sees `ECONNRESET` where a close was due |
+| `src/io_sendfile_tests.rs` | Real-socket controls for sendfile writable-readiness handoff | Sendfile retries spin, stall, or lose a writable transition |
 | `src/conn.rs` | Admission and connection lifecycle | Accept limits or shutdown sequencing fails |
 | `src/driver.rs` | Accepted-connection ownership, driver selection and the default Hyper driver | Adding a connection driver or changing who owns a socket |
 | `src/connection_service.rs` | Transport-independent request capacity, context, panic and shutdown lifecycle | A driver can bypass generic request contracts |
 | `src/request_capacity.rs` | Global request permits, accept-loop capacity notification and request cancellation | H1/H2 exceed the shared request ceiling, listener acceptance fails to pause or peer loss does not reach service cleanup |
 | `src/sendfile.rs` | Safe Linux/Apple file-to-socket syscall signature normalization | A self-held driver reports wrong sendfile progress or platform errors |
+| `src/sendfile_task.rs` | Bounded blocking handoff for file-transfer syscalls | A cold file stalls Tokio workers or blocking file work grows without a ceiling |
 | `src/shutdown.rs` | Trigger, report and metrics | Drain or abort counts are wrong |
 | `src/dispatch.rs` | Generic path-prefix selection | A route reaches the fallback unexpectedly |
 | `src/layers.rs` | General tower layer attachment points | Wiring panic, request ID, trace or compression |

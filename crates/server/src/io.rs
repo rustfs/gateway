@@ -23,7 +23,7 @@
 
 use std::io;
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
-use std::os::fd::BorrowedFd;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -85,6 +85,10 @@ pub(crate) fn deadline_remaining(deadline: Instant) -> Duration {
         .max(Duration::from_nanos(1))
 }
 
+pub(crate) fn deadline_reached(deadline: Instant) -> bool {
+    Instant::now() >= deadline
+}
+
 pub(crate) trait Transport: AsyncRead + AsyncWrite + Send + Unpin {}
 impl<T> Transport for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
 
@@ -107,6 +111,8 @@ pub(crate) struct ProgressIo<I> {
     idle_sleep: Pin<Box<Sleep>>,
     write_sleep: Pin<Box<Sleep>>,
     write_waiting: bool,
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+    send_file_retry_ready: bool,
     first_request_observed: bool,
     transport_read: Arc<AtomicU64>,
     linger: Linger,
@@ -156,6 +162,8 @@ impl<I> ProgressIo<I> {
             idle_sleep: Box::pin(tokio::time::sleep_until(header_deadline)),
             write_sleep: Box::pin(sleep(write_timeout)),
             write_waiting: false,
+            #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+            send_file_retry_ready: false,
             first_request_observed: false,
             transport_read: Arc::new(AtomicU64::new(0)),
             linger: Linger {
@@ -202,6 +210,10 @@ impl<I> ProgressIo<I> {
     fn reset_write(&mut self) {
         self.write_sleep.as_mut().reset(Instant::now() + self.write_timeout);
         self.write_waiting = false;
+        #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+        {
+            self.send_file_retry_ready = false;
+        }
     }
 
     fn record_write_progress(&mut self, written: usize) {
@@ -241,10 +253,18 @@ impl<I> ProgressIo<I> {
     }
 
     fn mark_write_pending(&mut self, context: &mut Context<'_>) -> io::Result<()> {
+        self.begin_write_wait();
+        self.check_write_wait(context)
+    }
+
+    fn begin_write_wait(&mut self) {
         if !self.write_waiting {
             self.write_sleep.as_mut().reset(Instant::now() + self.write_timeout);
             self.write_waiting = true;
         }
+    }
+
+    fn check_write_wait(&mut self, context: &mut Context<'_>) -> io::Result<()> {
         if self.write_sleep.as_mut().poll(context).is_ready() {
             Err(io::Error::new(io::ErrorKind::TimedOut, "response write made no progress"))
         } else {
@@ -263,45 +283,56 @@ fn writable_repoll_needs_retry<T>(poll: Poll<io::Result<T>>) -> io::Result<bool>
 }
 
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+fn send_file_level_after_poll(result: nix::Result<i32>, ready: bool) -> bool {
+    match result {
+        Ok(_) => ready,
+        Err(_) => false,
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
 impl ProgressIo<TcpStream> {
-    pub(crate) fn poll_send_file(
-        self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-        file: BorrowedFd<'_>,
-        offset: u64,
-        count: usize,
-    ) -> Poll<io::Result<usize>> {
+    pub(crate) fn poll_send_file_ready(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
-        match this.inner.poll_write_ready(context) {
-            Poll::Pending => {
-                this.mark_write_pending(context)?;
-                return Poll::Pending;
-            }
-            Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
-            Poll::Ready(Ok(_)) => {}
+        if this.send_file_retry_ready {
+            this.send_file_retry_ready = false;
+        } else if !writable_repoll_needs_retry(this.inner.poll_write_ready(context))? {
+            this.mark_write_pending(context)?;
+            return Poll::Pending;
         }
-        match this
+        if this.write_waiting {
+            this.check_write_wait(context)?;
+        }
+        Poll::Ready(Ok(()))
+    }
+
+    pub(crate) fn socket_fd(&self) -> BorrowedFd<'_> {
+        self.inner.as_fd()
+    }
+
+    pub(crate) fn begin_send_file_wait(&mut self) -> Instant {
+        self.begin_write_wait();
+        self.write_sleep.deadline()
+    }
+
+    pub(crate) fn record_send_file_progress(&mut self, written: usize) {
+        self.record_write_progress(written);
+    }
+
+    pub(crate) fn record_send_file_would_block(&mut self) {
+        use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+
+        let _ = self
             .inner
-            .try_io(Interest::WRITABLE, || crate::sendfile::send_file(&this.inner, file, offset, count))
-        {
-            Ok(written) => {
-                this.record_write_progress(written);
-                Poll::Ready(Ok(written))
-            }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                if writable_repoll_needs_retry(this.inner.poll_write_ready(context))? {
-                    context.waker().wake_by_ref();
-                }
-                this.mark_write_pending(context)?;
-                Poll::Pending
-            }
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
-                this.mark_write_pending(context)?;
-                context.waker().wake_by_ref();
-                Poll::Pending
-            }
-            Err(error) => Poll::Ready(Err(error)),
-        }
+            .try_io(Interest::WRITABLE, || Err::<(), _>(io::Error::from(io::ErrorKind::WouldBlock)));
+        let mut readiness = [PollFd::new(self.inner.as_fd(), PollFlags::POLLOUT)];
+        let result = poll(&mut readiness, PollTimeout::ZERO);
+        self.send_file_retry_ready = send_file_level_after_poll(result, readiness[0].any().unwrap_or(false));
+        self.begin_write_wait();
+    }
+
+    pub(crate) fn record_send_file_retry(&mut self) {
+        self.begin_write_wait();
     }
 }
 
@@ -697,17 +728,9 @@ mod tests {
         assert_eq!(written.load(Ordering::Relaxed), BODY_LEN);
         assert!(started.elapsed() >= Duration::from_millis(900));
     }
-
-    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
-    #[test]
-    fn writable_readiness_seen_after_would_block_requires_an_immediate_retry() {
-        assert!(writable_repoll_needs_retry(Poll::Ready(Ok(()))).expect("ready state is valid"));
-        assert!(!writable_repoll_needs_retry::<()>(Poll::Pending).expect("pending state is valid"));
-        let error = writable_repoll_needs_retry::<()>(Poll::Ready(Err(io::Error::new(
-            io::ErrorKind::BrokenPipe,
-            "fixture readiness error",
-        ))))
-        .expect_err("readiness errors remain errors");
-        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
-    }
 }
+
+#[cfg(all(test, any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
+#[allow(clippy::expect_used, clippy::panic)] // Test-only real-socket setup must terminate on fixture failure.
+#[path = "io_sendfile_tests.rs"]
+mod sendfile_tests;

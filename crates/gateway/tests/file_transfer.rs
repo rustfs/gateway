@@ -138,6 +138,7 @@ mod unix {
         assert!(second.ends_with(b"cdefg"));
         assert_eq!(transport_metrics.selected_connections(), 1);
         assert_eq!(transport_metrics.kernel_transfer_calls(), 2);
+        assert_eq!(transport_metrics.kernel_transfer_handoffs(), 2);
         assert_eq!(transport_metrics.kernel_transferred_bytes(), 10);
         assert_eq!(transport_metrics.fallback_responses_total(), 0);
         assert_eq!(transport_metrics.copied_payload_bytes(), 0);
@@ -176,7 +177,8 @@ mod unix {
         let body = &response[separator + 4..];
         assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
         assert_eq!(body, b"abc");
-        assert_eq!(transport_metrics.kernel_transfer_calls(), 1);
+        assert_eq!(transport_metrics.kernel_transfer_handoffs(), 1);
+        assert_eq!(transport_metrics.kernel_transfer_calls(), 2);
         assert_eq!(transport_metrics.kernel_transferred_bytes(), 3);
         let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
         assert!(running.task.await.expect("server task joins").is_ok());
@@ -355,6 +357,55 @@ mod unix {
         assert_eq!(stream_metrics.zero_copy_refusals(NoZeroCopy::VerificationObligationPresent), 0);
         let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
         assert!(running.task.await.expect("server task joins").is_ok());
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[tokio::test]
+    async fn release_sample_reports_warm_file_handoff_amplification() {
+        for len in [64 * 1024_usize, 1024 * 1024, 64 * 1024 * 1024] {
+            let fixture_bytes = vec![0x5a_u8; len];
+            let fixture = FixtureFile::new(&fixture_bytes);
+            let service = FileService {
+                path: Arc::clone(&fixture.path),
+                offset: 0,
+                len: u64::try_from(len).expect("fixture length fits u64"),
+                metrics: Arc::new(StreamMetrics::new()),
+            };
+            let (running, transport_metrics) = start(service);
+            let mut client = TcpStream::connect(running.local_addr).await.expect("client connects");
+            client
+                .write_all(b"GET /file HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+                .expect("request writes");
+            let started = std::time::Instant::now();
+            let mut response = Vec::with_capacity(len + 512);
+            client
+                .read_to_end(&mut response)
+                .await
+                .expect("warm file response reaches an observable close");
+            let elapsed = started.elapsed();
+            let separator = response
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .expect("response contains a head terminator");
+            let body = response.get(separator + 4..).expect("response body follows its terminator");
+            assert_eq!(body.len(), len);
+            assert!(body.iter().all(|byte| *byte == 0x5a));
+            let handoffs = transport_metrics.kernel_transfer_handoffs();
+            let syscalls = transport_metrics.kernel_transfer_calls();
+            assert!(handoffs > 0, "a non-empty file uses at least one kernel handoff");
+            assert!(syscalls >= handoffs, "every positive handoff observes at least one successful syscall");
+            assert!(
+                handoffs <= u64::try_from(len.div_ceil(4 * 1024)).expect("handoff ceiling fits u64"),
+                "warm transfer must not degenerate below four KiB per successful handoff"
+            );
+            let mebibytes_per_second = (len as f64 / (1024.0 * 1024.0)) / elapsed.as_secs_f64();
+            eprintln!(
+                "warm file bytes={len} handoffs={handoffs} syscalls={syscalls} elapsed={elapsed:?} throughput_mib_s={mebibytes_per_second:.2}"
+            );
+            let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
+            assert!(running.task.await.expect("server task joins").is_ok());
+        }
     }
 
     fn start(service: FileService) -> (rustfs_gateway_server::RunningServer, Arc<ResponseTransportMetrics>) {

@@ -46,6 +46,7 @@ use crate::shutdown::{MetricsInner, RunningServer, ServerMetrics, ShutdownComman
 use crate::tls::TlsHandle;
 
 use crate::request_capacity::RequestCapacity;
+use crate::sendfile_task::BlockingFileTransferExecutor;
 
 #[cfg(test)]
 #[allow(clippy::expect_used)] // Test-only synchronization failures terminate the scenario; no value comes from external input.
@@ -200,6 +201,7 @@ where
         deadline_observer,
     } = task;
     let semaphore = Arc::new(Semaphore::new(config.max_connections));
+    let file_transfer_executor = BlockingFileTransferExecutor::for_listener();
     let (request_capacity, mut request_capacity_receiver) = RequestCapacity::new(config.max_global_inflight_requests);
     let ip_counts = Arc::new(IpCounts::new(config.max_connections_per_ip));
     let request_stats = Arc::new(RequestStats::default());
@@ -314,11 +316,11 @@ where
             continue;
         };
         metrics.inner.active.fetch_add(1, Ordering::Relaxed);
-        let active = ActiveConnection {
+        let active = ConnectionLifecycle::new(ActiveConnection {
             metrics: Arc::clone(&metrics.inner),
             _permit: permit,
             _ip: ip_lease,
-        };
+        });
         let connection_config = config.clone();
         let connection_in_flight = Arc::new(AtomicUsize::new(0));
         let request_seen = Arc::new(AtomicBool::new(false));
@@ -338,6 +340,8 @@ where
                 request_body_unfinished,
                 header_deadline,
                 metrics: Arc::clone(&metrics.inner),
+                lifecycle: active.clone(),
+                file_transfer_executor: file_transfer_executor.clone(),
                 #[cfg(test)]
                 deadline_observer: deadline_observer
                     .as_ref()
@@ -358,25 +362,49 @@ where
 
     drop(listener);
     let Some(command) = command else {
-        connections.abort_all();
-        while connections.join_next().await.is_some() {}
+        abort_connections(&mut connections).await;
         return Ok(());
     };
 
     request_stats.begin_shutdown();
     let _ = shutdown_sender.send(true);
-    let drained = async { while connections.join_next().await.is_some() {} };
-    if tokio::time::timeout(command.grace, drained).await.is_err() {
-        request_stats.force_abort();
-        connections.abort_all();
-        while connections.join_next().await.is_some() {}
-    }
+    finish_shutdown(&mut connections, &file_transfer_executor, &request_stats, command.grace).await;
     let report = ShutdownReport {
         drained: request_stats.drained(),
         aborted: request_stats.aborted(),
     };
     let _ = command.reply.send(report);
     Ok(())
+}
+
+async fn drain_connections_and_file_transfers(
+    connections: &mut JoinSet<()>,
+    file_transfer_executor: &BlockingFileTransferExecutor,
+) {
+    drain_connections(connections).await;
+    file_transfer_executor.wait_idle().await;
+}
+
+async fn finish_shutdown(
+    connections: &mut JoinSet<()>,
+    file_transfer_executor: &BlockingFileTransferExecutor,
+    request_stats: &RequestStats,
+    grace: std::time::Duration,
+) {
+    let drained = drain_connections_and_file_transfers(connections, file_transfer_executor);
+    if tokio::time::timeout(grace, drained).await.is_err() {
+        request_stats.force_abort();
+        abort_connections(connections).await;
+    }
+}
+
+async fn abort_connections(connections: &mut JoinSet<()>) {
+    connections.abort_all();
+    drain_connections(connections).await;
+}
+
+async fn drain_connections(connections: &mut JoinSet<()>) {
+    while connections.join_next().await.is_some() {}
 }
 
 pub(crate) struct ConnectionState {
@@ -394,6 +422,8 @@ pub(crate) struct ConnectionState {
     pub(crate) header_deadline: tokio::time::Instant,
     /// The listener's counters, so the lingering drain can report the octets it discards.
     pub(crate) metrics: Arc<MetricsInner>,
+    pub(crate) lifecycle: ConnectionLifecycle,
+    pub(crate) file_transfer_executor: BlockingFileTransferExecutor,
     #[cfg(test)]
     deadline_observer: Option<deadline_test::DeadlineArmObserver>,
 }
@@ -420,6 +450,8 @@ where
         request_body_unfinished,
         header_deadline,
         metrics,
+        lifecycle: _lifecycle,
+        file_transfer_executor: _file_transfer_executor,
         #[cfg(test)]
         deadline_observer,
     } = state;
@@ -602,8 +634,132 @@ struct ActiveConnection {
     _ip: IpLease,
 }
 
+#[derive(Clone)]
+pub(crate) struct ConnectionLifecycle {
+    _active: Arc<ActiveConnection>,
+}
+
+impl ConnectionLifecycle {
+    fn new(active: ActiveConnection) -> Self {
+        Self {
+            _active: Arc::new(active),
+        }
+    }
+}
+
 impl Drop for ActiveConnection {
     fn drop(&mut self) {
         self.metrics.active.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)] // Test-only synchronization failures terminate the deterministic control.
+mod file_transfer_shutdown_tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use tokio::task::JoinSet;
+
+    use super::{drain_connections_and_file_transfers, finish_shutdown};
+    use crate::connection_service::RequestStats;
+    use crate::sendfile_task::BlockingFileTransferExecutor;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn listener_drain_waits_for_file_work_detached_from_its_connection_task() {
+        let executor = BlockingFileTransferExecutor::new(1);
+        let transfer_executor = executor.clone();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let transfer = tokio::spawn(async move {
+            transfer_executor
+                .run(move |_permit| {
+                    entered_tx.send(()).expect("test receiver remains alive");
+                    release_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("test releases the blocking job");
+                    Ok::<_, std::io::Error>(())
+                })
+                .await
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("blocking file work starts");
+        transfer.abort();
+        assert!(
+            transfer
+                .await
+                .expect_err("connection-side waiter is cancelled")
+                .is_cancelled()
+        );
+
+        let drain_executor = executor.clone();
+        let (drain_done_tx, drain_done_rx) = mpsc::channel();
+        let drain = tokio::spawn(async move {
+            let mut connections = JoinSet::new();
+            drain_connections_and_file_transfers(&mut connections, &drain_executor).await;
+            drain_done_tx.send(()).expect("test receiver remains alive");
+        });
+        assert!(
+            matches!(
+                drain_done_rx.recv_timeout(Duration::from_millis(100)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ),
+            "listener drain includes detached file work"
+        );
+
+        release_tx.send(()).expect("blocking job still waits for release");
+        drain_done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("listener drain completes after file work exits");
+        drain.await.expect("listener drain joins after file work exits");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn force_abort_finishes_without_waiting_for_detached_file_work() {
+        let executor = BlockingFileTransferExecutor::new(1);
+        let transfer_executor = executor.clone();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let transfer = tokio::spawn(async move {
+            transfer_executor
+                .run(move |_permit| {
+                    entered_tx.send(()).expect("test receiver remains alive");
+                    release_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("test releases the blocking job");
+                    Ok::<_, std::io::Error>(())
+                })
+                .await
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("blocking file work starts");
+        transfer.abort();
+        assert!(
+            transfer
+                .await
+                .expect_err("connection-side waiter is cancelled")
+                .is_cancelled()
+        );
+
+        let request_stats = RequestStats::default();
+        let mut connections = JoinSet::new();
+        connections.spawn(std::future::pending());
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            finish_shutdown(&mut connections, &executor, &request_stats, Duration::from_millis(10)),
+        )
+        .await
+        .expect("force abort has a hard return bound");
+        assert!(
+            request_stats.force_abort.load(std::sync::atomic::Ordering::Acquire),
+            "the production grace-timeout seam marks in-flight requests for force abort"
+        );
+
+        release_tx
+            .send(())
+            .expect("detached file work remains alive until explicitly released");
+        executor.wait_idle().await;
     }
 }
