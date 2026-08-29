@@ -91,6 +91,8 @@
 //! driver. Blocking inside `poll_frame` is sound because the thread has no other connection to
 //! progress.
 
+mod response;
+
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
@@ -1100,69 +1102,6 @@ impl Connection {
         self.stream
             .shutdown(Shutdown::Write)
             .map_err(|error| SutError::Environment(format!("cannot half-close: {error}")))
-    }
-
-    /// Reads one HTTP/1.1 response: head, then a `Content-Length` body.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SutError::Environment`] when no complete response arrives. Callers that have to
-    /// tell "nothing came" from "the peer hung up" apart use [`Connection::read_response_classified`]:
-    /// those are `expect.kind = "hang"` and `expect.kind = "connection_reset"`, which are two
-    /// different verdicts.
-    pub fn read_response(&mut self, timeout: Duration) -> Result<RawResponse, SutError> {
-        self.read_response_classified("GET", timeout)
-            .map_err(|failure| SutError::Environment(failure.to_string()))
-    }
-
-    /// Reads one response, naming *how* it failed to arrive when it did not.
-    ///
-    /// `method` is the method of the request this answers, because that is half of whether the
-    /// response has a body at all — see [`carries_a_body`]. Reading a body off a `HEAD` answer
-    /// because its `Content-Length` named one is a hang, and a hang that looks from the report like
-    /// a server that never replied.
-    ///
-    /// # Errors
-    ///
-    /// Returns the classification, which the caller turns into an [`crate::observation::Outcome`].
-    pub fn read_response_classified(&mut self, method: &str, timeout: Duration) -> Result<RawResponse, ReadFailure> {
-        let _ = self.stream.set_read_timeout(Some(timeout));
-        let mut buffer = Vec::new();
-        let head_end = loop {
-            if let Some(end) = find_head_end(&buffer) {
-                break end;
-            }
-            let read = self.pull(&mut buffer)?;
-            if read == 0 {
-                return Err(if buffer.is_empty() {
-                    ReadFailure::ClosedBeforeHead
-                } else {
-                    ReadFailure::Truncated
-                });
-            }
-        };
-        let head = core::str::from_utf8(buffer.get(..head_end).unwrap_or_default())
-            .map_err(|_| ReadFailure::Malformed("the response head is not UTF-8".to_owned()))?
-            .to_owned();
-        let (status, headers) = parse_response_head(&head)
-            .ok_or_else(|| ReadFailure::Malformed("the response head is not a status line and headers".to_owned()))?;
-        let length = if carries_a_body(method, status) {
-            headers
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-                .and_then(|(_, value)| value.parse::<usize>().ok())
-                .unwrap_or(0)
-        } else {
-            0
-        };
-        let mut body = buffer.split_off(head_end);
-        while body.len() < length {
-            if self.pull(&mut body)? == 0 {
-                break;
-            }
-        }
-        body.truncate(length);
-        Ok(RawResponse { status, headers, body })
     }
 
     /// One read into `sink`, with the failure classified rather than stringified.

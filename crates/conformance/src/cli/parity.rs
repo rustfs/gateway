@@ -1,0 +1,146 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Process isolation and report comparison for the production transport parity command.
+//!
+//! Responsible for: running both production drivers in isolated child processes and comparing
+//! their serialized reports. NOT responsible for: argument parsing or case assertions. Upstream:
+//! `super`. Downstream: `crate::parity`.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command as ProcessCommand, ExitCode};
+
+use crate::sut::Transport;
+
+use super::{Options, exit};
+
+pub(super) fn execute_transport_diff(options: &Options, root: PathBuf) -> ExitCode {
+    let executable = match std::env::current_exe() {
+        Ok(executable) => executable,
+        Err(error) => {
+            eprintln!("conformance: cannot locate this executable: {error}");
+            return ExitCode::from(exit::ENVIRONMENT);
+        }
+    };
+    let temporary = match parity_directory() {
+        Ok(path) => path,
+        Err(message) => {
+            eprintln!("conformance: {message}");
+            return ExitCode::from(exit::ENVIRONMENT);
+        }
+    };
+    let hyper_path = temporary.join("hyper.json");
+    let conn_path = temporary.join("conn.json");
+    let hyper_args = transport_child_args(options, &root, Transport::Hyper, hyper_path.clone());
+    let conn_args = transport_child_args(options, &root, Transport::Conn, conn_path.clone());
+    let (hyper, conn) = std::thread::scope(|scope| {
+        let hyper = scope.spawn(|| run_transport_child(&executable, &hyper_args, &hyper_path));
+        let conn = scope.spawn(|| run_transport_child(&executable, &conn_args, &conn_path));
+        (hyper.join(), conn.join())
+    });
+    let hyper = child_result("hyper", hyper);
+    let conn = child_result("self-held", conn);
+    let _ = std::fs::remove_file(&hyper_path);
+    let _ = std::fs::remove_file(&conn_path);
+    let _ = std::fs::remove_dir(&temporary);
+    let (hyper, conn) = match (hyper, conn) {
+        (Ok(hyper), Ok(conn)) => (hyper, conn),
+        (Err(message), _) | (_, Err(message)) => {
+            eprintln!("conformance: {message}");
+            return ExitCode::from(exit::ENVIRONMENT);
+        }
+    };
+    let comparison = match crate::parity::compare_json(&hyper, &conn) {
+        Ok(comparison) => comparison,
+        Err(message) => {
+            eprintln!("conformance: {message}");
+            return ExitCode::from(exit::ENVIRONMENT);
+        }
+    };
+    if comparison.differences.is_empty() {
+        println!(
+            "transport parity: {} case(s) identical; {common_failures} common failure(s)",
+            comparison.case_count,
+            common_failures = comparison.common_failures,
+        );
+        return ExitCode::from(exit::SUCCESS);
+    }
+    eprintln!("transport parity: {} case result(s) differ", comparison.differences.len());
+    for difference in comparison.differences {
+        eprintln!("  {}", difference.id);
+        eprintln!("    hyper: {:?}", difference.hyper);
+        eprintln!("    conn:  {:?}", difference.conn);
+    }
+    ExitCode::from(exit::REGRESSION)
+}
+
+pub(super) fn transport_child_args(options: &Options, root: &Path, transport: Transport, report: PathBuf) -> Vec<String> {
+    let mut args = vec![
+        "run".to_owned(),
+        "--transport".to_owned(),
+        transport.as_str().to_owned(),
+        "--profile".to_owned(),
+        options.profile.as_str().to_owned(),
+        "--root".to_owned(),
+        root.to_string_lossy().into_owned(),
+        "--json".to_owned(),
+        report.to_string_lossy().into_owned(),
+    ];
+    if let Some(filter) = &options.filter {
+        args.extend(["--filter".to_owned(), filter.clone()]);
+    }
+    if options.exclude_slow {
+        args.push("--exclude-slow".to_owned());
+    }
+    args
+}
+
+fn run_transport_child(executable: &Path, args: &[String], report: &Path) -> Result<String, String> {
+    let output = ProcessCommand::new(executable)
+        .args(args)
+        .output()
+        .map_err(|error| format!("cannot start child process: {error}"))?;
+    if !matches!(output.status.code(), Some(0 | 1)) {
+        return Err(format!(
+            "child exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    std::fs::read_to_string(report).map_err(|error| format!("cannot read {}: {error}", report.display()))
+}
+
+fn child_result(name: &str, result: std::thread::Result<Result<String, String>>) -> Result<String, String> {
+    match result {
+        Ok(result) => result.map_err(|message| format!("{name} transport could not run: {message}")),
+        Err(_) => Err(format!("{name} transport child controller panicked")),
+    }
+}
+
+fn parity_directory() -> Result<PathBuf, String> {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| format!("system clock is before the Unix epoch: {error}"))?
+        .as_nanos();
+    for attempt in 0..16 {
+        let path =
+            std::env::temp_dir().join(format!("rustfs-gateway-conformance-parity-{}-{nonce}-{attempt}", std::process::id()));
+        match std::fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(format!("cannot create {}: {error}", path.display())),
+        }
+    }
+    Err("cannot allocate an isolated transport parity directory".to_owned())
+}

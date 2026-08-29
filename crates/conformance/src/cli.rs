@@ -21,10 +21,17 @@
 //! NOT responsible for: any assertion (`crate::expect`) or verdict (`crate::runner`).
 //! Upstream: `crate::runner`, `crate::report`. Downstream: `src/bin/rustfs-gateway-conformance.rs`.
 
+#[cfg(feature = "production-transports")]
+mod parity;
+
+#[cfg(feature = "production-transports")]
+use self::parity::execute_transport_diff;
 use crate::conn::Conn;
 use crate::corpus::Corpus;
 use crate::inprocess::InProcess;
 use crate::keys;
+#[cfg(feature = "production-transports")]
+use crate::production::ProductionDriver;
 use crate::report::{Baseline, Report, Verdict};
 use crate::runner::{self, RunOptions};
 use crate::sut::{Profile, Sut, Transport};
@@ -51,6 +58,7 @@ usage: rustfs-gateway-conformance <command> [options]
 
 commands:
   run                       load the corpus and run it against a target
+  diff-transports           run both production drivers in parallel and compare every case result
   validate                  load the corpus and check it against the frozen schema and the
                             conventions, without touching a target; every case it accepts is
                             reported `validated`, never `passed`, because nothing was executed
@@ -108,18 +116,28 @@ pub fn main(args: &[String]) -> ExitCode {
             return ExitCode::from(exit::ENVIRONMENT);
         }
     };
-    // The flag now selects the target it names. It used to parse, print `transport conn` in the
-    // report header, and run every case in process — a run that names one assembly path while
-    // measuring the other, which is the single worst thing this binary can do. It was then refused
-    // outright, because a socket run could not report a paced request body or a socket-observed
-    // close. `crate::conn` supplies both: the pacing is a rendezvous with the server rather than a
-    // sleep, and `connection_after` is asked of the socket. The two runs are *not* interchangeable
-    // and are not meant to be — see `crate::conn` for what each can see — which is why the header
-    // names the transport and the baseline is per transport.
+    if options.command == Command::DiffTransports {
+        #[cfg(feature = "production-transports")]
+        return execute_transport_diff(&options, root);
+        #[cfg(not(feature = "production-transports"))]
+        {
+            eprintln!("conformance: diff-transports requires the production-transports feature");
+            return ExitCode::from(exit::ENVIRONMENT);
+        }
+    }
+    // Both choices start a production server and observe it through a socket. The transport name
+    // selects only the production connection driver, so `diff-transports` can require their
+    // per-case observations to agree.
     execute(&options, target(options.transport, root).as_mut())
 }
 
 fn target(transport: Transport, root: PathBuf) -> Box<dyn Sut> {
+    #[cfg(feature = "production-transports")]
+    match transport {
+        Transport::Hyper => Box::new(Conn::production(root, ProductionDriver::Hyper)),
+        Transport::Conn => Box::new(Conn::production(root, ProductionDriver::SelfHeld)),
+    }
+    #[cfg(not(feature = "production-transports"))]
     match transport {
         Transport::Hyper => Box::new(InProcess::new(root)),
         Transport::Conn => Box::new(Conn::new(root)),
@@ -287,6 +305,8 @@ fn read_baseline(path: &PathBuf) -> Result<Baseline, String> {
 pub enum Command {
     /// Run the corpus against a target.
     Run,
+    /// Run and compare both production connection drivers.
+    DiffTransports,
     /// Check the corpus only.
     Validate,
     /// Print a baseline document.
@@ -347,6 +367,7 @@ impl Options {
         };
         options.command = match first.as_str() {
             "run" => Command::Run,
+            "diff-transports" => Command::DiffTransports,
             "validate" => Command::Validate,
             "baseline" => Command::Baseline,
             "audit-keys" => Command::AuditKeys,
@@ -458,6 +479,31 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "production-transports")]
+    #[test]
+    fn transport_diff_children_receive_the_same_selection() {
+        let mut options = one_case(Command::DiffTransports);
+        options.exclude_slow = true;
+        let arguments = parity::transport_child_args(&options, &corpus().0, Transport::Conn, PathBuf::from("report.json"));
+        assert_eq!(
+            arguments,
+            args(&[
+                "run",
+                "--transport",
+                "conn",
+                "--profile",
+                "aws",
+                "--root",
+                corpus().0.to_str().expect("UTF-8 repository path"),
+                "--json",
+                "report.json",
+                "--filter",
+                "c-object-0001",
+                "--exclude-slow",
+            ])
+        );
+    }
+
     /// Negative — `validate` stays green on a case a target answered wrongly, and `run` does not.
     ///
     /// rustfs/gateway#245 asked for exactly this assertion: a case that is red under `run` must not
@@ -552,12 +598,25 @@ mod tests {
     /// The defect this pins is the one `--transport conn` shipped with: the flag parsed, the header
     /// printed `transport conn`, and every case ran in process. A description that does not move
     /// when the transport does is a report that cannot be read.
+    #[cfg(feature = "production-transports")]
     #[test]
     fn each_transport_names_the_target_it_actually_ran() {
-        let in_process = target(Transport::Hyper, PathBuf::from(".")).describe();
-        let over_a_socket = target(Transport::Conn, PathBuf::from(".")).describe();
-        assert_ne!(in_process, over_a_socket);
-        assert!(over_a_socket.contains("connection"), "{over_a_socket}");
+        let hyper = target(Transport::Hyper, PathBuf::from(".")).describe();
+        let self_held = target(Transport::Conn, PathBuf::from(".")).describe();
+        assert_ne!(hyper, self_held);
+        assert!(hyper.contains("production"), "{hyper}");
+        assert!(self_held.contains("production"), "{self_held}");
+    }
+
+    /// Negative — a transport label must select the production driver it names, not either local
+    /// test substitute.
+    #[cfg(feature = "production-transports")]
+    #[test]
+    fn each_transport_selects_its_production_driver() {
+        let hyper = target(Transport::Hyper, PathBuf::from(".")).describe();
+        let self_held = target(Transport::Conn, PathBuf::from(".")).describe();
+        assert!(hyper.contains("production Hyper"), "{hyper}");
+        assert!(self_held.contains("production self-held"), "{self_held}");
     }
 
     #[test]
