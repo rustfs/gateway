@@ -52,10 +52,11 @@ COVERED = {
 # today and is enforced exactly, so the debt cannot grow quietly while phase 2 is pending.
 EXCEPTIONS = {
     "crates/http": (
-        13,
+        14,
         "rustfs/gateway#277",
-        "thirteen wire-layer suites; the largest single block of the remaining debt and the first "
-        "crate phase 2 consolidates",
+        "fourteen wire-layer suites — tests/ingest_known_answer.rs (gateway#5) added the newest "
+        "one; the largest single block of the remaining debt and the first crate phase 2 "
+        "consolidates",
     ),
     "crates/macros": (
         2,
