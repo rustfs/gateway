@@ -48,7 +48,9 @@ fn runner_for_request(arguments: &[String]) -> &'static [&'static str] {
         return OPERATION_RUNNER;
     }
     match crate_request_name(arguments) {
-        Some("rustfs-gateway" | "s3gate") | None => LIGHT_RUNNER,
+        Some("rustfs-gateway" | "s3gate" | "rustfs-gateway-conformance" | "s3gate-conformance" | "conformance") | None => {
+            LIGHT_RUNNER
+        }
         Some(_) => FULL_RUNNER,
     }
 }
@@ -85,10 +87,14 @@ mod tests {
     use super::{FULL_RUNNER, LIGHT_RUNNER, OPERATION_RUNNER, runner_for_request};
 
     #[test]
-    fn the_facade_uses_the_light_runner_without_changing_other_selection() {
+    fn facade_and_conformance_use_the_light_runner_without_changing_other_selection() {
         let strings = |values: &[&str]| values.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>();
 
         for name in ["rustfs-gateway", "s3gate"] {
+            assert_eq!(runner_for_request(&strings(&["verify", "--crate", name])), LIGHT_RUNNER);
+            assert_eq!(runner_for_request(&strings(&["verify", "--json", "--crate", name])), LIGHT_RUNNER);
+        }
+        for name in ["rustfs-gateway-conformance", "s3gate-conformance", "conformance"] {
             assert_eq!(runner_for_request(&strings(&["verify", "--crate", name])), LIGHT_RUNNER);
             assert_eq!(runner_for_request(&strings(&["verify", "--json", "--crate", name])), LIGHT_RUNNER);
         }

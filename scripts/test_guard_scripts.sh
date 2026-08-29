@@ -1681,12 +1681,38 @@ expect_fail check_xtask_codegen_surface.sh \
     mut_xtask_operation_runner_uses_full_graph
 
 mut_xtask_facade_runner_returns_to_full_graph() {
-    perl -0pi -e 's/Some\("rustfs-gateway" \| "s3gate"\) \| None => LIGHT_RUNNER,/None => LIGHT_RUNNER,/' \
-        xtask-launcher/src/main.rs
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask-launcher/src/main.rs")
+text = path.read_text()
+old = 'Some("rustfs-gateway" | "s3gate" | "rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
+new = 'Some("rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
+if text.count(old) != 1:
+    raise SystemExit("the light facade and conformance selection is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
     'facade verification re-entering the full dependency graph' \
     mut_xtask_facade_runner_returns_to_full_graph
+
+mut_xtask_conformance_runner_returns_to_full_graph() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask-launcher/src/main.rs")
+text = path.read_text()
+old = 'Some("rustfs-gateway" | "s3gate" | "rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
+new = 'Some("rustfs-gateway" | "s3gate")'
+if text.count(old) != 1:
+    raise SystemExit("the light facade and conformance selection is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'conformance verification re-entering the full dependency graph' \
+    mut_xtask_conformance_runner_returns_to_full_graph
 
 mut_xtask_selection_module_becomes_full_only() {
     python3 - <<'PYEOF'

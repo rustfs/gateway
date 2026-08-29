@@ -116,9 +116,13 @@ pub fn main(args: &[String]) -> ExitCode {
     // sleep, and `connection_after` is asked of the socket. The two runs are *not* interchangeable
     // and are not meant to be — see `crate::conn` for what each can see — which is why the header
     // names the transport and the baseline is per transport.
-    match options.transport {
-        Transport::Hyper => execute(&options, &mut InProcess::new(root)),
-        Transport::Conn => execute(&options, &mut Conn::new(root)),
+    execute(&options, target(options.transport, root).as_mut())
+}
+
+fn target(transport: Transport, root: PathBuf) -> Box<dyn Sut> {
+    match transport {
+        Transport::Hyper => Box::new(InProcess::new(root)),
+        Transport::Conn => Box::new(Conn::new(root)),
     }
 }
 
@@ -181,7 +185,10 @@ pub fn execute(options: &Options, sut: &mut dyn Sut) -> ExitCode {
             return ExitCode::from(exit::ENVIRONMENT);
         }
     };
+    execute_prepared(options, sut, &corpus, baseline.as_ref())
+}
 
+fn execute_prepared(options: &Options, sut: &mut dyn Sut, corpus: &Corpus, baseline: Option<&Baseline>) -> ExitCode {
     let run_options = RunOptions {
         filter: options.filter.clone(),
         transport: options.transport,
@@ -189,7 +196,7 @@ pub fn execute(options: &Options, sut: &mut dyn Sut) -> ExitCode {
         include_slow: !options.exclude_slow,
         validate_only: options.command == Command::Validate,
     };
-    let report = runner::run(&corpus, sut, &run_options);
+    let report = runner::run(corpus, sut, &run_options);
 
     if options.command == Command::Baseline {
         print!("{}", Baseline::render(&report));
@@ -198,7 +205,7 @@ pub fn execute(options: &Options, sut: &mut dyn Sut) -> ExitCode {
     // Taken after the run, never before: the ledger is filled by the harness reading cases, so an
     // audit of a corpus that has not been executed would report that nothing is read.
     if options.command == Command::AuditKeys {
-        let (findings, rendered) = keys::report(&corpus);
+        let (findings, rendered) = keys::report(corpus);
         print!("{rendered}");
         return ExitCode::from(if findings.is_empty() {
             exit::SUCCESS
@@ -207,7 +214,7 @@ pub fn execute(options: &Options, sut: &mut dyn Sut) -> ExitCode {
         });
     }
 
-    print!("{}", report.render_text(baseline.as_ref()));
+    print!("{}", report.render_text(baseline));
     if let Some(path) = &options.json
         && let Err(error) = std::fs::write(path, report.render_json())
     {
@@ -220,7 +227,7 @@ pub fn execute(options: &Options, sut: &mut dyn Sut) -> ExitCode {
         eprintln!("conformance: cannot write {}: {error}", path.display());
         return ExitCode::from(exit::ENVIRONMENT);
     }
-    ExitCode::from(status(&report, baseline.as_ref(), options.command))
+    ExitCode::from(status(&report, baseline, options.command))
 }
 
 fn status(report: &Report, baseline: Option<&Baseline>, command: Command) -> u8 {
@@ -375,9 +382,19 @@ impl Options {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|item| (*item).to_owned()).collect()
+    }
+
+    fn corpus() -> &'static (PathBuf, Corpus) {
+        static CORPUS: OnceLock<(PathBuf, Corpus)> = OnceLock::new();
+        CORPUS.get_or_init(|| {
+            let root = Corpus::discover_root().expect("the repository corpus");
+            let corpus = runner::prepare_corpus(&root).expect("the corpus loads");
+            (root, corpus)
+        })
     }
 
     /// The feedback-loop evidence for one crate, and it must be an execution.
@@ -393,9 +410,19 @@ mod tests {
     /// Exit 0 is sufficient evidence on its own: an all-skipped run exits `ENVIRONMENT`, a filter
     /// naming no case exits `ENVIRONMENT`, and a failed assertion exits `REGRESSION`.
     fn assert_feedback_case(case: &str, transport: &str) {
+        let (root, corpus) = corpus();
+        let selected_transport = Transport::parse(transport).expect("the declared transport exists");
+        let options = RunOptions {
+            filter: Some(case.to_owned()),
+            transport: selected_transport,
+            profile: Profile::Aws,
+            include_slow: true,
+            validate_only: false,
+        };
+        let report = runner::run(corpus, target(selected_transport, root.clone()).as_mut(), &options);
         assert_eq!(
-            main(&args(&["run", "--transport", transport, "--filter", case])),
-            ExitCode::SUCCESS,
+            status_code(&report, None, Command::Run),
+            exit::SUCCESS,
             "{case} is a crate's feedback evidence and did not execute green over {transport}"
         );
     }
@@ -450,13 +477,13 @@ mod tests {
         );
         let mut under_run = crate::sut::Scripted::new().with("c-object-0001", 0, wrong.clone());
         assert_eq!(
-            execute(&one_case(Command::Run), &mut under_run),
+            execute_prepared(&one_case(Command::Run), &mut under_run, &corpus().1, None),
             ExitCode::from(exit::REGRESSION),
             "the documented command did not go red on a case whose target answered wrongly"
         );
         let mut under_validate = crate::sut::Scripted::new().with("c-object-0001", 0, wrong);
         assert_eq!(
-            execute(&one_case(Command::Validate), &mut under_validate),
+            execute_prepared(&one_case(Command::Validate), &mut under_validate, &corpus().1, None),
             ExitCode::SUCCESS,
             "validate is a corpus check and this case is internally consistent"
         );
@@ -474,14 +501,12 @@ mod tests {
     /// fail, reported in the same shape as one that checked something.
     #[test]
     fn a_filter_that_selects_no_case_is_an_environment_failure_not_a_pass() {
-        assert_eq!(
-            main(&args(&["validate", "--filter", "c-no-such-case-9999"])),
-            ExitCode::from(exit::ENVIRONMENT)
-        );
-        assert_eq!(
-            main(&args(&["run", "--filter", "c-no-such-case-9999"])),
-            ExitCode::from(exit::ENVIRONMENT)
-        );
+        for command in [Command::Validate, Command::Run] {
+            let mut options = one_case(command);
+            options.filter = Some("c-no-such-case-9999".to_owned());
+            let mut sut = crate::sut::Scripted::new();
+            assert_eq!(execute_prepared(&options, &mut sut, &corpus().1, None), ExitCode::from(exit::ENVIRONMENT));
+        }
     }
 
     #[test]
@@ -529,8 +554,8 @@ mod tests {
     /// when the transport does is a report that cannot be read.
     #[test]
     fn each_transport_names_the_target_it_actually_ran() {
-        let in_process = InProcess::new(PathBuf::from(".")).describe();
-        let over_a_socket = Conn::new(PathBuf::from(".")).describe();
+        let in_process = target(Transport::Hyper, PathBuf::from(".")).describe();
+        let over_a_socket = target(Transport::Conn, PathBuf::from(".")).describe();
         assert_ne!(in_process, over_a_socket);
         assert!(over_a_socket.contains("connection"), "{over_a_socket}");
     }
