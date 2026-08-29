@@ -186,16 +186,16 @@ expect_fail 'a new member consolidated but named by no table is rejected' \
 # --------------------------------------------------------------------------------------------
 mut_exception_row_deleted() {
     edit_guard '    "crates/http": (
-        13,' '    "crates/httpx": (
-        13,'
+        14,' '    "crates/httpx": (
+        14,'
 }
 expect_fail 'deleting the exception row for an unconsolidated crate is rejected' \
     mut_exception_row_deleted
 
 mut_exception_count_outgrown() {
-    touch crates/http/tests/fourteenth_loose_file.rs
+    touch crates/http/tests/fifteenth_loose_file.rs
 }
-expect_fail 'a fourteenth loose test file in an excepted crate is rejected' \
+expect_fail 'a fifteenth loose test file in an excepted crate is rejected' \
     mut_exception_count_outgrown
 
 mut_exception_stale_after_consolidation() {

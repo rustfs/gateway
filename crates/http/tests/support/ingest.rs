@@ -22,8 +22,11 @@
 //!
 //! The signer here is written from the AWS streaming specification rather than shared with the
 //! implementation. That is deliberate: a test that called the implementation's own string-to-sign
-//! would assert that the code does what it does. It is still not a published known-answer vector,
-//! which is recorded as an open point for the maintainer.
+//! would assert that the code does what it does. It is not a published known-answer vector either
+//! — both sides were written from the same reading of the same specification, so a shared
+//! misreading would still pass. `tests/ingest_known_answer.rs` closes that gap with AWS's own
+//! published chunked-upload example (gateway#5); this fixture remains useful for every case that
+//! needs an arbitrary, not-AWS's-own, signed body.
 
 // Each test binary compiles this module separately and uses a subset of it.
 #![allow(dead_code, unreachable_pub)]
