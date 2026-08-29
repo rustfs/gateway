@@ -2080,13 +2080,13 @@ fn restore_header(object: &StoredObject) -> Option<String> {
     format_optional_restore_status(object.restore.as_ref())
 }
 
-/// The tag count an object read reports, which S3 omits when it would be zero.
+/// The tag count an object read gives the response codec, including zero.
 ///
-/// `None` for an untagged object rather than `Some(0)`: readers use the header's *presence* to
-/// decide whether a `GetObjectTagging` round trip is worth making, so a zero would make every
-/// object look labelled. The ceiling makes the cast total — a stored set is at most fifty pairs.
+/// Suppression is the generated codec's responsibility: keeping it out of the fixture makes the
+/// `omit_when` rule observable and gives `GetObject` and `HeadObject` the same policy. The ceiling
+/// makes the cast total — a stored set is at most fifty pairs.
 fn tag_count_header(object: &StoredObject) -> Option<i32> {
-    i32::try_from(object.tags.len()).ok().filter(|count| *count > 0)
+    i32::try_from(object.tags.len()).ok()
 }
 
 /// The checksum contract an initiating request declared, if it declared one.

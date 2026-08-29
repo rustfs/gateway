@@ -356,7 +356,9 @@ impl OperationCodec for dto::HeadObject {
         // TagCount — header `x-amz-tagging-count`.
         if let Some(v) = output.tag_count.as_ref() {
             let rendered = &v.to_string();
-            response.set_header("x-amz-tagging-count", rendered);
+            if rendered != "0" {
+                response.set_header("x-amz-tagging-count", rendered);
+            }
         }
         // ObjectLockMode — header `x-amz-object-lock-mode`.
         if let Some(v) = output.object_lock_mode.as_ref() {
