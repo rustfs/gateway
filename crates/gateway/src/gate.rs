@@ -67,26 +67,7 @@ use rustfs_gateway_types::ErrorCode;
 
 use crate::integrity::checksum_refusal;
 use crate::render::{S3Error, from_handler, from_transport_limit};
-use crate::wire_read::{WireFrames, WireProgress, WireReader};
-
-/// Typed proof that a refusing stage stopped before request-body completion.
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
-pub(crate) struct RequestBodyUnfinished(bool);
-
-impl RequestBodyUnfinished {
-    pub(crate) const fn proven() -> Self {
-        Self(true)
-    }
-
-    pub(crate) fn attach<B>(self, response: &mut http::Response<B>) {
-        #[cfg(feature = "server")]
-        if self.0 {
-            response.extensions_mut().insert(rustfs_gateway_server::UnfinishedRequestBody);
-        }
-        #[cfg(not(feature = "server"))]
-        let _ = (self, response);
-    }
-}
+use crate::wire_read::{RequestBodyUnfinished, WireFrames, WireProgress, WireReader};
 
 /// Evidence that a request's signature reached a verdict and the verdict was not a rejection.
 ///
@@ -223,7 +204,7 @@ where
         // halves of one guarantee: `BodyDigestObligation::Sha256` is minted only by
         // `presigned_body_obligation`, so a header-signed request's payload hash is still not
         // compared here — a P2 gap this predates and does not close.
-        let progress = WireProgress::new(digest);
+        let progress = WireProgress::for_body(digest, self.body.as_ref());
         // Read only by the unframed arm below, and that is the whole of the rule: under framing
         // the bytes arriving here are chunk headers, signatures and CRLFs, and the object's own
         // octets exist only after the decoder has produced them, so the framed path's digests are
@@ -243,10 +224,10 @@ where
         if let Some(cap) = ceilings.declared
             && self.declared_length.is_some_and(|length| length > cap)
         {
-            return Err(past_declared_cap());
+            return Err(past_declared_cap(progress.request_body_unfinished()));
         }
         if ceilings.whole_body && self.declared_length.is_some_and(|length| length > ceilings.buffered) {
-            return Err(past_buffered_ceiling());
+            return Err(past_buffered_ceiling(progress.request_body_unfinished()));
         }
 
         // Both ceilings are applied to the *wire* bytes — the ones the peer wrote and this process
@@ -264,7 +245,11 @@ where
                 let decoded = ingest.run(WireReader::new(frames), &mut digests).await;
                 // The reader's refusal outranks the pipeline's: a ceiling that answered `413` is
                 // not an `IncompleteBody`, and the pull contract cannot carry the difference.
-                let decoded = decoded.map_err(|error| progress.take_refusal().unwrap_or(error))?;
+                let decoded = decoded.map_err(|error| {
+                    progress
+                        .take_refusal()
+                        .unwrap_or_else(|| progress.mark_refusal_if_unfinished(error))
+                })?;
                 let verified = digests.verify_with_trailers(decoded.trailers()).map_err(checksum_refusal)?;
                 if !decoded.commit_allowed(&verified) {
                     return Err(crate::chunked::trailers_not_verified());
@@ -322,14 +307,6 @@ where
         integrity: BodyIntegrity,
     ) -> Result<crate::request_body::StreamingRead, S3Error> {
         let (ceilings, timeouts, body_quota) = body_plan;
-        if let Some(cap) = ceilings.declared
-            && self.declared_length.is_some_and(|length| length > cap)
-        {
-            return Err(past_declared_cap());
-        }
-        if ceilings.whole_body && self.declared_length.is_some_and(|length| length > ceilings.buffered) {
-            return Err(past_buffered_ceiling());
-        }
         crate::request_body::StreamingRead::new(
             self.body,
             self.declared_length,
@@ -407,18 +384,18 @@ pub(crate) const MAX_DELETE_OBJECTS_BODY_BYTES: u64 = 2 * 1024 * 1024;
 /// whole body no second option. Draining them instead would be performing the transfer this
 /// refusal exists to avoid — `crate::close::after_body_ceiling` is where that judgement is
 /// written down. `c-object-0015` is the case.
-pub(crate) fn past_declared_cap() -> S3Error {
+pub(crate) fn past_declared_cap(proof: Option<RequestBodyUnfinished>) -> S3Error {
     let mut refusal = from_handler(
         HandlerError::new(ErrorCode::INVALID_REQUEST, "the request body is larger than this operation permits"),
         ResponseKind::Other,
         crate::close::after_body_ceiling(),
     );
-    refusal.body_unfinished = RequestBodyUnfinished::proven();
+    refusal.body_unfinished = proof;
     refusal
 }
 
 /// The refusal for a body larger than this assembly will hold.
-pub(crate) fn past_buffered_ceiling() -> S3Error {
+pub(crate) fn past_buffered_ceiling(proof: Option<RequestBodyUnfinished>) -> S3Error {
     let mut refusal = from_transport_limit(
         HandlerError::new(
             ErrorCode::ENTITY_TOO_LARGE,
@@ -427,7 +404,7 @@ pub(crate) fn past_buffered_ceiling() -> S3Error {
         StatusCode::PAYLOAD_TOO_LARGE,
         crate::close::after_body_ceiling(),
     );
-    refusal.body_unfinished = RequestBodyUnfinished::proven();
+    refusal.body_unfinished = proof;
     refusal
 }
 
@@ -453,30 +430,36 @@ pub(crate) fn incomplete() -> S3Error {
 /// with payload-free frames is a peer whose body is idle, and the deadline cannot see it because
 /// every one of those frames is an arrival. `crate::wire_read::MAX_PAYLOAD_FREE_FRAME_RUN` is
 /// where that bound and its reason live. All three close the connection.
-pub(crate) fn body_idle_timeout() -> S3Error {
-    from_transport_limit(
+pub(crate) fn body_idle_timeout(proof: Option<RequestBodyUnfinished>) -> S3Error {
+    let mut refusal = from_transport_limit(
         HandlerError::new(ErrorCode::REQUEST_TIMEOUT, "the request body stopped making progress"),
         StatusCode::REQUEST_TIMEOUT,
         crate::close::ConnectionIntent::Close,
-    )
+    );
+    refusal.body_unfinished = proof;
+    refusal
 }
 
 /// The closing refusal for a body that keeps arriving below its configured throughput floor.
-pub(crate) fn body_throughput_timeout() -> S3Error {
-    from_transport_limit(
+pub(crate) fn body_throughput_timeout(proof: Option<RequestBodyUnfinished>) -> S3Error {
+    let mut refusal = from_transport_limit(
         HandlerError::new(ErrorCode::REQUEST_TIMEOUT, "the request body remained below the minimum throughput"),
         StatusCode::REQUEST_TIMEOUT,
         crate::close::ConnectionIntent::Close,
-    )
+    );
+    refusal.body_unfinished = proof;
+    refusal
 }
 
 /// The closing refusal for a lease whose streaming body quota was exhausted.
-pub(crate) fn body_quota_refusal() -> S3Error {
-    from_handler(
+pub(crate) fn body_quota_refusal(proof: Option<RequestBodyUnfinished>) -> S3Error {
+    let mut refusal = from_handler(
         HandlerError::new(ErrorCode::SLOW_DOWN, "the service is not accepting this request right now"),
         ResponseKind::Other,
         crate::close::ConnectionIntent::Close,
-    )
+    );
+    refusal.body_unfinished = proof;
+    refusal
 }
 
 #[cfg(test)]
@@ -485,24 +468,220 @@ mod tests;
 
 #[cfg(all(test, feature = "server"))]
 mod unfinished_body_tests {
+    use core::convert::Infallible;
+    use core::pin::Pin;
+    use core::task::{Context, Poll};
+    use std::time::Duration;
+
+    use bytes::Bytes;
+    use http::{HeaderMap, HeaderValue};
     use rustfs_gateway_core::{HandlerError, ResponseKind};
+    use rustfs_gateway_http::{BodyIntegrity, ChunkLimits, Framing};
     use rustfs_gateway_server::UnfinishedRequestBody;
+    use rustfs_gateway_sig::{PayloadMode, TrailerSet};
     use rustfs_gateway_types::ErrorCode;
 
-    use super::past_buffered_ceiling;
+    use super::{
+        Authenticated, BodyCeilings, BodyDigestObligation, BodyTimeouts, SealedBody, body_idle_timeout, body_quota_refusal,
+        body_throughput_timeout, incomplete, past_buffered_ceiling,
+    };
     use crate::close::ConnectionIntent;
-    use crate::render::{from_handler, render};
+    use crate::render::{from_auth, from_handler, from_wire_reject, render};
     use crate::trace::RequestTrace;
+    use crate::wire_read::WireProgress;
+
+    fn unsigned_ingest(wire_length: u64) -> Option<crate::chunked::ChunkIngest> {
+        let mut headers = HeaderMap::new();
+        headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from(wire_length));
+        headers.insert(
+            http::HeaderName::from_static("x-amz-decoded-content-length"),
+            HeaderValue::from_static("11"),
+        );
+        let wire = Framing::classify(http::Version::HTTP_11, &headers, &rustfs_gateway_http::Limits::default()).ok()?;
+        crate::chunked::ChunkIngest::prepare(
+            &PayloadMode::StreamingUnsigned {
+                trailer: TrailerSet::None,
+            },
+            &headers,
+            &wire,
+            &crate::ext::ChunkSink::new(),
+            None,
+            ChunkLimits::default(),
+        )
+        .ok()?
+    }
+
+    struct FirstFrameThenPending(Option<Bytes>);
+
+    impl http_body::Body for FirstFrameThenPending {
+        type Data = Bytes;
+        type Error = Infallible;
+
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+            self.get_mut()
+                .0
+                .take()
+                .map(http_body::Frame::data)
+                .map(Ok)
+                .map_or(Poll::Pending, |frame| Poll::Ready(Some(frame)))
+        }
+    }
+
+    struct FinalFrameBody(Option<Bytes>);
+
+    impl http_body::Body for FinalFrameBody {
+        type Data = Bytes;
+        type Error = Infallible;
+
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+            Poll::Ready(self.get_mut().0.take().map(http_body::Frame::data).map(Ok))
+        }
+
+        fn is_end_stream(&self) -> bool {
+            self.0.is_none()
+        }
+    }
+
+    fn unfinished_proof() -> Option<crate::wire_read::RequestBodyUnfinished> {
+        let body = FirstFrameThenPending(Some(Bytes::new()));
+        WireProgress::for_body(BodyDigestObligation::None, Some(&body)).request_body_unfinished()
+    }
+
+    async fn chunk_refusal<B>(body: B) -> Option<crate::render::S3Error>
+    where
+        B: http_body::Body<Data = Bytes, Error = Infallible> + Send + 'static,
+    {
+        let ingest = unsigned_ingest(4096)?;
+        SealedBody::seal(Some(body), Some(4096))
+            .read(
+                &Authenticated::granted_for_test(),
+                BodyCeilings::of("PutObject", 1024 * 1024),
+                BodyTimeouts::S3,
+                Some(ingest),
+                BodyDigestObligation::None,
+                BodyIntegrity::NONE,
+            )
+            .await
+            .err()
+    }
 
     /// Positive — the early body ceiling is a proof that the service stopped before the body
     /// ended, independently of the connection-close verdict it also carries.
     #[test]
     fn an_early_body_ceiling_marks_the_rendered_response_as_unfinished() {
-        let response = render(&past_buffered_ceiling(), &RequestTrace::from_bits(1, 2));
+        let response = render(&past_buffered_ceiling(unfinished_proof()), &RequestTrace::from_bits(1, 2));
         assert!(
             response.extensions().get::<UnfinishedRequestBody>().is_some(),
             "the server cannot distinguish an arriving body from an ordinary close"
         );
+    }
+
+    /// Positive — every live-body policy refusal is emitted only while its monitor still owns a
+    /// producer that has not reported EOF.
+    #[test]
+    fn live_body_policy_refusals_mark_the_rendered_response_as_unfinished() {
+        let proof = unfinished_proof();
+        assert!(proof.is_some(), "a fresh wire reader has not reached EOF");
+        let Some(proof) = proof else {
+            return;
+        };
+        for refusal in [
+            body_idle_timeout(Some(proof)),
+            body_throughput_timeout(Some(proof)),
+            body_quota_refusal(Some(proof)),
+        ] {
+            let response = render(&refusal, &RequestTrace::from_bits(1, 2));
+            assert!(
+                response.extensions().get::<UnfinishedRequestBody>().is_some(),
+                "a live-body refusal lost its independent unfinished-body proof"
+            );
+        }
+    }
+
+    /// Positive — malformed framing rejected before the reader asks for EOF leaves source bytes
+    /// unconsumed and therefore carries the wire-owned proof.
+    #[tokio::test]
+    async fn a_pre_eof_chunk_parser_failure_marks_the_body_as_unfinished() {
+        let error = tokio::time::timeout(
+            Duration::from_millis(100),
+            chunk_refusal(FirstFrameThenPending(Some(Bytes::from_static(b"z\r\n")))),
+        )
+        .await
+        .ok()
+        .flatten();
+        assert!(error.is_some(), "plain text is not aws-chunked framing");
+        let Some(error) = error else {
+            return;
+        };
+        let response = render(&error, &RequestTrace::from_bits(1, 2));
+        assert!(response.extensions().get::<UnfinishedRequestBody>().is_some());
+    }
+
+    /// Negative — a parser refusal on the source's final DATA frame happens after the transport
+    /// has independently declared EOF, even though the reader never needs another poll.
+    #[tokio::test]
+    async fn a_final_frame_chunk_parser_failure_does_not_claim_bytes_remain() {
+        let error = chunk_refusal(FinalFrameBody(Some(Bytes::from_static(b"z\r\n")))).await;
+        assert!(error.is_some(), "plain text is not aws-chunked framing");
+        let Some(error) = error else {
+            return;
+        };
+        let response = render(&error, &RequestTrace::from_bits(1, 2));
+        assert!(response.extensions().get::<UnfinishedRequestBody>().is_none());
+    }
+
+    /// Negative — a truncated but initially valid chunk stream is rejected only after its source
+    /// reports EOF, so there is nothing left for lingering close to drain.
+    #[tokio::test]
+    async fn a_post_eof_chunk_parser_failure_does_not_claim_bytes_remain() {
+        let (body, _) = crate::probe::ObservedBody::new([Bytes::from_static(b"b\r\nhello world\r\n")]);
+        let error = chunk_refusal(body).await;
+        assert!(error.is_some(), "the terminal zero chunk is required");
+        let Some(error) = error else {
+            return;
+        };
+        let response = render(&error, &RequestTrace::from_bits(1, 2));
+        assert!(response.extensions().get::<UnfinishedRequestBody>().is_none());
+    }
+
+    /// Negative — signer material is a head-only prerequisite and says nothing about whether the
+    /// transport has delivered or retained body bytes.
+    #[test]
+    fn unavailable_chunk_signatures_do_not_claim_body_progress() {
+        let mut headers = HeaderMap::new();
+        headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from(4096));
+        headers.insert(
+            http::HeaderName::from_static("x-amz-decoded-content-length"),
+            HeaderValue::from_static("11"),
+        );
+        let wire = Framing::classify(http::Version::HTTP_11, &headers, &rustfs_gateway_http::Limits::default()).ok();
+        assert!(wire.is_some(), "a content length classifies");
+        let Some(wire) = wire else {
+            return;
+        };
+        let error = crate::chunked::ChunkIngest::prepare(
+            &PayloadMode::StreamingSigned {
+                trailer: TrailerSet::None,
+            },
+            &headers,
+            &wire,
+            &crate::ext::ChunkSink::new(),
+            None,
+            ChunkLimits::default(),
+        )
+        .err();
+        assert!(error.is_some(), "signed chunks need verifier material");
+        let Some(error) = error else {
+            return;
+        };
+        let response = render(&error, &RequestTrace::from_bits(1, 2));
+        assert!(response.extensions().get::<UnfinishedRequestBody>().is_none());
     }
 
     /// Negative — a close verdict alone says nothing about whether a body exists or reached its
@@ -519,5 +698,61 @@ mod unfinished_body_tests {
             response.extensions().get::<UnfinishedRequestBody>().is_none(),
             "ConnectionIntent::Close was treated as body-progress evidence"
         );
+    }
+
+    /// Negative — a transport failure says framing did not complete, but it does not prove that
+    /// readable request bytes remain for the server's lingering drain.
+    #[test]
+    fn an_incomplete_transport_does_not_claim_that_bytes_remain() {
+        let response = render(&incomplete(), &RequestTrace::from_bits(1, 2));
+        assert!(
+            response.extensions().get::<UnfinishedRequestBody>().is_none(),
+            "a transport error was treated as evidence that readable bytes remain"
+        );
+    }
+
+    /// Negative — trailer verification is decided only after the chunk reader reports EOF, so a
+    /// closing trailer refusal must not ask the server to drain a body it has already consumed.
+    #[test]
+    fn a_post_eof_trailer_refusal_does_not_claim_that_bytes_remain() {
+        let response = render(&crate::chunked::trailers_not_verified(), &RequestTrace::from_bits(1, 2));
+        assert!(
+            response.extensions().get::<UnfinishedRequestBody>().is_none(),
+            "a post-EOF refusal was treated as an unfinished body"
+        );
+    }
+
+    /// Negative — a wire `Connection` header is only a close announcement and cannot manufacture
+    /// the application proof consumed by the server's lingering drain.
+    #[test]
+    fn a_response_connection_close_header_does_not_claim_that_the_body_is_unfinished() {
+        let error = from_handler(
+            HandlerError::new(ErrorCode::INTERNAL_ERROR, "header-only close"),
+            ResponseKind::Other,
+            ConnectionIntent::MayKeepAlive,
+        );
+        let mut response = render(&error, &RequestTrace::from_bits(1, 2));
+        response
+            .headers_mut()
+            .insert(http::header::CONNECTION, http::HeaderValue::from_static("close"));
+        assert!(
+            response.extensions().get::<UnfinishedRequestBody>().is_none(),
+            "a response header was treated as body-progress evidence"
+        );
+    }
+
+    /// Negative — authentication and head-only wire refusals close for their own reasons and
+    /// carry no observation of body completion.
+    #[test]
+    fn closing_auth_and_wire_refusals_do_not_claim_body_progress() {
+        let refusals = [
+            from_auth(rustfs_gateway_sig::AuthError::SignatureDoesNotMatch, ResponseKind::Other),
+            from_wire_reject(rustfs_gateway_http::WireReject::MalformedChunkFraming),
+        ];
+        for refusal in refusals {
+            assert!(refusal.must_close_connection(), "the negative control must actually close");
+            let response = render(&refusal, &RequestTrace::from_bits(1, 2));
+            assert!(response.extensions().get::<UnfinishedRequestBody>().is_none());
+        }
     }
 }

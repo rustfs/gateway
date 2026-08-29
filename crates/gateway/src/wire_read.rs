@@ -107,12 +107,26 @@ pub(crate) const MAX_PAYLOAD_FREE_FRAME_RUN: u32 = 8;
 /// stopped the read — lives here and is borrowed rather than owned by the reader.
 struct WireProgressState {
     seen: u64,
+    reached_eof: bool,
     /// The obligation and the hasher opened for it, held together so that the value compared is
     /// necessarily the value the hasher was opened for. Two parameters, one at construction and
     /// one at comparison, is a rule stated in two places and therefore a rule that can drift.
     digest: BodyDigestObligation,
     sha256: Option<Sha256>,
     refusal: Option<S3Error>,
+}
+
+/// Evidence that the transport reader has not observed the end of this request body.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RequestBodyUnfinished(());
+
+impl RequestBodyUnfinished {
+    pub(crate) fn attach<B>(self, response: &mut http::Response<B>) {
+        #[cfg(feature = "server")]
+        response.extensions_mut().insert(rustfs_gateway_server::UnfinishedRequestBody);
+        #[cfg(not(feature = "server"))]
+        let _ = (self, response);
+    }
 }
 
 /// Shared accounting retained by the request owner while a framed pipeline owns the reader.
@@ -131,10 +145,11 @@ impl WireProgress {
     /// in the unframed branch is the fail-safe arrangement: the day a header-signed request's
     /// payload hash is compared — the P2 gap `crate::gate` records — the framed path gets the
     /// comparison rather than silently skipping it.
-    pub(crate) fn new(digest: BodyDigestObligation) -> Self {
+    fn new(digest: BodyDigestObligation, reached_eof: bool) -> Self {
         Self {
             state: Arc::new(Mutex::new(WireProgressState {
                 seen: 0,
+                reached_eof,
                 digest,
                 sha256: match digest {
                     BodyDigestObligation::None => None,
@@ -144,6 +159,17 @@ impl WireProgress {
             })),
             observer: None,
         }
+    }
+
+    /// Opens accounting from the source body's current end-of-stream observation.
+    ///
+    /// Callers cannot state the observation themselves: the transport body is the authority for
+    /// whether this request starts with bytes still outstanding. An absent body is already at EOF.
+    pub(crate) fn for_body<B>(digest: BodyDigestObligation, body: Option<&B>) -> Self
+    where
+        B: http_body::Body,
+    {
+        Self::new(digest, body.is_none_or(http_body::Body::is_end_stream))
     }
 
     /// Publishes cumulative wire-byte progress to the request owner.
@@ -179,6 +205,21 @@ impl WireProgress {
 
     pub(crate) fn seen(&self) -> u64 {
         self.state().seen
+    }
+
+    /// Produces the only owned unfinished-body proof, and only while EOF remains unobserved.
+    pub(crate) fn request_body_unfinished(&self) -> Option<RequestBodyUnfinished> {
+        (!self.state().reached_eof).then_some(RequestBodyUnfinished(()))
+    }
+
+    /// Carries this reader's current EOF observation into a refusal produced by its consumer.
+    pub(crate) fn mark_refusal_if_unfinished(&self, mut refusal: S3Error) -> S3Error {
+        refusal.body_unfinished = self.request_body_unfinished();
+        refusal
+    }
+
+    fn record_eof(&self) {
+        self.state().reached_eof = true;
     }
 
     fn record(&self, bytes: &Bytes) -> u64 {
@@ -258,6 +299,7 @@ where
                 Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
                 Poll::Ready(Ok(None)) => {
                     self.ended = true;
+                    self.progress.record_eof();
                     return Poll::Ready(Ok(None));
                 }
                 Poll::Ready(Ok(Some(frame))) => frame,
@@ -273,16 +315,16 @@ where
             // frame that crossed the line is not buffered either.
             let bytes = data.copy_to_bytes(length);
             if length as u64 > self.ceilings.buffered {
-                return Poll::Ready(Err(crate::gate::past_buffered_ceiling()));
+                return Poll::Ready(Err(crate::gate::past_buffered_ceiling(self.progress.request_body_unfinished())));
             }
             let seen = self.progress.record(&bytes);
             if let Some(cap) = self.ceilings.declared
                 && seen > cap
             {
-                return Poll::Ready(Err(crate::gate::past_declared_cap()));
+                return Poll::Ready(Err(crate::gate::past_declared_cap(self.progress.request_body_unfinished())));
             }
             if self.ceilings.whole_body && seen > self.ceilings.buffered {
-                return Poll::Ready(Err(crate::gate::past_buffered_ceiling()));
+                return Poll::Ready(Err(crate::gate::past_buffered_ceiling(self.progress.request_body_unfinished())));
             }
             if length == 0 {
                 // A frame carrying nothing is not the end of anything, and handing it on as a
@@ -317,7 +359,12 @@ where
     /// step that otherwise returns nothing hands back.
     fn charge_payload_free_frame(&mut self) -> Option<S3Error> {
         self.payload_free_run = self.payload_free_run.saturating_add(1);
-        (self.payload_free_run > MAX_PAYLOAD_FREE_FRAME_RUN).then(crate::gate::body_idle_timeout)
+        (self.payload_free_run > MAX_PAYLOAD_FREE_FRAME_RUN)
+            .then(|| crate::gate::body_idle_timeout(self.progress.request_body_unfinished()))
+    }
+
+    fn body_idle_refusal(&self) -> S3Error {
+        crate::gate::body_idle_timeout(self.progress.request_body_unfinished())
     }
 
     /// Records the refusal that stopped this read and returns the error the pull contract carries.
@@ -338,24 +385,24 @@ where
         match self.delay.as_mut() {
             None => {
                 if let Poll::Ready(frame) = self.body.as_mut().poll_frame(context) {
-                    return Poll::Ready(Self::settle(frame));
+                    return Poll::Ready(self.settle(frame));
                 }
                 let mut delay = Delay::new(self.timeouts.waiting_for(self.progress.seen() != 0));
                 if Pin::new(&mut delay).poll(context).is_ready() {
-                    return Poll::Ready(Err(crate::gate::body_idle_timeout()));
+                    return Poll::Ready(Err(self.body_idle_refusal()));
                 }
                 self.delay = Some(delay);
                 Poll::Pending
             }
             Some(delay) => {
                 if Pin::new(delay).poll(context).is_ready() {
-                    return Poll::Ready(Err(crate::gate::body_idle_timeout()));
+                    return Poll::Ready(Err(self.body_idle_refusal()));
                 }
                 match self.body.as_mut().poll_frame(context) {
                     Poll::Pending => Poll::Pending,
                     Poll::Ready(frame) => {
                         self.delay = None;
-                        Poll::Ready(Self::settle(frame))
+                        Poll::Ready(self.settle(frame))
                     }
                 }
             }
@@ -364,7 +411,13 @@ where
 
     /// A transport error is a body that did not arrive as it was framed, and nothing more
     /// specific: the transport's own reason is not a sentence to put on the wire.
-    fn settle(frame: Option<Result<http_body::Frame<B::Data>, B::Error>>) -> Result<Option<http_body::Frame<B::Data>>, S3Error> {
+    fn settle(
+        &mut self,
+        frame: Option<Result<http_body::Frame<B::Data>, B::Error>>,
+    ) -> Result<Option<http_body::Frame<B::Data>>, S3Error> {
+        if frame.is_some() && self.body.as_ref().get_ref().is_end_stream() {
+            self.progress.record_eof();
+        }
         match frame {
             None => Ok(None),
             Some(Ok(frame)) => Ok(Some(frame)),
