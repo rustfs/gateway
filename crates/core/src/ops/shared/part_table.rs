@@ -22,17 +22,18 @@
 //! against. The caller is the backend, reaching it through the facade re-export.
 //!
 //! Responsible for: turning "part N of an object whose parts are these lengths" into the byte
-//! window a `206` serves, and refusing every part number that names no window. It is the other
-//! half of [`super::precondition::evaluate_range`], which is handed the object's total length and
-//! nothing about where its parts begin and therefore stops at
+//! window a `206` serves, and distinguishing a malformed selector from a selector past a completed
+//! object's final part. It is the other half of [`super::precondition::evaluate_range`], which is
+//! handed the object's total length and nothing about where its parts begin and therefore stops at
 //! [`super::precondition::RangeDecision::Part`].
-//! NOT responsible for: producing a part table (storage's), deciding whether a part read carries
-//! `x-amz-mp-parts-count` or which status it gets — both are policy, and
-//! [`super::precondition::RangeDecision`] owns them — or the `Range`-and-`partNumber` conflict,
-//! which `evaluate_range` refuses before this is reached.
-//! Upstream: `rustfs-gateway-types`' `ErrorCode` and [`super::precondition`]. Downstream: the
-//! facade re-export, and through it every backend that answers `partNumber`.
+//! NOT responsible for: producing a part table (storage's), deciding whether a successful part
+//! read carries `x-amz-mp-parts-count` ([`super::precondition::RangeDecision`] owns that), or the
+//! `Range`-and-`partNumber` conflict, which `evaluate_range` refuses before this is reached.
+//! Upstream: `http` status typing, `rustfs-gateway-types`' `ErrorCode` and
+//! [`super::precondition`]. Downstream: the facade re-export, and through it every backend that
+//! answers `partNumber`.
 
+use http::StatusCode;
 use rustfs_gateway_types::ErrorCode;
 
 use super::precondition::{PreconditionRejection, RangeDecision};
@@ -73,18 +74,31 @@ impl PartWindow {
 ///
 /// # Errors
 ///
-/// [`ErrorCode::INVALID_PART_NUMBER`] when the number names no part of this object: zero (parts
+/// The wire spelling `InvalidPartNumber` when the number names no part of this object: zero (parts
 /// are numbered from one), a number past the end of the table, a table with no parts at all, a
 /// part carrying no bytes — which has no last byte to report — or a table whose lengths do not fit
-/// the address space. Every one of them is a request for a window that does not exist, and
-/// answering any of them with bytes would hand a client part of some other part.
+/// the address space. A selector past the end of a nonempty completed part table carries `416` in
+/// a distinct status-bearing [`ErrorCode`] with that spelling; the other forms equal
+/// [`ErrorCode::INVALID_PART_NUMBER`] and remain `400` because they do not establish that
+/// representation-backed boundary. Callers that group both outcomes must compare the spelling,
+/// while callers deciding retry or range behavior must inspect the status. Answering any of them
+/// with bytes would hand a client part of some other part.
 pub fn resolve_part(part_number: u32, part_lengths: &[u64]) -> Result<PartWindow, PreconditionRejection> {
     let refuse = |reason| Err(PreconditionRejection::new(ErrorCode::INVALID_PART_NUMBER, reason));
     let Some(index) = part_number.checked_sub(1).map(|index| index as usize) else {
         return refuse("a part number starts at 1, so 0 names no part of any object");
     };
     let Some(length) = part_lengths.get(index).copied() else {
-        return refuse("the object holds fewer parts than the request named");
+        if part_lengths.is_empty() {
+            return refuse("the object has no completed multipart part table");
+        }
+        // The authority's 400 row remains correct for malformed selectors such as zero. This
+        // representation-backed branch is the contextual pair AWS assigns only after the part
+        // table proves that the requested part is past the completed object's actual count.
+        return Err(PreconditionRejection::new(
+            ErrorCode::custom("InvalidPartNumber", StatusCode::RANGE_NOT_SATISFIABLE),
+            "the object holds fewer parts than the request named",
+        ));
     };
     // Checked first, and not folded into the arithmetic below: `start + 0 - 1` does not overflow
     // for any part after the first, it answers `bytes 16-15/16` — a window that reads as valid

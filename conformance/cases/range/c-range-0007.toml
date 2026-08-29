@@ -2,7 +2,8 @@
 #
 # Schema dimensions exercised: setup.multipart_uploads as a fixture, an upload id and two part
 # entity tags captured and read back into a completion body, multi-exchange form, a before/after
-# control pair, header-set assertions on the window and on the part count.
+# control pair, both sides of the part-number validity boundary, header-set assertions on the
+# window and on the part count.
 
 [case]
 id = "c-range-0007"
@@ -17,7 +18,9 @@ everything after the first part, with no error to explain it. An upload that was
 the wrong witness for any of it — there is no object to read a part of — so the upload is completed \
 through a real exchange first, and the part is read twice: part 2 must begin where part 1 ended, \
 because a server that answered the first sixteen bytes of part 1 would return the right number of \
-bytes and the wrong ones."""
+bytes and the wrong ones. The two invalid boundaries stay separate as well: zero is malformed and \
+answers 400, while part 3 against this completed two-part object is an unsatisfiable range and \
+answers 416."""
 polarity = "positive"
 operation = "GetObject"
 tags = ["range", "multipart", "read"]
@@ -27,6 +30,10 @@ quirks = []
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
 summary = "Documents the part-number parameter as returning one part with a header naming the total number of parts."
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AWSJavaSDK/latest/javadoc/com/amazonaws/services/s3/model/GetObjectRequest.html"
+summary = "Documents HTTP 416 when a requested part number exceeds the object's actual part count."
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
@@ -105,7 +112,47 @@ redact = ["Location", "UploadId"]
 contains_utf8 = ["<CompleteMultipartUploadResult", "-2&quot;</ETag>"]
 not_contains_utf8 = ["<Error>"]
 
-# 3 — the assertion the case exists for. Part 2 is sixteen bytes that start at 5242880, and the
+# 3 — the negative boundary. The completed object has exactly two parts, so part 3 is a ranged read
+# whose requested window does not exist. This distinguishes an unsatisfiable object-backed lookup
+# from a malformed query value, which is rejected before the backend sees the part table.
+[[exchanges]]
+name = "a part past the completed object's final part is an unsatisfiable range"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-range/parted?partNumber=3"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 416
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidPartNumber"
+message_present = true
+
+# 4 — the other negative boundary. Zero is malformed independently of the object, so it remains a
+# 400 rather than borrowing the 416 that only an object-backed lookup past the final part earns.
+# This control prevents a global InvalidPartNumber status change from satisfying exchange 3.
+[[exchanges]]
+name = "part number zero remains a malformed request"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-range/parted?partNumber=0"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidPartNumber"
+message_present = true
+
+# 5 — the assertion the case exists for. Part 2 is sixteen bytes that start at 5242880, and the
 # object is 5242896 bytes long: the `Content-Range` names all three numbers, so a window resolved
 # from the wrong offset cannot agree with it.
 [[exchanges]]
@@ -129,7 +176,7 @@ connection_after = "open"
 [exchanges.expect.body]
 size = 16
 
-# 4 — the control for exchange 3. Two parts of different lengths at different offsets, read through
+# 6 — the control for exchange 5. Two parts of different lengths at different offsets, read through
 # the same code: a server that answered a fixed window, or the whole object, or always the first
 # part would satisfy one of these two exchanges and not both. The part count is asserted again
 # because it must describe the object rather than the part that was asked for.
@@ -154,7 +201,7 @@ connection_after = "open"
 [exchanges.expect.body]
 size = 5242880
 
-# 5 — a whole read of the same object carries no part count at all. Without this, a server that
+# 7 — a whole read of the same object carries no part count at all. Without this, a server that
 # put `x-amz-mp-parts-count` on every response to a multipart object would be green above: the
 # header is asserted present twice and nowhere asserted absent.
 [[exchanges]]
