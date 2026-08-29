@@ -50,6 +50,9 @@ mod dialect;
 #[path = "dto_cold_split.rs"]
 mod dto_cold_split;
 
+#[path = "encryption_roundtrip.rs"]
+mod encryption_roundtrip;
+
 #[path = "error_resolution.rs"]
 mod error_resolution;
 
