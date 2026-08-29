@@ -72,7 +72,7 @@ pub use contract_values::{
     ContractValue, CopySourceGuardOrderValue, CopySourceIfMatchMissValue, DecodedUtf8Value, DefaultBucketValidatorValue,
     DefaultSlashPolicyValue, ErrorRootNamespaceValue, HeadBodyPolicyValue, PercentDecodePassesValue,
     ResidualEncodedDangerousValue, StoredLegacyControlPolicyValue, TraversalSegmentDelimitersValue, UnicodeNormalizationValue,
-    ValidatorAuthorityValue, ValidatorReplaceabilityValue,
+    UploadIdCapabilityScopeValue, ValidatorAuthorityValue, ValidatorReplaceabilityValue,
 };
 pub use cors_contract_values::*;
 pub use error_status::ErrorStatus;

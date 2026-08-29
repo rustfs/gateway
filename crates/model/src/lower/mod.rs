@@ -616,6 +616,22 @@ impl Ctx<'_> {
             "ObjectKey" => Type::ObjectKey,
             "BucketName" => Type::BucketName,
             "Range" => Type::Range,
+            "Capability" => {
+                if !matches!(binding, Binding::Query) {
+                    return Err(Error::ir(self.operation, "Capability fields must use a query binding"));
+                }
+                match argument {
+                    Some("upload_id") => Type::Capability {
+                        exchange: "upload_id".to_owned(),
+                    },
+                    Some(exchange) => {
+                        return Err(Error::ir(self.operation, format!("unknown capability exchange `{exchange}`")));
+                    }
+                    None => {
+                        return Err(Error::ir(self.operation, "Capability needs an explicit exchange"));
+                    }
+                }
+            }
             "ChecksumSpec" => Type::ChecksumSpec,
             "ETag" => {
                 let render = match argument {

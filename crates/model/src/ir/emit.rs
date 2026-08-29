@@ -203,6 +203,7 @@ fn ty(t: &Type) -> Value {
         Type::ObjectKey => Value::object([("kind".into(), s("ObjectKey"))]),
         Type::BucketName => Value::object([("kind".into(), s("BucketName"))]),
         Type::Range => Value::object([("kind".into(), s("Range"))]),
+        Type::Capability { exchange } => Value::object([("kind".into(), s("Capability")), ("exchange".into(), s(exchange))]),
         Type::StringEnum(values) => Value::object([("kind".into(), s("StringEnum")), ("values".into(), strings(values))]),
         Type::Structure(shape) => Value::object([("kind".into(), s("Structure")), ("shape".into(), s(shape))]),
         Type::Union(shape) => Value::object([("kind".into(), s("Union")), ("shape".into(), s(shape))]),

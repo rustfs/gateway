@@ -1,5 +1,5 @@
 {
-  "ir_version": "1",
+  "ir_version": "2",
   "operation": "UploadPart",
   "http": {
             "method": "PUT",
@@ -119,7 +119,7 @@
                            "wire_name": "uploadId",
                            "required": true,
                            "binding": { "kind": "Query" },
-                           "type": { "kind": "String" },
+                           "type": { "kind": "Capability", "exchange": "upload_id" },
                            "hot": true,
                            "quirk_refs": ["q-mpu-upload-id-0037"]
                          },
@@ -391,6 +391,9 @@
                            "c-mpu-0029",
                            "c-mpu-0030",
                            "c-mpu-0031",
+                           "c-mpu-0032",
+                           "c-mpu-0043",
+                           "c-mpu-0047",
                            "c-mpu-0049",
                            "c-mpu-0050",
                            "c-mpu-0051",

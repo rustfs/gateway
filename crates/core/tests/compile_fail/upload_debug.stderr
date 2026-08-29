@@ -1,11 +1,11 @@
-error[E0277]: `UploadIdClaim<'_>` doesn't implement `Debug`
+error[E0277]: `UploadIdClaim` doesn't implement `Debug`
   --> tests/compile_fail/upload_debug.rs:26:15
    |
 26 |     println!("{claim:?}");
-   |               ^^^^^^^^^ `UploadIdClaim<'_>` cannot be formatted using `{:?}` because it doesn't implement `Debug`
+   |               ^^^^^^^^^ `UploadIdClaim` cannot be formatted using `{:?}` because it doesn't implement `Debug`
    |
-   = help: the trait `Debug` is not implemented for `UploadIdClaim<'_>`
-   = note: required for `&UploadIdClaim<'_>` to implement `Debug`
+   = help: the trait `Debug` is not implemented for `UploadIdClaim`
+   = note: required for `&UploadIdClaim` to implement `Debug`
 
 error[E0277]: `ResolvedUploadId<'_>` doesn't implement `Debug`
   --> tests/compile_fail/upload_debug.rs:30:15

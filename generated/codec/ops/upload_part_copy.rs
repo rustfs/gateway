@@ -87,7 +87,7 @@ impl OperationCodec for dto::UploadPartCopy {
         // UploadId — query `uploadId`, percent-decoded once.
         if let Some(raw) = request.query("uploadId") {
             let raw = raw.as_ref();
-            input.upload_id = raw.to_owned();
+            input.upload_id = rustfs_gateway_types::UploadIdClaim::from_wire(raw);
         } else {
             return Err(value::missing(ErrorCode::INVALID_ARGUMENT, "UploadId"));
         }

@@ -58,14 +58,14 @@ impl AbortMultipartUpload {
 /// read off the type instead of unwrapped. `Default` fills a required member with a
 /// wire-invalid placeholder (P10), and [`Input::check_required`] is what keeps one from
 /// leaving the decode path.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct Input {
     /// Wire `Bucket`, bound as UriLabel. Required.
     pub bucket: crate::BucketName,
     /// Wire `Key`, bound as UriLabel. Required.
     pub key: crate::ObjectKey,
-    /// Wire `uploadId`, bound as Query. Required.
-    pub upload_id: String,
+    /// Wire `uploadId`, bound as Query. Required. Secret: `Debug` prints a placeholder.
+    pub upload_id: crate::UploadIdClaim,
     /// Wire `x-amz-request-payer`, bound as Header. Optional.
     pub request_payer: Option<crate::ops::enums::RequestPayer>,
     /// Wire `x-amz-expected-bucket-owner`, bound as Header. Optional.
@@ -94,6 +94,19 @@ impl Input {
         crate::reject_placeholder("AbortMultipartUploadInput", "Key", &self.key)?;
         crate::reject_placeholder("AbortMultipartUploadInput", "UploadId", &self.upload_id)?;
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Input {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Input")
+            .field("bucket", &self.bucket)
+            .field("key", &self.key)
+            .field("upload_id", &"<redacted>")
+            .field("request_payer", &self.request_payer)
+            .field("expected_bucket_owner", &self.expected_bucket_owner)
+            .field("if_match_initiated_time", &self.if_match_initiated_time)
+            .finish()
     }
 }
 
@@ -168,7 +181,7 @@ impl InputBuilder {
 
     /// Sets `UploadId`.
     #[must_use]
-    pub fn upload_id(mut self, value: String) -> Self {
+    pub fn upload_id(mut self, value: crate::UploadIdClaim) -> Self {
         self.input.upload_id = value;
         self
     }

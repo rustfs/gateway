@@ -42,13 +42,13 @@ case_dir = root / "conformance/cases"
 
 EXPECTED = {
     "records": 349,
-    "mutable": 99,
+    "mutable": 100,
     "typed_contracts": 160,
-    "untyped_contracts": 90,
-    "typed_sources": 259,
-    "dimensions": 178,
-    "wired": 257,
-    "emitted_constants": 170,
+    "untyped_contracts": 89,
+    "typed_sources": 260,
+    "dimensions": 179,
+    "wired": 258,
+    "emitted_constants": 171,
 }
 CAPABILITY_BLOCKS = {"q-cors-0006", "q-cors-0047"}
 
@@ -526,6 +526,7 @@ for quirk_id in sorted(mutable - mutable_contracts):
 emitter_paths = [
     root / "crates/codegen/src/emit/naming_contracts.rs",
     root / "crates/codegen/src/emit/range_contracts.rs",
+    root / "crates/codegen/src/emit/upload_id_contracts.rs",
     root / "crates/codegen/src/emit/runtime_contracts.rs",
     *sorted((root / "crates/codegen/src/emit/runtime_contracts").glob("*.rs")),
 ]
@@ -758,7 +759,11 @@ for quirk_id in sorted(typed_contracts | mutable_contracts):
                 (emitter.name == "naming_contracts.rs" and path.relative_to(root).as_posix().startswith("crates/types/src/scalar/"))
                 or (emitter.name == "range_contracts.rs" and path.relative_to(root).as_posix() == "crates/types/src/scalar/range.rs")
                 or (
-                    emitter.name not in {"naming_contracts.rs", "range_contracts.rs"}
+                    emitter.name == "upload_id_contracts.rs"
+                    and path.relative_to(root).as_posix() == "crates/types/src/scalar/upload_id.rs"
+                )
+                or (
+                    emitter.name not in {"naming_contracts.rs", "range_contracts.rs", "upload_id_contracts.rs"}
                     and (
                         path.relative_to(root).as_posix().startswith("crates/core/src/")
                         or (
@@ -769,7 +774,11 @@ for quirk_id in sorted(typed_contracts | mutable_contracts):
                 )
             )
         }
-        if constant in generated_consumer_constants and emitter.name not in {"naming_contracts.rs", "range_contracts.rs"}:
+        if constant in generated_consumer_constants and emitter.name not in {
+            "naming_contracts.rs",
+            "range_contracts.rs",
+            "upload_id_contracts.rs",
+        }:
             identities.add("rustfs-gateway-codegen::codec::decode")
         identities_by_constant[constant] = identities
     if all(len(identities) == 1 for identities in identities_by_constant.values()):
@@ -953,5 +962,5 @@ if errors:
         print(f"check_quirk_ledger: {error}", file=sys.stderr)
     raise SystemExit(1)
 
-print("OK: quirk ledger 349 overlay facts = 259 proven sources (99 mutable + 160 typed contracts) + 90 deferred; 178 dimensions; 257 wired; 2 capability blocks")
+print("OK: quirk ledger 349 overlay facts = 260 proven sources (100 mutable + 160 typed contracts) + 89 deferred; 179 dimensions; 258 wired; 2 capability blocks")
 PYEOF

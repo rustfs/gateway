@@ -100,6 +100,16 @@ pub fn from_wire(
         Type::ObjectKey => format!("value::object_key(raw, \"{member}\", {name_policy})?"),
         Type::BucketName => format!("value::bucket_name(raw, \"{member}\")?"),
         Type::Range => "value::byte_range(raw)".to_owned(),
+        Type::Capability { exchange } => match exchange.as_str() {
+            "upload_id" => "rustfs_gateway_types::UploadIdClaim::from_wire(raw)".to_owned(),
+            _ => {
+                return Err(unsupported(
+                    operation,
+                    member,
+                    &format!("the `{exchange}` capability exchange has no decoder"),
+                ));
+            }
+        },
         Type::StringEnum(_) => format!("dto::{}::custom(raw.to_owned())", naming::type_name(member)),
         Type::ChecksumSpec => {
             return Err(unsupported(
@@ -152,6 +162,13 @@ pub fn to_wire(ty: &Type, member: &str, operation: &str) -> Result<String, Strin
         Type::ETag(render) => format!("&value::render_etag(v, EtagRender::{})", etag_render(*render)),
         Type::ObjectKey | Type::BucketName => "v.as_str()".to_owned(),
         Type::StringEnum(_) => "v.as_str()".to_owned(),
+        Type::Capability { .. } => {
+            return Err(unsupported(
+                operation,
+                member,
+                "a capability is a request-side claim and cannot be disclosed by a response codec",
+            ));
+        }
         _ => {
             return Err(unsupported(
                 operation,

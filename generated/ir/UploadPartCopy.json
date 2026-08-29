@@ -1,5 +1,5 @@
 {
-  "ir_version": "1",
+  "ir_version": "2",
   "operation": "UploadPartCopy",
   "http": {
             "method": "PUT",
@@ -110,9 +110,9 @@
                            "wire_name": "uploadId",
                            "required": true,
                            "binding": { "kind": "Query" },
-                           "type": { "kind": "String" },
+                           "type": { "kind": "Capability", "exchange": "upload_id" },
                            "hot": false,
-                           "quirk_refs": []
+                           "quirk_refs": ["q-mpu-upload-id-0037"]
                          },
                          {
                            "name": "SSECustomerAlgorithm",
@@ -372,6 +372,37 @@
                               }
                             ],
                 "cases": ["c-ssec-0001", "c-ssec-0002"]
+              },
+              {
+                "id": "q-mpu-upload-id-0037",
+                "kind": "capability_token",
+                "target": "UploadPart.UploadId",
+                "summary": "An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured.",
+                "evidence": [
+                              {
+                                "kind": "s3s-issue",
+                                "ref": "https://github.com/s3s-project/s3s/issues/51",
+                                "summary": "Upstream accepted any upload id without checking what it belonged to, so knowing an id was enough to act on somebody else's upload."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html",
+                                "summary": "The request is documented as naming a bucket, a key and an upload id together, and the id is only meaningful for that pair."
+                              }
+                            ],
+                "cases": [
+                           "c-mpu-0028",
+                           "c-mpu-0029",
+                           "c-mpu-0030",
+                           "c-mpu-0031",
+                           "c-mpu-0032",
+                           "c-mpu-0043",
+                           "c-mpu-0047",
+                           "c-mpu-0049",
+                           "c-mpu-0050",
+                           "c-mpu-0051",
+                           "c-mpu-0052"
+                         ]
               },
               {
                 "id": "q-etag-form-0074",

@@ -1,0 +1,22 @@
+error[E0277]: `UploadIdClaim` doesn't implement `std::fmt::Display`
+  --> tests/compile_fail/upload_claim_traits.rs:26:15
+   |
+26 |     println!("{left}");
+   |               ^^^^^^ `UploadIdClaim` cannot be formatted with the default formatter
+   |
+   = help: the trait `std::fmt::Display` is not implemented for `UploadIdClaim`
+   = note: in format strings you may be able to use `{:?}` (or {:#?} for pretty-print) instead
+
+error[E0369]: binary operation `==` cannot be applied to type `UploadIdClaim`
+  --> tests/compile_fail/upload_claim_traits.rs:27:18
+   |
+27 |     let _ = left == right;
+   |             ---- ^^ ----- UploadIdClaim
+   |             |
+   |             UploadIdClaim
+   |
+note: `UploadIdClaim` does not implement `PartialEq`
+  --> $WORKSPACE/crates/types/src/scalar/upload_id.rs
+   |
+   | pub struct UploadIdClaim {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^ `UploadIdClaim` is defined in another crate

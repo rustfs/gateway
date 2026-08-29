@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/rustfs/gateway/spec/ir.schema.json",
-  "title": "rustfs-gateway operation IR, version 1 (frozen)",
+  "title": "rustfs-gateway operation IR, version 2 (frozen)",
   "description": "Shape of one operation IR document. One AWS operation per file. IR is a generated artifact: model/s3.json (pinned) + model/overlays/*.toml -> xtask codegen -> IR -> spec/, OPERATIONS.md, generated/**. Never hand-edit outside spec/ir/samples/, which are hand-written goldens for codegen. additionalProperties:false is enforced on every object so that a leaked Smithy trait (notably smithy.api#documentation) fails validation instead of entering the wire contract.",
   "type": "object",
   "additionalProperties": false,
@@ -25,7 +25,7 @@
   ],
   "properties": {
     "ir_version": {
-      "const": "1",
+      "const": "2",
       "description": "Bumped on any breaking change to this schema. A bump requires a fresh IR-FREEZE review."
     },
     "operation": {
@@ -488,6 +488,16 @@
         { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "ObjectKey" } } },
         { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "BucketName" } } },
         { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "Range" } } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "exchange"],
+          "properties": {
+            "kind": { "const": "Capability" },
+            "exchange": { "const": "upload_id" }
+          },
+          "description": "An untrusted server-minted token that grants no authority until the named exchange produces its resolved capability."
+        },
         {
           "type": "object",
           "additionalProperties": false,

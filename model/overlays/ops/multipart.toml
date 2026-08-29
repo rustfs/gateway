@@ -227,6 +227,7 @@ quirks = ["q-mpu-limits-0038", "q-part-number-0072"]
 [[op.UploadPart.field]]
 side = "input"
 name = "UploadId"
+type = "Capability:upload_id"
 quirks = ["q-mpu-upload-id-0037"]
 
 [[op.UploadPart.field]]
@@ -369,6 +370,7 @@ quirks = ["q-mpu-request-root-0030", "q-mpu-limits-0038"]
 [[op.CompleteMultipartUpload.field]]
 side = "input"
 name = "UploadId"
+type = "Capability:upload_id"
 quirks = ["q-mpu-upload-id-0037"]
 
 [[op.CompleteMultipartUpload.field]]
@@ -455,6 +457,7 @@ input_hot = ["UploadId"]
 [[op.AbortMultipartUpload.field]]
 side = "input"
 name = "UploadId"
+type = "Capability:upload_id"
 quirks = ["q-mpu-upload-id-0037", "q-mpu-abort-0035"]
 
 [[op.AbortMultipartUpload.field]]
@@ -509,6 +512,7 @@ quirks = ["q-mpu-marker-0040"]
 [[op.ListParts.field]]
 side = "input"
 name = "UploadId"
+type = "Capability:upload_id"
 quirks = ["q-mpu-upload-id-0037"]
 
 [[op.ListParts.field]]

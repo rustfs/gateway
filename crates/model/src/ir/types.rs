@@ -53,6 +53,11 @@ pub enum Type {
     BucketName,
     /// A byte range.
     Range,
+    /// An untrusted server-minted token whose authority is granted only by the named exchange.
+    Capability {
+        /// The exchange that validates and resolves the token.
+        exchange: String,
+    },
     /// An open string enumeration.
     StringEnum(Vec<String>),
     /// A nested structure.

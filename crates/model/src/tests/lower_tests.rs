@@ -153,6 +153,45 @@ fn derives_route_bindings_and_shapes_from_the_model() {
 }
 
 #[test]
+fn lowers_upload_id_query_as_an_owned_capability() {
+    let text = format!(
+        "{MINI_OVERLAY}\n\n[[op.GetThing.field]]\nside = \"input\"\nname = \"Marker\"\ntype = \"Capability:upload_id\"\n"
+    );
+    let lowered = load(&text).expect("known capability exchange lowers");
+    let marker = lowered.operations[0]
+        .input
+        .iter()
+        .find(|field| field.name == "Marker")
+        .expect("Marker");
+
+    assert_eq!(
+        marker.ty,
+        Type::Capability {
+            exchange: "upload_id".to_owned(),
+        }
+    );
+}
+
+#[test]
+fn n_rejects_an_unknown_capability_exchange() {
+    let text = format!(
+        "{MINI_OVERLAY}\n\n[[op.GetThing.field]]\nside = \"input\"\nname = \"Marker\"\ntype = \"Capability:session_id\"\n"
+    );
+    let err = load(&text).expect_err("unknown exchanges fail closed");
+
+    assert!(format!("{err}").contains("unknown capability exchange `session_id`"), "{err}");
+}
+
+#[test]
+fn n_rejects_a_capability_outside_the_query() {
+    let text =
+        format!("{MINI_OVERLAY}\n\n[[op.GetThing.field]]\nside = \"input\"\nname = \"Owner\"\ntype = \"Capability:upload_id\"\n");
+    let err = load(&text).expect_err("capabilities are query-only");
+
+    assert!(format!("{err}").contains("Capability fields must use a query binding"), "{err}");
+}
+
+#[test]
 fn n_fails_when_an_operation_is_neither_included_nor_deferred() {
     let err = load("include = []\n").expect_err("an undecided operation is a hard failure");
     assert!(format!("{err}").contains("neither included nor deferred"), "{err}");

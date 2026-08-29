@@ -138,10 +138,10 @@ quirks = []
 name = "UploadId"
 wire_name = "uploadId"
 binding = "Query"
-type = "String"
+type = "Capability(upload_id)"
 required = true
 hot = false
-quirks = []
+quirks = ["q-mpu-upload-id-0037"]
 
 [[input]]
 name = "SSECustomerAlgorithm"

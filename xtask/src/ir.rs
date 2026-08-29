@@ -362,18 +362,65 @@ mod tests {
     }
 
     #[test]
-    fn ir_version_other_than_one_gets_the_exact_const_diagnostic() {
+    fn ir_version_other_than_two_gets_the_exact_const_diagnostic() {
         let schema = load_schema(root()).expect("schema must load");
         let validator = compile_schema(&schema).expect("schema must compile");
         let mut doc: Value =
             read_json(&root().join("spec/ir/samples/GetBucketLocation.json")).expect("positive sample must parse");
-        doc["ir_version"] = Value::String("2".to_owned());
+        doc["ir_version"] = Value::String("1".to_owned());
         let diagnostics = schema_diagnostics(&validator, &doc);
         assert!(
             diagnostics.iter().any(|diagnostic| {
                 diagnostic.at == "/ir_version" && diagnostic.rule == "schema:#/properties/ir_version/const"
             })
         );
+    }
+
+    #[test]
+    fn ir_v2_accepts_an_owned_upload_id_capability() {
+        let schema = load_schema(root()).expect("schema must load");
+        let validator = compile_schema(&schema).expect("schema must compile");
+        let mut doc: Value =
+            read_json(&root().join("spec/ir/samples/GetBucketLocation.json")).expect("positive sample must parse");
+        doc["ir_version"] = Value::String("2".to_owned());
+        doc["input"]["fields"][0]["type"] = serde_json::json!({
+            "kind": "Capability",
+            "exchange": "upload_id",
+        });
+
+        let diagnostics = schema_diagnostics(&validator, &doc);
+        assert!(diagnostics.is_empty(), "IR v2 capability diagnostics: {diagnostics:?}");
+    }
+
+    #[test]
+    fn n_ir_v2_rejects_an_unknown_capability_exchange() {
+        let schema = load_schema(root()).expect("schema must load");
+        let validator = compile_schema(&schema).expect("schema must compile");
+        let mut doc: Value =
+            read_json(&root().join("spec/ir/samples/GetBucketLocation.json")).expect("positive sample must parse");
+        doc["input"]["fields"][0]["type"] = serde_json::json!({
+            "kind": "Capability",
+            "exchange": "unknown",
+        });
+
+        let diagnostics = schema_diagnostics(&validator, &doc);
+        assert!(!diagnostics.is_empty(), "an unknown exchange must fail closed");
+    }
+
+    #[test]
+    fn n_ir_v2_rejects_extra_capability_properties() {
+        let schema = load_schema(root()).expect("schema must load");
+        let validator = compile_schema(&schema).expect("schema must compile");
+        let mut doc: Value =
+            read_json(&root().join("spec/ir/samples/GetBucketLocation.json")).expect("positive sample must parse");
+        doc["input"]["fields"][0]["type"] = serde_json::json!({
+            "kind": "Capability",
+            "exchange": "upload_id",
+            "raw": "must-not-cross-the-IR",
+        });
+
+        let diagnostics = schema_diagnostics(&validator, &doc);
+        assert!(!diagnostics.is_empty(), "capability objects must stay closed");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 {
-  "ir_version": "1",
+  "ir_version": "2",
   "operation": "CreateMultipartUpload",
   "http": {
             "method": "POST",
@@ -628,6 +628,9 @@
                            "c-mpu-0029",
                            "c-mpu-0030",
                            "c-mpu-0031",
+                           "c-mpu-0032",
+                           "c-mpu-0043",
+                           "c-mpu-0047",
                            "c-mpu-0049",
                            "c-mpu-0050",
                            "c-mpu-0051",

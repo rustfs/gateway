@@ -26,7 +26,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::overlay::{Overlay, ROUTE_FILE, RuleClassification, is_quirk_id};
+use crate::overlay::{
+    ContractValue, MutationDimension, Overlay, ROUTE_FILE, RuleClassification, UploadIdCapabilityScopeValue, is_quirk_id,
+};
 
 /// A throwaway overlay directory. Removed on drop, so a failing assertion does not leak one.
 struct Sandbox {
@@ -128,6 +130,29 @@ fn loads_a_mutable_runtime_contract_rule() {
 
     assert_eq!(overlay.classifications.get("q-sig-test-9999"), Some(&RuleClassification::Mutable));
     assert!(overlay.contract_rules.contains_key("q-sig-test-9999"));
+}
+
+#[test]
+fn loads_the_upload_id_resource_scope_as_a_mutable_runtime_contract() {
+    let sandbox = Sandbox::new("upload-id-scope-contract");
+    sandbox
+        .write("ops/alpha.toml", "include = [\"Alpha\"]\n\n[op.Alpha]\nprecedence = 100\n")
+        .write(
+            "quirks/multipart.toml",
+            "[[quirk]]\nid = \"q-mpu-upload-id-0037\"\nkind = \"capability_token\"\nclassification = \"mutable\"\nmutation_dimension = \"upload_id_capability_scope\"\ncontract_value = \"bucket_and_key\"\ntarget = \"UploadPart.UploadId\"\nsummary = \"The upload token is resolved within its bucket and key.\"\ncases = [\"c-mpu-0028\"]\n\n[[quirk.evidence]]\nkind = \"observed\"\nref = \"local\"\nsummary = \"The test fixture records the ownership requirement.\"\n",
+        );
+
+    let overlay = Overlay::load(sandbox.path()).expect("the typed upload-id scope contract loads");
+    let rule = overlay
+        .contract_rules
+        .get("q-mpu-upload-id-0037")
+        .expect("the upload-id contract is retained");
+
+    assert_eq!(rule.mutation_dimension, MutationDimension::UploadIdCapabilityScope);
+    assert_eq!(
+        rule.current,
+        ContractValue::UploadIdCapabilityScope(UploadIdCapabilityScopeValue::BucketAndKey)
+    );
 }
 
 #[test]

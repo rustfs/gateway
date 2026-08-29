@@ -15,10 +15,10 @@
 //! The S3 scalar vocabulary: the leaf types every generated dto is built from.
 //!
 //! Responsible for: the `type.kind` variants the frozen IR names — `ETag`, `Checksum`,
-//! `ChecksumSpec`, `Timestamp`, `OpaqueString`, `ObjectKey`, `BucketName`, `Range` — plus the
-//! error-code vocabulary and its HTTP status table. Each of them turns a protocol exception that
-//! would otherwise be an `if` inside a serialiser into a value: a rendering context, a timestamp
-//! format, a table row.
+//! `ChecksumSpec`, `Timestamp`, `OpaqueString`, `ObjectKey`, `BucketName`, `Range`, and the
+//! `UploadIdClaim` capability — plus the error-code vocabulary and its HTTP status table. Each of
+//! them turns a protocol exception that would otherwise be an `if` inside a serialiser into a
+//! value: a rendering context, a timestamp format, a table row, or an ownership proof.
 //! NOT responsible for: reading or writing the wire (headers, XML, query strings are
 //! `rustfs-gateway-http` / `rustfs-gateway-xml`), deciding *where* in the pipeline a value is validated (that is
 //! the P3 ingest pipeline), and IO of any kind.
@@ -42,6 +42,7 @@ mod opaque_string;
 mod parse_error;
 mod range;
 mod timestamp;
+mod upload_id;
 
 #[cfg(test)]
 mod tests;
@@ -61,3 +62,4 @@ pub use self::opaque_string::OpaqueString;
 pub use self::parse_error::{ParseError, rules};
 pub use self::range::{ByteRange, RangeOutcome, RangeParse, RangeSpec};
 pub use self::timestamp::{Timestamp, TimestampFormat};
+pub use self::upload_id::{RecordedUpload, ResolvedUploadId, UploadIdClaim, UploadRejection, resolve_upload};
