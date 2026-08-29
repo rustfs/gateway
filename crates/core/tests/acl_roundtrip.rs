@@ -788,17 +788,12 @@ fn a_discriminator_is_read_by_namespace_and_not_by_the_prefix_spelling() {
 /// The one thing this identity samples and cannot judge: a **raw** carriage return in text.
 ///
 /// The generator emits `\r` — nothing is excluded — and the round trip holds, which is precisely
-/// why the identity is not enough here. The writer escapes it as `&#13;` and
-/// `crates/xml/src/write.rs` says why: an XML processor normalises a literal CR to a line feed on
-/// the way in (XML 1.0 §2.11), so the byte would not survive otherwise. **This reader does not
-/// normalise**, so the pair agrees with itself and disagrees with every processor an AWS SDK uses
-/// — the rustfs/gateway#206 shape moved from element names onto text. A mutation that made the
-/// writer emit the raw byte survived the property at 1024 cases for exactly this reason.
-///
-/// Pinned in the direction it has, naming rustfs/gateway#283, so this assertion goes red the day
-/// the reader is repaired rather than the repair going unnoticed.
+/// why the identity is not enough here. The writer escapes it as `&#13;` because a conforming XML
+/// processor normalises a literal CR to a line feed before parsing (XML 1.0 §2.11). This direct
+/// input control binds that external wire rule to the ACL decoder instead of asking the writer and
+/// reader whether they agree with each other.
 #[test]
-fn n_a_raw_carriage_return_is_not_normalised_on_the_way_in() {
+fn a_raw_carriage_return_is_normalised_before_acl_decoding() {
     let document = "<AccessControlPolicy><Owner><ID>o</ID><DisplayName>a\rb</DisplayName></Owner>\
                     <AccessControlList><Grant><Grantee><ID>g</ID></Grantee>\
                     <Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>";
@@ -807,16 +802,16 @@ fn n_a_raw_carriage_return_is_not_normalised_on_the_way_in() {
 
     assert_eq!(
         stored.owner.as_ref().and_then(|owner| owner.display_name.as_deref()),
-        Some("a\rb"),
-        "rustfs/gateway#283: XML 1.0 §2.11 requires this to read back as a line feed, and it does not"
+        Some("a\nb"),
+        "XML 1.0 §2.11 requires a literal carriage return to reach the decoder as a line feed"
     );
 
-    // And the writer's half is right on its own terms: what it emits is the one spelling that
-    // would survive a conformant reader, which is what makes the divergence the reader's.
+    // The stored value is now a line feed, so the writer must not invent a carriage-return
+    // reference on the way back out.
     let reserialised = encode_read(stored);
     assert!(
-        reserialised.contains("<DisplayName>a&#13;b</DisplayName>"),
-        "the writer must not emit a bare CR, whatever the reader does with one: {reserialised}"
+        reserialised.contains("<DisplayName>a\nb</DisplayName>"),
+        "the normalised line feed must survive re-encoding: {reserialised}"
     );
 }
 

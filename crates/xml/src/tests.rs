@@ -565,17 +565,21 @@ fn n_refuses_a_forbidden_character_in_an_attribute_value_or_a_name() {
     assert_eq!(parse(name.as_bytes()), Err(XmlError::ForbiddenCharacter));
 }
 
-/// Positive — the three C0 controls XML 1.0 admits, and DEL, still reach a decoder.
+/// Positive — XML 1.0 line-end normalisation happens before text reaches a decoder.
 ///
-/// The control that keeps the refusal from widening into "no control characters". A tag value
-/// holding a newline is legal on this wire and a rule that refused it would break every caller
-/// that stores one.
+/// A literal CR and CRLF each become one LF, while a numeric character reference remains a CR.
+/// The last direction keeps the normaliser from rewriting the decoded value rather than the
+/// document's literal bytes. Tab and DEL keep the character guard from widening into "no control
+/// characters".
 #[test]
-fn the_three_admitted_controls_and_del_still_reach_a_decoder() {
-    let body = "<Root><Value>a\tb\nc\u{7f}d</Value><Second>e&#13;f</Second></Root>";
-    let root = parse(body.as_bytes()).expect("tab, newline, DEL and a carriage-return reference are legal XML 1.0");
-    assert_eq!(root.child_text("Value"), Some("a\tb\nc\u{7f}d"));
-    assert_eq!(root.child_text("Second"), Some("e\rf"));
+fn normalises_literal_line_ends_without_rewriting_a_character_reference() {
+    let body = "<Root><Cr>a\rb</Cr><CrLf>c\r\nd</CrLf><CData><![CDATA[e\r\nf]]></CData><Reference>g&#13;h</Reference><Controls>i\tj\u{7f}k</Controls></Root>";
+    let root = parse(body.as_bytes()).expect("the XML 1.0 characters are legal");
+    assert_eq!(root.child_text("Cr"), Some("a\nb"));
+    assert_eq!(root.child_text("CrLf"), Some("c\nd"));
+    assert_eq!(root.child_text("CData"), Some("e\nf"));
+    assert_eq!(root.child_text("Reference"), Some("g\rh"));
+    assert_eq!(root.child_text("Controls"), Some("i\tj\u{7f}k"));
 }
 
 /// Negative — the writer cannot emit a character the reader refuses.

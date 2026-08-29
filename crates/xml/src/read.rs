@@ -14,8 +14,8 @@
 
 //! The reader every generated decoder reads an S3 request body through.
 //!
-//! Responsible for: turning a buffered body into a bounded tree of [`XmlNode`], and refusing
-//! every construct an S3 request body has no use for.
+//! Responsible for: turning a buffered body into a bounded tree of [`XmlNode`], applying XML 1.0
+//! line-end normalisation, and refusing every construct an S3 request body has no use for.
 //! NOT responsible for: knowing which elements an operation expects, or what any of them mean.
 //! Upstream: `quick-xml`. Downstream: `rustfs-gateway-core`'s generated codecs.
 //!
@@ -335,15 +335,20 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
                 let Some(node) = stack.last_mut() else {
                     continue;
                 };
-                let decoded = chunk.decode().map_err(|_| XmlError::UnsupportedEntity)?;
+                // XML 1.0 §2.11 applies before parsing: a literal CR and CRLF each become one LF.
+                // `xml10_content` performs that byte-level normalisation without touching a CR
+                // introduced later by a numeric character reference.
+                let decoded = chunk.xml10_content().map_err(|_| XmlError::UnsupportedEntity)?;
                 node.text.push_str(representable(decoded.as_ref())?);
             }
             Ok(Event::CData(chunk)) => {
                 let Some(node) = stack.last_mut() else {
                     continue;
                 };
-                let decoded = core::str::from_utf8(chunk.as_ref()).map_err(|_| XmlError::NotUtf8)?;
-                node.text.push_str(representable(decoded)?);
+                // CDATA is part of the same parsed entity and follows the same §2.11 line-end
+                // rule; only entity expansion differs from ordinary text.
+                let decoded = chunk.xml10_content().map_err(|_| XmlError::NotUtf8)?;
+                node.text.push_str(representable(decoded.as_ref())?);
             }
             // `quick-xml` hands every `&…;` back verbatim instead of expanding it. That is the
             // property this crate relies on: the five XML predefines and numeric character
