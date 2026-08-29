@@ -30,6 +30,7 @@
 //! bytes and a header naming how many parts there are; the S3 error list documents
 //! `InvalidPartNumber` for a part number the object cannot satisfy.
 
+use http::StatusCode;
 use rustfs_gateway_core::ops::shared::part_table::{PartWindow, resolve_part};
 use rustfs_gateway_core::ops::shared::precondition::RangeDecision;
 use rustfs_gateway_types::ErrorCode;
@@ -94,12 +95,19 @@ fn the_window_renders_as_an_ordinary_partial_content_range() {
 fn part_number_zero_is_refused() {
     let rejection = resolve_part(0, &TWO_PARTS).expect_err("part numbers start at one");
     assert_eq!(*rejection.code(), ErrorCode::INVALID_PART_NUMBER);
+    assert_eq!(rejection.status(), StatusCode::BAD_REQUEST);
 }
 
 #[test]
 fn a_part_past_the_end_of_the_table_is_refused() {
     let rejection = resolve_part(3, &TWO_PARTS).expect_err("the object has two parts");
-    assert_eq!(*rejection.code(), ErrorCode::INVALID_PART_NUMBER);
+    assert_eq!(rejection.code().as_str(), ErrorCode::INVALID_PART_NUMBER.as_str());
+    assert_eq!(rejection.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_ne!(
+        rejection.code(),
+        &ErrorCode::INVALID_PART_NUMBER,
+        "status is part of a code's wire identity"
+    );
 }
 
 /// The boundary either side of the last part, in one test, because off-by-one here is the defect
@@ -118,6 +126,7 @@ fn the_last_part_resolves_and_the_one_after_it_does_not() {
 fn an_empty_part_table_satisfies_no_part_number() {
     let rejection = resolve_part(1, &[]).expect_err("an object with no parts has no part 1");
     assert_eq!(*rejection.code(), ErrorCode::INVALID_PART_NUMBER);
+    assert_eq!(rejection.status(), StatusCode::BAD_REQUEST);
 }
 
 /// A part carrying no bytes names no window, and `start - 1` on an empty part is exactly the
