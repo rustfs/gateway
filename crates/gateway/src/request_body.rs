@@ -71,7 +71,15 @@ impl StreamingRead {
     {
         let (ceilings, timeouts, body_quota) = body_plan;
         let (progress_tx, progress_rx) = watch::channel(0_u64);
-        let progress = WireProgress::new(digest).with_observer(progress_tx);
+        let progress = WireProgress::for_body(digest, body.as_ref()).with_observer(progress_tx);
+        if let Some(cap) = ceilings.declared
+            && declared_length.is_some_and(|length| length > cap)
+        {
+            return Err(crate::gate::past_declared_cap(progress.request_body_unfinished()));
+        }
+        if ceilings.whole_body && declared_length.is_some_and(|length| length > ceilings.buffered) {
+            return Err(crate::gate::past_buffered_ceiling(progress.request_body_unfinished()));
+        }
         let decoded_length = ingest.as_ref().map(ChunkIngest::decoded_length).or(declared_length);
         if ingest.is_none() && body.as_ref().is_none_or(http_body::Body::is_end_stream) {
             let verdict = if !progress.digest_matches() {
@@ -86,6 +94,7 @@ impl StreamingRead {
                 terminal: BodyMonitor {
                     terminal: terminal_rx,
                     progress: progress_rx,
+                    wire_progress: progress,
                     timeouts,
                 },
             });
@@ -101,7 +110,7 @@ impl StreamingRead {
         let (terminal_tx, terminal_rx) = oneshot::channel();
         let producer = VerifiedRequestBody {
             source,
-            progress,
+            progress: progress.clone(),
             digests: Some(integrity.begin()),
             terminal: Some(terminal_tx),
             body_quota,
@@ -115,6 +124,7 @@ impl StreamingRead {
             terminal: BodyMonitor {
                 terminal: terminal_rx,
                 progress: progress_rx,
+                wire_progress: progress,
                 timeouts,
             },
         })
@@ -129,6 +139,7 @@ impl StreamingRead {
 pub struct BodyMonitor {
     terminal: oneshot::Receiver<BodyTerminal>,
     pub(crate) progress: watch::Receiver<u64>,
+    wire_progress: WireProgress,
     pub(crate) timeouts: BodyTimeouts,
 }
 
@@ -137,9 +148,9 @@ pub(crate) struct BodyVerified;
 
 pub(crate) enum BodyEvent {
     Complete(Result<BodyVerified, S3Error>),
-    Quota,
-    Idle,
-    Throughput,
+    Quota(WireProgress),
+    Idle(WireProgress),
+    Throughput(WireProgress),
 }
 
 pub(crate) enum BodyTerminal {
@@ -186,7 +197,7 @@ impl BodyMonitor {
             };
             match wake {
                 Wake::Terminal(Ok(BodyTerminal::Complete(verdict))) => return BodyEvent::Complete(verdict),
-                Wake::Terminal(Ok(BodyTerminal::Quota)) => return BodyEvent::Quota,
+                Wake::Terminal(Ok(BodyTerminal::Quota)) => return BodyEvent::Quota(self.wire_progress.clone()),
                 Wake::Terminal(Err(_)) | Wake::Progress(Err(_)) => {
                     return BodyEvent::Complete(Err(crate::gate::incomplete()));
                 }
@@ -200,11 +211,13 @@ impl BodyMonitor {
                         idle_deadline = Box::pin(futures_timer::Delay::new(self.timeouts.waiting_for(true)));
                     }
                 }
-                Wake::Idle => return BodyEvent::Idle,
+                Wake::Idle => {
+                    return BodyEvent::Idle(self.wire_progress.clone());
+                }
                 Wake::Throughput => {
                     let delivered = *self.progress.borrow();
                     if delivered.saturating_sub(window_start_bytes) < self.timeouts.minimum_throughput_bytes() {
-                        return BodyEvent::Throughput;
+                        return BodyEvent::Throughput(self.wire_progress.clone());
                     }
                     window_start_bytes = delivered;
                     throughput_deadline = Some(Box::pin(futures_timer::Delay::new(self.timeouts.throughput_window())));
@@ -217,20 +230,45 @@ impl BodyMonitor {
     pub(crate) async fn wait(mut self) -> Result<BodyVerified, S3Error> {
         match self.next_event().await {
             BodyEvent::Complete(verdict) => verdict,
-            BodyEvent::Quota => Err(crate::gate::body_quota_refusal()),
-            BodyEvent::Idle => Err(crate::gate::body_idle_timeout()),
-            BodyEvent::Throughput => Err(crate::gate::body_throughput_timeout()),
+            BodyEvent::Quota(progress) => Err(crate::gate::body_quota_refusal(progress.request_body_unfinished())),
+            BodyEvent::Idle(progress) => Err(crate::gate::body_idle_timeout(progress.request_body_unfinished())),
+            BodyEvent::Throughput(progress) => Err(crate::gate::body_throughput_timeout(progress.request_body_unfinished())),
         }
     }
 
     #[cfg(test)]
     pub(crate) fn pending_for_test(timeouts: BodyTimeouts) -> (Self, oneshot::Sender<BodyTerminal>, watch::Sender<u64>) {
+        struct PendingBody;
+
+        impl http_body::Body for PendingBody {
+            type Data = Bytes;
+            type Error = core::convert::Infallible;
+
+            fn poll_frame(
+                self: Pin<&mut Self>,
+                _context: &mut Context<'_>,
+            ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+                Poll::Pending
+            }
+        }
+
+        let pending_body = PendingBody;
+        let wire_progress = WireProgress::for_body(BodyDigestObligation::None, Some(&pending_body));
+        Self::pending_with_wire_progress_for_test(timeouts, wire_progress)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_with_wire_progress_for_test(
+        timeouts: BodyTimeouts,
+        wire_progress: WireProgress,
+    ) -> (Self, oneshot::Sender<BodyTerminal>, watch::Sender<u64>) {
         let (terminal_tx, terminal) = oneshot::channel();
         let (progress_tx, progress) = watch::channel(0);
         (
             Self {
                 terminal,
                 progress,
+                wire_progress,
                 timeouts,
             },
             terminal_tx,
@@ -337,7 +375,10 @@ where
                 match Pin::new(pipeline.as_mut()).poll_fill(context, &mut buffer) {
                     Poll::Pending => Poll::Pending,
                     Poll::Ready(Err(_)) => {
-                        let refusal = this.progress.take_refusal().unwrap_or_else(|| ChunkIngest::refusal(pipeline));
+                        let refusal = this
+                            .progress
+                            .take_refusal()
+                            .unwrap_or_else(|| this.progress.mark_refusal_if_unfinished(ChunkIngest::refusal(pipeline)));
                         this.fail(refusal)
                     }
                     Poll::Ready(Ok(ReadProgress::Filled(0))) => this.fail(crate::gate::incomplete()),

@@ -324,18 +324,6 @@ pub(crate) mod sealed {
                                 BodyMonitoredOutcome::Failed(error) => {
                                     return Err(StaticDispatchError::Body(E::from(error)));
                                 }
-                                BodyMonitoredOutcome::Idle { cleanup_completed } => {
-                                    let _ = cleanup_completed;
-                                    return Err(StaticDispatchError::Body(E::from(crate::gate::body_idle_timeout())));
-                                }
-                                BodyMonitoredOutcome::Throughput { cleanup_completed } => {
-                                    let _ = cleanup_completed;
-                                    return Err(StaticDispatchError::Body(E::from(crate::gate::body_throughput_timeout())));
-                                }
-                                BodyMonitoredOutcome::Quota { cleanup_completed } => {
-                                    let _ = cleanup_completed;
-                                    return Err(StaticDispatchError::Body(E::from(crate::gate::body_quota_refusal())));
-                                }
                             };
                         let response = match managed {
                             HandlerCancellationOutcome::Completed(response) => response,

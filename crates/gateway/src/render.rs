@@ -60,7 +60,7 @@ pub struct S3Error {
     resource: Option<Box<str>>,
     etag: Option<ETag>,
     connection: ConnectionIntent,
-    pub(crate) body_unfinished: crate::gate::RequestBodyUnfinished,
+    pub(crate) body_unfinished: Option<crate::wire_read::RequestBodyUnfinished>,
     extras: Option<Box<Extras>>,
 }
 
@@ -177,7 +177,7 @@ impl From<ErrorResolution> for S3Error {
             resource: resolution.resource().map(Box::from),
             etag: resolution.etag().cloned(),
             connection: crate::close::after_refusal_code(resolution.code()),
-            body_unfinished: crate::gate::RequestBodyUnfinished::default(),
+            body_unfinished: None,
             extras,
         }
     }
@@ -401,7 +401,7 @@ fn unreachable_internal_resolution() -> S3Error {
         resource: None,
         etag: None,
         connection: ConnectionIntent::MayKeepAlive,
-        body_unfinished: crate::gate::RequestBodyUnfinished::default(),
+        body_unfinished: None,
         extras: None,
     }
 }
@@ -483,7 +483,9 @@ pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
     trace.apply(headers);
     // Only the transport turns these typed extensions into socket action.
     response.extensions_mut().insert(error.connection);
-    error.body_unfinished.attach(&mut response);
+    if let Some(proof) = error.body_unfinished {
+        proof.attach(&mut response);
+    }
     response
 }
 

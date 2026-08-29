@@ -45,9 +45,6 @@ pub(crate) enum HandlerCancellationOutcome<T> {
 pub(crate) enum BodyMonitoredOutcome<T> {
     Completed(T),
     Failed(S3Error),
-    Idle { cleanup_completed: bool },
-    Throughput { cleanup_completed: bool },
-    Quota { cleanup_completed: bool },
 }
 
 pub(crate) async fn handler_with_body_monitor<T>(
@@ -75,16 +72,20 @@ pub(crate) async fn handler_with_body_monitor<T>(
         Ok(output) => match body_event.await {
             BodyEvent::Complete(Ok(_)) => BodyMonitoredOutcome::Completed(output),
             BodyEvent::Complete(Err(error)) => BodyMonitoredOutcome::Failed(error),
-            BodyEvent::Idle => BodyMonitoredOutcome::Idle { cleanup_completed: true },
-            BodyEvent::Throughput => BodyMonitoredOutcome::Throughput { cleanup_completed: true },
-            BodyEvent::Quota => {
+            BodyEvent::Idle(progress) => {
+                BodyMonitoredOutcome::Failed(crate::gate::body_idle_timeout(progress.request_body_unfinished()))
+            }
+            BodyEvent::Throughput(progress) => {
+                BodyMonitoredOutcome::Failed(crate::gate::body_throughput_timeout(progress.request_body_unfinished()))
+            }
+            BodyEvent::Quota(progress) => {
                 cancellation.cancel(HandlerCancellation::BodyQuota);
-                BodyMonitoredOutcome::Quota { cleanup_completed: true }
+                BodyMonitoredOutcome::Failed(crate::gate::body_quota_refusal(progress.request_body_unfinished()))
             }
         },
         Err(BodyEvent::Complete(Ok(_))) => BodyMonitoredOutcome::Completed(handler.await),
         Err(BodyEvent::Complete(Err(error))) => BodyMonitoredOutcome::Failed(error),
-        Err(BodyEvent::Quota) => {
+        Err(BodyEvent::Quota(progress)) => {
             cancellation.cancel(HandlerCancellation::BodyQuota);
             let mut grace = Box::pin(futures_timer::Delay::new(cleanup_grace));
             let cleanup_completed = poll_fn(|context| {
@@ -97,9 +98,10 @@ pub(crate) async fn handler_with_body_monitor<T>(
                 Poll::Pending
             })
             .await;
-            BodyMonitoredOutcome::Quota { cleanup_completed }
+            let _ = cleanup_completed;
+            BodyMonitoredOutcome::Failed(crate::gate::body_quota_refusal(progress.request_body_unfinished()))
         }
-        Err(BodyEvent::Idle) => {
+        Err(BodyEvent::Idle(progress)) => {
             cancellation.cancel(HandlerCancellation::BodyIdle);
             let mut grace = Box::pin(futures_timer::Delay::new(cleanup_grace));
             let cleanup_completed = poll_fn(|context| {
@@ -112,9 +114,10 @@ pub(crate) async fn handler_with_body_monitor<T>(
                 Poll::Pending
             })
             .await;
-            BodyMonitoredOutcome::Idle { cleanup_completed }
+            let _ = cleanup_completed;
+            BodyMonitoredOutcome::Failed(crate::gate::body_idle_timeout(progress.request_body_unfinished()))
         }
-        Err(BodyEvent::Throughput) => {
+        Err(BodyEvent::Throughput(progress)) => {
             cancellation.cancel(HandlerCancellation::BodyThroughput);
             let mut grace = Box::pin(futures_timer::Delay::new(cleanup_grace));
             let cleanup_completed = poll_fn(|context| {
@@ -127,7 +130,8 @@ pub(crate) async fn handler_with_body_monitor<T>(
                 Poll::Pending
             })
             .await;
-            BodyMonitoredOutcome::Throughput { cleanup_completed }
+            let _ = cleanup_completed;
+            BodyMonitoredOutcome::Failed(crate::gate::body_throughput_timeout(progress.request_body_unfinished()))
         }
     }
 }
@@ -350,8 +354,56 @@ mod tests {
         });
 
         let outcome = handler_with_body_monitor(handler, cancellation, Duration::from_millis(100), Some(monitor)).await;
-        assert!(matches!(outcome, BodyMonitoredOutcome::Idle { cleanup_completed: true }));
+        assert!(matches!(outcome, BodyMonitoredOutcome::Failed(_)));
         assert_eq!(*observed.lock().expect("the observation lock"), Some(HandlerCancellation::BodyIdle));
+    }
+
+    /// Negative — cleanup can consume the final wire frame after the idle event fired, so the
+    /// response must consult the shared EOF observation instead of retaining the event's snapshot.
+    #[tokio::test]
+    async fn cleanup_rechecks_body_completion_before_marking_the_refusal() {
+        struct FinalFrameBody(Option<bytes::Bytes>);
+
+        impl http_body::Body for FinalFrameBody {
+            type Data = bytes::Bytes;
+            type Error = core::convert::Infallible;
+
+            fn poll_frame(
+                self: Pin<&mut Self>,
+                _context: &mut core::task::Context<'_>,
+            ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+                Poll::Ready(self.get_mut().0.take().map(http_body::Frame::data).map(Ok))
+            }
+
+            fn is_end_stream(&self) -> bool {
+                self.0.is_none()
+            }
+        }
+
+        let timeouts = crate::gate::BodyTimeouts::new(Duration::from_millis(20), Duration::from_millis(20))
+            .expect("non-zero body deadlines");
+        let body = FinalFrameBody(Some(bytes::Bytes::from_static(b"last")));
+        let wire_progress = crate::wire_read::WireProgress::for_body(crate::gate::BodyDigestObligation::None, Some(&body));
+        let mut frames = crate::wire_read::WireFrames::new(
+            body,
+            wire_progress.clone(),
+            crate::gate::BodyCeilings::of("PutObject", 1024),
+            timeouts,
+        );
+        let (monitor, _terminal, _progress) =
+            crate::request_body::BodyMonitor::pending_with_wire_progress_for_test(timeouts, wire_progress);
+        let (cancellation, context) = HandlerCancellationSource::pair();
+        let handler = Box::pin(async move {
+            assert_eq!(context.cancelled().await, HandlerCancellation::BodyIdle);
+            let frame = poll_fn(|poll_context| frames.poll_next(poll_context)).await;
+            assert!(matches!(frame, Ok(Some(_))), "cleanup consumes the final frame");
+        });
+
+        let outcome = handler_with_body_monitor(handler, cancellation, Duration::from_millis(100), Some(monitor)).await;
+        let BodyMonitoredOutcome::Failed(error) = outcome else {
+            panic!("the idle policy must still refuse the request");
+        };
+        assert!(error.body_unfinished.is_none(), "cleanup reached EOF before the response was rendered");
     }
 
     /// Negative — byte-at-a-time progress cannot rearm the body deadline forever when one
@@ -379,7 +431,7 @@ mod tests {
 
         let outcome = handler_with_body_monitor(handler, cancellation, Duration::from_millis(100), Some(monitor)).await;
         feeder.await.expect("the trickle feeder joins");
-        assert!(matches!(outcome, BodyMonitoredOutcome::Throughput { cleanup_completed: true }));
+        assert!(matches!(outcome, BodyMonitoredOutcome::Failed(_)));
         assert_eq!(*observed.lock().expect("the observation lock"), Some(HandlerCancellation::BodyThroughput));
     }
 
@@ -396,7 +448,7 @@ mod tests {
 
         let event = monitor.next_event().await;
 
-        assert!(matches!(event, BodyEvent::Idle));
+        assert!(matches!(event, BodyEvent::Idle(_)));
     }
 
     /// **Negative — a continuation that never resolves reports the bound, not a hang.**
