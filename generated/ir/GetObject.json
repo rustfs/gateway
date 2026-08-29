@@ -600,7 +600,8 @@
                             "binding": { "kind": "Header" },
                             "type": { "kind": "Integer" },
                             "hot": false,
-                            "quirk_refs": []
+                            "omit_when": { "kind": "ValueEquals", "value": "0" },
+                            "quirk_refs": ["q-tag-count-omit-0095"]
                           },
                           {
                             "name": "ObjectLockMode",
@@ -835,6 +836,11 @@
                                 "kind": "aws-doc",
                                 "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html",
                                 "summary": "The response syntax documents the header as the number of tags, present on tagged objects."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html",
+                                "summary": "The metadata response defines the same header as the number of tags, if any, on the object."
                               }
                             ],
                 "cases": ["c-tagging-0019", "c-tagging-0020"]

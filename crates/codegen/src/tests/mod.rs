@@ -36,6 +36,7 @@ mod naming_contract_tests;
 mod operations_json_tests;
 mod request_body_mode_tests;
 mod runtime_contract_tests;
+mod tagging_tests;
 mod tolerance_tests;
 mod url_tests;
 mod xml_list_tests;

@@ -12,7 +12,7 @@ success_status = 200
 alt_success_statuses = []
 predicates = ["Method HEAD", "Target Object"]
 head_mirrors = "GetObject"
-quirks = ["q-storageclass-0024", "q-head-0025"]
+quirks = ["q-storageclass-0024", "q-head-0025", "q-tag-count-omit-0095"]
 
 [auth]
 requirement = "Required"
@@ -607,7 +607,8 @@ binding = "Header"
 type = "Integer"
 required = false
 hot = false
-quirks = []
+omit_when = "ValueEquals(0)"
+quirks = ["q-tag-count-omit-0095"]
 
 [[output]]
 name = "ObjectLockMode"

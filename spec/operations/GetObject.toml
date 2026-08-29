@@ -614,7 +614,8 @@ binding = "Header"
 type = "Integer"
 required = false
 hot = false
-quirks = []
+omit_when = "ValueEquals(0)"
+quirks = ["q-tag-count-omit-0095"]
 
 [[output]]
 name = "ObjectLockMode"

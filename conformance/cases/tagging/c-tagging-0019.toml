@@ -1,17 +1,18 @@
 # c-tagging-0019 — the tag count travels on the object read as an integer header.
 #
-# Schema dimensions exercised: the third wire surface of the tag set — a response header on GET.
+# Schema dimensions exercised: the third wire surface of the tag set — a response header on GET
+# and HEAD.
 
 [case]
 id = "c-tagging-0019"
 schema_version = 1
-title = "GetObject on a tagged object carries x-amz-tagging-count with the number of tags"
+title = "GetObject and HeadObject on a tagged object carry the tag count"
 rationale = """
 The count header is how a reader learns there are labels worth a second request: SDKs surface it \
 directly, and replication tooling uses it to decide whether GetObjectTagging is needed at all. An \
 implementation that stores tags but never mints the count leaves every such reader believing the \
 object is unlabelled, and the tags silently stop propagating. The value is the count of the set \
-the write established — here two — and it must agree with what the subresource read returns."""
+the write established — here two — and it must agree on both the object body read and the metadata-only read."""
 polarity = "positive"
 operation = "GetObject"
 tags = ["tagging", "wire-bytes"]
@@ -21,6 +22,11 @@ quirks = ["q-tag-count-omit-0095"]
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
 summary = "The response syntax documents x-amz-tagging-count as the number of tags on the object."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html"
+summary = "The metadata-only response syntax includes x-amz-tagging-count, and the field is the number of tags when any are present."
 kind = "aws-doc"
 
 [clock]
@@ -65,3 +71,19 @@ connection_after = "open"
 
 [exchanges.expect.body]
 exact_utf8 = "counted"
+
+[[exchanges]]
+name = "the-metadata-read-counts-them"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-tagging/counted.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-tagging-count" = "2"

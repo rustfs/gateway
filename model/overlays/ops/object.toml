@@ -92,6 +92,15 @@ omit_when = "ValueEquals"
 omit_when_value = "STANDARD"
 quirks = ["q-storageclass-0024"]
 
+# The fixture and every real backend provide the count, including zero. Suppression belongs to the
+# generated codec so GetObject and the derived HeadObject response cannot implement two policies.
+[[op.GetObject.field]]
+side = "output"
+name = "TagCount"
+omit_when = "ValueEquals"
+omit_when_value = "0"
+quirks = ["q-tag-count-omit-0095"]
+
 [[op.GetObject.field]]
 side = "output"
 name = "ContentType"
@@ -182,7 +191,7 @@ error_codes = [
   "MethodNotAllowed",
   "NoSuchVersion",
 ]
-quirk_refs = ["q-head-0025", "q-storageclass-0024"]
+quirk_refs = ["q-head-0025", "q-storageclass-0024", "q-tag-count-omit-0095"]
 output_hot = ["ETag", "ContentLength", "ContentType", "LastModified"]
 
 [[op.HeadObject.field]]
@@ -196,6 +205,13 @@ name = "StorageClass"
 omit_when = "ValueEquals"
 omit_when_value = "STANDARD"
 quirks = ["q-storageclass-0024"]
+
+[[op.HeadObject.field]]
+side = "output"
+name = "TagCount"
+omit_when = "ValueEquals"
+omit_when_value = "0"
+quirks = ["q-tag-count-omit-0095"]
 
 [[op.HeadObject.field]]
 side = "output"

@@ -1,17 +1,17 @@
 # c-tagging-0020 — a zero count is an omitted header, not a zero.
 #
-# Schema dimensions exercised: header absence as the assertion, the omit-when-zero dimension.
+# Schema dimensions exercised: header absence on GET and HEAD, the omit-when-zero dimension.
 
 [case]
 id = "c-tagging-0020"
 schema_version = 1
-title = "GetObject on an untagged object omits x-amz-tagging-count entirely"
+title = "GetObject and HeadObject on an untagged object omit the tag count"
 rationale = """
 AWS omits the header when the object carries no tags — it does not send a zero — and readers are \
 written against that: presence means labels exist. An implementation that always emits the header \
 with 0 makes every object look labelled to a presence check, and one that emits an empty value \
 breaks integer parsing in strict SDKs. Absence is the only correct rendering of none, and only a \
-header-absence assertion can hold it."""
+header-absence assertion on both the body and metadata-only read can hold it."""
 polarity = "negative"
 operation = "GetObject"
 tags = ["tagging", "error-shape"]
@@ -23,8 +23,16 @@ url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
 summary = "The count header is documented on the response only for objects that have tags."
 kind = "aws-doc"
 
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html"
+summary = "The metadata response defines the tag-count header as the number of tags, if any, on the object."
+kind = "aws-doc"
+
 [clock]
 fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
 
 [[setup.buckets]]
 name = "conf-tagging"
@@ -35,16 +43,33 @@ key = "uncounted.txt"
 content_type = "text/plain"
 body = { utf8 = "uncounted" }
 
-[request]
+[[exchanges]]
+name = "the-body-read-omits-zero"
+
+[exchanges.request]
 method = "GET"
 target = "/conf-tagging/uncounted.txt"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
-[expect]
+[exchanges.expect]
 kind = "response"
 status = 200
 headers_absent = ["x-amz-tagging-count"]
 connection_after = "open"
 
-[expect.body]
+[exchanges.expect.body]
 exact_utf8 = "uncounted"
+
+[[exchanges]]
+name = "the-metadata-read-omits-zero"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-tagging/uncounted.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+headers_absent = ["x-amz-tagging-count"]
+connection_after = "open"
