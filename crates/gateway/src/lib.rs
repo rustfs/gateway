@@ -438,9 +438,9 @@ pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};
 // while `REQUIRED_FACADE_EXPORTS` was satisfied to the letter. A facade that exports the
 // service but not the values the service returns is not a facade.
 pub use rustfs_gateway_types::{
-    AwsNameValidator, BucketName, ChecksumAlgorithm, ChecksumDigest, ChecksumSpec, ChecksumType, ETag, ErrorCode, NamePolicy,
-    NameRejection, NameValidator, ObjectKey, SlashPolicy, Stricter, Timestamp, TimestampFormat, decode_once, floor_check_bucket,
-    floor_check_key,
+    AwsNameValidator, BucketName, ChecksumAlgorithm, ChecksumDigest, ChecksumSpec, ChecksumType, Checksummer, ETag, ErrorCode,
+    NamePolicy, NameRejection, NameValidator, ObjectKey, SlashPolicy, Stricter, Timestamp, TimestampFormat, decode_once,
+    floor_check_bucket, floor_check_key,
 };
 
 #[cfg(test)]
