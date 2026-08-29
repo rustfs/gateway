@@ -228,6 +228,10 @@ fn read_replication_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Repl
         shape.prefix = Some(raw.to_owned());
     }
     if let Some(child) = node.child("Filter") {
+        let recognized = ["And", "Prefix", "Tag"];
+        if !child.children.is_empty() && !child.children.iter().any(|nested| recognized.contains(&nested.name.as_str())) {
+            return Err(CodecError::malformed_xml("a non-empty structure contains no recognized child element").about("Filter"));
+        }
         shape.filter = Some(read_replication_rule_filter(child)?);
     }
     if let Some(raw) = node.child_text("Status") {

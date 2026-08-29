@@ -48,6 +48,15 @@ pub enum UnknownElementPolicyValue {
     Reject,
 }
 
+/// How a structure member treats a non-empty element whose children are all unknown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AllUnknownChildrenValue {
+    /// Preserve the element after every child is skipped.
+    Allow,
+    /// Refuse the element before its lost children can collapse it to an explicit empty value.
+    Reject,
+}
+
 /// Accepted spelling of a boolean carried as a wire string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BooleanSpellingValue {
@@ -77,6 +86,8 @@ pub enum CodecValue {
     HeaderTolerance(HeaderToleranceValue),
     /// Unknown-child policy applied by generated XML readers.
     UnknownElementPolicy(UnknownElementPolicyValue),
+    /// Policy for a non-empty structure member whose children are all unknown.
+    AllUnknownChildren(AllUnknownChildrenValue),
     /// Accepted spelling of a boolean wire value.
     BooleanSpelling(BooleanSpellingValue),
 }

@@ -37,6 +37,7 @@
 //! except as a comment and a type. That is the property that makes fifteen more families a matter
 //! of writing overlay entries.
 
+pub mod all_unknown;
 pub mod boolean;
 pub mod bounds;
 pub mod decode;

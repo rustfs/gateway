@@ -24,16 +24,16 @@ use std::fmt::Write as _;
 use rustfs_gateway_model::ir::{EmptyValue, Field, OmitWhen, OperationIr, Quirk, Type};
 use rustfs_gateway_model::json::Value;
 use rustfs_gateway_model::{
-    AbsoluteOrUncPolicyValue, AclChannelPolicyValue, AclOwnerPolicyValue, BooleanSpellingValue, BucketStatePreconditionValue,
-    CaseFoldingValue, ClientIngressForbiddenCodepointsValue, CodecRule, CodecValue, ConditionConflictValue,
-    ConditionFailureDetailValue, ConditionalWildcardParseValue, ConditionalWildcardWriteValue, ConditionalWriteOrderValue,
-    ContractRule, ContractValue, CopySourceGuardOrderValue, CopySourceIfMatchMissValue, CopyValidatorScopeValue,
-    DecodedUtf8Value, DefaultBucketValidatorValue, DefaultSlashPolicyValue, DeleteAbsentPolicyValue, ErrorRootNamespaceValue,
-    ErrorSecretFlowValue, EtagComparisonStrengthValue, HeadBodyPolicyValue, HeaderToleranceValue, IfMatchAbsentPolicyValue,
-    IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue, PercentDecodePassesValue,
-    ResidualEncodedDangerousValue, RuleClassification, SourceRule, StoredLegacyControlPolicyValue, TemporalRelationValue,
-    TraversalSegmentDelimitersValue, UnicodeNormalizationValue, UnknownElementPolicyValue, ValidatorAuthorityValue,
-    ValidatorReplaceabilityValue,
+    AbsoluteOrUncPolicyValue, AclChannelPolicyValue, AclOwnerPolicyValue, AllUnknownChildrenValue, BooleanSpellingValue,
+    BucketStatePreconditionValue, CaseFoldingValue, ClientIngressForbiddenCodepointsValue, CodecRule, CodecValue,
+    ConditionConflictValue, ConditionFailureDetailValue, ConditionalWildcardParseValue, ConditionalWildcardWriteValue,
+    ConditionalWriteOrderValue, ContractRule, ContractValue, CopySourceGuardOrderValue, CopySourceIfMatchMissValue,
+    CopyValidatorScopeValue, DecodedUtf8Value, DefaultBucketValidatorValue, DefaultSlashPolicyValue, DeleteAbsentPolicyValue,
+    ErrorRootNamespaceValue, ErrorSecretFlowValue, EtagComparisonStrengthValue, HeadBodyPolicyValue, HeaderToleranceValue,
+    IfMatchAbsentPolicyValue, IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue,
+    PercentDecodePassesValue, ResidualEncodedDangerousValue, RuleClassification, SourceRule, StoredLegacyControlPolicyValue,
+    TemporalRelationValue, TraversalSegmentDelimitersValue, UnicodeNormalizationValue, UnknownElementPolicyValue,
+    ValidatorAuthorityValue, ValidatorReplaceabilityValue,
 };
 
 use super::{quote, string_list};
@@ -272,6 +272,8 @@ pub fn render(
         Some(CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Reject)) => {
             out.push_str("codec_value = \"reject\"\n");
         }
+        Some(CodecValue::AllUnknownChildren(AllUnknownChildrenValue::Allow)) => out.push_str("codec_value = \"allow\"\n"),
+        Some(CodecValue::AllUnknownChildren(AllUnknownChildrenValue::Reject)) => out.push_str("codec_value = \"reject\"\n"),
         Some(CodecValue::BooleanSpelling(BooleanSpellingValue::AsciiCaseInsensitive)) => {
             out.push_str("codec_value = \"ascii_case_insensitive\"\n");
         }

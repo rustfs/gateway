@@ -20,6 +20,7 @@
 //! NOT responsible for: the parsers, which are tested in `rustfs-gateway-model`.
 //! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 
+mod all_unknown_tests;
 mod boolean_tests;
 mod bounds_tests;
 mod codegen_tests;

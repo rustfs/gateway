@@ -41,13 +41,13 @@ ops_dir = root / "model/overlays/ops"
 case_dir = root / "conformance/cases"
 
 EXPECTED = {
-    "records": 348,
-    "mutable": 98,
+    "records": 349,
+    "mutable": 99,
     "typed_contracts": 160,
     "untyped_contracts": 90,
-    "typed_sources": 258,
-    "dimensions": 177,
-    "wired": 256,
+    "typed_sources": 259,
+    "dimensions": 178,
+    "wired": 257,
     "emitted_constants": 170,
 }
 CAPABILITY_BLOCKS = {"q-cors-0006", "q-cors-0047"}
@@ -953,5 +953,5 @@ if errors:
         print(f"check_quirk_ledger: {error}", file=sys.stderr)
     raise SystemExit(1)
 
-print("OK: quirk ledger 348 overlay facts = 258 proven sources (98 mutable + 160 typed contracts) + 90 deferred; 177 dimensions; 256 wired; 2 capability blocks")
+print("OK: quirk ledger 349 overlay facts = 259 proven sources (99 mutable + 160 typed contracts) + 90 deferred; 178 dimensions; 257 wired; 2 capability blocks")
 PYEOF

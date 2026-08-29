@@ -43,6 +43,8 @@ pub enum MutationDimension {
     HeaderTolerance,
     /// Toggle whether generated XML readers skip or reject unknown children.
     UnknownElementPolicy,
+    /// Toggle whether a non-empty structure with no recognized children is refused.
+    AllUnknownChildren,
     /// Swap adjacent XML siblings in a generated element sequence.
     ElementOrder,
     /// Replace an XML element name with a mechanically distinct spelling.
@@ -392,6 +394,7 @@ impl MutationDimension {
             Self::MediaType => "media_type",
             Self::HeaderTolerance => "header_tolerance",
             Self::UnknownElementPolicy => "unknown_element_policy",
+            Self::AllUnknownChildren => "all_unknown_children",
             Self::ElementOrder => "element_order",
             Self::ElementRename => "element_rename",
             Self::AttributeRename => "attribute_rename",

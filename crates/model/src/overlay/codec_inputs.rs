@@ -22,7 +22,10 @@ use crate::error::{Error, Result};
 use crate::toml_lite::Toml;
 
 use super::MutationDimension;
-use super::codec::{BooleanSpellingValue, CodecRule, CodecValue, HeaderToleranceValue, SourceRule, UnknownElementPolicyValue};
+use super::codec::{
+    AllUnknownChildrenValue, BooleanSpellingValue, CodecRule, CodecValue, HeaderToleranceValue, SourceRule,
+    UnknownElementPolicyValue,
+};
 use super::{opt_str, required_str};
 
 pub(super) fn source_rule(table: &Toml, id: &str) -> Result<Option<SourceRule>> {
@@ -117,6 +120,16 @@ pub(super) fn codec_rule(table: &Toml, id: &str) -> Result<Option<CodecRule>> {
                 _ => return Err(Error::Overlay(format!("{what}: unknown element policy `{spelling}`"))),
             };
             (CodecValue::UnknownElementPolicy(policy), MutationDimension::UnknownElementPolicy)
+        }
+        "all_unknown_children" => {
+            reject_range_keys(table, &what)?;
+            let spelling = required_str(table, "codec_value", &what)?;
+            let policy = match spelling.as_str() {
+                "allow" => AllUnknownChildrenValue::Allow,
+                "reject" => AllUnknownChildrenValue::Reject,
+                _ => return Err(Error::Overlay(format!("{what}: unknown all-unknown-children policy `{spelling}`"))),
+            };
+            (CodecValue::AllUnknownChildren(policy), MutationDimension::AllUnknownChildren)
         }
         "boolean_spelling_policy" => {
             reject_range_keys(table, &what)?;

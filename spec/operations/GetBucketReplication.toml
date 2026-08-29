@@ -338,7 +338,7 @@ binding = "BodyXml"
 type = "Structure(ReplicationRuleFilter)"
 required = false
 hot = false
-quirks = []
+quirks = ["q-repl-0014"]
 
 [[shape.ReplicationRule.field]]
 name = "Status"

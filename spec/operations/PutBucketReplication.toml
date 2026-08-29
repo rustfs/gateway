@@ -11,7 +11,7 @@ precedence = 395
 success_status = 200
 alt_success_statuses = []
 predicates = ["Method PUT", "Target Bucket", "QueryPresent ?replication"]
-quirks = ["q-repl-0004", "q-repl-0005", "q-repl-0006", "q-repl-0007", "q-repl-0008", "q-repl-0009", "q-repl-0010", "q-repl-0011", "q-repl-0012", "q-repl-0013"]
+quirks = ["q-repl-0004", "q-repl-0005", "q-repl-0006", "q-repl-0007", "q-repl-0008", "q-repl-0009", "q-repl-0010", "q-repl-0011", "q-repl-0012", "q-repl-0013", "q-repl-0014"]
 
 [auth]
 requirement = "Required"
@@ -366,7 +366,7 @@ binding = "BodyXml"
 type = "Structure(ReplicationRuleFilter)"
 required = false
 hot = false
-quirks = []
+quirks = ["q-repl-0014"]
 
 [[shape.ReplicationRule.field]]
 name = "Status"

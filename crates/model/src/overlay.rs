@@ -61,11 +61,11 @@ mod select_restore_contract_inputs;
 mod select_restore_contract_values;
 
 pub use codec::{
-    AclChannelPolicyValue, AclOwnerPolicyValue, BooleanSpellingValue, BucketStatePreconditionValue, CodecRule, CodecValue,
-    ConditionConflictValue, ConditionalWildcardParseValue, ConditionalWildcardWriteValue, ConditionalWriteOrderValue,
-    CopyValidatorScopeValue, DeleteAbsentPolicyValue, ErrorSecretFlowValue, EtagComparisonStrengthValue, HeaderToleranceValue,
-    IfMatchAbsentPolicyValue, IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue, SourceRule,
-    TemporalRelationValue, UnknownElementPolicyValue,
+    AclChannelPolicyValue, AclOwnerPolicyValue, AllUnknownChildrenValue, BooleanSpellingValue, BucketStatePreconditionValue,
+    CodecRule, CodecValue, ConditionConflictValue, ConditionalWildcardParseValue, ConditionalWildcardWriteValue,
+    ConditionalWriteOrderValue, CopyValidatorScopeValue, DeleteAbsentPolicyValue, ErrorSecretFlowValue,
+    EtagComparisonStrengthValue, HeaderToleranceValue, IfMatchAbsentPolicyValue, IfMatchDatePrecedenceValue,
+    IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue, SourceRule, TemporalRelationValue, UnknownElementPolicyValue,
 };
 pub use contract_values::{
     AbsoluteOrUncPolicyValue, CaseFoldingValue, ClientIngressForbiddenCodepointsValue, ConditionFailureDetailValue, ContractRule,

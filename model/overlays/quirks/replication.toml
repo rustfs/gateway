@@ -250,3 +250,18 @@ cases   = ["c-replication-0011"]
   kind    = "aws-doc"
   ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html"
   summary = "The request documents the optional x-amz-bucket-object-lock-token header as a token allowing Object Lock to be enabled for an existing bucket."
+
+[[quirk]]
+id      = "q-repl-0014"
+kind    = "all_unknown_children"
+classification = "mutable"
+mutation_dimension = "all_unknown_children"
+codec_value = "reject"
+target  = "ReplicationRule.Filter"
+summary = "A syntactically non-empty Filter whose children are all unknown is refused before decoding can collapse it to the explicit empty Filter that means every object; an empty Filter and a known condition beside unknown children remain accepted."
+cases   = ["c-replication-0035"]
+
+  [[quirk.evidence]]
+  kind    = "other"
+  ref     = "https://github.com/rustfs/gateway/issues/250"
+  summary = "A lower-case Prefix or unknown wrapper was observed to decode as an empty filter, silently widening a scoped replication rule to every object."

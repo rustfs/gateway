@@ -414,7 +414,7 @@
                                                  "binding": { "kind": "BodyXml" },
                                                  "type": { "kind": "Structure", "shape": "ReplicationRuleFilter" },
                                                  "hot": false,
-                                                 "quirk_refs": []
+                                                 "quirk_refs": ["q-repl-0014"]
                                                },
                                                {
                                                  "name": "Status",
@@ -736,7 +736,8 @@
                   "q-repl-0010",
                   "q-repl-0011",
                   "q-repl-0012",
-                  "q-repl-0013"
+                  "q-repl-0013",
+                  "q-repl-0014"
                 ],
   "quirks": [
               {
@@ -915,6 +916,20 @@
                               }
                             ],
                 "cases": ["c-replication-0011"]
+              },
+              {
+                "id": "q-repl-0014",
+                "kind": "all_unknown_children",
+                "target": "ReplicationRule.Filter",
+                "summary": "A syntactically non-empty Filter whose children are all unknown is refused before decoding can collapse it to the explicit empty Filter that means every object; an empty Filter and a known condition beside unknown children remain accepted.",
+                "evidence": [
+                              {
+                                "kind": "other",
+                                "ref": "https://github.com/rustfs/gateway/issues/250",
+                                "summary": "A lower-case Prefix or unknown wrapper was observed to decode as an empty filter, silently widening a scoped replication rule to every object."
+                              }
+                            ],
+                "cases": ["c-replication-0035"]
               }
             ],
   "ext_points": []

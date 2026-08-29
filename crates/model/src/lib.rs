@@ -50,16 +50,17 @@ pub use error::{Error, Result};
 pub use ir::OperationIr;
 pub use lower::{Lowered, lower};
 pub use overlay::{
-    AbsoluteOrUncPolicyValue, AclChannelPolicyValue, AclOwnerPolicyValue, BooleanSpellingValue, BucketStatePreconditionValue,
-    CaseFoldingValue, ClientIngressForbiddenCodepointsValue, CodecRule, CodecValue, ConditionConflictValue,
-    ConditionFailureDetailValue, ConditionalWildcardParseValue, ConditionalWildcardWriteValue, ConditionalWriteOrderValue,
-    ContractRule, ContractValue, CopySourceGuardOrderValue, CopySourceIfMatchMissValue, CopyValidatorScopeValue,
-    DecodedUtf8Value, DefaultBucketValidatorValue, DefaultSlashPolicyValue, DeleteAbsentPolicyValue, ErrorRootNamespaceValue,
-    ErrorSecretFlowValue, ErrorStatus, EtagComparisonStrengthValue, HeadBodyPolicyValue, HeaderToleranceValue,
-    IfMatchAbsentPolicyValue, IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue, IfNoneDatePrecedenceValue, MutationDimension,
-    Overlay, PercentDecodePassesValue, ResidualEncodedDangerousValue, RuleClassification, ShadowingDecl, SourceRule,
-    StoredLegacyControlPolicyValue, TemporalRelationValue, TraversalSegmentDelimitersValue, UnicodeNormalizationValue,
-    UnknownElementPolicyValue, ValidatorAuthorityValue, ValidatorReplaceabilityValue,
+    AbsoluteOrUncPolicyValue, AclChannelPolicyValue, AclOwnerPolicyValue, AllUnknownChildrenValue, BooleanSpellingValue,
+    BucketStatePreconditionValue, CaseFoldingValue, ClientIngressForbiddenCodepointsValue, CodecRule, CodecValue,
+    ConditionConflictValue, ConditionFailureDetailValue, ConditionalWildcardParseValue, ConditionalWildcardWriteValue,
+    ConditionalWriteOrderValue, ContractRule, ContractValue, CopySourceGuardOrderValue, CopySourceIfMatchMissValue,
+    CopyValidatorScopeValue, DecodedUtf8Value, DefaultBucketValidatorValue, DefaultSlashPolicyValue, DeleteAbsentPolicyValue,
+    ErrorRootNamespaceValue, ErrorSecretFlowValue, ErrorStatus, EtagComparisonStrengthValue, HeadBodyPolicyValue,
+    HeaderToleranceValue, IfMatchAbsentPolicyValue, IfMatchDatePrecedenceValue, IfMatchMissOutcomeValue,
+    IfNoneDatePrecedenceValue, MutationDimension, Overlay, PercentDecodePassesValue, ResidualEncodedDangerousValue,
+    RuleClassification, ShadowingDecl, SourceRule, StoredLegacyControlPolicyValue, TemporalRelationValue,
+    TraversalSegmentDelimitersValue, UnicodeNormalizationValue, UnknownElementPolicyValue, ValidatorAuthorityValue,
+    ValidatorReplaceabilityValue,
 };
 pub use overlay::{
     ActualAllowOriginPolicyValue, ActualExposePolicyValue, ActualPreflightHeaderPolicyValue, ActualVaryPolicyValue,
