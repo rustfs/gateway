@@ -26,6 +26,7 @@
 use crate::interpolate::Captures;
 use crate::observation::Observation;
 use crate::value::Value;
+pub use rustfs_gateway::Transport;
 use std::collections::BTreeMap;
 
 /// How long a target here lets a committed continuation go without producing its outcome.
@@ -38,37 +39,6 @@ use std::collections::BTreeMap;
 ///
 /// Read by `crate::inprocess`, which assembles the service both transports run against.
 pub const COMMIT_PROGRESS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
-
-/// The assembly path a case runs on. Every case runs on every path and the runs must agree, so
-/// this is injected by the runner and is deliberately not expressible in a case file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Transport {
-    /// The hyper-based assembly.
-    Hyper,
-    /// The connection-level assembly.
-    Conn,
-}
-
-impl Transport {
-    /// The command-line spelling.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Transport::Hyper => "hyper",
-            Transport::Conn => "conn",
-        }
-    }
-
-    /// Parses the command-line spelling.
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Transport> {
-        match text {
-            "hyper" => Some(Transport::Hyper),
-            "conn" => Some(Transport::Conn),
-            _ => None,
-        }
-    }
-}
 
 /// Which implementation profile the target claims, gating `case.applies_to.profiles`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
