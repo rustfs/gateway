@@ -40,20 +40,13 @@
 //! * a peer that closed only its write side is [`ConnectionState::HalfClosed`], distinguished by
 //!   the socket still accepting a write after the read returned end of stream.
 //!
-//! The proof that this is what happens is the four-corner matrix at the bottom of this file. Two
-//! servers lie in opposite directions — one announces `close` and keeps the socket, one announces
-//! `keep-alive` and closes it — and the observer has to disagree with both announcements. One lie
-//! alone would prove nothing, because an observer stuck at a single answer satisfies whichever
-//! control happens to agree with it. If those tests ever start agreeing with the header, every
-//! `connection_after` assertion in the corpus has quietly stopped measuring anything.
+//! The four-corner test matrix below proves the observer against peers whose announcements disagree
+//! with their socket behavior in both directions.
 //!
 //! # Ports and parallelism
 //!
-//! [`Listener::start`] binds `127.0.0.1:0` and asks the kernel for the port. Nothing here writes a
-//! port number down, nothing scans for a free one, and two listeners in one test binary — or in
-//! twenty parallel `cargo test` threads — cannot collide, because the kernel does not hand the same
-//! ephemeral port to two live sockets. A hard-coded port, or a "find a free port then bind it"
-//! dance, are both races; asking the kernel is not.
+//! [`Listener::start`] binds `127.0.0.1:0`; the kernel allocates collision-free ephemeral ports for
+//! parallel tests without a racy scan for a supposedly free port.
 //!
 //! # Why the framing is hand-rolled
 //!
@@ -64,7 +57,7 @@
 //! A path whose purpose is to make those observable cannot delegate them. This is also why the
 //! workspace keeps `hyper` on `default-features = false`: nothing here needs its server.
 //!
-//! # Pacing: why the clock is never waited on
+//! # Pacing: peer demand plus an authored not-before deadline
 //!
 //! A body written into a loopback socket in one call is in the kernel buffer before the server has
 //! read a byte of it. Measure "how much of the body had gone out when the answer arrived" from the
@@ -73,34 +66,23 @@
 //! **invert while still reading as measured**. That is why `--transport conn` did not exist before
 //! this module could pace.
 //!
-//! The obvious way to pace is to sleep for `dataChunk.delay_ms`. It is also the wrong way, and the
-//! reason is in the corpus rather than in taste: `c-sig-0001` declares two 300 ms pauses *and*
-//! `terminate_within_ms = 3000`, `c-chunked-0001` declares 40 ms and 20 ms pauses *and*
-//! `terminate_within_ms = 5000`. Sleeping spends the case's own timing budget on the harness, and
-//! how much of it is left over is a property of the build machine. A suite whose verdicts move with
-//! the load average is a suite whose red is not information.
-//!
-//! So this paces on the **peer**, not on the clock. [`Pacer`] is a rendezvous between the client
-//! thread and the server thread of one connection:
+//! Clock delay alone is insufficient: a body written into a loopback kernel buffer before the
+//! server asks for it says nothing about server progress. Peer demand alone is also insufficient:
+//! it cannot provoke a read-interval timeout or express that a later chunk did not exist before a
+//! declared instant. This transport therefore requires both. [`Pacer`] is a rendezvous between the
+//! client thread and the server thread of one connection:
 //!
 //! * the server signals [`Pacer::server_wants_body`] at the moment it is about to block reading
 //!   body bytes off the socket — it has asked, and there is nothing buffered to answer with;
 //! * it signals [`Pacer::server_ended_body`] when the body reported its end, and
 //!   [`Pacer::server_answered`] when the service has produced a response.
 //!
-//! The client writes the head, then waits, and releases the next frame only when the server has
-//! asked for it. It stops writing the moment the response exists. No `Duration` enters the decision
-//! anywhere, so *the bytes on the wire are the same on an idle laptop and on a machine under load*,
-//! and the byte counts a case asserts are reproducible rather than probabilistic. The one
-//! [`Duration`] in the rendezvous is a safety net measured in tens of seconds, whose only job is to
-//! stop a wedged server from holding the run: it is never the path a passing case takes, and when it
-//! does fire the exchange is reported as an environment failure — a skip with a reason — rather than
-//! as a byte count nobody measured.
-//!
-//! What this deliberately does **not** do is honour the *number* in `dataChunk.delay_ms`. The value
-//! stays unread and `crate::keys::DECLARED` still says so. Pacing by acknowledgement gives the case
-//! everything the pause was there to buy — the server gets the chance to answer before the next
-//! frame exists — and gives it deterministically, which the pause could not.
+//! Peer demand and the authored not-before instant are independent gates; the client releases a
+//! frame only after both are satisfied, and stops waiting if the response arrives. Thus the lower-
+//! bound timing assertion is deterministic — a frame is never early — while scheduler delay can
+//! only make it later. The longer rendezvous duration remains a safety net: when a peer never
+//! asks or answers, the exchange is reported as an environment failure rather than as a byte count
+//! nobody measured.
 //!
 //! # Why the service runtime is current-threaded
 //!
@@ -122,12 +104,9 @@ use crate::exec::ServiceRuntime;
 use crate::observation::ConnectionState;
 use crate::sut::SutError;
 
-/// How long a server thread waits on a silent peer before giving the thread back.
-///
-/// Generous, because a case may legitimately pace a body across seconds; the case's own
-/// `timeout_ms` is the budget that decides a verdict, and this only stops a wedged connection from
-/// holding a thread for the life of the process.
-const SERVER_READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// A listener safety net strictly beyond the maximum exchange budget, so case timing decides first.
+/// It only stops a wedged connection from holding a thread for the life of the process.
+pub(crate) const SERVER_READ_TIMEOUT: Duration = Duration::from_secs(61);
 
 /// How long [`observe_connection`] waits for the peer to reveal what it did with the socket.
 ///
@@ -193,11 +172,7 @@ impl BodyDisposition {
     }
 }
 
-/// The rendezvous that replaces a sleep between two body frames.
-///
-/// One per connection. See the module documentation for why pacing is driven by the peer rather
-/// than by the clock; this type is that argument in code. Every field is a monotone fact about what
-/// the *server* thread has done, and the client thread waits on them.
+/// The per-connection rendezvous between peer demand, authored timing, and the client writer.
 #[derive(Debug, Default)]
 pub struct Pacer {
     state: Mutex<PacerState>,
@@ -206,15 +181,14 @@ pub struct Pacer {
 
 #[derive(Debug, Default, Clone, Copy)]
 struct PacerState {
-    /// How many times the server has been about to block reading body bytes with nothing buffered.
-    ///
-    /// A counter rather than a flag: the client compares it against how many demands it has already
-    /// answered, so a demand that arrives while the client is mid-write is not lost.
+    /// Server reads that would block; a counter keeps demands raised mid-write from being lost.
     wants: u64,
     /// Whether the body reported its end to the service.
     ended: bool,
     /// Whether the service has produced a response.
     answered: bool,
+    #[cfg(test)]
+    delay_waits_started: u64,
 }
 
 /// What released a client waiting on a [`Pacer`].
@@ -276,8 +250,57 @@ impl Pacer {
         self.state.lock().map(|state| state.answered).unwrap_or(true)
     }
 
+    /// Waits for an authored delay; returns `true` if an answer made the frame unnecessary.
+    /// A poisoned rendezvous also stops writes rather than reporting an unknown measurement.
+    pub fn await_delay_or_answered(&self, delay: Duration) -> bool {
+        let Some(deadline) = Instant::now().checked_add(delay) else {
+            return true;
+        };
+        let Ok(mut state) = self.state.lock() else {
+            return true;
+        };
+        #[cfg(test)]
+        if !delay.is_zero() {
+            state.delay_waits_started = state.delay_waits_started.saturating_add(1);
+            self.signal.notify_all();
+        }
+        loop {
+            if state.answered {
+                return true;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            let Ok((next, _)) = self.signal.wait_timeout(state, deadline - now) else {
+                return true;
+            };
+            state = next;
+        }
+    }
+
+    #[cfg(test)]
+    /// Waits until a production delay has started so the interrupt test cannot race it.
+    pub fn await_delay_wait(&self, budget: Duration) -> bool {
+        let deadline = Instant::now() + budget;
+        let Ok(mut state) = self.state.lock() else { return false };
+        while state.delay_waits_started == 0 {
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            let Ok((next, _)) = self.signal.wait_timeout(state, deadline - now) else { return false };
+            state = next;
+        }
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn delay_waits_started(&self) -> u64 {
+        self.state.lock().map(|state| state.delay_waits_started).unwrap_or(u64::MAX)
+    }
+
     /// Waits until the server asks for body bytes it has not already been given, or answers.
-    ///
     /// `answered` is how many demands this client has already satisfied, and is advanced on the way
     /// out. Passing the same counter through a whole chunk sequence is what stops a demand raised
     /// while the client was writing from being waited on twice.
@@ -305,18 +328,12 @@ impl Pacer {
         }
     }
 
-    /// Waits until the server has taken everything written so far, one way or another.
-    ///
-    /// What a client asks before tearing the connection down: "close here" is only a meaningful
-    /// instruction once the bytes before it have been handed over, and this is how that is known
-    /// without guessing at a delay. Three things count as handed over, and all three are needed:
+    /// Waits until the server has taken everything written so far before a client teardown.
     ///
     /// * the body reported its end — the declared length was met;
     /// * the service answered — nothing more of the body will be read;
     /// * **the server asked again** — it consumed what was there and wants more, which is the only
-    ///   one of the three that a *truncating* case ever reaches. Waiting for the body's end alone
-    ///   wedged `c-mpu-0043` for its whole budget: a part that announces a megabyte and writes
-    ///   twenty-nine bytes is never going to end, and the half-close is the point.
+    ///   outcome a truncating case reaches (`c-mpu-0043`).
     pub fn await_handover(&self, satisfied: &mut u64, budget: Duration) -> Demand {
         let deadline = std::time::Instant::now() + budget;
         let Ok(mut state) = self.state.lock() else {

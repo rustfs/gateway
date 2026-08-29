@@ -137,8 +137,8 @@ fn the_paced_early_refusal_case_is_green_over_a_socket_and_red_without_one() {
     );
 
     // The control. One test alone proves nothing here: a transport that reported `closed` and `0`
-    // unconditionally would satisfy the assertion above, and this is what says the corpus can still
-    // tell the two targets apart.
+    // unconditionally would satisfy the assertion above. The in-process run still judges the
+    // protocol result, but warns that arrival timing itself was not observed.
     let in_process = run("c-sig-0001");
     let process_outcome = only(&in_process);
     assert_eq!(process_outcome.verdict, Verdict::Failed);
@@ -148,6 +148,25 @@ fn the_paced_early_refusal_case_is_green_over_a_socket_and_red_without_one() {
             .any(|failure| failure.contains("connection_after")),
         "{:?}",
         failures(process_outcome)
+    );
+    assert!(
+        process_outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("delay_ms arrival timing was not observed")),
+        "{:?}",
+        process_outcome.diagnostics
+    );
+
+    let no_delay = run("c-range-0001");
+    let no_delay_outcome = only(&no_delay);
+    assert!(
+        no_delay_outcome
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("delay_ms arrival timing was not observed")),
+        "the warning was attached without a positive data-chunk delay: {:?}",
+        no_delay_outcome.diagnostics
     );
 }
 

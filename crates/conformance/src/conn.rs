@@ -15,8 +15,8 @@
 //! The connection target: the same service, reached by writing bytes on a socket.
 //!
 //! Responsible for: turning one `[request]` block into wire bytes, writing them on a real TCP
-//! connection at a pace the *peer* sets, reading the response back, and asking the socket what
-//! state it was left in.
+//! connection after both peer demand and the case's not-before delay, reading the response back,
+//! and asking the socket what state it was left in.
 //! NOT responsible for: framing the server side or observing the socket (`crate::socket`), reading
 //! or signing a request (`crate::inprocess`, whose reader and signer this module reuses rather than
 //! copying), judging anything (`crate::expect`), or storing anything (`crate::fixture`).
@@ -61,7 +61,7 @@
 //! * **HTTP/2** framing does not exist on either transport.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::inprocess::{ChunkStep, HOST, InProcess, Wire, clock_of, sign_request};
 use crate::interpolate::Captures;
@@ -361,12 +361,13 @@ impl Sut for Conn {
             .ok_or_else(|| SutError::Environment("no connection was opened".to_owned()))?;
         connection.start_exchange();
 
-        let started = std::time::Instant::now();
+        let started = Instant::now();
+        let deadline = started + budget;
         connection.write(&head.bytes)?;
-        let progress = write_body(connection, &pacer, &wire, head.declared_length, budget)?;
+        let progress = write_body(connection, &pacer, &wire, head.declared_length, deadline)?;
 
         let method = request_method(&wire, &head);
-        let read = connection.read_response_classified(&method, budget);
+        let read = connection.read_response_classified(&method, remaining(deadline)?);
         let ttfb_ms = elapsed_ms(started);
         let observation = match read {
             Ok(response) => {
@@ -489,8 +490,14 @@ fn request_method(wire: &Wire, head: &Head) -> String {
     parse_head(&head.bytes).map_or_else(|| wire.method.clone(), |parsed| parsed.method)
 }
 
-fn elapsed_ms(started: std::time::Instant) -> u64 {
+fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn remaining(deadline: Instant) -> Result<Duration, SutError> {
+    deadline.checked_duration_since(Instant::now()).ok_or_else(|| {
+        SutError::Environment("the exchange exhausted its declared timeout before the response could be observed".to_owned())
+    })
 }
 
 /// The wait a wedged exchange is cut off at, which is never the path a passing case takes.
@@ -501,26 +508,36 @@ fn budget_of(timeout_ms: Option<i64>) -> Duration {
         .min(MAX_BUDGET)
 }
 
-/// Writes the body at the pace the peer sets, and reports what got out before the answer did.
+/// Writes the body after peer demand and each authored not-before deadline.
 ///
 /// The loop is the whole argument of this transport. Before every frame it waits for the server to
-/// ask for body bytes it does not have; if the response exists instead, it stops writing. No frame
-/// is released on a timer, so what the client had written when the answer arrived is the same
-/// number on an idle machine and on a loaded one.
+/// ask for body bytes it does not have; if the response exists instead, it stops writing. A data
+/// frame also waits until its independently authored `delay_ms` has elapsed. Fixing that deadline
+/// when the frame becomes current makes the release time the later of peer demand and not-before,
+/// rather than incorrectly adding one wait to the other.
 fn write_body(
     connection: &mut Connection,
     pacer: &Arc<Pacer>,
     wire: &Wire,
     declared_length: u64,
-    budget: Duration,
+    deadline: Instant,
 ) -> Result<BodyProgress, SutError> {
     let mut satisfied = 0_u64;
     let mut notes = Vec::new();
     let mut sent_at_response = None;
     for (index, step) in wire.steps.iter().enumerate() {
         match step {
-            ChunkStep::Data(bytes) => {
-                match pacer.await_demand(&mut satisfied, budget) {
+            ChunkStep::Data(bytes, delay_ms) => {
+                let not_before = Instant::now()
+                    .checked_add(Duration::from_millis(*delay_ms))
+                    .filter(|not_before| *not_before <= deadline)
+                    .ok_or_else(|| {
+                        SutError::Environment(format!(
+                            "data chunk {index} declares a {delay_ms}ms delay beyond the remaining exchange timeout"
+                        ))
+                    })?;
+                let wait = remaining(deadline)?;
+                match pacer.await_demand(&mut satisfied, wait) {
                     Demand::More => {}
                     Demand::Answered => {
                         // The measurement point. Everything after this is a client finishing a
@@ -536,9 +553,14 @@ fn write_body(
                              {}ms. That is a wedged exchange, not a byte count: reporting the \
                              frames this client happened to have written would be reporting the \
                              timeout",
-                            budget.as_millis()
+                            wait.as_millis()
                         )));
                     }
+                }
+                if pacer.await_delay_or_answered(not_before.saturating_duration_since(Instant::now())) {
+                    sent_at_response = Some(connection.body_written());
+                    catch_up(connection, wire, index);
+                    break;
                 }
                 connection.write_body(bytes)?;
             }
@@ -547,7 +569,7 @@ fn write_body(
                 delay_ms,
                 duration_ms,
             } => {
-                if let Some(note) = control(connection, pacer, &mut satisfied, action, *delay_ms, *duration_ms, budget)? {
+                if let Some(note) = control(connection, pacer, &mut satisfied, action, *delay_ms, *duration_ms, deadline)? {
                     notes.push(note);
                 }
                 if connection.torn_down() {
@@ -585,7 +607,7 @@ fn write_body(
 fn catch_up(connection: &mut Connection, wire: &Wire, from: usize) {
     for step in wire.steps.iter().skip(from) {
         match step {
-            ChunkStep::Data(bytes) => {
+            ChunkStep::Data(bytes, _) => {
                 if connection.write_body(bytes).is_err() {
                     return;
                 }
@@ -605,7 +627,7 @@ fn control(
     action: &str,
     delay_ms: u64,
     duration_ms: u64,
-    budget: Duration,
+    deadline: Instant,
 ) -> Result<Option<String>, SutError> {
     match action {
         // A stall is "hold the connection open and send nothing", and it is the one place a
@@ -613,7 +635,7 @@ fn control(
         // the moment there is an answer to read, so a server that refuses on the head does not cost
         // the case its own `terminate_within_ms`.
         "stall" => {
-            let _ = pacer.stall_until_answered(Duration::from_millis(duration_ms).min(budget));
+            let _ = pacer.stall_until_answered(Duration::from_millis(duration_ms).min(remaining(deadline)?));
             Ok(None)
         }
         // Both teardowns wait for the server to have taken what was already written, so that
@@ -622,14 +644,12 @@ fn control(
         // connection down relative to the work it started, and there is no acknowledgement that
         // could stand in for it.
         "half_close" => {
-            let _ = pacer.await_handover(satisfied, budget);
-            sleep(delay_ms);
+            wait_for_teardown(pacer, satisfied, action, delay_ms, deadline)?;
             connection.half_close()?;
             Ok(None)
         }
         "close" => {
-            let _ = pacer.await_handover(satisfied, budget);
-            sleep(delay_ms);
+            wait_for_teardown(pacer, satisfied, action, delay_ms, deadline)?;
             connection.close()?;
             Ok(Some(
                 "this client closed the connection itself, so `kind = \"connection_reset\"` and \
@@ -645,6 +665,28 @@ fn control(
              connection that never performed it is a false green"
         ))),
     }
+}
+
+fn wait_for_teardown(
+    pacer: &Arc<Pacer>,
+    satisfied: &mut u64,
+    action: &str,
+    delay_ms: u64,
+    deadline: Instant,
+) -> Result<(), SutError> {
+    let handover_budget = teardown_handover_budget(action, delay_ms, remaining(deadline)?)?;
+    let _ = pacer.await_handover(satisfied, handover_budget);
+    sleep(delay_ms);
+    let _ = remaining(deadline)?;
+    Ok(())
+}
+
+fn teardown_handover_budget(action: &str, delay_ms: u64, budget: Duration) -> Result<Duration, SutError> {
+    budget.checked_sub(Duration::from_millis(delay_ms)).ok_or_else(|| {
+        SutError::Environment(format!(
+            "{action} control chunk declares a {delay_ms}ms delay beyond the remaining exchange timeout"
+        ))
+    })
 }
 
 fn sleep(millis: u64) {
