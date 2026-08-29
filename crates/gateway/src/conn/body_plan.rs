@@ -27,6 +27,9 @@ use rustfs_gateway_stream::{NoZeroCopy, RefusedBodyTransport, TransportCaps};
 
 use super::metrics::ResponseFallbackReason;
 
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+const SUPPORTED_KERNEL_TRANSFER_CAPS: TransportCaps = TransportCaps::SENDFILE;
+
 pub(super) enum ApplicationBodyPlan {
     #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
     KernelFile(rustfs_gateway_stream::FileRegion),
@@ -44,7 +47,7 @@ pub(super) enum ApplicationBodyPlan {
 pub(super) fn plan_application_body(body: Body) -> io::Result<ApplicationBodyPlan> {
     #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
     {
-        match body.into_transport().try_into_file_region_for(TransportCaps::SENDFILE) {
+        match body.into_transport().try_into_file_region_for(SUPPORTED_KERNEL_TRANSFER_CAPS) {
             Ok(region) => Ok(ApplicationBodyPlan::KernelFile(region)),
             Err(refused) if refused.reason() == NoZeroCopy::NotFileBacked => {
                 Ok(refused_application_body(refused, ResponseFallbackReason::NotFileBacked))

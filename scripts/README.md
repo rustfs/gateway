@@ -160,6 +160,8 @@ fixed now so that the same check does not get written twice under two names.
 | `check_monomorphic_dispatch.sh` | The public static assembly emits direct operation codec and concrete handler calls, with no erased dispatch callback in that call chain | P7-01 |
 | `check_handler_context_migration.sh` | Reviewed handlers keep legacy `call` beside an explicit `call_with_context`; core wrappers also retain the framework cancellation source through delegation | P3-03 |
 | `check_handler_deadline_class.sh` | Every standard operation has one explicit closed handler-deadline class; unknown operations receive no implicit class | P3-05 |
+| `check_transport_shared.sh` | Conformance and the facade consume one shared two-path transport vocabulary | P7-03 |
+| `check_caps_have_impl.sh` | Every kernel-transfer capability advertised by response planning has a compiled production implementation | P7-03 |
 | `check_schema_dimensions.sh` | The frozen conformance schema retains all nine P8-01 day-one expression dimensions | P8-01 |
 | `check_evidence_shape.sh` | Every case has compact HTTPS/URN-plus-summary evidence and cannot carry pasted upstream prose | P8-01 |
 | `check_baseline_ratchet.sh` | The conformance baseline failure set only shrinks | P8-01 |

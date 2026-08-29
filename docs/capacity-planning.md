@@ -100,6 +100,23 @@ runtime, that is single-digit milliseconds against a low-single-digit-millisecon
 single-worker runtime the same load pushes p99 past 200 ms, which is the reason the case pins its
 runtime flavour rather than inheriting the default.
 
+## Response write strategy
+
+`ServerConfig::write_strategy = WriteStrategy::Disabled` passes `writev(false)` to Hyper's HTTP/1
+builder. Hyper calls that internal mode `WriteStrategy::Flatten`: response head and body fragments
+are copied into one contiguous connection buffer before the socket write. This can help an I/O
+adapter that handles vectored writes poorly, but it adds user-space copies and can grow the buffered
+working set up to `h1_max_buf_size`; it must not be used to claim a zero-copy file response.
+
+`WriteStrategy::Enabled` forces Hyper's queued vectored-write mode, while `Auto` lets Hyper inspect
+the concrete I/O transport. These settings apply only to the Hyper assembly. The plaintext
+self-held HTTP/1 driver negotiates a `FileRegion` separately and reports completed kernel-transfer
+calls and bytes; TLS, HTTP/2, verification obligations and unsupported platforms stay on a named,
+byte-counted user-space fallback.
+
+Dedicated 1 GiB RSS and syscall measurements belong to rustfs/backlog#1766, as recorded by
+ADR-0014. They are not wall-clock gates on shared runners.
+
 ## What this does not do
 
 - It does not share limits across processes. A fleet of `n` gateways has `n` independent budgets.

@@ -20271,6 +20271,127 @@ expect_fail check_sig_case_coverage.sh \
     mut_sigv2_conformance_wrong_secret_removed \
     'lost conformance evidence'
 
+# -- check_transport_shared.sh / check_caps_have_impl.sh -----------------------------------------
+
+mut_transport_shared_reexport_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/conformance/src/sut.rs")
+text = path.read_text()
+old = "pub use rustfs_gateway::Transport;"
+if text.count(old) != 1:
+    raise SystemExit("shared Transport re-export mutation subject is not unique")
+path.write_text(text.replace(old, "// shared Transport re-export removed", 1))
+PYEOF
+}
+expect_fail check_transport_shared.sh \
+    'conformance dropping the facade Transport re-export' \
+    mut_transport_shared_reexport_removed \
+    'does not re-export'
+
+mut_transport_shared_duplicate_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/conformance/src/sut.rs")
+text = path.read_text()
+old = "pub use rustfs_gateway::Transport;"
+if text.count(old) != 1:
+    raise SystemExit("duplicate Transport mutation subject is not unique")
+path.write_text(text.replace(old, old + "\npub enum Transport { Hyper, Conn }", 1))
+PYEOF
+}
+expect_fail check_transport_shared.sh \
+    'conformance restoring a second Transport enum' \
+    mut_transport_shared_duplicate_added \
+    'defines a second Transport enum'
+
+mut_transport_shared_census_reduced() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/transport.rs")
+text = path.read_text()
+old = "pub const ALL: [Self; 2] = [Self::Hyper, Self::Conn];"
+if text.count(old) != 1:
+    raise SystemExit("transport census mutation subject is not unique")
+path.write_text(text.replace(old, "pub const ALL: [Self; 1] = [Self::Hyper];", 1))
+PYEOF
+}
+expect_fail check_transport_shared.sh \
+    'the shared transport census dropping the self-held path' \
+    mut_transport_shared_census_reduced \
+    'no longer names both production paths'
+
+mut_caps_unimplemented_advertised() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/conn/body_plan.rs")
+text = path.read_text()
+old = "const SUPPORTED_KERNEL_TRANSFER_CAPS: TransportCaps = TransportCaps::SENDFILE;"
+if text.count(old) != 1:
+    raise SystemExit("kernel capability mutation subject is not unique")
+path.write_text(text.replace(old, "const SUPPORTED_KERNEL_TRANSFER_CAPS: TransportCaps = TransportCaps::SPLICE;", 1))
+PYEOF
+}
+expect_fail check_caps_have_impl.sh \
+    'the response planner advertising splice without an implementation' \
+    mut_caps_unimplemented_advertised \
+    'has no reviewed implementation mapping'
+
+mut_caps_census_bypassed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/conn/body_plan.rs")
+text = path.read_text()
+old = "try_into_file_region_for(SUPPORTED_KERNEL_TRANSFER_CAPS)"
+if text.count(old) != 1:
+    raise SystemExit("capability census use mutation subject is not unique")
+path.write_text(text.replace(old, "try_into_file_region_for(TransportCaps::SENDFILE)", 1))
+PYEOF
+}
+expect_fail check_caps_have_impl.sh \
+    'response planning bypassing the reviewed capability census' \
+    mut_caps_census_bypassed \
+    'bypasses the supported capability census'
+
+mut_caps_server_module_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/src/lib.rs")
+text = path.read_text()
+old = "mod sendfile;"
+if text.count(old) != 1:
+    raise SystemExit("sendfile module mutation subject is not unique")
+path.write_text(text.replace(old, "// sendfile module removed", 1))
+PYEOF
+}
+expect_fail check_caps_have_impl.sh \
+    'the server dropping the advertised sendfile backend module' \
+    mut_caps_server_module_removed \
+    'does not compile the sendfile backend'
+
+mut_caps_platform_call_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/server/src/sendfile.rs")
+text = path.read_text()
+old = "nix::sys::sendfile::sendfile"
+if text.count(old) < 1:
+    raise SystemExit("platform sendfile mutation subject is missing")
+path.write_text(text.replace(old, "nix::sys::sendfile::missing", 1))
+PYEOF
+}
+expect_fail check_caps_have_impl.sh \
+    'the advertised sendfile backend losing its platform call' \
+    mut_caps_platform_call_removed \
+    'a Linux or Apple sendfile implementation is missing'
+
 fi
 
 guard_finish
