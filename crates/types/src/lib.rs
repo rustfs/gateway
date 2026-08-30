@@ -48,6 +48,7 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+pub mod cors_tagging;
 pub mod persistence;
 pub mod placeholder;
 mod scalar;

@@ -12,3 +12,5 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/lifecycle.rs` | Binds Lifecycle codecs, D1 structural evidence, D5 enabled decisions, traceable samples, parser boundaries, and mutations. | Auditing Lifecycle persistence compatibility. |
 | `src/bucket_encryption.rs` | Binds Bucket Encryption codecs, algorithm/KMS/bucket-key behavior, traceable samples, and mutations. | Auditing default-encryption persistence compatibility. |
 | `src/public_access_block.rs` | Binds Public Access Block codecs, four-switch behavior, traceable samples, and mutations. | Auditing public-access persistence compatibility. |
+| `src/cors.rs` | Binds CORS production/oracle codecs, full runtime projection, samples, parser boundaries, and mutations. | Auditing CORS persistence compatibility. |
+| `src/tagging.rs` | Binds Tagging production/oracle codecs, complete tag projection, samples, parser boundaries, and mutations. | Auditing Tagging persistence compatibility. |

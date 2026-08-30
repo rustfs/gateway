@@ -21,15 +21,19 @@
 
 use core::fmt;
 
+use crate::cors_tagging::{
+    CorsBehaviorProjection, PersistedCorsConfiguration, PersistedCorsRule, PersistedTag, PersistedTagging,
+};
 use crate::persistence::{
     PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedDefaultRetention,
     PersistedEncryptionByDefault, PersistedObjectLockConfiguration, PersistedObjectLockRule,
     PersistedPublicAccessBlockConfiguration, PersistedVersioningConfiguration,
 };
 use s3s::dto::{
-    BucketVersioningStatus, DefaultRetention, ExcludedPrefix, MFADelete, ObjectLockConfiguration, ObjectLockEnabled,
-    ObjectLockRetentionMode, ObjectLockRule, PublicAccessBlockConfiguration, ServerSideEncryption, ServerSideEncryptionByDefault,
-    ServerSideEncryptionConfiguration, ServerSideEncryptionRule, VersioningConfiguration,
+    BucketVersioningStatus, CORSConfiguration, CORSRule, DefaultRetention, ExcludedPrefix, MFADelete, ObjectLockConfiguration,
+    ObjectLockEnabled, ObjectLockRetentionMode, ObjectLockRule, PublicAccessBlockConfiguration, ServerSideEncryption,
+    ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, Tag, Tagging,
+    VersioningConfiguration,
 };
 use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -80,6 +84,24 @@ pub struct S3sPublicAccessBlockObservation {
     pub structure: PersistedPublicAccessBlockConfiguration,
     /// The four effective access decisions in stable field order.
     pub behavior: (bool, bool, bool, bool),
+}
+
+/// One old-codec CORS observation before either side is normalized.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3sCorsObservation {
+    /// Complete parsed persistence structure.
+    pub structure: PersistedCorsConfiguration,
+    /// Independently projected runtime CORS behavior.
+    pub behavior: CorsBehaviorProjection,
+}
+
+/// One old-codec Tagging observation before either side is normalized.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3sTaggingObservation {
+    /// Complete parsed persistence structure.
+    pub structure: PersistedTagging,
+    /// Independently projected complete tag set.
+    pub tags: Vec<(Option<String>, Option<String>)>,
 }
 
 /// Failure raised by the pinned old persistence codec.
@@ -272,6 +294,75 @@ pub fn serialize_s3s_bucket_encryption(value: &PersistedBucketEncryptionConfigur
     Ok(output)
 }
 
+/// Parses CORS bytes with the pinned s3s persistence decoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
+pub fn parse_s3s_cors(input: &[u8]) -> Result<S3sCorsObservation, CompatCodecError> {
+    let mut deserializer = Deserializer::new(input);
+    let value = CORSConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
+    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
+    let behavior = value
+        .cors_rules
+        .iter()
+        .map(|rule| {
+            (
+                rule.allowed_origins.clone(),
+                rule.allowed_methods.clone(),
+                rule.allowed_headers.clone(),
+                rule.expose_headers.clone(),
+                rule.max_age_seconds,
+            )
+        })
+        .collect();
+    let structure = PersistedCorsConfiguration {
+        cors_rules: value
+            .cors_rules
+            .into_iter()
+            .map(|rule| PersistedCorsRule {
+                allowed_headers: rule.allowed_headers,
+                allowed_methods: rule.allowed_methods,
+                allowed_origins: rule.allowed_origins,
+                expose_headers: rule.expose_headers,
+                id: rule.id,
+                max_age_seconds: rule.max_age_seconds,
+            })
+            .collect(),
+    };
+    Ok(S3sCorsObservation { structure, behavior })
+}
+
+/// Serializes CORS with the pinned s3s persistence encoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s cannot render the value.
+pub fn serialize_s3s_cors(value: &PersistedCorsConfiguration) -> Result<Vec<u8>, CompatCodecError> {
+    #[allow(clippy::needless_update)] // Keep a default tail for the generated old DTO.
+    let old_value = CORSConfiguration {
+        cors_rules: value
+            .cors_rules
+            .clone()
+            .into_iter()
+            .map(|rule| CORSRule {
+                allowed_headers: rule.allowed_headers,
+                allowed_methods: rule.allowed_methods,
+                allowed_origins: rule.allowed_origins,
+                expose_headers: rule.expose_headers,
+                id: rule.id,
+                max_age_seconds: rule.max_age_seconds,
+                ..CORSRule::default()
+            })
+            .collect(),
+        ..CORSConfiguration::default()
+    };
+    let mut output = Vec::with_capacity(512);
+    let mut serializer = Serializer::new(&mut output);
+    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
+    Ok(output)
+}
+
 /// Parses Public Access Block bytes with the pinned s3s persistence decoder.
 ///
 /// # Errors
@@ -309,6 +400,55 @@ pub fn serialize_s3s_public_access_block(value: &PersistedPublicAccessBlockConfi
         restrict_public_buckets: value.restrict_public_buckets,
     };
     let mut output = Vec::with_capacity(256);
+    let mut serializer = Serializer::new(&mut output);
+    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
+    Ok(output)
+}
+
+/// Parses Tagging bytes with the pinned s3s persistence decoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
+pub fn parse_s3s_tagging(input: &[u8]) -> Result<S3sTaggingObservation, CompatCodecError> {
+    let mut deserializer = Deserializer::new(input);
+    let value = Tagging::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
+    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
+    let tags = value.tag_set.iter().map(|tag| (tag.key.clone(), tag.value.clone())).collect();
+    let structure = PersistedTagging {
+        tag_set: value
+            .tag_set
+            .into_iter()
+            .map(|tag| PersistedTag {
+                key: tag.key,
+                value: tag.value,
+            })
+            .collect(),
+    };
+    Ok(S3sTaggingObservation { structure, tags })
+}
+
+/// Serializes Tagging with the pinned s3s persistence encoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s cannot render the value.
+pub fn serialize_s3s_tagging(value: &PersistedTagging) -> Result<Vec<u8>, CompatCodecError> {
+    #[allow(clippy::needless_update)] // Keep a default tail for the generated old DTO.
+    let old_value = Tagging {
+        tag_set: value
+            .tag_set
+            .clone()
+            .into_iter()
+            .map(|tag| Tag {
+                key: tag.key,
+                value: tag.value,
+                ..Tag::default()
+            })
+            .collect(),
+        ..Tagging::default()
+    };
+    let mut output = Vec::with_capacity(512);
     let mut serializer = Serializer::new(&mut output);
     old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
     Ok(output)
