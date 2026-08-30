@@ -49,7 +49,12 @@ guard = jobs.fetch("guard-self-test")
 guard_group_ids = ["guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4"]
 guard_groups = guard_group_ids.map { |job_id| jobs.fetch(job_id) }
 target = jobs.fetch("target-consolidation-self-test")
-quirk_ledger = jobs.fetch("quirk-ledger-self-test")
+quirk_ledger_ids = [
+  "quirk-ledger-self-test",
+  "quirk-ledger-self-test-2",
+  "quirk-ledger-self-test-3"
+]
+quirk_ledgers = quirk_ledger_ids.map { |job_id| jobs.fetch(job_id) }
 dto_compiler = jobs.fetch("dto-compiler-self-test")
 build_guard_ids = [
   "build-guard-self-test",
@@ -95,11 +100,13 @@ require_equal(target.keys, worker_keys,
 require_equal(target.values_at("name", "runs-on", "timeout-minutes"),
               ["Target consolidation self-test", "ubuntu-latest", 3],
               "target-consolidation-self-test identity or budget changed")
-require_equal(quirk_ledger.keys, worker_keys,
-              "quirk-ledger-self-test changed its parallel two-minute contract")
-require_equal(quirk_ledger.values_at("name", "runs-on", "timeout-minutes"),
-              ["Quirk ledger self-test", "ubuntu-latest", 2],
-              "quirk-ledger-self-test identity or budget changed")
+quirk_ledgers.each_with_index do |job, index|
+  require_equal(job.keys, worker_keys,
+                "#{quirk_ledger_ids[index]} changed its parallel two-minute contract")
+  require_equal(job.values_at("name", "runs-on", "timeout-minutes"),
+                ["Quirk ledger self-test #{index + 1}", "ubuntu-latest", 2],
+                "#{quirk_ledger_ids[index]} identity or budget changed")
+end
 require_equal(dto_compiler.keys, worker_keys,
               "dto-compiler-self-test changed its parallel two-minute contract")
 require_equal(dto_compiler.values_at("name", "runs-on", "timeout-minutes"),
@@ -174,14 +181,17 @@ require_equal(target_steps.first,
               "target-consolidation-self-test checkout action or pin changed")
 require_equal(target_steps.last.keys, ["name", "run"],
               "target-consolidation-self-test command can skip or hide failure")
-quirk_ledger_steps = quirk_ledger.fetch("steps")
-require_equal(quirk_ledger_steps.length, 2,
-              "quirk-ledger-self-test changed its setup or command step count")
-require_equal(quirk_ledger_steps.first,
-              {"uses" => "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10"},
-              "quirk-ledger-self-test checkout action or pin changed")
-require_equal(quirk_ledger_steps.last.keys, ["name", "run"],
-              "quirk-ledger-self-test command can skip or hide failure")
+quirk_ledger_steps = quirk_ledgers.each_with_index.map do |job, index|
+  steps = job.fetch("steps")
+  require_equal(steps.length, 2,
+                "#{quirk_ledger_ids[index]} changed its setup or command step count")
+  require_equal(steps.first,
+                {"uses" => "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10"},
+                "#{quirk_ledger_ids[index]} checkout action or pin changed")
+  require_equal(steps.last.keys, ["name", "run"],
+                "#{quirk_ledger_ids[index]} command can skip or hide failure")
+  steps
+end
 dto_compiler_steps = dto_compiler.fetch("steps")
 require_equal(dto_compiler_steps.length, 4,
               "dto-compiler-self-test changed its setup or command step count")
@@ -259,9 +269,11 @@ target_run = <<~'RUN'
   scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh
   scripts/ci_budget.sh 45 "test target coverage self-test" bash scripts/test_test_target_coverage.sh
 RUN
-quirk_ledger_run = <<~'RUN'
-  scripts/ci_budget.sh 60 "quirk ledger self-test" env GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 bash scripts/test_guard_scripts.sh
-RUN
+quirk_ledger_runs = (0...3).map do |group|
+  <<~RUN
+    scripts/ci_budget.sh 60 "quirk ledger mutations #{group + 1}/3" env GATEWAY_GUARD_BUDGET_SECONDS=60 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
+  RUN
+end
 dto_compiler_run = <<~'RUN'
   scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
 RUN
@@ -289,8 +301,12 @@ end
 require_equal(guard_runs.uniq.length, 4, "the guard runners do not cover four distinct shards")
 require_equal(target.fetch("steps").last.fetch("run"), target_run,
               "target-consolidation-self-test command changed or can hide a failure")
-require_equal(quirk_ledger.fetch("steps").last.fetch("run"), quirk_ledger_run,
-              "quirk-ledger-self-test command changed or can hide a failure")
+quirk_ledgers.each_with_index do |job, index|
+  require_equal(job.fetch("steps").last.fetch("run"), quirk_ledger_runs.fetch(index),
+                "#{quirk_ledger_ids[index]} command changed, lost its shard, or can hide failure")
+end
+require_equal(quirk_ledger_runs.uniq.length, 3,
+              "the quirk-ledger runners do not cover three distinct shards")
 require_equal(dto_compiler.fetch("steps").last.fetch("run"), dto_compiler_run,
               "dto-compiler-self-test command changed or can hide a failure")
 error_status_run = <<~'RUN'
@@ -342,8 +358,8 @@ end
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "workspace-tests-2", "transport-parity", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all twenty workers within the budget")
+              ["Test", ["workspace-tests", "workspace-tests-2", "transport-parity", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "quirk-ledger-self-test-2", "quirk-ledger-self-test-3", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all twenty-two workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
@@ -359,6 +375,8 @@ expected_env = {
   "GUARD_4_RESULT" => "${{ needs.guard-self-test-4.result }}",
   "TARGET_CONSOLIDATION_RESULT" => "${{ needs.target-consolidation-self-test.result }}",
   "QUIRK_LEDGER_RESULT" => "${{ needs.quirk-ledger-self-test.result }}",
+  "QUIRK_LEDGER_2_RESULT" => "${{ needs.quirk-ledger-self-test-2.result }}",
+  "QUIRK_LEDGER_3_RESULT" => "${{ needs.quirk-ledger-self-test-3.result }}",
   "DTO_COMPILER_RESULT" => "${{ needs.dto-compiler-self-test.result }}",
   "BUILD_GUARD_RESULT" => "${{ needs.build-guard-self-test.result }}",
   "BUILD_GUARD_2_RESULT" => "${{ needs.build-guard-self-test-2.result }}",
@@ -382,6 +400,8 @@ expected_run = <<~'RUN'
   test "$GUARD_4_RESULT" = success
   test "$TARGET_CONSOLIDATION_RESULT" = success
   test "$QUIRK_LEDGER_RESULT" = success
+  test "$QUIRK_LEDGER_2_RESULT" = success
+  test "$QUIRK_LEDGER_3_RESULT" = success
   test "$DTO_COMPILER_RESULT" = success
   test "$BUILD_GUARD_RESULT" = success
   test "$BUILD_GUARD_2_RESULT" = success
@@ -473,7 +493,13 @@ invocations = re.findall(
 )
 regular_shards = [
     (int(seconds), env) for seconds, env in invocations
-    if "GATEWAY_GUARD_SHARD_GROUP=" in env and "GATEWAY_GUARD_BUILD_GUARDS_ONLY=1" not in env
+    if "GATEWAY_GUARD_SHARD_GROUP=" in env
+    and "GATEWAY_GUARD_BUILD_GUARDS_ONLY=1" not in env
+    and "GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1" not in env
+]
+quirk_ledger_shards = [
+    (int(seconds), env) for seconds, env in invocations
+    if "GATEWAY_GUARD_SHARD_GROUP=" in env and "GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1" in env
 ]
 build_shards = [
     (int(seconds), env) for seconds, env in invocations
@@ -483,11 +509,15 @@ if len(regular_shards) != 4:
     raise SystemExit(
         f"ERROR: expected four guard shard invocations in CI, found {len(regular_shards)}"
     )
+if len(quirk_ledger_shards) != 3:
+    raise SystemExit(
+        f"ERROR: expected three quirk-ledger shard invocations in CI, found {len(quirk_ledger_shards)}"
+    )
 if len(build_shards) != 5:
     raise SystemExit(
         f"ERROR: expected five build-backed guard shard invocations in CI, found {len(build_shards)}"
     )
-for seconds, env in regular_shards + build_shards:
+for seconds, env in regular_shards + quirk_ledger_shards + build_shards:
     declared = re.search(r"GATEWAY_GUARD_BUDGET_SECONDS=([0-9]+)", env)
     if declared is None:
         raise SystemExit(
@@ -507,6 +537,14 @@ if regular_groups != [0, 1, 2, 3]:
     raise SystemExit(
         f"ERROR: the guard shards cover groups {regular_groups}, not every quarter of the suite"
     )
+quirk_ledger_groups = sorted(
+    int(re.search(r"GATEWAY_GUARD_SHARD_GROUP=([0-9]+)", env).group(1))
+    for _, env in quirk_ledger_shards
+)
+if quirk_ledger_groups != [0, 1, 2]:
+    raise SystemExit(
+        f"ERROR: the quirk-ledger shards cover groups {quirk_ledger_groups}, not every third"
+    )
 build_groups = sorted(
     int(re.search(r"GATEWAY_GUARD_SHARD_GROUP=([0-9]+)", env).group(1))
     for _, env in build_shards
@@ -517,4 +555,4 @@ if build_groups != [0, 1, 2, 3, 4]:
     )
 PY
 
-printf 'OK: two workspace shards, transport parity, persistence goldens, signing suite, four guard shards, target-consolidation, quirk-ledger, DTO compiler, five build guard shards, error-status and TSAN workers are parallel behind Test\n'
+printf 'OK: two workspace shards, transport parity, persistence goldens, signing suite, four guard shards, target-consolidation, three quirk-ledger shards, DTO compiler, five build guard shards, error-status and TSAN workers are parallel behind Test\n'
