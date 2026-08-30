@@ -191,6 +191,7 @@ core_modules = (
     "acl_contract",
     "acl_roundtrip",
     "authz_consumption",
+    "bucketconfig_roundtrip",
     "codec_binding",
     "committed_head",
     "compile_fail",

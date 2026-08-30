@@ -29,6 +29,9 @@ mod acl_roundtrip;
 #[path = "authz_consumption.rs"]
 mod authz_consumption;
 
+#[path = "bucketconfig_roundtrip.rs"]
+mod bucketconfig_roundtrip;
+
 #[path = "codec_binding.rs"]
 mod codec_binding;
 
