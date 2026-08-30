@@ -14878,13 +14878,13 @@ expect_fail check_ci_test_split.sh \
     'the second workspace test job being renamed away' mut_ci_second_workspace_job_missing
 
 mut_ci_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance' 'scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway' 'scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job running only one package' mut_ci_workspace_command_weakened
 
 mut_ci_second_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance' 'scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance --package rustfs-gateway' 'scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the second workspace shard running the wrong package' mut_ci_second_workspace_command_weakened
@@ -14898,8 +14898,8 @@ expect_fail check_ci_test_split.sh \
     mut_ci_handlers_facade_fixture_removed
 
 mut_ci_workspace_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance' \
-        '          scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance || true'
+    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway' \
+        '          scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway || true'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job swallowing a failure or timeout' mut_ci_workspace_failure_swallowed

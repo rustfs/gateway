@@ -293,7 +293,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Workspace tests 1/2 (maximum 8 minutes after setup)
         run: |
-          scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance
+          scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway
           scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 
   workspace-tests-2:
@@ -308,7 +308,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Workspace tests 2/2 (maximum 8 minutes after setup)
         run: |
-          scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance
+          scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance --package rustfs-gateway
 
   transport-parity:
     name: Production transport parity
