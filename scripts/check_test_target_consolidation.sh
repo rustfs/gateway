@@ -656,6 +656,7 @@ gateway_modules = (
     "payload_transport",
     "pipeline",
     "precondition_contract",
+    "precondition_reachability",
     "refusal_order_guards",
     "reject_rendering",
     "replication_token",
