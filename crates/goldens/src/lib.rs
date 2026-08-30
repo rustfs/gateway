@@ -33,17 +33,21 @@ mod accelerate_payment;
 mod bucket_encryption;
 mod cors;
 mod lifecycle;
+mod logging;
 mod object_lock;
 mod public_access_block;
 mod tagging;
+mod website;
 
 pub use accelerate_payment::{assert_accelerate_four_way, assert_request_payment_four_way};
 pub use bucket_encryption::assert_bucket_encryption_four_way;
 pub use cors::assert_cors_four_way;
 pub use lifecycle::assert_lifecycle_four_way;
+pub use logging::assert_bucket_logging_four_way;
 pub use object_lock::assert_object_lock_four_way;
 pub use public_access_block::assert_public_access_block_four_way;
 pub use tagging::assert_tagging_four_way;
+pub use website::assert_website_four_way;
 
 /// A persistence configuration family covered by the golden harness.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -66,6 +70,10 @@ pub enum ConfigKind {
     Cors,
     /// Bucket tagging metadata.
     Tagging,
+    /// Bucket access-log delivery metadata.
+    Logging,
+    /// Bucket static-website metadata.
+    Website,
 }
 
 /// A traceable source for one persisted sample.
