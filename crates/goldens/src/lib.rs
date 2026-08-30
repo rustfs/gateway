@@ -29,8 +29,10 @@ use rustfs_gateway_types::compat::{S3sVersioningObservation, parse_s3s_versionin
 use rustfs_gateway_types::persistence::{PersistedVersioningConfiguration, parse_versioning, serialize_versioning};
 use sha2::{Digest, Sha256};
 
+mod lifecycle;
 mod object_lock;
 
+pub use lifecycle::assert_lifecycle_four_way;
 pub use object_lock::assert_object_lock_four_way;
 
 /// A persistence configuration family covered by the golden harness.
@@ -40,6 +42,8 @@ pub enum ConfigKind {
     Versioning,
     /// Bucket Object Lock metadata.
     ObjectLock,
+    /// Bucket Lifecycle metadata.
+    Lifecycle,
 }
 
 /// A traceable source for one persisted sample.
