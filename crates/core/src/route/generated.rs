@@ -34,18 +34,19 @@
 //! for the reason ADR-0005 gives for `rustfs-gateway-types`: an `include!` may not reach outside
 //! the package directory, and the symlink is what puts the generated tree inside it.
 //!
-//! # A gap worth knowing about
+//! # A gap that used to exist here
 //!
-//! [`RoutePredicate`] has eight variants; [`Predicate`] has ten. `HostClass` and `ArnForm` are in
-//! the frozen IR schema and in this crate, but `rustfs-gateway-model`'s `Predicate` does not carry
-//! them yet, so codegen cannot emit them. Adding the two variants here pre-emptively would be
-//! inventing a spelling that the emitter has never produced and might not match. They are
-//! therefore constructible by hand and by tests, but not yet reachable from the model — recorded
-//! in `MAP.md` for the maintainer rather than silently papered over.
+//! Until `rustfs/gateway#3`, [`RoutePredicate`] had eight variants against [`Predicate`]'s ten:
+//! `HostClass` and `ArnForm` were in the frozen IR schema and in this crate, but
+//! `rustfs-gateway-model`'s `Predicate` could not carry them, so codegen could not emit either one.
+//! Both are now reachable end to end — `rustfs-gateway-model`'s `Predicate::HostClass`/`ArnForm`,
+//! `rustfs-gateway-codegen`'s `rust_files::predicate` — but no operation's overlay entry sets
+//! `host_class` or `arn_form` yet, so `ROUTES` below still carries neither spelling. The two
+//! variants are proved reachable by `RouteRow::to_entry` reading them, not by a real generated row.
 
 use http::Method;
 
-use super::selector::{Predicate, RouteEntry, RouteSelector, TargetKind};
+use super::selector::{ArnForm, HostClass, Predicate, RouteEntry, RouteSelector, TargetKind};
 use crate::contracts::{SELECT_TYPE_ROUTE_PREDICATE, SelectTypeRoutePredicatePolicy};
 
 /// One row of the generated route table.
@@ -96,6 +97,10 @@ pub enum RoutePredicate {
     HeaderPrefix(&'static str, &'static str),
     /// `PathLiteral("/WriteGetObjectResponse")`.
     PathLiteral(&'static str),
+    /// `HostClass("ObjectLambda")`, the IR spelling `HostClass::as_str` produces.
+    HostClass(&'static str),
+    /// `ArnForm("AccessPoint")`, the IR spelling `ArnForm::as_str` produces.
+    ArnForm(&'static str),
 }
 
 /// The generated table. Data only; the types above are its vocabulary.
@@ -192,6 +197,14 @@ impl RouteRow {
                 RoutePredicate::HeaderPresent(header, negated) => Predicate::HeaderPresent { header, negated },
                 RoutePredicate::HeaderPrefix(header, prefix) => Predicate::HeaderPrefix(header, prefix),
                 RoutePredicate::PathLiteral(path) => Predicate::PathLiteral(path),
+                RoutePredicate::HostClass(text) => {
+                    let class = HostClass::parse(text).ok_or_else(|| error(format!("unknown host class {text:?}")))?;
+                    Predicate::HostClass(class)
+                }
+                RoutePredicate::ArnForm(text) => {
+                    let form = ArnForm::parse(text).ok_or_else(|| error(format!("unknown ARN form {text:?}")))?;
+                    Predicate::ArnForm(form)
+                }
             });
         }
 
@@ -255,4 +268,86 @@ const fn str_eq(left: &str, right: &str) -> bool {
 /// The first [`RowError`] encountered.
 pub fn generated_entries() -> Result<Vec<RouteEntry>, RowError> {
     ROUTES.iter().map(RouteRow::to_entry).collect()
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::{ArnForm, HostClass, Predicate, RoutePredicate, RouteRow};
+
+    const HOST_CLASS_ROW: RoutePredicate = RoutePredicate::HostClass("ObjectLambda");
+    const ARN_FORM_ROW: RoutePredicate = RoutePredicate::ArnForm("AccessPoint");
+    const UNKNOWN_HOST_CLASS_ROW: RoutePredicate = RoutePredicate::HostClass("Nope");
+    const UNKNOWN_ARN_FORM_ROW: RoutePredicate = RoutePredicate::ArnForm("Nope");
+
+    /// The row this test builds does not exist in `ROUTES` — no operation's overlay sets
+    /// `host_class` yet (`rustfs/gateway#3`) — so this is the proof that [`RoutePredicate::HostClass`]
+    /// and [`RoutePredicate::ArnForm`] are reachable the moment codegen does emit either spelling,
+    /// not a claim about the current generated table.
+    fn synthetic_row(predicates: &'static [RoutePredicate]) -> RouteRow {
+        RouteRow {
+            operation: "SyntheticProbe",
+            precedence: 999,
+            method: "POST",
+            target: "Object",
+            path_shape: "/{Bucket}/{Key+}",
+            success_status: 200,
+            not_configured: None,
+            predicates,
+        }
+    }
+
+    #[test]
+    fn to_entry_reads_a_generated_host_class_predicate() {
+        const PREDICATES: &[RoutePredicate] = &[
+            RoutePredicate::Method("POST"),
+            RoutePredicate::Target("Object"),
+            HOST_CLASS_ROW,
+        ];
+        let entry = synthetic_row(PREDICATES).to_entry().expect("a known host class converts");
+        assert!(
+            entry
+                .selector
+                .predicates()
+                .contains(&Predicate::HostClass(HostClass::ObjectLambda))
+        );
+    }
+
+    #[test]
+    fn to_entry_reads_a_generated_arn_form_predicate() {
+        const PREDICATES: &[RoutePredicate] = &[RoutePredicate::Method("POST"), RoutePredicate::Target("Object"), ARN_FORM_ROW];
+        let entry = synthetic_row(PREDICATES).to_entry().expect("a known ARN form converts");
+        assert!(
+            entry
+                .selector
+                .predicates()
+                .contains(&Predicate::ArnForm(ArnForm::AccessPoint))
+        );
+    }
+
+    #[test]
+    fn n_to_entry_rejects_an_unknown_host_class_spelling() {
+        const PREDICATES: &[RoutePredicate] = &[
+            RoutePredicate::Method("POST"),
+            RoutePredicate::Target("Object"),
+            UNKNOWN_HOST_CLASS_ROW,
+        ];
+        let err = synthetic_row(PREDICATES)
+            .to_entry()
+            .expect_err("an unknown spelling must not convert");
+        assert!(format!("{err}").contains("unknown host class"), "{err}");
+    }
+
+    #[test]
+    fn n_to_entry_rejects_an_unknown_arn_form_spelling() {
+        const PREDICATES: &[RoutePredicate] = &[
+            RoutePredicate::Method("POST"),
+            RoutePredicate::Target("Object"),
+            UNKNOWN_ARN_FORM_ROW,
+        ];
+        let err = synthetic_row(PREDICATES)
+            .to_entry()
+            .expect_err("an unknown spelling must not convert");
+        assert!(format!("{err}").contains("unknown ARN form"), "{err}");
+    }
 }

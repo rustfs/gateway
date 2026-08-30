@@ -160,6 +160,14 @@ fn lower_one(model: &Model, overlay: &Overlay, name: &str) -> Result<OperationIr
             negated: true,
         });
     }
+    if let Some(text) = &ov.host_class {
+        let class = HostClass::parse(text).ok_or_else(|| Error::ir(name, format!("unknown host_class `{text}`")))?;
+        predicates.push(Predicate::HostClass(class));
+    }
+    if let Some(text) = &ov.arn_form {
+        let form = ArnForm::parse(text).ok_or_else(|| Error::ir(name, format!("unknown arn_form `{text}`")))?;
+        predicates.push(Predicate::ArnForm(form));
+    }
 
     let success_status = ov.success_status.unwrap_or_else(|| {
         http_trait

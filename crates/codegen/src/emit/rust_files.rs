@@ -201,6 +201,8 @@ fn predicate(p: &Predicate) -> String {
         }
         Predicate::HeaderPrefix { header, prefix } => format!("RoutePredicate::HeaderPrefix(\"{header}\", \"{prefix}\")"),
         Predicate::PathLiteral(path) => format!("RoutePredicate::PathLiteral(\"{path}\")"),
+        Predicate::HostClass(class) => format!("RoutePredicate::HostClass(\"{}\")", class.as_str()),
+        Predicate::ArnForm(form) => format!("RoutePredicate::ArnForm(\"{}\")", form.as_str()),
     }
 }
 
@@ -266,7 +268,8 @@ fn table(declaration: &str, rows: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::render_subresource_bits;
+    use super::{predicate, render_subresource_bits};
+    use rustfs_gateway_model::ir::{ArnForm, HostClass, Predicate};
 
     #[test]
     fn sixty_five_routing_query_keys_fail_generation() {
@@ -274,5 +277,19 @@ mod tests {
         let error = render_subresource_bits(keys).expect_err("a u64 must not silently drop the sixty-fifth key");
         assert!(error.contains("65 routing query keys"), "{error}");
         assert!(error.contains("u128 or segment"), "{error}");
+    }
+
+    /// The two spellings `rustfs-gateway-core::route::generated::RoutePredicate` has to accept the
+    /// moment a route actually carries either predicate — see `rustfs/gateway#3`.
+    #[test]
+    fn renders_host_class_and_arn_form_predicates() {
+        assert_eq!(
+            predicate(&Predicate::HostClass(HostClass::ObjectLambda)),
+            "RoutePredicate::HostClass(\"ObjectLambda\")"
+        );
+        assert_eq!(
+            predicate(&Predicate::ArnForm(ArnForm::AccessPoint)),
+            "RoutePredicate::ArnForm(\"AccessPoint\")"
+        );
     }
 }

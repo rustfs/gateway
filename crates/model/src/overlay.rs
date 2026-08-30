@@ -146,6 +146,10 @@ pub struct OpOverlay {
     pub header_present: Vec<String>,
     /// Headers that must be absent for this route to match.
     pub header_absent: Vec<String>,
+    /// The endpoint family this route requires, as an IR `host_class` spelling.
+    pub host_class: Option<String>,
+    /// The ARN form this route requires in the bucket position, as an IR `arn_form` spelling.
+    pub arn_form: Option<String>,
     /// Authentication requirement.
     pub auth_requirement: Option<String>,
     /// IAM action.
@@ -681,6 +685,8 @@ fn op_overlay(name: &str, table: &Toml) -> Result<OpOverlay> {
         query_absent: list(table, "query_absent", &what)?,
         header_present: list(table, "header_present", &what)?,
         header_absent: list(table, "header_absent", &what)?,
+        host_class: opt_str(table, "host_class"),
+        arn_form: opt_str(table, "arn_form"),
         auth_requirement: opt_str(table, "auth_requirement"),
         auth_action: opt_str(table, "auth_action"),
         auth_presigned: opt_bool(table, "auth_presigned"),
