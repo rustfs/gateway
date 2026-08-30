@@ -78,6 +78,75 @@ pub struct PersistedDefaultRetention {
     pub years: Option<i32>,
 }
 
+/// The complete default-encryption configuration persisted by the old RustFS path.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PersistedBucketEncryptionConfiguration {
+    /// Flattened `Rule` entries, preserving their stored order.
+    pub rules: Vec<PersistedBucketEncryptionRule>,
+}
+
+impl PersistedBucketEncryptionConfiguration {
+    /// Runtime-relevant default-encryption decisions, one tuple per stored rule.
+    #[must_use]
+    pub fn encryption_behavior(&self) -> Vec<(Option<String>, Option<String>, Option<bool>)> {
+        self.rules
+            .iter()
+            .map(|rule| {
+                let default = rule.apply_server_side_encryption_by_default.as_ref();
+                (
+                    default.map(|value| value.sse_algorithm.clone()),
+                    default.and_then(|value| value.kms_master_key_id.clone()),
+                    rule.bucket_key_enabled,
+                )
+            })
+            .collect()
+    }
+}
+
+/// One persisted bucket default-encryption rule.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PersistedBucketEncryptionRule {
+    /// Encryption algorithm and optional KMS key applied by default.
+    pub apply_server_side_encryption_by_default: Option<PersistedEncryptionByDefault>,
+    /// Whether the rule enables an S3 bucket key.
+    pub bucket_key_enabled: Option<bool>,
+}
+
+/// The persisted encryption defaults nested inside one rule.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PersistedEncryptionByDefault {
+    /// Stored algorithm string, including values unknown to the current implementation.
+    pub sse_algorithm: String,
+    /// Optional KMS key identifier.
+    pub kms_master_key_id: Option<String>,
+}
+
+/// The complete persisted Public Access Block configuration.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PersistedPublicAccessBlockConfiguration {
+    /// Whether public ACLs are rejected when supplied.
+    pub block_public_acls: Option<bool>,
+    /// Whether existing public ACLs are ignored.
+    pub ignore_public_acls: Option<bool>,
+    /// Whether public bucket policies are rejected.
+    pub block_public_policy: Option<bool>,
+    /// Whether public bucket access is restricted.
+    pub restrict_public_buckets: Option<bool>,
+}
+
+impl PersistedPublicAccessBlockConfiguration {
+    /// The four effective access decisions; omitted persisted switches default to `false`.
+    #[must_use]
+    pub fn effective_switches(&self) -> (bool, bool, bool, bool) {
+        (
+            self.block_public_acls.unwrap_or(false),
+            self.ignore_public_acls.unwrap_or(false),
+            self.block_public_policy.unwrap_or(false),
+            self.restrict_public_buckets.unwrap_or(false),
+        )
+    }
+}
+
 impl PersistedVersioningConfiguration {
     /// Whether the stored configuration enables object versioning.
     #[must_use]
@@ -113,6 +182,12 @@ pub enum PersistenceCodecError {
     UnexpectedLifecycleElement,
     /// A scalar field appeared more than once where the old decoder rejects duplicates.
     DuplicateField,
+    /// A persisted XML boolean is not the lowercase lexical form accepted by the old decoder.
+    InvalidBoolean,
+    /// A nested Bucket Encryption element is not recognized by the pinned old decoder.
+    UnexpectedBucketEncryptionElement,
+    /// A required persisted field is absent where the pinned old decoder refuses the document.
+    MissingRequiredField,
 }
 
 impl fmt::Display for PersistenceCodecError {
@@ -134,6 +209,11 @@ impl fmt::Display for PersistenceCodecError {
             Self::DuplicateField => {
                 formatter.write_str("persisted configuration XML has a duplicate scalar field or structural field")
             }
+            Self::InvalidBoolean => formatter.write_str("persisted configuration XML has an invalid boolean value"),
+            Self::UnexpectedBucketEncryptionElement => {
+                formatter.write_str("persisted Bucket Encryption XML has an unexpected nested element")
+            }
+            Self::MissingRequiredField => formatter.write_str("persisted configuration XML is missing a required field"),
         }
     }
 }
@@ -314,6 +394,145 @@ pub fn serialize_object_lock(value: &PersistedObjectLockConfiguration) -> Vec<u8
             writer.close();
         }
         writer.close();
+    }
+    writer.close();
+    writer.finish().into_bytes()
+}
+
+/// Parses persisted Bucket Encryption bytes without applying HTTP request policy.
+///
+/// Unknown root-level elements and attributes are ignored for rolling-upgrade compatibility.
+/// Repeated scalar or structural fields fail closed exactly where the old decoder does.
+///
+/// # Errors
+///
+/// Returns [`PersistenceCodecError`] for malformed XML, a wrong root, an invalid boolean,
+/// an unexpected nested element, or a repeated known field.
+pub fn parse_bucket_encryption(input: &[u8]) -> Result<PersistedBucketEncryptionConfiguration, PersistenceCodecError> {
+    let root = parse_persistence_root(input, "ServerSideEncryptionConfiguration")?;
+    let rules = root
+        .children_named("Rule")
+        .map(parse_bucket_encryption_rule)
+        .collect::<Result<Vec<_>, _>>()?;
+    if rules.is_empty() {
+        return Err(PersistenceCodecError::MissingRequiredField);
+    }
+    Ok(PersistedBucketEncryptionConfiguration { rules })
+}
+
+fn parse_bucket_encryption_rule(
+    rule: &rustfs_gateway_xml::XmlNode,
+) -> Result<PersistedBucketEncryptionRule, PersistenceCodecError> {
+    reject_unknown_encryption_children(rule, &["ApplyServerSideEncryptionByDefault", "BucketKeyEnabled"])?;
+    let apply_server_side_encryption_by_default = optional_child(rule, "ApplyServerSideEncryptionByDefault")?
+        .map(parse_encryption_by_default)
+        .transpose()?;
+    Ok(PersistedBucketEncryptionRule {
+        apply_server_side_encryption_by_default,
+        bucket_key_enabled: optional_bool_child(rule, "BucketKeyEnabled")?,
+    })
+}
+
+fn parse_encryption_by_default(
+    default: &rustfs_gateway_xml::XmlNode,
+) -> Result<PersistedEncryptionByDefault, PersistenceCodecError> {
+    reject_unknown_encryption_children(default, &["SSEAlgorithm", "KMSMasterKeyID"])?;
+    let Some(sse_algorithm) = optional_child_text(default, "SSEAlgorithm")? else {
+        return Err(PersistenceCodecError::MissingRequiredField);
+    };
+    Ok(PersistedEncryptionByDefault {
+        sse_algorithm,
+        kms_master_key_id: optional_child_text(default, "KMSMasterKeyID")?,
+    })
+}
+
+fn reject_unknown_encryption_children(
+    parent: &rustfs_gateway_xml::XmlNode,
+    allowed: &[&str],
+) -> Result<(), PersistenceCodecError> {
+    if parent.children.iter().any(|child| !allowed.contains(&child.name.as_str())) {
+        return Err(PersistenceCodecError::UnexpectedBucketEncryptionElement);
+    }
+    Ok(())
+}
+
+/// Serializes Bucket Encryption into the exact old persistence field order and element form.
+#[must_use]
+pub fn serialize_bucket_encryption(value: &PersistedBucketEncryptionConfiguration) -> Vec<u8> {
+    let mut writer = XmlWriter::fragment();
+    writer.open("ServerSideEncryptionConfiguration", None);
+    for rule in &value.rules {
+        writer.open("Rule", None);
+        if let Some(default) = rule.apply_server_side_encryption_by_default.as_ref() {
+            writer.open("ApplyServerSideEncryptionByDefault", None);
+            if let Some(key_id) = default.kms_master_key_id.as_deref() {
+                writer.element("KMSMasterKeyID", key_id);
+            }
+            writer.element("SSEAlgorithm", &default.sse_algorithm);
+            writer.close();
+        }
+        if let Some(enabled) = rule.bucket_key_enabled {
+            writer.element_bool("BucketKeyEnabled", enabled);
+        }
+        writer.close();
+    }
+    writer.close();
+    writer.finish().into_bytes()
+}
+
+/// Parses persisted Public Access Block bytes without applying HTTP request policy.
+///
+/// # Errors
+///
+/// Returns [`PersistenceCodecError`] for malformed XML, a wrong root, a repeated switch, or an
+/// invalid boolean lexical form.
+pub fn parse_public_access_block(input: &[u8]) -> Result<PersistedPublicAccessBlockConfiguration, PersistenceCodecError> {
+    let root = parse_persistence_root(input, "PublicAccessBlockConfiguration")?;
+    Ok(PersistedPublicAccessBlockConfiguration {
+        block_public_acls: optional_bool_child(&root, "BlockPublicAcls")?,
+        ignore_public_acls: optional_bool_child(&root, "IgnorePublicAcls")?,
+        block_public_policy: optional_bool_child(&root, "BlockPublicPolicy")?,
+        restrict_public_buckets: optional_bool_child(&root, "RestrictPublicBuckets")?,
+    })
+}
+
+fn optional_bool_child(parent: &rustfs_gateway_xml::XmlNode, name: &str) -> Result<Option<bool>, PersistenceCodecError> {
+    match optional_child_text(parent, name)?.as_deref() {
+        Some("true" | "TRUE") => Ok(Some(true)),
+        Some("false" | "FALSE") => Ok(Some(false)),
+        Some(_) => Err(PersistenceCodecError::InvalidBoolean),
+        None => Ok(None),
+    }
+}
+
+fn parse_persistence_root(input: &[u8], expected_root: &str) -> Result<rustfs_gateway_xml::XmlNode, PersistenceCodecError> {
+    let bound = input.len().max(1);
+    let Some(limits) = XmlLimits::new(bound, bound, bound, bound, bound) else {
+        unreachable!("max(1) makes every persistence XML limit non-zero");
+    };
+    let root = parse_with_limits(input, limits)?;
+    if root.name != expected_root {
+        return Err(PersistenceCodecError::WrongRoot);
+    }
+    Ok(root)
+}
+
+/// Serializes Public Access Block into the exact old persistence field order and element form.
+#[must_use]
+pub fn serialize_public_access_block(value: &PersistedPublicAccessBlockConfiguration) -> Vec<u8> {
+    let mut writer = XmlWriter::fragment();
+    writer.open("PublicAccessBlockConfiguration", None);
+    if let Some(enabled) = value.block_public_acls {
+        writer.element_bool("BlockPublicAcls", enabled);
+    }
+    if let Some(enabled) = value.block_public_policy {
+        writer.element_bool("BlockPublicPolicy", enabled);
+    }
+    if let Some(enabled) = value.ignore_public_acls {
+        writer.element_bool("IgnorePublicAcls", enabled);
+    }
+    if let Some(enabled) = value.restrict_public_buckets {
+        writer.element_bool("RestrictPublicBuckets", enabled);
     }
     writer.close();
     writer.finish().into_bytes()
