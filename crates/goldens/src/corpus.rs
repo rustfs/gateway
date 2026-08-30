@@ -204,6 +204,7 @@ struct CoverageRow {
     kind: ConfigKind,
     accepted: usize,
     rejected: usize,
+    bytes: usize,
     variants: Vec<CorpusVariant>,
 }
 
@@ -215,6 +216,12 @@ pub struct CorpusReport {
 }
 
 impl CorpusReport {
+    /// Total concrete sample bytes across all validated families.
+    #[must_use]
+    pub fn total_size_bytes(&self) -> usize {
+        self.rows.iter().map(|row| row.bytes).sum()
+    }
+
     /// Renders deterministic accepted, rejected, and variant coverage for the requested families.
     #[must_use]
     pub fn render(&self) -> String {
@@ -231,13 +238,21 @@ impl CorpusReport {
                 .collect::<Vec<_>>()
                 .join(",");
             output.push_str(&format!(
-                "{}: accepted={} rejected={} variants={}\n",
+                "{}: accepted={} rejected={} bytes={} variants={}\n",
                 row.kind.report_name(),
                 row.accepted,
                 row.rejected,
+                row.bytes,
                 variants
             ));
         }
+        let accepted = self.rows.iter().map(|row| row.accepted).sum::<usize>();
+        let rejected = self.rows.iter().map(|row| row.rejected).sum::<usize>();
+        output.push_str(&format!(
+            "total: families={} accepted={accepted} rejected={rejected} bytes={}\n",
+            self.rows.len(),
+            self.total_size_bytes()
+        ));
         output
     }
 }
@@ -367,6 +382,7 @@ pub fn build_corpus_report(
             .ok_or(CorpusCoverageError::MissingFamily(*kind))?;
         let mut accepted = 0;
         let mut rejected = 0;
+        let mut bytes = 0;
         let mut variants = Vec::new();
         for (index, case) in family.cases.iter().enumerate() {
             if case.kind != *kind {
@@ -385,6 +401,7 @@ pub fn build_corpus_report(
                 CorpusDisposition::Accepted => accepted += 1,
                 CorpusDisposition::Rejected => rejected += 1,
             }
+            bytes += case.bytes.len();
             for variant in &case.variants {
                 if !variants.contains(variant) {
                     variants.push(*variant);
@@ -417,6 +434,7 @@ pub fn build_corpus_report(
             kind: *kind,
             accepted,
             rejected,
+            bytes,
             variants,
         });
     }
@@ -500,14 +518,19 @@ mod tests {
 
     #[test]
     fn report_counts_and_variants_come_from_concrete_cases() {
-        let report = build_corpus_report(&[crate::ConfigKind::Versioning], &[family()])
-            .expect("the concrete framework fixture is complete");
+        let family = family();
+        let expected_bytes = family.cases.iter().map(|case| case.bytes.len()).sum::<usize>();
+        let report =
+            build_corpus_report(&[crate::ConfigKind::Versioning], &[family]).expect("the concrete framework fixture is complete");
         assert_eq!(report.rows.len(), 1);
         assert_eq!(report.rows[0].accepted, 5);
         assert_eq!(report.rows[0].rejected, 4);
+        assert_eq!(report.total_size_bytes(), expected_bytes);
         assert_eq!(
             report.render(),
-            "persisted XML corpus: 1/1 requested families covered\nversioning: accepted=5 rejected=4 variants=canonical,missing-field,namespace,duplicate-field\n"
+            format!(
+                "persisted XML corpus: 1/1 requested families covered\nversioning: accepted=5 rejected=4 bytes={expected_bytes} variants=canonical,missing-field,namespace,duplicate-field\ntotal: families=1 accepted=5 rejected=4 bytes={expected_bytes}\n"
+            )
         );
     }
 
