@@ -176,7 +176,7 @@ impl<T> ConcreteFamilyCorpus<T> {
     }
 }
 
-/// Builds the concrete corpus report for the five wired pilot families.
+/// Builds the concrete corpus report for the nine wired pilot families.
 ///
 /// # Errors
 ///
@@ -189,6 +189,10 @@ pub fn build_pilot_corpus_report() -> Result<CorpusReport, CorpusCoverageError> 
         lifecycle::corpus_evidence().framework()?,
         cors::corpus_evidence()?,
         tagging::corpus_evidence()?,
+        accelerate_payment::accelerate_corpus_evidence()?,
+        accelerate_payment::request_payment_corpus_evidence()?,
+        bucket_encryption::bucket_encryption_corpus_evidence()?,
+        public_access_block::public_access_block_corpus_evidence()?,
     ];
     build_corpus_report(
         &[
@@ -197,6 +201,10 @@ pub fn build_pilot_corpus_report() -> Result<CorpusReport, CorpusCoverageError> 
             ConfigKind::Lifecycle,
             ConfigKind::Cors,
             ConfigKind::Tagging,
+            ConfigKind::Accelerate,
+            ConfigKind::RequestPayment,
+            ConfigKind::BucketEncryption,
+            ConfigKind::PublicAccessBlock,
         ],
         &families,
     )
@@ -428,15 +436,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn five_pilot_families_publish_real_corpus_evidence() {
+    fn nine_pilot_families_publish_real_corpus_evidence() {
         let versioning = crate::versioning::corpus_evidence();
         let object_lock = crate::object_lock::corpus_evidence();
         let lifecycle = crate::lifecycle::corpus_evidence();
         assert!(versioning.rejected.len() > versioning.accepted.len());
         assert!(object_lock.rejected.len() > object_lock.accepted.len());
         assert!(lifecycle.rejected.len() > lifecycle.accepted.len());
-        let report = build_pilot_corpus_report().expect("all three pilot families have concrete corpus coverage");
-        assert!(report.render().contains("5/5 requested families covered"));
+        let report = build_pilot_corpus_report().expect("all nine pilot families have concrete corpus coverage");
+        assert!(report.render().contains("9/9 requested families covered"));
     }
 
     #[test]
