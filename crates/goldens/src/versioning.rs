@@ -32,6 +32,8 @@ const HISTORICAL: &[u8] = br#"<VersioningConfiguration xmlns="http://s3.amazonaw
 const ALL_FIELDS: &[u8] = br#"<VersioningConfiguration><ExcludeFolders>true</ExcludeFolders><ExcludedPrefixes><Prefix>a</Prefix></ExcludedPrefixes><ExcludedPrefixes><Prefix>b</Prefix></ExcludedPrefixes><MfaDelete>Disabled</MfaDelete><Status>Enabled</Status></VersioningConfiguration>"#;
 const UNKNOWN_SUSPENDED: &[u8] =
     br#"<VersioningConfiguration><FutureTopLevel>future</FutureTopLevel><Status>Suspended</Status></VersioningConfiguration>"#;
+const BODY_LITERAL_PERSISTED: &[u8] = br#"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"#;
+const BARE_BODY_LITERAL: &[u8] = b"Enabled";
 const EMPTY: &[u8] = br#"<VersioningConfiguration></VersioningConfiguration>"#;
 const EMPTY_STATUS: &[u8] = br#"<VersioningConfiguration><Status></Status></VersioningConfiguration>"#;
 const DUPLICATE_STATUS: &[u8] =
@@ -226,6 +228,16 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfi
                 &[CorpusVariant::UnknownTopLevel],
             ),
             accepted(
+                BODY_LITERAL_PERSISTED,
+                "dd6f6f21cc8680cc5c32bba98d4297e37552279d7e326a35df847ed2713f2d6a",
+                PersistedVersioningConfiguration {
+                    status: Some("Enabled".to_owned()),
+                    ..PersistedVersioningConfiguration::default()
+                },
+                "pinned MinIO-compatible HTTP decoding of the bare Enabled body persists this canonical old-readable XML",
+                &[CorpusVariant::BodyLiteral],
+            ),
+            accepted(
                 &large_bytes,
                 &large_digest,
                 PersistedVersioningConfiguration {
@@ -255,6 +267,11 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfi
         ],
         rejected: vec![
             rejected(DUPLICATE_STATUS, "duplicate Status", &[CorpusVariant::DuplicateField]),
+            rejected(
+                BARE_BODY_LITERAL,
+                "the HTTP compatibility decoder accepts this literal, but persistence receives its canonical XML output",
+                &[CorpusVariant::BodyLiteral],
+            ),
             rejected(OLD_UNREADABLE, "unclosed wrong root", &[CorpusVariant::MissingField]),
             rejected(MISMATCHED_CLOSE, "mismatched scalar close tag", &[CorpusVariant::BodyLiteral]),
             rejected(WRONG_ROOT, "wrong root", &[CorpusVariant::MissingField]),
@@ -339,6 +356,21 @@ mod tests {
     #[test]
     fn explicit_empty_status_is_not_absence() {
         assert_versioning_four_way(&accepted_sample(EMPTY_STATUS)).expect("empty and absent remain distinct");
+    }
+
+    #[test]
+    fn minio_body_literal_value_has_old_persistence_bytes() {
+        let case = corpus_evidence()
+            .accepted
+            .into_iter()
+            .find(|case| case.variants.contains(&CorpusVariant::BodyLiteral))
+            .expect("g-d1-005 requires an accepted body-literal-derived sample");
+        assert_eq!(
+            serialize_s3s_versioning(&case.sample.value).expect("the pinned old persistence writer accepts the value"),
+            case.sample.bytes,
+            "the evidence must be observed old-writer output, not an arbitrary row tagged BodyLiteral"
+        );
+        assert_versioning_four_way(&case.sample).expect("both persistence codecs accept the observed old-writer bytes");
     }
 
     #[test]
