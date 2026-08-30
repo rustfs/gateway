@@ -25,8 +25,6 @@
 
 use core::fmt;
 
-use rustfs_gateway_types::compat::{S3sVersioningObservation, parse_s3s_versioning, serialize_s3s_versioning};
-use rustfs_gateway_types::persistence::{PersistedVersioningConfiguration, parse_versioning, serialize_versioning};
 use sha2::{Digest, Sha256};
 
 mod accelerate_payment;
@@ -40,6 +38,7 @@ mod object_lock;
 mod public_access_block;
 mod replication;
 mod tagging;
+mod versioning;
 mod website;
 
 pub use accelerate_payment::{assert_accelerate_four_way, assert_request_payment_four_way};
@@ -56,6 +55,7 @@ pub use object_lock::assert_object_lock_four_way;
 pub use public_access_block::assert_public_access_block_four_way;
 pub use replication::assert_replication_four_way;
 pub use tagging::assert_tagging_four_way;
+pub use versioning::assert_versioning_four_way;
 pub use website::assert_website_four_way;
 
 /// A persistence configuration family covered by the golden harness.
@@ -139,6 +139,77 @@ pub struct GoldenSample<T> {
     pub notes: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct AcceptedCorpusCase<T> {
+    pub(crate) sample: GoldenSample<T>,
+    pub(crate) variants: Vec<CorpusVariant>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RejectedCorpusCase {
+    pub(crate) sample: RejectedGoldenSample,
+    pub(crate) variants: Vec<CorpusVariant>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ConcreteFamilyCorpus<T> {
+    pub(crate) kind: ConfigKind,
+    pub(crate) required_variants: Vec<CorpusVariant>,
+    pub(crate) accepted: Vec<AcceptedCorpusCase<T>>,
+    pub(crate) rejected: Vec<RejectedCorpusCase>,
+}
+
+impl<T> ConcreteFamilyCorpus<T> {
+    pub(crate) fn framework(&self) -> Result<FamilyCorpusEvidence, CorpusCoverageError> {
+        let mut cases = self
+            .accepted
+            .iter()
+            .map(|case| CorpusCaseEvidence::accepted(&case.sample, &case.variants))
+            .collect::<Result<Vec<_>, _>>()?;
+        cases.extend(
+            self.rejected
+                .iter()
+                .map(|case| CorpusCaseEvidence::rejected(&case.sample, &case.variants))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        Ok(FamilyCorpusEvidence::new(self.kind, self.required_variants.clone(), cases))
+    }
+}
+
+/// Builds the concrete corpus report for the nine wired pilot families.
+///
+/// # Errors
+///
+/// Returns a fail-closed coverage error when any family-owned case has invalid provenance,
+/// duplicated bytes, missing polarity, or an incomplete required-variant set.
+pub fn build_pilot_corpus_report() -> Result<CorpusReport, CorpusCoverageError> {
+    let families = [
+        versioning::corpus_evidence().framework()?,
+        object_lock::corpus_evidence().framework()?,
+        lifecycle::corpus_evidence().framework()?,
+        cors::corpus_evidence()?,
+        tagging::corpus_evidence()?,
+        accelerate_payment::accelerate_corpus_evidence()?,
+        accelerate_payment::request_payment_corpus_evidence()?,
+        bucket_encryption::bucket_encryption_corpus_evidence()?,
+        public_access_block::public_access_block_corpus_evidence()?,
+    ];
+    build_corpus_report(
+        &[
+            ConfigKind::Versioning,
+            ConfigKind::ObjectLock,
+            ConfigKind::Lifecycle,
+            ConfigKind::Cors,
+            ConfigKind::Tagging,
+            ConfigKind::Accelerate,
+            ConfigKind::RequestPayment,
+            ConfigKind::BucketEncryption,
+            ConfigKind::PublicAccessBlock,
+        ],
+        &families,
+    )
+}
+
 /// The input check or compatibility direction that failed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Direction {
@@ -154,13 +225,6 @@ pub enum Direction {
     D4NotStricter,
     /// D5: the old and new parsed values have the same runtime behavior.
     D5Behavior,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct VersioningBehaviorProjection {
-    versioning_enabled: bool,
-    versioning_status: Option<String>,
-    mfa_delete: Option<String>,
 }
 
 /// A fail-closed input or D1-D5 result with byte-diff context where applicable.
@@ -293,72 +357,6 @@ pub fn assert_four_way<C: FourWayCodec>(codec: &C, sample: &GoldenSample<C::Valu
     Ok(())
 }
 
-/// Runs the real pinned-s3s versus gateway persistence Versioning pilot.
-///
-/// # Errors
-///
-/// Returns an invalid-provenance or first D1-D5 failure.
-pub fn assert_versioning_four_way(sample: &GoldenSample<PersistedVersioningConfiguration>) -> Result<(), GoldenFailure> {
-    assert_four_way(&VersioningCodec, sample)
-}
-
-#[derive(Clone, Copy, Debug)]
-struct VersioningCodec;
-
-impl FourWayCodec for VersioningCodec {
-    const KIND: ConfigKind = ConfigKind::Versioning;
-
-    type Value = PersistedVersioningConfiguration;
-    type OldParsed = S3sVersioningObservation;
-    type NewParsed = PersistedVersioningConfiguration;
-    type Structure = PersistedVersioningConfiguration;
-    type Behavior = VersioningBehaviorProjection;
-
-    fn old_parse(&self, bytes: &[u8]) -> Result<Self::OldParsed, String> {
-        parse_s3s_versioning(bytes).map_err(|error| error.to_string())
-    }
-
-    fn new_parse(&self, bytes: &[u8]) -> Result<Self::NewParsed, String> {
-        parse_versioning(bytes).map_err(|error| error.to_string())
-    }
-
-    fn old_structure(&self, value: &Self::OldParsed) -> Self::Structure {
-        value.structure.clone()
-    }
-
-    fn new_structure(&self, value: &Self::NewParsed) -> Self::Structure {
-        value.clone()
-    }
-
-    fn expected_structure(&self, value: &Self::Value) -> Self::Structure {
-        value.clone()
-    }
-
-    fn old_serialize(&self, value: &Self::Value) -> Result<Vec<u8>, String> {
-        serialize_s3s_versioning(value).map_err(|error| error.to_string())
-    }
-
-    fn new_serialize(&self, value: &Self::Value) -> Result<Vec<u8>, String> {
-        Ok(serialize_versioning(value))
-    }
-
-    fn old_behavior(&self, value: &Self::OldParsed) -> Self::Behavior {
-        VersioningBehaviorProjection {
-            versioning_enabled: value.versioning_enabled,
-            versioning_status: value.versioning_status.clone(),
-            mfa_delete: value.mfa_delete.clone(),
-        }
-    }
-
-    fn new_behavior(&self, value: &Self::NewParsed) -> Self::Behavior {
-        VersioningBehaviorProjection {
-            versioning_enabled: value.versioning_enabled(),
-            versioning_status: value.status.clone(),
-            mfa_delete: value.mfa_delete.clone(),
-        }
-    }
-}
-
 fn validate_sample<T>(expected_kind: ConfigKind, sample: &GoldenSample<T>) -> Result<(), GoldenFailure> {
     if sample.kind != expected_kind {
         return Err(GoldenFailure {
@@ -437,311 +435,61 @@ fn format_bytes(bytes: &[u8], offset: usize) -> String {
 mod tests {
     use super::*;
 
-    const HISTORICAL: &[u8] = br#"<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><MfaDelete>Enabled</MfaDelete></VersioningConfiguration>"#;
-    const ALL_FIELDS: &[u8] = br#"<VersioningConfiguration><ExcludeFolders>true</ExcludeFolders><ExcludedPrefixes><Prefix>a</Prefix></ExcludedPrefixes><ExcludedPrefixes><Prefix>b</Prefix></ExcludedPrefixes><MfaDelete>Disabled</MfaDelete><Status>Enabled</Status></VersioningConfiguration>"#;
-    const UNKNOWN_SUSPENDED: &[u8] = br#"<VersioningConfiguration><FutureTopLevel>future</FutureTopLevel><Status>Suspended</Status></VersioningConfiguration>"#;
-    const EMPTY: &[u8] = br#"<VersioningConfiguration></VersioningConfiguration>"#;
-    const DUPLICATE_STATUS: &[u8] =
-        br#"<VersioningConfiguration><Status>Enabled</Status><Status>Suspended</Status></VersioningConfiguration>"#;
-    const EMPTY_STATUS: &[u8] = br#"<VersioningConfiguration><Status></Status></VersioningConfiguration>"#;
-
-    fn base_value() -> PersistedVersioningConfiguration {
-        PersistedVersioningConfiguration {
-            mfa_delete: Some("Enabled".to_owned()),
-            ..PersistedVersioningConfiguration::default()
-        }
-    }
-
-    fn sample() -> GoldenSample<PersistedVersioningConfiguration> {
-        GoldenSample {
-            kind: ConfigKind::Versioning,
-            bytes: HISTORICAL.to_vec(),
-            value: base_value(),
-            origin: SampleOrigin {
-                source: "rustfs/crates/ecstore/src/services/tier/warm_backend_wasabi.rs".to_owned(),
-                producer: "RustFS Wasabi response fixture".to_owned(),
-                version: "rustfs@1c8088d0b2af0a1afc8df128014b2176037a0622".to_owned(),
-                sha256: "2b687cc0f956f0b0d1ebe8511d637316c7869637191ad02a9373a9b858f20b8f".to_owned(),
-            },
-            notes: "repository fixture that is old-readable with a namespace and canonicalizes without one".to_owned(),
-        }
-    }
-
-    fn synthetic(
-        bytes: &[u8],
-        sha256: &str,
-        value: PersistedVersioningConfiguration,
-        notes: &str,
-    ) -> GoldenSample<PersistedVersioningConfiguration> {
-        GoldenSample {
-            kind: ConfigKind::Versioning,
-            bytes: bytes.to_vec(),
-            value,
-            origin: SampleOrigin {
-                source: "P9 Versioning pilot matrix".to_owned(),
-                producer: "pinned s3s XML behavior".to_owned(),
-                version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
-                sha256: sha256.to_owned(),
-            },
-            notes: notes.to_owned(),
-        }
+    #[test]
+    fn nine_pilot_families_publish_real_corpus_evidence() {
+        let versioning = crate::versioning::corpus_evidence();
+        let object_lock = crate::object_lock::corpus_evidence();
+        let lifecycle = crate::lifecycle::corpus_evidence();
+        assert!(versioning.rejected.len() > versioning.accepted.len());
+        assert!(object_lock.rejected.len() > object_lock.accepted.len());
+        assert!(lifecycle.rejected.len() > lifecycle.accepted.len());
+        let report = build_pilot_corpus_report().expect("all nine pilot families have concrete corpus coverage");
+        assert!(report.render().contains("9/9 requested families covered"));
     }
 
     #[test]
-    fn four_way_versioning_pilot_passes_all_five_directions() {
-        assert_versioning_four_way(&sample()).expect("the independent old and new codecs agree");
+    fn provider_provenance_mutation_fails_closed() {
+        let mut family = crate::versioning::corpus_evidence();
+        family.accepted[0].sample.origin.sha256.replace_range(..1, "0");
+        assert!(matches!(
+            family.framework(),
+            Err(CorpusCoverageError::InvalidEvidence {
+                kind: ConfigKind::Versioning,
+                ..
+            })
+        ));
     }
 
     #[test]
-    fn every_versioning_field_keeps_the_old_byte_order() {
-        let value = PersistedVersioningConfiguration {
-            status: Some("Enabled".to_owned()),
-            mfa_delete: Some("Disabled".to_owned()),
-            exclude_folders: Some(true),
-            excluded_prefixes: Some(vec![Some("a".to_owned()), Some("b".to_owned())]),
-        };
-        let case = synthetic(
-            ALL_FIELDS,
-            "d24bc9199f709a4195e25df7b01e9246566289d289e969871dbe05f4ab1a8fc2",
-            value,
-            "all fields make D2 observe extension flattening and order",
+    fn provider_duplicate_row_mutation_fails_closed() {
+        let mut family = crate::object_lock::corpus_evidence();
+        family.rejected.push(family.rejected[0].clone());
+        let evidence = family.framework().expect("each real row remains traceable");
+        assert!(matches!(
+            build_corpus_report(&[ConfigKind::ObjectLock], &[evidence]),
+            Err(CorpusCoverageError::DuplicateSample {
+                kind: ConfigKind::ObjectLock,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn provider_required_variant_mutation_fails_closed() {
+        let mut family = crate::lifecycle::corpus_evidence();
+        family
+            .accepted
+            .retain(|case| !case.variants.contains(&CorpusVariant::TimestampPrecision));
+        family
+            .rejected
+            .retain(|case| !case.variants.contains(&CorpusVariant::TimestampPrecision));
+        let evidence = family.framework().expect("remaining real rows remain traceable");
+        assert_eq!(
+            build_corpus_report(&[ConfigKind::Lifecycle], &[evidence]),
+            Err(CorpusCoverageError::MissingVariant {
+                kind: ConfigKind::Lifecycle,
+                variant: CorpusVariant::TimestampPrecision,
+            })
         );
-        assert_versioning_four_way(&case).expect("the full old shape remains byte-identical");
-    }
-
-    #[test]
-    fn old_readable_unknown_element_and_suspended_status_stay_readable() {
-        let value = PersistedVersioningConfiguration {
-            status: Some("Suspended".to_owned()),
-            ..PersistedVersioningConfiguration::default()
-        };
-        let case = synthetic(
-            UNKNOWN_SUSPENDED,
-            "39c0bba117e8b64307f4ddc56d4150c28eb8b70db0c007150896c7cdd40ca437",
-            value,
-            "unknown top-level element must not make the new persistence parser stricter",
-        );
-        assert_versioning_four_way(&case).expect("unknown old-readable content remains readable");
-    }
-
-    #[test]
-    fn old_readable_metadata_above_the_http_body_limit_stays_readable() {
-        let prefix = "p".repeat(1024 * 1024);
-        let bytes = format!(
-            "<VersioningConfiguration><ExcludedPrefixes><Prefix>{prefix}</Prefix></ExcludedPrefixes></VersioningConfiguration>"
-        )
-        .into_bytes();
-        let digest = hex::encode(Sha256::digest(&bytes));
-        let value = PersistedVersioningConfiguration {
-            excluded_prefixes: Some(vec![Some(prefix)]),
-            ..PersistedVersioningConfiguration::default()
-        };
-        let case = synthetic(
-            &bytes,
-            &digest,
-            value,
-            "old-readable persistence metadata must not inherit the smaller HTTP request-body limit",
-        );
-        assert_versioning_four_way(&case).expect("the persistence parser is no stricter than the old codec");
-    }
-
-    #[test]
-    fn empty_document_preserves_never_configured_state() {
-        let case = synthetic(
-            EMPTY,
-            "ac87a5732e533b964cf009668f3c9cdddd6e11b6c88b8944ce3ebb9070655f5d",
-            PersistedVersioningConfiguration::default(),
-            "absence is distinct from Suspended",
-        );
-        assert_versioning_four_way(&case).expect("empty document means never configured on both sides");
-    }
-
-    #[test]
-    fn duplicate_status_is_rejected_by_both_real_parsers() {
-        let old = VersioningCodec
-            .old_parse(DUPLICATE_STATUS)
-            .expect_err("old parser rejects duplicate fields");
-        let new = VersioningCodec
-            .new_parse(DUPLICATE_STATUS)
-            .expect_err("new parser must reject the same duplicate");
-        assert!(old.contains("duplicate field"), "unexpected old refusal: {old}");
-        assert!(new.contains("duplicate scalar field"), "unexpected new refusal: {new}");
-    }
-
-    #[test]
-    fn explicit_empty_status_is_not_absence() {
-        let value = PersistedVersioningConfiguration {
-            status: Some(String::new()),
-            ..PersistedVersioningConfiguration::default()
-        };
-        let case = synthetic(
-            EMPTY_STATUS,
-            "835f380c356b1a7de54b9e0cf8a2019b8e6826ff922c6d0ebaadc0e3c5759946",
-            value,
-            "paired empty Status must stay present",
-        );
-        assert_versioning_four_way(&case).expect("empty and absent remain distinct");
-    }
-
-    struct Mutant {
-        panic_on_old_parse: bool,
-        old_byte_drift: bool,
-        reject_new_output_in_old: bool,
-        reject_historical_in_new: bool,
-        new_structure_drift: bool,
-        new_behavior_drift: bool,
-    }
-
-    impl FourWayCodec for Mutant {
-        const KIND: ConfigKind = ConfigKind::Versioning;
-
-        type Value = PersistedVersioningConfiguration;
-        type OldParsed = S3sVersioningObservation;
-        type NewParsed = PersistedVersioningConfiguration;
-        type Structure = PersistedVersioningConfiguration;
-        type Behavior = VersioningBehaviorProjection;
-
-        fn old_parse(&self, bytes: &[u8]) -> Result<Self::OldParsed, String> {
-            assert!(!self.panic_on_old_parse, "input validation must run before the old parser");
-            let canonical = VersioningCodec.new_serialize(&base_value())?;
-            if self.reject_new_output_in_old && bytes == canonical {
-                return Err("mutation: rollback parser rejects the new output".to_owned());
-            }
-            VersioningCodec.old_parse(bytes)
-        }
-
-        fn new_parse(&self, bytes: &[u8]) -> Result<Self::NewParsed, String> {
-            if self.reject_historical_in_new && bytes == HISTORICAL {
-                return Err("mutation: new parser is stricter".to_owned());
-            }
-            let mut parsed = VersioningCodec.new_parse(bytes)?;
-            if self.new_structure_drift {
-                parsed.mfa_delete = Some("Disabled".to_owned());
-            }
-            Ok(parsed)
-        }
-
-        fn old_structure(&self, value: &Self::OldParsed) -> Self::Structure {
-            VersioningCodec.old_structure(value)
-        }
-
-        fn new_structure(&self, value: &Self::NewParsed) -> Self::Structure {
-            VersioningCodec.new_structure(value)
-        }
-
-        fn expected_structure(&self, value: &Self::Value) -> Self::Structure {
-            VersioningCodec.expected_structure(value)
-        }
-
-        fn old_serialize(&self, value: &Self::Value) -> Result<Vec<u8>, String> {
-            let mut bytes = VersioningCodec.old_serialize(value)?;
-            if self.old_byte_drift {
-                bytes.push(b' ');
-            }
-            Ok(bytes)
-        }
-
-        fn new_serialize(&self, value: &Self::Value) -> Result<Vec<u8>, String> {
-            VersioningCodec.new_serialize(value)
-        }
-
-        fn old_behavior(&self, value: &Self::OldParsed) -> Self::Behavior {
-            VersioningCodec.old_behavior(value)
-        }
-
-        fn new_behavior(&self, value: &Self::NewParsed) -> Self::Behavior {
-            let mut projection = VersioningCodec.new_behavior(value);
-            if self.new_behavior_drift {
-                projection.versioning_enabled = !projection.versioning_enabled;
-            }
-            projection
-        }
-    }
-
-    fn mutant() -> Mutant {
-        Mutant {
-            panic_on_old_parse: false,
-            old_byte_drift: false,
-            reject_new_output_in_old: false,
-            reject_historical_in_new: false,
-            new_structure_drift: false,
-            new_behavior_drift: false,
-        }
-    }
-
-    #[test]
-    fn d2_detects_one_byte_serializer_drift() {
-        let mut codec = mutant();
-        codec.old_byte_drift = true;
-        let failure = assert_four_way(&codec, &sample()).expect_err("D2 must reject one changed byte");
-        assert_eq!(failure.direction, Direction::D2ByteWrite);
-        assert!(failure.offset.is_some());
-    }
-
-    #[test]
-    fn d3_detects_an_old_parser_that_rejects_new_output() {
-        let mut codec = mutant();
-        codec.reject_new_output_in_old = true;
-        let failure = assert_four_way(&codec, &sample()).expect_err("D3 must prove rollback readability");
-        assert_eq!(failure.direction, Direction::D3RollbackRead);
-    }
-
-    #[test]
-    fn d4_detects_a_new_parser_that_rejects_old_readable_input() {
-        let mut codec = mutant();
-        codec.reject_historical_in_new = true;
-        let failure = assert_four_way(&codec, &sample()).expect_err("D4 must reject a stricter parser");
-        assert_eq!(failure.direction, Direction::D4NotStricter);
-    }
-
-    #[test]
-    fn d1_detects_structure_drift_after_both_parsers_accept() {
-        let mut codec = mutant();
-        codec.new_structure_drift = true;
-        let failure = assert_four_way(&codec, &sample()).expect_err("D1 must compare parsed structures");
-        assert_eq!(failure.direction, Direction::D1CompatibleRead);
-    }
-
-    #[test]
-    fn old_unreadable_corpus_input_fails_instead_of_skipping() {
-        let mut invalid = sample();
-        invalid.bytes = b"<not-versioning>".to_vec();
-        invalid.origin.sha256 = hex::encode(Sha256::digest(&invalid.bytes));
-        let failure = assert_four_way(&mutant(), &invalid).expect_err("missing old observation must fail closed");
-        assert_eq!(failure.direction, Direction::D1CompatibleRead);
-    }
-
-    #[test]
-    fn d5_detects_behavior_drift_after_structure_matches() {
-        let mut codec = mutant();
-        codec.new_behavior_drift = true;
-        let failure = assert_four_way(&codec, &sample()).expect_err("D5 must use independent behavior projections");
-        assert_eq!(failure.direction, Direction::D5Behavior);
-    }
-
-    #[test]
-    fn missing_provenance_fails_before_any_codec_observation() {
-        let mut invalid = sample();
-        invalid.origin.source.clear();
-        let failure = assert_four_way(&mutant(), &invalid).expect_err("missing source must fail closed");
-        assert_eq!(failure.direction, Direction::Input);
-    }
-
-    #[test]
-    fn stale_sample_digest_fails_before_any_codec_observation() {
-        let mut invalid = sample();
-        invalid.origin.sha256.replace_range(..1, "0");
-        let failure = assert_four_way(&mutant(), &invalid).expect_err("stale digest must fail closed");
-        assert_eq!(failure.direction, Direction::Input);
-    }
-
-    #[test]
-    fn sample_kind_mismatch_fails_before_any_codec_observation() {
-        let mut invalid = sample();
-        invalid.kind = ConfigKind::ObjectLock;
-        let mut codec = mutant();
-        codec.panic_on_old_parse = true;
-        let failure = assert_four_way(&codec, &invalid).expect_err("a mislabeled sample must fail closed");
-        assert_eq!(failure.direction, Direction::Input);
     }
 }

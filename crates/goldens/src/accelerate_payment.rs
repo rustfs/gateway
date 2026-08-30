@@ -396,9 +396,6 @@ pub(crate) fn request_payment_corpus_evidence() -> Result<FamilyCorpusEvidence, 
     family_corpus(ConfigKind::RequestPayment, payment_accepted_samples(), payment_rejected_samples())
 }
 
-const _: [fn() -> Result<FamilyCorpusEvidence, CorpusCoverageError>; 2] =
-    [accelerate_corpus_evidence, request_payment_corpus_evidence];
-
 #[cfg(test)]
 mod tests {
     use super::*;

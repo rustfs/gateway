@@ -334,8 +334,6 @@ pub(crate) fn bucket_encryption_corpus_evidence() -> Result<FamilyCorpusEvidence
     ))
 }
 
-const _: fn() -> Result<FamilyCorpusEvidence, CorpusCoverageError> = bucket_encryption_corpus_evidence;
-
 #[cfg(test)]
 mod tests {
     use super::*;
