@@ -36,6 +36,7 @@ use http_body_util::Full;
 use rustfs_gateway_server::{RunningServer, Server, ServerConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpSocket, TcpStream};
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tower::service_fn;
 
 #[path = "server_load/per_ip.rs"]
@@ -120,16 +121,31 @@ fn rss_bytes() -> Option<usize> {
 /// Tells a re-executed copy of this test binary that it is the isolated child.
 const RSS_CHILD_MARKER: &str = "RUSTFS_GATEWAY_SERVER_RUNTIME_RSS_CHILD";
 
+/// Coordinates tests that deliberately saturate the host with live sockets.
+///
+/// Load cases take a shared lease and remain parallel with each other. A timing-sensitive runtime
+/// case takes the exclusive lease so its protocol deadline is not measuring unrelated test load.
+static SERVER_LOAD_ISOLATION: RwLock<()> = RwLock::const_new(());
+
+async fn shared_server_load_lease() -> RwLockReadGuard<'static, ()> {
+    SERVER_LOAD_ISOLATION.read().await
+}
+
+pub(crate) async fn exclusive_server_load_lease() -> RwLockWriteGuard<'static, ()> {
+    SERVER_LOAD_ISOLATION.write().await
+}
+
 /// Re-runs `test_name` alone in a child process, so a resident-set reading belongs to that test
 /// and not to whatever else the harness happens to be running beside it.
 ///
 /// Returns `true` when this process *is* the isolated child and must do the work. The parent does
 /// not trust the child's exit status on its own: `--exact` on a name libtest cannot find runs no
 /// test and still exits zero, which reads exactly like a pass, so the summary line is checked too.
-fn run_isolated(test_name: &str) -> bool {
+async fn run_isolated(test_name: &str) -> bool {
     if std::env::var_os(RSS_CHILD_MARKER).is_some() {
         return true;
     }
+    let _load_lease = shared_server_load_lease().await;
     let qualified_name = format!("server_load::{test_name}");
     let output = Command::new(std::env::current_exe().expect("test executable path is available"))
         .args(["--exact", &qualified_name, "--nocapture", "--test-threads=1"])
@@ -197,7 +213,7 @@ async fn c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budg
     const TAIL_SHARE_OF_FIRST: usize = 2;
     const BALLAST_SHARE_SEEN: usize = 2;
     const MIN_SCALE: usize = 4 * 1024 * 1024;
-    if !run_isolated(TEST_NAME) {
+    if !run_isolated(TEST_NAME).await {
         return;
     }
     let mut config = plaintext_config();
@@ -632,7 +648,7 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
     /// from, and the case reports that instead of asserting against a scale it does not have.
     /// Observed first-wave growth is ~24 MiB; this is well under any healthy reading.
     const MIN_SCALE: usize = 4 * 1024 * 1024;
-    if !run_isolated(TEST_NAME) {
+    if !run_isolated(TEST_NAME).await {
         return;
     }
     let stalling_body = Bytes::from(vec![b'x'; RESPONSE_LEN]);

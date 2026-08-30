@@ -28,7 +28,7 @@ async fn c_lim_0037_ten_thousand_half_open_connections_preserve_other_ip_p99() {
     const PROBES: usize = 500;
     const WARMUP_PROBES: usize = 20;
     const PROBE_CEILING: Duration = Duration::from_secs(5);
-    if !run_isolated(TEST_NAME) {
+    if !run_isolated(TEST_NAME).await {
         return;
     }
 
@@ -157,7 +157,7 @@ async fn c_wire_0061_slow_headers_expire_without_rss_or_healthy_p99_growth() {
     const SLOW_HEADERS: usize = 100;
     const PROBES: usize = 200;
     const PROBE_CEILING: Duration = Duration::from_secs(2);
-    if !run_isolated(TEST_NAME) {
+    if !run_isolated(TEST_NAME).await {
         return;
     }
 
@@ -245,7 +245,7 @@ async fn c_wire_0064_one_thousand_half_open_connections_are_bounded_and_reused()
     const ATTEMPTS: usize = 1_000;
     const PER_IP_LIMIT: usize = 64;
     const GLOBAL_LIMIT: usize = PER_IP_LIMIT * 2;
-    if !run_isolated(TEST_NAME) {
+    if !run_isolated(TEST_NAME).await {
         return;
     }
 

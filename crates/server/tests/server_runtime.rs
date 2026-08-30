@@ -478,6 +478,7 @@ async fn c_lim_0038_in_flight_request_limit_pauses_accept_before_the_next_socket
 
 #[tokio::test]
 async fn a_srv_0013_slow_headers_do_not_block_a_healthy_connection() {
+    let _exclusive_load_lease = crate::server_load::exclusive_server_load_lease().await;
     let RunningServer {
         local_addr,
         metrics,
