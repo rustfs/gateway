@@ -126,10 +126,11 @@ const RSS_CHILD_MARKER: &str = "RUSTFS_GATEWAY_SERVER_RUNTIME_RSS_CHILD";
 /// Returns `true` when this process *is* the isolated child and must do the work. The parent does
 /// not trust the child's exit status on its own: `--exact` on a name libtest cannot find runs no
 /// test and still exits zero, which reads exactly like a pass, so the summary line is checked too.
-fn run_isolated(test_name: &str) -> bool {
+async fn run_isolated(test_name: &str) -> bool {
     if std::env::var_os(RSS_CHILD_MARKER).is_some() {
         return true;
     }
+    let _load_lease = crate::shared_server_load_lease().await;
     let qualified_name = format!("server_load::{test_name}");
     let output = Command::new(std::env::current_exe().expect("test executable path is available"))
         .args(["--exact", &qualified_name, "--nocapture", "--test-threads=1"])
@@ -197,7 +198,7 @@ async fn c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budg
     const TAIL_SHARE_OF_FIRST: usize = 2;
     const BALLAST_SHARE_SEEN: usize = 2;
     const MIN_SCALE: usize = 4 * 1024 * 1024;
-    if !run_isolated(TEST_NAME) {
+    if !run_isolated(TEST_NAME).await {
         return;
     }
     let mut config = plaintext_config();
@@ -632,7 +633,7 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
     /// from, and the case reports that instead of asserting against a scale it does not have.
     /// Observed first-wave growth is ~24 MiB; this is well under any healthy reading.
     const MIN_SCALE: usize = 4 * 1024 * 1024;
-    if !run_isolated(TEST_NAME) {
+    if !run_isolated(TEST_NAME).await {
         return;
     }
     let stalling_body = Bytes::from(vec![b'x'; RESPONSE_LEN]);

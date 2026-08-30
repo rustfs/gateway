@@ -14,9 +14,26 @@
 
 //! Consolidated integration-test entry point for `server`.
 //!
-//! Responsible for: registering every `server` integration-test source in one Cargo target.
-//! NOT responsible for: test behavior or repository automation implementation.
+//! Responsible for: registering every `server` integration-test source in one Cargo target and
+//! coordinating cases that share host socket capacity. NOT responsible for: server behavior or
+//! repository automation implementation.
 //! Upstream: the `server` integration-test modules. Downstream: Cargo's test harness.
+
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+/// Coordinates tests that deliberately saturate the host with live sockets.
+///
+/// Load cases take a shared lease and remain parallel with each other. A timing-sensitive runtime
+/// case takes the exclusive lease so its protocol deadline is not measuring unrelated test load.
+static SERVER_LOAD_ISOLATION: RwLock<()> = RwLock::const_new(());
+
+async fn shared_server_load_lease() -> RwLockReadGuard<'static, ()> {
+    SERVER_LOAD_ISOLATION.read().await
+}
+
+async fn exclusive_server_load_lease() -> RwLockWriteGuard<'static, ()> {
+    SERVER_LOAD_ISOLATION.write().await
+}
 
 #[path = "acceptance.rs"]
 mod acceptance;
