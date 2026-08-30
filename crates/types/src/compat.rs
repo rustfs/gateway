@@ -22,11 +22,14 @@
 use core::fmt;
 
 use crate::persistence::{
-    PersistedDefaultRetention, PersistedObjectLockConfiguration, PersistedObjectLockRule, PersistedVersioningConfiguration,
+    PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedDefaultRetention,
+    PersistedEncryptionByDefault, PersistedObjectLockConfiguration, PersistedObjectLockRule,
+    PersistedPublicAccessBlockConfiguration, PersistedVersioningConfiguration,
 };
 use s3s::dto::{
     BucketVersioningStatus, DefaultRetention, ExcludedPrefix, MFADelete, ObjectLockConfiguration, ObjectLockEnabled,
-    ObjectLockRetentionMode, ObjectLockRule, VersioningConfiguration,
+    ObjectLockRetentionMode, ObjectLockRule, PublicAccessBlockConfiguration, ServerSideEncryption, ServerSideEncryptionByDefault,
+    ServerSideEncryptionConfiguration, ServerSideEncryptionRule, VersioningConfiguration,
 };
 use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -54,6 +57,24 @@ pub struct S3sObjectLockObservation {
     pub structure: PersistedObjectLockConfiguration,
     /// Whether the pinned old implementation interprets Object Lock as enabled.
     pub object_lock_enabled: bool,
+}
+
+/// One old-codec Bucket Encryption observation before either side is normalized.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3sBucketEncryptionObservation {
+    /// Complete parsed persistence structure.
+    pub structure: PersistedBucketEncryptionConfiguration,
+    /// Runtime-relevant algorithm, KMS key, and bucket-key decisions per stored rule.
+    pub behavior: Vec<(Option<String>, Option<String>, Option<bool>)>,
+}
+
+/// One old-codec Public Access Block observation before either side is normalized.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3sPublicAccessBlockObservation {
+    /// Complete parsed persistence structure.
+    pub structure: PersistedPublicAccessBlockConfiguration,
+    /// The four effective access decisions in stable field order.
+    pub behavior: (bool, bool, bool, bool),
 }
 
 /// Failure raised by the pinned old persistence codec.
@@ -174,6 +195,113 @@ pub fn serialize_s3s_object_lock(value: &PersistedObjectLockConfiguration) -> Re
             ..ObjectLockRule::default()
         }),
         ..ObjectLockConfiguration::default()
+    };
+    let mut output = Vec::with_capacity(256);
+    let mut serializer = Serializer::new(&mut output);
+    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
+    Ok(output)
+}
+
+/// Parses Bucket Encryption bytes with the pinned s3s persistence decoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
+pub fn parse_s3s_bucket_encryption(input: &[u8]) -> Result<S3sBucketEncryptionObservation, CompatCodecError> {
+    let mut deserializer = Deserializer::new(input);
+    let value = ServerSideEncryptionConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
+    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
+    let behavior = value
+        .rules
+        .iter()
+        .map(|rule| {
+            let default = rule.apply_server_side_encryption_by_default.as_ref();
+            (
+                default.map(|value| value.sse_algorithm.as_str().to_owned()),
+                default.and_then(|value| value.kms_master_key_id.clone()),
+                rule.bucket_key_enabled,
+            )
+        })
+        .collect();
+    let rules = value
+        .rules
+        .into_iter()
+        .map(|rule| PersistedBucketEncryptionRule {
+            apply_server_side_encryption_by_default: rule.apply_server_side_encryption_by_default.map(|default| {
+                PersistedEncryptionByDefault {
+                    sse_algorithm: default.sse_algorithm.as_str().to_owned(),
+                    kms_master_key_id: default.kms_master_key_id,
+                }
+            }),
+            bucket_key_enabled: rule.bucket_key_enabled,
+        })
+        .collect::<Vec<_>>();
+    let structure = PersistedBucketEncryptionConfiguration { rules };
+    Ok(S3sBucketEncryptionObservation { structure, behavior })
+}
+
+/// Serializes a Bucket Encryption value with the pinned s3s persistence encoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s cannot render the value.
+pub fn serialize_s3s_bucket_encryption(value: &PersistedBucketEncryptionConfiguration) -> Result<Vec<u8>, CompatCodecError> {
+    let old_value = ServerSideEncryptionConfiguration {
+        rules: value
+            .rules
+            .iter()
+            .map(|rule| ServerSideEncryptionRule {
+                apply_server_side_encryption_by_default: rule.apply_server_side_encryption_by_default.as_ref().map(|default| {
+                    ServerSideEncryptionByDefault {
+                        kms_master_key_id: default.kms_master_key_id.clone(),
+                        sse_algorithm: ServerSideEncryption::from(default.sse_algorithm.clone()),
+                    }
+                }),
+                bucket_key_enabled: rule.bucket_key_enabled,
+            })
+            .collect(),
+    };
+    let mut output = Vec::with_capacity(256);
+    let mut serializer = Serializer::new(&mut output);
+    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
+    Ok(output)
+}
+
+/// Parses Public Access Block bytes with the pinned s3s persistence decoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
+pub fn parse_s3s_public_access_block(input: &[u8]) -> Result<S3sPublicAccessBlockObservation, CompatCodecError> {
+    let mut deserializer = Deserializer::new(input);
+    let value = PublicAccessBlockConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
+    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
+    let behavior = (
+        value.block_public_acls.unwrap_or(false),
+        value.ignore_public_acls.unwrap_or(false),
+        value.block_public_policy.unwrap_or(false),
+        value.restrict_public_buckets.unwrap_or(false),
+    );
+    let structure = PersistedPublicAccessBlockConfiguration {
+        block_public_acls: value.block_public_acls,
+        ignore_public_acls: value.ignore_public_acls,
+        block_public_policy: value.block_public_policy,
+        restrict_public_buckets: value.restrict_public_buckets,
+    };
+    Ok(S3sPublicAccessBlockObservation { structure, behavior })
+}
+
+/// Serializes a Public Access Block value with the pinned s3s persistence encoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s cannot render the value.
+pub fn serialize_s3s_public_access_block(value: &PersistedPublicAccessBlockConfiguration) -> Result<Vec<u8>, CompatCodecError> {
+    let old_value = PublicAccessBlockConfiguration {
+        block_public_acls: value.block_public_acls,
+        ignore_public_acls: value.ignore_public_acls,
+        block_public_policy: value.block_public_policy,
+        restrict_public_buckets: value.restrict_public_buckets,
     };
     let mut output = Vec::with_capacity(256);
     let mut serializer = Serializer::new(&mut output);
