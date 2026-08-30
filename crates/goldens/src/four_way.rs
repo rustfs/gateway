@@ -14,9 +14,10 @@
 
 //! Fail-closed aggregate execution of family-owned persistence assertions.
 //!
-//! Responsible for: collecting observed D1-D5 executions into a machine-readable report. NOT
-//! responsible for: defining codecs, fixtures, or coverage variants. Upstream: each configuration
-//! module's concrete sample runner. Downstream: the `four-way --all` migration gate.
+//! Responsible for: collecting observed D1-D5 executions into a machine-readable report.
+//! Not responsible for: defining codecs, fixtures, or coverage variants.
+//! Upstream: each configuration module's concrete sample runner.
+//! Downstream: the `four-way --all` migration gate.
 
 use core::fmt;
 
