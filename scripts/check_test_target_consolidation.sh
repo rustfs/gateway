@@ -670,6 +670,7 @@ gateway_modules = (
     "sigv2_runtime",
     "sse_runtime",
     "streaming_request",
+    "tagging_reachability",
     "throughput_request",
     "vhost_resolution",
 )

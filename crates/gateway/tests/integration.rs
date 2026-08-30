@@ -108,6 +108,8 @@ mod sigv2_runtime;
 mod sse_runtime;
 #[path = "streaming_request.rs"]
 mod streaming_request;
+#[path = "tagging_reachability.rs"]
+mod tagging_reachability;
 #[path = "throughput_request.rs"]
 mod throughput_request;
 #[path = "vhost_resolution.rs"]
