@@ -9,9 +9,11 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `src/persistence/accelerate_payment.rs` | Production Accelerate and Request Payment persistence codecs and runtime decisions. | Changing those two metadata families or their historical XML compatibility. |
 | `src/persistence/lifecycle.rs` | Full Lifecycle persistence structure, parser, timestamp normalization, and old-order writer. | Changing Lifecycle metadata compatibility or action semantics. |
 | `src/cors_tagging.rs` | Persisted CORS and Tagging codecs plus runtime behavior projections. | Changing stored CORS rules, tag sets, or their migration evidence. |
+| `src/persistence/notification.rs` | Full Notification persistence structure, old-order writer, bounded parser, and routing decisions. | Changing Notification metadata compatibility or event-routing semantics. |
 | `src/compat.rs` | Milestone-bounded adapters to the pinned-s3s persistence oracle for the implemented families. | Auditing old-read or rollback behavior for D1-D5. |
 | `src/compat/accelerate_payment.rs` | Independent pinned-s3s observations for Accelerate and Request Payment. | Auditing the old side of either family’s D1-D5 evidence. |
 | `src/compat/lifecycle.rs` | Pinned-s3s Lifecycle translation and decision observation. | Auditing Lifecycle D1-D5 against the old codec. |
+| `src/compat/notification.rs` | Independent pinned-s3s Notification structure and routing observations. | Auditing Notification D1-D5 against the old codec. |
 | `src/persistence/logging_website.rs` | Bucket Logging and Website persisted structures, codecs, and runtime decision seams. | Auditing either family without loading unrelated persistence implementations. |
 | `src/persistence/replication.rs` | Full Replication persistence structure, permissive top-level parser, strict nested parser, and old-order writer. | Changing Replication metadata compatibility or rule semantics. |
 | `src/compat/replication.rs` | Pinned-s3s Replication translation, exact writer, and runtime rule observation. | Auditing Replication D1-D5 against the old codec. |

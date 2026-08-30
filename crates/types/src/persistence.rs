@@ -26,6 +26,7 @@ use rustfs_gateway_xml::{XmlError, XmlLimits, XmlWriter, parse_with_limits};
 mod accelerate_payment;
 mod lifecycle;
 mod logging_website;
+mod notification;
 mod replication;
 
 pub use accelerate_payment::{
@@ -39,6 +40,7 @@ pub use logging_website::{
     PersistedRoutingRuleCondition, PersistedTargetObjectKeyFormat, PersistedWebsiteConfiguration, parse_bucket_logging,
     parse_website, serialize_bucket_logging, serialize_website,
 };
+pub use notification::*;
 pub use replication::*;
 
 /// The complete Versioning configuration persisted by the old RustFS path.
@@ -213,6 +215,8 @@ pub enum PersistenceCodecError {
     UnexpectedBucketEncryptionElement,
     /// A nested Bucket Logging element is not recognized by the pinned old decoder.
     UnexpectedLoggingElement,
+    /// A nested Notification element is not recognized by the pinned old decoder.
+    UnexpectedNotificationElement,
     /// A nested Website element is not recognized by the pinned old decoder.
     UnexpectedWebsiteElement,
 }
@@ -251,6 +255,9 @@ impl fmt::Display for PersistenceCodecError {
             Self::MissingRequiredField => formatter.write_str("persisted configuration XML is missing a required field"),
             Self::UnexpectedLoggingElement => {
                 formatter.write_str("persisted Bucket Logging XML has an unexpected nested element")
+            }
+            Self::UnexpectedNotificationElement => {
+                formatter.write_str("persisted Notification XML has an unexpected nested element")
             }
             Self::UnexpectedWebsiteElement => formatter.write_str("persisted Website XML has an unexpected nested element"),
         }
