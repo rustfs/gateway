@@ -20,10 +20,246 @@
 
 use rustfs_gateway_types::compat::{S3sBucketLoggingObservation, parse_s3s_bucket_logging, serialize_s3s_bucket_logging};
 use rustfs_gateway_types::persistence::{
-    PersistedBucketLoggingStatus, PersistedLoggingEnabled, parse_bucket_logging, serialize_bucket_logging,
+    PersistedBucketLoggingStatus, PersistedGrantee, PersistedLoggingEnabled, PersistedLoggingGrant,
+    PersistedTargetObjectKeyFormat, parse_bucket_logging, serialize_bucket_logging,
 };
 
-use crate::{ConfigKind, FourWayCodec, GoldenFailure, GoldenSample, assert_four_way};
+use crate::{
+    ConfigKind, CorpusCaseEvidence, CorpusCoverageError, CorpusVariant, FamilyCorpusEvidence, FourWayCodec, GoldenFailure,
+    GoldenSample, RejectedGoldenSample, SampleOrigin, assert_four_way,
+};
+
+const EMPTY: &[u8] = b"<BucketLoggingStatus></BucketLoggingStatus>";
+const BASIC: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
+const NAMESPACE: &[u8] = br#"<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>"#;
+const UNKNOWN_TOP: &[u8] = b"<BucketLoggingStatus><FutureTopLevel>future</FutureTopLevel><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
+const ALTERNATE_ORDER: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetPrefix>access/</TargetPrefix><TargetBucket>logs</TargetBucket></LoggingEnabled></BucketLoggingStatus>";
+const EMPTY_PREFIX: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix></TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
+const EMPTY_GRANTS: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetGrants></TargetGrants><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
+const EMPTY_KEY_FORMAT: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetObjectKeyFormat></TargetObjectKeyFormat><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
+const SIMPLE_PREFIX: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetObjectKeyFormat><SimplePrefix></SimplePrefix></TargetObjectKeyFormat><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
+const PARTITIONED_PREFIX: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetObjectKeyFormat><PartitionedPrefix><PartitionDateSource>EventTime</PartitionDateSource></PartitionedPrefix></TargetObjectKeyFormat><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
+const FULL_GRANT: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetGrants><Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"CanonicalUser\"><DisplayName>delivery</DisplayName><ID>canonical-id</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></TargetGrants><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
+
+type AcceptedLoggingCase = (GoldenSample<PersistedBucketLoggingStatus>, &'static [CorpusVariant]);
+type RejectedLoggingCase = (RejectedGoldenSample, &'static [CorpusVariant]);
+
+fn enabled() -> PersistedLoggingEnabled {
+    PersistedLoggingEnabled {
+        target_bucket: "logs".to_owned(),
+        target_grants: None,
+        target_object_key_format: None,
+        target_prefix: "access/".to_owned(),
+    }
+}
+
+fn status(logging_enabled: Option<PersistedLoggingEnabled>) -> PersistedBucketLoggingStatus {
+    PersistedBucketLoggingStatus { logging_enabled }
+}
+
+fn origin(sha256: &str) -> SampleOrigin {
+    SampleOrigin {
+        source: "P9 Bucket Logging persistence matrix".to_owned(),
+        producer: "pinned s3s XML behavior".to_owned(),
+        version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
+        sha256: sha256.to_owned(),
+    }
+}
+
+fn accepted(
+    bytes: &[u8],
+    sha256: &str,
+    value: PersistedBucketLoggingStatus,
+    notes: &str,
+    variants: &'static [CorpusVariant],
+) -> AcceptedLoggingCase {
+    (
+        GoldenSample {
+            kind: ConfigKind::Logging,
+            bytes: bytes.to_vec(),
+            value,
+            origin: origin(sha256),
+            notes: notes.to_owned(),
+        },
+        variants,
+    )
+}
+
+fn rejected(bytes: &[u8], sha256: &str, notes: &str, variants: &'static [CorpusVariant]) -> RejectedLoggingCase {
+    (
+        RejectedGoldenSample {
+            kind: ConfigKind::Logging,
+            bytes: bytes.to_vec(),
+            origin: origin(sha256),
+            notes: notes.to_owned(),
+        },
+        variants,
+    )
+}
+
+fn namespace_case() -> AcceptedLoggingCase {
+    accepted(
+        NAMESPACE,
+        "b64ef0e8d537c54bd1bd8d853b26a09ccf3b41a907325d7e1355c91efddca4ee",
+        status(Some(enabled())),
+        "old-readable default namespace",
+        &[CorpusVariant::Namespace],
+    )
+}
+
+fn accepted_cases() -> Vec<AcceptedLoggingCase> {
+    let mut empty_prefix = enabled();
+    empty_prefix.target_prefix.clear();
+    let mut empty_grants = enabled();
+    empty_grants.target_grants = Some(Vec::new());
+    let mut empty_format = enabled();
+    empty_format.target_object_key_format = Some(PersistedTargetObjectKeyFormat::default());
+    let mut simple = enabled();
+    simple.target_object_key_format = Some(PersistedTargetObjectKeyFormat {
+        partition_date_source: None,
+        simple_prefix: true,
+    });
+    let mut partitioned = enabled();
+    partitioned.target_object_key_format = Some(PersistedTargetObjectKeyFormat {
+        partition_date_source: Some(Some("EventTime".to_owned())),
+        simple_prefix: false,
+    });
+    let mut grant = enabled();
+    grant.target_grants = Some(vec![PersistedLoggingGrant {
+        grantee: Some(PersistedGrantee {
+            display_name: Some("delivery".to_owned()),
+            email_address: None,
+            id: Some("canonical-id".to_owned()),
+            grantee_type: "CanonicalUser".to_owned(),
+            uri: None,
+        }),
+        permission: Some("FULL_CONTROL".to_owned()),
+    }]);
+    vec![
+        accepted(
+            EMPTY,
+            "793250b29f13f41065355f5dbacde7476e500a047882380079067dcc543dfde7",
+            status(None),
+            "logging disabled",
+            &[CorpusVariant::EmptyElement],
+        ),
+        accepted(
+            BASIC,
+            "a7a16f7a97a8fc2e694fbfae2ac08bfc908ebdab8be432b8cefbcd0256c1d300",
+            status(Some(enabled())),
+            "basic destination",
+            &[CorpusVariant::Canonical],
+        ),
+        namespace_case(),
+        accepted(
+            UNKNOWN_TOP,
+            "2911ec9b187e2363c7fa3911eaa1058a5d3ff193b6844184dd5d15e39ba0bf50",
+            status(Some(enabled())),
+            "unknown root child",
+            &[CorpusVariant::UnknownTopLevel],
+        ),
+        accepted(
+            ALTERNATE_ORDER,
+            "f4bbd84a110fb62fa8ecd185b90cd3b4bee9e9704bbc5f8bb12db4f9aed5db99",
+            status(Some(enabled())),
+            "noncanonical field order",
+            &[CorpusVariant::AlternateOrder],
+        ),
+        accepted(
+            EMPTY_PREFIX,
+            "fb8ad343565a5ae5e71746ac207b72f81d9944c8da06b91ca24c25c1662ab698",
+            status(Some(empty_prefix)),
+            "explicit empty prefix",
+            &[CorpusVariant::EmptyElement],
+        ),
+        accepted(
+            EMPTY_GRANTS,
+            "8e0f8fafa51072dd8ce1fb45653622d80d6b29357f4f8d90859afe84bfdcbbaa",
+            status(Some(empty_grants)),
+            "present empty grants list",
+            &[CorpusVariant::EmptyElement],
+        ),
+        accepted(
+            EMPTY_KEY_FORMAT,
+            "3cf25b8c7187447aa85fb53cfc19158c96eec57952bd6c91a7d3a3357174893c",
+            status(Some(empty_format)),
+            "present empty key format",
+            &[CorpusVariant::EmptyElement],
+        ),
+        accepted(
+            SIMPLE_PREFIX,
+            "2e11977b5f4c6674825ca33bd5e37b6e414e9a94ba3ff3b07fbb29dd20e24093",
+            status(Some(simple)),
+            "simple prefix marker",
+            &[CorpusVariant::Canonical],
+        ),
+        accepted(
+            PARTITIONED_PREFIX,
+            "ed7d11ff939f85b18d0321150bf5cc14aedb564f624db8d92a1f31fb287687f7",
+            status(Some(partitioned)),
+            "event-time partition",
+            &[CorpusVariant::Canonical],
+        ),
+        accepted(
+            FULL_GRANT,
+            "bb90a0544c15d5620fb4865df48014d47ee2fd4b5aef1709507225e73c37fd4e",
+            status(Some(grant)),
+            "canonical-user full-control grant",
+            &[CorpusVariant::Canonical],
+        ),
+    ]
+}
+
+fn rejected_cases() -> Vec<RejectedLoggingCase> {
+    vec![
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "3c1fe730a7952894451471009943d1f8be3a32a7abe69c43c94e1ea0f0224de9", "missing TargetBucket", &[CorpusVariant::MissingField]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket></LoggingEnabled></BucketLoggingStatus>", "24386793aa92e2525afcbf6808a21ef8d516ea35cabdc6d819ac1b7580804918", "missing TargetPrefix", &[CorpusVariant::MissingField]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetGrants><Grant><Grantee></Grantee></Grant></TargetGrants><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "60e5cc895d3540482031286aa69319b9e984e7d7da0bc1722ba553b35ac81e69", "missing Grantee xsi:type", &[CorpusVariant::MissingField]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetGrants><Grant><Grantee type=\"CanonicalUser\"></Grantee></Grant></TargetGrants><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "87a17b70e7c671e29588e44986de3d03d627b67983499296935921b284a660c0", "missing Grantee xsi:type namespace", &[CorpusVariant::MissingField]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><Future>x</Future><TargetBucket>b</TargetBucket><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "b0ebddb34d08b91fc3ef50a2a8a3bd0f8e50d073813becbfc937925ff066cee3", "unknown nested LoggingEnabled child", &[CorpusVariant::UnknownNested]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetGrants><Grant><Future>x</Future></Grant></TargetGrants><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "0f56635f3153f5e233008ede6bdb5ccb3e73c25a295902f468708394ace34c91", "unknown nested Grant child", &[CorpusVariant::UnknownNested]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetGrants><Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"CanonicalUser\"><Future>x</Future></Grantee></Grant></TargetGrants><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "f8ec51f895a45b245b40c67c8d6e29c8051a613e9b066f5ff30c9783a476cf75", "unknown nested Grantee child", &[CorpusVariant::UnknownNested]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetObjectKeyFormat><Future>x</Future></TargetObjectKeyFormat><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "97e6e8d6c95f3e9183c938caaec793e50fc8221fc6b006756a9fc05564c621e0", "unknown nested TargetObjectKeyFormat child", &[CorpusVariant::UnknownNested]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetObjectKeyFormat><PartitionedPrefix><Future>x</Future></PartitionedPrefix></TargetObjectKeyFormat><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "9adf7ba4a1a6bc83a484b7dda626dd03f31d0dccb81842cd32b8f9469e068317", "unknown nested PartitionedPrefix child", &[CorpusVariant::UnknownNested]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetObjectKeyFormat><SimplePrefix><Future>x</Future></SimplePrefix></TargetObjectKeyFormat><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "4dc86f5804aedaca387c7d991194138bcff4c91b455a3f85de309a80c4771bb3", "unknown nested SimplePrefix child", &[CorpusVariant::UnknownNested]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetPrefix>p</TargetPrefix></LoggingEnabled><LoggingEnabled><TargetBucket>b</TargetBucket><TargetPrefix>q</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "252778817264ef10507bbf0e62beefa565eb945d4a63b8f2079cf11623e3f6c1", "duplicate LoggingEnabled", &[CorpusVariant::DuplicateField]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetBucket>b</TargetBucket><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "e8a13eb207296fe24d7bdc19f6d20dca55601a0cc998784a61dc0f63eb26914e", "duplicate TargetBucket", &[CorpusVariant::DuplicateField]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetPrefix>p</TargetPrefix><TargetPrefix>q</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "8c0252d052f2062edd2e0450449efd6dc8df694bfd50aa01d70887fcd3586c0c", "duplicate TargetPrefix", &[CorpusVariant::DuplicateField]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetGrants></TargetGrants><TargetGrants></TargetGrants><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "1acd0e04b72f04665dc3bf114ec4b56dee2e3431db5a8e26e9a5f59cde358e2f", "duplicate TargetGrants", &[CorpusVariant::DuplicateField]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetObjectKeyFormat></TargetObjectKeyFormat><TargetObjectKeyFormat></TargetObjectKeyFormat><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "b6ecde5d0f98d442c773c8a0b39fe7c562b6c147ff251c6de8b3e306b0080d3b", "duplicate TargetObjectKeyFormat", &[CorpusVariant::DuplicateField]),
+        rejected(b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetObjectKeyFormat><PartitionedPrefix></PartitionedPrefix><PartitionedPrefix></PartitionedPrefix></TargetObjectKeyFormat><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>", "18ac1b3209e308654c1a9370b2ac508ab93110b6b58131697e14ecd3a24399ea", "duplicate PartitionedPrefix", &[CorpusVariant::DuplicateField]),
+        rejected(b"<WebsiteConfiguration></WebsiteConfiguration>", "08b83bc276606aa2ce48152256014689d10181375cbdfaad0adb8aa2d3a02fc9", "wrong Logging root", &[CorpusVariant::MissingField]),
+    ]
+}
+
+/// Builds Bucket Logging corpus coverage from the exact cases used by codec tests.
+///
+/// # Errors
+///
+/// Returns an error when provenance is stale or a concrete case lacks a variant.
+pub(crate) fn bucket_logging_corpus_evidence() -> Result<FamilyCorpusEvidence, CorpusCoverageError> {
+    let mut cases = Vec::new();
+    for (sample, variants) in accepted_cases() {
+        cases.push(CorpusCaseEvidence::accepted(&sample, variants)?);
+    }
+    for (sample, variants) in rejected_cases() {
+        cases.push(CorpusCaseEvidence::rejected(&sample, variants)?);
+    }
+    Ok(FamilyCorpusEvidence::new(
+        ConfigKind::Logging,
+        vec![
+            CorpusVariant::Canonical,
+            CorpusVariant::EmptyElement,
+            CorpusVariant::MissingField,
+            CorpusVariant::UnknownTopLevel,
+            CorpusVariant::UnknownNested,
+            CorpusVariant::Namespace,
+            CorpusVariant::AlternateOrder,
+            CorpusVariant::DuplicateField,
+        ],
+        cases,
+    ))
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct LoggingBehaviorProjection(Option<PersistedLoggingEnabled>);
@@ -80,158 +316,15 @@ impl FourWayCodec for LoggingCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Direction, SampleOrigin};
-    use rustfs_gateway_types::persistence::{PersistedGrantee, PersistedLoggingGrant, PersistedTargetObjectKeyFormat};
-    use sha2::{Digest, Sha256};
-
-    const EMPTY: &[u8] = b"<BucketLoggingStatus></BucketLoggingStatus>";
-    const BASIC: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
-    const NAMESPACE: &[u8] = br#"<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>"#;
-    const UNKNOWN_TOP: &[u8] = b"<BucketLoggingStatus><FutureTopLevel>future</FutureTopLevel><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
-    const ALTERNATE_ORDER: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetPrefix>access/</TargetPrefix><TargetBucket>logs</TargetBucket></LoggingEnabled></BucketLoggingStatus>";
-    const EMPTY_PREFIX: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix></TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
-    const EMPTY_GRANTS: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetGrants></TargetGrants><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
-    const EMPTY_KEY_FORMAT: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetObjectKeyFormat></TargetObjectKeyFormat><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
-    const SIMPLE_PREFIX: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetObjectKeyFormat><SimplePrefix></SimplePrefix></TargetObjectKeyFormat><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
-    const PARTITIONED_PREFIX: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetObjectKeyFormat><PartitionedPrefix><PartitionDateSource>EventTime</PartitionDateSource></PartitionedPrefix></TargetObjectKeyFormat><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
-    const FULL_GRANT: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetGrants><Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"CanonicalUser\"><DisplayName>delivery</DisplayName><ID>canonical-id</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></TargetGrants><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
-
-    fn enabled() -> PersistedLoggingEnabled {
-        PersistedLoggingEnabled {
-            target_bucket: "logs".to_owned(),
-            target_grants: None,
-            target_object_key_format: None,
-            target_prefix: "access/".to_owned(),
-        }
-    }
-
-    fn status(logging_enabled: Option<PersistedLoggingEnabled>) -> PersistedBucketLoggingStatus {
-        PersistedBucketLoggingStatus { logging_enabled }
-    }
-
-    fn sample(
-        bytes: &[u8],
-        sha256: &str,
-        value: PersistedBucketLoggingStatus,
-        notes: &str,
-    ) -> GoldenSample<PersistedBucketLoggingStatus> {
-        assert_eq!(hex::encode(Sha256::digest(bytes)), sha256, "stale Logging sample digest");
-        GoldenSample {
-            kind: ConfigKind::Logging,
-            bytes: bytes.to_vec(),
-            value,
-            origin: SampleOrigin {
-                source: "P9 Bucket Logging persistence matrix".to_owned(),
-                producer: "pinned s3s XML behavior".to_owned(),
-                version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
-                sha256: sha256.to_owned(),
-            },
-            notes: notes.to_owned(),
-        }
-    }
+    use crate::Direction;
 
     fn base_sample() -> GoldenSample<PersistedBucketLoggingStatus> {
-        sample(
-            NAMESPACE,
-            "b64ef0e8d537c54bd1bd8d853b26a09ccf3b41a907325d7e1355c91efddca4ee",
-            status(Some(enabled())),
-            "old-readable default namespace",
-        )
+        namespace_case().0
     }
 
     #[test]
     fn logging_sample_matrix_passes_all_five_directions() {
-        let mut empty_prefix = enabled();
-        empty_prefix.target_prefix.clear();
-        let mut empty_grants = enabled();
-        empty_grants.target_grants = Some(Vec::new());
-        let mut empty_format = enabled();
-        empty_format.target_object_key_format = Some(PersistedTargetObjectKeyFormat::default());
-        let mut simple = enabled();
-        simple.target_object_key_format = Some(PersistedTargetObjectKeyFormat {
-            partition_date_source: None,
-            simple_prefix: true,
-        });
-        let mut partitioned = enabled();
-        partitioned.target_object_key_format = Some(PersistedTargetObjectKeyFormat {
-            partition_date_source: Some(Some("EventTime".to_owned())),
-            simple_prefix: false,
-        });
-        let mut grant = enabled();
-        grant.target_grants = Some(vec![PersistedLoggingGrant {
-            grantee: Some(PersistedGrantee {
-                display_name: Some("delivery".to_owned()),
-                email_address: None,
-                id: Some("canonical-id".to_owned()),
-                grantee_type: "CanonicalUser".to_owned(),
-                uri: None,
-            }),
-            permission: Some("FULL_CONTROL".to_owned()),
-        }]);
-        let cases = [
-            sample(
-                EMPTY,
-                "793250b29f13f41065355f5dbacde7476e500a047882380079067dcc543dfde7",
-                status(None),
-                "logging disabled",
-            ),
-            sample(
-                BASIC,
-                "a7a16f7a97a8fc2e694fbfae2ac08bfc908ebdab8be432b8cefbcd0256c1d300",
-                status(Some(enabled())),
-                "basic destination",
-            ),
-            base_sample(),
-            sample(
-                UNKNOWN_TOP,
-                "2911ec9b187e2363c7fa3911eaa1058a5d3ff193b6844184dd5d15e39ba0bf50",
-                status(Some(enabled())),
-                "unknown root child",
-            ),
-            sample(
-                ALTERNATE_ORDER,
-                "f4bbd84a110fb62fa8ecd185b90cd3b4bee9e9704bbc5f8bb12db4f9aed5db99",
-                status(Some(enabled())),
-                "noncanonical field order",
-            ),
-            sample(
-                EMPTY_PREFIX,
-                "fb8ad343565a5ae5e71746ac207b72f81d9944c8da06b91ca24c25c1662ab698",
-                status(Some(empty_prefix)),
-                "explicit empty prefix",
-            ),
-            sample(
-                EMPTY_GRANTS,
-                "8e0f8fafa51072dd8ce1fb45653622d80d6b29357f4f8d90859afe84bfdcbbaa",
-                status(Some(empty_grants)),
-                "present empty grants list",
-            ),
-            sample(
-                EMPTY_KEY_FORMAT,
-                "3cf25b8c7187447aa85fb53cfc19158c96eec57952bd6c91a7d3a3357174893c",
-                status(Some(empty_format)),
-                "present empty key format",
-            ),
-            sample(
-                SIMPLE_PREFIX,
-                "2e11977b5f4c6674825ca33bd5e37b6e414e9a94ba3ff3b07fbb29dd20e24093",
-                status(Some(simple)),
-                "simple prefix marker",
-            ),
-            sample(
-                PARTITIONED_PREFIX,
-                "ed7d11ff939f85b18d0321150bf5cc14aedb564f624db8d92a1f31fb287687f7",
-                status(Some(partitioned)),
-                "event-time partition",
-            ),
-            sample(
-                FULL_GRANT,
-                "bb90a0544c15d5620fb4865df48014d47ee2fd4b5aef1709507225e73c37fd4e",
-                status(Some(grant)),
-                "canonical-user full-control grant",
-            ),
-        ];
-        for case in cases {
+        for (case, _) in accepted_cases() {
             if let Err(error) = assert_bucket_logging_four_way(&case) {
                 panic!("Logging sample failed ({}): {error}", case.notes);
             }
@@ -240,30 +333,23 @@ mod tests {
 
     #[test]
     fn n_required_logging_members_match_the_old_refusals() {
-        for (name, bytes) in [
-            ("TargetBucket", b"<BucketLoggingStatus><LoggingEnabled><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice()),
-            ("TargetPrefix", b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket></LoggingEnabled></BucketLoggingStatus>".as_slice()),
-            ("Grantee.type", b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetGrants><Grant><Grantee></Grantee></Grant></TargetGrants><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice()),
-            ("Grantee xsi:type namespace", b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetGrants><Grant><Grantee type=\"CanonicalUser\"></Grantee></Grant></TargetGrants><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice()),
-        ] {
-            assert!(LoggingCodec.old_parse(bytes).is_err(), "old accepted missing {name}");
-            assert!(LoggingCodec.new_parse(bytes).is_err(), "new accepted missing {name}");
+        for (case, _) in rejected_cases()
+            .into_iter()
+            .filter(|(case, variants)| variants.contains(&CorpusVariant::MissingField) && case.notes != "wrong Logging root")
+        {
+            assert!(LoggingCodec.old_parse(&case.bytes).is_err(), "old accepted {}", case.notes);
+            assert!(LoggingCodec.new_parse(&case.bytes).is_err(), "new accepted {}", case.notes);
         }
     }
 
     #[test]
     fn n_nested_unknown_logging_content_matches_the_old_boundary() {
-        let cases = [
-            ("enabled", b"<BucketLoggingStatus><LoggingEnabled><Future>x</Future><TargetBucket>b</TargetBucket><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice()),
-            ("grant", b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetGrants><Grant><Future>x</Future></Grant></TargetGrants><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice()),
-            ("grantee", b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetGrants><Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"CanonicalUser\"><Future>x</Future></Grantee></Grant></TargetGrants><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice()),
-            ("format", b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetObjectKeyFormat><Future>x</Future></TargetObjectKeyFormat><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice()),
-            ("partition", b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetObjectKeyFormat><PartitionedPrefix><Future>x</Future></PartitionedPrefix></TargetObjectKeyFormat><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice()),
-            ("simple prefix", b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>b</TargetBucket><TargetObjectKeyFormat><SimplePrefix><Future>x</Future></SimplePrefix></TargetObjectKeyFormat><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice()),
-        ];
-        for (name, bytes) in cases {
-            assert!(LoggingCodec.old_parse(bytes).is_err(), "old accepted nested unknown in {name}");
-            assert!(LoggingCodec.new_parse(bytes).is_err(), "new accepted nested unknown in {name}");
+        for (case, _) in rejected_cases()
+            .into_iter()
+            .filter(|(_, variants)| variants.contains(&CorpusVariant::UnknownNested))
+        {
+            assert!(LoggingCodec.old_parse(&case.bytes).is_err(), "old accepted {}", case.notes);
+            assert!(LoggingCodec.new_parse(&case.bytes).is_err(), "new accepted {}", case.notes);
         }
     }
 
@@ -291,25 +377,23 @@ mod tests {
 
     #[test]
     fn n_duplicate_logging_wrappers_and_scalars_are_rejected() {
-        let cases = [
-            b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetPrefix>p</TargetPrefix></LoggingEnabled><LoggingEnabled><TargetBucket>b</TargetBucket><TargetPrefix>q</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice(),
-            b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetBucket>b</TargetBucket><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice(),
-            b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetPrefix>p</TargetPrefix><TargetPrefix>q</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice(),
-            b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetGrants></TargetGrants><TargetGrants></TargetGrants><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice(),
-            b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetObjectKeyFormat></TargetObjectKeyFormat><TargetObjectKeyFormat></TargetObjectKeyFormat><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice(),
-            b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>a</TargetBucket><TargetObjectKeyFormat><PartitionedPrefix></PartitionedPrefix><PartitionedPrefix></PartitionedPrefix></TargetObjectKeyFormat><TargetPrefix>p</TargetPrefix></LoggingEnabled></BucketLoggingStatus>".as_slice(),
-        ];
-        for bytes in cases {
-            assert!(LoggingCodec.old_parse(bytes).is_err());
-            assert!(LoggingCodec.new_parse(bytes).is_err());
+        for (case, _) in rejected_cases()
+            .into_iter()
+            .filter(|(_, variants)| variants.contains(&CorpusVariant::DuplicateField))
+        {
+            assert!(LoggingCodec.old_parse(&case.bytes).is_err());
+            assert!(LoggingCodec.new_parse(&case.bytes).is_err());
         }
     }
 
     #[test]
     fn n_wrong_logging_root_is_rejected() {
-        let bytes = b"<WebsiteConfiguration></WebsiteConfiguration>";
-        assert!(LoggingCodec.old_parse(bytes).is_err());
-        assert!(LoggingCodec.new_parse(bytes).is_err());
+        let (case, _) = rejected_cases()
+            .into_iter()
+            .find(|(case, _)| case.notes == "wrong Logging root")
+            .expect("the shared refusal corpus contains the wrong-root case");
+        assert!(LoggingCodec.old_parse(&case.bytes).is_err());
+        assert!(LoggingCodec.new_parse(&case.bytes).is_err());
     }
 
     struct Mutant {
@@ -420,5 +504,13 @@ mod tests {
         codec.panic_on_old_parse = true;
         let failure = assert_four_way(&codec, &invalid).expect_err("mislabeled Logging sample must fail closed");
         assert_eq!(failure.direction, Direction::Input);
+    }
+
+    #[test]
+    fn logging_provider_report_is_derived_from_shared_concrete_cases() {
+        let evidence = bucket_logging_corpus_evidence().expect("Logging corpus evidence is traceable");
+        let report = crate::build_corpus_report(&[ConfigKind::Logging], &[evidence])
+            .expect("Logging concrete cases satisfy the coverage contract");
+        assert!(report.render().contains("logging: accepted=11 rejected=17"));
     }
 }

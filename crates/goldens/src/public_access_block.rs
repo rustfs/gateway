@@ -343,8 +343,6 @@ pub(crate) fn public_access_block_corpus_evidence() -> Result<FamilyCorpusEviden
     ))
 }
 
-const _: fn() -> Result<FamilyCorpusEvidence, CorpusCoverageError> = public_access_block_corpus_evidence;
-
 #[cfg(test)]
 mod tests {
     use super::*;
