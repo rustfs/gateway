@@ -22,10 +22,14 @@ use rustfs_gateway_types::compat::{
     S3sBucketEncryptionObservation, parse_s3s_bucket_encryption, serialize_s3s_bucket_encryption,
 };
 use rustfs_gateway_types::persistence::{
-    PersistedBucketEncryptionConfiguration, parse_bucket_encryption, serialize_bucket_encryption,
+    PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedEncryptionByDefault, parse_bucket_encryption,
+    serialize_bucket_encryption,
 };
 
-use crate::{ConfigKind, FourWayCodec, GoldenFailure, GoldenSample, assert_four_way};
+use crate::{
+    ConfigKind, CorpusCaseEvidence, CorpusCoverageError, CorpusVariant, FamilyCorpusEvidence, FourWayCodec, GoldenFailure,
+    GoldenSample, RejectedGoldenSample, SampleOrigin, assert_four_way,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct BucketEncryptionBehaviorProjection {
@@ -96,135 +100,264 @@ impl FourWayCodec for BucketEncryptionCodec {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use rustfs_gateway_types::persistence::{PersistedBucketEncryptionRule, PersistedEncryptionByDefault};
-    use sha2::{Digest, Sha256};
+const EMPTY_RULE: &[u8] = b"<ServerSideEncryptionConfiguration><Rule></Rule></ServerSideEncryptionConfiguration>";
+const AES256: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
+const KMS_BUCKET_KEY: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><KMSMasterKeyID>kms-key</KMSMasterKeyID><SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>";
+const NAMESPACE: &[u8] = br#"<ServerSideEncryptionConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule></Rule></ServerSideEncryptionConfiguration>"#;
+const UNKNOWN_TOP_LEVEL: &[u8] = b"<ServerSideEncryptionConfiguration><FutureTopLevel>future</FutureTopLevel><Rule></Rule></ServerSideEncryptionConfiguration>";
+const UNKNOWN_ATTRIBUTES: &[u8] = b"<ServerSideEncryptionConfiguration future=\"root\"><Rule future=\"rule\"><ApplyServerSideEncryptionByDefault future=\"default\"><SSEAlgorithm future=\"algorithm\">AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
+const ALTERNATE_ORDER: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>true</BucketKeyEnabled><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>kms-key</KMSMasterKeyID></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
+const MULTIPLE_RULES: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule><Rule><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>";
+const UNKNOWN_ALGORITHM: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>future:sse</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
 
-    use super::*;
-    use crate::{Direction, SampleOrigin};
-
-    const EMPTY_RULE: &[u8] = b"<ServerSideEncryptionConfiguration><Rule></Rule></ServerSideEncryptionConfiguration>";
-    const AES256: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
-    const KMS_BUCKET_KEY: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><KMSMasterKeyID>kms-key</KMSMasterKeyID><SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>";
-    const BUCKET_KEY_FALSE: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>false</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>";
-    const NAMESPACE: &[u8] = br#"<ServerSideEncryptionConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule></Rule></ServerSideEncryptionConfiguration>"#;
-    const UNKNOWN_TOP_LEVEL: &[u8] = b"<ServerSideEncryptionConfiguration><FutureTopLevel>future</FutureTopLevel><Rule></Rule></ServerSideEncryptionConfiguration>";
-    const UNKNOWN_ATTRIBUTES: &[u8] = b"<ServerSideEncryptionConfiguration future=\"root\"><Rule future=\"rule\"><ApplyServerSideEncryptionByDefault future=\"default\"><SSEAlgorithm future=\"algorithm\">AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
-    const ALTERNATE_ORDER: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>true</BucketKeyEnabled><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>kms-key</KMSMasterKeyID></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
-    const MULTIPLE_RULES: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule><Rule><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>";
-    const UNKNOWN_ALGORITHM: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>future:sse</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
-
-    fn encryption_default(algorithm: &str, kms_key: Option<&str>) -> PersistedEncryptionByDefault {
-        PersistedEncryptionByDefault {
-            sse_algorithm: algorithm.to_owned(),
-            kms_master_key_id: kms_key.map(str::to_owned),
-        }
+fn encryption_default(algorithm: &str, kms_key: Option<&str>) -> PersistedEncryptionByDefault {
+    PersistedEncryptionByDefault {
+        sse_algorithm: algorithm.to_owned(),
+        kms_master_key_id: kms_key.map(str::to_owned),
     }
+}
 
-    fn rule(default: Option<PersistedEncryptionByDefault>, bucket_key_enabled: Option<bool>) -> PersistedBucketEncryptionRule {
-        PersistedBucketEncryptionRule {
-            apply_server_side_encryption_by_default: default,
-            bucket_key_enabled,
-        }
+fn rule(default: Option<PersistedEncryptionByDefault>, bucket_key_enabled: Option<bool>) -> PersistedBucketEncryptionRule {
+    PersistedBucketEncryptionRule {
+        apply_server_side_encryption_by_default: default,
+        bucket_key_enabled,
     }
+}
 
-    fn configuration(rules: Vec<PersistedBucketEncryptionRule>) -> PersistedBucketEncryptionConfiguration {
-        PersistedBucketEncryptionConfiguration { rules }
+fn configuration(rules: Vec<PersistedBucketEncryptionRule>) -> PersistedBucketEncryptionConfiguration {
+    PersistedBucketEncryptionConfiguration { rules }
+}
+
+fn origin(sha256: &str) -> SampleOrigin {
+    SampleOrigin {
+        source: "P9 Bucket Encryption persistence matrix".to_owned(),
+        producer: "pinned s3s XML behavior".to_owned(),
+        version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
+        sha256: sha256.to_owned(),
     }
+}
 
-    fn sample(
-        bytes: &[u8],
-        sha256: &str,
-        value: PersistedBucketEncryptionConfiguration,
-        notes: &str,
-    ) -> GoldenSample<PersistedBucketEncryptionConfiguration> {
-        assert_eq!(hex::encode(Sha256::digest(bytes)), sha256, "stale SSE sample digest");
-        GoldenSample {
+fn sample(
+    bytes: &[u8],
+    sha256: &str,
+    value: PersistedBucketEncryptionConfiguration,
+    notes: &str,
+) -> GoldenSample<PersistedBucketEncryptionConfiguration> {
+    GoldenSample {
+        kind: ConfigKind::BucketEncryption,
+        bytes: bytes.to_vec(),
+        value,
+        origin: origin(sha256),
+        notes: notes.to_owned(),
+    }
+}
+
+fn rejected(bytes: Vec<u8>, sha256: &str, notes: &str, variant: CorpusVariant) -> (RejectedGoldenSample, Vec<CorpusVariant>) {
+    (
+        RejectedGoldenSample {
             kind: ConfigKind::BucketEncryption,
-            bytes: bytes.to_vec(),
-            value,
-            origin: SampleOrigin {
-                source: "P9 Bucket Encryption persistence matrix".to_owned(),
-                producer: "pinned s3s XML behavior".to_owned(),
-                version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
-                sha256: sha256.to_owned(),
-            },
+            bytes,
+            origin: origin(sha256),
             notes: notes.to_owned(),
-        }
-    }
+        },
+        vec![variant],
+    )
+}
 
-    fn base_sample() -> GoldenSample<PersistedBucketEncryptionConfiguration> {
-        sample(
-            NAMESPACE,
-            "8c92662634d2d1191664089ca7e152bfe975f2b70ed260a94136f7d3502de524",
-            configuration(vec![rule(None, None)]),
-            "old-readable namespace with an explicit empty rule",
+fn bucket_key_accepted_samples() -> Vec<(GoldenSample<PersistedBucketEncryptionConfiguration>, Vec<CorpusVariant>)> {
+    [
+        ("true", true, "fcd1915005f4fcb91eb15bde6c306e93c60b4b37d007bdec17ff35924cb6efdd"),
+        ("false", false, "27af9808807e633bf5dab4c2666a5a3bd2324aa2097d8539d6c1bb01e028e099"),
+        ("TRUE", true, "f9ae6ea13e59e3e9e02c3be25022607a7f323296614dcfbebbb7c4a541807ca5"),
+        ("FALSE", false, "92b3a4d6c2497dcfdce798a3eeb2ec48ae7fcb311532d6c2cbf64e7f2601400e"),
+    ]
+    .into_iter()
+    .map(|(lexeme, value, sha256)| {
+        let bytes = format!(
+            "<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>{lexeme}</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>"
+        );
+        (
+            sample(
+                bytes.as_bytes(),
+                sha256,
+                configuration(vec![rule(None, Some(value))]),
+                "old-readable bucket-key boolean lexeme",
+            ),
+            vec![CorpusVariant::Canonical],
         )
-    }
+    })
+    .collect()
+}
 
-    #[test]
-    fn bucket_encryption_sample_matrix_passes_all_five_directions() {
-        let aes = rule(Some(encryption_default("AES256", None)), None);
-        let kms = rule(Some(encryption_default("aws:kms", Some("kms-key"))), Some(true));
-        let cases = [
+fn bucket_encryption_accepted_samples() -> Vec<(GoldenSample<PersistedBucketEncryptionConfiguration>, Vec<CorpusVariant>)> {
+    let aes = rule(Some(encryption_default("AES256", None)), None);
+    let kms = rule(Some(encryption_default("aws:kms", Some("kms-key"))), Some(true));
+    let mut cases = vec![
+        (
             sample(
                 EMPTY_RULE,
                 "38cc281d68379e358fbb4f9ebeca6a5513018a70b9b45149d2e4593048e10e3f",
                 configuration(vec![rule(None, None)]),
                 "explicit empty Rule is the minimum old-readable document",
             ),
+            vec![CorpusVariant::EmptyElement],
+        ),
+        (
             sample(
                 AES256,
                 "cb55d1d74144c5f9f50b3e22a249af0ddd47788c96474b0c341770f1e2d28419",
                 configuration(vec![aes.clone()]),
                 "AES256 default without KMS or bucket key",
             ),
+            vec![CorpusVariant::Canonical],
+        ),
+        (
             sample(
                 KMS_BUCKET_KEY,
                 "693378445b8e5745b67c4a7e027bf933f731f1a082fb0ae41b9aee5bd1b23dc2",
                 configuration(vec![kms.clone()]),
                 "KMS algorithm, key identifier, and enabled bucket key",
             ),
+            vec![CorpusVariant::Canonical],
+        ),
+        (
             sample(
-                BUCKET_KEY_FALSE,
-                "27af9808807e633bf5dab4c2666a5a3bd2324aa2097d8539d6c1bb01e028e099",
-                configuration(vec![rule(None, Some(false))]),
-                "explicit false bucket-key decision without a default algorithm",
+                NAMESPACE,
+                "8c92662634d2d1191664089ca7e152bfe975f2b70ed260a94136f7d3502de524",
+                configuration(vec![rule(None, None)]),
+                "old-readable namespace with an explicit empty rule",
             ),
-            base_sample(),
+            vec![CorpusVariant::Namespace],
+        ),
+        (
             sample(
                 UNKNOWN_TOP_LEVEL,
                 "cec2f27f2e168d5649f1963146986062d968d03d1b46ed3baa94cfbcc28e8a57",
                 configuration(vec![rule(None, None)]),
                 "old-readable unknown root child before the required Rule",
             ),
+            vec![CorpusVariant::UnknownTopLevel],
+        ),
+        (
             sample(
                 UNKNOWN_ATTRIBUTES,
                 "b701aa1267f0b80eb6705f4d1439e62e2c7d4f5045868ae0910d3fbd1c317daf",
                 configuration(vec![aes.clone()]),
                 "old-readable attributes at each structural level",
             ),
+            vec![CorpusVariant::UnknownAttribute],
+        ),
+        (
             sample(
                 ALTERNATE_ORDER,
                 "90ba60c24e212c6ed5a46a60ed0e2e75162c5c500707086cad6369f2f9bbd310",
                 configuration(vec![kms]),
                 "old-readable rule and nested fields in noncanonical order",
             ),
+            vec![CorpusVariant::AlternateOrder],
+        ),
+        (
             sample(
                 MULTIPLE_RULES,
                 "283f72738e2bb4cd0bfe9dd84c288f7ea3c02001db43cfacc0db69284f8dbae7",
                 configuration(vec![aes, rule(None, Some(true))]),
                 "flattened Rule is an unbounded list rather than a duplicate field",
             ),
+            vec![CorpusVariant::Canonical],
+        ),
+        (
             sample(
                 UNKNOWN_ALGORITHM,
                 "3678a23ffb849464e60212c7362598d5b767d19a53d432261320475b3b9377ae",
                 configuration(vec![rule(Some(encryption_default("future:sse", None)), None)]),
                 "old string newtype preserves a future algorithm value",
             ),
-        ];
-        for case in cases {
+            vec![CorpusVariant::UnknownScalar],
+        ),
+    ];
+    cases.extend(bucket_key_accepted_samples());
+    cases
+}
+
+fn bucket_encryption_rejected_samples() -> Vec<(RejectedGoldenSample, Vec<CorpusVariant>)> {
+    let raw = [
+        (b"<ServerSideEncryptionConfiguration></ServerSideEncryptionConfiguration>".to_vec(), "f569568f0add3b5707c9b51dfeb88b84adc8f06e90d235374b80d5075c0c699a", "missing Rule", CorpusVariant::MissingField),
+        (b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".to_vec(), "9be376a461453226ac09b3bc7ef2945155701ca14d08443b09aa0a136ae852f0", "missing SSEAlgorithm", CorpusVariant::MissingField),
+        (b"<ServerSideEncryptionConfiguration><Rule><Future>v</Future></Rule></ServerSideEncryptionConfiguration>".to_vec(), "742b9b08e46369ad19d5046e0ffa3eb5cd0986e003b1fdbccb2e455e78cce8cb", "unknown Rule child", CorpusVariant::UnknownNested),
+        (b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><Future>v</Future><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".to_vec(), "ec967c0d49c6c11e097d36dc0850f66e6b529ef3f0433ca45f8c206467d6eac9", "unknown default child", CorpusVariant::UnknownNested),
+        (b"<ServerSideEncryptionConfiguration><Rule><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>".to_vec(), "62ea2d1b74fd4d569e03ee5b6f5e7131e22d2e3d857707fbd89bd55f3683bf47", "newer blocked-encryption extension", CorpusVariant::UnknownNested),
+        (b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".to_vec(), "ab9086097aec1f918804bb9ad609858a7809292bbc0556279d3b09894716012e", "duplicate ApplyServerSideEncryptionByDefault", CorpusVariant::DuplicateField),
+        (b"<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>true</BucketKeyEnabled><BucketKeyEnabled>false</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>".to_vec(), "f09965caedc03a774e49df45e33a0254bbbe3b1c1c66f17b8db2d9d43400c48d", "duplicate BucketKeyEnabled", CorpusVariant::DuplicateField),
+        (b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm><SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".to_vec(), "951efa211513b57224418c667d84415a431f9a2e1cf6bf6e263ba3cc935a5327", "duplicate SSEAlgorithm", CorpusVariant::DuplicateField),
+        (b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><KMSMasterKeyID>a</KMSMasterKeyID><KMSMasterKeyID>b</KMSMasterKeyID><SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".to_vec(), "3ae78a8a43208b208e951c7b9e6914ba6c0dafa80464994b4cc97fd6e0475699", "duplicate KMSMasterKeyID", CorpusVariant::DuplicateField),
+        (b"<NotServerSideEncryptionConfiguration></NotServerSideEncryptionConfiguration>".to_vec(), "37712921e071a26674ec3f6eb99ade6eb886d6e26fb4a7c573cf0ac7d0575d12", "wrong root", CorpusVariant::MissingField),
+    ];
+    let mut cases = raw
+        .into_iter()
+        .map(|(bytes, sha256, notes, variant)| rejected(bytes, sha256, notes, variant))
+        .collect::<Vec<_>>();
+    for (lexeme, sha256) in [
+        ("TrUe", "f61f080a0bbee0be9914eda37663bc176b457d3db6a9a789934d1cdd5b9b6798"),
+        ("FaLsE", "fb46634772c6c86affcf23c7c870257a869729004125ca67471a7f0d3b41835a"),
+        ("1", "14a941613cb25549322af992da579c52bf2f819038f541bc35ea06ebe1c9d97c"),
+        (" true ", "8084d86b5e214cc60862f6bce74078e50c591770eea5d596d062417ea72c6a38"),
+        ("", "51cd7ed43995d032000d2ece6900aaa7b601530b66e73434e8846802582b305f"),
+    ] {
+        cases.push(rejected(format!("<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>{lexeme}</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>").into_bytes(), sha256, "invalid bucket-key boolean lexeme", CorpusVariant::UnknownScalar));
+    }
+    cases
+}
+
+pub(crate) fn bucket_encryption_corpus_evidence() -> Result<FamilyCorpusEvidence, CorpusCoverageError> {
+    let mut cases = Vec::new();
+    for (sample, variants) in bucket_encryption_accepted_samples() {
+        cases.push(CorpusCaseEvidence::accepted(&sample, &variants)?);
+    }
+    for (sample, variants) in bucket_encryption_rejected_samples() {
+        cases.push(CorpusCaseEvidence::rejected(&sample, &variants)?);
+    }
+    Ok(FamilyCorpusEvidence::new(
+        ConfigKind::BucketEncryption,
+        vec![
+            CorpusVariant::Canonical,
+            CorpusVariant::EmptyElement,
+            CorpusVariant::MissingField,
+            CorpusVariant::Namespace,
+            CorpusVariant::UnknownTopLevel,
+            CorpusVariant::UnknownNested,
+            CorpusVariant::UnknownAttribute,
+            CorpusVariant::AlternateOrder,
+            CorpusVariant::DuplicateField,
+            CorpusVariant::UnknownScalar,
+        ],
+        cases,
+    ))
+}
+
+const _: fn() -> Result<FamilyCorpusEvidence, CorpusCoverageError> = bucket_encryption_corpus_evidence;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Direction, build_corpus_report};
+
+    #[test]
+    fn family_owned_corpus_evidence_is_built_from_the_shared_case_objects() {
+        let evidence = bucket_encryption_corpus_evidence().expect("SSE corpus evidence is traceable");
+        build_corpus_report(&[ConfigKind::BucketEncryption], &[evidence])
+            .expect("SSE corpus coverage is derived from the shared cases");
+    }
+
+    fn base_sample() -> GoldenSample<PersistedBucketEncryptionConfiguration> {
+        bucket_encryption_accepted_samples()
+            .into_iter()
+            .find_map(|(sample, variants)| variants.contains(&CorpusVariant::Namespace).then_some(sample))
+            .expect("SSE matrix carries its namespace control")
+    }
+
+    #[test]
+    fn bucket_encryption_sample_matrix_passes_all_five_directions() {
+        for (case, _) in bucket_encryption_accepted_samples() {
             if let Err(error) = assert_bucket_encryption_four_way(&case) {
                 panic!("Bucket Encryption sample failed ({}): {error}", case.notes);
             }
@@ -233,92 +366,80 @@ mod tests {
 
     #[test]
     fn required_sse_wrappers_match_the_pinned_old_refusals() {
-        for (name, bytes) in [
-            ("missing Rule", b"<ServerSideEncryptionConfiguration></ServerSideEncryptionConfiguration>".as_slice()),
-            (
-                "missing SSEAlgorithm",
-                b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".as_slice(),
-            ),
-        ] {
-            assert!(BucketEncryptionCodec.old_parse(bytes).is_err(), "old parser accepted {name}");
-            assert!(BucketEncryptionCodec.new_parse(bytes).is_err(), "new parser accepted {name}");
+        for (case, _) in bucket_encryption_rejected_samples()
+            .into_iter()
+            .filter(|(_, variants)| variants.contains(&CorpusVariant::MissingField))
+        {
+            assert!(
+                BucketEncryptionCodec.old_parse(&case.bytes).is_err(),
+                "old parser accepted {}",
+                case.notes
+            );
+            assert!(
+                BucketEncryptionCodec.new_parse(&case.bytes).is_err(),
+                "new parser accepted {}",
+                case.notes
+            );
         }
     }
 
     #[test]
     fn nested_unknown_sse_content_matches_the_old_refusal_boundary() {
-        for (name, bytes) in [
-            (
-                "Rule child",
-                b"<ServerSideEncryptionConfiguration><Rule><Future>v</Future></Rule></ServerSideEncryptionConfiguration>".as_slice(),
-            ),
-            (
-                "default child",
-                b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><Future>v</Future><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".as_slice(),
-            ),
-            (
-                "newer blocked-encryption extension",
-                b"<ServerSideEncryptionConfiguration><Rule><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>".as_slice(),
-            ),
-        ] {
-            assert!(BucketEncryptionCodec.old_parse(bytes).is_err(), "old parser accepted {name}");
-            assert!(BucketEncryptionCodec.new_parse(bytes).is_err(), "new parser accepted {name}");
+        for (case, _) in bucket_encryption_rejected_samples()
+            .into_iter()
+            .filter(|(_, variants)| variants.contains(&CorpusVariant::UnknownNested))
+        {
+            assert!(
+                BucketEncryptionCodec.old_parse(&case.bytes).is_err(),
+                "old parser accepted {}",
+                case.notes
+            );
+            assert!(
+                BucketEncryptionCodec.new_parse(&case.bytes).is_err(),
+                "new parser accepted {}",
+                case.notes
+            );
         }
     }
 
     #[test]
     fn every_duplicate_sse_scalar_or_wrapper_is_rejected_by_both_parsers() {
-        let cases = [
-            (
-                "ApplyServerSideEncryptionByDefault",
-                b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".as_slice(),
-            ),
-            (
-                "BucketKeyEnabled",
-                b"<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>true</BucketKeyEnabled><BucketKeyEnabled>false</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>".as_slice(),
-            ),
-            (
-                "SSEAlgorithm",
-                b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm><SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".as_slice(),
-            ),
-            (
-                "KMSMasterKeyID",
-                b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><KMSMasterKeyID>a</KMSMasterKeyID><KMSMasterKeyID>b</KMSMasterKeyID><SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".as_slice(),
-            ),
-        ];
-        for (field, bytes) in cases {
-            assert!(BucketEncryptionCodec.old_parse(bytes).is_err(), "old parser accepted duplicate {field}");
-            assert!(BucketEncryptionCodec.new_parse(bytes).is_err(), "new parser accepted duplicate {field}");
+        for (case, _) in bucket_encryption_rejected_samples()
+            .into_iter()
+            .filter(|(_, variants)| variants.contains(&CorpusVariant::DuplicateField))
+        {
+            assert!(
+                BucketEncryptionCodec.old_parse(&case.bytes).is_err(),
+                "old parser accepted {}",
+                case.notes
+            );
+            assert!(
+                BucketEncryptionCodec.new_parse(&case.bytes).is_err(),
+                "new parser accepted {}",
+                case.notes
+            );
         }
     }
 
     #[test]
     fn bucket_key_boolean_lexemes_match_the_old_oracle() {
-        for (value, expected) in [("true", true), ("false", false), ("TRUE", true), ("FALSE", false)] {
-            let bytes = format!(
-                "<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>{value}</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>"
-            );
+        for (case, _) in bucket_key_accepted_samples() {
+            let expected = case.value.rules[0].bucket_key_enabled;
             let old = BucketEncryptionCodec
-                .old_parse(bytes.as_bytes())
-                .expect("old accepts lowercase bool");
+                .old_parse(&case.bytes)
+                .expect("old accepts observed boolean lexeme");
             let new = BucketEncryptionCodec
-                .new_parse(bytes.as_bytes())
-                .expect("new accepts lowercase bool");
-            assert_eq!(old.structure.rules[0].bucket_key_enabled, Some(expected));
-            assert_eq!(new.rules[0].bucket_key_enabled, Some(expected));
+                .new_parse(&case.bytes)
+                .expect("new accepts observed boolean lexeme");
+            assert_eq!(old.structure.rules[0].bucket_key_enabled, expected);
+            assert_eq!(new.rules[0].bucket_key_enabled, expected);
         }
-        for value in ["TrUe", "FaLsE", "1", " true ", ""] {
-            let bytes = format!(
-                "<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>{value}</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>"
-            );
-            assert!(
-                BucketEncryptionCodec.old_parse(bytes.as_bytes()).is_err(),
-                "old accepted invalid bool {value:?}"
-            );
-            assert!(
-                BucketEncryptionCodec.new_parse(bytes.as_bytes()).is_err(),
-                "new accepted invalid bool {value:?}"
-            );
+        for (case, _) in bucket_encryption_rejected_samples()
+            .into_iter()
+            .filter(|(_, variants)| variants.contains(&CorpusVariant::UnknownScalar))
+        {
+            assert!(BucketEncryptionCodec.old_parse(&case.bytes).is_err(), "old accepted {}", case.notes);
+            assert!(BucketEncryptionCodec.new_parse(&case.bytes).is_err(), "new accepted {}", case.notes);
         }
     }
 
