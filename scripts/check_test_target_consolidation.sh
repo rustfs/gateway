@@ -222,6 +222,7 @@ core_modules = (
     "tagging_roundtrip",
     "tolerant_conditions",
     "upload_capability",
+    "website_roundtrip",
     "xml_character_range",
 )
 core_tests = root / "crates/core/tests"
