@@ -80,6 +80,8 @@ mod payload_transport;
 mod pipeline;
 #[path = "precondition_contract.rs"]
 mod precondition_contract;
+#[path = "precondition_reachability.rs"]
+mod precondition_reachability;
 #[path = "refusal_order_guards.rs"]
 mod refusal_order_guards;
 #[path = "reject_rendering.rs"]
