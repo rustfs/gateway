@@ -41,6 +41,7 @@ layers = [
     ("rustfs-gateway-xml", set()),
     ("rustfs-gateway-codegen", {"rustfs-gateway-model"}),
     ("rustfs-gateway-types", {"rustfs-gateway-xml", "rustfs-gateway-stream"}),
+    ("rustfs-gateway-goldens", {"rustfs-gateway-types"}),
     ("rustfs-gateway-http", {"rustfs-gateway-types", "rustfs-gateway-stream"}),
     ("rustfs-gateway-sig", {"rustfs-gateway-http", "rustfs-gateway-types", "rustfs-gateway-stream"}),
     (

@@ -7,7 +7,7 @@ description = "S3 scalar types, operation inputs/outputs and their generated cod
 # the root `rustfs-gateway-types` dependency requirement still matches it. Keep the numeric part
 # equal to that requirement, and move the date whenever `model/s3.json` is re-pinned — the value is
 # `model/PROVENANCE.md`'s "Pinned commit date".
-version = "0.5.0+aws.2026-08-04"
+version = "0.5.1+aws.2026-08-04"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -40,6 +40,7 @@ http = { workspace = true }
 percent-encoding = { workspace = true }
 sha2 = { workspace = true }
 unicode-normalization = { workspace = true }
+s3s = { git = "https://github.com/rustfs/s3s.git", rev = "9c4690d8e73fc8d184031a19b2c4539ebc77d180", version = "0.15.0", features = ["minio"], optional = true }
 
 # Pinned here rather than inherited, and each line states why. Hoisting them into
 # `[workspace.dependencies]` is a root-manifest change and belongs to whoever owns that file.
@@ -59,7 +60,8 @@ serde_json = { workspace = true }
 [features]
 # The ONLY place a ring-0 crate may ever depend on s3s. Reason (measured, E0117): the orphan
 # rule forbids a third-party crate from writing `impl From<s3s::X> for rustfs-gateway::X`, so the
-# migration conversions must live here. Empty placeholder until P9.
-# DELETE BY: end of P9 migration.
+# migration conversions must live here. The exact revision is the old persistence oracle; allowing
+# it to float would make a golden compare two moving targets.
+# DELETE BY: P9-09 removes this dependency and compatibility module after the last migration.
 # see ADR-0004: version carries +aws.<model-date> once the model is pinned
-compat-s3s = []
+compat-s3s = ["dep:s3s"]

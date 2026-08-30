@@ -1,0 +1,25 @@
+[package]
+name = "rustfs-gateway-goldens"
+description = "Persistence compatibility goldens for RustFS gateway migrations"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[package.metadata.gateway]
+ring = 1
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+rustfs-gateway-types = { path = "../types", features = ["compat-s3s"] }
+hex = { workspace = true }
+sha2 = { workspace = true }
