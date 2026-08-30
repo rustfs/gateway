@@ -63,6 +63,8 @@ pub enum CorpusVariant {
     BodyLiteral,
     /// Equivalent attributes appear in a different order.
     AttributeOrder,
+    /// The byte stream is not a well-formed XML document.
+    MalformedDocument,
 }
 
 impl CorpusVariant {
@@ -86,6 +88,7 @@ impl CorpusVariant {
             Self::Extension => "extension",
             Self::BodyLiteral => "body-literal",
             Self::AttributeOrder => "attribute-order",
+            Self::MalformedDocument => "malformed-document",
         }
     }
 }
