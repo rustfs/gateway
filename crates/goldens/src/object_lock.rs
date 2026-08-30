@@ -20,9 +20,206 @@
 //! migration golden gate.
 
 use rustfs_gateway_types::compat::{S3sObjectLockObservation, parse_s3s_object_lock, serialize_s3s_object_lock};
-use rustfs_gateway_types::persistence::{PersistedObjectLockConfiguration, parse_object_lock, serialize_object_lock};
+use rustfs_gateway_types::persistence::{
+    PersistedDefaultRetention, PersistedObjectLockConfiguration, PersistedObjectLockRule, parse_object_lock,
+    serialize_object_lock,
+};
+use sha2::{Digest, Sha256};
 
-use crate::{ConfigKind, FourWayCodec, GoldenFailure, GoldenSample, assert_four_way};
+use crate::{
+    AcceptedCorpusCase, ConcreteFamilyCorpus, ConfigKind, CorpusVariant, FourWayCodec, GoldenFailure, GoldenSample,
+    RejectedCorpusCase, RejectedGoldenSample, SampleOrigin, assert_four_way,
+};
+
+const EMPTY: &[u8] = b"<ObjectLockConfiguration></ObjectLockConfiguration>";
+const ENABLED_WITHOUT_RULE: &[u8] =
+    b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>";
+const EMPTY_RULE: &[u8] = b"<ObjectLockConfiguration><Rule></Rule></ObjectLockConfiguration>";
+const EMPTY_DEFAULT_RETENTION: &[u8] =
+    b"<ObjectLockConfiguration><Rule><DefaultRetention></DefaultRetention></Rule></ObjectLockConfiguration>";
+const GOVERNANCE_DAYS: &[u8] = b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>30</Days></DefaultRetention></Rule></ObjectLockConfiguration>";
+const COMPLIANCE_YEARS: &[u8] = b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Years>7</Years></DefaultRetention></Rule></ObjectLockConfiguration>";
+const NAMESPACE: &[u8] = br#"<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>"#;
+const UNKNOWN_TOP_LEVEL: &[u8] = b"<ObjectLockConfiguration><FutureTopLevel>future</FutureTopLevel><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>";
+const UNKNOWN_ATTRIBUTES: &[u8] = b"<ObjectLockConfiguration future=\"top\"><Rule future=\"rule\"><DefaultRetention future=\"retention\"><Mode>GOVERNANCE</Mode><Days>1</Days></DefaultRetention></Rule></ObjectLockConfiguration>";
+const UNKNOWN_RULE_CHILD: &[u8] = b"<ObjectLockConfiguration><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>1</Days></DefaultRetention><FutureRule>future</FutureRule></Rule></ObjectLockConfiguration>";
+const UNKNOWN_RETENTION_CHILD: &[u8] = b"<ObjectLockConfiguration><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>1</Days><FutureRetention>future</FutureRetention></DefaultRetention></Rule></ObjectLockConfiguration>";
+const ALTERNATE_ORDER: &[u8] = b"<ObjectLockConfiguration><Rule><DefaultRetention><Years>2</Years><Mode>COMPLIANCE</Mode></DefaultRetention></Rule><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>";
+const DUPLICATE_ENABLED: &[u8] = b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>";
+const INVALID_DAYS: &[u8] =
+    b"<ObjectLockConfiguration><Rule><DefaultRetention><Days>tomorrow</Days></DefaultRetention></Rule></ObjectLockConfiguration>";
+
+fn retention(mode: &str, days: Option<i32>, years: Option<i32>) -> PersistedDefaultRetention {
+    PersistedDefaultRetention {
+        mode: Some(mode.to_owned()),
+        days,
+        years,
+    }
+}
+
+fn enabled(rule: Option<PersistedDefaultRetention>) -> PersistedObjectLockConfiguration {
+    PersistedObjectLockConfiguration {
+        object_lock_enabled: Some("Enabled".to_owned()),
+        rule: rule.map(|default_retention| PersistedObjectLockRule {
+            default_retention: Some(default_retention),
+        }),
+    }
+}
+
+fn sample(bytes: &[u8], value: PersistedObjectLockConfiguration, notes: &str) -> GoldenSample<PersistedObjectLockConfiguration> {
+    GoldenSample {
+        kind: ConfigKind::ObjectLock,
+        bytes: bytes.to_vec(),
+        value,
+        origin: SampleOrigin {
+            source: "P9 Object Lock persistence matrix".to_owned(),
+            producer: "pinned s3s XML behavior".to_owned(),
+            version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
+            sha256: hex::encode(Sha256::digest(bytes)),
+        },
+        notes: notes.to_owned(),
+    }
+}
+
+fn rejected(bytes: &[u8], variants: &[CorpusVariant], notes: &str) -> RejectedCorpusCase {
+    RejectedCorpusCase {
+        sample: RejectedGoldenSample {
+            kind: ConfigKind::ObjectLock,
+            bytes: bytes.to_vec(),
+            origin: SampleOrigin {
+                source: "P9 Object Lock refusal matrix".to_owned(),
+                producer: "pinned s3s XML behavior".to_owned(),
+                version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
+                sha256: hex::encode(Sha256::digest(bytes)),
+            },
+            notes: notes.to_owned(),
+        },
+        variants: variants.to_vec(),
+    }
+}
+
+pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedObjectLockConfiguration> {
+    let accepted = vec![
+        (
+            EMPTY,
+            PersistedObjectLockConfiguration::default(),
+            vec![CorpusVariant::Canonical],
+            "all optional fields absent",
+        ),
+        (
+            EMPTY_RULE,
+            PersistedObjectLockConfiguration {
+                rule: Some(PersistedObjectLockRule { default_retention: None }),
+                ..PersistedObjectLockConfiguration::default()
+            },
+            vec![CorpusVariant::EmptyElement],
+            "explicit empty Rule remains structurally present",
+        ),
+        (
+            EMPTY_DEFAULT_RETENTION,
+            PersistedObjectLockConfiguration {
+                rule: Some(PersistedObjectLockRule {
+                    default_retention: Some(PersistedDefaultRetention::default()),
+                }),
+                ..PersistedObjectLockConfiguration::default()
+            },
+            vec![CorpusVariant::EmptyElement],
+            "explicit empty DefaultRetention remains structurally present",
+        ),
+        (
+            ENABLED_WITHOUT_RULE,
+            enabled(None),
+            vec![CorpusVariant::MissingField],
+            "enabled without a retention rule",
+        ),
+        (
+            GOVERNANCE_DAYS,
+            enabled(Some(retention("GOVERNANCE", Some(30), None))),
+            vec![CorpusVariant::Canonical],
+            "day-based governance retention",
+        ),
+        (
+            COMPLIANCE_YEARS,
+            enabled(Some(retention("COMPLIANCE", None, Some(7)))),
+            vec![CorpusVariant::Canonical],
+            "year-based compliance retention",
+        ),
+        (
+            NAMESPACE,
+            enabled(None),
+            vec![CorpusVariant::Namespace],
+            "historical namespace declaration",
+        ),
+        (
+            UNKNOWN_TOP_LEVEL,
+            enabled(None),
+            vec![CorpusVariant::UnknownTopLevel],
+            "old-readable unknown top-level element",
+        ),
+        (
+            UNKNOWN_ATTRIBUTES,
+            PersistedObjectLockConfiguration {
+                rule: Some(PersistedObjectLockRule {
+                    default_retention: Some(retention("GOVERNANCE", Some(1), None)),
+                }),
+                ..PersistedObjectLockConfiguration::default()
+            },
+            vec![CorpusVariant::UnknownAttribute],
+            "old-readable unknown attributes",
+        ),
+        (
+            ALTERNATE_ORDER,
+            enabled(Some(retention("COMPLIANCE", None, Some(2)))),
+            vec![CorpusVariant::AlternateOrder],
+            "old-readable noncanonical element order",
+        ),
+    ]
+    .into_iter()
+    .map(|(bytes, value, variants, notes)| AcceptedCorpusCase {
+        sample: sample(bytes, value, notes),
+        variants,
+    })
+    .collect();
+
+    let mut rejected_cases = vec![
+        rejected(DUPLICATE_ENABLED, &[CorpusVariant::DuplicateField], "duplicate ObjectLockEnabled"),
+        rejected(b"<ObjectLockConfiguration><Rule></Rule><Rule></Rule></ObjectLockConfiguration>", &[CorpusVariant::DuplicateField], "duplicate Rule"),
+        rejected(b"<ObjectLockConfiguration><Rule><DefaultRetention></DefaultRetention><DefaultRetention></DefaultRetention></Rule></ObjectLockConfiguration>", &[CorpusVariant::DuplicateField], "duplicate DefaultRetention"),
+        rejected(b"<ObjectLockConfiguration><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Mode>COMPLIANCE</Mode></DefaultRetention></Rule></ObjectLockConfiguration>", &[CorpusVariant::DuplicateField], "duplicate Mode"),
+        rejected(b"<ObjectLockConfiguration><Rule><DefaultRetention><Days>1</Days><Days>2</Days></DefaultRetention></Rule></ObjectLockConfiguration>", &[CorpusVariant::DuplicateField], "duplicate Days"),
+        rejected(b"<ObjectLockConfiguration><Rule><DefaultRetention><Years>1</Years><Years>2</Years></DefaultRetention></Rule></ObjectLockConfiguration>", &[CorpusVariant::DuplicateField], "duplicate Years"),
+        rejected(UNKNOWN_RULE_CHILD, &[CorpusVariant::UnknownNested], "unknown Rule child"),
+        rejected(UNKNOWN_RETENTION_CHILD, &[CorpusVariant::UnknownNested], "unknown DefaultRetention child"),
+        rejected(INVALID_DAYS, &[CorpusVariant::UnknownScalar], "non-integer Days"),
+    ];
+    for field in ["Days", "Years"] {
+        for (lexeme, note) in [
+            (" 1 ", "surrounding whitespace"),
+            ("-2147483649", "below i32 minimum"),
+            ("2147483648", "above i32 maximum"),
+        ] {
+            let bytes = format!("<ObjectLockConfiguration><Rule><DefaultRetention><{field}>{lexeme}</{field}></DefaultRetention></Rule></ObjectLockConfiguration>").into_bytes();
+            rejected_cases.push(rejected(&bytes, &[CorpusVariant::UnknownScalar], &format!("{field} {note}")));
+        }
+    }
+    ConcreteFamilyCorpus {
+        kind: ConfigKind::ObjectLock,
+        required_variants: vec![
+            CorpusVariant::Canonical,
+            CorpusVariant::EmptyElement,
+            CorpusVariant::MissingField,
+            CorpusVariant::Namespace,
+            CorpusVariant::UnknownTopLevel,
+            CorpusVariant::UnknownNested,
+            CorpusVariant::UnknownAttribute,
+            CorpusVariant::AlternateOrder,
+            CorpusVariant::DuplicateField,
+            CorpusVariant::UnknownScalar,
+        ],
+        accepted,
+        rejected: rejected_cases,
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ObjectLockBehaviorProjection {
@@ -95,73 +292,16 @@ impl FourWayCodec for ObjectLockCodec {
 
 #[cfg(test)]
 mod tests {
-    use rustfs_gateway_types::persistence::{PersistedDefaultRetention, PersistedObjectLockRule};
-    use sha2::{Digest, Sha256};
-
     use super::*;
-    use crate::{Direction, SampleOrigin};
-
-    const EMPTY: &[u8] = b"<ObjectLockConfiguration></ObjectLockConfiguration>";
-    const ENABLED_WITHOUT_RULE: &[u8] =
-        b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>";
-    const EMPTY_RULE: &[u8] = b"<ObjectLockConfiguration><Rule></Rule></ObjectLockConfiguration>";
-    const EMPTY_DEFAULT_RETENTION: &[u8] =
-        b"<ObjectLockConfiguration><Rule><DefaultRetention></DefaultRetention></Rule></ObjectLockConfiguration>";
-    const GOVERNANCE_DAYS: &[u8] = b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>30</Days></DefaultRetention></Rule></ObjectLockConfiguration>";
-    const COMPLIANCE_YEARS: &[u8] = b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Years>7</Years></DefaultRetention></Rule></ObjectLockConfiguration>";
-    const NAMESPACE: &[u8] = br#"<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>"#;
-    const UNKNOWN_TOP_LEVEL: &[u8] = b"<ObjectLockConfiguration><FutureTopLevel>future</FutureTopLevel><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>";
-    const UNKNOWN_ATTRIBUTES: &[u8] = b"<ObjectLockConfiguration future=\"top\"><Rule future=\"rule\"><DefaultRetention future=\"retention\"><Mode>GOVERNANCE</Mode><Days>1</Days></DefaultRetention></Rule></ObjectLockConfiguration>";
-    const UNKNOWN_RULE_CHILD: &[u8] = b"<ObjectLockConfiguration><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>1</Days></DefaultRetention><FutureRule>future</FutureRule></Rule></ObjectLockConfiguration>";
-    const UNKNOWN_RETENTION_CHILD: &[u8] = b"<ObjectLockConfiguration><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>1</Days><FutureRetention>future</FutureRetention></DefaultRetention></Rule></ObjectLockConfiguration>";
-    const ALTERNATE_ORDER: &[u8] = b"<ObjectLockConfiguration><Rule><DefaultRetention><Years>2</Years><Mode>COMPLIANCE</Mode></DefaultRetention></Rule><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>";
-    const DUPLICATE_ENABLED: &[u8] = b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>";
-    const INVALID_DAYS: &[u8] = b"<ObjectLockConfiguration><Rule><DefaultRetention><Days>tomorrow</Days></DefaultRetention></Rule></ObjectLockConfiguration>";
-
-    fn retention(mode: &str, days: Option<i32>, years: Option<i32>) -> PersistedDefaultRetention {
-        PersistedDefaultRetention {
-            mode: Some(mode.to_owned()),
-            days,
-            years,
-        }
-    }
-
-    fn enabled(rule: Option<PersistedDefaultRetention>) -> PersistedObjectLockConfiguration {
-        PersistedObjectLockConfiguration {
-            object_lock_enabled: Some("Enabled".to_owned()),
-            rule: rule.map(|default_retention| PersistedObjectLockRule {
-                default_retention: Some(default_retention),
-            }),
-        }
-    }
-
-    fn sample(
-        bytes: &[u8],
-        sha256: &str,
-        value: PersistedObjectLockConfiguration,
-        notes: &str,
-    ) -> GoldenSample<PersistedObjectLockConfiguration> {
-        GoldenSample {
-            kind: ConfigKind::ObjectLock,
-            bytes: bytes.to_vec(),
-            value,
-            origin: SampleOrigin {
-                source: "P9 Object Lock persistence matrix".to_owned(),
-                producer: "pinned s3s XML behavior".to_owned(),
-                version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
-                sha256: sha256.to_owned(),
-            },
-            notes: notes.to_owned(),
-        }
-    }
+    use crate::Direction;
 
     fn base_sample() -> GoldenSample<PersistedObjectLockConfiguration> {
-        sample(
-            NAMESPACE,
-            "df6ac0549ea2798014d483cff942654be46743dad3474af3b679ca143807ac99",
-            enabled(None),
-            "historical namespace bytes canonicalize without changing Object Lock behavior",
-        )
+        corpus_evidence()
+            .accepted
+            .into_iter()
+            .find(|case| case.sample.bytes == NAMESPACE)
+            .expect("the corpus keeps its namespace D1-D5 row")
+            .sample
     }
 
     #[test]
@@ -197,84 +337,9 @@ mod tests {
 
     #[test]
     fn object_lock_sample_matrix_passes_all_five_directions() {
-        let cases = [
-            sample(
-                EMPTY,
-                "9bfb72f1694f868f08f9f3aa7e2bdb31689a3640575e43b8c8b8ff7a0bdc454b",
-                PersistedObjectLockConfiguration::default(),
-                "all optional fields absent",
-            ),
-            sample(
-                EMPTY_RULE,
-                "94def8e5843449bdc01c7affce219c5628f7788a7a1fbb21d6c78bfb3a88273b",
-                PersistedObjectLockConfiguration {
-                    rule: Some(PersistedObjectLockRule { default_retention: None }),
-                    ..PersistedObjectLockConfiguration::default()
-                },
-                "explicit empty Rule remains structurally present",
-            ),
-            sample(
-                EMPTY_DEFAULT_RETENTION,
-                "eeed78e82ddbb6505bd8d6ef1b8f2b8e17811c636e8ed815f3dfe80088dbf14a",
-                PersistedObjectLockConfiguration {
-                    rule: Some(PersistedObjectLockRule {
-                        default_retention: Some(PersistedDefaultRetention::default()),
-                    }),
-                    ..PersistedObjectLockConfiguration::default()
-                },
-                "explicit empty DefaultRetention remains structurally present",
-            ),
-            sample(
-                ENABLED_WITHOUT_RULE,
-                "9cf16b957c9f7a738af95d6962500ebaae0e23d0138c811a8b6f39bcc941bbb2",
-                enabled(None),
-                "bucket-creation default keeps Object Lock enabled without inventing a retention rule",
-            ),
-            sample(
-                GOVERNANCE_DAYS,
-                "6ed57381ca9d593140b4fbbe04a8959a4a287453cad8fc0eb1f39d76f56bdc86",
-                enabled(Some(retention("GOVERNANCE", Some(30), None))),
-                "day-based governance retention",
-            ),
-            sample(
-                COMPLIANCE_YEARS,
-                "0843768a4fb162916b72d91e3c6dd616c42188d3c55d00ca0bc46e64ae305834",
-                enabled(Some(retention("COMPLIANCE", None, Some(7)))),
-                "year-based compliance retention",
-            ),
-            sample(
-                NAMESPACE,
-                "df6ac0549ea2798014d483cff942654be46743dad3474af3b679ca143807ac99",
-                enabled(None),
-                "historical namespace declaration",
-            ),
-            sample(
-                UNKNOWN_TOP_LEVEL,
-                "4fa90cd14d038f1733870bc2def87505d04950136f71c4bdb44c2c7d2d4146cb",
-                enabled(None),
-                "old-readable unknown top-level element",
-            ),
-            sample(
-                UNKNOWN_ATTRIBUTES,
-                "7648bd3868592907be4be7b8ad7aecf451047bbc17da8dbac9e5b53fddf2e515",
-                PersistedObjectLockConfiguration {
-                    rule: Some(PersistedObjectLockRule {
-                        default_retention: Some(retention("GOVERNANCE", Some(1), None)),
-                    }),
-                    ..PersistedObjectLockConfiguration::default()
-                },
-                "old-readable unknown attributes at every structural level",
-            ),
-            sample(
-                ALTERNATE_ORDER,
-                "6be59d596d355f198c14b373f54d3812c4f3c7b9cffe5d841b3017b77a9f2a43",
-                enabled(Some(retention("COMPLIANCE", None, Some(2)))),
-                "old-readable noncanonical element order",
-            ),
-        ];
-        for case in cases {
-            if let Err(error) = assert_object_lock_four_way(&case) {
-                panic!("Object Lock sample failed ({}): {error}", case.notes);
+        for case in corpus_evidence().accepted {
+            if let Err(error) = assert_object_lock_four_way(&case.sample) {
+                panic!("Object Lock sample failed ({}): {error}", case.sample.notes);
             }
         }
     }
@@ -314,57 +379,41 @@ mod tests {
 
     #[test]
     fn every_duplicate_known_object_lock_field_is_rejected_by_both_real_parsers() {
-        let cases: [(&str, &[u8]); 6] = [
-            ("ObjectLockEnabled", DUPLICATE_ENABLED),
-            (
-                "Rule",
-                b"<ObjectLockConfiguration><Rule></Rule><Rule></Rule></ObjectLockConfiguration>",
-            ),
-            (
-                "DefaultRetention",
-                b"<ObjectLockConfiguration><Rule><DefaultRetention></DefaultRetention><DefaultRetention></DefaultRetention></Rule></ObjectLockConfiguration>",
-            ),
-            (
-                "Mode",
-                b"<ObjectLockConfiguration><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Mode>COMPLIANCE</Mode></DefaultRetention></Rule></ObjectLockConfiguration>",
-            ),
-            (
-                "Days",
-                b"<ObjectLockConfiguration><Rule><DefaultRetention><Days>1</Days><Days>2</Days></DefaultRetention></Rule></ObjectLockConfiguration>",
-            ),
-            (
-                "Years",
-                b"<ObjectLockConfiguration><Rule><DefaultRetention><Years>1</Years><Years>2</Years></DefaultRetention></Rule></ObjectLockConfiguration>",
-            ),
-        ];
-        for (field, bytes) in cases {
-            assert!(ObjectLockCodec.old_parse(bytes).is_err(), "old parser accepted duplicate {field}");
-            assert!(ObjectLockCodec.new_parse(bytes).is_err(), "new parser accepted duplicate {field}");
+        for case in corpus_evidence()
+            .rejected
+            .into_iter()
+            .filter(|case| case.variants.contains(&CorpusVariant::DuplicateField))
+        {
+            assert!(
+                ObjectLockCodec.old_parse(&case.sample.bytes).is_err(),
+                "old parser accepted {}",
+                case.sample.notes
+            );
+            assert!(
+                ObjectLockCodec.new_parse(&case.sample.bytes).is_err(),
+                "new parser accepted {}",
+                case.sample.notes
+            );
         }
     }
 
     #[test]
     fn nested_unknown_children_expose_the_pinned_old_oracle_boundary() {
-        for (location, bytes, sha256) in [
-            (
-                "Rule",
-                UNKNOWN_RULE_CHILD,
-                "6458e6cb584f35e6167785042d0fb926f1df1e1255e1194a188dd7ad35919af4",
-            ),
-            (
-                "DefaultRetention",
-                UNKNOWN_RETENTION_CHILD,
-                "278f82b4be46a3d909113e8efbe93acaddecc8d0f1645683196a3e0f3525962d",
-            ),
-        ] {
-            assert_eq!(hex::encode(Sha256::digest(bytes)), sha256, "stale {location} negative-case digest");
+        for case in corpus_evidence()
+            .rejected
+            .into_iter()
+            .filter(|case| case.variants.contains(&CorpusVariant::UnknownNested))
+        {
+            let bytes = &case.sample.bytes;
             assert!(
                 ObjectLockCodec.old_parse(bytes).is_err(),
-                "pinned old parser unexpectedly accepted unknown child in {location}"
+                "pinned old parser unexpectedly accepted {}",
+                case.sample.notes
             );
             assert!(
                 ObjectLockCodec.new_parse(bytes).is_err(),
-                "new parser must preserve old rejection of unknown child in {location}"
+                "new parser must preserve rejection of {}",
+                case.sample.notes
             );
         }
     }
@@ -374,11 +423,8 @@ mod tests {
         let lexemes = [
             ("negative", "-1", Some(-1)),
             ("explicit plus", "+1", Some(1)),
-            ("surrounding whitespace", " 1 ", None),
             ("i32 minimum", "-2147483648", Some(i32::MIN)),
             ("i32 maximum", "2147483647", Some(i32::MAX)),
-            ("below i32 minimum", "-2147483649", None),
-            ("above i32 maximum", "2147483648", None),
         ];
         for field in ["Days", "Years"] {
             for (description, lexeme, expected) in lexemes {
@@ -413,19 +459,36 @@ mod tests {
                         assert_eq!(old_value, Some(value), "old {field} {description}");
                         assert_eq!(new_value, Some(value), "new {field} {description}");
                     }
-                    None => {
-                        assert!(old.is_err(), "old accepted invalid {field} {description}");
-                        assert!(new.is_err(), "new accepted invalid {field} {description}");
-                    }
+                    None => unreachable!("the accepted lexeme matrix contains no refusal rows"),
                 }
             }
+        }
+        for case in corpus_evidence().rejected.into_iter().filter(|case| {
+            case.variants.contains(&CorpusVariant::UnknownScalar)
+                && (case.sample.notes.starts_with("Days ") || case.sample.notes.starts_with("Years "))
+        }) {
+            assert!(
+                ObjectLockCodec.old_parse(&case.sample.bytes).is_err(),
+                "old accepted {}",
+                case.sample.notes
+            );
+            assert!(
+                ObjectLockCodec.new_parse(&case.sample.bytes).is_err(),
+                "new accepted {}",
+                case.sample.notes
+            );
         }
     }
 
     #[test]
     fn invalid_duration_is_rejected_by_both_real_parsers() {
-        assert!(ObjectLockCodec.old_parse(INVALID_DAYS).is_err());
-        assert!(ObjectLockCodec.new_parse(INVALID_DAYS).is_err());
+        let case = corpus_evidence()
+            .rejected
+            .into_iter()
+            .find(|case| case.sample.bytes == INVALID_DAYS)
+            .expect("the refusal corpus keeps the non-integer Days row");
+        assert!(ObjectLockCodec.old_parse(&case.sample.bytes).is_err());
+        assert!(ObjectLockCodec.new_parse(&case.sample.bytes).is_err());
     }
 
     struct Mutant {
