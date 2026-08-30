@@ -324,6 +324,34 @@ jobs:
         run: |
           scripts/ci_budget.sh 480 "production transport parity" cargo run --package rustfs-gateway-conformance --bin rustfs-gateway-conformance -- diff-transports --exclude-slow
 
+  # The corpus is embedded in family providers rather than stored under a corpus/ directory.
+  # corpus-report derives this byte total from the concrete accepted and rejected sample inputs.
+  persistence-goldens:
+    name: Persistence goldens
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Run persisted XML goldens (maximum 3.5 minutes after setup)
+        run: |
+          report="$(
+            scripts/ci_budget.sh 105 "persistence corpus report" \
+              cargo run --quiet --package rustfs-gateway-goldens --bin corpus-report
+          )"
+          printf '%s\n' "$report"
+          corpus_bytes="$(
+            printf '%s\n' "$report" |
+              sed -n 's/^total: families=13 accepted=[0-9][0-9]* rejected=[0-9][0-9]* bytes=\([0-9][0-9]*\)$/\1/p'
+          )"
+          test -n "$corpus_bytes"
+          test "$corpus_bytes" -le 20971520
+          scripts/ci_budget.sh 105 "four-way persistence goldens" \
+            cargo run --quiet --package rustfs-gateway-goldens --bin four-way -- --all
+
   signing-suite:
     name: Official signing suite
     runs-on: ubuntu-latest
@@ -545,11 +573,11 @@ jobs:
         run: |
           scripts/ci_budget.sh 60 "error status self-test" env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
 
-  # Branch protection requires this exact check name. It aggregates all nineteen parallel jobs and must
+  # Branch protection requires this exact check name. It aggregates all twenty parallel jobs and must
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, transport-parity, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs]
+    needs: [workspace-tests, workspace-tests-2, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -559,6 +587,7 @@ jobs:
           WORKSPACE_RESULT: ${{ needs.workspace-tests.result }}
           WORKSPACE_2_RESULT: ${{ needs.workspace-tests-2.result }}
           TRANSPORT_PARITY_RESULT: ${{ needs.transport-parity.result }}
+          PERSISTENCE_GOLDENS_RESULT: ${{ needs.persistence-goldens.result }}
           SIGNING_SUITE_RESULT: ${{ needs.signing-suite.result }}
           GUARD_RESULT: ${{ needs.guard-self-test.result }}
           GUARD_2_RESULT: ${{ needs.guard-self-test-2.result }}
@@ -579,6 +608,7 @@ jobs:
           test "$WORKSPACE_RESULT" = success
           test "$WORKSPACE_2_RESULT" = success
           test "$TRANSPORT_PARITY_RESULT" = success
+          test "$PERSISTENCE_GOLDENS_RESULT" = success
           test "$SIGNING_SUITE_RESULT" = success
           test "$GUARD_RESULT" = success
           test "$GUARD_2_RESULT" = success
