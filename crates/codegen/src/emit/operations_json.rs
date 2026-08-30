@@ -203,10 +203,12 @@ pub(crate) fn rendered_field_names(entry: &Entry) -> Vec<&'static str> {
 /// seven), and codegen cannot see it. Emitting "reachable on all seven" from here would state the
 /// opposite of what that layer enforces.
 ///
-/// Every entry is empty today, and that is a fact about the pinned model rather than a placeholder:
-/// `rustfs-gateway-model`'s [`Predicate`] has no `HostClass` variant (`rustfs/gateway#3`), so no
-/// operation can carry the constraint. The `match` below is exhaustive so that adding the variant
-/// does not compile until this function decides what it means.
+/// Every entry was empty before `rustfs/gateway#3`: `rustfs-gateway-model`'s [`Predicate`] carried
+/// no `HostClass` variant, so no operation could carry the constraint. It now does, and this
+/// function reports exactly the classes an operation's selector names — `ArnForm` is a distinct
+/// dimension (it constrains the bucket-position ARN shape, not which endpoint family served the
+/// request) and deliberately contributes nothing here. The `match` stays exhaustive so that a
+/// future predicate does not compile until this function decides what it means.
 fn host_classes(ir: &OperationIr) -> Vec<String> {
     let mut constraints: Vec<String> = ir
         .http
@@ -220,7 +222,9 @@ fn host_classes(ir: &OperationIr) -> Vec<String> {
             | Predicate::QueryAbsent(_)
             | Predicate::HeaderPresent { .. }
             | Predicate::HeaderPrefix { .. }
-            | Predicate::PathLiteral(_) => None,
+            | Predicate::PathLiteral(_)
+            | Predicate::ArnForm(_) => None,
+            Predicate::HostClass(class) => Some(class.as_str().to_owned()),
         })
         .collect();
     constraints.sort();

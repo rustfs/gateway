@@ -109,6 +109,8 @@ fn predicate(p: &Predicate) -> Value {
             ("prefix".into(), s(prefix)),
         ]),
         Predicate::PathLiteral(path) => Value::object([("kind".into(), s("PathLiteral")), ("path".into(), s(path))]),
+        Predicate::HostClass(class) => Value::object([("kind".into(), s("HostClass")), ("class".into(), s(class.as_str()))]),
+        Predicate::ArnForm(form) => Value::object([("kind".into(), s("ArnForm")), ("form".into(), s(form.as_str()))]),
     }
 }
 
@@ -336,4 +338,24 @@ fn ext_point(e: &ExtPoint) -> Value {
         ("position".into(), s(&e.position)),
         ("unknown_policy".into(), s(&e.unknown_policy)),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::predicate;
+    use crate::ir::{ArnForm, HostClass, Predicate};
+    use crate::json::write_canonical;
+
+    /// The exact shape `spec/ir.schema.json` pins for these two predicate kinds.
+    #[test]
+    fn renders_host_class_and_arn_form_predicates() {
+        assert_eq!(
+            write_canonical(&predicate(&Predicate::HostClass(HostClass::Website))),
+            "{ \"kind\": \"HostClass\", \"class\": \"Website\" }\n"
+        );
+        assert_eq!(
+            write_canonical(&predicate(&Predicate::ArnForm(ArnForm::Outposts))),
+            "{ \"kind\": \"ArnForm\", \"form\": \"Outposts\" }\n"
+        );
+    }
 }

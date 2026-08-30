@@ -38,6 +38,7 @@ overlays/quirks/*.toml    ──┘
 | `src/overlay/quirks.rs` | Exhaustive protocol-record loading and mutable/contract classification. | A record lacks one typed input or lands in the wrong generated table. |
 | `src/ir/mod.rs` | The IR document structure — one type per construct in `spec/ir.schema.json`. Also the quirk ordering rule and the query-key/header reverse lookups. | You are adding an IR construct, or you want to know what the IR can express. |
 | `src/ir/types.rs` | The scalar and composite type vocabulary: `Type`, timestamp and entity-tag rendering, `OmitWhen`. Nothing here has a default rendering. | You are binding a field and need to know which types exist. |
+| `src/ir/host.rs` | `HostClass` and `ArnForm`: the two `Predicate` operands with a closed IR-side vocabulary, mirroring `rustfs-gateway-core::route`'s copy one for one. | You are adding a route that constrains an endpoint family or an ARN form. |
 | `src/ir/emit.rs` | IR → JSON value, in the schema's key order. | A generated IR document's key order looks wrong. |
 | `src/lower/mod.rs` | The derivation rules that need the model, the overlay and the route at once: uri → route and target, member traits → binding and wire name, shape kinds → IR types, and the overlay-target checks. | Any question of the form "why did codegen decide *that*?" |
 | `src/lower/support.rs` | The self-contained half: uri parsing, payload discipline, empty-value policy, XML root, checksum algorithms, error-code union, and the `validate` pass. | A derived default is wrong, or an IR rule rejected your operation. |

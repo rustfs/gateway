@@ -25,12 +25,14 @@
 //! compile time.
 
 pub mod emit;
+mod host;
 pub mod types;
 
 use std::collections::BTreeMap;
 
 use crate::json::Value;
 
+pub use host::{ArnForm, HostClass};
 pub use types::{ETagRender, OmitWhen, TimestampFormat, Type};
 
 /// The `ir_version` every document carries. A bump requires a fresh IR-FREEZE review.
@@ -195,6 +197,10 @@ pub enum Predicate {
     },
     /// The request path equals this literal.
     PathLiteral(String),
+    /// The endpoint family the request arrived on.
+    HostClass(HostClass),
+    /// The bucket position holds an ARN of this form.
+    ArnForm(ArnForm),
 }
 
 /// Authentication and authorization.

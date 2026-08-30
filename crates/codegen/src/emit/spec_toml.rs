@@ -267,5 +267,19 @@ pub fn predicate(p: &Predicate) -> String {
         Predicate::HeaderPresent { header, negated: true } => format!("HeaderAbsent {header}"),
         Predicate::HeaderPrefix { header, prefix } => format!("HeaderPrefix {header}: {prefix}"),
         Predicate::PathLiteral(path) => format!("PathLiteral {path}"),
+        Predicate::HostClass(class) => format!("HostClass {}", class.as_str()),
+        Predicate::ArnForm(form) => format!("ArnForm {}", form.as_str()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::predicate;
+    use rustfs_gateway_model::ir::{ArnForm, HostClass, Predicate};
+
+    #[test]
+    fn renders_host_class_and_arn_form_predicates() {
+        assert_eq!(predicate(&Predicate::HostClass(HostClass::S3Express)), "HostClass S3Express");
+        assert_eq!(predicate(&Predicate::ArnForm(ArnForm::Mrap)), "ArnForm MRAP");
     }
 }

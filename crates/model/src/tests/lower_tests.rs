@@ -24,7 +24,7 @@
 //! must fail for one reason each. End-to-end generation against the real model is covered by
 //! `rustfs-gateway-codegen`.
 
-use crate::ir::{Binding, EmptyValue, Method, Predicate, TargetKind, Type};
+use crate::ir::{ArnForm, Binding, EmptyValue, HostClass, Method, Predicate, TargetKind, Type};
 use crate::lower::lower;
 use crate::overlay::Overlay;
 use crate::smithy::Model;
@@ -256,4 +256,42 @@ fn n_fails_when_a_shape_overlay_targets_an_unknown_member() {
     let text = format!("{MINI_OVERLAY}\n\n[shape.Item]\nrequired = [\"Nope\"]\n");
     let err = load(&text).expect_err("unknown member in a shape overlay");
     assert!(format!("{err}").contains("not one of its members"), "{err}");
+}
+
+#[test]
+fn lowers_host_class_as_a_route_predicate() {
+    let text = format!("{MINI_OVERLAY}\nhost_class = \"ObjectLambda\"\n");
+    let lowered = load(&text).expect("a known host class lowers");
+    let ir = &lowered.operations[0];
+    assert!(
+        ir.http.predicates.contains(&Predicate::HostClass(HostClass::ObjectLambda)),
+        "{:?}",
+        ir.http.predicates
+    );
+}
+
+#[test]
+fn lowers_arn_form_as_a_route_predicate() {
+    let text = format!("{MINI_OVERLAY}\narn_form = \"AccessPoint\"\n");
+    let lowered = load(&text).expect("a known ARN form lowers");
+    let ir = &lowered.operations[0];
+    assert!(
+        ir.http.predicates.contains(&Predicate::ArnForm(ArnForm::AccessPoint)),
+        "{:?}",
+        ir.http.predicates
+    );
+}
+
+#[test]
+fn n_rejects_an_unknown_host_class() {
+    let text = format!("{MINI_OVERLAY}\nhost_class = \"Nope\"\n");
+    let err = load(&text).expect_err("an unknown host class must fail closed");
+    assert!(format!("{err}").contains("host_class"), "{err}");
+}
+
+#[test]
+fn n_rejects_an_unknown_arn_form() {
+    let text = format!("{MINI_OVERLAY}\narn_form = \"Nope\"\n");
+    let err = load(&text).expect_err("an unknown ARN form must fail closed");
+    assert!(format!("{err}").contains("arn_form"), "{err}");
 }

@@ -24,6 +24,7 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use rustfs_gateway_model::ir::{ArnForm, HostClass, Predicate};
 use rustfs_gateway_model::json::{self, Value};
 
 use super::codegen_tests::artifacts;
@@ -99,10 +100,11 @@ fn the_fields_are_the_ir_they_claim_to_be() {
 
 /// `host_classes` reports a constraint, so an operation that names no endpoint family carries none.
 ///
-/// Empty is the answer for every operation in the pinned model, because `rustfs-gateway-model`'s
-/// `Predicate` cannot express the constraint (`rustfs/gateway#3`). Asserting it here rather than
-/// leaving it implied is what makes the day the variant lands a red test rather than a silent
-/// change of meaning in a machine-readable document.
+/// Empty is the answer for every operation in the *pinned model* today: `rustfs-gateway-model`'s
+/// `Predicate` can express `HostClass` since `rustfs/gateway#3`, but no operation's overlay entry
+/// sets `host_class` yet, so nothing in `model/overlays/**` reaches it. `emits_the_host_class_a_
+/// synthetic_operation_declares` below proves the function itself decides something for the
+/// variant, against a synthetic IR rather than the pinned model.
 #[test]
 fn host_classes_is_the_selector_constraint_and_no_operation_carries_one() {
     let document = document();
@@ -116,6 +118,31 @@ fn host_classes_is_the_selector_constraint_and_no_operation_carries_one() {
     assert!(
         keys(get(&document, "by_host_class")).is_empty(),
         "no operation constrains a host class, so nothing may be indexed under one"
+    );
+}
+
+/// `host_classes` reports exactly the [`Predicate::HostClass`] a selector carries, and an
+/// [`Predicate::ArnForm`] on the same selector contributes nothing to it — the two are distinct
+/// dimensions of the same route.
+///
+/// The pinned model constrains no real operation's host class yet, so this mutates a clone of a
+/// real IR rather than reaching for one — the same shape `xml_list_tests` uses to prove the
+/// wrapped-list rule is general rather than one operation patched into place.
+#[test]
+fn emits_the_host_class_a_synthetic_operation_declares() {
+    let mut ir = artifacts()
+        .operations
+        .into_iter()
+        .next()
+        .expect("the pinned model generates operations");
+    ir.http.predicates.push(Predicate::HostClass(HostClass::ObjectLambda));
+    ir.http.predicates.push(Predicate::ArnForm(ArnForm::AccessPoint));
+
+    let entry = operations_json::entry(&ir);
+    assert_eq!(
+        entry.host_classes,
+        vec!["ObjectLambda".to_owned()],
+        "ArnForm must not leak into host_classes"
     );
 }
 
