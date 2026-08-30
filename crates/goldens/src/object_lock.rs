@@ -235,6 +235,14 @@ pub fn assert_object_lock_four_way(sample: &GoldenSample<PersistedObjectLockConf
     assert_four_way(&ObjectLockCodec, sample)
 }
 
+pub(crate) fn run_object_lock_corpus_four_way() -> Result<usize, GoldenFailure> {
+    let corpus = corpus_evidence();
+    for case in &corpus.accepted {
+        assert_object_lock_four_way(&case.sample)?;
+    }
+    Ok(corpus.accepted.len())
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ObjectLockCodec;
 
