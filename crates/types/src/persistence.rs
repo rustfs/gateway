@@ -22,6 +22,10 @@ use core::fmt;
 
 use rustfs_gateway_xml::{XmlError, XmlLimits, XmlWriter, parse_with_limits};
 
+mod lifecycle;
+
+pub use lifecycle::*;
+
 /// The complete Versioning configuration persisted by the old RustFS path.
 ///
 /// The two extension fields are part of the persistence format even though they are not AWS
@@ -93,8 +97,20 @@ pub enum PersistenceCodecError {
     InvalidExcludeFolders,
     /// An Object Lock duration is present but is not a signed 32-bit integer.
     InvalidObjectLockDuration,
+    /// A Lifecycle integer is outside its signed width or has a noncanonical lexeme.
+    InvalidLifecycleInteger,
+    /// A Lifecycle boolean is not the lowercase XML spelling `true` or `false`.
+    InvalidLifecycleBoolean,
+    /// A Lifecycle timestamp is not an old-readable DateTime value.
+    InvalidLifecycleTimestamp,
+    /// A Lifecycle rule omitted its required status.
+    MissingLifecycleStatus,
+    /// A Lifecycle configuration contains no rules.
+    MissingLifecycleRule,
     /// A nested Object Lock element is not recognized by the pinned old decoder.
     UnexpectedObjectLockElement,
+    /// A nested Lifecycle element is not recognized by the pinned old decoder.
+    UnexpectedLifecycleElement,
     /// A scalar field appeared more than once where the old decoder rejects duplicates.
     DuplicateField,
 }
@@ -106,9 +122,15 @@ impl fmt::Display for PersistenceCodecError {
             Self::WrongRoot => formatter.write_str("persisted configuration XML has the wrong root"),
             Self::InvalidExcludeFolders => formatter.write_str("persisted Versioning XML has an invalid ExcludeFolders value"),
             Self::InvalidObjectLockDuration => formatter.write_str("persisted Object Lock XML has an invalid retention duration"),
+            Self::InvalidLifecycleInteger => formatter.write_str("persisted Lifecycle XML has an invalid integer"),
+            Self::InvalidLifecycleBoolean => formatter.write_str("persisted Lifecycle XML has an invalid boolean"),
+            Self::InvalidLifecycleTimestamp => formatter.write_str("persisted Lifecycle XML has an invalid timestamp"),
+            Self::MissingLifecycleStatus => formatter.write_str("persisted Lifecycle XML has a rule without Status"),
+            Self::MissingLifecycleRule => formatter.write_str("persisted Lifecycle XML has no Rule"),
             Self::UnexpectedObjectLockElement => {
                 formatter.write_str("persisted Object Lock XML has an unexpected nested element")
             }
+            Self::UnexpectedLifecycleElement => formatter.write_str("persisted Lifecycle XML has an unexpected nested element"),
             Self::DuplicateField => {
                 formatter.write_str("persisted configuration XML has a duplicate scalar field or structural field")
             }

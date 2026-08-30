@@ -14,10 +14,10 @@
 
 //! Temporary adapters to the pinned s3s persistence oracle.
 //!
-//! Responsible for: invoking the exact old Versioning and Object Lock XML codecs and projecting
-//! their results into owned gateway-neutral observations. NOT responsible for: production XML
-//! behavior, golden assertions, or exposing s3s DTOs. Upstream: pinned s3s revision `9c4690d8`.
-//! Downstream: `rustfs-gateway-goldens`; this module is deleted by P9-09.
+//! Responsible for: invoking exact old persistence codecs and exposing family-scoped adapters.
+//! NOT responsible for: production XML behavior, golden assertions, or exposing s3s DTOs.
+//! Upstream: pinned s3s revision `9c4690d8`. Downstream: `rustfs-gateway-goldens`; this module is
+//! deleted by P9-09.
 
 use core::fmt;
 
@@ -29,6 +29,10 @@ use s3s::dto::{
     ObjectLockRetentionMode, ObjectLockRule, VersioningConfiguration,
 };
 use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
+
+mod lifecycle;
+
+pub use lifecycle::{S3sLifecycleObservation, parse_s3s_lifecycle, serialize_s3s_lifecycle};
 
 /// One old-codec observation before the golden harness normalizes either side.
 #[derive(Clone, Debug, Eq, PartialEq)]
