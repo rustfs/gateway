@@ -218,6 +218,7 @@ core_modules = (
     "response_override_safety",
     "route_sizes",
     "route_table",
+    "select_restore_roundtrip",
     "static_dispatch",
     "tagging_contract",
     "tagging_roundtrip",
