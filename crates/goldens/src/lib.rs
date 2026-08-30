@@ -90,6 +90,23 @@ pub enum ConfigKind {
 }
 
 impl ConfigKind {
+    /// Every named persisted XML configuration family in stable report order.
+    pub const ALL: [Self; 13] = [
+        Self::Versioning,
+        Self::ObjectLock,
+        Self::Lifecycle,
+        Self::Cors,
+        Self::Tagging,
+        Self::Accelerate,
+        Self::RequestPayment,
+        Self::BucketEncryption,
+        Self::PublicAccessBlock,
+        Self::Notification,
+        Self::Logging,
+        Self::Website,
+        Self::Replication,
+    ];
+
     /// Stable report label for this persisted XML family.
     #[must_use]
     pub const fn report_name(self) -> &'static str {
@@ -182,7 +199,7 @@ impl<T> ConcreteFamilyCorpus<T> {
 ///
 /// Returns a fail-closed coverage error when any family-owned case has invalid provenance,
 /// duplicated bytes, missing polarity, or an incomplete required-variant set.
-pub fn build_pilot_corpus_report() -> Result<CorpusReport, CorpusCoverageError> {
+pub fn build_persistence_corpus_report() -> Result<CorpusReport, CorpusCoverageError> {
     let families = [
         versioning::corpus_evidence().framework()?,
         object_lock::corpus_evidence().framework()?,
@@ -198,24 +215,16 @@ pub fn build_pilot_corpus_report() -> Result<CorpusReport, CorpusCoverageError> 
         website::website_corpus_evidence()?,
         replication::replication_corpus_evidence()?,
     ];
-    build_corpus_report(
-        &[
-            ConfigKind::Versioning,
-            ConfigKind::ObjectLock,
-            ConfigKind::Lifecycle,
-            ConfigKind::Cors,
-            ConfigKind::Tagging,
-            ConfigKind::Accelerate,
-            ConfigKind::RequestPayment,
-            ConfigKind::BucketEncryption,
-            ConfigKind::PublicAccessBlock,
-            ConfigKind::Notification,
-            ConfigKind::Logging,
-            ConfigKind::Website,
-            ConfigKind::Replication,
-        ],
-        &families,
-    )
+    build_corpus_report(&ConfigKind::ALL, &families)
+}
+
+/// Builds the complete persisted XML corpus report under its original pilot-era name.
+///
+/// # Errors
+///
+/// Returns the same fail-closed coverage errors as [`build_persistence_corpus_report`].
+pub fn build_pilot_corpus_report() -> Result<CorpusReport, CorpusCoverageError> {
+    build_persistence_corpus_report()
 }
 
 /// The input check or compatibility direction that failed.
@@ -451,7 +460,8 @@ mod tests {
         assert!(versioning.rejected.len() > versioning.accepted.len());
         assert!(object_lock.rejected.len() > object_lock.accepted.len());
         assert!(lifecycle.rejected.len() > lifecycle.accepted.len());
-        let report = build_pilot_corpus_report().expect("all thirteen persisted XML families have concrete corpus coverage");
+        let report =
+            build_persistence_corpus_report().expect("all thirteen persisted XML families have concrete corpus coverage");
         assert!(report.render().contains("13/13 requested families covered"));
     }
 
