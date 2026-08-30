@@ -21,7 +21,8 @@
 use core::fmt;
 
 use crate::{
-    ConfigKind, GoldenFailure, accelerate_payment, bucket_encryption, lifecycle, object_lock, public_access_block, versioning,
+    ConfigKind, GoldenFailure, accelerate_payment, bucket_encryption, cors, lifecycle, logging, notification, object_lock,
+    public_access_block, replication, tagging, versioning, website,
 };
 
 type FamilyRunner = fn() -> Result<usize, GoldenFailure>;
@@ -105,15 +106,50 @@ pub fn run_four_way_core_shard() -> Result<FourWayRunReport, FourWayRunError> {
     Ok(FourWayRunReport { families, sample_count })
 }
 
+/// Executes all thirteen persisted XML families against every concrete accepted sample.
+///
+/// # Errors
+///
+/// Returns the first family-scoped input or D1-D5 failure. The success report is therefore an
+/// observation of every real family runner, not a static completeness declaration.
+pub fn run_four_way_all() -> Result<FourWayRunReport, FourWayRunError> {
+    let mut report = run_four_way_core_shard()?;
+    let runners: [(ConfigKind, FamilyRunner); 6] = [
+        (ConfigKind::Cors, cors::run_cors_corpus_four_way),
+        (ConfigKind::Tagging, tagging::run_tagging_corpus_four_way),
+        (ConfigKind::Notification, notification::run_notification_corpus_four_way),
+        (ConfigKind::Logging, logging::run_bucket_logging_corpus_four_way),
+        (ConfigKind::Website, website::run_website_corpus_four_way),
+        (ConfigKind::Replication, replication::run_replication_corpus_four_way),
+    ];
+    for (kind, runner) in runners {
+        let sample_count = runner().map_err(|failure| FourWayRunError { kind, failure })?;
+        report.sample_count += sample_count;
+        report.families.push(FourWayFamilyReport { kind, sample_count });
+    }
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::run_four_way_core_shard;
+    use super::{run_four_way_all, run_four_way_core_shard};
 
     #[test]
     fn core_shard_executes_seven_real_families() {
         let report = run_four_way_core_shard().expect("all core persistence samples pass D1-D5");
         assert_eq!(report.families.len(), 7);
         assert_eq!(report.sample_count, 71);
+        assert_eq!(
+            report.sample_count,
+            report.families.iter().map(|family| family.sample_count).sum::<usize>()
+        );
+        assert!(report.families.iter().all(|family| family.sample_count > 0));
+    }
+
+    #[test]
+    fn all_families_execute_real_samples_through_d1_to_d5() {
+        let report = run_four_way_all().expect("all persisted XML samples pass D1-D5");
+        assert_eq!(report.families.len(), 13);
         assert_eq!(
             report.sample_count,
             report.families.iter().map(|family| family.sample_count).sum::<usize>()
