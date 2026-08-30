@@ -36,6 +36,7 @@ mod lifecycle;
 mod logging;
 mod object_lock;
 mod public_access_block;
+mod replication;
 mod tagging;
 mod website;
 
@@ -46,6 +47,7 @@ pub use lifecycle::assert_lifecycle_four_way;
 pub use logging::assert_bucket_logging_four_way;
 pub use object_lock::assert_object_lock_four_way;
 pub use public_access_block::assert_public_access_block_four_way;
+pub use replication::assert_replication_four_way;
 pub use tagging::assert_tagging_four_way;
 pub use website::assert_website_four_way;
 
@@ -74,6 +76,8 @@ pub enum ConfigKind {
     Logging,
     /// Bucket static-website metadata.
     Website,
+    /// Bucket replication metadata.
+    Replication,
 }
 
 /// A traceable source for one persisted sample.

@@ -16,3 +16,4 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/tagging.rs` | Binds Tagging production/oracle codecs, complete tag projection, samples, parser boundaries, and mutations. | Auditing Tagging persistence compatibility. |
 | `src/logging.rs` | Binds Bucket Logging codecs, delivery behavior, traceable samples, and mutations. | Auditing access-log configuration persistence. |
 | `src/website.rs` | Binds Website codecs, routing behavior, traceable samples, and mutations. | Auditing static-website configuration persistence. |
+| `src/replication.rs` | Binds Replication codecs, runtime rule projections, traceable samples, strict nested boundaries, and D1-D5 mutations. | Auditing Replication persistence compatibility. |
