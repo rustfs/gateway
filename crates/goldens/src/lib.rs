@@ -34,6 +34,7 @@ mod bucket_encryption;
 mod cors;
 mod lifecycle;
 mod logging;
+mod notification;
 mod object_lock;
 mod public_access_block;
 mod replication;
@@ -45,6 +46,7 @@ pub use bucket_encryption::assert_bucket_encryption_four_way;
 pub use cors::assert_cors_four_way;
 pub use lifecycle::assert_lifecycle_four_way;
 pub use logging::assert_bucket_logging_four_way;
+pub use notification::assert_notification_four_way;
 pub use object_lock::assert_object_lock_four_way;
 pub use public_access_block::assert_public_access_block_four_way;
 pub use replication::assert_replication_four_way;
@@ -64,6 +66,8 @@ pub enum ConfigKind {
     Lifecycle,
     /// Bucket default-encryption metadata.
     BucketEncryption,
+    /// Bucket event-notification metadata.
+    Notification,
     /// Bucket public-access-block metadata.
     PublicAccessBlock,
     /// Bucket requester-pays metadata.

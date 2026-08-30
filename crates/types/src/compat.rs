@@ -44,6 +44,7 @@ use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod accelerate_payment;
 mod lifecycle;
+mod notification;
 mod replication;
 
 pub use accelerate_payment::{
@@ -51,6 +52,7 @@ pub use accelerate_payment::{
     serialize_s3s_accelerate, serialize_s3s_request_payment,
 };
 pub use lifecycle::{S3sLifecycleObservation, parse_s3s_lifecycle, serialize_s3s_lifecycle};
+pub use notification::{S3sNotificationObservation, parse_s3s_notification, serialize_s3s_notification};
 pub use replication::{S3sReplicationObservation, parse_s3s_replication, serialize_s3s_replication};
 
 /// One old-codec observation before the golden harness normalizes either side.
