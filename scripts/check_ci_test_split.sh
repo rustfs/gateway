@@ -199,10 +199,10 @@ require_equal(error_status_steps.last.keys, ["name", "run"],
               "error-status-self-test command can skip or hide failure")
 
 workspace_runs = [<<~'RUN', <<~'RUN']
-  scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance
+  scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway
   scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 RUN
-  scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance
+  scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance --package rustfs-gateway
 RUN
 signing_suite_run = <<~'RUN'
   scripts/ci_budget.sh 90 "signing suite build" cargo build --package xtask --bin xtask
