@@ -1732,6 +1732,7 @@ dependencies = [
  "http-body-util",
  "httparse",
  "hyper",
+ "md-5",
  "rustfs-gateway-core",
  "rustfs-gateway-http",
  "rustfs-gateway-macros",
