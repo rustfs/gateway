@@ -8,6 +8,7 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `src/persistence.rs` | Feature-independent persisted bucket-configuration codecs and decision seams for the implemented families. | Adding a persistence family or changing production metadata behavior. |
 | `src/persistence/accelerate_payment.rs` | Production Accelerate and Request Payment persistence codecs and runtime decisions. | Changing those two metadata families or their historical XML compatibility. |
 | `src/persistence/lifecycle.rs` | Full Lifecycle persistence structure, parser, timestamp normalization, and old-order writer. | Changing Lifecycle metadata compatibility or action semantics. |
+| `src/cors_tagging.rs` | Persisted CORS and Tagging codecs plus runtime behavior projections. | Changing stored CORS rules, tag sets, or their migration evidence. |
 | `src/compat.rs` | Milestone-bounded adapters to the pinned-s3s persistence oracle for the implemented families. | Auditing old-read or rollback behavior for D1-D5. |
 | `src/compat/accelerate_payment.rs` | Independent pinned-s3s observations for Accelerate and Request Payment. | Auditing the old side of either family’s D1-D5 evidence. |
 | `src/compat/lifecycle.rs` | Pinned-s3s Lifecycle translation and decision observation. | Auditing Lifecycle D1-D5 against the old codec. |
