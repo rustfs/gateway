@@ -202,7 +202,12 @@ impl<T> ConcreteFamilyCorpus<T> {
 /// Returns a fail-closed coverage error when any family-owned case has invalid provenance,
 /// duplicated bytes, missing polarity, or an incomplete required-variant set.
 pub fn build_persistence_corpus_report() -> Result<CorpusReport, CorpusCoverageError> {
-    let families = [
+    let families = all_family_corpus_evidence()?;
+    build_corpus_report(&ConfigKind::ALL, &families)
+}
+
+fn all_family_corpus_evidence() -> Result<Vec<FamilyCorpusEvidence>, CorpusCoverageError> {
+    Ok(vec![
         versioning::corpus_evidence().framework()?,
         object_lock::corpus_evidence().framework()?,
         lifecycle::corpus_evidence().framework()?,
@@ -216,8 +221,7 @@ pub fn build_persistence_corpus_report() -> Result<CorpusReport, CorpusCoverageE
         logging::bucket_logging_corpus_evidence()?,
         website::website_corpus_evidence()?,
         replication::replication_corpus_evidence()?,
-    ];
-    build_corpus_report(&ConfigKind::ALL, &families)
+    ])
 }
 
 /// Builds the complete persisted XML corpus report under its original pilot-era name.

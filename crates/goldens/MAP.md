@@ -8,6 +8,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | --- | --- | --- |
 | `src/lib.rs` | Runs fail-closed persistence compatibility assertions against independent old and new codecs. | Adding a configuration family or changing a D1-D5 assertion. |
 | `src/corpus.rs` | Derives coverage from concrete traceable accepted/rejected samples without claiming aggregate completeness. | Wiring family-owned sample collections or changing corpus validation. |
+| `src/corpus/backup_zip.rs` | Proves old/new backup archives preserve every accepted persisted XML byte and remain readable in both migration directions. | Auditing backup import/export rollback evidence or its fail-closed archive checks. |
 | `src/bin/corpus-report.rs` | Validates and renders all persisted XML corpus families with fail-closed process status. | Running or changing the persistence corpus CLI. |
 | `src/bin/four-way.rs` | Executes all persisted XML samples through D1-D5 with a fail-closed process status. | Running or changing the full persistence rollback gate. |
 | `src/accelerate_payment.rs` | Binds Accelerate and Request Payment production/oracle codecs, decision projections, traceable samples, and mutations. | Auditing Accelerate or Request Payment persistence compatibility. |
