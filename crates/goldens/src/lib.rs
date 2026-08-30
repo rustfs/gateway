@@ -29,11 +29,17 @@ use rustfs_gateway_types::compat::{S3sVersioningObservation, parse_s3s_versionin
 use rustfs_gateway_types::persistence::{PersistedVersioningConfiguration, parse_versioning, serialize_versioning};
 use sha2::{Digest, Sha256};
 
+mod object_lock;
+
+pub use object_lock::assert_object_lock_four_way;
+
 /// A persistence configuration family covered by the golden harness.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConfigKind {
     /// Bucket versioning metadata.
     Versioning,
+    /// Bucket Object Lock metadata.
+    ObjectLock,
 }
 
 /// A traceable source for one persisted sample.
@@ -81,15 +87,11 @@ pub enum Direction {
     D5Behavior,
 }
 
-/// Versioning behavior that must survive a codec migration.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BehaviorProjection {
-    /// Whether object versioning is enabled.
-    pub versioning_enabled: bool,
-    /// The exact configured versioning status, including the never-configured `None` state.
-    pub versioning_status: Option<String>,
-    /// The exact MFA delete state.
-    pub mfa_delete: Option<String>,
+struct VersioningBehaviorProjection {
+    versioning_enabled: bool,
+    versioning_status: Option<String>,
+    mfa_delete: Option<String>,
 }
 
 /// A fail-closed input or D1-D5 result with byte-diff context where applicable.
@@ -122,6 +124,9 @@ impl std::error::Error for GoldenFailure {}
 
 /// Independent old/new codec operations consumed by the generic harness.
 pub trait FourWayCodec {
+    /// Configuration family accepted by this codec.
+    const KIND: ConfigKind;
+
     /// Common value handed independently to both serializers.
     type Value: Clone + fmt::Debug + Eq;
     /// Parsed value retained in the old implementation's own observation shape.
@@ -130,6 +135,8 @@ pub trait FourWayCodec {
     type NewParsed: fmt::Debug;
     /// Common structural projection used only for D1 and D3 comparisons.
     type Structure: Clone + fmt::Debug + Eq;
+    /// Family-specific runtime behavior projected independently from each parser.
+    type Behavior: fmt::Debug + Eq;
 
     /// Parses persisted bytes with the pinned old codec.
     fn old_parse(&self, bytes: &[u8]) -> Result<Self::OldParsed, String>;
@@ -146,9 +153,9 @@ pub trait FourWayCodec {
     /// Serializes a value with the production new codec.
     fn new_serialize(&self, value: &Self::Value) -> Result<Vec<u8>, String>;
     /// Computes runtime behavior through the old implementation's interpretation.
-    fn old_behavior(&self, value: &Self::OldParsed) -> BehaviorProjection;
+    fn old_behavior(&self, value: &Self::OldParsed) -> Self::Behavior;
     /// Computes runtime behavior through the new implementation's interpretation.
-    fn new_behavior(&self, value: &Self::NewParsed) -> BehaviorProjection;
+    fn new_behavior(&self, value: &Self::NewParsed) -> Self::Behavior;
 }
 
 /// Runs provenance validation and D1-D5 against one historical sample.
@@ -162,7 +169,7 @@ pub trait FourWayCodec {
 /// Returns [`GoldenFailure`] for invalid provenance or the first failed direction, with a ±64-byte
 /// hex and printable context for D2.
 pub fn assert_four_way<C: FourWayCodec>(codec: &C, sample: &GoldenSample<C::Value>) -> Result<(), GoldenFailure> {
-    validate_sample(sample)?;
+    validate_sample(C::KIND, sample)?;
     let old_parsed = codec.old_parse(&sample.bytes).map_err(|error| GoldenFailure {
         direction: Direction::D1CompatibleRead,
         offset: None,
@@ -230,10 +237,13 @@ pub fn assert_versioning_four_way(sample: &GoldenSample<PersistedVersioningConfi
 struct VersioningCodec;
 
 impl FourWayCodec for VersioningCodec {
+    const KIND: ConfigKind = ConfigKind::Versioning;
+
     type Value = PersistedVersioningConfiguration;
     type OldParsed = S3sVersioningObservation;
     type NewParsed = PersistedVersioningConfiguration;
     type Structure = PersistedVersioningConfiguration;
+    type Behavior = VersioningBehaviorProjection;
 
     fn old_parse(&self, bytes: &[u8]) -> Result<Self::OldParsed, String> {
         parse_s3s_versioning(bytes).map_err(|error| error.to_string())
@@ -263,16 +273,16 @@ impl FourWayCodec for VersioningCodec {
         Ok(serialize_versioning(value))
     }
 
-    fn old_behavior(&self, value: &Self::OldParsed) -> BehaviorProjection {
-        BehaviorProjection {
+    fn old_behavior(&self, value: &Self::OldParsed) -> Self::Behavior {
+        VersioningBehaviorProjection {
             versioning_enabled: value.versioning_enabled,
             versioning_status: value.versioning_status.clone(),
             mfa_delete: value.mfa_delete.clone(),
         }
     }
 
-    fn new_behavior(&self, value: &Self::NewParsed) -> BehaviorProjection {
-        BehaviorProjection {
+    fn new_behavior(&self, value: &Self::NewParsed) -> Self::Behavior {
+        VersioningBehaviorProjection {
             versioning_enabled: value.versioning_enabled(),
             versioning_status: value.status.clone(),
             mfa_delete: value.mfa_delete.clone(),
@@ -280,7 +290,15 @@ impl FourWayCodec for VersioningCodec {
     }
 }
 
-fn validate_sample<T>(sample: &GoldenSample<T>) -> Result<(), GoldenFailure> {
+fn validate_sample<T>(expected_kind: ConfigKind, sample: &GoldenSample<T>) -> Result<(), GoldenFailure> {
+    if sample.kind != expected_kind {
+        return Err(GoldenFailure {
+            direction: Direction::Input,
+            offset: None,
+            left: format!("{:?}", sample.kind),
+            right: format!("expected {:?}", expected_kind),
+        });
+    }
     for (name, value) in [
         ("source", sample.origin.source.as_str()),
         ("producer", sample.origin.producer.as_str()),
@@ -497,6 +515,7 @@ mod tests {
     }
 
     struct Mutant {
+        panic_on_old_parse: bool,
         old_byte_drift: bool,
         reject_new_output_in_old: bool,
         reject_historical_in_new: bool,
@@ -505,12 +524,16 @@ mod tests {
     }
 
     impl FourWayCodec for Mutant {
+        const KIND: ConfigKind = ConfigKind::Versioning;
+
         type Value = PersistedVersioningConfiguration;
         type OldParsed = S3sVersioningObservation;
         type NewParsed = PersistedVersioningConfiguration;
         type Structure = PersistedVersioningConfiguration;
+        type Behavior = VersioningBehaviorProjection;
 
         fn old_parse(&self, bytes: &[u8]) -> Result<Self::OldParsed, String> {
+            assert!(!self.panic_on_old_parse, "input validation must run before the old parser");
             let canonical = VersioningCodec.new_serialize(&base_value())?;
             if self.reject_new_output_in_old && bytes == canonical {
                 return Err("mutation: rollback parser rejects the new output".to_owned());
@@ -553,11 +576,11 @@ mod tests {
             VersioningCodec.new_serialize(value)
         }
 
-        fn old_behavior(&self, value: &Self::OldParsed) -> BehaviorProjection {
+        fn old_behavior(&self, value: &Self::OldParsed) -> Self::Behavior {
             VersioningCodec.old_behavior(value)
         }
 
-        fn new_behavior(&self, value: &Self::NewParsed) -> BehaviorProjection {
+        fn new_behavior(&self, value: &Self::NewParsed) -> Self::Behavior {
             let mut projection = VersioningCodec.new_behavior(value);
             if self.new_behavior_drift {
                 projection.versioning_enabled = !projection.versioning_enabled;
@@ -568,6 +591,7 @@ mod tests {
 
     fn mutant() -> Mutant {
         Mutant {
+            panic_on_old_parse: false,
             old_byte_drift: false,
             reject_new_output_in_old: false,
             reject_historical_in_new: false,
@@ -639,6 +663,16 @@ mod tests {
         let mut invalid = sample();
         invalid.origin.sha256.replace_range(..1, "0");
         let failure = assert_four_way(&mutant(), &invalid).expect_err("stale digest must fail closed");
+        assert_eq!(failure.direction, Direction::Input);
+    }
+
+    #[test]
+    fn sample_kind_mismatch_fails_before_any_codec_observation() {
+        let mut invalid = sample();
+        invalid.kind = ConfigKind::ObjectLock;
+        let mut codec = mutant();
+        codec.panic_on_old_parse = true;
+        let failure = assert_four_way(&codec, &invalid).expect_err("a mislabeled sample must fail closed");
         assert_eq!(failure.direction, Direction::Input);
     }
 }
