@@ -46,6 +46,14 @@ pub fn assert_public_access_block_four_way(
     assert_four_way(&PublicAccessBlockCodec, sample)
 }
 
+pub(crate) fn run_public_access_block_corpus_four_way() -> Result<usize, GoldenFailure> {
+    let cases = public_access_block_accepted_samples();
+    for (sample, _) in &cases {
+        assert_public_access_block_four_way(sample)?;
+    }
+    Ok(cases.len())
+}
+
 #[derive(Clone, Copy, Debug)]
 struct PublicAccessBlockCodec;
 

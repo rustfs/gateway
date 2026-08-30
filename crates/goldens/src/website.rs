@@ -283,6 +283,14 @@ pub fn assert_website_four_way(sample: &GoldenSample<PersistedWebsiteConfigurati
     assert_four_way(&WebsiteCodec, sample)
 }
 
+pub(crate) fn run_website_corpus_four_way() -> Result<usize, GoldenFailure> {
+    let cases = accepted_cases();
+    for (sample, _) in &cases {
+        assert_website_four_way(sample)?;
+    }
+    Ok(cases.len())
+}
+
 #[derive(Clone, Copy, Debug)]
 struct WebsiteCodec;
 

@@ -47,6 +47,14 @@ pub fn assert_bucket_encryption_four_way(
     assert_four_way(&BucketEncryptionCodec, sample)
 }
 
+pub(crate) fn run_bucket_encryption_corpus_four_way() -> Result<usize, GoldenFailure> {
+    let cases = bucket_encryption_accepted_samples();
+    for (sample, _) in &cases {
+        assert_bucket_encryption_four_way(sample)?;
+    }
+    Ok(cases.len())
+}
+
 #[derive(Clone, Copy, Debug)]
 struct BucketEncryptionCodec;
 

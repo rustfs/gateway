@@ -274,7 +274,7 @@ macro_rules! rejected_rows {
     };
 }
 
-fn accelerate_accepted_samples() -> Vec<(GoldenSample<PersistedAccelerateConfiguration>, Vec<CorpusVariant>)> {
+pub(crate) fn accelerate_accepted_samples() -> Vec<(GoldenSample<PersistedAccelerateConfiguration>, Vec<CorpusVariant>)> {
     let value = "x".repeat(8 * 1024);
     let large = accelerate_bytes(&value);
     accepted_rows!(accelerate_sample;
@@ -294,7 +294,7 @@ fn accelerate_accepted_samples() -> Vec<(GoldenSample<PersistedAccelerateConfigu
     )
 }
 
-fn payment_accepted_samples() -> Vec<(GoldenSample<PersistedRequestPaymentConfiguration>, Vec<CorpusVariant>)> {
+pub(crate) fn payment_accepted_samples() -> Vec<(GoldenSample<PersistedRequestPaymentConfiguration>, Vec<CorpusVariant>)> {
     let value = "x".repeat(8 * 1024);
     let large = payment_bytes(&value);
     accepted_rows!(payment_sample;

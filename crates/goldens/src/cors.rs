@@ -212,6 +212,14 @@ pub fn assert_cors_four_way(sample: &GoldenSample<PersistedCorsConfiguration>) -
     assert_four_way(&CorsCodec, sample)
 }
 
+pub(crate) fn run_cors_corpus_four_way() -> Result<usize, GoldenFailure> {
+    let cases = accepted_cases();
+    for (sample, _) in &cases {
+        assert_cors_four_way(sample)?;
+    }
+    Ok(cases.len())
+}
+
 impl FourWayCodec for CorsCodec {
     const KIND: ConfigKind = ConfigKind::Cors;
     type Value = PersistedCorsConfiguration;
