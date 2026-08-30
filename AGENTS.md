@@ -234,6 +234,15 @@ No exceptions. If you believe you have found one, stop and ask on the issue.
 - No dependency on `inventory` or `linkme` (see `P0-07` ADR-0003). Registration must be explicit and
   greppable.
 
+**Persisted configuration decoding**
+
+- Persisted XML configuration decoders are an explicit exception to any `deny_unknown_fields`
+  default: they must skip unknown elements while continuing to decode every known field. This
+  exception applies only to bytes already stored in bucket metadata; HTTP request-body decoders
+  remain strict unless a separate protocol rule says otherwise. Evidence: the RustFS
+  [`s3_xml_parser_discards_unknown_replication_elements_before_validation`](https://github.com/rustfs/rustfs/blob/47ad69b691dc6d2a617d47767a2a3deee0849335/crates/replication/src/config.rs)
+  test proves that shipped persisted replication XML containing an unknown element remains readable.
+
 **Measurement**
 
 This repository has now produced the same defect **seven times**: a check that cannot fail, which
