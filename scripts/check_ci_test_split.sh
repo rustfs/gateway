@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # WHAT THIS CHECKS
-#   Workspace tests, the official signing suite, guard mutations split over four runners,
+#   Workspace tests, persistence goldens, the official signing suite, guard mutations split over four runners,
 #   build-backed mutations split over three runners, target-consolidation mutations, quirk-ledger
 #   mutations, error-status mutations and TSAN run on separate CI runners, while the
 #   branch-protected Test check waits for every worker. This keeps the gate wall time below ten
@@ -44,6 +44,7 @@ require_equal(workflow.fetch("env", {}).keys, workflow_env_keys,
 workspace_ids = ["workspace-tests", "workspace-tests-2"]
 workspaces = workspace_ids.map { |job_id| jobs.fetch(job_id) }
 signing_suite = jobs.fetch("signing-suite")
+persistence_goldens = jobs.fetch("persistence-goldens")
 guard = jobs.fetch("guard-self-test")
 guard_group_ids = ["guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4"]
 guard_groups = guard_group_ids.map { |job_id| jobs.fetch(job_id) }
@@ -76,6 +77,11 @@ end
 require_equal(signing_suite.keys, worker_keys, "signing-suite changed its parallel four-minute contract")
 require_equal(signing_suite.values_at("name", "runs-on", "timeout-minutes"),
               ["Official signing suite", "ubuntu-latest", 4], "signing-suite identity or budget changed")
+require_equal(persistence_goldens.keys, worker_keys,
+              "persistence-goldens changed its parallel four-minute contract")
+require_equal(persistence_goldens.values_at("name", "runs-on", "timeout-minutes"),
+              ["Persistence goldens", "ubuntu-latest", 4],
+              "persistence-goldens identity or budget changed")
 # Four runners, one per quarter of the case ordinals. Six minutes each keeps the longest
 # dependency path (a guard runner plus the one-minute Test aggregate) at seven of the ten.
 guard_groups.each_with_index do |job, index|
@@ -140,6 +146,19 @@ require_equal(signing_suite_steps.first(3).map(&:keys), [["uses"], ["uses", "wit
               "signing-suite setup gained executable control")
 require_equal(signing_suite_steps.last.keys, ["name", "run"],
               "signing-suite command can skip or hide failure")
+persistence_goldens_steps = persistence_goldens.fetch("steps")
+require_equal(persistence_goldens_steps.length, 4,
+              "persistence-goldens changed its setup or command step count")
+require_equal(persistence_goldens_steps.first(3).map { |step| step.fetch("uses") }, [
+  "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+  "dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30",
+  "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32"
+], "persistence-goldens setup action or pin changed")
+require_equal(persistence_goldens_steps.first(3).map(&:keys),
+              [["uses"], ["uses", "with"], ["uses"]],
+              "persistence-goldens setup gained executable control")
+require_equal(persistence_goldens_steps.last.keys, ["name", "run"],
+              "persistence-goldens command can skip or hide failure")
 guard_groups.each_with_index do |job, index|
   steps = job.fetch("steps")
   require_equal(steps.first(3).map(&:keys), [["uses", "with"], ["uses", "with"], ["uses"]],
@@ -209,6 +228,21 @@ signing_suite_run = <<~'RUN'
   scripts/ci_budget.sh 60 "signing suite fetch" target/debug/xtask sigsuite fetch
   scripts/ci_budget.sh 60 "signing suite run" target/debug/xtask sigsuite run
 RUN
+persistence_goldens_run = <<~'RUN'
+  report="$(
+    scripts/ci_budget.sh 105 "persistence corpus report" \
+      cargo run --quiet --package rustfs-gateway-goldens --bin corpus-report
+  )"
+  printf '%s\n' "$report"
+  corpus_bytes="$(
+    printf '%s\n' "$report" |
+      sed -n 's/^total: families=13 accepted=[0-9][0-9]* rejected=[0-9][0-9]* bytes=\([0-9][0-9]*\)$/\1/p'
+  )"
+  test -n "$corpus_bytes"
+  test "$corpus_bytes" -le 20971520
+  scripts/ci_budget.sh 105 "four-way persistence goldens" \
+    cargo run --quiet --package rustfs-gateway-goldens --bin four-way -- --all
+RUN
 # Every runner declares the same budget it is given, so an overrun stops itself with a
 # diagnosis instead of being killed at exit 124 with every case still printing ok.
 guard_runs = (0...4).map do |group|
@@ -244,6 +278,8 @@ require_equal(workspace_runs.uniq.length, 2,
               "the workspace test runners do not cover two distinct shards")
 require_equal(signing_suite_steps.last.fetch("run"), signing_suite_run,
               "signing-suite command changed or can hide a failure")
+require_equal(persistence_goldens_steps.last.fetch("run"), persistence_goldens_run,
+              "persistence-goldens command or embedded-corpus size guard changed")
 guard_groups.each_with_index do |job, index|
   require_equal(job.fetch("steps").last.fetch("run"), guard_runs.fetch(index),
                 "#{guard_group_ids[index]} command changed, lost its shard, or can hide a failure")
@@ -306,8 +342,8 @@ end
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "workspace-tests-2", "transport-parity", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all nineteen workers within the budget")
+              ["Test", ["workspace-tests", "workspace-tests-2", "transport-parity", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all twenty workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
@@ -315,6 +351,7 @@ expected_env = {
   "WORKSPACE_RESULT" => "${{ needs.workspace-tests.result }}",
   "WORKSPACE_2_RESULT" => "${{ needs.workspace-tests-2.result }}",
   "TRANSPORT_PARITY_RESULT" => "${{ needs.transport-parity.result }}",
+  "PERSISTENCE_GOLDENS_RESULT" => "${{ needs.persistence-goldens.result }}",
   "SIGNING_SUITE_RESULT" => "${{ needs.signing-suite.result }}",
   "GUARD_RESULT" => "${{ needs.guard-self-test.result }}",
   "GUARD_2_RESULT" => "${{ needs.guard-self-test-2.result }}",
@@ -337,6 +374,7 @@ expected_run = <<~'RUN'
   test "$WORKSPACE_RESULT" = success
   test "$WORKSPACE_2_RESULT" = success
   test "$TRANSPORT_PARITY_RESULT" = success
+  test "$PERSISTENCE_GOLDENS_RESULT" = success
   test "$SIGNING_SUITE_RESULT" = success
   test "$GUARD_RESULT" = success
   test "$GUARD_2_RESULT" = success
@@ -479,4 +517,4 @@ if build_groups != [0, 1, 2, 3, 4]:
     )
 PY
 
-printf 'OK: two workspace shards, transport parity, signing suite, four guard shards, target-consolidation, quirk-ledger, DTO compiler, five build guard shards, error-status and TSAN workers are parallel behind Test\n'
+printf 'OK: two workspace shards, transport parity, persistence goldens, signing suite, four guard shards, target-consolidation, quirk-ledger, DTO compiler, five build guard shards, error-status and TSAN workers are parallel behind Test\n'
