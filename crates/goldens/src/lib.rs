@@ -31,6 +31,7 @@ use sha2::{Digest, Sha256};
 
 mod accelerate_payment;
 mod bucket_encryption;
+mod corpus;
 mod cors;
 mod lifecycle;
 mod logging;
@@ -43,6 +44,10 @@ mod website;
 
 pub use accelerate_payment::{assert_accelerate_four_way, assert_request_payment_four_way};
 pub use bucket_encryption::assert_bucket_encryption_four_way;
+pub use corpus::{
+    CorpusCaseEvidence, CorpusCoverageError, CorpusReport, CorpusVariant, FamilyCorpusEvidence, RejectedGoldenSample,
+    build_corpus_report,
+};
 pub use cors::assert_cors_four_way;
 pub use lifecycle::assert_lifecycle_four_way;
 pub use logging::assert_bucket_logging_four_way;
@@ -82,6 +87,28 @@ pub enum ConfigKind {
     Website,
     /// Bucket replication metadata.
     Replication,
+}
+
+impl ConfigKind {
+    /// Stable report label for this persisted XML family.
+    #[must_use]
+    pub const fn report_name(self) -> &'static str {
+        match self {
+            Self::Accelerate => "accelerate",
+            Self::Versioning => "versioning",
+            Self::ObjectLock => "object-lock",
+            Self::Lifecycle => "lifecycle",
+            Self::BucketEncryption => "bucket-encryption",
+            Self::Notification => "notification",
+            Self::PublicAccessBlock => "public-access-block",
+            Self::RequestPayment => "request-payment",
+            Self::Cors => "cors",
+            Self::Tagging => "tagging",
+            Self::Logging => "logging",
+            Self::Website => "website",
+            Self::Replication => "replication",
+        }
+    }
 }
 
 /// A traceable source for one persisted sample.
