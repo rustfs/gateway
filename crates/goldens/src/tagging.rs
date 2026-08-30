@@ -297,7 +297,6 @@ pub(crate) fn corpus_evidence() -> Result<FamilyCorpusEvidence, CorpusCoverageEr
         cases,
     ))
 }
-
 const _: fn() -> Result<FamilyCorpusEvidence, CorpusCoverageError> = corpus_evidence;
 
 #[derive(Clone, Copy, Debug)]
