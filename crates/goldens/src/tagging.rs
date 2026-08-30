@@ -20,9 +20,283 @@
 //! golden gate.
 
 use rustfs_gateway_types::compat::{S3sTaggingObservation, parse_s3s_tagging, serialize_s3s_tagging};
-use rustfs_gateway_types::cors_tagging::{PersistedTagging, parse_tagging, serialize_tagging};
+use rustfs_gateway_types::cors_tagging::{PersistedTag, PersistedTagging, parse_tagging, serialize_tagging};
 
-use crate::{ConfigKind, FourWayCodec, GoldenFailure, GoldenSample, assert_four_way};
+use crate::{
+    ConfigKind, CorpusCaseEvidence, CorpusCoverageError, CorpusVariant, FamilyCorpusEvidence, FourWayCodec, GoldenFailure,
+    GoldenSample, RejectedGoldenSample, SampleOrigin, assert_four_way,
+};
+
+const NON_ASCII: &[u8] = "<Tagging><TagSet><Tag><Key>café</Key><Value>data-🚀</Value></Tag></TagSet></Tagging>".as_bytes();
+const EMPTY: &[u8] = b"<Tagging><TagSet></TagSet></Tagging>";
+const EMPTY_TAG: &[u8] = b"<Tagging><TagSet><Tag></Tag></TagSet></Tagging>";
+const KEY_ONLY: &[u8] = b"<Tagging><TagSet><Tag><Key>k</Key></Tag></TagSet></Tagging>";
+const UNKNOWN_TOP: &[u8] = b"<Tagging><Future>future</Future><TagSet><Tag><Key>k</Key><Value>v</Value></Tag></TagSet></Tagging>";
+const UNKNOWN_SET: &[u8] = b"<Tagging><TagSet><Future>future</Future><Tag><Key>k</Key><Value>v</Value></Tag></TagSet></Tagging>";
+const UNKNOWN_TAG: &[u8] = b"<Tagging><TagSet><Tag><Key>k</Key><Future>future</Future><Value>v</Value></Tag></TagSet></Tagging>";
+const UNKNOWN_ATTRIBUTES: &[u8] = b"<Tagging future=\"root\"><TagSet future=\"set\"><Tag future=\"tag\"><Key future=\"key\">k</Key><Value>v</Value></Tag></TagSet></Tagging>";
+const ALTERNATE_ORDER: &[u8] = b"<Tagging><TagSet><Tag><Value>v</Value><Key>k</Key></Tag></TagSet></Tagging>";
+const BOM: &[u8] = b"\xef\xbb\xbf<Tagging><TagSet><Tag><Key>k</Key><Value>v</Value></Tag></TagSet></Tagging>";
+const CRLF: &[u8] = b"<Tagging>\r\n<TagSet>\r\n<Tag><Key>k</Key><Value>v</Value></Tag>\r\n</TagSet>\r\n</Tagging>";
+
+type AcceptedTaggingCase = (GoldenSample<PersistedTagging>, &'static [CorpusVariant]);
+type RejectedTaggingCase = (RejectedGoldenSample, &'static [CorpusVariant]);
+
+fn tag(key: Option<&str>, value: Option<&str>) -> PersistedTag {
+    PersistedTag {
+        key: key.map(str::to_owned),
+        value: value.map(str::to_owned),
+    }
+}
+
+fn kv() -> PersistedTagging {
+    PersistedTagging {
+        tag_set: vec![tag(Some("k"), Some("v"))],
+    }
+}
+
+fn origin(sha256: &str) -> SampleOrigin {
+    SampleOrigin {
+        source: "P9 Tagging persistence matrix".to_owned(),
+        producer: "pinned s3s XML behavior".to_owned(),
+        version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
+        sha256: sha256.to_owned(),
+    }
+}
+
+fn accepted(
+    bytes: Vec<u8>,
+    sha256: &str,
+    value: PersistedTagging,
+    notes: &str,
+    variants: &'static [CorpusVariant],
+) -> AcceptedTaggingCase {
+    (
+        GoldenSample {
+            kind: ConfigKind::Tagging,
+            bytes,
+            value,
+            origin: origin(sha256),
+            notes: notes.to_owned(),
+        },
+        variants,
+    )
+}
+
+fn rejected(bytes: &[u8], sha256: &str, notes: &str, variants: &'static [CorpusVariant]) -> RejectedTaggingCase {
+    (
+        RejectedGoldenSample {
+            kind: ConfigKind::Tagging,
+            bytes: bytes.to_vec(),
+            origin: origin(sha256),
+            notes: notes.to_owned(),
+        },
+        variants,
+    )
+}
+
+fn accepted_cases() -> Vec<AcceptedTaggingCase> {
+    let large = "€".repeat(8 * 1024);
+    let large_xml = format!("<Tagging><TagSet><Tag><Key>k</Key><Value>{large}</Value></Tag></TagSet></Tagging>");
+    vec![
+        accepted(
+            NON_ASCII.to_vec(),
+            "060a0ddb322306d508dd1b5792075fb46a1859309c501eecdfd9901b649f6118",
+            PersistedTagging {
+                tag_set: vec![tag(Some("café"), Some("data-🚀"))],
+            },
+            "non-ASCII tag key and value",
+            &[CorpusVariant::Canonical, CorpusVariant::Unicode],
+        ),
+        accepted(
+            EMPTY.to_vec(),
+            "8335526089e36ac194a7ce0c192060008f43ba25a359c3ed96f3b3eedbb85d98",
+            PersistedTagging::default(),
+            "empty tag set wrapper",
+            &[CorpusVariant::EmptyElement],
+        ),
+        accepted(
+            EMPTY_TAG.to_vec(),
+            "975f1fb93267886428d37ca30f2372279b62b7d038bb1a07ebdb497f2e5f518d",
+            PersistedTagging {
+                tag_set: vec![tag(None, None)],
+            },
+            "empty tag preserves absent key and value",
+            &[CorpusVariant::EmptyElement, CorpusVariant::MissingField],
+        ),
+        accepted(
+            KEY_ONLY.to_vec(),
+            "698e9114e245b064bf99e17f47ff24ebb11bf50e793faba2ccc1cc54f9ccb5ea",
+            PersistedTagging {
+                tag_set: vec![tag(Some("k"), None)],
+            },
+            "tag value absence remains distinct from empty text",
+            &[CorpusVariant::MissingField],
+        ),
+        accepted(
+            UNKNOWN_TOP.to_vec(),
+            "2dc2b86dd4607c5144e9027ccf77e110547788c50b7ee0678954abd39e89c558",
+            kv(),
+            "old-readable unknown top-level element",
+            &[CorpusVariant::UnknownTopLevel],
+        ),
+        accepted(
+            UNKNOWN_SET.to_vec(),
+            "8413ecaa36d5fb11a51d46cbfc3cf1155113696dbd3e02a32c5a2f2556203a46",
+            kv(),
+            "old-readable unknown TagSet element",
+            &[CorpusVariant::UnknownNested],
+        ),
+        accepted(
+            UNKNOWN_ATTRIBUTES.to_vec(),
+            "eb18bcb791fea939a6145b87e0c8767a83cc17ec5b77586d4b367bb5b8cee6e5",
+            kv(),
+            "old-readable attributes at every structural level",
+            &[CorpusVariant::UnknownAttribute],
+        ),
+        accepted(
+            ALTERNATE_ORDER.to_vec(),
+            "d0938cc3f069f7b1c8effa0a521ded608b2721676aff3bd4ab97f6b18e075e25",
+            kv(),
+            "old-readable Value-before-Key order",
+            &[CorpusVariant::AlternateOrder],
+        ),
+        accepted(
+            BOM.to_vec(),
+            "5a9b6714cef975abe9eee01caa71f677e034ba67116bbd34b8e751086dd87295",
+            kv(),
+            "UTF-8 byte-order mark",
+            &[CorpusVariant::Bom],
+        ),
+        accepted(
+            CRLF.to_vec(),
+            "3ce4ffc4ed3786c8969303a28fdda86fa1ef25bc7fc6abef6788b0e57b28113d",
+            kv(),
+            "CRLF line endings",
+            &[CorpusVariant::Crlf],
+        ),
+        accepted(
+            large_xml.into_bytes(),
+            "fac42b276894784523ecf2ebda80eaccacb5e8b54082cdde572698e967902cad",
+            PersistedTagging {
+                tag_set: vec![tag(Some("k"), Some(&large))],
+            },
+            "persistence-sized Unicode tag value",
+            &[CorpusVariant::LargeValue, CorpusVariant::Unicode],
+        ),
+    ]
+}
+
+fn rejected_cases() -> Vec<RejectedTaggingCase> {
+    vec![
+        rejected(
+            b"<Tagging></Tagging>",
+            "b957e31ebd9819ec59c3e5b020a4c28f13d66fecd3e2e6191296e6598de92311",
+            "missing TagSet",
+            &[CorpusVariant::MissingField],
+        ),
+        rejected(
+            b"<Tagging><TagSet></TagSet><TagSet></TagSet></Tagging>",
+            "704a85684c0e3f0c1898bfd2e5593b2adb56f6d9fad67b4b8a73f76f8de43f5e",
+            "duplicate TagSet",
+            &[CorpusVariant::DuplicateField],
+        ),
+        rejected(
+            b"<Tagging><TagSet><Tag><Key>a</Key><Key>b</Key></Tag></TagSet></Tagging>",
+            "389627cd77c0004f08e7cb3196f1e84d8f6783c98dfe5999e4daa4934107a390",
+            "duplicate Key",
+            &[CorpusVariant::DuplicateField],
+        ),
+        rejected(
+            b"<Tagging><TagSet><Tag><Value>a</Value><Value>b</Value></Tag></TagSet></Tagging>",
+            "c9fe91b601d06410efec0e4e3f0ce71c5957a877d9003c5e62b40171e9b50fae",
+            "duplicate Value",
+            &[CorpusVariant::DuplicateField],
+        ),
+        rejected(
+            UNKNOWN_TAG,
+            "632e2db3a5f85479319e37291266f272a91108ee4e0036fd67fd397aa00951d6",
+            "unknown Tag element",
+            &[CorpusVariant::UnknownNested],
+        ),
+        rejected(
+            b"",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "empty document",
+            &[CorpusVariant::MalformedDocument],
+        ),
+        rejected(
+            b"<Wrong><TagSet></TagSet></Wrong>",
+            "1abd8ef242b25a9b25bee3de9a9de2b140b4238110dbe0d053515983d6e9250d",
+            "wrong root",
+            &[CorpusVariant::MalformedDocument],
+        ),
+        rejected(
+            b"<Tagging><TagSet>",
+            "7eb91def4df99883d6deff30928a8d7ae75d587a442d48dd881964d034be25fd",
+            "unclosed document",
+            &[CorpusVariant::MalformedDocument],
+        ),
+        rejected(
+            b"<Tagging><TagSet>\xff</TagSet></Tagging>",
+            "88a94e2653afd96d8631134c4eafd975420bce331fcd01841765e80010b898fb",
+            "invalid UTF-8",
+            &[CorpusVariant::MalformedDocument],
+        ),
+        rejected(
+            b"<Tagging bad=\"x><TagSet></TagSet></Tagging>",
+            "1d4411b5ab953c36bfa3cffdf493c61deef3e41250b1b046e5372008b51ab5ff",
+            "unterminated attribute",
+            &[CorpusVariant::MalformedDocument],
+        ),
+        rejected(
+            b"<Tagging><TagSet></Tagging>",
+            "bffc2c8c5bc02a036ea20615282c0da08e3ae00bac2ca3927c28ccd37e8860b5",
+            "mismatched closing tag",
+            &[CorpusVariant::MalformedDocument],
+        ),
+        rejected(
+            b"<Tagging><TagSet><Tag><Key>&bogus;</Key></Tag></TagSet></Tagging>",
+            "f292bdd7948ce11bfccc27a9bc23da064d19ac3cabc78794a51a8c79d71a4e39",
+            "invalid XML entity",
+            &[CorpusVariant::MalformedDocument],
+        ),
+    ]
+}
+
+/// Builds Tagging coverage from the same accepted and rejected cases used by the codec tests.
+///
+/// # Errors
+///
+/// Returns an error when a case has stale provenance or lacks a coverage classification.
+pub(crate) fn corpus_evidence() -> Result<FamilyCorpusEvidence, CorpusCoverageError> {
+    let mut cases = Vec::new();
+    for (sample, variants) in accepted_cases() {
+        cases.push(CorpusCaseEvidence::accepted(&sample, variants)?);
+    }
+    for (sample, variants) in rejected_cases() {
+        cases.push(CorpusCaseEvidence::rejected(&sample, variants)?);
+    }
+    Ok(FamilyCorpusEvidence::new(
+        ConfigKind::Tagging,
+        vec![
+            CorpusVariant::Canonical,
+            CorpusVariant::EmptyElement,
+            CorpusVariant::MissingField,
+            CorpusVariant::UnknownTopLevel,
+            CorpusVariant::UnknownNested,
+            CorpusVariant::UnknownAttribute,
+            CorpusVariant::AlternateOrder,
+            CorpusVariant::DuplicateField,
+            CorpusVariant::LargeValue,
+            CorpusVariant::Bom,
+            CorpusVariant::Crlf,
+            CorpusVariant::Unicode,
+            CorpusVariant::MalformedDocument,
+        ],
+        cases,
+    ))
+}
 
 #[derive(Clone, Copy, Debug)]
 struct TaggingCodec;
@@ -75,139 +349,29 @@ impl FourWayCodec for TaggingCodec {
 
 #[cfg(test)]
 mod tests {
-    use rustfs_gateway_types::cors_tagging::PersistedTag;
-
     use super::*;
-    use crate::{Direction, SampleOrigin};
-
-    const NON_ASCII: &[u8] = "<Tagging><TagSet><Tag><Key>café</Key><Value>data-🚀</Value></Tag></TagSet></Tagging>".as_bytes();
-    const EMPTY: &[u8] = b"<Tagging><TagSet></TagSet></Tagging>";
-    const EMPTY_TAG: &[u8] = b"<Tagging><TagSet><Tag></Tag></TagSet></Tagging>";
-    const KEY_ONLY: &[u8] = b"<Tagging><TagSet><Tag><Key>k</Key></Tag></TagSet></Tagging>";
-    const UNKNOWN_TOP: &[u8] =
-        b"<Tagging><Future>future</Future><TagSet><Tag><Key>k</Key><Value>v</Value></Tag></TagSet></Tagging>";
-    const UNKNOWN_SET: &[u8] =
-        b"<Tagging><TagSet><Future>future</Future><Tag><Key>k</Key><Value>v</Value></Tag></TagSet></Tagging>";
-    const UNKNOWN_TAG: &[u8] =
-        b"<Tagging><TagSet><Tag><Key>k</Key><Future>future</Future><Value>v</Value></Tag></TagSet></Tagging>";
-    const UNKNOWN_ATTRIBUTES: &[u8] = b"<Tagging future=\"root\"><TagSet future=\"set\"><Tag future=\"tag\"><Key future=\"key\">k</Key><Value>v</Value></Tag></TagSet></Tagging>";
-    const ALTERNATE_ORDER: &[u8] = b"<Tagging><TagSet><Tag><Value>v</Value><Key>k</Key></Tag></TagSet></Tagging>";
-
-    fn tag(key: Option<&str>, value: Option<&str>) -> PersistedTag {
-        PersistedTag {
-            key: key.map(str::to_owned),
-            value: value.map(str::to_owned),
-        }
-    }
-
-    fn traced(bytes: &[u8], sha256: &str, value: PersistedTagging, notes: &str) -> GoldenSample<PersistedTagging> {
-        GoldenSample {
-            kind: ConfigKind::Tagging,
-            bytes: bytes.to_vec(),
-            value,
-            origin: SampleOrigin {
-                source: "P9 Tagging persistence matrix".to_owned(),
-                producer: "pinned s3s XML behavior".to_owned(),
-                version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
-                sha256: sha256.to_owned(),
-            },
-            notes: notes.to_owned(),
-        }
-    }
+    use crate::{Direction, build_corpus_report};
 
     fn sample() -> GoldenSample<PersistedTagging> {
-        traced(
-            UNKNOWN_ATTRIBUTES,
-            "eb18bcb791fea939a6145b87e0c8767a83cc17ec5b77586d4b367bb5b8cee6e5",
-            PersistedTagging {
-                tag_set: vec![tag(Some("café"), Some("data-🚀"))],
-            },
-            "old-readable attributes exercise D4 independently from canonical D2 bytes",
-        )
+        accepted_cases()
+            .into_iter()
+            .find(|(_, variants)| variants.contains(&CorpusVariant::UnknownAttribute))
+            .expect("Tagging corpus has an unknown-attribute control")
+            .0
     }
 
     #[test]
     fn tagging_sample_matrix_passes_all_five_directions() {
-        let kv = || PersistedTagging {
-            tag_set: vec![tag(Some("k"), Some("v"))],
-        };
-        let cases = [
-            traced(
-                NON_ASCII,
-                "060a0ddb322306d508dd1b5792075fb46a1859309c501eecdfd9901b649f6118",
-                PersistedTagging {
-                    tag_set: vec![tag(Some("café"), Some("data-🚀"))],
-                },
-                "non-ASCII tag key and value",
-            ),
-            traced(
-                EMPTY,
-                "8335526089e36ac194a7ce0c192060008f43ba25a359c3ed96f3b3eedbb85d98",
-                PersistedTagging::default(),
-                "empty tag set wrapper",
-            ),
-            traced(
-                EMPTY_TAG,
-                "975f1fb93267886428d37ca30f2372279b62b7d038bb1a07ebdb497f2e5f518d",
-                PersistedTagging {
-                    tag_set: vec![tag(None, None)],
-                },
-                "empty tag preserves absent key and value",
-            ),
-            traced(
-                KEY_ONLY,
-                "698e9114e245b064bf99e17f47ff24ebb11bf50e793faba2ccc1cc54f9ccb5ea",
-                PersistedTagging {
-                    tag_set: vec![tag(Some("k"), None)],
-                },
-                "tag value absence remains distinct from empty text",
-            ),
-            traced(
-                UNKNOWN_TOP,
-                "2dc2b86dd4607c5144e9027ccf77e110547788c50b7ee0678954abd39e89c558",
-                kv(),
-                "old-readable unknown top-level element",
-            ),
-            traced(
-                UNKNOWN_SET,
-                "8413ecaa36d5fb11a51d46cbfc3cf1155113696dbd3e02a32c5a2f2556203a46",
-                kv(),
-                "old-readable unknown TagSet element",
-            ),
-            traced(
-                UNKNOWN_ATTRIBUTES,
-                "eb18bcb791fea939a6145b87e0c8767a83cc17ec5b77586d4b367bb5b8cee6e5",
-                kv(),
-                "old-readable attributes at every structural level",
-            ),
-            traced(
-                ALTERNATE_ORDER,
-                "d0938cc3f069f7b1c8effa0a521ded608b2721676aff3bd4ab97f6b18e075e25",
-                kv(),
-                "old-readable Value-before-Key order",
-            ),
-        ];
-        for case in cases {
+        for (case, _) in accepted_cases() {
             assert_tagging_four_way(&case).unwrap_or_else(|error| panic!("Tagging {}: {error}", case.notes));
         }
     }
 
     #[test]
     fn missing_and_duplicate_tagging_structure_matches_the_old_refusal_boundary() {
-        for (description, xml) in [
-            ("missing TagSet", b"<Tagging></Tagging>".as_slice()),
-            ("duplicate TagSet", b"<Tagging><TagSet></TagSet><TagSet></TagSet></Tagging>".as_slice()),
-            (
-                "duplicate Key",
-                b"<Tagging><TagSet><Tag><Key>a</Key><Key>b</Key></Tag></TagSet></Tagging>".as_slice(),
-            ),
-            (
-                "duplicate Value",
-                b"<Tagging><TagSet><Tag><Value>a</Value><Value>b</Value></Tag></TagSet></Tagging>".as_slice(),
-            ),
-        ] {
-            assert!(TaggingCodec.old_parse(xml).is_err(), "old parser accepted {description}");
-            assert!(TaggingCodec.new_parse(xml).is_err(), "new parser accepted {description}");
+        for (case, _) in rejected_cases() {
+            assert!(TaggingCodec.old_parse(&case.bytes).is_err(), "old parser accepted {}", case.notes);
+            assert!(TaggingCodec.new_parse(&case.bytes).is_err(), "new parser accepted {}", case.notes);
         }
     }
 
@@ -245,35 +409,26 @@ mod tests {
 
     #[test]
     fn bom_and_crlf_inputs_match_the_pinned_old_parser() {
-        for (description, xml) in [
-            (
-                "UTF-8 BOM",
-                b"\xef\xbb\xbf<Tagging><TagSet><Tag><Key>k</Key><Value>v</Value></Tag></TagSet></Tagging>".as_slice(),
-            ),
-            (
-                "CRLF",
-                b"<Tagging>\r\n<TagSet>\r\n<Tag><Key>k</Key><Value>v</Value></Tag>\r\n</TagSet>\r\n</Tagging>".as_slice(),
-            ),
-        ] {
-            let old = TaggingCodec
-                .old_parse(xml)
-                .unwrap_or_else(|error| panic!("old rejected {description}: {error}"));
-            let new = TaggingCodec
-                .new_parse(xml)
-                .unwrap_or_else(|error| panic!("new rejected {description}: {error}"));
-            assert_eq!(old.structure, new);
+        for (case, _) in accepted_cases()
+            .into_iter()
+            .filter(|(_, variants)| variants.contains(&CorpusVariant::Bom) || variants.contains(&CorpusVariant::Crlf))
+        {
+            assert_tagging_four_way(&case).unwrap_or_else(|error| panic!("Tagging {}: {error}", case.notes));
         }
     }
 
     #[test]
     fn persisted_tagging_accepts_an_eight_kibibyte_unicode_value() {
-        let long = "€".repeat(8 * 1024);
-        let xml = format!("<Tagging><TagSet><Tag><Key>k</Key><Value>{long}</Value></Tag></TagSet></Tagging>");
+        let case = accepted_cases()
+            .into_iter()
+            .find(|(_, variants)| variants.contains(&CorpusVariant::LargeValue))
+            .expect("Tagging corpus has a large-value control")
+            .0;
         let old = TaggingCodec
-            .old_parse(xml.as_bytes())
+            .old_parse(&case.bytes)
             .expect("old persistence parser accepts long tag");
         let new = TaggingCodec
-            .new_parse(xml.as_bytes())
+            .new_parse(&case.bytes)
             .expect("new persistence parser accepts long tag");
         assert_eq!(old.structure, new);
         assert_eq!(new.tag_set[0].value.as_deref().map(str::len), Some(8 * 1024 * 3));
@@ -386,5 +541,13 @@ mod tests {
         codec.panic_old = true;
         let failure = assert_four_way(&codec, &invalid).expect_err("wrong kind must fail closed");
         assert_eq!(failure.direction, Direction::Input);
+    }
+
+    #[test]
+    fn tagging_report_is_derived_from_the_shared_concrete_cases() {
+        let evidence = corpus_evidence().expect("Tagging corpus evidence is traceable");
+        let report = build_corpus_report(&[ConfigKind::Tagging], &[evidence])
+            .expect("Tagging concrete cases satisfy the coverage contract");
+        assert!(report.render().contains("tagging: accepted=11 rejected=12"));
     }
 }
