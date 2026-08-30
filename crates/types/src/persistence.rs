@@ -202,8 +202,6 @@ pub enum PersistenceCodecError {
     InvalidBoolean,
     /// A nested Bucket Encryption element is not recognized by the pinned old decoder.
     UnexpectedBucketEncryptionElement,
-    /// A required persisted field is absent where the pinned old decoder refuses the document.
-    MissingRequiredField,
     /// A nested Bucket Logging element is not recognized by the pinned old decoder.
     UnexpectedLoggingElement,
     /// A nested Website element is not recognized by the pinned old decoder.
@@ -229,7 +227,6 @@ impl fmt::Display for PersistenceCodecError {
             Self::UnexpectedScalarElement => {
                 formatter.write_str("persisted configuration XML has a nested element inside a scalar field")
             }
-            Self::MissingRequiredField => formatter.write_str("persisted configuration XML is missing a required field"),
             Self::DuplicateField => {
                 formatter.write_str("persisted configuration XML has a duplicate scalar field or structural field")
             }

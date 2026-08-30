@@ -34,11 +34,11 @@ use crate::persistence::{
 };
 use s3s::dto::{
     BucketLoggingStatus, BucketLogsPermission, BucketVersioningStatus, CORSConfiguration, CORSRule, Condition, DefaultRetention,
-    ErrorDocument, ExcludedPrefix, Grantee, IndexDocument, LoggingEnabled, MFADelete, ObjectLockConfiguration,
-    ObjectLockEnabled, ObjectLockRetentionMode, ObjectLockRule, PartitionDateSource, PartitionedPrefix, Protocol,
-    PublicAccessBlockConfiguration, Redirect, RedirectAllRequestsTo, RoutingRule, ServerSideEncryption,
-    ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix, Tag, Tagging,
-    TargetGrant, TargetObjectKeyFormat, Type, VersioningConfiguration, WebsiteConfiguration,
+    ErrorDocument, ExcludedPrefix, Grantee, IndexDocument, LoggingEnabled, MFADelete, ObjectLockConfiguration, ObjectLockEnabled,
+    ObjectLockRetentionMode, ObjectLockRule, PartitionDateSource, PartitionedPrefix, Protocol, PublicAccessBlockConfiguration,
+    Redirect, RedirectAllRequestsTo, RoutingRule, ServerSideEncryption, ServerSideEncryptionByDefault,
+    ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix, Tag, Tagging, TargetGrant, TargetObjectKeyFormat,
+    Type, VersioningConfiguration, WebsiteConfiguration,
 };
 use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -644,4 +644,3 @@ pub fn serialize_s3s_website(value: &PersistedWebsiteConfiguration) -> Result<Ve
     old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
     Ok(output)
 }
-
