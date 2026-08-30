@@ -59,6 +59,14 @@ pub fn assert_versioning_four_way(sample: &GoldenSample<PersistedVersioningConfi
     assert_four_way(&VersioningCodec, sample)
 }
 
+pub(crate) fn run_versioning_corpus_four_way() -> Result<usize, GoldenFailure> {
+    let corpus = corpus_evidence();
+    for case in &corpus.accepted {
+        assert_versioning_four_way(&case.sample)?;
+    }
+    Ok(corpus.accepted.len())
+}
+
 #[derive(Clone, Copy, Debug)]
 struct VersioningCodec;
 

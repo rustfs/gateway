@@ -219,6 +219,14 @@ pub fn assert_lifecycle_four_way(sample: &GoldenSample<PersistedLifecycleConfigu
     assert_four_way(&LifecycleCodec, sample)
 }
 
+pub(crate) fn run_lifecycle_corpus_four_way() -> Result<usize, GoldenFailure> {
+    let corpus = corpus_evidence();
+    for case in &corpus.accepted {
+        assert_lifecycle_four_way(&case.sample)?;
+    }
+    Ok(corpus.accepted.len())
+}
+
 pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedLifecycleConfiguration> {
     let mut alternate = minimal();
     alternate.rules[0].id = Some("alt".to_owned());
