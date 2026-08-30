@@ -413,6 +413,14 @@ mod corpus_cases {
         ))
     }
 
+    pub(super) fn run_four_way() -> Result<usize, GoldenFailure> {
+        let cases = accepted_cases();
+        for (sample, _) in &cases {
+            super::assert_notification_four_way(sample)?;
+        }
+        Ok(cases.len())
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -613,4 +621,8 @@ mod corpus_cases {
 /// Returns an error when provenance is stale or a concrete case lacks a required variant.
 pub(crate) fn notification_corpus_evidence() -> Result<FamilyCorpusEvidence, CorpusCoverageError> {
     corpus_cases::corpus_evidence()
+}
+
+pub(crate) fn run_notification_corpus_four_way() -> Result<usize, GoldenFailure> {
+    corpus_cases::run_four_way()
 }

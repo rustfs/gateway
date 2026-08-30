@@ -273,6 +273,14 @@ pub fn assert_bucket_logging_four_way(sample: &GoldenSample<PersistedBucketLoggi
     assert_four_way(&LoggingCodec, sample)
 }
 
+pub(crate) fn run_bucket_logging_corpus_four_way() -> Result<usize, GoldenFailure> {
+    let cases = accepted_cases();
+    for (sample, _) in &cases {
+        assert_bucket_logging_four_way(sample)?;
+    }
+    Ok(cases.len())
+}
+
 #[derive(Clone, Copy, Debug)]
 struct LoggingCodec;
 

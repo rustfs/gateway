@@ -311,6 +311,14 @@ pub fn assert_tagging_four_way(sample: &GoldenSample<PersistedTagging>) -> Resul
     assert_four_way(&TaggingCodec, sample)
 }
 
+pub(crate) fn run_tagging_corpus_four_way() -> Result<usize, GoldenFailure> {
+    let cases = accepted_cases();
+    for (sample, _) in &cases {
+        assert_tagging_four_way(sample)?;
+    }
+    Ok(cases.len())
+}
+
 impl FourWayCodec for TaggingCodec {
     const KIND: ConfigKind = ConfigKind::Tagging;
     type Value = PersistedTagging;

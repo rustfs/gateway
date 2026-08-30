@@ -280,6 +280,14 @@ pub fn assert_replication_four_way(sample: &GoldenSample<PersistedReplicationCon
     assert_four_way(&ReplicationCodec, sample)
 }
 
+pub(crate) fn run_replication_corpus_four_way() -> Result<usize, GoldenFailure> {
+    let cases = accepted_cases();
+    for (sample, _) in &cases {
+        assert_replication_four_way(sample)?;
+    }
+    Ok(cases.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
