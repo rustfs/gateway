@@ -22,8 +22,13 @@ use core::fmt;
 
 use rustfs_gateway_xml::{XmlError, XmlLimits, XmlWriter, parse_with_limits};
 
+mod accelerate_payment;
 mod lifecycle;
 
+pub use accelerate_payment::{
+    PersistedAccelerateConfiguration, PersistedRequestPaymentConfiguration, parse_accelerate, parse_request_payment,
+    serialize_accelerate, serialize_request_payment,
+};
 pub use lifecycle::*;
 
 /// The complete Versioning configuration persisted by the old RustFS path.
@@ -180,14 +185,16 @@ pub enum PersistenceCodecError {
     UnexpectedObjectLockElement,
     /// A nested Lifecycle element is not recognized by the pinned old decoder.
     UnexpectedLifecycleElement,
+    /// A scalar element contains nested XML where the pinned old decoder expects text.
+    UnexpectedScalarElement,
+    /// A required persisted configuration member is absent.
+    MissingRequiredField,
     /// A scalar field appeared more than once where the old decoder rejects duplicates.
     DuplicateField,
     /// A persisted XML boolean is not the lowercase lexical form accepted by the old decoder.
     InvalidBoolean,
     /// A nested Bucket Encryption element is not recognized by the pinned old decoder.
     UnexpectedBucketEncryptionElement,
-    /// A required persisted field is absent where the pinned old decoder refuses the document.
-    MissingRequiredField,
 }
 
 impl fmt::Display for PersistenceCodecError {
@@ -206,6 +213,10 @@ impl fmt::Display for PersistenceCodecError {
                 formatter.write_str("persisted Object Lock XML has an unexpected nested element")
             }
             Self::UnexpectedLifecycleElement => formatter.write_str("persisted Lifecycle XML has an unexpected nested element"),
+            Self::UnexpectedScalarElement => {
+                formatter.write_str("persisted configuration XML has a nested element inside a scalar field")
+            }
+            Self::MissingRequiredField => formatter.write_str("persisted configuration XML is missing a required field"),
             Self::DuplicateField => {
                 formatter.write_str("persisted configuration XML has a duplicate scalar field or structural field")
             }
@@ -213,7 +224,6 @@ impl fmt::Display for PersistenceCodecError {
             Self::UnexpectedBucketEncryptionElement => {
                 formatter.write_str("persisted Bucket Encryption XML has an unexpected nested element")
             }
-            Self::MissingRequiredField => formatter.write_str("persisted configuration XML is missing a required field"),
         }
     }
 }

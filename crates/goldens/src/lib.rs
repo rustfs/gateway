@@ -29,11 +29,13 @@ use rustfs_gateway_types::compat::{S3sVersioningObservation, parse_s3s_versionin
 use rustfs_gateway_types::persistence::{PersistedVersioningConfiguration, parse_versioning, serialize_versioning};
 use sha2::{Digest, Sha256};
 
+mod accelerate_payment;
 mod bucket_encryption;
 mod lifecycle;
 mod object_lock;
 mod public_access_block;
 
+pub use accelerate_payment::{assert_accelerate_four_way, assert_request_payment_four_way};
 pub use bucket_encryption::assert_bucket_encryption_four_way;
 pub use lifecycle::assert_lifecycle_four_way;
 pub use object_lock::assert_object_lock_four_way;
@@ -42,6 +44,8 @@ pub use public_access_block::assert_public_access_block_four_way;
 /// A persistence configuration family covered by the golden harness.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConfigKind {
+    /// Bucket Transfer Acceleration metadata.
+    Accelerate,
     /// Bucket versioning metadata.
     Versioning,
     /// Bucket Object Lock metadata.
@@ -52,6 +56,8 @@ pub enum ConfigKind {
     BucketEncryption,
     /// Bucket public-access-block metadata.
     PublicAccessBlock,
+    /// Bucket requester-pays metadata.
+    RequestPayment,
 }
 
 /// A traceable source for one persisted sample.

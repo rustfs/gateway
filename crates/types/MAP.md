@@ -5,9 +5,11 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | File | Responsibility | Read it when |
 |---|---|---|
 | `src/lib.rs` | Scalar modules and generated DTO mounts. | Start here for a types task. |
-| `src/persistence.rs` | Feature-independent persisted bucket-configuration codecs and decision seams for Versioning, Object Lock, Lifecycle, Bucket Encryption, and Public Access Block. | Adding a persistence family or changing production metadata behavior. |
+| `src/persistence.rs` | Feature-independent persisted bucket-configuration codecs and decision seams for the implemented families. | Adding a persistence family or changing production metadata behavior. |
+| `src/persistence/accelerate_payment.rs` | Production Accelerate and Request Payment persistence codecs and runtime decisions. | Changing those two metadata families or their historical XML compatibility. |
 | `src/persistence/lifecycle.rs` | Full Lifecycle persistence structure, parser, timestamp normalization, and old-order writer. | Changing Lifecycle metadata compatibility or action semantics. |
 | `src/compat.rs` | Milestone-bounded adapters to the pinned-s3s persistence oracle for the implemented families. | Auditing old-read or rollback behavior for D1-D5. |
+| `src/compat/accelerate_payment.rs` | Independent pinned-s3s observations for Accelerate and Request Payment. | Auditing the old side of either family’s D1-D5 evidence. |
 | `src/compat/lifecycle.rs` | Pinned-s3s Lifecycle translation and decision observation. | Auditing Lifecycle D1-D5 against the old codec. |
 | `src/scalar/bucket.rs` | Validated bucket names. | Bucket syntax or display changes. |
 | `src/scalar/key.rs` | Lossless object-key bytes. | Key normalization/encoding changes. |
