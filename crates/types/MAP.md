@@ -13,6 +13,8 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `src/compat/accelerate_payment.rs` | Independent pinned-s3s observations for Accelerate and Request Payment. | Auditing the old side of either family’s D1-D5 evidence. |
 | `src/compat/lifecycle.rs` | Pinned-s3s Lifecycle translation and decision observation. | Auditing Lifecycle D1-D5 against the old codec. |
 | `src/persistence/logging_website.rs` | Bucket Logging and Website persisted structures, codecs, and runtime decision seams. | Auditing either family without loading unrelated persistence implementations. |
+| `src/persistence/replication.rs` | Full Replication persistence structure, permissive top-level parser, strict nested parser, and old-order writer. | Changing Replication metadata compatibility or rule semantics. |
+| `src/compat/replication.rs` | Pinned-s3s Replication translation, exact writer, and runtime rule observation. | Auditing Replication D1-D5 against the old codec. |
 | `src/scalar/bucket.rs` | Validated bucket names. | Bucket syntax or display changes. |
 | `src/scalar/key.rs` | Lossless object-key bytes. | Key normalization/encoding changes. |
 | `src/scalar/etag.rs` | Context-typed entity tags. | ETag quoting or comparison changes. |

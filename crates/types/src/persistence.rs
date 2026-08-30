@@ -19,12 +19,14 @@
 //! Upstream: `rustfs-gateway-xml`. Downstream: RustFS metadata persistence and migration goldens.
 
 use core::fmt;
+use std::borrow::Cow;
 
 use rustfs_gateway_xml::{XmlError, XmlLimits, XmlWriter, parse_with_limits};
 
 mod accelerate_payment;
 mod lifecycle;
 mod logging_website;
+mod replication;
 
 pub use accelerate_payment::{
     PersistedAccelerateConfiguration, PersistedRequestPaymentConfiguration, parse_accelerate, parse_request_payment,
@@ -37,6 +39,7 @@ pub use logging_website::{
     PersistedRoutingRuleCondition, PersistedTargetObjectKeyFormat, PersistedWebsiteConfiguration, parse_bucket_logging,
     parse_website, serialize_bucket_logging, serialize_website,
 };
+pub use replication::*;
 
 /// The complete Versioning configuration persisted by the old RustFS path.
 ///
@@ -184,14 +187,20 @@ pub enum PersistenceCodecError {
     InvalidLifecycleBoolean,
     /// A Lifecycle timestamp is not an old-readable DateTime value.
     InvalidLifecycleTimestamp,
+    /// A Replication integer is outside its signed width or has a noncanonical lexeme.
+    InvalidReplicationInteger,
     /// A Lifecycle rule omitted its required status.
     MissingLifecycleStatus,
     /// A Lifecycle configuration contains no rules.
     MissingLifecycleRule,
+    /// A Replication configuration contains no rules.
+    MissingReplicationRule,
     /// A nested Object Lock element is not recognized by the pinned old decoder.
     UnexpectedObjectLockElement,
     /// A nested Lifecycle element is not recognized by the pinned old decoder.
     UnexpectedLifecycleElement,
+    /// A nested Replication element is not recognized by the pinned old decoder.
+    UnexpectedReplicationElement,
     /// A scalar element contains nested XML where the pinned old decoder expects text.
     UnexpectedScalarElement,
     /// A required persisted configuration member is absent.
@@ -218,12 +227,17 @@ impl fmt::Display for PersistenceCodecError {
             Self::InvalidLifecycleInteger => formatter.write_str("persisted Lifecycle XML has an invalid integer"),
             Self::InvalidLifecycleBoolean => formatter.write_str("persisted Lifecycle XML has an invalid boolean"),
             Self::InvalidLifecycleTimestamp => formatter.write_str("persisted Lifecycle XML has an invalid timestamp"),
+            Self::InvalidReplicationInteger => formatter.write_str("persisted Replication XML has an invalid integer"),
             Self::MissingLifecycleStatus => formatter.write_str("persisted Lifecycle XML has a rule without Status"),
             Self::MissingLifecycleRule => formatter.write_str("persisted Lifecycle XML has no Rule"),
+            Self::MissingReplicationRule => formatter.write_str("persisted Replication XML has no Rule"),
             Self::UnexpectedObjectLockElement => {
                 formatter.write_str("persisted Object Lock XML has an unexpected nested element")
             }
             Self::UnexpectedLifecycleElement => formatter.write_str("persisted Lifecycle XML has an unexpected nested element"),
+            Self::UnexpectedReplicationElement => {
+                formatter.write_str("persisted Replication XML has an unexpected nested element")
+            }
             Self::UnexpectedScalarElement => {
                 formatter.write_str("persisted configuration XML has a nested element inside a scalar field")
             }
@@ -249,6 +263,52 @@ impl From<XmlError> for PersistenceCodecError {
     fn from(error: XmlError) -> Self {
         Self::Xml(error)
     }
+}
+
+/// Removes the exact inert document-type preamble accepted by the historical persistence codec.
+pub(super) fn strip_inert_doctype<'a>(input: &'a [u8], expected: &str) -> Cow<'a, [u8]> {
+    let mut cursor = usize::from(input.starts_with(b"\xef\xbb\xbf")) * 3;
+    while input.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+        cursor += 1;
+    }
+    if input.get(cursor..).is_some_and(|body| body.starts_with(b"<?xml")) {
+        let Some(end) = input[cursor..].windows(2).position(|window| window == b"?>") else {
+            return Cow::Borrowed(input);
+        };
+        cursor += end + 2;
+        while input.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+    }
+    let declaration_start = cursor;
+    let Some(body) = input.get(cursor..).and_then(|body| body.strip_prefix(b"<!DOCTYPE")) else {
+        return Cow::Borrowed(input);
+    };
+    cursor = input.len() - body.len();
+    if !input.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+        return Cow::Borrowed(input);
+    }
+    while input.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+        cursor += 1;
+    }
+    let Some(body) = input.get(cursor..).and_then(|body| body.strip_prefix(expected.as_bytes())) else {
+        return Cow::Borrowed(input);
+    };
+    cursor = input.len() - body.len();
+    while input.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+        cursor += 1;
+    }
+    if input.get(cursor) != Some(&b'>') {
+        return Cow::Borrowed(input);
+    }
+    let declaration_end = cursor + 1;
+    if declaration_start == 0 {
+        return Cow::Borrowed(&input[declaration_end..]);
+    }
+    let mut without_declaration = Vec::with_capacity(input.len() - (declaration_end - declaration_start));
+    without_declaration.extend_from_slice(&input[..declaration_start]);
+    without_declaration.extend_from_slice(&input[declaration_end..]);
+    Cow::Owned(without_declaration)
 }
 
 /// Parses persisted Versioning bytes without applying HTTP request policy.
