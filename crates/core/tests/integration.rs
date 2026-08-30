@@ -110,6 +110,9 @@ mod route_sizes;
 #[path = "route_table.rs"]
 mod route_table;
 
+#[path = "select_restore_roundtrip.rs"]
+mod select_restore_roundtrip;
+
 #[path = "static_dispatch.rs"]
 mod static_dispatch;
 
