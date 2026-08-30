@@ -23,3 +23,6 @@ workspace = true
 rustfs-gateway-types = { path = "../types", features = ["compat-s3s"] }
 hex = { workspace = true }
 sha2 = { workspace = true }
+
+[dev-dependencies]
+zip = { version = "8.6.0", default-features = false }

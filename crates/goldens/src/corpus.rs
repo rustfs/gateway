@@ -22,6 +22,9 @@ use core::fmt;
 
 use crate::{ConfigKind, GoldenSample, SampleOrigin, validate_sample};
 
+#[cfg(test)]
+mod backup_zip;
+
 const MINIMUM_SAMPLES_PER_FAMILY: usize = 8;
 
 /// A protocol-relevant shape represented by one concrete corpus sample.
