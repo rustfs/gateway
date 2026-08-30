@@ -25,7 +25,10 @@ use rustfs_gateway_types::persistence::{
     PersistedPublicAccessBlockConfiguration, parse_public_access_block, serialize_public_access_block,
 };
 
-use crate::{ConfigKind, FourWayCodec, GoldenFailure, GoldenSample, assert_four_way};
+use crate::{
+    ConfigKind, CorpusCaseEvidence, CorpusCoverageError, CorpusVariant, FamilyCorpusEvidence, FourWayCodec, GoldenFailure,
+    GoldenSample, RejectedGoldenSample, SampleOrigin, assert_four_way,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PublicAccessBlockBehaviorProjection {
@@ -96,129 +99,274 @@ impl FourWayCodec for PublicAccessBlockCodec {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use sha2::{Digest, Sha256};
+const EMPTY: &[u8] = b"<PublicAccessBlockConfiguration></PublicAccessBlockConfiguration>";
+const ALL_TRUE: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><IgnorePublicAcls>true</IgnorePublicAcls><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>";
+const MIXED: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>false</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>false</RestrictPublicBuckets></PublicAccessBlockConfiguration>";
+const PARTIAL: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicPolicy>true</BlockPublicPolicy><IgnorePublicAcls>false</IgnorePublicAcls></PublicAccessBlockConfiguration>";
+const NAMESPACE: &[u8] = br#"<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><BlockPublicAcls>true</BlockPublicAcls></PublicAccessBlockConfiguration>"#;
+const UNKNOWN_TOP_LEVEL: &[u8] = b"<PublicAccessBlockConfiguration><FutureTopLevel>future</FutureTopLevel><BlockPublicAcls>true</BlockPublicAcls></PublicAccessBlockConfiguration>";
+const UNKNOWN_ATTRIBUTES: &[u8] = b"<PublicAccessBlockConfiguration future=\"root\"><BlockPublicAcls future=\"switch\">true</BlockPublicAcls></PublicAccessBlockConfiguration>";
+const ALTERNATE_ORDER: &[u8] = b"<PublicAccessBlockConfiguration><RestrictPublicBuckets>true</RestrictPublicBuckets><BlockPublicPolicy>false</BlockPublicPolicy><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicAcls>false</BlockPublicAcls></PublicAccessBlockConfiguration>";
+const UPPERCASE_BOOLEANS: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicAcls>TRUE</BlockPublicAcls><IgnorePublicAcls>FALSE</IgnorePublicAcls></PublicAccessBlockConfiguration>";
+const CRLF: &[u8] =
+    b"<PublicAccessBlockConfiguration>\r\n<BlockPublicAcls>true</BlockPublicAcls>\r\n</PublicAccessBlockConfiguration>";
 
-    use super::*;
-    use crate::{Direction, SampleOrigin};
-
-    const EMPTY: &[u8] = b"<PublicAccessBlockConfiguration></PublicAccessBlockConfiguration>";
-    const ALL_TRUE: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><IgnorePublicAcls>true</IgnorePublicAcls><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>";
-    const MIXED: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>false</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>false</RestrictPublicBuckets></PublicAccessBlockConfiguration>";
-    const PARTIAL: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicPolicy>true</BlockPublicPolicy><IgnorePublicAcls>false</IgnorePublicAcls></PublicAccessBlockConfiguration>";
-    const NAMESPACE: &[u8] = br#"<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><BlockPublicAcls>true</BlockPublicAcls></PublicAccessBlockConfiguration>"#;
-    const UNKNOWN_TOP_LEVEL: &[u8] = b"<PublicAccessBlockConfiguration><FutureTopLevel>future</FutureTopLevel><BlockPublicAcls>true</BlockPublicAcls></PublicAccessBlockConfiguration>";
-    const UNKNOWN_ATTRIBUTES: &[u8] = b"<PublicAccessBlockConfiguration future=\"root\"><BlockPublicAcls future=\"switch\">true</BlockPublicAcls></PublicAccessBlockConfiguration>";
-    const ALTERNATE_ORDER: &[u8] = b"<PublicAccessBlockConfiguration><RestrictPublicBuckets>true</RestrictPublicBuckets><BlockPublicPolicy>false</BlockPublicPolicy><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicAcls>false</BlockPublicAcls></PublicAccessBlockConfiguration>";
-    const UPPERCASE_BOOLEANS: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicAcls>TRUE</BlockPublicAcls><IgnorePublicAcls>FALSE</IgnorePublicAcls></PublicAccessBlockConfiguration>";
-    const CRLF: &[u8] =
-        b"<PublicAccessBlockConfiguration>\r\n<BlockPublicAcls>true</BlockPublicAcls>\r\n</PublicAccessBlockConfiguration>";
-
-    fn configuration(
-        block_public_acls: Option<bool>,
-        ignore_public_acls: Option<bool>,
-        block_public_policy: Option<bool>,
-        restrict_public_buckets: Option<bool>,
-    ) -> PersistedPublicAccessBlockConfiguration {
-        PersistedPublicAccessBlockConfiguration {
-            block_public_acls,
-            ignore_public_acls,
-            block_public_policy,
-            restrict_public_buckets,
-        }
+fn configuration(
+    block_public_acls: Option<bool>,
+    ignore_public_acls: Option<bool>,
+    block_public_policy: Option<bool>,
+    restrict_public_buckets: Option<bool>,
+) -> PersistedPublicAccessBlockConfiguration {
+    PersistedPublicAccessBlockConfiguration {
+        block_public_acls,
+        ignore_public_acls,
+        block_public_policy,
+        restrict_public_buckets,
     }
+}
 
-    fn sample(
-        bytes: &[u8],
-        sha256: &str,
-        value: PersistedPublicAccessBlockConfiguration,
-        notes: &str,
-    ) -> GoldenSample<PersistedPublicAccessBlockConfiguration> {
-        assert_eq!(hex::encode(Sha256::digest(bytes)), sha256, "stale PAB sample digest");
-        GoldenSample {
+fn origin(sha256: &str) -> SampleOrigin {
+    SampleOrigin {
+        source: "P9 Public Access Block persistence matrix".to_owned(),
+        producer: "pinned s3s XML behavior".to_owned(),
+        version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
+        sha256: sha256.to_owned(),
+    }
+}
+
+fn sample(
+    bytes: &[u8],
+    sha256: &str,
+    value: PersistedPublicAccessBlockConfiguration,
+    notes: &str,
+) -> GoldenSample<PersistedPublicAccessBlockConfiguration> {
+    GoldenSample {
+        kind: ConfigKind::PublicAccessBlock,
+        bytes: bytes.to_vec(),
+        value,
+        origin: origin(sha256),
+        notes: notes.to_owned(),
+    }
+}
+
+fn rejected(bytes: Vec<u8>, sha256: &str, notes: &str, variant: CorpusVariant) -> (RejectedGoldenSample, Vec<CorpusVariant>) {
+    (
+        RejectedGoldenSample {
             kind: ConfigKind::PublicAccessBlock,
-            bytes: bytes.to_vec(),
-            value,
-            origin: SampleOrigin {
-                source: "P9 Public Access Block persistence matrix".to_owned(),
-                producer: "pinned s3s XML behavior".to_owned(),
-                version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
-                sha256: sha256.to_owned(),
-            },
+            bytes,
+            origin: origin(sha256),
             notes: notes.to_owned(),
-        }
-    }
+        },
+        vec![variant],
+    )
+}
 
-    fn base_sample() -> GoldenSample<PersistedPublicAccessBlockConfiguration> {
-        sample(
-            NAMESPACE,
-            "1a9a999e1f0d9c6cb9a544b75321a09b6436a9a31d30e26a536a0c9a3f9a17e9",
-            configuration(Some(true), None, None, None),
-            "old-readable namespace on a partial PAB document",
-        )
-    }
-
-    #[test]
-    fn public_access_block_sample_matrix_passes_all_five_directions() {
-        let cases = [
+fn public_access_block_accepted_samples() -> Vec<(GoldenSample<PersistedPublicAccessBlockConfiguration>, Vec<CorpusVariant>)> {
+    vec![
+        (
             sample(
                 EMPTY,
                 "df7a50f7496998b13b49459c73a76957b18a40a57b3d0d55a53bb244fea446c0",
                 configuration(None, None, None, None),
                 "all switches omitted and therefore behaviorally false",
             ),
+            vec![CorpusVariant::EmptyElement],
+        ),
+        (
             sample(
                 ALL_TRUE,
                 "ea08b0fff9a3578a8e60f3da84d74dfdb9ddb7d970baa2d01641c68d6f363b2f",
                 configuration(Some(true), Some(true), Some(true), Some(true)),
                 "all four switches enabled in old serializer order",
             ),
+            vec![CorpusVariant::Canonical],
+        ),
+        (
             sample(
                 MIXED,
                 "e9794bc46522b7509fa24e707a7dbcb3e8327bfab3086ce64042ed097e9a9903",
                 configuration(Some(true), Some(false), Some(true), Some(false)),
                 "all four switches with mixed decisions",
             ),
+            vec![CorpusVariant::Canonical],
+        ),
+        (
             sample(
                 PARTIAL,
                 "63e0b248dc7eb3a88ac4b34e96ca3714e85c416042cfc2ad28bc9b0d65563e94",
                 configuration(None, Some(false), Some(true), None),
                 "omitted switches remain structurally absent but behaviorally false",
             ),
-            base_sample(),
+            vec![CorpusVariant::Canonical],
+        ),
+        (
+            sample(
+                NAMESPACE,
+                "1a9a999e1f0d9c6cb9a544b75321a09b6436a9a31d30e26a536a0c9a3f9a17e9",
+                configuration(Some(true), None, None, None),
+                "old-readable namespace on a partial PAB document",
+            ),
+            vec![CorpusVariant::Namespace],
+        ),
+        (
             sample(
                 UNKNOWN_TOP_LEVEL,
                 "09d7c41d7f8228d11bb8005d030e1338bb771fa75de5781049fc979c5cb905c8",
                 configuration(Some(true), None, None, None),
                 "old-readable unknown root child",
             ),
+            vec![CorpusVariant::UnknownTopLevel],
+        ),
+        (
             sample(
                 UNKNOWN_ATTRIBUTES,
                 "18db0ec9a2f8aac27208b495399758964dde2ca77c3106b072ab8992bd1f7818",
                 configuration(Some(true), None, None, None),
                 "old-readable attributes on the root and a switch",
             ),
+            vec![CorpusVariant::UnknownAttribute],
+        ),
+        (
             sample(
                 ALTERNATE_ORDER,
                 "c8258d9467547f4a655972b0e9469df198ef90fcddd4ab9c82c9302ad6b8b74f",
                 configuration(Some(false), Some(true), Some(false), Some(true)),
                 "old-readable switches in reverse and interleaved order",
             ),
+            vec![CorpusVariant::AlternateOrder],
+        ),
+        (
             sample(
                 UPPERCASE_BOOLEANS,
                 "2cca29af0f550d4f1acf27f0e3b000560b4549c4a22222a33204e95cad4f2349",
                 configuration(Some(true), Some(false), None, None),
                 "old boolean codec accepts exact uppercase lexical forms",
             ),
+            vec![CorpusVariant::Canonical],
+        ),
+        (
             sample(
                 CRLF,
                 "e105bae955fbf2277374554e5337bb0bdac11547c160d6eda738856fbca563cf",
                 configuration(Some(true), None, None, None),
                 "old-readable CRLF whitespace around a switch",
             ),
-        ];
-        for case in cases {
+            vec![CorpusVariant::Crlf],
+        ),
+    ]
+}
+
+fn public_access_block_rejected_samples() -> Vec<(RejectedGoldenSample, Vec<CorpusVariant>)> {
+    let mut cases = Vec::new();
+    for (lexeme, sha256) in [
+        ("FaLsE", "469d3738e7172f6600c7c3932e810c04b8e0323ae3d40201b5ae3886b9e77a7c"),
+        ("1", "8829bd727c1661e55ea9f7e5cec1c57b6f051737dc7b22e6a6e386e933a098f3"),
+        (" true ", "30d2f401fda07d71faca8447dd2a6f66f73e0491abf01c494753ccb9cfbf97a6"),
+        ("", "9021385f5dfbb8f89121ab0cf8f329a16308fa60d7cf60af107a24bcfd1a844e"),
+    ] {
+        cases.push(rejected(
+            format!(
+                "<PublicAccessBlockConfiguration><BlockPublicAcls>{lexeme}</BlockPublicAcls></PublicAccessBlockConfiguration>"
+            )
+            .into_bytes(),
+            sha256,
+            "invalid PAB boolean lexeme",
+            CorpusVariant::UnknownScalar,
+        ));
+    }
+    for (field, sha256) in [
+        ("BlockPublicAcls", "400c98a17d436b05b63d806f0efc5cd7394bf96e973bf741941b6e8f96d759fc"),
+        ("IgnorePublicAcls", "64c5b01a411da7b03573bc8920a3c16298581702d101c0a426fb8ff4ff7576fb"),
+        ("BlockPublicPolicy", "5fa8a1b8a92f477efd9f77286d13f879a5e76702793cffe1cb58c315b0b69e35"),
+        (
+            "RestrictPublicBuckets",
+            "d91af1f4620434d10d2914c9fde09330d577fa6c0685e4bdb6a769484b5a5c74",
+        ),
+    ] {
+        cases.push(rejected(
+            format!(
+                "<PublicAccessBlockConfiguration><{field}>true</{field}><{field}>false</{field}></PublicAccessBlockConfiguration>"
+            )
+            .into_bytes(),
+            sha256,
+            "duplicate PAB switch",
+            CorpusVariant::DuplicateField,
+        ));
+    }
+    cases.extend([
+        rejected(
+            b"<NotPublicAccessBlockConfiguration></NotPublicAccessBlockConfiguration>".to_vec(),
+            "868cdddef248319d7319bafd87ebef91e47f954186c58a8735adbe1ff1cc68d6",
+            "wrong PAB root",
+            CorpusVariant::MissingField,
+        ),
+        rejected(
+            b"<PublicAccessBlockConfiguration><BlockPublicAcls>true".to_vec(),
+            "5713e4b2953f129408fa7966af3de249cb134373f397ac98d04bd31ce0291c38",
+            "truncated PAB document",
+            CorpusVariant::MissingField,
+        ),
+        rejected(
+            vec![0xff],
+            "a8100ae6aa1940d0b663bb31cd466142ebbdbd5187131b92d93818987832eb89",
+            "non-UTF-8 PAB document",
+            CorpusVariant::Unicode,
+        ),
+    ]);
+    cases
+}
+
+pub(crate) fn public_access_block_corpus_evidence() -> Result<FamilyCorpusEvidence, CorpusCoverageError> {
+    let mut cases = Vec::new();
+    for (sample, variants) in public_access_block_accepted_samples() {
+        cases.push(CorpusCaseEvidence::accepted(&sample, &variants)?);
+    }
+    for (sample, variants) in public_access_block_rejected_samples() {
+        cases.push(CorpusCaseEvidence::rejected(&sample, &variants)?);
+    }
+    Ok(FamilyCorpusEvidence::new(
+        ConfigKind::PublicAccessBlock,
+        vec![
+            CorpusVariant::Canonical,
+            CorpusVariant::EmptyElement,
+            CorpusVariant::MissingField,
+            CorpusVariant::Namespace,
+            CorpusVariant::UnknownTopLevel,
+            CorpusVariant::UnknownAttribute,
+            CorpusVariant::AlternateOrder,
+            CorpusVariant::DuplicateField,
+            CorpusVariant::UnknownScalar,
+            CorpusVariant::Crlf,
+            CorpusVariant::Unicode,
+        ],
+        cases,
+    ))
+}
+
+const _: fn() -> Result<FamilyCorpusEvidence, CorpusCoverageError> = public_access_block_corpus_evidence;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Direction, build_corpus_report};
+
+    #[test]
+    fn family_owned_corpus_evidence_is_built_from_the_shared_case_objects() {
+        let evidence = public_access_block_corpus_evidence().expect("PAB corpus evidence is traceable");
+        build_corpus_report(&[ConfigKind::PublicAccessBlock], &[evidence])
+            .expect("PAB corpus coverage is derived from the shared cases");
+    }
+
+    fn base_sample() -> GoldenSample<PersistedPublicAccessBlockConfiguration> {
+        public_access_block_accepted_samples()
+            .into_iter()
+            .find_map(|(sample, variants)| variants.contains(&CorpusVariant::Namespace).then_some(sample))
+            .expect("PAB matrix carries its namespace control")
+    }
+
+    #[test]
+    fn public_access_block_sample_matrix_passes_all_five_directions() {
+        for (case, _) in public_access_block_accepted_samples() {
             if let Err(error) = assert_public_access_block_four_way(&case) {
                 panic!("Public Access Block sample failed ({}): {error}", case.notes);
             }
@@ -227,52 +375,37 @@ mod tests {
 
     #[test]
     fn pinned_pab_boolean_boundaries_are_exact() {
-        for (name, value, expected) in [("uppercase true", "TRUE", true), ("uppercase false", "FALSE", false)] {
-            let bytes = format!(
-                "<PublicAccessBlockConfiguration><BlockPublicAcls>{value}</BlockPublicAcls></PublicAccessBlockConfiguration>"
-            );
-            let old = PublicAccessBlockCodec
-                .old_parse(bytes.as_bytes())
-                .unwrap_or_else(|error| panic!("old rejected {name}: {error}"));
-            let new = PublicAccessBlockCodec
-                .new_parse(bytes.as_bytes())
-                .unwrap_or_else(|error| panic!("new rejected {name}: {error}"));
-            assert_eq!(old.structure.block_public_acls, Some(expected));
-            assert_eq!(new.block_public_acls, Some(expected));
-        }
-        for (name, value) in [
-            ("mixed-case", "FaLsE"),
-            ("numeric", "1"),
-            ("whitespace", " true "),
-            ("empty", ""),
-        ] {
-            let bytes = format!(
-                "<PublicAccessBlockConfiguration><BlockPublicAcls>{value}</BlockPublicAcls></PublicAccessBlockConfiguration>"
-            );
-            assert!(PublicAccessBlockCodec.old_parse(bytes.as_bytes()).is_err(), "old accepted {name} boolean");
-            assert!(PublicAccessBlockCodec.new_parse(bytes.as_bytes()).is_err(), "new accepted {name} boolean");
+        let uppercase = public_access_block_accepted_samples()
+            .into_iter()
+            .find_map(|(sample, _)| (sample.bytes == UPPERCASE_BOOLEANS).then_some(sample))
+            .expect("PAB matrix carries uppercase boolean controls");
+        let old = PublicAccessBlockCodec
+            .old_parse(&uppercase.bytes)
+            .expect("old accepts uppercase boolean controls");
+        let new = PublicAccessBlockCodec
+            .new_parse(&uppercase.bytes)
+            .expect("new accepts uppercase boolean controls");
+        assert_eq!(old.structure.block_public_acls, Some(true));
+        assert_eq!(old.structure.ignore_public_acls, Some(false));
+        assert_eq!(new.block_public_acls, Some(true));
+        assert_eq!(new.ignore_public_acls, Some(false));
+        for (case, _) in public_access_block_rejected_samples()
+            .into_iter()
+            .filter(|(_, variants)| variants.contains(&CorpusVariant::UnknownScalar))
+        {
+            assert!(PublicAccessBlockCodec.old_parse(&case.bytes).is_err(), "old accepted {}", case.notes);
+            assert!(PublicAccessBlockCodec.new_parse(&case.bytes).is_err(), "new accepted {}", case.notes);
         }
     }
 
     #[test]
     fn every_duplicate_pab_switch_is_rejected_by_both_parsers() {
-        for field in [
-            "BlockPublicAcls",
-            "IgnorePublicAcls",
-            "BlockPublicPolicy",
-            "RestrictPublicBuckets",
-        ] {
-            let bytes = format!(
-                "<PublicAccessBlockConfiguration><{field}>true</{field}><{field}>false</{field}></PublicAccessBlockConfiguration>"
-            );
-            assert!(
-                PublicAccessBlockCodec.old_parse(bytes.as_bytes()).is_err(),
-                "old accepted duplicate {field}"
-            );
-            assert!(
-                PublicAccessBlockCodec.new_parse(bytes.as_bytes()).is_err(),
-                "new accepted duplicate {field}"
-            );
+        for (case, _) in public_access_block_rejected_samples()
+            .into_iter()
+            .filter(|(_, variants)| variants.contains(&CorpusVariant::DuplicateField))
+        {
+            assert!(PublicAccessBlockCodec.old_parse(&case.bytes).is_err(), "old accepted {}", case.notes);
+            assert!(PublicAccessBlockCodec.new_parse(&case.bytes).is_err(), "new accepted {}", case.notes);
         }
     }
 
@@ -291,9 +424,10 @@ mod tests {
 
     #[test]
     fn wrong_pab_root_is_rejected_by_both_parsers() {
-        let bytes = b"<NotPublicAccessBlockConfiguration></NotPublicAccessBlockConfiguration>";
-        assert!(PublicAccessBlockCodec.old_parse(bytes).is_err());
-        assert!(PublicAccessBlockCodec.new_parse(bytes).is_err());
+        for (case, _) in public_access_block_rejected_samples() {
+            assert!(PublicAccessBlockCodec.old_parse(&case.bytes).is_err(), "old accepted {}", case.notes);
+            assert!(PublicAccessBlockCodec.new_parse(&case.bytes).is_err(), "new accepted {}", case.notes);
+        }
     }
 
     struct Mutant {
