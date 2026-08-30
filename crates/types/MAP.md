@@ -5,6 +5,8 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | File | Responsibility | Read it when |
 |---|---|---|
 | `src/lib.rs` | Scalar modules and generated DTO mounts. | Start here for a types task. |
+| `src/persistence.rs` | Feature-independent persisted bucket-configuration codecs and decision seams. | Adding a persistence family or changing production metadata behavior. |
+| `src/compat.rs` | Milestone-bounded adapters to the pinned-s3s persistence oracle. | Auditing old-read or rollback behavior for D1-D5. |
 | `src/scalar/bucket.rs` | Validated bucket names. | Bucket syntax or display changes. |
 | `src/scalar/key.rs` | Lossless object-key bytes. | Key normalization/encoding changes. |
 | `src/scalar/etag.rs` | Context-typed entity tags. | ETag quoting or comparison changes. |
@@ -15,7 +17,6 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `src/scalar/cursor.rs` | Server-minted pagination cursors. | Continuation tokens change. |
 | `src/scalar/range.rs` | Range parsing and length-dependent resolution, driven by generated typed range inputs. | A byte-range form or boundary changes. |
 | `src/scalar/error_code.rs` | `ErrorCode` itself: the newtype, `custom`, `known`, and the include of the generated status table. No status is written here — the rows live in `model/overlays/error-status.toml` and reach this file through `generated/error_status.rs`. | Add an error code, or change how one is constructed. |
-| `src/compat.rs` | Temporary s3s conversion feature. | Work on the milestone-bounded compatibility seam. |
 | `src/tests/dto_tests.rs` | Generated DTO semantic contracts. | Codegen changes DTO shape. |
 | `../../OPERATIONS.md` | Generated operation/field index. | Inspect operation shapes without reading generated code. |
 | `../../spec/operations/` | Generated field-binding facts. | Inspect one binding without reading generated code. |
