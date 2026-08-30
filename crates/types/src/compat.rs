@@ -25,15 +25,20 @@ use crate::cors_tagging::{
     CorsBehaviorProjection, PersistedCorsConfiguration, PersistedCorsRule, PersistedTag, PersistedTagging,
 };
 use crate::persistence::{
-    PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedDefaultRetention,
-    PersistedEncryptionByDefault, PersistedObjectLockConfiguration, PersistedObjectLockRule,
-    PersistedPublicAccessBlockConfiguration, PersistedVersioningConfiguration,
+    PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedBucketLoggingStatus,
+    PersistedDefaultRetention, PersistedEncryptionByDefault, PersistedErrorDocument, PersistedGrantee, PersistedIndexDocument,
+    PersistedLoggingEnabled, PersistedLoggingGrant, PersistedObjectLockConfiguration, PersistedObjectLockRule,
+    PersistedPublicAccessBlockConfiguration, PersistedRedirect, PersistedRedirectAllRequestsTo, PersistedRoutingRule,
+    PersistedRoutingRuleCondition, PersistedTargetObjectKeyFormat, PersistedVersioningConfiguration,
+    PersistedWebsiteConfiguration,
 };
 use s3s::dto::{
-    BucketVersioningStatus, CORSConfiguration, CORSRule, DefaultRetention, ExcludedPrefix, MFADelete, ObjectLockConfiguration,
-    ObjectLockEnabled, ObjectLockRetentionMode, ObjectLockRule, PublicAccessBlockConfiguration, ServerSideEncryption,
-    ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, Tag, Tagging,
-    VersioningConfiguration,
+    BucketLoggingStatus, BucketLogsPermission, BucketVersioningStatus, CORSConfiguration, CORSRule, Condition, DefaultRetention,
+    ErrorDocument, ExcludedPrefix, Grantee, IndexDocument, LoggingEnabled, MFADelete, ObjectLockConfiguration,
+    ObjectLockEnabled, ObjectLockRetentionMode, ObjectLockRule, PartitionDateSource, PartitionedPrefix, Protocol,
+    PublicAccessBlockConfiguration, Redirect, RedirectAllRequestsTo, RoutingRule, ServerSideEncryption,
+    ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix, Tag, Tagging,
+    TargetGrant, TargetObjectKeyFormat, Type, VersioningConfiguration, WebsiteConfiguration,
 };
 use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -102,6 +107,24 @@ pub struct S3sTaggingObservation {
     pub structure: PersistedTagging,
     /// Independently projected complete tag set.
     pub tags: Vec<(Option<String>, Option<String>)>,
+}
+
+/// One old-codec Bucket Logging observation before either side is normalized.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3sBucketLoggingObservation {
+    /// Complete parsed persistence structure.
+    pub structure: PersistedBucketLoggingStatus,
+    /// Runtime delivery decisions projected directly from the pinned DTO.
+    pub behavior: Option<crate::persistence::PersistedLoggingEnabled>,
+}
+
+/// One old-codec Website observation before either side is normalized.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3sWebsiteObservation {
+    /// Complete parsed persistence structure.
+    pub structure: PersistedWebsiteConfiguration,
+    /// Runtime routing decisions projected directly from the pinned DTO.
+    pub behavior: PersistedWebsiteConfiguration,
 }
 
 /// Failure raised by the pinned old persistence codec.
@@ -453,3 +476,172 @@ pub fn serialize_s3s_tagging(value: &PersistedTagging) -> Result<Vec<u8>, Compat
     old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
     Ok(output)
 }
+
+/// Parses Bucket Logging bytes with the pinned s3s persistence decoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
+pub fn parse_s3s_bucket_logging(input: &[u8]) -> Result<S3sBucketLoggingObservation, CompatCodecError> {
+    let mut deserializer = Deserializer::new(input);
+    let value = BucketLoggingStatus::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
+    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
+    let logging_enabled = value.logging_enabled.map(|logging| PersistedLoggingEnabled {
+        target_bucket: logging.target_bucket,
+        target_grants: logging.target_grants.map(|grants| {
+            grants
+                .into_iter()
+                .map(|grant| PersistedLoggingGrant {
+                    grantee: grant.grantee.map(|grantee| PersistedGrantee {
+                        display_name: grantee.display_name,
+                        email_address: grantee.email_address,
+                        id: grantee.id,
+                        grantee_type: grantee.type_.as_str().to_owned(),
+                        uri: grantee.uri,
+                    }),
+                    permission: grant.permission.map(|value| value.as_str().to_owned()),
+                })
+                .collect()
+        }),
+        target_object_key_format: logging.target_object_key_format.map(|format| PersistedTargetObjectKeyFormat {
+            partition_date_source: format
+                .partitioned_prefix
+                .map(|partitioned| partitioned.partition_date_source.map(|value| value.as_str().to_owned())),
+            simple_prefix: format.simple_prefix.is_some(),
+        }),
+        target_prefix: logging.target_prefix,
+    });
+    Ok(S3sBucketLoggingObservation {
+        structure: PersistedBucketLoggingStatus {
+            logging_enabled: logging_enabled.clone(),
+        },
+        behavior: logging_enabled,
+    })
+}
+
+/// Parses Website bytes with the pinned s3s persistence decoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
+pub fn parse_s3s_website(input: &[u8]) -> Result<S3sWebsiteObservation, CompatCodecError> {
+    let mut deserializer = Deserializer::new(input);
+    let value = WebsiteConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
+    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
+    let structure = PersistedWebsiteConfiguration {
+        error_document: value
+            .error_document
+            .map(|document| PersistedErrorDocument { key: document.key }),
+        index_document: value
+            .index_document
+            .map(|document| PersistedIndexDocument { suffix: document.suffix }),
+        redirect_all_requests_to: value.redirect_all_requests_to.map(|redirect| PersistedRedirectAllRequestsTo {
+            host_name: redirect.host_name,
+            protocol: redirect.protocol.map(|value| value.as_str().to_owned()),
+        }),
+        routing_rules: value.routing_rules.map(|rules| {
+            rules
+                .into_iter()
+                .map(|rule| PersistedRoutingRule {
+                    condition: rule.condition.map(|condition| PersistedRoutingRuleCondition {
+                        http_error_code_returned_equals: condition.http_error_code_returned_equals,
+                        key_prefix_equals: condition.key_prefix_equals,
+                    }),
+                    redirect: PersistedRedirect {
+                        host_name: rule.redirect.host_name,
+                        http_redirect_code: rule.redirect.http_redirect_code,
+                        protocol: rule.redirect.protocol.map(|value| value.as_str().to_owned()),
+                        replace_key_prefix_with: rule.redirect.replace_key_prefix_with,
+                        replace_key_with: rule.redirect.replace_key_with,
+                    },
+                })
+                .collect()
+        }),
+    };
+    Ok(S3sWebsiteObservation {
+        structure: structure.clone(),
+        behavior: structure,
+    })
+}
+
+/// Serializes a Bucket Logging value with the pinned s3s persistence encoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s cannot render the value.
+pub fn serialize_s3s_bucket_logging(value: &PersistedBucketLoggingStatus) -> Result<Vec<u8>, CompatCodecError> {
+    let old_value = BucketLoggingStatus {
+        logging_enabled: value.logging_enabled.as_ref().map(|logging| LoggingEnabled {
+            target_bucket: logging.target_bucket.clone(),
+            target_grants: logging.target_grants.as_ref().map(|grants| {
+                grants
+                    .iter()
+                    .map(|grant| TargetGrant {
+                        grantee: grant.grantee.as_ref().map(|grantee| Grantee {
+                            display_name: grantee.display_name.clone(),
+                            email_address: grantee.email_address.clone(),
+                            id: grantee.id.clone(),
+                            type_: Type::from(grantee.grantee_type.clone()),
+                            uri: grantee.uri.clone(),
+                        }),
+                        permission: grant.permission.clone().map(BucketLogsPermission::from),
+                    })
+                    .collect()
+            }),
+            target_object_key_format: logging.target_object_key_format.as_ref().map(|format| TargetObjectKeyFormat {
+                partitioned_prefix: format.partition_date_source.as_ref().map(|source| PartitionedPrefix {
+                    partition_date_source: source.clone().map(PartitionDateSource::from),
+                }),
+                simple_prefix: format.simple_prefix.then(SimplePrefix::default),
+            }),
+            target_prefix: logging.target_prefix.clone(),
+        }),
+    };
+    let mut output = Vec::with_capacity(512);
+    let mut serializer = Serializer::new(&mut output);
+    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
+    Ok(output)
+}
+
+/// Serializes a Website value with the pinned s3s persistence encoder.
+///
+/// # Errors
+///
+/// Returns [`CompatCodecError`] when s3s cannot render the value.
+pub fn serialize_s3s_website(value: &PersistedWebsiteConfiguration) -> Result<Vec<u8>, CompatCodecError> {
+    let old_value = WebsiteConfiguration {
+        error_document: value.error_document.as_ref().map(|document| ErrorDocument {
+            key: document.key.clone(),
+        }),
+        index_document: value.index_document.as_ref().map(|document| IndexDocument {
+            suffix: document.suffix.clone(),
+        }),
+        redirect_all_requests_to: value.redirect_all_requests_to.as_ref().map(|redirect| RedirectAllRequestsTo {
+            host_name: redirect.host_name.clone(),
+            protocol: redirect.protocol.clone().map(Protocol::from),
+        }),
+        routing_rules: value.routing_rules.as_ref().map(|rules| {
+            rules
+                .iter()
+                .map(|rule| RoutingRule {
+                    condition: rule.condition.as_ref().map(|condition| Condition {
+                        http_error_code_returned_equals: condition.http_error_code_returned_equals.clone(),
+                        key_prefix_equals: condition.key_prefix_equals.clone(),
+                    }),
+                    redirect: Redirect {
+                        host_name: rule.redirect.host_name.clone(),
+                        http_redirect_code: rule.redirect.http_redirect_code.clone(),
+                        protocol: rule.redirect.protocol.clone().map(Protocol::from),
+                        replace_key_prefix_with: rule.redirect.replace_key_prefix_with.clone(),
+                        replace_key_with: rule.redirect.replace_key_with.clone(),
+                    },
+                })
+                .collect()
+        }),
+    };
+    let mut output = Vec::with_capacity(512);
+    let mut serializer = Serializer::new(&mut output);
+    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
+    Ok(output)
+}
+
