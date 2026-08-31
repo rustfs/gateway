@@ -136,8 +136,8 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedObjectLockConfi
         (
             ENABLED_WITHOUT_RULE,
             enabled(None),
-            vec![CorpusVariant::MissingField],
-            "enabled without a retention rule",
+            vec![CorpusVariant::MissingField, CorpusVariant::BodyLiteral],
+            "enabled without a retention rule; pinned MinIO-compatible bare Enabled body value persisted by the old writer",
         ),
         (
             GOVERNANCE_DAYS,
@@ -228,6 +228,7 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedObjectLockConfi
             CorpusVariant::AlternateOrder,
             CorpusVariant::DuplicateField,
             CorpusVariant::UnknownScalar,
+            CorpusVariant::BodyLiteral,
         ],
         accepted,
         rejected: rejected_cases,
@@ -323,6 +324,24 @@ mod tests {
             .find(|case| case.sample.bytes == NAMESPACE)
             .expect("the corpus keeps its namespace D1-D5 row")
             .sample
+    }
+
+    #[test]
+    fn minio_body_literal_value_has_old_persistence_bytes() {
+        let case = corpus_evidence()
+            .accepted
+            .into_iter()
+            .find(|case| case.variants.contains(&CorpusVariant::BodyLiteral))
+            .expect("Object Lock requires an accepted body-literal-derived sample");
+        assert_eq!(case.sample.bytes, ENABLED_WITHOUT_RULE);
+        assert_eq!(case.sample.value, enabled(None));
+        assert_eq!(
+            serialize_s3s_object_lock(&case.sample.value).expect("the pinned old persistence writer accepts the value"),
+            case.sample.bytes,
+            "the evidence must be observed old-writer output, not an arbitrary row tagged BodyLiteral"
+        );
+        assert_object_lock_four_way(&case.sample)
+            .expect("both persistence codecs accept the Object Lock body-literal-derived bytes");
     }
 
     #[test]

@@ -218,8 +218,8 @@ fn accepted_cases() -> Vec<AcceptedLoggingCase> {
             FULL_GRANT,
             "bb90a0544c15d5620fb4865df48014d47ee2fd4b5aef1709507225e73c37fd4e",
             status(Some(grant)),
-            "canonical-user full-control grant",
-            &[CorpusVariant::Canonical],
+            "pinned old-writer grant whose two equivalent attributes are exercised in both orders",
+            &[CorpusVariant::Canonical, CorpusVariant::AttributeOrder],
         ),
     ];
     let value = parse_s3s_bucket_logging(NEW_WRITER_LOGGING)
@@ -289,6 +289,7 @@ pub(crate) fn bucket_logging_corpus_evidence() -> Result<FamilyCorpusEvidence, C
             CorpusVariant::Namespace,
             CorpusVariant::AlternateOrder,
             CorpusVariant::DuplicateField,
+            CorpusVariant::AttributeOrder,
         ],
         cases,
     ))
@@ -392,6 +393,46 @@ mod tests {
             Some(prefix.len()),
             "the namespace declaration text must start on the Grantee opening tag"
         );
+    }
+
+    #[test]
+    fn attribute_order_is_parser_equivalent_and_writer_canonical() {
+        let canonical = accepted_cases()
+            .into_iter()
+            .find_map(|(sample, variants)| variants.contains(&CorpusVariant::AttributeOrder).then_some(sample))
+            .expect("the Logging corpus contains executable attribute-order evidence");
+        let canonical_open = b"<Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"CanonicalUser\">";
+        let reversed_open = b"<Grantee xsi:type=\"CanonicalUser\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">";
+        let offset = canonical
+            .bytes
+            .windows(canonical_open.len())
+            .position(|window| window == canonical_open)
+            .expect("the pinned old writer emits both Grantee attributes");
+        let mut reversed = canonical.bytes.clone();
+        reversed.splice(offset..offset + canonical_open.len(), reversed_open.iter().copied());
+
+        let old = LoggingCodec
+            .old_parse(&reversed)
+            .expect("the pinned old parser accepts reversed attributes");
+        let new = LoggingCodec
+            .new_parse(&reversed)
+            .expect("the production parser accepts reversed attributes");
+        assert_eq!(old.structure, canonical.value);
+        assert_eq!(new, canonical.value);
+        assert_eq!(
+            LoggingCodec
+                .old_serialize(&canonical.value)
+                .expect("the pinned old writer accepts the parsed value"),
+            canonical.bytes
+        );
+        assert_eq!(
+            LoggingCodec
+                .new_serialize(&canonical.value)
+                .expect("the production writer accepts the parsed value"),
+            canonical.bytes
+        );
+        assert_bucket_logging_four_way(&canonical)
+            .expect("the real pinned-old attribute-order sample remains on the D1-D5 execution path");
     }
 
     #[test]
