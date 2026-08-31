@@ -1,0 +1,136 @@
+{
+  "ir_version": "2",
+  "operation": "GetBucketOwnershipControls",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 270,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "ownershipControls" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:GetBucketOwnershipControls",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 4096 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "OwnershipControls",
+                            "wire_name": null,
+                            "required": false,
+                            "binding": { "kind": "Payload" },
+                            "type": { "kind": "Structure", "shape": "OwnershipControls" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "OwnershipControls": {
+                                     "kind": "Structure",
+                                     "fields": [
+                                                 {
+                                                   "name": "Rules",
+                                                   "wire_name": "Rule",
+                                                   "required": true,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": {
+                                                             "kind": "List",
+                                                             "member": {
+                                                                         "kind": "Structure",
+                                                                         "shape": "OwnershipControlsRule"
+                                                                       },
+                                                             "flattened": true,
+                                                             "wrapper_name": null
+                                                           },
+                                                   "hot": false,
+                                                   "quirk_refs": []
+                                                 }
+                                               ],
+                                     "xml": {
+                                              "element_order": ["Rules"],
+                                              "empty_value_policy": { "Rules": "emit" },
+                                              "attributes": []
+                                            }
+                                   },
+              "OwnershipControlsRule": {
+                                         "kind": "Structure",
+                                         "fields": [
+                                                     {
+                                                       "name": "ObjectOwnership",
+                                                       "wire_name": "ObjectOwnership",
+                                                       "required": true,
+                                                       "binding": { "kind": "BodyXml" },
+                                                       "type": {
+                                                                 "kind": "StringEnum",
+                                                                 "values": [
+                                                                             "BucketOwnerPreferred",
+                                                                             "ObjectWriter",
+                                                                             "BucketOwnerEnforced"
+                                                                           ]
+                                                               },
+                                                       "hot": false,
+                                                       "quirk_refs": []
+                                                     }
+                                                   ],
+                                         "xml": {
+                                                  "element_order": ["ObjectOwnership"],
+                                                  "empty_value_policy": { "ObjectOwnership": "emit" },
+                                                  "attributes": []
+                                                }
+                                       }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["NoSuchBucket", "AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [],
+  "quirks": [],
+  "ext_points": []
+}

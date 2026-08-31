@@ -47,6 +47,7 @@ pub(crate) static OPERATION_NAMES: &[&str] = &[
     "GetBucketLocation",
     "GetBucketLogging",
     "GetBucketNotificationConfiguration",
+    "GetBucketOwnershipControls",
     "GetBucketPolicy",
     "GetBucketPolicyStatus",
     "GetBucketReplication",

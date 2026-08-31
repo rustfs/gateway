@@ -14,7 +14,6 @@ GetBucketInventoryConfiguration -> ListObjects
 GetBucketMetadataConfiguration -> ListObjects
 GetBucketMetadataTableConfiguration -> ListObjects
 GetBucketMetricsConfiguration -> ListObjects
-GetBucketOwnershipControls -> ListObjects
 ListBucketAnalyticsConfigurations -> ListObjects
 ListBucketIntelligentTieringConfigurations -> ListObjects
 ListBucketInventoryConfigurations -> ListObjects

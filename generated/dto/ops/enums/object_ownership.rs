@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `ObjectOwnership` string enumeration. Bound by: CreateBucket.
+/// The `ObjectOwnership` string enumeration. Bound by: CreateBucket, GetBucketOwnershipControls.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`ObjectOwnership::custom`]. Adding a constant is a minor version

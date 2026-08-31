@@ -105,7 +105,6 @@ operations = [
   "GetBucketIntelligentTieringConfiguration",
   "GetBucketInventoryConfiguration",
   "GetBucketMetricsConfiguration",
-  "GetBucketOwnershipControls",
   "ListBucketAnalyticsConfigurations",
   "ListBucketIntelligentTieringConfigurations",
   "ListBucketInventoryConfigurations",

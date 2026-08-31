@@ -55,7 +55,7 @@
 # `PutObjectAcl -> PutObject` lines of the route-coverage debt register, and this family retires
 # all three.
 
-include = ["GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl"]
+include = ["GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl", "GetBucketOwnershipControls"]
 
 # =============================================================================================
 # The `?acl` bands: 250 / 260 on a bucket, 550 / 560 on an object
@@ -99,6 +99,22 @@ url_encoded_fields = []
 input_hot = []
 output_hot = ["Grants", "Owner"]
 quirk_refs = ["q-acl-0001", "q-acl-0002", "q-acl-0003", "q-acl-0008"]
+
+# =============================================================================================
+# GetBucketOwnershipControls
+#
+# The bucket ownership switch determines whether ACLs are enforced, ignored, or preferred. Its
+# `?ownershipControls` selector must precede ListObjects so an unsupported handler cannot expose a
+# page of object keys in place of the configuration document.
+# =============================================================================================
+[op.GetBucketOwnershipControls]
+precedence = 270
+auth_action = "s3:GetBucketOwnershipControls"
+response_max_bytes = 4096
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = []
+output_hot = ["OwnershipControls"]
 
 # =============================================================================================
 # PutBucketAcl

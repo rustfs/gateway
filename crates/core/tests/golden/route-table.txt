@@ -21,6 +21,7 @@
   242  DeleteBucketWebsite                      /{Bucket}            Method(DELETE) ∧ Target(Bucket) ∧ QueryPresent("website")
   250  GetBucketAcl                             /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("acl")
   260  PutBucketAcl                             /{Bucket}            Method(PUT) ∧ Target(Bucket) ∧ QueryPresent("acl")
+  270  GetBucketOwnershipControls               /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("ownershipControls")
   300  GetBucketLocation                        /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("location")
   310  GetBucketCors                            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("cors")
   320  PutBucketCors                            /{Bucket}            Method(PUT) ∧ Target(Bucket) ∧ QueryPresent("cors")

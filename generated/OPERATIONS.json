@@ -343,6 +343,15 @@
                                                           "error_codes": ["NoSuchBucket", "AccessDenied"],
                                                           "precedence": 210
                                                         },
+                  "GetBucketOwnershipControls": {
+                                                  "method": "GET",
+                                                  "path_shape": "/{Bucket}",
+                                                  "query_keys": ["ownershipControls"],
+                                                  "key_headers": [],
+                                                  "host_classes": [],
+                                                  "error_codes": ["NoSuchBucket", "AccessDenied"],
+                                                  "precedence": 270
+                                                },
                   "GetBucketPolicy": {
                                        "method": "GET",
                                        "path_shape": "/{Bucket}",
@@ -1166,6 +1175,7 @@
                           "GetBucketLocation",
                           "GetBucketLogging",
                           "GetBucketNotificationConfiguration",
+                          "GetBucketOwnershipControls",
                           "GetBucketPolicy",
                           "GetBucketPolicyStatus",
                           "GetBucketReplication",
@@ -1249,6 +1259,7 @@
                                     "GetBucketLocation",
                                     "GetBucketLogging",
                                     "GetBucketNotificationConfiguration",
+                                    "GetBucketOwnershipControls",
                                     "GetBucketPolicy",
                                     "GetBucketPolicyStatus",
                                     "GetBucketReplication",
@@ -1394,7 +1405,7 @@
                                       "PutBucketNotificationConfiguration"
                                     ],
                     "object-lock": ["CreateBucket", "GetObjectLockConfiguration", "PutObjectLockConfiguration"],
-                    "ownershipControls": ["CreateBucket", "DeleteBucket"],
+                    "ownershipControls": ["CreateBucket", "DeleteBucket", "GetBucketOwnershipControls"],
                     "part-number-marker": ["ListParts"],
                     "partNumber": ["GetObject", "HeadObject", "UploadPart", "UploadPartCopy"],
                     "policy": [
@@ -1539,6 +1550,7 @@
                                        "GetBucketLocation",
                                        "GetBucketLogging",
                                        "GetBucketNotificationConfiguration",
+                                       "GetBucketOwnershipControls",
                                        "GetBucketPolicy",
                                        "GetBucketPolicyStatus",
                                        "GetBucketReplication",
@@ -1756,6 +1768,7 @@
                                        "GetBucketLocation",
                                        "GetBucketLogging",
                                        "GetBucketNotificationConfiguration",
+                                       "GetBucketOwnershipControls",
                                        "GetBucketPolicy",
                                        "GetBucketPolicyStatus",
                                        "GetBucketReplication",
@@ -1901,6 +1914,7 @@
                      "242": ["DeleteBucketWebsite"],
                      "250": ["GetBucketAcl"],
                      "260": ["PutBucketAcl"],
+                     "270": ["GetBucketOwnershipControls"],
                      "300": ["GetBucketLocation"],
                      "310": ["GetBucketCors"],
                      "320": ["PutBucketCors"],

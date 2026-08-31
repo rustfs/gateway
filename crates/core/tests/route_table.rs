@@ -2377,3 +2377,30 @@ fn n_get_object_torrent_does_not_claim_neighbour_controls() {
         assert_ne!(routed(&table, &request), Some("GetObjectTorrent"), "{line}");
     }
 }
+
+// ── GetBucketOwnershipControls ─────────────────────────────────────────────────
+
+/// An ownership-controls read selects its configuration operation ahead of object listing.
+#[test]
+fn get_bucket_ownership_controls_routes_ahead_of_list_objects() {
+    let table = generated_table();
+    assert_eq!(
+        routed(&table, &Req::new("GET /bucket?ownershipControls")),
+        Some("GetBucketOwnershipControls")
+    );
+}
+
+/// Negative controls keep the plain listing and unrelated request shapes outside the new row.
+#[test]
+fn n_get_bucket_ownership_controls_does_not_claim_neighbour_controls() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket")), Some("ListObjects"));
+    for line in [
+        "GET /bucket/key?ownershipControls",
+        "HEAD /bucket?ownershipControls",
+        "PUT /bucket?ownershipControls",
+    ] {
+        let request = Req::new(line);
+        assert_ne!(routed(&table, &request), Some("GetBucketOwnershipControls"), "{line}");
+    }
+}
