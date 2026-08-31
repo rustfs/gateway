@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! `GetObjectTorrent`: retrieval of an object's binary torrent descriptor.
+//! Shares: nothing.
 //!
 //! Responsible for: the operation identity, security floor and authorization contract needed to
 //! reserve `GET /{Bucket}/{Key+}?torrent` independently of backend registration.
