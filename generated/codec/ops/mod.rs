@@ -73,6 +73,7 @@ mod head_object;
 mod list_bucket_intelligent_tiering_configurations;
 mod list_bucket_inventory_configurations;
 mod list_buckets;
+mod list_directory_buckets;
 mod list_multipart_uploads;
 mod list_object_annotations;
 mod list_object_versions;

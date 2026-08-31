@@ -12,6 +12,5 @@ GetBucketMetadataTableConfiguration -> ListObjects
 GetBucketMetricsConfiguration -> ListObjects
 ListBucketAnalyticsConfigurations -> ListObjects
 ListBucketMetricsConfigurations -> ListObjects
-ListDirectoryBuckets -> ListBuckets
 PutObjectAnnotation -> PutObject
 UpdateObjectEncryption -> PutObject

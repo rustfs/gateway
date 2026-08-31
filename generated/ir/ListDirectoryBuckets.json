@@ -1,0 +1,163 @@
+{
+  "ir_version": "2",
+  "operation": "ListDirectoryBuckets",
+  "http": {
+            "method": "GET",
+            "target": "Service",
+            "precedence": 90,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Service" },
+                            { "kind": "HostClass", "class": "S3Express" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3express:ListAllMyDirectoryBuckets",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 1048576 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "ContinuationToken",
+                           "wire_name": "continuation-token",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "MaxDirectoryBuckets",
+                           "wire_name": "max-directory-buckets",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "Integer" },
+                           "hot": true,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "Buckets",
+                            "wire_name": "Buckets",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "Bucket" },
+                                      "flattened": false,
+                                      "wrapper_name": "Bucket"
+                                    },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ContinuationToken",
+                            "wire_name": "ContinuationToken",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "Bucket": {
+                          "kind": "Structure",
+                          "fields": [
+                                      {
+                                        "name": "Name",
+                                        "wire_name": "Name",
+                                        "required": true,
+                                        "binding": { "kind": "BodyXml" },
+                                        "type": { "kind": "BucketName" },
+                                        "hot": true,
+                                        "quirk_refs": ["q-wrapped-0062"]
+                                      },
+                                      {
+                                        "name": "CreationDate",
+                                        "wire_name": "CreationDate",
+                                        "required": true,
+                                        "binding": { "kind": "BodyXml" },
+                                        "type": { "kind": "Timestamp", "format": "Iso8601" },
+                                        "hot": true,
+                                        "quirk_refs": []
+                                      },
+                                      {
+                                        "name": "BucketRegion",
+                                        "wire_name": "BucketRegion",
+                                        "required": false,
+                                        "binding": { "kind": "BodyXml" },
+                                        "type": { "kind": "String" },
+                                        "hot": false,
+                                        "quirk_refs": []
+                                      },
+                                      {
+                                        "name": "BucketArn",
+                                        "wire_name": "BucketArn",
+                                        "required": false,
+                                        "binding": { "kind": "BodyXml" },
+                                        "type": { "kind": "String" },
+                                        "hot": false,
+                                        "quirk_refs": []
+                                      }
+                                    ],
+                          "xml": {
+                                   "element_order": ["Name", "CreationDate", "BucketRegion", "BucketArn"],
+                                   "empty_value_policy": {
+                                                           "Name": "emit",
+                                                           "CreationDate": "emit",
+                                                           "BucketRegion": "emit",
+                                                           "BucketArn": "emit"
+                                                         },
+                                   "attributes": []
+                                 }
+                        }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "ListAllMyDirectoryBucketsResult",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": ["Buckets", "ContinuationToken"],
+           "empty_value_policy": { "Buckets": "emit", "ContinuationToken": "emit" },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [],
+  "quirks": [
+              {
+                "id": "q-wrapped-0062",
+                "kind": "flattened",
+                "target": "ListBuckets",
+                "summary": "The bucket listing wraps its entries in an enclosing element, the one listing in this family that is not flattened.",
+                "evidence": [
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html",
+                                "summary": "The documented response nests every bucket entry inside a single enclosing element."
+                              }
+                            ],
+                "cases": ["c-list-0015"]
+              }
+            ],
+  "ext_points": []
+}

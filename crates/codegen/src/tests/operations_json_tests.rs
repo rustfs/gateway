@@ -98,36 +98,29 @@ fn the_fields_are_the_ir_they_claim_to_be() {
     }
 }
 
-/// `host_classes` reports a constraint, so an operation that names no endpoint family carries none.
-///
-/// Empty is the answer for every operation in the *pinned model* today: `rustfs-gateway-model`'s
-/// `Predicate` can express `HostClass` since `rustfs/gateway#3`, but no operation's overlay entry
-/// sets `host_class` yet, so nothing in `model/overlays/**` reaches it. `emits_the_host_class_a_
-/// synthetic_operation_declares` below proves the function itself decides something for the
-/// variant, against a synthetic IR rather than the pinned model.
+/// `host_classes` reports the one endpoint constraint in the pinned operation set and no others.
 #[test]
-fn host_classes_is_the_selector_constraint_and_no_operation_carries_one() {
+fn host_classes_is_the_selector_constraint_for_the_pinned_model() {
     let document = document();
     let operations = get(&document, "operations");
     for name in keys(operations) {
-        assert!(
-            strings(get(get(operations, &name), "host_classes")).is_empty(),
-            "{name} claims a host-class constraint the IR cannot express"
-        );
+        let expected = if name == "ListDirectoryBuckets" {
+            vec!["S3Express"]
+        } else {
+            vec![]
+        };
+        assert_eq!(strings(get(get(operations, &name), "host_classes")), expected, "{name}");
     }
-    assert!(
-        keys(get(&document, "by_host_class")).is_empty(),
-        "no operation constrains a host class, so nothing may be indexed under one"
-    );
+    let by_host_class = get(&document, "by_host_class");
+    assert_eq!(keys(by_host_class), ["S3Express"]);
+    assert_eq!(strings(get(by_host_class, "S3Express")), ["ListDirectoryBuckets"]);
 }
 
 /// `host_classes` reports exactly the [`Predicate::HostClass`] a selector carries, and an
 /// [`Predicate::ArnForm`] on the same selector contributes nothing to it — the two are distinct
 /// dimensions of the same route.
 ///
-/// The pinned model constrains no real operation's host class yet, so this mutates a clone of a
-/// real IR rather than reaching for one — the same shape `xml_list_tests` uses to prove the
-/// wrapped-list rule is general rather than one operation patched into place.
+/// This mutates a clone of a real IR to prove `ArnForm` remains distinct from `HostClass`.
 #[test]
 fn emits_the_host_class_a_synthetic_operation_declares() {
     let mut ir = artifacts()

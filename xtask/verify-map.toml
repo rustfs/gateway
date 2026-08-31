@@ -209,6 +209,10 @@ name = "ListBuckets"
 cases = "c-authz-0007,c-authz-1009,c-authz-1010,c-authz-1015,c-list-0015,c-list-0016,c-list-0044,c-naming-0014,c-sig-0506,c-sig-0582,c-sig-0583,c-sig-0584"
 
 [[operation]]
+name = "ListDirectoryBuckets"
+cases = ""
+
+[[operation]]
 name = "ListMultipartUploads"
 cases = "c-mpu-0011,c-mpu-0012,c-mpu-0013,c-mpu-0047"
 

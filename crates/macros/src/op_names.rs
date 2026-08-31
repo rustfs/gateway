@@ -73,6 +73,7 @@ pub(crate) static OPERATION_NAMES: &[&str] = &[
     "ListBucketIntelligentTieringConfigurations",
     "ListBucketInventoryConfigurations",
     "ListBuckets",
+    "ListDirectoryBuckets",
     "ListMultipartUploads",
     "ListObjectAnnotations",
     "ListObjectVersions",

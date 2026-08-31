@@ -35,7 +35,7 @@ use rustfs_gateway_core::dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE, Ro
 use rustfs_gateway_core::error::{PRE_AUTH_STATUSES, PreAuthError};
 use rustfs_gateway_core::op::{AuthRequirement, ResourceShape};
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec, ParamKind, Registry, RegistryError, RequiredParam};
-use rustfs_gateway_core::route::{Predicate, RouteTable, ShadowingDecls, ShadowingPolicy, TargetKind};
+use rustfs_gateway_core::route::{HostClass, Predicate, RouteTable, ShadowingDecls, ShadowingPolicy, TargetKind};
 use rustfs_gateway_types::ErrorCode;
 use support::{Req, entry};
 
@@ -63,6 +63,11 @@ static DELETE_OBJECT: OperationSpec = OperationSpec::builder("DeleteObject", 204
 static LIST_OBJECTS: OperationSpec = OperationSpec::builder("ListObjects", 200, None)
     .required_params(&[])
     .auth(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket))
+    .build();
+
+static LIST_BUCKETS: OperationSpec = OperationSpec::builder("ListBuckets", 200, None)
+    .required_params(&[])
+    .auth(AuthRequirement::new("s3:ListAllMyBuckets", ResourceShape::Service))
     .build();
 
 static GET_LIFECYCLE: OperationSpec =
@@ -1468,4 +1473,28 @@ fn n_unhandled_inventory_reads_are_refused_instead_of_dispatching_list_objects()
         .dispatch(&Req::new("GET /bucket").parts())
         .expect("the registered ListObjects neighbour remains served");
     assert_eq!(plain.entry.op_name, "ListObjects");
+}
+
+/// An unhandled directory-bucket listing is refused by name, not answered by ordinary ListBuckets.
+#[test]
+fn n_unhandled_list_directory_buckets_is_refused_instead_of_dispatching_list_buckets() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_BUCKETS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    let request = Req::new("GET /?max-directory-buckets=10")
+        .target(TargetKind::Service)
+        .host_class(HostClass::S3Express);
+    let error = router
+        .dispatch(&request.parts())
+        .expect_err("the directory-bucket listing handler is absent");
+    assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED);
+    assert_eq!(error.message(), NOT_REGISTERED_MESSAGE);
+    assert_eq!(error.operation(), Some("ListDirectoryBuckets"));
+
+    let standard = Req::new("GET /").target(TargetKind::Service).host_class(HostClass::Standard);
+    let served = router
+        .dispatch(&standard.parts())
+        .expect("the registered ordinary ListBuckets neighbour remains served");
+    assert_eq!(served.entry.op_name, "ListBuckets");
 }

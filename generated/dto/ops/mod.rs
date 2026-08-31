@@ -76,6 +76,7 @@ pub mod head_object;
 pub mod list_bucket_intelligent_tiering_configurations;
 pub mod list_bucket_inventory_configurations;
 pub mod list_buckets;
+pub mod list_directory_buckets;
 pub mod list_multipart_uploads;
 pub mod list_object_annotations;
 pub mod list_object_versions;

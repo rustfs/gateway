@@ -5267,4 +5267,13 @@ pub const SHADOWING: &[ShadowingDecl] = &[
             "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html — ListObjectVersions is selected by the ?versions subresource and ignores query keys it does not define.",
         ],
     },
+    ShadowingDecl {
+        winner: "ListDirectoryBuckets",
+        shadowed: "ListBuckets",
+        reason: "ListBuckets constrains only GET and the service target, so it also accepts requests to the S3 Express control endpoint. ListDirectoryBuckets wins at 90 for HostClass(S3Express) before the ordinary listing at 100; the reverse order exposes the wrong bucket namespace.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListDirectoryBuckets.html — ListDirectoryBuckets is an account-level GET on the S3 Express regional control endpoint and returns only directory buckets.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html — ListBuckets is an account-level GET on the ordinary S3 endpoint and returns the general bucket namespace.",
+        ],
+    },
 ];
