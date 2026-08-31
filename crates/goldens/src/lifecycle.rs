@@ -17,7 +17,10 @@
 //! Responsible for: binding independent pinned-s3s and production Lifecycle codecs to D1-D5.
 //! NOT responsible for: HTTP lifecycle policy validation, other configuration families, or CI.
 //! Upstream: `rustfs-gateway-types` persistence and compat seams. Downstream: migration gates.
-
+use crate::{
+    AcceptedCorpusCase, ConcreteFamilyCorpus, ConfigKind, CorpusVariant, FourWayCodec, GoldenFailure, GoldenSample,
+    RejectedCorpusCase, RejectedGoldenSample, SampleOrigin, assert_four_way,
+};
 use rustfs_gateway_types::compat::{S3sLifecycleObservation, parse_s3s_lifecycle, serialize_s3s_lifecycle};
 use rustfs_gateway_types::persistence::{
     PersistedAbortIncompleteMultipartUpload, PersistedDelMarkerExpiration, PersistedLifecycleAnd,
@@ -26,11 +29,6 @@ use rustfs_gateway_types::persistence::{
     serialize_lifecycle,
 };
 use sha2::{Digest, Sha256};
-
-use crate::{
-    AcceptedCorpusCase, ConcreteFamilyCorpus, ConfigKind, CorpusVariant, FourWayCodec, GoldenFailure, GoldenSample,
-    RejectedCorpusCase, RejectedGoldenSample, SampleOrigin, assert_four_way,
-};
 
 mod source_b;
 #[cfg(test)]
