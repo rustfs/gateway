@@ -230,6 +230,10 @@ summary = "a tag-set read is a GET to the object key carrying the ?tagging subre
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTorrent.html"
 summary = "GetObjectTorrent is selected by the ?torrent subresource on an object GET and returns a binary torrent descriptor rather than the object body."
 
+[evidence.get-bucket-ownership-controls]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketOwnershipControls.html"
+summary = "GetBucketOwnershipControls is selected by the ?ownershipControls subresource on a bucket GET and returns the stored object-ownership rules rather than an object listing."
+
 [evidence.get-public-access-block]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html"
 summary = "GetPublicAccessBlock is selected by the ?publicAccessBlock subresource alone and answers with the four stored switches."
@@ -2844,3 +2848,129 @@ winner   = "RenameObject"
 shadowed = "PutObject"
 reason   = "Every rename is also accepted by PutObject, whose selector pins only PUT and an object target. RenameObject wins at 780 before PutObject at 800; the reverse order writes an empty object to the destination instead of returning operation-specific NotImplemented."
 evidence = ["rename-object", "put-object"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "GetBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "GetBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "GetBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "GetBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "GetBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "GetBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "GetBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "GetBucketOwnershipControls"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "get-bucket-ownership-controls"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-location"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "list-objects-v2"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "list-object-versions"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so every ownership-controls read satisfies it too. The subresource row wins at 270 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["get-bucket-ownership-controls", "list-objects"]

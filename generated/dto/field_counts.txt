@@ -82,6 +82,8 @@ GetBucketLoggingInput 2
 GetBucketLoggingOutput 1
 GetBucketNotificationConfigurationInput 2
 GetBucketNotificationConfigurationOutput 4
+GetBucketOwnershipControlsInput 2
+GetBucketOwnershipControlsOutput 1
 GetBucketPolicyInput 2
 GetBucketPolicyOutput 1
 GetBucketPolicyStatusInput 2
@@ -167,6 +169,8 @@ ObjectVersion 11
 OutputLocation 1
 OutputSerialization 2
 Owner 2
+OwnershipControls 1
+OwnershipControlsRule 1
 ParquetInput 0
 Part 14
 PartitionedPrefix 1

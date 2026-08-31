@@ -41,13 +41,13 @@ pub use crate::ops::shapes::{
     LoggingEnabled, MetadataEntry, Metrics, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
     NotificationConfiguration, NotificationConfigurationFilter, Object, ObjectIdentifier, ObjectLockConfiguration,
     ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, OutputLocation, OutputSerialization,
-    Owner, ParquetInput, Part, PartitionedPrefix, PolicyStatus, PublicAccessBlockConfiguration, QueueConfiguration, Redirect,
-    RedirectAllRequestsTo, ReplicaModifications, ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator,
-    ReplicationRuleFilter, ReplicationTime, ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest,
-    RestoreStatus, RoutingRule, S3KeyFilter, S3Location, ScanRange, SelectParameters, ServerSideEncryptionByDefault,
-    ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects,
-    Tag, Tagging, TargetGrant, TargetObjectKeyFormat, TopicConfiguration, Transition, VersioningConfiguration,
-    WebsiteConfiguration,
+    Owner, OwnershipControls, OwnershipControlsRule, ParquetInput, Part, PartitionedPrefix, PolicyStatus,
+    PublicAccessBlockConfiguration, QueueConfiguration, Redirect, RedirectAllRequestsTo, ReplicaModifications,
+    ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationTime,
+    ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest, RestoreStatus, RoutingRule, S3KeyFilter,
+    S3Location, ScanRange, SelectParameters, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
+    ServerSideEncryptionRule, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects, Tag, Tagging, TargetGrant,
+    TargetObjectKeyFormat, TopicConfiguration, Transition, VersioningConfiguration, WebsiteConfiguration,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -146,6 +146,10 @@ pub use crate::ops::get_bucket_logging::{
 pub use crate::ops::get_bucket_notification_configuration::{
     GetBucketNotificationConfiguration, Input as GetBucketNotificationConfigurationInput,
     InputBuilder as GetBucketNotificationConfigurationInputBuilder, Output as GetBucketNotificationConfigurationOutput,
+};
+pub use crate::ops::get_bucket_ownership_controls::{
+    GetBucketOwnershipControls, Input as GetBucketOwnershipControlsInput, InputBuilder as GetBucketOwnershipControlsInputBuilder,
+    Output as GetBucketOwnershipControlsOutput,
 };
 pub use crate::ops::get_bucket_policy::{
     GetBucketPolicy, Input as GetBucketPolicyInput, InputBuilder as GetBucketPolicyInputBuilder, Output as GetBucketPolicyOutput,

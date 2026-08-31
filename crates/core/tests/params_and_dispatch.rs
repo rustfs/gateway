@@ -1379,3 +1379,23 @@ fn n_unhandled_get_object_torrent_is_refused_instead_of_dispatching_get_object()
         .expect("the registered GetObject neighbour remains served");
     assert_eq!(plain.entry.op_name, "GetObject");
 }
+
+/// An unhandled ownership-controls read is refused by name instead of returning listed keys.
+#[test]
+fn n_unhandled_get_bucket_ownership_controls_is_refused_instead_of_dispatching_list_objects() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    let error = router
+        .dispatch(&Req::new("GET /bucket?ownershipControls").parts())
+        .expect_err("this registry has no GetBucketOwnershipControls handler");
+    assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED);
+    assert_eq!(error.message(), NOT_REGISTERED_MESSAGE);
+    assert_eq!(error.operation(), Some("GetBucketOwnershipControls"));
+
+    let plain = router
+        .dispatch(&Req::new("GET /bucket").parts())
+        .expect("the registered ListObjects neighbour remains served");
+    assert_eq!(plain.entry.op_name, "ListObjects");
+}

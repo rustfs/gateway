@@ -47,6 +47,7 @@ mod get_bucket_lifecycle_configuration;
 mod get_bucket_location;
 mod get_bucket_logging;
 mod get_bucket_notification_configuration;
+mod get_bucket_ownership_controls;
 mod get_bucket_policy;
 mod get_bucket_policy_status;
 mod get_bucket_replication;

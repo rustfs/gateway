@@ -105,6 +105,10 @@ name = "GetBucketNotificationConfiguration"
 cases = "c-bucketconfig-0011,c-bucketconfig-0024"
 
 [[operation]]
+name = "GetBucketOwnershipControls"
+cases = ""
+
+[[operation]]
 name = "GetBucketPolicy"
 cases = "c-bucketconfig-0017,c-bucketconfig-0029,c-bucketconfig-0056"
 
