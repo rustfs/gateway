@@ -14,26 +14,26 @@
 
 //! Real MinIO-to-RustFS migrated persisted-XML evidence.
 //!
-//! Responsible for: running six raw MinIO-written persisted XML families through D1-D5.
+//! Responsible for: running seven raw MinIO-written persisted XML families through D1-D5.
 //! NOT responsible for: synthesizing variants or decoding the source `.metadata.bin` at test time.
 //! Upstream: the RustFS real-MinIO migration fixture. Downstream: the aggregate persistence rollback gate.
 
 use rustfs_gateway_types::{
     compat::{
-        parse_s3s_bucket_encryption, parse_s3s_lifecycle, parse_s3s_object_lock, parse_s3s_replication, parse_s3s_tagging,
-        parse_s3s_versioning,
+        parse_s3s_bucket_encryption, parse_s3s_lifecycle, parse_s3s_notification, parse_s3s_object_lock, parse_s3s_replication,
+        parse_s3s_tagging, parse_s3s_versioning,
     },
     cors_tagging::PersistedTagging,
     persistence::{
-        PersistedBucketEncryptionConfiguration, PersistedLifecycleConfiguration, PersistedObjectLockConfiguration,
-        PersistedReplicationConfiguration, PersistedVersioningConfiguration,
+        PersistedBucketEncryptionConfiguration, PersistedLifecycleConfiguration, PersistedNotificationConfiguration,
+        PersistedObjectLockConfiguration, PersistedReplicationConfiguration, PersistedVersioningConfiguration,
     },
 };
 
 use crate::{
     ConfigKind, Direction, GoldenFailure, GoldenSample, SampleOrigin, assert_bucket_encryption_four_way,
-    assert_lifecycle_four_way, assert_object_lock_four_way, assert_replication_four_way, assert_tagging_four_way,
-    assert_versioning_four_way,
+    assert_lifecycle_four_way, assert_notification_four_way, assert_object_lock_four_way, assert_replication_four_way,
+    assert_tagging_four_way, assert_versioning_four_way,
 };
 
 const SOURCE: &str = "https://github.com/rustfs/rustfs/blob/7df0920c801998d4f5e65776767d746f362a2975/crates/ecstore/tests/fixtures/minio/bucket_metadata.blob.hex";
@@ -45,12 +45,14 @@ const REPLICATION_SHA256: &str = "43f149b5afcdeac67f52059b4f15b604912b1627f2c050
 const VERSIONING_SHA256: &str = "482d4e510b5cdcf0bbf3a044e82832dc711f4f28757a6c06eb21758282a73ef7";
 const BUCKET_ENCRYPTION_SHA256: &str = "df4e3e6cf7a0b4af67ba58f41eaa596d54579eea2ed2f993da09600f59413711";
 const TAGGING_SHA256: &str = "606b9240d3b90605a36076e93411ceb7245be8908aec6872117e2dc1276cd782";
+const NOTIFICATION_SHA256: &str = "aa87052048dba6dada6359f577d9ae583398303c1384c38408fa17a730c0fb6e";
 const LIFECYCLE: &[u8] = b"<LifecycleConfiguration><Rule><ID>d96i4g89k8h26a95st60</ID><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><Expiration><Days>30</Days></Expiration><NoncurrentVersionExpiration><NoncurrentDays>7</NoncurrentDays></NoncurrentVersionExpiration></Rule><ExpiryUpdatedAt>2026-07-07T15:58:57.337315Z</ExpiryUpdatedAt></LifecycleConfiguration>";
 const OBJECT_LOCK: &[u8] = b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>7</Days></DefaultRetention></Rule></ObjectLockConfiguration>";
 const REPLICATION: &[u8] = b"<ReplicationConfiguration><Rule><ID>d96i4m09k8h2vldifkag</ID><Status>Enabled</Status><Priority>1</Priority><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication><DeleteReplication><Status>Enabled</Status></DeleteReplication><Destination><Bucket>arn:minio:replication::ef5859af-120a-4218-94b5-be23470f3c60:interop-dr</Bucket></Destination><SourceSelectionCriteria><ReplicaModifications><Status>Enabled</Status></ReplicaModifications></SourceSelectionCriteria><Filter><Prefix></Prefix></Filter><ExistingObjectReplication><Status>Enabled</Status></ExistingObjectReplication></Rule><Role></Role></ReplicationConfiguration>";
 const VERSIONING: &[u8] = b"<VersioningConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Status>Enabled</Status></VersioningConfiguration>";
 const BUCKET_ENCRYPTION: &[u8] = b"<ServerSideEncryptionConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
 const TAGGING: &[u8] = b"<Tagging><TagSet><Tag><Key>team</Key><Value>storage</Value></Tag><Tag><Key>env</Key><Value>prod</Value></Tag></TagSet></Tagging>";
+const NOTIFICATION: &[u8] = b"<NotificationConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><QueueConfiguration><Id></Id><Event>s3:ObjectCreated:*</Event><Queue>arn:minio:sqs::primary:webhook</Queue></QueueConfiguration></NotificationConfiguration>";
 
 fn sample<T>(kind: ConfigKind, bytes: &[u8], sha256: &str, value: T, notes: &str) -> GoldenSample<T> {
     GoldenSample {
@@ -144,6 +146,17 @@ pub(crate) fn tagging_sample() -> Result<GoldenSample<PersistedTagging>, GoldenF
     ))
 }
 
+pub(crate) fn notification_sample() -> Result<GoldenSample<PersistedNotificationConfiguration>, GoldenFailure> {
+    let value = parse_s3s_notification(NOTIFICATION).map_err(input_failure)?.structure;
+    Ok(sample(
+        ConfigKind::Notification,
+        NOTIFICATION,
+        NOTIFICATION_SHA256,
+        value,
+        "Source-(c) MinIO-written webhook notification bytes migrated unchanged through RustFS bucket metadata migration.",
+    ))
+}
+
 pub(crate) fn run() -> Result<Vec<(ConfigKind, usize)>, (ConfigKind, GoldenFailure)> {
     let versioning = versioning_sample().and_then(|sample| assert_versioning_four_way(&sample));
     versioning.map_err(|failure| (ConfigKind::Versioning, failure))?;
@@ -153,6 +166,9 @@ pub(crate) fn run() -> Result<Vec<(ConfigKind, usize)>, (ConfigKind, GoldenFailu
 
     let tagging = tagging_sample().and_then(|sample| assert_tagging_four_way(&sample));
     tagging.map_err(|failure| (ConfigKind::Tagging, failure))?;
+
+    let notification = notification_sample().and_then(|sample| assert_notification_four_way(&sample));
+    notification.map_err(|failure| (ConfigKind::Notification, failure))?;
 
     let lifecycle = lifecycle_sample().and_then(|sample| assert_lifecycle_four_way(&sample));
     lifecycle.map_err(|failure| (ConfigKind::Lifecycle, failure))?;
@@ -167,6 +183,7 @@ pub(crate) fn run() -> Result<Vec<(ConfigKind, usize)>, (ConfigKind, GoldenFailu
         (ConfigKind::Versioning, 1),
         (ConfigKind::BucketEncryption, 1),
         (ConfigKind::Tagging, 1),
+        (ConfigKind::Notification, 1),
         (ConfigKind::Lifecycle, 1),
         (ConfigKind::ObjectLock, 1),
         (ConfigKind::Replication, 1),
@@ -187,6 +204,7 @@ mod tests {
                 (ConfigKind::Versioning, 1),
                 (ConfigKind::BucketEncryption, 1),
                 (ConfigKind::Tagging, 1),
+                (ConfigKind::Notification, 1),
                 (ConfigKind::Lifecycle, 1),
                 (ConfigKind::ObjectLock, 1),
                 (ConfigKind::Replication, 1),
