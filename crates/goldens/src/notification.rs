@@ -90,7 +90,7 @@ impl FourWayCodec for NotificationCodec {
 mod corpus_cases {
     use super::*;
 
-    mod source_a;
+    pub(super) mod source_a;
 
     use rustfs_gateway_types::persistence::{
         PersistedEventBridgeConfiguration, PersistedFilterRule, PersistedLambdaFunctionConfiguration,
@@ -618,6 +618,10 @@ mod corpus_cases {
             }
         }
     }
+}
+
+pub(crate) fn source_a_rows() -> Vec<crate::source_a_census::SourceARow> {
+    corpus_cases::source_a::source_a_rows()
 }
 
 /// Builds Notification corpus coverage from the exact cases used by codec tests.

@@ -23,6 +23,7 @@ use rustfs_gateway_types::compat::parse_s3s_notification;
 #[cfg(test)]
 use rustfs_gateway_types::persistence::parse_notification;
 
+use crate::source_a_census::SourceARow;
 use crate::{ConfigKind, CorpusVariant, GoldenSample, RejectedGoldenSample, SampleOrigin};
 
 use super::{AcceptedNotificationCase, RejectedNotificationCase};
@@ -286,6 +287,59 @@ const OLD_REJECTED_SHA256: [&str; 4] = [
     "813cdc05e81e0fbadb8a3f96d1189005ca2e44aac94083bfe98a8d9118206320",
     "c579c698faa21543dfcf82cf48264e36adb063ec01962195de23527e8857b3a9",
 ];
+
+pub(crate) fn source_a_rows() -> Vec<SourceARow> {
+    let mut rows = FIXTURES
+        .iter()
+        .flat_map(|fixture| {
+            fixture.test_ids.iter().enumerate().map(move |(index, test_id)| {
+                let source_ref = source_ref(test_id);
+                if OLD_READABLE_SHA256.contains(&fixture.sha256) {
+                    if index == 0 {
+                        SourceARow::accepted_sample(ConfigKind::Notification, source_ref, fixture.sha256)
+                    } else {
+                        SourceARow::accepted_alias(ConfigKind::Notification, source_ref, fixture.sha256)
+                    }
+                } else {
+                    SourceARow::refused_sample(ConfigKind::Notification, source_ref, fixture.sha256)
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    rows.push(SourceARow::accepted_sample(
+        ConfigKind::Notification,
+        NEW_WRITER_SOURCE,
+        NEW_WRITER_NOTIFICATION_SHA256,
+    ));
+    rows.push(SourceARow::accepted_sample(
+        ConfigKind::Notification,
+        "crates/ecstore/src/bucket/metadata.rs::tests::marshal_msg_complete_example::notification_xml",
+        ECSTORE_CLOUDWATCH_SHA256,
+    ));
+    rows.push(SourceARow::accepted_alias(
+        ConfigKind::Notification,
+        "crates/ecstore/src/bucket/metadata_test.rs::marshal_msg_complete_example::notification_xml",
+        ECSTORE_CLOUDWATCH_SHA256,
+    ));
+    rows
+}
+
+fn source_ref(test_id: &str) -> &'static str {
+    match test_id {
+        "test_bug_report_exact_scenario_xml" => "crates/notify/src/rules/config_test.rs::test_bug_report_exact_scenario_xml",
+        "test_url_encoded_keys" => "crates/notify/src/rules/config_test.rs::test_url_encoded_keys",
+        "test_prefix_only_filter_xml" => "crates/notify/src/rules/config_test.rs::test_prefix_only_filter_xml",
+        "test_capitalized_filter_names_xml" => "crates/notify/src/rules/config_test.rs::test_capitalized_filter_names_xml",
+        "test_suffix_only_filter_xml" => "crates/notify/src/rules/config_test.rs::test_suffix_only_filter_xml",
+        "test_no_filter_xml" => "crates/notify/src/rules/config_test.rs::test_no_filter_xml",
+        "test_specific_event_type_xml" => "crates/notify/src/rules/config_test.rs::test_specific_event_type_xml",
+        "test_multiple_queue_configs_xml" => "crates/notify/src/rules/config_test.rs::test_multiple_queue_configs_xml",
+        "test_compound_event_expansion_integration" => {
+            "crates/notify/src/rules/config_test.rs::test_compound_event_expansion_integration"
+        }
+        _ => panic!("unregistered source-(a) Notification test identifier: {test_id}"),
+    }
+}
 
 fn source(test_ids: &[&str]) -> String {
     match test_ids {

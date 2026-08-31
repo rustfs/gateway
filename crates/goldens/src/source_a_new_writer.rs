@@ -25,6 +25,7 @@ use rustfs_gateway_types::persistence::{
 #[cfg(test)]
 use sha2::{Digest, Sha256};
 
+use crate::source_a_census::SourceARow;
 use crate::{AcceptedCorpusCase, ConfigKind, CorpusVariant, GoldenSample, SampleOrigin};
 
 const CORS: &[u8] = b"<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.test</AllowedOrigin></CORSRule></CORSConfiguration>";
@@ -57,6 +58,13 @@ fn bindings() -> [NewWriterBinding; 2] {
             bytes: LIFECYCLE,
         },
     ]
+}
+
+pub(crate) fn source_a_rows() -> Vec<SourceARow> {
+    bindings()
+        .into_iter()
+        .map(|binding| SourceARow::accepted_sample(binding.kind, binding.source_ref, binding.sha256))
+        .collect()
 }
 
 #[cfg(test)]

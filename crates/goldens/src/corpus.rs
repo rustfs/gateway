@@ -215,6 +215,13 @@ impl FamilyCorpusEvidence {
         self.cases.push(CorpusCaseEvidence::accepted(sample, variants)?);
         Ok(())
     }
+
+    pub(crate) fn source_a_registrations(&self) -> Vec<(ConfigKind, String, bool)> {
+        self.cases
+            .iter()
+            .map(|case| (case.kind, case.origin.sha256.clone(), case.disposition == CorpusDisposition::Accepted))
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -24,6 +24,7 @@ mod source_b;
 use rustfs_gateway_types::compat::{S3sTaggingObservation, parse_s3s_tagging, serialize_s3s_tagging};
 use rustfs_gateway_types::cors_tagging::{PersistedTag, PersistedTagging, parse_tagging, serialize_tagging};
 
+use crate::source_a_census::SourceARow;
 use crate::{
     ConfigKind, CorpusCaseEvidence, CorpusCoverageError, CorpusVariant, FamilyCorpusEvidence, FourWayCodec, GoldenFailure,
     GoldenSample, RejectedGoldenSample, SampleOrigin, assert_four_way,
@@ -46,6 +47,14 @@ const NEW_WRITER_TAGGING_SHA256: &str = "e1c0bf5c6e7c7ae427dcdf6e0df463397fb3844
 const NEW_WRITER_TAGGING_SOURCE: &str =
     "crates/ecstore/src/bucket/metadata_sys.rs::NEW_WRITER_CONFIGS[6] (BUCKET_TAGGING_CONFIG)";
 const NEW_WRITER_REVISION: &str = "ca46ae9e56c167998f7139f4d3cfd5914280f4aa";
+
+pub(crate) fn source_a_rows() -> Vec<SourceARow> {
+    vec![SourceARow::accepted_sample(
+        ConfigKind::Tagging,
+        NEW_WRITER_TAGGING_SOURCE,
+        NEW_WRITER_TAGGING_SHA256,
+    )]
+}
 
 type AcceptedTaggingCase = (GoldenSample<PersistedTagging>, &'static [CorpusVariant]);
 type RejectedTaggingCase = (RejectedGoldenSample, &'static [CorpusVariant]);

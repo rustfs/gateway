@@ -10,6 +10,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/corpus.rs` | Derives coverage from concrete traceable accepted/rejected samples without claiming aggregate completeness. | Wiring family-owned sample collections or changing corpus validation. |
 | `src/corpus/backup_zip.rs` | Proves old/new backup archives preserve every accepted persisted XML byte and remain readable in both migration directions. | Auditing backup import/export rollback evidence or its fail-closed archive checks. |
 | `src/source_a_boundary.rs` | Binds the four physical CORS and Lifecycle rule-cap fixtures to exact source-(a) paths, case IDs, and SHA-256 digests. | Auditing physical fixture census or rule-count boundary migration evidence. |
+| `src/source_a_census.rs` | Fails closed unless all 38 audited source-(a) references map to the exact 30 kind/digest/disposition corpus registrations and sample/alias roles. | Auditing aggregate source-(a) completeness or adding a physical RustFS fixture binding. |
 | `src/source_a_lifecycle.rs` | Registers one unique RustFS Lifecycle metadata-test literal and two exact marshal provenance aliases. | Auditing source-(a) Lifecycle byte identity or alias deduplication. |
 | `src/source_a_new_writer.rs` | Binds selected RustFS CORS and Lifecycle `NEW_WRITER_CONFIGS` bytes to exact source references and SHA-256 digests. | Auditing source-(a) new-writer rollback fixtures or their census. |
 | `src/source_b_mc.rs` | Registers official-mc CORS and Lifecycle raw exports plus a deduplicated Versioning provenance alias. | Auditing the live mc client matrix, raw metadata digests, or alias census. |
@@ -30,3 +31,4 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/logging.rs` | Binds Bucket Logging codecs, delivery behavior, traceable samples, and mutations. | Auditing access-log configuration persistence. |
 | `src/website.rs` | Binds Website codecs, routing behavior, traceable samples, and mutations. | Auditing static-website configuration persistence. |
 | `src/replication.rs` | Binds Replication codecs, runtime rule projections, traceable samples, strict nested boundaries, and D1-D5 mutations. | Auditing Replication persistence compatibility. |
+| `src/replication/source_a_census.rs` | Exposes Replication's four exact source-(a) kind, digest, disposition, and provenance rows to the union census. | Auditing Replication source-(a) completeness without loading codec tests. |

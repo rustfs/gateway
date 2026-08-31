@@ -22,6 +22,7 @@ use rustfs_gateway_types::persistence::{PersistedLifecycleConfiguration, Persist
 #[cfg(test)]
 use sha2::{Digest, Sha256};
 
+use crate::source_a_census::SourceARow;
 use crate::{AcceptedCorpusCase, ConfigKind, CorpusVariant, GoldenSample, SampleOrigin};
 
 const LIFECYCLE_XML: &[u8] = b"<LifecycleConfiguration><Rule><ID>rule1</ID><Status>Enabled</Status><Expiration><Days>30</Days></Expiration></Rule></LifecycleConfiguration>";
@@ -67,6 +68,16 @@ fn bindings() -> [SourceBinding; 3] {
             mode: BindingMode::Alias,
         },
     ]
+}
+
+pub(crate) fn source_a_rows() -> Vec<SourceARow> {
+    bindings()
+        .into_iter()
+        .map(|binding| match binding.mode {
+            BindingMode::Concrete => SourceARow::accepted_sample(ConfigKind::Lifecycle, binding.source_ref, binding.sha256),
+            BindingMode::Alias => SourceARow::accepted_alias(ConfigKind::Lifecycle, binding.source_ref, binding.sha256),
+        })
+        .collect()
 }
 
 pub(crate) fn lifecycle_case() -> AcceptedCorpusCase<PersistedLifecycleConfiguration> {
