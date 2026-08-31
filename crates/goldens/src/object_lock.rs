@@ -32,7 +32,7 @@ use crate::{
 };
 
 const EMPTY: &[u8] = b"<ObjectLockConfiguration></ObjectLockConfiguration>";
-const ENABLED_WITHOUT_RULE: &[u8] =
+pub(crate) const ENABLED_WITHOUT_RULE: &[u8] =
     b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>";
 const EMPTY_RULE: &[u8] = b"<ObjectLockConfiguration><Rule></Rule></ObjectLockConfiguration>";
 const EMPTY_DEFAULT_RETENTION: &[u8] =
@@ -67,6 +67,11 @@ fn enabled(rule: Option<PersistedDefaultRetention>) -> PersistedObjectLockConfig
 }
 
 fn sample(bytes: &[u8], value: PersistedObjectLockConfiguration, notes: &str) -> GoldenSample<PersistedObjectLockConfiguration> {
+    let notes = if bytes == ENABLED_WITHOUT_RULE {
+        format!("{notes}; {}", crate::source_a_create_defaults::object_lock_alias_note())
+    } else {
+        notes.to_owned()
+    };
     GoldenSample {
         kind: ConfigKind::ObjectLock,
         bytes: bytes.to_vec(),
@@ -77,7 +82,7 @@ fn sample(bytes: &[u8], value: PersistedObjectLockConfiguration, notes: &str) ->
             version: "s3s@9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
             sha256: hex::encode(Sha256::digest(bytes)),
         },
-        notes: notes.to_owned(),
+        notes,
     }
 }
 

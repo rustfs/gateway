@@ -32,7 +32,8 @@ const HISTORICAL: &[u8] = br#"<VersioningConfiguration xmlns="http://s3.amazonaw
 const ALL_FIELDS: &[u8] = br#"<VersioningConfiguration><ExcludeFolders>true</ExcludeFolders><ExcludedPrefixes><Prefix>a</Prefix></ExcludedPrefixes><ExcludedPrefixes><Prefix>b</Prefix></ExcludedPrefixes><MfaDelete>Disabled</MfaDelete><Status>Enabled</Status></VersioningConfiguration>"#;
 const UNKNOWN_SUSPENDED: &[u8] =
     br#"<VersioningConfiguration><FutureTopLevel>future</FutureTopLevel><Status>Suspended</Status></VersioningConfiguration>"#;
-const BODY_LITERAL_PERSISTED: &[u8] = br#"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"#;
+pub(crate) const BODY_LITERAL_PERSISTED: &[u8] =
+    br#"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"#;
 const BARE_BODY_LITERAL: &[u8] = b"Enabled";
 const EMPTY: &[u8] = br#"<VersioningConfiguration></VersioningConfiguration>"#;
 const EMPTY_STATUS: &[u8] = br#"<VersioningConfiguration><Status></Status></VersioningConfiguration>"#;
@@ -192,9 +193,10 @@ fn rejected(bytes: &[u8], notes: &str, variants: &[CorpusVariant]) -> RejectedCo
 pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfiguration> {
     let prefix = "p".repeat(1024 * 1024);
     let versioning_alias_note = format!(
-        "{}; {}",
+        "{}; {}; {}",
         crate::source_b_mc::versioning_alias_note(),
-        crate::source_b_rclone::versioning_alias_note()
+        crate::source_b_rclone::versioning_alias_note(),
+        crate::source_a_create_defaults::versioning_alias_note()
     );
     let large_bytes = format!(
         "<VersioningConfiguration><ExcludedPrefixes><Prefix>{prefix}</Prefix></ExcludedPrefixes></VersioningConfiguration>"
