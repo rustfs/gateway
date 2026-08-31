@@ -212,6 +212,17 @@ fn all_family_corpus_evidence() -> Result<Vec<FamilyCorpusEvidence>, CorpusCover
         kind,
         reason: error.to_string(),
     };
+    let versioning_sample =
+        minio_migration::versioning_sample().map_err(|error| migration_error(ConfigKind::Versioning, error))?;
+    let mut versioning = versioning::corpus_evidence().framework()?;
+    versioning.push_accepted(&versioning_sample, &[CorpusVariant::Canonical, CorpusVariant::Namespace])?;
+    let bucket_encryption_sample =
+        minio_migration::bucket_encryption_sample().map_err(|error| migration_error(ConfigKind::BucketEncryption, error))?;
+    let mut bucket_encryption = bucket_encryption::bucket_encryption_corpus_evidence()?;
+    bucket_encryption.push_accepted(&bucket_encryption_sample, &[CorpusVariant::Canonical, CorpusVariant::Namespace])?;
+    let tagging_sample = minio_migration::tagging_sample().map_err(|error| migration_error(ConfigKind::Tagging, error))?;
+    let mut tagging = tagging::corpus_evidence()?;
+    tagging.push_accepted(&tagging_sample, &[CorpusVariant::Canonical])?;
     let lifecycle_sample = minio_migration::lifecycle_sample().map_err(|error| migration_error(ConfigKind::Lifecycle, error))?;
     let mut lifecycle = lifecycle::corpus_evidence().framework()?;
     lifecycle.push_accepted(
@@ -231,14 +242,14 @@ fn all_family_corpus_evidence() -> Result<Vec<FamilyCorpusEvidence>, CorpusCover
     let mut replication = replication::replication_corpus_evidence()?;
     replication.push_accepted(&replication_sample, &[CorpusVariant::Canonical, CorpusVariant::EmptyElement])?;
     Ok(vec![
-        versioning::corpus_evidence().framework()?,
+        versioning,
         object_lock,
         lifecycle,
         cors::corpus_evidence()?,
-        tagging::corpus_evidence()?,
+        tagging,
         accelerate_payment::accelerate_corpus_evidence()?,
         accelerate_payment::request_payment_corpus_evidence()?,
-        bucket_encryption::bucket_encryption_corpus_evidence()?,
+        bucket_encryption,
         public_access_block::public_access_block_corpus_evidence()?,
         notification::notification_corpus_evidence()?,
         logging::bucket_logging_corpus_evidence()?,
