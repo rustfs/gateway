@@ -3612,6 +3612,15 @@ pub const SHADOWING: &[ShadowingDecl] = &[
         ],
     },
     ShadowingDecl {
+        winner: "GetObjectTorrent",
+        shadowed: "GetObject",
+        reason: "A torrent read is a GET to the object key plus ?torrent, and GetObject accepts every such request. GetObjectTorrent is tried first (595 before 900); the opposite order would return the object's bytes instead of the binary torrent descriptor.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTorrent.html — GetObjectTorrent is selected by the ?torrent subresource on an object GET and returns a binary torrent descriptor rather than the object body.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html — an object read is the same method and path with no upload id.",
+        ],
+    },
+    ShadowingDecl {
         winner: "UploadPartCopy",
         shadowed: "PutObjectAcl",
         reason: "PUT /b/k?partNumber&uploadId&acl with x-amz-copy-source is a part copy that also names the ACL subresource. The multipart band (400) is tried before the ACL row (560), the same order the tagging and retention writes already keep.",

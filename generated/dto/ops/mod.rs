@@ -65,6 +65,7 @@ pub mod get_object_legal_hold;
 pub mod get_object_lock_configuration;
 pub mod get_object_retention;
 pub mod get_object_tagging;
+pub mod get_object_torrent;
 pub mod get_public_access_block;
 pub mod head_bucket;
 pub mod head_object;

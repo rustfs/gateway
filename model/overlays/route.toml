@@ -226,6 +226,10 @@ summary = "a retention read is a GET to the object key carrying the ?retention s
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTagging.html"
 summary = "a tag-set read is a GET to the object key carrying the ?tagging subresource, and it answers with the tag set rather than with the object."
 
+[evidence.get-object-torrent]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectTorrent.html"
+summary = "GetObjectTorrent is selected by the ?torrent subresource on an object GET and returns a binary torrent descriptor rather than the object body."
+
 [evidence.get-public-access-block]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html"
 summary = "GetPublicAccessBlock is selected by the ?publicAccessBlock subresource alone and answers with the four stored switches."
@@ -2744,6 +2748,12 @@ winner   = "ListObjectAnnotations"
 shadowed = "GetObject"
 reason   = "An annotation listing is a GET to the object key plus ?annotation without annotationName, and GetObject accepts every such request. ListObjectAnnotations is tried first (592 before 900); the opposite order would return the parent object body instead of annotation metadata."
 evidence = ["list-object-annotations", "get-object"]
+
+[[shadowing]]
+winner   = "GetObjectTorrent"
+shadowed = "GetObject"
+reason   = "A torrent read is a GET to the object key plus ?torrent, and GetObject accepts every such request. GetObjectTorrent is tried first (595 before 900); the opposite order would return the object's bytes instead of the binary torrent descriptor."
+evidence = ["get-object-torrent", "get-object"]
 
 [[shadowing]]
 winner   = "UploadPartCopy"

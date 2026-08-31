@@ -204,6 +204,10 @@ pub use crate::ops::get_object_tagging::{
     GetObjectTagging, Input as GetObjectTaggingInput, InputBuilder as GetObjectTaggingInputBuilder,
     Output as GetObjectTaggingOutput,
 };
+pub use crate::ops::get_object_torrent::{
+    GetObjectTorrent, Input as GetObjectTorrentInput, InputBuilder as GetObjectTorrentInputBuilder,
+    Output as GetObjectTorrentOutput,
+};
 pub use crate::ops::get_public_access_block::{
     GetPublicAccessBlock, Input as GetPublicAccessBlockInput, InputBuilder as GetPublicAccessBlockInputBuilder,
     Output as GetPublicAccessBlockOutput,

@@ -113,6 +113,8 @@ GetObjectRetentionInput 5
 GetObjectRetentionOutput 1
 GetObjectTaggingInput 5
 GetObjectTaggingOutput 2
+GetObjectTorrentInput 4
+GetObjectTorrentOutput 2
 GetPublicAccessBlockInput 2
 GetPublicAccessBlockOutput 1
 GlacierJobParameters 1

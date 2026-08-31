@@ -62,6 +62,7 @@ pub(crate) static OPERATION_NAMES: &[&str] = &[
     "GetObjectLockConfiguration",
     "GetObjectRetention",
     "GetObjectTagging",
+    "GetObjectTorrent",
     "GetPublicAccessBlock",
     "HeadBucket",
     "HeadObject",

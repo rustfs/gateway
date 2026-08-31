@@ -165,6 +165,10 @@ name = "GetObjectTagging"
 cases = "c-tagging-0007,c-tagging-0023,c-tagging-0024,c-tagging-0025"
 
 [[operation]]
+name = "GetObjectTorrent"
+cases = ""
+
+[[operation]]
 name = "GetPublicAccessBlock"
 cases = "c-bucketconfig-0021,c-bucketconfig-0031,c-bucketconfig-0055"
 

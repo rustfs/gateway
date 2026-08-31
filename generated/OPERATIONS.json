@@ -536,6 +536,24 @@
                                         "error_codes": ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidArgument"],
                                         "precedence": 480
                                       },
+                  "GetObjectTorrent": {
+                                        "method": "GET",
+                                        "path_shape": "/{Bucket}/{Key+}",
+                                        "query_keys": [
+                                                        "acl",
+                                                        "annotation",
+                                                        "attributes",
+                                                        "legal-hold",
+                                                        "retention",
+                                                        "tagging",
+                                                        "torrent",
+                                                        "uploadId"
+                                                      ],
+                                        "key_headers": [],
+                                        "host_classes": [],
+                                        "error_codes": ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidRequest"],
+                                        "precedence": 595
+                                      },
                   "GetPublicAccessBlock": {
                                             "method": "GET",
                                             "path_shape": "/{Bucket}",
@@ -1163,6 +1181,7 @@
                           "GetObjectLockConfiguration",
                           "GetObjectRetention",
                           "GetObjectTagging",
+                          "GetObjectTorrent",
                           "GetPublicAccessBlock",
                           "ListBuckets",
                           "ListMultipartUploads",
@@ -1275,6 +1294,7 @@
                                            "GetObjectLegalHold",
                                            "GetObjectRetention",
                                            "GetObjectTagging",
+                                           "GetObjectTorrent",
                                            "HeadObject",
                                            "ListObjectAnnotations",
                                            "ListParts",
@@ -1302,15 +1322,26 @@
                              "GetBucketAcl",
                              "GetObjectAcl",
                              "GetObjectAnnotation",
+                             "GetObjectTorrent",
                              "ListObjectAnnotations",
                              "PutBucketAcl",
                              "PutObjectAcl"
                            ],
                     "analytics": ["CreateBucket", "DeleteBucket"],
-                    "annotation": ["DeleteObjectAnnotation", "GetObjectAnnotation", "ListObjectAnnotations"],
+                    "annotation": [
+                                    "DeleteObjectAnnotation",
+                                    "GetObjectAnnotation",
+                                    "GetObjectTorrent",
+                                    "ListObjectAnnotations"
+                                  ],
                     "annotation-prefix": ["ListObjectAnnotations"],
                     "annotationName": ["DeleteObjectAnnotation", "GetObjectAnnotation", "ListObjectAnnotations"],
-                    "attributes": ["GetObjectAnnotation", "GetObjectAttributes", "ListObjectAnnotations"],
+                    "attributes": [
+                                    "GetObjectAnnotation",
+                                    "GetObjectAttributes",
+                                    "GetObjectTorrent",
+                                    "ListObjectAnnotations"
+                                  ],
                     "bucket-region": ["ListBuckets"],
                     "continuation-token": ["ListBuckets", "ListObjectAnnotations", "ListObjectsV2"],
                     "cors": ["CreateBucket", "DeleteBucket", "DeleteBucketCors", "GetBucketCors", "PutBucketCors"],
@@ -1331,6 +1362,7 @@
                     "legal-hold": [
                                     "GetObjectAnnotation",
                                     "GetObjectLegalHold",
+                                    "GetObjectTorrent",
                                     "ListObjectAnnotations",
                                     "PutObjectLegalHold"
                                   ],
@@ -1406,6 +1438,7 @@
                     "retention": [
                                    "GetObjectAnnotation",
                                    "GetObjectRetention",
+                                   "GetObjectTorrent",
                                    "ListObjectAnnotations",
                                    "PutObjectRetention"
                                  ],
@@ -1420,15 +1453,18 @@
                                  "GetBucketTagging",
                                  "GetObjectAnnotation",
                                  "GetObjectTagging",
+                                 "GetObjectTorrent",
                                  "ListObjectAnnotations",
                                  "PutBucketTagging",
                                  "PutObjectTagging"
                                ],
+                    "torrent": ["GetObjectTorrent"],
                     "upload-id-marker": ["ListMultipartUploads"],
                     "uploadId": [
                                   "AbortMultipartUpload",
                                   "CompleteMultipartUpload",
                                   "GetObjectAnnotation",
+                                  "GetObjectTorrent",
                                   "ListObjectAnnotations",
                                   "ListParts",
                                   "UploadPart",
@@ -1517,6 +1553,7 @@
                                        "GetObjectLockConfiguration",
                                        "GetObjectRetention",
                                        "GetObjectTagging",
+                                       "GetObjectTorrent",
                                        "GetPublicAccessBlock",
                                        "HeadBucket",
                                        "HeadObject",
@@ -1643,6 +1680,7 @@
                                          "CopyObject",
                                          "CreateMultipartUpload",
                                          "DeleteObjects",
+                                         "GetObjectTorrent",
                                          "PutBucketAcl",
                                          "PutBucketCors",
                                          "PutBucketEncryption",
@@ -1733,6 +1771,7 @@
                                        "GetObjectLockConfiguration",
                                        "GetObjectRetention",
                                        "GetObjectTagging",
+                                       "GetObjectTorrent",
                                        "GetPublicAccessBlock",
                                        "HeadBucket",
                                        "HeadObject",
@@ -1780,6 +1819,7 @@
                                     "GetObjectLegalHold",
                                     "GetObjectRetention",
                                     "GetObjectTagging",
+                                    "GetObjectTorrent",
                                     "HeadObject",
                                     "ListObjectAnnotations",
                                     "PutObjectAcl",
@@ -1901,6 +1941,7 @@
                      "590": ["DeleteObjectAnnotation"],
                      "591": ["GetObjectAnnotation"],
                      "592": ["ListObjectAnnotations"],
+                     "595": ["GetObjectTorrent"],
                      "600": ["ListObjectsV2"],
                      "610": ["ListObjectVersions"],
                      "650": ["DeleteObjects"],

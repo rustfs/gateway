@@ -62,6 +62,7 @@ mod get_object_legal_hold;
 mod get_object_lock_configuration;
 mod get_object_retention;
 mod get_object_tagging;
+mod get_object_torrent;
 mod get_public_access_block;
 mod head_bucket;
 mod head_object;
