@@ -34,6 +34,7 @@ mod cors;
 mod four_way;
 mod lifecycle;
 mod logging;
+mod minio_migration;
 mod notification;
 mod object_lock;
 mod public_access_block;
@@ -207,10 +208,32 @@ pub fn build_persistence_corpus_report() -> Result<CorpusReport, CorpusCoverageE
 }
 
 fn all_family_corpus_evidence() -> Result<Vec<FamilyCorpusEvidence>, CorpusCoverageError> {
+    let migration_error = |kind: ConfigKind, error: GoldenFailure| CorpusCoverageError::InvalidEvidence {
+        kind,
+        reason: error.to_string(),
+    };
+    let lifecycle_sample = minio_migration::lifecycle_sample().map_err(|error| migration_error(ConfigKind::Lifecycle, error))?;
+    let mut lifecycle = lifecycle::corpus_evidence().framework()?;
+    lifecycle.push_accepted(
+        &lifecycle_sample,
+        &[
+            CorpusVariant::Canonical,
+            CorpusVariant::EmptyElement,
+            CorpusVariant::TimestampPrecision,
+        ],
+    )?;
+    let object_lock_sample =
+        minio_migration::object_lock_sample().map_err(|error| migration_error(ConfigKind::ObjectLock, error))?;
+    let mut object_lock = object_lock::corpus_evidence().framework()?;
+    object_lock.push_accepted(&object_lock_sample, &[CorpusVariant::Canonical])?;
+    let replication_sample =
+        minio_migration::replication_sample().map_err(|error| migration_error(ConfigKind::Replication, error))?;
+    let mut replication = replication::replication_corpus_evidence()?;
+    replication.push_accepted(&replication_sample, &[CorpusVariant::Canonical, CorpusVariant::EmptyElement])?;
     Ok(vec![
         versioning::corpus_evidence().framework()?,
-        object_lock::corpus_evidence().framework()?,
-        lifecycle::corpus_evidence().framework()?,
+        object_lock,
+        lifecycle,
         cors::corpus_evidence()?,
         tagging::corpus_evidence()?,
         accelerate_payment::accelerate_corpus_evidence()?,
@@ -220,7 +243,7 @@ fn all_family_corpus_evidence() -> Result<Vec<FamilyCorpusEvidence>, CorpusCover
         notification::notification_corpus_evidence()?,
         logging::bucket_logging_corpus_evidence()?,
         website::website_corpus_evidence()?,
-        replication::replication_corpus_evidence()?,
+        replication,
     ])
 }
 

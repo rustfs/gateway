@@ -200,6 +200,21 @@ impl FamilyCorpusEvidence {
             cases,
         }
     }
+
+    pub(crate) fn push_accepted<T>(
+        &mut self,
+        sample: &GoldenSample<T>,
+        variants: &[CorpusVariant],
+    ) -> Result<(), CorpusCoverageError> {
+        if sample.kind != self.kind {
+            return Err(CorpusCoverageError::CaseFamilyMismatch {
+                expected: self.kind,
+                found: sample.kind,
+            });
+        }
+        self.cases.push(CorpusCaseEvidence::accepted(sample, variants)?);
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

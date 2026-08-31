@@ -22,8 +22,8 @@
 use core::fmt;
 
 use crate::{
-    ConfigKind, GoldenFailure, accelerate_payment, bucket_encryption, cors, lifecycle, logging, notification, object_lock,
-    public_access_block, replication, tagging, versioning, website,
+    ConfigKind, GoldenFailure, accelerate_payment, bucket_encryption, cors, lifecycle, logging, minio_migration, notification,
+    object_lock, public_access_block, replication, tagging, versioning, website,
 };
 
 type FamilyRunner = fn() -> Result<usize, GoldenFailure>;
@@ -127,6 +127,23 @@ pub fn run_four_way_all() -> Result<FourWayRunReport, FourWayRunError> {
         let sample_count = runner().map_err(|failure| FourWayRunError { kind, failure })?;
         report.sample_count += sample_count;
         report.families.push(FourWayFamilyReport { kind, sample_count });
+    }
+    for (kind, sample_count) in minio_migration::run().map_err(|(kind, failure)| FourWayRunError { kind, failure })? {
+        let family = report
+            .families
+            .iter_mut()
+            .find(|family| family.kind == kind)
+            .ok_or_else(|| FourWayRunError {
+                kind,
+                failure: GoldenFailure {
+                    direction: crate::Direction::Input,
+                    offset: None,
+                    left: "registered aggregate family".to_owned(),
+                    right: format!("{kind:?}"),
+                },
+            })?;
+        family.sample_count += sample_count;
+        report.sample_count += sample_count;
     }
     Ok(report)
 }
