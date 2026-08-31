@@ -19,6 +19,8 @@
 //! Upstream: pinned-s3s observations and gateway persistence codecs. Downstream: the migration
 //! golden gate.
 
+mod source_b;
+
 use rustfs_gateway_types::compat::{S3sTaggingObservation, parse_s3s_tagging, serialize_s3s_tagging};
 use rustfs_gateway_types::cors_tagging::{PersistedTag, PersistedTagging, parse_tagging, serialize_tagging};
 
@@ -98,7 +100,7 @@ fn rejected(bytes: &[u8], sha256: &str, notes: &str, variants: &'static [CorpusV
 fn accepted_cases() -> Vec<AcceptedTaggingCase> {
     let large = "€".repeat(8 * 1024);
     let large_xml = format!("<Tagging><TagSet><Tag><Key>k</Key><Value>{large}</Value></Tag></TagSet></Tagging>");
-    vec![
+    let mut cases = vec![
         accepted(
             NON_ASCII.to_vec(),
             "060a0ddb322306d508dd1b5792075fb46a1859309c501eecdfd9901b649f6118",
@@ -184,11 +186,13 @@ fn accepted_cases() -> Vec<AcceptedTaggingCase> {
             "persistence-sized Unicode tag value",
             &[CorpusVariant::LargeValue, CorpusVariant::Unicode],
         ),
-    ]
+    ];
+    cases.extend(source_b::cases());
+    cases
 }
 
 fn rejected_cases() -> Vec<RejectedTaggingCase> {
-    vec![
+    let mut cases = vec![
         rejected(
             b"<Tagging></Tagging>",
             "b957e31ebd9819ec59c3e5b020a4c28f13d66fecd3e2e6191296e6598de92311",
@@ -261,7 +265,9 @@ fn rejected_cases() -> Vec<RejectedTaggingCase> {
             "invalid XML entity",
             &[CorpusVariant::MalformedDocument],
         ),
-    ]
+    ];
+    cases.extend(source_b::rejected_cases());
+    cases
 }
 
 /// Builds Tagging coverage from the same accepted and rejected cases used by the codec tests.
@@ -557,6 +563,6 @@ mod tests {
         let evidence = corpus_evidence().expect("Tagging corpus evidence is traceable");
         let report = build_corpus_report(&[ConfigKind::Tagging], &[evidence])
             .expect("Tagging concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("tagging: accepted=11 rejected=12"));
+        assert!(report.render().contains("tagging: accepted=12 rejected=13"));
     }
 }
