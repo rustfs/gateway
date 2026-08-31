@@ -209,6 +209,7 @@ fn accepted_cases() -> Vec<AcceptedCorsCase> {
         ),
     ];
     cases.extend(crate::source_a_boundary::cors_cases());
+    cases.extend(crate::source_a_new_writer::cors_cases());
     cases
 }
 
@@ -565,6 +566,6 @@ mod tests {
         let evidence = corpus_evidence().expect("CORS corpus evidence is traceable");
         let report =
             build_corpus_report(&[ConfigKind::Cors], &[evidence]).expect("CORS concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("cors: accepted=9 rejected=10"));
+        assert!(report.render().contains("cors: accepted=10 rejected=10"));
     }
 }
