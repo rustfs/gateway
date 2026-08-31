@@ -11,6 +11,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/corpus/backup_zip.rs` | Proves old/new backup archives preserve every accepted persisted XML byte and remain readable in both migration directions. | Auditing backup import/export rollback evidence or its fail-closed archive checks. |
 | `src/source_a_boundary.rs` | Binds the four physical CORS and Lifecycle rule-cap fixtures to exact source-(a) paths, case IDs, and SHA-256 digests. | Auditing physical fixture census or rule-count boundary migration evidence. |
 | `src/source_a_new_writer.rs` | Binds selected RustFS CORS and Lifecycle `NEW_WRITER_CONFIGS` bytes to exact source references and SHA-256 digests. | Auditing source-(a) new-writer rollback fixtures or their census. |
+| `src/source_b_mc.rs` | Registers official-mc CORS and Lifecycle raw exports plus a deduplicated Versioning provenance alias. | Auditing the live mc client matrix, raw metadata digests, or alias census. |
 | `src/bin/corpus-report.rs` | Validates and renders all persisted XML corpus families with fail-closed process status. | Running or changing the persistence corpus CLI. |
 | `src/bin/four-way.rs` | Executes all persisted XML samples through D1-D5 with a fail-closed process status. | Running or changing the full persistence rollback gate. |
 | `src/accelerate_payment.rs` | Binds Accelerate and Request Payment production/oracle codecs, decision projections, traceable samples, and mutations. | Auditing Accelerate or Request Payment persistence compatibility. |

@@ -191,6 +191,7 @@ fn rejected(bytes: &[u8], notes: &str, variants: &[CorpusVariant]) -> RejectedCo
 
 pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfiguration> {
     let prefix = "p".repeat(1024 * 1024);
+    let versioning_alias_note = crate::source_b_mc::versioning_alias_note();
     let large_bytes = format!(
         "<VersioningConfiguration><ExcludedPrefixes><Prefix>{prefix}</Prefix></ExcludedPrefixes></VersioningConfiguration>"
     )
@@ -290,7 +291,7 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfi
                     status: Some("Enabled".to_owned()),
                     ..PersistedVersioningConfiguration::default()
                 },
-                "pinned MinIO-compatible HTTP decoding of the bare Enabled body persists this canonical old-readable XML",
+                &versioning_alias_note,
                 &[CorpusVariant::BodyLiteral],
             ),
             accepted(
