@@ -39,6 +39,50 @@ const BOM_CRLF: &[u8] = b"\xef\xbb\xbf<ReplicationConfiguration>\r\n<Role>role</
 const UNKNOWN_ATTRIBUTE: &[u8] = br#"<ReplicationConfiguration data-version="old"><Role>role</Role><Rule><Destination><Bucket>bucket</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>"#;
 const EMPTY_DELETE_MARKER: &[u8] = b"<ReplicationConfiguration><Role>role</Role><Rule><DeleteMarkerReplication></DeleteMarkerReplication><Destination><Bucket>bucket</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>";
 const INERT_DOCTYPE: &[u8] = b"<!DOCTYPE ReplicationConfiguration><ReplicationConfiguration><Role>role</Role><Rule><Destination><Bucket>bucket</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>";
+const RUSTFS_STANDARD_STORAGE_CLASS: &[u8] = br#"
+            <ReplicationConfiguration>
+              <Role></Role>
+              <Rule>
+                <ID>console-rule</ID>
+                <Status>Enabled</Status>
+                <Priority>1</Priority>
+                <DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication>
+                <Destination>
+                  <Bucket>arn:aws:s3:::destination</Bucket>
+                  <StorageClass>STANDARD</StorageClass>
+                </Destination>
+              </Rule>
+            </ReplicationConfiguration>
+        "#;
+const RUSTFS_HISTORICAL_DESTINATION: &[u8] = br#"
+            <ReplicationConfiguration>
+              <Role></Role>
+              <Rule>
+                <ID>historical</ID>
+                <Status>Enabled</Status>
+                <Destination>
+                  <Bucket>arn:aws:s3:::destination</Bucket>
+                  <Account>123456789012</Account>
+                  <AccessControlTranslation><Owner>Destination</Owner></AccessControlTranslation>
+                  <StorageClass>STANDARD_IA</StorageClass>
+                </Destination>
+              </Rule>
+            </ReplicationConfiguration>
+        "#;
+const RUSTFS_UNKNOWN_TOP_LEVEL: &[u8] = br#"
+            <ReplicationConfiguration>
+              <Role></Role>
+              <FutureTopLevel>future</FutureTopLevel>
+              <Rule>
+                <ID>unknown</ID>
+                <Status>Enabled</Status>
+                <Destination>
+                  <Bucket>arn:aws:s3:::destination</Bucket>
+                </Destination>
+              </Rule>
+            </ReplicationConfiguration>
+        "#;
+const DUPLICATE_STORAGE_CLASS: &[u8] = b"<ReplicationConfiguration><Role></Role><Rule><Destination><Bucket>arn:aws:s3:::destination</Bucket><StorageClass>STANDARD</StorageClass><StorageClass>GLACIER</StorageClass></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>";
 
 type AcceptedReplicationCase = (GoldenSample<PersistedReplicationConfiguration>, &'static [CorpusVariant]);
 type RejectedReplicationCase = (RejectedGoldenSample, &'static [CorpusVariant]);
@@ -48,6 +92,15 @@ fn origin(sha256: &str) -> SampleOrigin {
         source: "repository replication persistence fixture".to_owned(),
         producer: "s3s pinned persistence codec".to_owned(),
         version: "9c4690d8e73fc8d184031a19b2c4539ebc77d180".to_owned(),
+        sha256: sha256.to_owned(),
+    }
+}
+
+fn rustfs_source_a_origin(test_id: &str, sha256: &str) -> SampleOrigin {
+    SampleOrigin {
+        source: format!("crates/replication/src/config.rs::{test_id}"),
+        producer: "rustfs/rustfs repository test fixture".to_owned(),
+        version: "c876df53f5097618b1817568a471cbb8b4f26ee8".to_owned(),
         sha256: sha256.to_owned(),
     }
 }
@@ -62,6 +115,28 @@ fn accepted(bytes: &[u8], sha256: &str, notes: &str, variants: &'static [CorpusV
             bytes: bytes.to_vec(),
             value,
             origin: origin(sha256),
+            notes: notes.to_owned(),
+        },
+        variants,
+    )
+}
+
+fn rustfs_source_a_accepted(
+    bytes: &[u8],
+    sha256: &str,
+    test_id: &str,
+    notes: &str,
+    variants: &'static [CorpusVariant],
+) -> AcceptedReplicationCase {
+    let value = parse_s3s_replication(bytes)
+        .expect("pinned RustFS source-(a) fixture is old-readable")
+        .structure; // Every caller passes an accepted repository fixture from the pinned revision.
+    (
+        GoldenSample {
+            kind: ConfigKind::Replication,
+            bytes: bytes.to_vec(),
+            value,
+            origin: rustfs_source_a_origin(test_id, sha256),
             notes: notes.to_owned(),
         },
         variants,
@@ -163,6 +238,27 @@ fn accepted_cases() -> Vec<AcceptedReplicationCase> {
             "role value at the required 8 KiB boundary",
             &[CorpusVariant::LargeValue],
         ),
+        rustfs_source_a_accepted(
+            RUSTFS_STANDARD_STORAGE_CLASS,
+            "2560f5c5c7d9d9c7cec7b2243e7bc8a0893c0365f6246cdec4da334c4902bfa1",
+            "explicit_standard_storage_class_is_accepted_from_wire_xml",
+            "RustFS console-shaped STANDARD destination fixture",
+            &[CorpusVariant::Canonical],
+        ),
+        rustfs_source_a_accepted(
+            RUSTFS_HISTORICAL_DESTINATION,
+            "e43422968e98588f09f159bed479bf8388293910fd13569f2c72c62699babe82",
+            "historical_destination_fields_survive_the_s3_xml_round_trip",
+            "RustFS historical destination account, owner, and storage-class fixture",
+            &[CorpusVariant::Canonical],
+        ),
+        rustfs_source_a_accepted(
+            RUSTFS_UNKNOWN_TOP_LEVEL,
+            "6255f7f096dc3ec330244406b5340f20aba3349491025e8d4f189ea158936d2d",
+            "s3_xml_parser_discards_unknown_replication_elements_before_validation",
+            "RustFS unknown top-level element fixture",
+            &[CorpusVariant::UnknownTopLevel],
+        ),
     ]
 }
 
@@ -176,6 +272,7 @@ fn rejected_cases() -> Vec<RejectedReplicationCase> {
         rejected(b"<ReplicationConfiguration><Role>one</Role><Role>two</Role><Rule><Destination><Bucket>bucket</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>", "95a14926feb8c6b654301f8ff7901864e29131dddd73f92979b3c5adb98ea6c0", "duplicate Role", &[CorpusVariant::DuplicateField]),
         rejected(b"<ReplicationConfiguration><Role>role</Role><Rule><Destination><Bucket>one</Bucket><Bucket>two</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>", "1b05fd826d04b6dde8a07d05cfec99da45ebbc3e49d1d92067b70d8b5ed99e9c", "duplicate Destination.Bucket", &[CorpusVariant::DuplicateField]),
         rejected(b"<ReplicationConfiguration><Role>role</Role><Rule><Destination><Bucket>bucket</Bucket></Destination><Status>Enabled</Status><Status>Disabled</Status></Rule></ReplicationConfiguration>", "88cf06cad3d6a96115126011b88f7725c91fbf4f1874d40dfa459e8a7d21f1bb", "duplicate Rule.Status", &[CorpusVariant::DuplicateField]),
+        rejected(DUPLICATE_STORAGE_CLASS, "d73f197c7046124569a7333fca3c35edbe123f95335636df9f9ed712e899dfd2", "duplicate Destination.StorageClass derived from the RustFS STANDARD fixture", &[CorpusVariant::DuplicateField]),
         rejected(b"<ReplicationConfiguration><Role>role</Role><Rule><Future>value</Future><Destination><Bucket>bucket</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>", "b780a8093262d85f773b3ce2f0f85cbca754abd87fa6ce5091d61116556f79a0", "unknown nested Rule child", &[CorpusVariant::UnknownNested]),
         rejected(b"<ReplicationConfiguration><Role>role</Role><Rule><Destination><Bucket>bucket</Bucket><ReplicationTime><Status>Enabled</Status></ReplicationTime></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>", "00c32f59adc4adf9d0a48e1785e5cf33c8beddf861e2d9cd6f9c1eaa6a68b070", "missing ReplicationTime.Time", &[CorpusVariant::MissingField]),
         rejected(b"<ReplicationConfiguration><Role><Future>role</Future></Role><Rule><Destination><Bucket>bucket</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>", "b3e8b6d1e9cab292b1f953bc665a61149ca74990cc208f2e3db46e2dad66140a", "unknown nested Role child", &[CorpusVariant::UnknownNested]),
@@ -438,9 +535,41 @@ mod tests {
     }
 
     #[test]
-    fn twelve_traceable_replication_samples_pass_d1_through_d5() {
+    fn fifteen_traceable_replication_samples_pass_d1_through_d5() {
         for (case, _) in accepted_cases() {
             assert_replication_four_way(&case).expect("Replication sample passes D1-D5");
+        }
+    }
+
+    #[test]
+    fn rustfs_source_a_replication_fixtures_are_registered_exactly_once() {
+        for (bytes, sha256, source) in [
+            (
+                RUSTFS_STANDARD_STORAGE_CLASS,
+                "2560f5c5c7d9d9c7cec7b2243e7bc8a0893c0365f6246cdec4da334c4902bfa1",
+                "crates/replication/src/config.rs::explicit_standard_storage_class_is_accepted_from_wire_xml",
+            ),
+            (
+                RUSTFS_HISTORICAL_DESTINATION,
+                "e43422968e98588f09f159bed479bf8388293910fd13569f2c72c62699babe82",
+                "crates/replication/src/config.rs::historical_destination_fields_survive_the_s3_xml_round_trip",
+            ),
+            (
+                RUSTFS_UNKNOWN_TOP_LEVEL,
+                "6255f7f096dc3ec330244406b5340f20aba3349491025e8d4f189ea158936d2d",
+                "crates/replication/src/config.rs::s3_xml_parser_discards_unknown_replication_elements_before_validation",
+            ),
+        ] {
+            let matches = accepted_cases()
+                .into_iter()
+                .filter(|(sample, _)| sample.origin.sha256 == sha256)
+                .collect::<Vec<_>>();
+            assert_eq!(matches.len(), 1, "{source} must have one SHA-deduplicated registration");
+            let sample = &matches[0].0;
+            assert_eq!(sample.bytes, bytes);
+            assert_eq!(sample.origin.source, source);
+            assert_eq!(sample.origin.version, "c876df53f5097618b1817568a471cbb8b4f26ee8");
+            assert_replication_four_way(sample).expect("RustFS source-(a) fixture passes D1-D5");
         }
     }
 
@@ -590,6 +719,6 @@ mod tests {
         let evidence = replication_corpus_evidence().expect("Replication corpus evidence is traceable");
         let report = crate::build_corpus_report(&[ConfigKind::Replication], &[evidence])
             .expect("Replication concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("replication: accepted=12 rejected=15"));
+        assert!(report.render().contains("replication: accepted=15 rejected=16"));
     }
 }
