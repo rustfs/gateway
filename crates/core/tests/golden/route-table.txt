@@ -58,6 +58,7 @@
   560  PutObjectAcl                             /{Bucket}/{Key+}     Method(PUT) ∧ Target(Object) ∧ QueryPresent("acl")
   570  RestoreObject                            /{Bucket}/{Key+}     Method(POST) ∧ Target(Object) ∧ QueryPresent("restore")
   580  SelectObjectContent                      /{Bucket}/{Key+}     Method(POST) ∧ Target(Object) ∧ QueryPresent("select") ∧ QueryEquals("select-type", "2")
+  590  DeleteObjectAnnotation                   /{Bucket}/{Key+}     Method(DELETE) ∧ Target(Object) ∧ QueryPresent("annotation")
   600  ListObjectsV2                            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryEquals("list-type", "2")
   610  ListObjectVersions                       /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("versions")
   650  DeleteObjects                            /{Bucket}            Method(POST) ∧ Target(Bucket) ∧ QueryPresent("delete")

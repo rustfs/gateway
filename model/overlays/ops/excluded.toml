@@ -41,7 +41,6 @@ operations = [
 [[deferred]]
 reason = "Out of scope for the gateway: object annotations, an AWS-only metadata surface with no storage-backend equivalent."
 operations = [
-  "DeleteObjectAnnotation",
   "GetObjectAnnotation",
   "ListObjectAnnotations",
   "PutObjectAnnotation",

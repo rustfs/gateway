@@ -122,6 +122,10 @@ summary = "DeleteBucketWebsite is selected by the ?website subresource on a buck
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html"
 summary = "an object delete is the same method and path with no upload id."
 
+[evidence.delete-object-annotation]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectAnnotation.html"
+summary = "DeleteObjectAnnotation permanently removes one named annotation through DELETE on an object key with ?annotation and annotationName, while leaving the object itself in place."
+
 [evidence.delete-object-tagging]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectTagging.html"
 summary = "a tag-set removal is a DELETE to the object key carrying the ?tagging subresource, and it leaves the object in place."
@@ -2482,10 +2486,28 @@ reason   = "A DELETE on an object key carrying both ?uploadId and ?tagging asks 
 evidence = ["abort-multipart-upload", "delete-object-tagging"]
 
 [[shadowing]]
+winner   = "AbortMultipartUpload"
+shadowed = "DeleteObjectAnnotation"
+reason   = "A DELETE carrying both ?uploadId and ?annotation names an in-progress upload and a committed-object annotation at once. The multipart band (430) is tried before the annotation row (590), consistently keeping uploadId-bound requests on the multipart resource."
+evidence = ["abort-multipart-upload", "delete-object-annotation"]
+
+[[shadowing]]
 winner   = "DeleteObjectTagging"
 shadowed = "DeleteObject"
 reason   = "Clearing a tag set is a DELETE to the object key plus ?tagging, and DeleteObject accepts every such request. DeleteObjectTagging is tried first (500 before 1000). The other order is the worst outcome in the table: the object itself is removed, and the 204 a successful untag answers with is indistinguishable from the 204 the delete answers with."
 evidence = ["delete-object-tagging", "delete-object"]
+
+[[shadowing]]
+winner   = "DeleteObjectTagging"
+shadowed = "DeleteObjectAnnotation"
+reason   = "A DELETE carrying both ?tagging and ?annotation names two different metadata subresources. The established tagging row (500) is tried before the annotation row (590), so admitting annotations cannot silently change the meaning of an existing tagging request."
+evidence = ["delete-object-tagging", "delete-object-annotation"]
+
+[[shadowing]]
+winner   = "DeleteObjectAnnotation"
+shadowed = "DeleteObject"
+reason   = "Removing one named annotation is a DELETE to the object key plus ?annotation and annotationName, and DeleteObject accepts every such request. DeleteObjectAnnotation is tried first (590 before 1000); the opposite order would permanently remove the object while returning the same 204 success status."
+evidence = ["delete-object-annotation", "delete-object"]
 
 [[shadowing]]
 winner   = "CopyObject"

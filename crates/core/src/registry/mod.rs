@@ -294,6 +294,7 @@ fn standard_handler_deadline_class(name: &str) -> Option<HandlerDeadlineClass> {
         | "DeleteBucketTagging"
         | "DeleteBucketWebsite"
         | "DeleteObject"
+        | "DeleteObjectAnnotation"
         | "DeleteObjectTagging"
         | "DeleteObjects"
         | "DeletePublicAccessBlock"

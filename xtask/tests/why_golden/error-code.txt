@@ -1,4 +1,4 @@
-RULE      NoSuchKey — S3 error code status=404 produced by CopyObject, DeleteObjectTagging, GetObject, GetObjectAcl, GetObjectAttributes, GetObjectLegalHold, GetObjectRetention, GetObjectTagging, HeadObject, PutObjectAcl, PutObjectLegalHold, PutObjectRetention, PutObjectTagging, RestoreObject, SelectObjectContent, UploadPartCopy
+RULE      NoSuchKey — S3 error code status=404 produced by CopyObject, DeleteObjectAnnotation, DeleteObjectTagging, GetObject, GetObjectAcl, GetObjectAttributes, GetObjectLegalHold, GetObjectRetention, GetObjectTagging, HeadObject, PutObjectAcl, PutObjectLegalHold, PutObjectRetention, PutObjectTagging, RestoreObject, SelectObjectContent, UploadPartCopy
 EVIDENCE  NONE
 CASES     c-copy-0025 — A copy source that is an ARN of another service is refused rather than read as a bucket name
           c-copy-0034 — A copy from a missing key answers NoSuchKey and from a missing bucket answers NoSuchBucket
@@ -13,6 +13,7 @@ CASES     c-copy-0025 — A copy source that is an ARN of another service is ref
           c-tagging-0024 — A ?tagging request naming a delete marker is a 405, not a NoSuchKey
 ADR       NONE
 SPEC      spec/operations/CopyObject.toml:errors
+          spec/operations/DeleteObjectAnnotation.toml:errors
           spec/operations/DeleteObjectTagging.toml:errors
           spec/operations/GetObject.toml:errors
           spec/operations/GetObjectAcl.toml:errors
@@ -29,6 +30,7 @@ SPEC      spec/operations/CopyObject.toml:errors
           spec/operations/SelectObjectContent.toml:errors
           spec/operations/UploadPartCopy.toml:errors
 RELATED   CopyObject
+          DeleteObjectAnnotation
           DeleteObjectTagging
           GetObject
           GetObjectAcl

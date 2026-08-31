@@ -46,6 +46,8 @@ DeleteBucketWebsiteInput 2
 DeleteBucketWebsiteOutput 0
 DeleteMarkerEntry 5
 DeleteMarkerReplication 1
+DeleteObjectAnnotationInput 7
+DeleteObjectAnnotationOutput 2
 DeleteObjectInput 10
 DeleteObjectOutput 3
 DeleteObjectTaggingInput 4

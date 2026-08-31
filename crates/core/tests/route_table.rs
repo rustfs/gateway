@@ -2293,3 +2293,38 @@ fn n_rename_object_does_not_claim_neighbour_controls() {
         assert_eq!(routed(&table, &Req::new(&line)), Some(expected), "{line}");
     }
 }
+
+// ── DeleteObjectAnnotation ──────────────────────────────────────────────────────────────────
+
+/// A permanent annotation deletion routes to its own operation, not the parent-object delete.
+#[test]
+fn delete_object_annotation_routes_ahead_of_delete_object() {
+    let table = generated_table();
+    assert_eq!(
+        routed(&table, &Req::new("DELETE /bucket/key?annotation&annotationName=name")),
+        Some("DeleteObjectAnnotation")
+    );
+}
+
+/// Negative controls keep plain deletion and unrelated request shapes outside the annotation row.
+#[test]
+fn n_delete_object_annotation_does_not_claim_neighbour_controls() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("DELETE /bucket/key")), Some("DeleteObject"));
+    assert_ne!(
+        routed(&table, &Req::new("GET /bucket/key?annotation&annotationName=name")),
+        Some("DeleteObjectAnnotation")
+    );
+    assert_ne!(
+        routed(&table, &Req::new("DELETE /bucket?annotation&annotationName=name")),
+        Some("DeleteObjectAnnotation")
+    );
+    assert_eq!(
+        routed(&table, &Req::new("DELETE /bucket/key?annotation&annotationName=name&uploadId=upload")),
+        Some("AbortMultipartUpload")
+    );
+    assert_eq!(
+        routed(&table, &Req::new("DELETE /bucket/key?annotation&annotationName=name&tagging")),
+        Some("DeleteObjectTagging")
+    );
+}
