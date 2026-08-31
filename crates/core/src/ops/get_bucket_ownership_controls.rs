@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! `GetBucketOwnershipControls`: retrieval of a bucket's object-ownership policy.
+//! Shares: nothing.
 //!
 //! Responsible for: the operation identity, security floor and authorization contract needed to
 //! reserve `GET /{Bucket}?ownershipControls` independently of backend registration.

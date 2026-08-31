@@ -306,6 +306,7 @@ fn standard_handler_deadline_class(name: &str) -> Option<HandlerDeadlineClass> {
         | "GetBucketLocation"
         | "GetBucketLogging"
         | "GetBucketNotificationConfiguration"
+        | "GetBucketOwnershipControls"
         | "GetBucketPolicy"
         | "GetBucketPolicyStatus"
         | "GetBucketReplication"
