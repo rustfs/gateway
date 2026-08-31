@@ -48,6 +48,8 @@ const TWO_ROOTS: &[u8] = b"<VersioningConfiguration></VersioningConfiguration><O
 const INVALID_UTF8: &[u8] = b"\xff";
 const EMPTY_INPUT: &[u8] = b"";
 const SOURCE_B_BOTO3: &[u8] = b"<VersioningConfiguration><Status>Suspended</Status></VersioningConfiguration>";
+const SOURCE_B_AWS_CLI: &[u8] =
+    b"<VersioningConfiguration><MfaDelete>Disabled</MfaDelete><Status>Enabled</Status></VersioningConfiguration>";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct VersioningBehaviorProjection {
@@ -211,6 +213,25 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfi
             AcceptedCorpusCase {
                 sample: GoldenSample {
                     kind: ConfigKind::Versioning,
+                    bytes: SOURCE_B_AWS_CLI.to_vec(),
+                    value: PersistedVersioningConfiguration {
+                        status: Some("Enabled".to_owned()),
+                        mfa_delete: Some("Disabled".to_owned()),
+                        ..PersistedVersioningConfiguration::default()
+                    },
+                    origin: SampleOrigin {
+                        source: "Source-(b) live aws-cli client matrix capture".to_owned(),
+                        producer: "aws-cli 1.44.87 against disposable RustFS; rustfs-cli raw export".to_owned(),
+                        version: "botocore@1.42.97; rustfs-server@sha256:1174803fcd0051a4a008fdaaed29fc7e8e7e16b07abdf8108553a439523e998a; rustfs-cli@c876df53f5097618b1817568a471cbb8b4f26ee8".to_owned(),
+                        sha256: "3e66b6af86286aedfc0ed134ee7dea730dd91ce0b7095bcb53856877552f6ea4".to_owned(),
+                    },
+                    notes: "byte-exact Versioning XML persisted after an aws-cli put-bucket-versioning request".to_owned(),
+                },
+                variants: vec![CorpusVariant::Canonical],
+            },
+            AcceptedCorpusCase {
+                sample: GoldenSample {
+                    kind: ConfigKind::Versioning,
                     bytes: SOURCE_B_BOTO3.to_vec(),
                     value: PersistedVersioningConfiguration {
                         status: Some("Suspended".to_owned()),
@@ -328,6 +349,11 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfi
                 "source-(b) Suspended capture with a mismatched root close",
                 &[CorpusVariant::BodyLiteral],
             ),
+            rejected(
+                b"<VersioningConfiguration><MfaDelete>Disabled</MfaDelete><Status>Enabled</Status>",
+                "source-(b) aws-cli capture with a missing root close",
+                &[CorpusVariant::BodyLiteral],
+            ),
         ],
     }
 }
@@ -369,11 +395,23 @@ mod tests {
         let sample = corpus_evidence()
             .accepted
             .into_iter()
-            .find(|case| case.sample.origin.source.starts_with("Source-(b)"))
+            .find(|case| case.sample.origin.producer.starts_with("boto3"))
             .expect("the live boto3 Versioning capture is registered")
             .sample;
         assert_eq!(sample.origin.sha256, "7ecd6025d6e250b27b84aed6bc0df05b96726bce8df5b0a1ab57e9889ce8fe29");
         assert_eq!(sample.bytes.len(), 77);
+    }
+
+    #[test]
+    fn source_b_aws_cli_versioning_capture_is_registered() {
+        let sample = corpus_evidence()
+            .accepted
+            .into_iter()
+            .find(|case| case.sample.origin.producer.starts_with("aws-cli"))
+            .expect("the live aws-cli Versioning capture is registered")
+            .sample;
+        assert_eq!(sample.origin.sha256, "3e66b6af86286aedfc0ed134ee7dea730dd91ce0b7095bcb53856877552f6ea4");
+        assert_eq!(sample.bytes.len(), 106);
     }
 
     #[test]
