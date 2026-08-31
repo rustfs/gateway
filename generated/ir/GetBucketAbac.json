@@ -1,0 +1,97 @@
+{
+  "ir_version": "2",
+  "operation": "GetBucketAbac",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 276,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "abac" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:GetBucketAbac", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 4096 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "AbacStatus",
+                            "wire_name": null,
+                            "required": false,
+                            "binding": { "kind": "Payload" },
+                            "type": { "kind": "Structure", "shape": "AbacStatus" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "AbacStatus": {
+                              "kind": "Structure",
+                              "fields": [
+                                          {
+                                            "name": "Status",
+                                            "wire_name": "Status",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          }
+                                        ],
+                              "xml": {
+                                       "element_order": ["Status"],
+                                       "empty_value_policy": { "Status": "emit" },
+                                       "attributes": []
+                                     }
+                            }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["NoSuchBucket", "AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [],
+  "quirks": [],
+  "ext_points": []
+}

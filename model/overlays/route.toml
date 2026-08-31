@@ -242,6 +242,10 @@ summary = "GetBucketIntelligentTieringConfiguration is a bucket GET selected by 
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketIntelligentTieringConfigurations.html"
 summary = "ListBucketIntelligentTieringConfigurations is a bucket GET selected by bare ?intelligent-tiering and returns policy documents rather than an object listing."
 
+[evidence.get-bucket-abac]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html"
+summary = "GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys."
+
 [evidence.get-public-access-block]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html"
 summary = "GetPublicAccessBlock is selected by the ?publicAccessBlock subresource alone and answers with the four stored switches."
@@ -3126,6 +3130,150 @@ winner = "ListBucketIntelligentTieringConfigurations"
 shadowed = "ListObjects"
 reason = "ListObjects pins no query key, so every intelligent-tiering configuration list request satisfies it too. The subresource row wins at 273 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
 evidence = ["list-bucket-intelligent-tiering-configurations", "list-objects"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "get-bucket-location"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "list-objects-v2"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "list-object-versions"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so every ABAC status request satisfies it too. The subresource row wins at 276 before the listing fallback at 700; the reverse order exposes object keys under the wrong access-control contract."
+evidence = ["get-bucket-abac", "list-objects"]
 
 
 [[shadowing]]

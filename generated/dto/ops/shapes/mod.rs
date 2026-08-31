@@ -23,6 +23,7 @@
 //! are written — those live in `spec/operations/<Op>.toml`.
 //! Upstream: `cargo xtask codegen`. Downstream: the generated dto and its codecs.
 
+mod abac_status;
 mod abort_incomplete_multipart_upload;
 mod accelerate_configuration;
 mod access_control_policy;
@@ -133,6 +134,7 @@ mod transition;
 mod versioning_configuration;
 mod website_configuration;
 
+pub use self::abac_status::AbacStatus;
 pub use self::abort_incomplete_multipart_upload::AbortIncompleteMultipartUpload;
 pub use self::accelerate_configuration::AccelerateConfiguration;
 pub use self::access_control_policy::AccessControlPolicy;

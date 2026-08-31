@@ -24,6 +24,7 @@
   270  GetBucketOwnershipControls               /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("ownershipControls")
   272  GetBucketIntelligentTieringConfiguration /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("intelligent-tiering") ∧ QueryPresent("id")
   273  ListBucketIntelligentTieringConfigurations /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("intelligent-tiering")
+  276  GetBucketAbac                            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("abac")
   300  GetBucketLocation                        /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("location")
   310  GetBucketCors                            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("cors")
   320  PutBucketCors                            /{Bucket}            Method(PUT) ∧ Target(Bucket) ∧ QueryPresent("cors")

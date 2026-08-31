@@ -73,6 +73,10 @@ name = "DeletePublicAccessBlock"
 cases = "c-bucketconfig-0022,c-bucketconfig-0034"
 
 [[operation]]
+name = "GetBucketAbac"
+cases = ""
+
+[[operation]]
 name = "GetBucketAccelerateConfiguration"
 cases = "c-bucketconfig-0005,c-bucketconfig-0025"
 

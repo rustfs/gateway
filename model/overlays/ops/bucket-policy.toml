@@ -44,6 +44,7 @@
 include = [
   "DeleteBucketPolicy",
   "DeletePublicAccessBlock",
+  "GetBucketAbac",
   "GetBucketPolicy",
   "GetBucketPolicyStatus",
   "GetPublicAccessBlock",
@@ -196,6 +197,21 @@ output_hot = []
 quirk_refs = ["q-pab-0003"]
 
 # =============================================================================================
+# GetBucketAbac
+#
+# The one status switch for attribute-based bucket access control. It is a general-purpose bucket
+# read and must not fall through to the object listing route when no handler is registered.
+# =============================================================================================
+[op.GetBucketAbac]
+precedence = 276
+auth_action = "s3:GetBucketAbac"
+response_max_bytes = 4096
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = []
+output_hot = ["AbacStatus"]
+
+# =============================================================================================
 # Nested shapes owned by this family
 # =============================================================================================
 
@@ -210,8 +226,5 @@ element_order = ["BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "Re
 element_order = ["IsPublic"]
 
 [[deferred]]
-reason = "The ?abac attribute-based access-control pair is a RustFS extension outside the AWS surface this family codifies; it needs its own evidence and its own review."
-operations = [
-  "GetBucketAbac",
-  "PutBucketAbac",
-]
+reason = "The ?abac write changes the access-control mode and remains deferred for its own validation and migration review; routing the read does not define or weaken that write contract."
+operations = ["PutBucketAbac"]

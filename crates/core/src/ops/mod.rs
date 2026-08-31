@@ -56,6 +56,7 @@ pub mod delete_object_annotation;
 pub mod delete_object_tagging;
 pub mod delete_objects;
 pub mod delete_public_access_block;
+pub mod get_bucket_abac;
 pub mod get_bucket_accelerate_configuration;
 pub mod get_bucket_acl;
 pub mod get_bucket_cors;

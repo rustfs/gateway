@@ -39,6 +39,7 @@ mod delete_object_annotation;
 mod delete_object_tagging;
 mod delete_objects;
 mod delete_public_access_block;
+mod get_bucket_abac;
 mod get_bucket_accelerate_configuration;
 mod get_bucket_acl;
 mod get_bucket_cors;
