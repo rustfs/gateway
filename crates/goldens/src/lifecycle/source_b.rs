@@ -14,7 +14,7 @@
 
 //! Live source-(b) Lifecycle persistence sample.
 //!
-//! Responsible for: registering the byte-exact boto3-to-RustFS raw export and its provenance.
+//! Responsible for: registering byte-exact boto3, aws-cli, and official-mc raw exports and provenance.
 //! NOT responsible for: HTTP request construction, offline export, or Lifecycle codec behavior.
 //! Upstream: disposable RustFS capture and `rustfs-cli` raw export. Downstream: Lifecycle D1-D5 corpus.
 
@@ -105,8 +105,8 @@ fn aws_cli_case() -> AcceptedCorpusCase<PersistedLifecycleConfiguration> {
     }
 }
 
-pub(super) fn cases() -> [AcceptedCorpusCase<PersistedLifecycleConfiguration>; 2] {
-    [boto3_case(), aws_cli_case()]
+pub(super) fn cases() -> Vec<AcceptedCorpusCase<PersistedLifecycleConfiguration>> {
+    vec![boto3_case(), aws_cli_case(), crate::source_b_mc::lifecycle_case()]
 }
 
 #[cfg(test)]

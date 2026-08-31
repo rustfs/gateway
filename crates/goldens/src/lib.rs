@@ -41,6 +41,7 @@ mod public_access_block;
 mod replication;
 mod source_a_boundary;
 mod source_a_new_writer;
+mod source_b_mc;
 mod tagging;
 mod versioning;
 mod website;
