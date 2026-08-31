@@ -648,6 +648,7 @@ gateway_modules = (
     "governor_streaming",
     "handler_panic",
     "ingest_assembly",
+    "lifecycle_reachability",
     "middleware",
     "monomorphic",
     "naming_policy",
