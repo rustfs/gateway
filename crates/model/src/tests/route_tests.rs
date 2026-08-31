@@ -270,7 +270,7 @@ fn n_refuses_a_pair_naming_an_operation_no_family_includes() {
         one(&format!(
             "winner = \"Alpha\"\nshadowed = \"Gamma\"\nreason = \"{REASON}\"\nevidence = [\"alpha\", \"beta\"]\n"
         )),
-        "and no family `include`s it",
+        "and no family includes it or marks it route-only",
     );
 }
 

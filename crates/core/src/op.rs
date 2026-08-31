@@ -221,6 +221,21 @@ pub fn standard_operation_names() -> Vec<&'static str> {
     names
 }
 
+/// Every AWS operation for which this build generated a handler registration surface.
+///
+/// Route-only rows remain in [`standard_operation_names`] so a third party cannot claim an AWS
+/// name, but they are absent here because no truthful input/output type or codec exists to handle.
+pub(crate) fn standard_handler_operation_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = ROUTES
+        .iter()
+        .filter(|row| row.handler_registration)
+        .map(|row| row.operation)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
 /// Whether a name is one of the AWS operation names in the generated route table.
 #[must_use]
 pub fn is_standard_operation_name(name: &str) -> bool {

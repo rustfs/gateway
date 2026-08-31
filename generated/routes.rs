@@ -21,6 +21,7 @@
 pub const ROUTES: &[RouteRow] = &[
     RouteRow {
         operation: "ListBuckets",
+        handler_registration: true,
         precedence: 100,
         method: "GET",
         target: "Service",
@@ -34,6 +35,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketAccelerateConfiguration",
+        handler_registration: true,
         precedence: 200,
         method: "GET",
         target: "Bucket",
@@ -48,6 +50,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketAccelerateConfiguration",
+        handler_registration: true,
         precedence: 201,
         method: "PUT",
         target: "Bucket",
@@ -62,6 +65,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketLogging",
+        handler_registration: true,
         precedence: 205,
         method: "GET",
         target: "Bucket",
@@ -76,6 +80,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketLogging",
+        handler_registration: true,
         precedence: 206,
         method: "PUT",
         target: "Bucket",
@@ -90,6 +95,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketNotificationConfiguration",
+        handler_registration: true,
         precedence: 210,
         method: "GET",
         target: "Bucket",
@@ -104,6 +110,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketNotificationConfiguration",
+        handler_registration: true,
         precedence: 211,
         method: "PUT",
         target: "Bucket",
@@ -118,6 +125,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketPolicy",
+        handler_registration: true,
         precedence: 215,
         method: "GET",
         target: "Bucket",
@@ -132,6 +140,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketPolicy",
+        handler_registration: true,
         precedence: 216,
         method: "PUT",
         target: "Bucket",
@@ -146,6 +155,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteBucketPolicy",
+        handler_registration: true,
         precedence: 217,
         method: "DELETE",
         target: "Bucket",
@@ -160,6 +170,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketPolicyStatus",
+        handler_registration: true,
         precedence: 220,
         method: "GET",
         target: "Bucket",
@@ -174,6 +185,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetPublicAccessBlock",
+        handler_registration: true,
         precedence: 225,
         method: "GET",
         target: "Bucket",
@@ -188,6 +200,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutPublicAccessBlock",
+        handler_registration: true,
         precedence: 226,
         method: "PUT",
         target: "Bucket",
@@ -202,6 +215,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeletePublicAccessBlock",
+        handler_registration: true,
         precedence: 227,
         method: "DELETE",
         target: "Bucket",
@@ -216,6 +230,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketRequestPayment",
+        handler_registration: true,
         precedence: 230,
         method: "GET",
         target: "Bucket",
@@ -230,6 +245,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketRequestPayment",
+        handler_registration: true,
         precedence: 231,
         method: "PUT",
         target: "Bucket",
@@ -244,6 +260,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketVersioning",
+        handler_registration: true,
         precedence: 235,
         method: "GET",
         target: "Bucket",
@@ -258,6 +275,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketVersioning",
+        handler_registration: true,
         precedence: 236,
         method: "PUT",
         target: "Bucket",
@@ -272,6 +290,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketWebsite",
+        handler_registration: true,
         precedence: 240,
         method: "GET",
         target: "Bucket",
@@ -286,6 +305,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketWebsite",
+        handler_registration: true,
         precedence: 241,
         method: "PUT",
         target: "Bucket",
@@ -300,6 +320,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteBucketWebsite",
+        handler_registration: true,
         precedence: 242,
         method: "DELETE",
         target: "Bucket",
@@ -314,6 +335,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketAcl",
+        handler_registration: true,
         precedence: 250,
         method: "GET",
         target: "Bucket",
@@ -328,6 +350,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketAcl",
+        handler_registration: true,
         precedence: 260,
         method: "PUT",
         target: "Bucket",
@@ -342,6 +365,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketOwnershipControls",
+        handler_registration: true,
         precedence: 270,
         method: "GET",
         target: "Bucket",
@@ -356,6 +380,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketIntelligentTieringConfiguration",
+        handler_registration: true,
         precedence: 272,
         method: "GET",
         target: "Bucket",
@@ -371,6 +396,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "ListBucketIntelligentTieringConfigurations",
+        handler_registration: true,
         precedence: 273,
         method: "GET",
         target: "Bucket",
@@ -385,6 +411,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketAbac",
+        handler_registration: true,
         precedence: 276,
         method: "GET",
         target: "Bucket",
@@ -399,6 +426,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketInventoryConfiguration",
+        handler_registration: true,
         precedence: 277,
         method: "GET",
         target: "Bucket",
@@ -414,6 +442,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "ListBucketInventoryConfigurations",
+        handler_registration: true,
         precedence: 278,
         method: "GET",
         target: "Bucket",
@@ -427,7 +456,23 @@ pub const ROUTES: &[RouteRow] = &[
         ],
     },
     RouteRow {
+        operation: "CreateSession",
+        handler_registration: false,
+        precedence: 279,
+        method: "GET",
+        target: "Bucket",
+        path_shape: "/{Bucket}",
+        success_status: 200,
+        not_configured: None,
+        predicates: &[
+            RoutePredicate::Method("GET"),
+            RoutePredicate::Target("Bucket"),
+            RoutePredicate::QueryPresent("session"),
+        ],
+    },
+    RouteRow {
         operation: "GetBucketLocation",
+        handler_registration: true,
         precedence: 300,
         method: "GET",
         target: "Bucket",
@@ -442,6 +487,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketCors",
+        handler_registration: true,
         precedence: 310,
         method: "GET",
         target: "Bucket",
@@ -456,6 +502,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketCors",
+        handler_registration: true,
         precedence: 320,
         method: "PUT",
         target: "Bucket",
@@ -470,6 +517,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteBucketCors",
+        handler_registration: true,
         precedence: 330,
         method: "DELETE",
         target: "Bucket",
@@ -484,6 +532,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketTagging",
+        handler_registration: true,
         precedence: 340,
         method: "GET",
         target: "Bucket",
@@ -498,6 +547,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketTagging",
+        handler_registration: true,
         precedence: 350,
         method: "PUT",
         target: "Bucket",
@@ -512,6 +562,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteBucketTagging",
+        handler_registration: true,
         precedence: 360,
         method: "DELETE",
         target: "Bucket",
@@ -526,6 +577,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketLifecycleConfiguration",
+        handler_registration: true,
         precedence: 370,
         method: "GET",
         target: "Bucket",
@@ -540,6 +592,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketLifecycleConfiguration",
+        handler_registration: true,
         precedence: 380,
         method: "PUT",
         target: "Bucket",
@@ -554,6 +607,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteBucketLifecycle",
+        handler_registration: true,
         precedence: 390,
         method: "DELETE",
         target: "Bucket",
@@ -568,6 +622,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketEncryption",
+        handler_registration: true,
         precedence: 391,
         method: "GET",
         target: "Bucket",
@@ -582,6 +637,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketEncryption",
+        handler_registration: true,
         precedence: 392,
         method: "PUT",
         target: "Bucket",
@@ -596,6 +652,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteBucketEncryption",
+        handler_registration: true,
         precedence: 393,
         method: "DELETE",
         target: "Bucket",
@@ -610,6 +667,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetBucketReplication",
+        handler_registration: true,
         precedence: 394,
         method: "GET",
         target: "Bucket",
@@ -624,6 +682,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutBucketReplication",
+        handler_registration: true,
         precedence: 395,
         method: "PUT",
         target: "Bucket",
@@ -638,6 +697,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteBucketReplication",
+        handler_registration: true,
         precedence: 396,
         method: "DELETE",
         target: "Bucket",
@@ -652,6 +712,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetObjectLockConfiguration",
+        handler_registration: true,
         precedence: 397,
         method: "GET",
         target: "Bucket",
@@ -666,6 +727,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutObjectLockConfiguration",
+        handler_registration: true,
         precedence: 398,
         method: "PUT",
         target: "Bucket",
@@ -680,6 +742,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "UploadPartCopy",
+        handler_registration: true,
         precedence: 400,
         method: "PUT",
         target: "Object",
@@ -696,6 +759,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "UploadPart",
+        handler_registration: true,
         precedence: 410,
         method: "PUT",
         target: "Object",
@@ -711,6 +775,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "CompleteMultipartUpload",
+        handler_registration: true,
         precedence: 420,
         method: "POST",
         target: "Object",
@@ -725,6 +790,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "AbortMultipartUpload",
+        handler_registration: true,
         precedence: 430,
         method: "DELETE",
         target: "Object",
@@ -739,6 +805,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "ListParts",
+        handler_registration: true,
         precedence: 440,
         method: "GET",
         target: "Object",
@@ -753,6 +820,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "CreateMultipartUpload",
+        handler_registration: true,
         precedence: 450,
         method: "POST",
         target: "Object",
@@ -767,6 +835,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "ListMultipartUploads",
+        handler_registration: true,
         precedence: 460,
         method: "GET",
         target: "Bucket",
@@ -781,6 +850,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetObjectAttributes",
+        handler_registration: true,
         precedence: 470,
         method: "GET",
         target: "Object",
@@ -795,6 +865,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetObjectTagging",
+        handler_registration: true,
         precedence: 480,
         method: "GET",
         target: "Object",
@@ -809,6 +880,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutObjectTagging",
+        handler_registration: true,
         precedence: 490,
         method: "PUT",
         target: "Object",
@@ -823,6 +895,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteObjectTagging",
+        handler_registration: true,
         precedence: 500,
         method: "DELETE",
         target: "Object",
@@ -837,6 +910,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetObjectRetention",
+        handler_registration: true,
         precedence: 510,
         method: "GET",
         target: "Object",
@@ -851,6 +925,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutObjectRetention",
+        handler_registration: true,
         precedence: 520,
         method: "PUT",
         target: "Object",
@@ -865,6 +940,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetObjectLegalHold",
+        handler_registration: true,
         precedence: 530,
         method: "GET",
         target: "Object",
@@ -879,6 +955,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutObjectLegalHold",
+        handler_registration: true,
         precedence: 540,
         method: "PUT",
         target: "Object",
@@ -893,6 +970,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetObjectAcl",
+        handler_registration: true,
         precedence: 550,
         method: "GET",
         target: "Object",
@@ -907,6 +985,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutObjectAcl",
+        handler_registration: true,
         precedence: 560,
         method: "PUT",
         target: "Object",
@@ -921,6 +1000,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "RestoreObject",
+        handler_registration: true,
         precedence: 570,
         method: "POST",
         target: "Object",
@@ -935,6 +1015,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "SelectObjectContent",
+        handler_registration: true,
         precedence: 580,
         method: "POST",
         target: "Object",
@@ -950,6 +1031,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteObjectAnnotation",
+        handler_registration: true,
         precedence: 590,
         method: "DELETE",
         target: "Object",
@@ -964,6 +1046,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetObjectAnnotation",
+        handler_registration: true,
         precedence: 591,
         method: "GET",
         target: "Object",
@@ -985,6 +1068,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "ListObjectAnnotations",
+        handler_registration: true,
         precedence: 592,
         method: "GET",
         target: "Object",
@@ -1006,6 +1090,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetObjectTorrent",
+        handler_registration: true,
         precedence: 595,
         method: "GET",
         target: "Object",
@@ -1027,6 +1112,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "ListObjectsV2",
+        handler_registration: true,
         precedence: 600,
         method: "GET",
         target: "Bucket",
@@ -1041,6 +1127,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "ListObjectVersions",
+        handler_registration: true,
         precedence: 610,
         method: "GET",
         target: "Bucket",
@@ -1055,6 +1142,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteObjects",
+        handler_registration: true,
         precedence: 650,
         method: "POST",
         target: "Bucket",
@@ -1069,6 +1157,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "ListObjects",
+        handler_registration: true,
         precedence: 700,
         method: "GET",
         target: "Bucket",
@@ -1082,6 +1171,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "CreateBucket",
+        handler_registration: true,
         precedence: 710,
         method: "PUT",
         target: "Bucket",
@@ -1119,6 +1209,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteBucket",
+        handler_registration: true,
         precedence: 720,
         method: "DELETE",
         target: "Bucket",
@@ -1147,6 +1238,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "HeadBucket",
+        handler_registration: true,
         precedence: 730,
         method: "HEAD",
         target: "Bucket",
@@ -1160,6 +1252,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "RenameObject",
+        handler_registration: true,
         precedence: 780,
         method: "PUT",
         target: "Object",
@@ -1174,6 +1267,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "CopyObject",
+        handler_registration: true,
         precedence: 790,
         method: "PUT",
         target: "Object",
@@ -1188,6 +1282,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "PutObject",
+        handler_registration: true,
         precedence: 800,
         method: "PUT",
         target: "Object",
@@ -1201,6 +1296,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "GetObject",
+        handler_registration: true,
         precedence: 900,
         method: "GET",
         target: "Object",
@@ -1214,6 +1310,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "HeadObject",
+        handler_registration: true,
         precedence: 950,
         method: "HEAD",
         target: "Object",
@@ -1227,6 +1324,7 @@ pub const ROUTES: &[RouteRow] = &[
     },
     RouteRow {
         operation: "DeleteObject",
+        handler_registration: true,
         precedence: 1000,
         method: "DELETE",
         target: "Object",

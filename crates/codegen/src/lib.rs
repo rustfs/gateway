@@ -310,13 +310,16 @@ pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[
     }
     files.push((
         out.operations_md.clone(),
-        emit::operations_md::render(&lowered.operations, &lowered.deferred),
+        emit::operations_md::render(&lowered.operations, &lowered.route_only, &overlay.route_only, &lowered.deferred),
     ));
     files.push((
         out.generated_dir.join("OPERATIONS.json"),
         emit::operations_json::render(&lowered.operations),
     ));
-    files.push((out.generated_dir.join("routes.rs"), emit::rust_files::routes(&lowered.operations)));
+    files.push((
+        out.generated_dir.join("routes.rs"),
+        emit::rust_files::routes(&lowered.operations, &lowered.route_only),
+    ));
     files.push((
         out.generated_dir.join("subresource_bits.rs"),
         emit::rust_files::subresource_bits(&lowered.routing_query_keys).map_err(Error::Policy)?,

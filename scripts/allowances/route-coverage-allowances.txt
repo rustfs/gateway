@@ -6,7 +6,6 @@
 # progress; a line that appears is a new exposure.
 #
 # Regenerate: GATEWAY_WRITE_ROUTE_ALLOWANCES=1 scripts/check_route_coverage.sh
-CreateSession -> ListObjects
 GetBucketAnalyticsConfiguration -> ListObjects
 GetBucketMetadataConfiguration -> ListObjects
 GetBucketMetadataTableConfiguration -> ListObjects

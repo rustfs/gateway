@@ -10396,10 +10396,14 @@ mut_sig_p2_04_dry_run_route_inventory_removed() {
 from pathlib import Path
 path = Path("xtask/src/security_posture.rs")
 text = path.read_text()
-old = '    let routed: BTreeSet<_> = rustfs_gateway_core::standard_operation_names()'
+old = '''    let routed: BTreeSet<_> = rustfs_gateway_core::route::ROUTES
+        .iter()
+        .filter(|row| row.handler_registration)
+        .map(|row| row.operation.to_owned())
+        .collect();'''
 if text.count(old) != 1:
     raise SystemExit("missing dry-run route-inventory mutation subject")
-new = '    // let routed: BTreeSet<_> = rustfs_gateway_core::standard_operation_names()\n    let routed: BTreeSet<_> = Vec::<&str>::new()'
+new = '    let routed: BTreeSet<String> = BTreeSet::new();'
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
@@ -10407,6 +10411,22 @@ expect_fail check_sig_case_coverage.sh \
     'dry-run replacing the route-table inventory with an empty proxy' \
     mut_sig_p2_04_dry_run_route_inventory_removed \
     'check_sig_case_coverage: dry-run does not join real floors to the route-table inventory'
+
+mut_sig_p2_04_dry_run_handler_filter_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '        .filter(|row| row.handler_registration)'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run handler-filter mutation subject")
+path.write_text(text.replace(old, '        .filter(|_| true)', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dry-run including route-only operations in the handler inventory' \
+    mut_sig_p2_04_dry_run_handler_filter_removed \
+    'check_sig_case_coverage: dry-run does not exclude route-only operations from the handler inventory'
 
 mut_sig_p2_04_dry_run_inventory_check_removed() {
     python3 - <<'PYEOF'

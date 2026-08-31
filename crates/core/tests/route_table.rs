@@ -14,13 +14,10 @@
 
 //! The ordered table: what it routes, and everything it refuses to be built from.
 //!
-//! Responsible for: the route cases — sixteen positive, forty-three negative — including the one
-//! that falsifies a fake overlap check, the three blocks that pin an operation the protocol
-//! defines and this build does not serve to its own row rather than to its neighbour's
-//! (`?attributes`, the three-method object `?tagging` band whose absence was a write and a delete
-//! of the object, and the bucket `?tagging` band whose GET was answered by `ListObjects` with a
-//! page of keys), and the bucket lifecycle band whose selectors pin every subresource key absent
-//! so a configuration request can never create or delete a bucket.
+//! Responsible for: route cases including the mutation control that falsifies a fake overlap
+//! check; operation rows that prevent `?attributes`, object and bucket `?tagging` requests from
+//! reaching their body-serving neighbours; and lifecycle selectors that prevent configuration
+//! requests from creating or deleting buckets.
 //! NOT responsible for: parameter validation (`params_and_dispatch.rs`), the compiled form
 //! (`hot_path.rs`), the golden rendering (`golden.rs`).
 //! Upstream: `support`. Downstream: nothing.
@@ -2006,6 +2003,7 @@ fn a_generated_row_whose_method_contradicts_its_predicate_is_refused() {
 
     let row = RouteRow {
         operation: "Confused",
+        handler_registration: true,
         precedence: 800,
         method: "GET",
         target: "Object",
@@ -2025,6 +2023,7 @@ fn a_generated_row_with_an_unknown_method_is_refused() {
 
     let row = RouteRow {
         operation: "Brew",
+        handler_registration: true,
         precedence: 800,
         method: "BREW",
         target: "Object",

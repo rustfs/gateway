@@ -48,7 +48,7 @@ fn rendered_shape_line(shape: Shape) -> String {
         .expect("the pinned model generates operations");
     ir.shapes = BTreeMap::from([("Sample".to_owned(), shape)]);
 
-    let rendered = operations_md::render(&[ir], &BTreeMap::new());
+    let rendered = operations_md::render(&[ir], &[], &BTreeMap::new(), &BTreeMap::new());
     rendered
         .lines()
         .find(|line| line.starts_with("- `Sample`"))

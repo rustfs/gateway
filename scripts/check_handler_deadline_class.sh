@@ -440,14 +440,14 @@ for path in sorted((root / "crates").rglob("*.rs")):
                 fail(f"explicit OperationSpec builder does not use Standard: {relative}")
             explicit_builders += 1
 
-if central_builders != 90 or explicit_builders != 26:
+if central_builders != 91 or explicit_builders != 26:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=90 explicit=26"
+        f"central={central_builders} explicit={explicit_builders}, expected central=91 explicit=26"
     )
 
 print(
-    "check_handler_deadline_class: 121 repository builder sites are inventoried "
-    "(116 classified: 90 central standard, 26 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 122 repository builder sites are inventoried "
+    "(117 classified: 91 central standard, 26 explicit; 5 authority tests)"
 )
 PY

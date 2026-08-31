@@ -16,7 +16,7 @@
 //!
 //! Responsible for: deriving the dry-run report from the real standard operation-floor sources.
 //! NOT responsible for: observing a configured service; the runtime startup report owns that.
-//! Upstream: core operation modules and the generated route-table operation names. Downstream:
+//! Upstream: core operation modules and generated handler-registration route rows. Downstream:
 //! release and deployment checks that inspect the standard, uncustomized posture.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -54,9 +54,10 @@ fn repository_root() -> PathBuf {
 
 fn dry_run(root: PathBuf) -> Result<String, String> {
     let floors = parse_standard_floors(&root.join("crates/core/src/ops"))?;
-    let routed: BTreeSet<_> = rustfs_gateway_core::standard_operation_names()
-        .into_iter()
-        .map(str::to_owned)
+    let routed: BTreeSet<_> = rustfs_gateway_core::route::ROUTES
+        .iter()
+        .filter(|row| row.handler_registration)
+        .map(|row| row.operation.to_owned())
         .collect();
     let parsed: BTreeSet<_> = floors.keys().cloned().collect();
     if parsed != routed {

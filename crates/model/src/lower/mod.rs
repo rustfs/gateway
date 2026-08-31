@@ -32,8 +32,12 @@ use crate::json::Value;
 use crate::overlay::{AttributeOverlay, FieldOverlay, OpOverlay, Overlay, ShapeOverlay, Side};
 use crate::smithy::{Model, has_trait, local_name, target_of, trait_of};
 
+mod route_only;
 mod routing_query;
 mod support;
+
+pub use route_only::RouteOnly;
+use route_only::lower_http;
 
 use support::{
     Uri, body_members, default_of, empty_value_policy, error_codes, model_request_algorithms, omit_when_of, parse_binding,
@@ -53,6 +57,8 @@ const UNIT_SHAPE: &str = "smithy.api#Unit";
 pub struct Lowered {
     /// One IR per included operation, ordered by operation name.
     pub operations: Vec<OperationIr>,
+    /// Protocol-known routes that deliberately have no generated DTO or codec surface.
+    pub route_only: Vec<RouteOnly>,
     /// Operations deliberately not generated, with their reason.
     pub deferred: BTreeMap<String, String>,
     /// Routing query keys from every model operation, including deferred operations.
@@ -76,14 +82,19 @@ pub fn lower(model: &Model, overlay: &Overlay) -> Result<Lowered> {
             return Err(Error::Overlay(format!("deferred operation `{name}` is not in the model")));
         }
     }
+    for name in overlay.route_only.keys() {
+        if !model_ops.contains(name) {
+            return Err(Error::Overlay(format!("route-only operation `{name}` is not in the model")));
+        }
+    }
     let undecided: Vec<&String> = model_ops
         .iter()
-        .filter(|n| !overlay.include.contains(n) && !overlay.deferred.contains_key(*n))
+        .filter(|n| !overlay.include.contains(n) && !overlay.route_only.contains_key(*n) && !overlay.deferred.contains_key(*n))
         .collect();
     if !undecided.is_empty() {
         return Err(Error::Overlay(format!(
-            "{} operation(s) are in the model but neither included nor deferred: {}. \
-             Add each to `include` or to a [[deferred]] group with a reason.",
+            "{} operation(s) are in the model but neither included, route-only nor deferred: {}. \
+             Add each to `include`, a [[route_only]] group or a [[deferred]] group with a reason.",
             undecided.len(),
             undecided.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
         )));
@@ -96,9 +107,21 @@ pub fn lower(model: &Model, overlay: &Overlay) -> Result<Lowered> {
     for name in &names {
         operations.push(lower_one(model, overlay, name)?);
     }
+    let mut route_only_names: Vec<&String> = overlay.route_only.keys().collect();
+    route_only_names.sort();
+    let route_only = route_only_names
+        .into_iter()
+        .map(|name| {
+            Ok(RouteOnly {
+                operation: name.clone(),
+                http: lower_http(model, overlay, name)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     let routing_query_keys = routing_query::keys(model, overlay, &model_ops)?;
     Ok(Lowered {
         operations,
+        route_only,
         deferred: overlay.deferred.clone(),
         routing_query_keys,
     })
@@ -111,73 +134,12 @@ fn lower_one(model: &Model, overlay: &Overlay, name: &str) -> Result<OperationIr
         .ok_or_else(|| Error::Model(format!("no operation shape `{name}`")))?;
     let ov = overlay.ops.get(name).unwrap_or(&empty);
 
-    let http_trait =
-        trait_of(op, "smithy.api#http").ok_or_else(|| Error::ir(name, "the operation carries no smithy.api#http trait"))?;
-    let method_text = http_trait
-        .get("method")
-        .and_then(Value::as_str)
-        .ok_or_else(|| Error::ir(name, "smithy.api#http has no method"))?;
-    let method = Method::parse(method_text).ok_or_else(|| Error::ir(name, format!("unknown method `{method_text}`")))?;
-    let uri = http_trait
+    let uri = trait_of(op, "smithy.api#http")
+        .ok_or_else(|| Error::ir(name, "the operation carries no smithy.api#http trait"))?
         .get("uri")
         .and_then(Value::as_str)
         .ok_or_else(|| Error::ir(name, "smithy.api#http has no uri"))?;
     let route = Uri::parse(uri);
-
-    let target = match &ov.target {
-        Some(t) => TargetKind::parse(t).ok_or_else(|| Error::ir(name, format!("unknown target `{t}`")))?,
-        None => route.target(),
-    };
-
-    let mut predicates = vec![Predicate::Method(method), Predicate::Target(target)];
-    for (key, value) in &route.query {
-        match value {
-            Some(v) => predicates.push(Predicate::QueryEquals(key.clone(), v.clone())),
-            None => predicates.push(Predicate::QueryPresent(key.clone())),
-        }
-    }
-    for key in &ov.query_present {
-        if route.query.iter().any(|(existing, _)| existing == key) {
-            return Err(Error::ir(
-                name,
-                format!("`query_present` repeats `{key}`, which the model's uri already pins"),
-            ));
-        }
-        predicates.push(Predicate::QueryPresent(key.clone()));
-    }
-    for key in &ov.query_absent {
-        predicates.push(Predicate::QueryAbsent(key.clone()));
-    }
-    for header in &ov.header_present {
-        predicates.push(Predicate::HeaderPresent {
-            header: header.clone(),
-            negated: false,
-        });
-    }
-    for header in &ov.header_absent {
-        predicates.push(Predicate::HeaderPresent {
-            header: header.clone(),
-            negated: true,
-        });
-    }
-    if let Some(text) = &ov.host_class {
-        let class = HostClass::parse(text).ok_or_else(|| Error::ir(name, format!("unknown host_class `{text}`")))?;
-        predicates.push(Predicate::HostClass(class));
-    }
-    if let Some(text) = &ov.arn_form {
-        let form = ArnForm::parse(text).ok_or_else(|| Error::ir(name, format!("unknown arn_form `{text}`")))?;
-        predicates.push(Predicate::ArnForm(form));
-    }
-
-    let success_status = ov.success_status.unwrap_or_else(|| {
-        http_trait
-            .get("code")
-            .and_then(|c| match c {
-                Value::Int(i) => u16::try_from(*i).ok(),
-                _ => None,
-            })
-            .unwrap_or(200)
-    });
 
     // `smithy.api#Unit` is Smithy's "no input/output at all" marker, not a shape the model
     // declares — DeleteBucketCors and DeleteBucketTagging are the included operations whose output
@@ -211,17 +173,7 @@ fn lower_one(model: &Model, overlay: &Overlay, name: &str) -> Result<OperationIr
         ctx.collect_shapes(&field.ty, &mut shapes)?;
     }
 
-    let http = Http {
-        method,
-        target,
-        precedence: ov
-            .precedence
-            .ok_or_else(|| Error::ir(name, "no route precedence; add `precedence` to the operation's overlay entry"))?,
-        predicates,
-        success_status,
-        alt_success_statuses: ov.alt_success_statuses.clone(),
-        path_shape: ov.path_shape.clone().unwrap_or_else(|| route.path_shape()),
-    };
+    let http = lower_http(model, overlay, name)?;
 
     let auth = Auth {
         requirement: match &ov.auth_requirement {

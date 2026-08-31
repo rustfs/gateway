@@ -216,6 +216,7 @@ core_modules = (
     "registration",
     "replication_roundtrip",
     "response_override_safety",
+    "route_only",
     "route_sizes",
     "route_table",
     "select_restore_roundtrip",

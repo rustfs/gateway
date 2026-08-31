@@ -1370,8 +1370,16 @@ validate_rust_evidence "$xtask_security_posture" source_order \
     'check_sig_case_coverage: security-posture accepts arguments other than --dry-run'
 validate_rust_evidence "$xtask_security_posture" source_order \
     'let floors = parse_standard_floors' \
-    'rustfs_gateway_core::standard_operation_names()' \
+    'rustfs_gateway_core::route::ROUTES' \
     'check_sig_case_coverage: dry-run does not join real floors to the route-table inventory'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    'rustfs_gateway_core::route::ROUTES' \
+    '.filter(|row| row.handler_registration)' \
+    'check_sig_case_coverage: dry-run does not exclude route-only operations from the handler inventory'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    '.filter(|row| row.handler_registration)' \
+    '.map(|row| row.operation.to_owned())' \
+    'check_sig_case_coverage: dry-run does not derive handler names from real route rows'
 validate_rust_evidence "$xtask_security_posture" source_order \
     'let parsed: BTreeSet<_> = floors.keys().cloned().collect();' \
     'if parsed != routed {' \

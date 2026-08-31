@@ -90,6 +90,10 @@ summary = "RenameObject is a PUT to a directory-bucket object key carrying the r
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html"
 summary = "initiation is a POST to the object key carrying the ?uploads subresource and no upload id."
 
+[evidence.create-session]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateSession.html"
+summary = "CreateSession is selected by GET on a directory bucket carrying the session query subresource."
+
 [evidence.delete-bucket-cors]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html"
 summary = "a CORS configuration removal is a DELETE on the bucket carrying the ?cors subresource."
@@ -3715,3 +3719,165 @@ winner = "GetBucketOwnershipControls"
 shadowed = "ListObjects"
 reason = "ListObjects pins no query key, so every ownership-controls read satisfies it too. The subresource row wins at 270 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
 evidence = ["get-bucket-ownership-controls", "list-objects"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so a session request satisfies it too. The route-only session refusal wins at 279 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["create-session", "list-objects"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "create-session"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "create-session"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "create-session"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "create-session"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "create-session"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "get-bucket-location"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "list-objects-v2"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "list-object-versions"]

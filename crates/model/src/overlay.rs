@@ -57,6 +57,7 @@ mod precondition_contract_inputs;
 mod precondition_contract_values;
 mod quirks;
 mod route;
+mod route_only;
 mod select_restore_contract_inputs;
 mod select_restore_contract_values;
 
@@ -95,6 +96,8 @@ pub enum RuleClassification {
 pub struct Overlay {
     /// Operations that are generated.
     pub include: Vec<String>,
+    /// Operations that emit only a route row, with the reason no typed surface is generated.
+    pub route_only: BTreeMap<String, String>,
     /// Operations that are deliberately not generated yet, with the reason.
     pub deferred: BTreeMap<String, String>,
     /// Smithy shape local name to IR scalar spelling.
@@ -339,11 +342,19 @@ impl Overlay {
         overlay.read_error_status(&dir.join(ERROR_STATUS_FILE))?;
 
         let mut include_origin = Origins::new();
+        let mut route_only_origin = Origins::new();
         let mut deferred_origin = Origins::new();
         let mut op_origin = Origins::new();
         let mut shape_origin = Origins::new();
         for path in family_files(dir, OPS_DIR)? {
-            overlay.read_operations(&path, &mut include_origin, &mut deferred_origin, &mut op_origin, &mut shape_origin)?;
+            overlay.read_operations(
+                &path,
+                &mut include_origin,
+                &mut route_only_origin,
+                &mut deferred_origin,
+                &mut op_origin,
+                &mut shape_origin,
+            )?;
         }
 
         let mut quirk_origin = Origins::new();
@@ -353,7 +364,7 @@ impl Overlay {
 
         overlay.shadowing = route::read(&dir.join(ROUTE_FILE))?;
 
-        overlay.check(&include_origin, &deferred_origin)?;
+        overlay.check(&include_origin, &route_only_origin, &deferred_origin)?;
         Ok(overlay)
     }
 
@@ -370,7 +381,7 @@ impl Overlay {
     fn read_scalars(&mut self, path: &Path) -> Result<()> {
         let text = read(path)?;
         let doc = toml_lite::parse(&path.display().to_string(), &text)?;
-        for key in ["include", "deferred", "op", "shape", "quirk"] {
+        for key in ["include", "route_only", "deferred", "op", "shape", "quirk"] {
             if doc.get(key).is_some() {
                 return Err(Error::Overlay(format!(
                     "{SCALARS_FILE} carries `{key}`; it holds `[scalar]` alone, and everything \
@@ -402,6 +413,7 @@ impl Overlay {
         &mut self,
         path: &Path,
         include_origin: &mut Origins,
+        route_only_origin: &mut Origins,
         deferred_origin: &mut Origins,
         op_origin: &mut Origins,
         shape_origin: &mut Origins,
@@ -428,6 +440,7 @@ impl Overlay {
                 self.include.push(op);
             }
         }
+        route_only::read(&doc, &file, &mut self.route_only, route_only_origin)?;
         for group in array_of_tables(&doc, "deferred") {
             let reason = group
                 .get("reason")
@@ -458,25 +471,21 @@ impl Overlay {
     }
 
     /// Checks the overlay against itself: id shapes, evidence presence, and no operation listed
-    /// both as included and deferred.
-    fn check(&self, include_origin: &Origins, deferred_origin: &Origins) -> Result<()> {
-        for op in &self.include {
-            if self.deferred.contains_key(op) {
-                let included = include_origin.get(op).map_or("?", String::as_str);
-                let deferred = deferred_origin.get(op).map_or("?", String::as_str);
-                return Err(Error::Overlay(format!(
-                    "`{op}` is included by `{included}` and deferred by `{deferred}`; one family owns \
-                     an operation, and it decides which of the two it is"
-                )));
-            }
-        }
-        let included: std::collections::BTreeSet<&str> = self.include.iter().map(String::as_str).collect();
+    /// in more than one of included, route-only and deferred.
+    fn check(&self, include_origin: &Origins, route_only_origin: &Origins, deferred_origin: &Origins) -> Result<()> {
+        route_only::check_categories(self, include_origin, route_only_origin, deferred_origin)?;
+        let routable: std::collections::BTreeSet<&str> = self
+            .include
+            .iter()
+            .map(String::as_str)
+            .chain(self.route_only.keys().map(String::as_str))
+            .collect();
         for decl in &self.shadowing {
             for (role, op) in [("winner", &decl.winner), ("shadowed", &decl.shadowed)] {
-                if !included.contains(op.as_str()) {
+                if !routable.contains(op.as_str()) {
                     return Err(Error::Overlay(format!(
                         "shadowing declaration `{} over {}` names `{op}` as its {role}, and no family \
-                         `include`s it; only an included operation emits a route row, so the pair \
+                         includes it or marks it route-only; only those operations emit route rows, so the pair \
                          describes an overlap that cannot happen",
                         decl.winner, decl.shadowed
                     )));
