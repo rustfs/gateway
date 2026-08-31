@@ -31,6 +31,12 @@ use crate::{
 };
 
 const NON_ASCII: &[u8] = "<Tagging><TagSet><Tag><Key>café</Key><Value>data-🚀</Value></Tag></TagSet></Tagging>".as_bytes();
+const CHINESE_EMOJI_HISTORY: &[u8] = concat!(
+    "<Tagging><TagSet><Tag><Key>language</Key><Value>",
+    "\u{4e2d}\u{6587}\u{1f680}",
+    "</Value></Tag></TagSet></Tagging>"
+)
+.as_bytes();
 const EMPTY: &[u8] = b"<Tagging><TagSet></TagSet></Tagging>";
 const EMPTY_TAG: &[u8] = b"<Tagging><TagSet><Tag></Tag></TagSet></Tagging>";
 const KEY_ONLY: &[u8] = b"<Tagging><TagSet><Tag><Key>k</Key></Tag></TagSet></Tagging>";
@@ -124,6 +130,15 @@ fn accepted_cases() -> Vec<AcceptedTaggingCase> {
             },
             "non-ASCII tag key and value",
             &[CorpusVariant::Canonical, CorpusVariant::Unicode],
+        ),
+        accepted(
+            CHINESE_EMOJI_HISTORY.to_vec(),
+            "735381e7a7d72e9d905395a44d7f4751c308b8bde5d9eaad400ab11c732518c3",
+            PersistedTagging {
+                tag_set: vec![tag(Some("language"), Some(concat!("\u{4e2d}", "\u{6587}", "\u{1f680}")))],
+            },
+            "historical Chinese and emoji tag value bytes",
+            &[CorpusVariant::Unicode],
         ),
         accepted(
             EMPTY.to_vec(),
@@ -436,6 +451,33 @@ mod tests {
     }
 
     #[test]
+    fn g_d1_007_chinese_and_emoji_tag_value_is_code_point_exact() {
+        let case = accepted_cases()
+            .into_iter()
+            .find(|(case, _)| case.origin.sha256 == "735381e7a7d72e9d905395a44d7f4751c308b8bde5d9eaad400ab11c732518c3")
+            .expect("the exact Chinese and emoji historical bytes are registered")
+            .0;
+        let expected_value = concat!("\u{4e2d}", "\u{6587}", "\u{1f680}");
+        let old = TaggingCodec
+            .old_parse(&case.bytes)
+            .expect("the old parser reads the historical bytes");
+        let new = TaggingCodec
+            .new_parse(&case.bytes)
+            .expect("the new parser reads the historical bytes");
+
+        for observed in [
+            case.value.tag_set[0].value.as_deref(),
+            old.structure.tag_set[0].value.as_deref(),
+            new.tag_set[0].value.as_deref(),
+        ] {
+            let observed = observed.expect("the historical tag has a value");
+            assert_eq!(observed.chars().map(u32::from).collect::<Vec<_>>(), vec![0x4e2d, 0x6587, 0x1f680]);
+            assert_eq!(observed, expected_value);
+        }
+        assert_tagging_four_way(&case).expect("the exact historical bytes pass D1, D4, and D5 observations");
+    }
+
+    #[test]
     fn missing_and_duplicate_tagging_structure_matches_the_old_refusal_boundary() {
         for (case, _) in rejected_cases() {
             assert!(TaggingCodec.old_parse(&case.bytes).is_err(), "old parser accepted {}", case.notes);
@@ -616,7 +658,7 @@ mod tests {
         let evidence = corpus_evidence().expect("Tagging corpus evidence is traceable");
         let report = build_corpus_report(&[ConfigKind::Tagging], &[evidence])
             .expect("Tagging concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("tagging: accepted=15 rejected=13"));
+        assert!(report.render().contains("tagging: accepted=16 rejected=13"));
     }
 
     #[test]
