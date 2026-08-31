@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `Status` string enumeration. Bound by: GetBucketAccelerateConfiguration, GetBucketIntelligentTieringConfiguration, GetBucketLifecycleConfiguration, GetBucketReplication, GetBucketVersioning, GetObjectLegalHold, ListBucketIntelligentTieringConfigurations, PutBucketAccelerateConfiguration, PutBucketLifecycleConfiguration, PutBucketReplication, PutBucketVersioning, PutObjectLegalHold.
+/// The `Status` string enumeration. Bound by: GetBucketAbac, GetBucketAccelerateConfiguration, GetBucketIntelligentTieringConfiguration, GetBucketLifecycleConfiguration, GetBucketReplication, GetBucketVersioning, GetObjectLegalHold, ListBucketIntelligentTieringConfigurations, PutBucketAccelerateConfiguration, PutBucketLifecycleConfiguration, PutBucketReplication, PutBucketVersioning, PutObjectLegalHold.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`Status::custom`]. Adding a constant is a minor version
@@ -34,17 +34,17 @@ pub struct Status(Cow<'static, str>);
 impl Status {
     /// `Enabled`
     pub const ENABLED: Self = Self(Cow::Borrowed("Enabled"));
-    /// `Suspended`
-    pub const SUSPENDED: Self = Self(Cow::Borrowed("Suspended"));
     /// `Disabled`
     pub const DISABLED: Self = Self(Cow::Borrowed("Disabled"));
+    /// `Suspended`
+    pub const SUSPENDED: Self = Self(Cow::Borrowed("Suspended"));
     /// `ON`
     pub const ON: Self = Self(Cow::Borrowed("ON"));
     /// `OFF`
     pub const OFF: Self = Self(Cow::Borrowed("OFF"));
 
     /// Every value the pinned model declares, in model order.
-    pub const VALUES: &'static [&'static str] = &["Enabled", "Suspended", "Disabled", "ON", "OFF"];
+    pub const VALUES: &'static [&'static str] = &["Enabled", "Disabled", "Suspended", "ON", "OFF"];
 
     /// Wraps a value this build has no constant for.
     #[must_use]

@@ -39,6 +39,7 @@ pub(crate) static OPERATION_NAMES: &[&str] = &[
     "DeleteObjectTagging",
     "DeleteObjects",
     "DeletePublicAccessBlock",
+    "GetBucketAbac",
     "GetBucketAccelerateConfiguration",
     "GetBucketAcl",
     "GetBucketCors",

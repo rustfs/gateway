@@ -384,6 +384,20 @@ pub const ROUTES: &[RouteRow] = &[
         ],
     },
     RouteRow {
+        operation: "GetBucketAbac",
+        precedence: 276,
+        method: "GET",
+        target: "Bucket",
+        path_shape: "/{Bucket}",
+        success_status: 200,
+        not_configured: None,
+        predicates: &[
+            RoutePredicate::Method("GET"),
+            RoutePredicate::Target("Bucket"),
+            RoutePredicate::QueryPresent("abac"),
+        ],
+    },
+    RouteRow {
         operation: "GetBucketLocation",
         precedence: 300,
         method: "GET",

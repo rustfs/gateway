@@ -4162,6 +4162,222 @@ pub const SHADOWING: &[ShadowingDecl] = &[
     },
     ShadowingDecl {
         winner: "GetBucketAccelerateConfiguration",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAccelerateConfiguration.html — GetBucketAccelerateConfiguration is selected by the ?accelerate subresource alone and answers with the stored configuration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketLogging",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLogging.html — GetBucketLogging is selected by the ?logging subresource alone and answers with the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketNotificationConfiguration",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketNotificationConfiguration.html — GetBucketNotificationConfiguration is selected by the ?notification subresource alone and answers with the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketPolicy",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html — GetBucketPolicy is selected by the ?policy subresource alone and answers with the stored policy document as JSON.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketPolicyStatus",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicyStatus.html — GetBucketPolicyStatus is selected by the ?policyStatus subresource, which is a different key from ?policy and answers a different document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetPublicAccessBlock",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html — GetPublicAccessBlock is selected by the ?publicAccessBlock subresource alone and answers with the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketRequestPayment",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketRequestPayment.html — GetBucketRequestPayment is selected by the ?requestPayment subresource alone and answers with the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketVersioning",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketVersioning.html — GetBucketVersioning is selected by the ?versioning subresource alone and answers with the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketWebsite",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketWebsite.html — GetBucketWebsite is selected by the ?website subresource alone and answers with the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAcl",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAcl.html — GetBucketAcl is selected by the ?acl subresource on a bucket GET and answers with the access control policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketOwnershipControls",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketOwnershipControls.html — GetBucketOwnershipControls is selected by the ?ownershipControls subresource on a bucket GET and returns the stored object-ownership rules rather than an object listing.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketIntelligentTieringConfiguration",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketIntelligentTieringConfiguration.html — GetBucketIntelligentTieringConfiguration is a bucket GET selected by ?intelligent-tiering plus a required id and returns that named policy rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketIntelligentTieringConfigurations",
+        shadowed: "GetBucketAbac",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketIntelligentTieringConfigurations.html — ListBucketIntelligentTieringConfigurations is a bucket GET selected by bare ?intelligent-tiering and returns policy documents rather than an object listing.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "GetBucketLocation",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html — GetBucketLocation is selected by the ?location subresource alone and takes no other query input.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "GetBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketCors.html — GetBucketCors is selected by the ?cors subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "GetBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html — a bucket tag-set read is a GET on the bucket carrying the ?tagging subresource, and it defines no other selector.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "GetBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLifecycleConfiguration.html — GetBucketLifecycleConfiguration is selected by the ?lifecycle subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "GetBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketEncryption.html — GetBucketEncryption is selected by the ?encryption subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "GetBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketReplication.html — GetBucketReplication is selected by the ?replication subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "GetObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectLockConfiguration.html — the lock-configuration read is a GET on the bucket carrying the ?object-lock subresource, and it defines no other selector.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "ListMultipartUploads",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html — ListMultipartUploads is selected by the ?uploads subresource and defines no other selector.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "ListObjectsV2",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html — ListObjectsV2 is selected by list-type=2 and treats unrecognised query keys as inert.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "ListObjectVersions",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html — ListObjectVersions is selected by the ?versions subresource and ignores query keys it does not define.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "ListObjects",
+        reason: "ListObjects pins no query key, so every ABAC status request satisfies it too. The subresource row wins at 276 before the listing fallback at 700; the reverse order exposes object keys under the wrong access-control contract.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html — ListObjects is what a GET on a bucket means when no other subresource claimed it, so it pins no query key.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAccelerateConfiguration",
         shadowed: "GetBucketOwnershipControls",
         reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
         evidence: &[

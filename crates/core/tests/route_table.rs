@@ -2459,3 +2459,31 @@ fn intelligent_tiering_reads_share_the_get_configuration_authorization_contract(
         assert_eq!(auth.resource, ResourceShape::Bucket, "{}", spec.name);
     }
 }
+
+// ── GetBucketAbac ────────────────────────────────────────────────────────────────
+
+/// An ABAC status read selects its control-plane operation ahead of object listing.
+#[test]
+fn get_bucket_abac_routes_ahead_of_list_objects() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket?abac")), Some("GetBucketAbac"));
+}
+
+/// Negative controls keep object targets, other methods and the plain listing outside the ABAC row.
+#[test]
+fn n_get_bucket_abac_does_not_claim_neighbour_controls() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket")), Some("ListObjects"));
+    for line in ["GET /bucket/key?abac", "HEAD /bucket?abac", "PUT /bucket?abac"] {
+        assert_ne!(routed(&table, &Req::new(line)), Some("GetBucketAbac"), "{line}");
+    }
+}
+
+/// The ABAC status read uses the bucket-scoped action AWS documents for that control plane.
+#[test]
+fn get_bucket_abac_uses_the_bucket_authorization_contract() {
+    let spec = <rustfs_gateway_types::dto::GetBucketAbac as Operation>::spec();
+    let auth = spec.auth.expect("GetBucketAbac declares authorization");
+    assert_eq!(auth.action, "s3:GetBucketAbac");
+    assert_eq!(auth.resource, ResourceShape::Bucket);
+}

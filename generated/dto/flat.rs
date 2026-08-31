@@ -31,8 +31,8 @@ pub use crate::ops::enums::{
     StorageClass, TaggingDirective, Tier, TransitionDefaultMinimumObjectSize, Type,
 };
 pub use crate::ops::shapes::{
-    AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, AccessControlTranslation, AnnotationEntry,
-    BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration, BucketLoggingStatus, Checksum, CommonPrefix,
+    AbacStatus, AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, AccessControlTranslation,
+    AnnotationEntry, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration, BucketLoggingStatus, Checksum, CommonPrefix,
     CompletedMultipartUpload, CompletedPart, Condition, CorsConfiguration, CorsRule, CreateBucketConfiguration, CsvInput,
     CsvOutput, DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication, DeletedObject, Destination, Encryption,
     EncryptionConfiguration, Error, ErrorDocument, EventBridgeConfiguration, ExistingObjectReplication, FilterRule,
@@ -117,6 +117,9 @@ pub use crate::ops::delete_objects::{
 pub use crate::ops::delete_public_access_block::{
     DeletePublicAccessBlock, Input as DeletePublicAccessBlockInput, InputBuilder as DeletePublicAccessBlockInputBuilder,
     Output as DeletePublicAccessBlockOutput,
+};
+pub use crate::ops::get_bucket_abac::{
+    GetBucketAbac, Input as GetBucketAbacInput, InputBuilder as GetBucketAbacInputBuilder, Output as GetBucketAbacOutput,
 };
 pub use crate::ops::get_bucket_accelerate_configuration::{
     GetBucketAccelerateConfiguration, Input as GetBucketAccelerateConfigurationInput,

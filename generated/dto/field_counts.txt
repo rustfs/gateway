@@ -1,3 +1,4 @@
+AbacStatus 1
 AbortIncompleteMultipartUpload 1
 AbortMultipartUploadInput 6
 AbortMultipartUploadOutput 1
@@ -66,6 +67,8 @@ ErrorDocument 1
 EventBridgeConfiguration 0
 ExistingObjectReplication 1
 FilterRule 2
+GetBucketAbacInput 2
+GetBucketAbacOutput 1
 GetBucketAccelerateConfigurationInput 3
 GetBucketAccelerateConfigurationOutput 2
 GetBucketAclInput 2

@@ -1424,3 +1424,23 @@ fn n_unhandled_intelligent_tiering_reads_are_refused_instead_of_dispatching_list
         .expect("the registered ListObjects neighbour remains served");
     assert_eq!(plain.entry.op_name, "ListObjects");
 }
+
+/// An unhandled ABAC status read is refused by name instead of returning listed keys.
+#[test]
+fn n_unhandled_get_bucket_abac_is_refused_instead_of_dispatching_list_objects() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    let error = router
+        .dispatch(&Req::new("GET /bucket?abac").parts())
+        .expect_err("this registry has no GetBucketAbac handler");
+    assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED);
+    assert_eq!(error.message(), NOT_REGISTERED_MESSAGE);
+    assert_eq!(error.operation(), Some("GetBucketAbac"));
+
+    let plain = router
+        .dispatch(&Req::new("GET /bucket").parts())
+        .expect("the registered ListObjects neighbour remains served");
+    assert_eq!(plain.entry.op_name, "ListObjects");
+}
