@@ -15,7 +15,7 @@
 //! RustFS repository Notification persistence fixtures.
 //!
 //! Responsible for: preserving exact source-(a) XML bytes, test identifiers, aliases, and
-//! revisions from the RustFS Notification rule tests. NOT responsible for: defining generic
+//! revisions from RustFS Notification tests and new-writer metadata constants. NOT responsible for: defining generic
 //! Notification corpus boundaries or codec behavior. Upstream: the pinned RustFS repository
 //! revision. Downstream: the parent Notification D1-D5 and backup ZIP corpus.
 
@@ -29,6 +29,10 @@ use super::{AcceptedNotificationCase, RejectedNotificationCase};
 
 const SOURCE_PATH: &str = "crates/notify/src/rules/config_test.rs";
 const SOURCE_REVISION: &str = "c876df53f5097618b1817568a471cbb8b4f26ee8";
+const NEW_WRITER_SOURCE: &str = "crates/ecstore/src/bucket/metadata_sys.rs::NEW_WRITER_CONFIGS[BUCKET_NOTIFICATION_CONFIG]";
+const NEW_WRITER_REVISION: &str = "ca46ae9e56c167998f7139f4d3cfd5914280f4aa";
+const NEW_WRITER_NOTIFICATION: &[u8] = br#"<NotificationConfiguration/>"#;
+const NEW_WRITER_NOTIFICATION_SHA256: &str = "c1f563b9bdb5fcdc9ef642ba79826762a94492d592ac89676fbc7e570b004c96";
 
 const BUG_AND_URL_ENCODED: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
 <NotificationConfiguration>
@@ -298,7 +302,7 @@ fn origin(fixture: &SourceAFixture) -> SampleOrigin {
 }
 
 pub(super) fn accepted_cases() -> Vec<AcceptedNotificationCase> {
-    FIXTURES
+    let mut cases = FIXTURES
         .iter()
         .filter(|fixture| OLD_READABLE_SHA256.contains(&fixture.sha256))
         .map(|fixture| {
@@ -316,7 +320,26 @@ pub(super) fn accepted_cases() -> Vec<AcceptedNotificationCase> {
                 fixture.variants,
             )
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let value = parse_s3s_notification(NEW_WRITER_NOTIFICATION)
+        .expect("the RustFS new-writer Notification fixture is old-readable")
+        .structure;
+    cases.push((
+        GoldenSample {
+            kind: ConfigKind::Notification,
+            bytes: NEW_WRITER_NOTIFICATION.to_vec(),
+            value,
+            origin: SampleOrigin {
+                source: NEW_WRITER_SOURCE.to_owned(),
+                producer: "rustfs/rustfs new bucket-metadata writer fixture".to_owned(),
+                version: NEW_WRITER_REVISION.to_owned(),
+                sha256: NEW_WRITER_NOTIFICATION_SHA256.to_owned(),
+            },
+            notes: "RustFS new writer emits an empty self-closing Notification configuration".to_owned(),
+        },
+        &[CorpusVariant::EmptyElement],
+    ));
+    cases
 }
 
 pub(super) fn rejected_cases() -> Vec<RejectedNotificationCase> {
@@ -390,5 +413,20 @@ mod tests {
                 assert_eq!(sample.origin.version, SOURCE_REVISION);
             }
         }
+    }
+
+    #[test]
+    fn new_writer_notification_fixture_is_registered_once_by_exact_sha() {
+        let matches = super::super::accepted_cases()
+            .into_iter()
+            .filter(|(sample, _)| sample.origin.sha256 == NEW_WRITER_NOTIFICATION_SHA256)
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "the new-writer Notification SHA must be registered exactly once");
+        let sample = &matches[0].0;
+        assert_eq!(sample.bytes, NEW_WRITER_NOTIFICATION);
+        assert_eq!(sample.origin.source, NEW_WRITER_SOURCE);
+        assert_eq!(sample.origin.version, NEW_WRITER_REVISION);
+        super::super::super::assert_notification_four_way(sample)
+            .expect("the RustFS new-writer Notification fixture passes D1-D5");
     }
 }
