@@ -40,6 +40,12 @@ const UNKNOWN_ATTRIBUTES: &[u8] = b"<Tagging future=\"root\"><TagSet future=\"se
 const ALTERNATE_ORDER: &[u8] = b"<Tagging><TagSet><Tag><Value>v</Value><Key>k</Key></Tag></TagSet></Tagging>";
 const BOM: &[u8] = b"\xef\xbb\xbf<Tagging><TagSet><Tag><Key>k</Key><Value>v</Value></Tag></TagSet></Tagging>";
 const CRLF: &[u8] = b"<Tagging>\r\n<TagSet>\r\n<Tag><Key>k</Key><Value>v</Value></Tag>\r\n</TagSet>\r\n</Tagging>";
+const NEW_WRITER_TAGGING: &[u8] =
+    "<Tagging><TagSet><Tag><Key>environment</Key><Value>\u{6D4B}\u{8BD5}-\u{1F980}</Value></Tag></TagSet></Tagging>".as_bytes();
+const NEW_WRITER_TAGGING_SHA256: &str = "e1c0bf5c6e7c7ae427dcdf6e0df463397fb3844504b25dbf5262f18a56505779";
+const NEW_WRITER_TAGGING_SOURCE: &str =
+    "crates/ecstore/src/bucket/metadata_sys.rs::NEW_WRITER_CONFIGS[6] (BUCKET_TAGGING_CONFIG)";
+const NEW_WRITER_REVISION: &str = "ca46ae9e56c167998f7139f4d3cfd5914280f4aa";
 
 type AcceptedTaggingCase = (GoldenSample<PersistedTagging>, &'static [CorpusVariant]);
 type RejectedTaggingCase = (RejectedGoldenSample, &'static [CorpusVariant]);
@@ -188,6 +194,24 @@ fn accepted_cases() -> Vec<AcceptedTaggingCase> {
         ),
     ];
     cases.extend(source_b::cases());
+    let value = parse_s3s_tagging(NEW_WRITER_TAGGING)
+        .expect("the RustFS new-writer Tagging fixture is old-readable")
+        .structure;
+    cases.push((
+        GoldenSample {
+            kind: ConfigKind::Tagging,
+            bytes: NEW_WRITER_TAGGING.to_vec(),
+            value,
+            origin: SampleOrigin {
+                source: NEW_WRITER_TAGGING_SOURCE.to_owned(),
+                producer: "rustfs/rustfs new bucket-metadata writer fixture".to_owned(),
+                version: NEW_WRITER_REVISION.to_owned(),
+                sha256: NEW_WRITER_TAGGING_SHA256.to_owned(),
+            },
+            notes: "RustFS new writer emits a Unicode environment tag".to_owned(),
+        },
+        &[CorpusVariant::Canonical, CorpusVariant::Unicode],
+    ));
     cases
 }
 
@@ -563,6 +587,20 @@ mod tests {
         let evidence = corpus_evidence().expect("Tagging corpus evidence is traceable");
         let report = build_corpus_report(&[ConfigKind::Tagging], &[evidence])
             .expect("Tagging concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("tagging: accepted=12 rejected=13"));
+        assert!(report.render().contains("tagging: accepted=13 rejected=13"));
+    }
+
+    #[test]
+    fn new_writer_tagging_fixture_is_registered_once_by_exact_sha() {
+        let matches = accepted_cases()
+            .into_iter()
+            .filter(|(sample, _)| sample.origin.sha256 == NEW_WRITER_TAGGING_SHA256)
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "the new-writer Tagging SHA must be registered exactly once");
+        let sample = &matches[0].0;
+        assert_eq!(sample.bytes, NEW_WRITER_TAGGING);
+        assert_eq!(sample.origin.source, NEW_WRITER_TAGGING_SOURCE);
+        assert_eq!(sample.origin.version, NEW_WRITER_REVISION);
+        assert_tagging_four_way(sample).expect("the RustFS new-writer Tagging fixture passes D1-D5");
     }
 }

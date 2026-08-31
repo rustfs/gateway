@@ -83,6 +83,11 @@ const RUSTFS_UNKNOWN_TOP_LEVEL: &[u8] = br#"
             </ReplicationConfiguration>
         "#;
 const DUPLICATE_STORAGE_CLASS: &[u8] = b"<ReplicationConfiguration><Role></Role><Rule><Destination><Bucket>arn:aws:s3:::destination</Bucket><StorageClass>STANDARD</StorageClass><StorageClass>GLACIER</StorageClass></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>";
+const NEW_WRITER_REPLICATION: &[u8] = br#"<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rollback</ID><Priority>1</Priority><Filter><Prefix>documents/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>"#;
+const NEW_WRITER_REPLICATION_SHA256: &str = "c4ee7b2dbff03b885bfc04e2c3141aef7a0ccd3a6b3a2d3129b9a91512271066";
+const NEW_WRITER_REPLICATION_SOURCE: &str =
+    "crates/ecstore/src/bucket/metadata_sys.rs::NEW_WRITER_CONFIGS[7] (BUCKET_REPLICATION_CONFIG -> NEW_WRITER_REPLICATION_XML)";
+const NEW_WRITER_REVISION: &str = "ca46ae9e56c167998f7139f4d3cfd5914280f4aa";
 
 type AcceptedReplicationCase = (GoldenSample<PersistedReplicationConfiguration>, &'static [CorpusVariant]);
 type RejectedReplicationCase = (RejectedGoldenSample, &'static [CorpusVariant]);
@@ -170,7 +175,7 @@ fn accepted_cases() -> Vec<AcceptedReplicationCase> {
         "x".repeat(8 * 1024)
     )
     .into_bytes();
-    vec![
+    let mut cases = vec![
         accepted(
             MINIMAL,
             "1ebe6a8e64f2bd34a20d2e292d3c8a9c091c4e6bfa56c4c4c8d80ced64eb6436",
@@ -259,7 +264,26 @@ fn accepted_cases() -> Vec<AcceptedReplicationCase> {
             "RustFS unknown top-level element fixture",
             &[CorpusVariant::UnknownTopLevel],
         ),
-    ]
+    ];
+    let value = parse_s3s_replication(NEW_WRITER_REPLICATION)
+        .expect("the RustFS new-writer Replication fixture is old-readable")
+        .structure;
+    cases.push((
+        GoldenSample {
+            kind: ConfigKind::Replication,
+            bytes: NEW_WRITER_REPLICATION.to_vec(),
+            value,
+            origin: SampleOrigin {
+                source: NEW_WRITER_REPLICATION_SOURCE.to_owned(),
+                producer: "rustfs/rustfs new bucket-metadata writer fixture".to_owned(),
+                version: NEW_WRITER_REVISION.to_owned(),
+                sha256: NEW_WRITER_REPLICATION_SHA256.to_owned(),
+            },
+            notes: "RustFS new writer emits the rollback Replication fixture".to_owned(),
+        },
+        &[CorpusVariant::Namespace, CorpusVariant::Canonical],
+    ));
+    cases
 }
 
 fn rejected_cases() -> Vec<RejectedReplicationCase> {
@@ -535,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn fifteen_traceable_replication_samples_pass_d1_through_d5() {
+    fn sixteen_traceable_replication_samples_pass_d1_through_d5() {
         for (case, _) in accepted_cases() {
             assert_replication_four_way(&case).expect("Replication sample passes D1-D5");
         }
@@ -719,6 +743,20 @@ mod tests {
         let evidence = replication_corpus_evidence().expect("Replication corpus evidence is traceable");
         let report = crate::build_corpus_report(&[ConfigKind::Replication], &[evidence])
             .expect("Replication concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("replication: accepted=15 rejected=16"));
+        assert!(report.render().contains("replication: accepted=16 rejected=16"));
+    }
+
+    #[test]
+    fn new_writer_replication_fixture_is_registered_once_by_exact_sha() {
+        let matches = accepted_cases()
+            .into_iter()
+            .filter(|(sample, _)| sample.origin.sha256 == NEW_WRITER_REPLICATION_SHA256)
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "the new-writer Replication SHA must be registered exactly once");
+        let sample = &matches[0].0;
+        assert_eq!(sample.bytes, NEW_WRITER_REPLICATION);
+        assert_eq!(sample.origin.source, NEW_WRITER_REPLICATION_SOURCE);
+        assert_eq!(sample.origin.version, NEW_WRITER_REVISION);
+        assert_replication_four_way(sample).expect("the RustFS new-writer Replication fixture passes D1-D5");
     }
 }
