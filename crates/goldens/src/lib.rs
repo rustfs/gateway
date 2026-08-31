@@ -223,6 +223,17 @@ fn all_family_corpus_evidence() -> Result<Vec<FamilyCorpusEvidence>, CorpusCover
     let tagging_sample = minio_migration::tagging_sample().map_err(|error| migration_error(ConfigKind::Tagging, error))?;
     let mut tagging = tagging::corpus_evidence()?;
     tagging.push_accepted(&tagging_sample, &[CorpusVariant::Canonical])?;
+    let notification_sample =
+        minio_migration::notification_sample().map_err(|error| migration_error(ConfigKind::Notification, error))?;
+    let mut notification = notification::notification_corpus_evidence()?;
+    notification.push_accepted(
+        &notification_sample,
+        &[
+            CorpusVariant::Canonical,
+            CorpusVariant::Namespace,
+            CorpusVariant::EmptyElement,
+        ],
+    )?;
     let lifecycle_sample = minio_migration::lifecycle_sample().map_err(|error| migration_error(ConfigKind::Lifecycle, error))?;
     let mut lifecycle = lifecycle::corpus_evidence().framework()?;
     lifecycle.push_accepted(
@@ -251,7 +262,7 @@ fn all_family_corpus_evidence() -> Result<Vec<FamilyCorpusEvidence>, CorpusCover
         accelerate_payment::request_payment_corpus_evidence()?,
         bucket_encryption,
         public_access_block::public_access_block_corpus_evidence()?,
-        notification::notification_corpus_evidence()?,
+        notification,
         logging::bucket_logging_corpus_evidence()?,
         website::website_corpus_evidence()?,
         replication,
