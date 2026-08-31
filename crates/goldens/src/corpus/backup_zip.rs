@@ -213,14 +213,14 @@ mod tests {
     #[test]
     fn g_zip_001_old_archive_is_new_readable_and_byte_exact() {
         let report = prove_backup_compatibility().expect("old backup bytes remain new-readable");
-        assert_eq!(report.old_to_new_samples, 156);
+        assert_eq!(report.old_to_new_samples, 157);
         assert_eq!(report.family_count, 13);
     }
 
     #[test]
     fn g_zip_002_new_archive_is_old_readable_after_rollback() {
         let report = prove_backup_compatibility().expect("new backup bytes remain old-readable");
-        assert_eq!(report.new_to_old_samples, 156);
+        assert_eq!(report.new_to_old_samples, 157);
         assert!(report.archive_size > 0);
     }
 
