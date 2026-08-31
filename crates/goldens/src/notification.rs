@@ -90,6 +90,8 @@ impl FourWayCodec for NotificationCodec {
 mod corpus_cases {
     use super::*;
 
+    mod source_a;
+
     use rustfs_gateway_types::persistence::{
         PersistedEventBridgeConfiguration, PersistedFilterRule, PersistedLambdaFunctionConfiguration,
         PersistedNotificationConfigurationFilter, PersistedQueueConfiguration, PersistedS3KeyFilter, PersistedTopicConfiguration,
@@ -268,7 +270,7 @@ mod corpus_cases {
 
     fn accepted_cases() -> Vec<AcceptedNotificationCase> {
         let large = large_bytes();
-        vec![
+        let mut cases: Vec<AcceptedNotificationCase> = vec![
             (
                 sample(
                     EMPTY,
@@ -351,7 +353,9 @@ mod corpus_cases {
                 ),
                 &[CorpusVariant::LargeValue],
             ),
-        ]
+        ];
+        cases.extend(source_a::accepted_cases());
+        cases
     }
 
     fn rejected(bytes: &[u8], sha256: &str, notes: &str, variants: &'static [CorpusVariant]) -> RejectedNotificationCase {
@@ -367,7 +371,7 @@ mod corpus_cases {
     }
 
     fn rejected_cases() -> Vec<RejectedNotificationCase> {
-        vec![
+        let mut cases = vec![
             rejected(b"<NotificationConfiguration><EventBridgeConfiguration/><EventBridgeConfiguration/></NotificationConfiguration>", "95c8796c8cbb1c769db034f1a1cd8c164e29dbb583bd78923b6bff8895b30c74", "duplicate EventBridge configuration", &[CorpusVariant::DuplicateField]),
             rejected(b"<NotificationConfiguration><EventBridgeConfiguration><Unknown/></EventBridgeConfiguration></NotificationConfiguration>", "a77da2808231406863b9303a0842525cb71d46e7a51a214caccc5ce6b523f200", "unknown EventBridge child", &[CorpusVariant::UnknownNested]),
             rejected(b"<NotificationConfiguration><QueueConfiguration><Queue>q</Queue></QueueConfiguration></NotificationConfiguration>", "386becafdffb2f5793f26d92854fed1a365e5856ef446b0615229c924139d2e7", "queue event missing", &[CorpusVariant::MissingField]),
@@ -379,7 +383,9 @@ mod corpus_cases {
             rejected(b"<NotificationConfiguration><QueueConfiguration><Event>a</Event><Queue>q</Queue><Queue>q2</Queue></QueueConfiguration></NotificationConfiguration>", "5fedaf5337bdba8cb38ae204d8f7c8934b4b92edaefb5439ae2e0babd4b1ca08", "duplicate queue ARN", &[CorpusVariant::DuplicateField]),
             rejected(b"<NotificationConfiguration><QueueConfiguration><Event>a</Event><Unknown/><Queue>q</Queue></QueueConfiguration></NotificationConfiguration>", "8d5426ca22c1c4617ae78b1e902a3e35f35dab4945db9b5ef7660c91010c0eaf", "unknown queue child", &[CorpusVariant::UnknownNested]),
             rejected(b"<NotificationConfiguration><QueueConfiguration><Event>a</Event><Filter><Unknown/></Filter><Queue>q</Queue></QueueConfiguration></NotificationConfiguration>", "ec9ab32bec7f8a1542b3adc02195690fd3bd491c2f7895b5576e329e1c22f12e", "unknown filter child", &[CorpusVariant::UnknownNested]),
-        ]
+        ];
+        cases.extend(source_a::rejected_cases());
+        cases
     }
 
     pub(super) fn corpus_evidence() -> Result<FamilyCorpusEvidence, CorpusCoverageError> {
@@ -464,7 +470,7 @@ mod corpus_cases {
         }
 
         #[test]
-        fn ten_traceable_samples_pass_d1_through_d5() {
+        fn fourteen_traceable_samples_pass_d1_through_d5() {
             for (case, _) in accepted_cases() {
                 assert_notification_four_way(&case).expect("Notification sample passes D1-D5");
             }
