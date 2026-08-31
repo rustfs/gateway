@@ -15,6 +15,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/versioning.rs` | Binds Versioning codecs, concrete accepted/refused corpus rows, runtime behavior, and D1-D5 mutations. | Auditing Versioning persistence compatibility or its corpus coverage. |
 | `src/object_lock.rs` | Binds Object Lock production/oracle codecs, enabled-decision projection, traceable samples, and mutations. | Auditing Object Lock persistence compatibility. |
 | `src/lifecycle.rs` | Binds Lifecycle codecs, D1 structural evidence, D5 enabled decisions, traceable samples, parser boundaries, and mutations. | Auditing Lifecycle persistence compatibility. |
+| `src/lifecycle/source_b.rs` | Registers the byte-exact Lifecycle sample captured through the live source-(b) client path. | Auditing the boto3-to-RustFS persistence provenance for Lifecycle. |
 | `src/notification.rs` | Binds Notification codecs, full routing decisions, traceable samples, parser boundaries, and D1-D5 mutations. | Auditing Notification persistence compatibility. |
 | `src/bucket_encryption.rs` | Binds Bucket Encryption codecs, algorithm/KMS/bucket-key behavior, traceable samples, and mutations. | Auditing default-encryption persistence compatibility. |
 | `src/public_access_block.rs` | Binds Public Access Block codecs, four-switch behavior, traceable samples, and mutations. | Auditing public-access persistence compatibility. |
