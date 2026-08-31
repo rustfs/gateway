@@ -31,6 +31,7 @@ mod accelerate_payment;
 mod bucket_encryption;
 mod corpus;
 mod cors;
+mod ecstore_source_a;
 mod four_way;
 mod lifecycle;
 mod logging;

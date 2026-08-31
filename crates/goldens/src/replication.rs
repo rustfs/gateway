@@ -283,6 +283,26 @@ fn accepted_cases() -> Vec<AcceptedReplicationCase> {
         },
         &[CorpusVariant::Namespace, CorpusVariant::Canonical],
     ));
+    for (bytes, sha256, source_refs) in crate::ecstore_source_a::fixture_bindings(ConfigKind::Replication) {
+        let value = parse_s3s_replication(bytes)
+            .expect("the RustFS ecstore Replication fixture is old-readable")
+            .structure;
+        cases.push((
+            GoldenSample {
+                kind: ConfigKind::Replication,
+                bytes: bytes.to_vec(),
+                value,
+                origin: SampleOrigin {
+                    source: crate::ecstore_source_a::provenance_source(source_refs),
+                    producer: "rustfs/rustfs ecstore metadata test fixture".to_owned(),
+                    version: crate::ecstore_source_a::SOURCE_REVISION.to_owned(),
+                    sha256: sha256.to_owned(),
+                },
+                notes: "RustFS ecstore persists this Replication document byte-exactly".to_owned(),
+            },
+            &[CorpusVariant::Canonical],
+        ));
+    }
     cases
 }
 
@@ -408,6 +428,9 @@ pub(crate) fn run_replication_corpus_four_way() -> Result<usize, GoldenFailure> 
     }
     Ok(cases.len())
 }
+
+#[cfg(test)]
+mod ecstore_source_a_tests;
 
 #[cfg(test)]
 mod tests {
@@ -559,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn sixteen_traceable_replication_samples_pass_d1_through_d5() {
+    fn eighteen_traceable_replication_samples_pass_d1_through_d5() {
         for (case, _) in accepted_cases() {
             assert_replication_four_way(&case).expect("Replication sample passes D1-D5");
         }
@@ -743,7 +766,7 @@ mod tests {
         let evidence = replication_corpus_evidence().expect("Replication corpus evidence is traceable");
         let report = crate::build_corpus_report(&[ConfigKind::Replication], &[evidence])
             .expect("Replication concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("replication: accepted=16 rejected=16"));
+        assert!(report.render().contains("replication: accepted=18 rejected=16"));
     }
 
     #[test]
