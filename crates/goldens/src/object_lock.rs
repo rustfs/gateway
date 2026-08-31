@@ -19,6 +19,8 @@
 //! Upstream: pinned-s3s compatibility observations and gateway persistence codecs. Downstream: the
 //! migration golden gate.
 
+mod source_b;
+
 use rustfs_gateway_types::compat::{S3sObjectLockObservation, parse_s3s_object_lock, serialize_s3s_object_lock};
 use rustfs_gateway_types::persistence::{
     PersistedDefaultRetention, PersistedObjectLockConfiguration, PersistedObjectLockRule, parse_object_lock,
@@ -104,7 +106,7 @@ fn rejected(bytes: &[u8], variants: &[CorpusVariant], notes: &str) -> RejectedCo
 }
 
 pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedObjectLockConfiguration> {
-    let accepted = vec![
+    let mut accepted = vec![
         (
             EMPTY,
             PersistedObjectLockConfiguration::default(),
@@ -184,7 +186,13 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedObjectLockConfi
         sample: sample(bytes, value, notes),
         variants,
     })
-    .collect();
+    .collect::<Vec<_>>();
+    for case in &mut accepted {
+        if case.sample.bytes == ENABLED_WITHOUT_RULE {
+            source_b::decorate_enabled_only_alias(&mut case.sample);
+        }
+    }
+    accepted.extend(source_b::cases());
 
     let mut rejected_cases = vec![
         rejected(DUPLICATE_ENABLED, &[CorpusVariant::DuplicateField], "duplicate ObjectLockEnabled"),
