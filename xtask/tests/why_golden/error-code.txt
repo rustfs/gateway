@@ -1,4 +1,4 @@
-RULE      NoSuchKey — S3 error code status=404 produced by CopyObject, DeleteObjectAnnotation, DeleteObjectTagging, GetObject, GetObjectAcl, GetObjectAnnotation, GetObjectAttributes, GetObjectLegalHold, GetObjectRetention, GetObjectTagging, HeadObject, ListObjectAnnotations, PutObjectAcl, PutObjectLegalHold, PutObjectRetention, PutObjectTagging, RestoreObject, SelectObjectContent, UploadPartCopy
+RULE      NoSuchKey — S3 error code status=404 produced by CopyObject, DeleteObjectAnnotation, DeleteObjectTagging, GetObject, GetObjectAcl, GetObjectAnnotation, GetObjectAttributes, GetObjectLegalHold, GetObjectRetention, GetObjectTagging, GetObjectTorrent, HeadObject, ListObjectAnnotations, PutObjectAcl, PutObjectLegalHold, PutObjectRetention, PutObjectTagging, RestoreObject, SelectObjectContent, UploadPartCopy
 EVIDENCE  NONE
 CASES     c-copy-0025 — A copy source that is an ARN of another service is refused rather than read as a bucket name
           c-copy-0034 — A copy from a missing key answers NoSuchKey and from a missing bucket answers NoSuchBucket
@@ -22,6 +22,7 @@ SPEC      spec/operations/CopyObject.toml:errors
           spec/operations/GetObjectLegalHold.toml:errors
           spec/operations/GetObjectRetention.toml:errors
           spec/operations/GetObjectTagging.toml:errors
+          spec/operations/GetObjectTorrent.toml:errors
           spec/operations/HeadObject.toml:errors
           spec/operations/ListObjectAnnotations.toml:errors
           spec/operations/PutObjectAcl.toml:errors
@@ -41,6 +42,7 @@ RELATED   CopyObject
           GetObjectLegalHold
           GetObjectRetention
           GetObjectTagging
+          GetObjectTorrent
           HeadObject
           ListObjectAnnotations
           PutObjectAcl

@@ -25,7 +25,7 @@
 # a request *means*, only whether it can be served — so the selector lands here now and the handler
 # lands with the rest of the family.
 
-include = ["GetObjectAttributes"]
+include = ["GetObjectAttributes", "GetObjectTorrent"]
 
 # =============================================================================================
 # GetObjectAttributes
@@ -52,6 +52,22 @@ element_order = ["ETag", "Checksum", "ObjectParts", "StorageClass", "ObjectSize"
 url_encoded_fields = []
 input_hot = ["Key", "ObjectAttributes"]
 output_hot = ["ETag", "ObjectSize", "StorageClass"]
+
+# =============================================================================================
+# GetObjectTorrent
+#
+# A torrent descriptor is a separate binary representation selected by `?torrent`. It must never
+# fall through to GetObject, because that would return the object's bytes under the wrong response
+# contract. The body remains the model's streaming blob; admitting the route does not buffer it.
+# =============================================================================================
+[op.GetObjectTorrent]
+precedence = 595
+query_absent = ["acl", "annotation", "attributes", "legal-hold", "retention", "tagging", "uploadId"]
+auth_action = "s3:GetObject"
+error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidRequest"]
+url_encoded_fields = []
+input_hot = ["Key"]
+output_hot = ["Body"]
 
 # `x-amz-object-attributes` is a comma-delimited list in a header position, the same shape
 # `ListObjectsV2.OptionalObjectAttributes` has. The frozen IR can only describe a list through the
@@ -137,6 +153,5 @@ element_order = [
 [[deferred]]
 reason = "P5 advanced object family; each member carries a body shape or a framing the data plane does not have."
 operations = [
-  "GetObjectTorrent",
   "UpdateObjectEncryption",
 ]

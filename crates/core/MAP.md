@@ -13,6 +13,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/ops/*.rs` | Exactly one `impl Operation` per AWS operation. | Change one operation's static contract. |
 | `src/ops/delete_object_annotation.rs` | Reserves annotation deletion independently of destructive object deletion. | An annotation DELETE routes to DeleteObject or declares the wrong authorization floor. |
 | `src/ops/get_object_annotation.rs` | Reserves a named annotation read independently of the parent object body. | A named annotation GET routes to GetObject or declares the wrong authorization floor. |
+| `src/ops/get_object_torrent.rs` | Reserves a torrent descriptor read independently of the parent object body. | A torrent GET routes to GetObject or declares the wrong authorization floor. |
 | `src/ops/list_object_annotations.rs` | Reserves annotation metadata listing independently of the parent object body. | An annotation listing routes to GetObject or declares the wrong authorization floor. |
 | `src/ops/rename_object.rs` | Reserves the directory-bucket rename contract independently of backend registration. | A rename request routes to PutObject or declares the wrong authorization floor. |
 | `src/ops/shared/` | Explicit cross-operation protocol logic. | A list/copy/conditional/ACL/checksum rule affects several operations. |

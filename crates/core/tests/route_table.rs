@@ -2357,3 +2357,23 @@ fn n_object_annotation_reads_do_not_claim_neighbour_controls() {
         assert_ne!(routed(&table, &request), Some("ListObjectAnnotations"), "{line}");
     }
 }
+
+// ── GetObjectTorrent ───────────────────────────────────────────────────────────────────────
+
+/// A torrent metadata read selects its own operation ahead of the object-body fallback.
+#[test]
+fn get_object_torrent_routes_ahead_of_get_object() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket/key?torrent")), Some("GetObjectTorrent"));
+}
+
+/// Negative controls keep the parent read and unrelated request shapes outside the torrent row.
+#[test]
+fn n_get_object_torrent_does_not_claim_neighbour_controls() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket/key")), Some("GetObject"));
+    for line in ["GET /bucket?torrent", "HEAD /bucket/key?torrent", "PUT /bucket/key?torrent"] {
+        let request = Req::new(line);
+        assert_ne!(routed(&table, &request), Some("GetObjectTorrent"), "{line}");
+    }
+}

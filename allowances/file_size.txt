@@ -1,12 +1,12 @@
 # path limit issue-url reason
 crates/conformance/src/fixture.rs 6100 https://github.com/rustfs/backlog/issues/1742 Existing fixture corpus; split in a dedicated behavior-reviewed task.
-crates/core/tests/route_table.rs 2359 https://github.com/rustfs/backlog/issues/1742 Existing route matrix; split in a dedicated behavior-reviewed task.
+crates/core/tests/route_table.rs 2379 https://github.com/rustfs/backlog/issues/1742 Existing route matrix; split in a dedicated behavior-reviewed task.
 crates/conformance/src/socket.rs 1250 https://github.com/rustfs/backlog/issues/1742 Existing socket harness; its tests are split out into socket/tests.rs, the production half still wants splitting.
 crates/conformance/src/inprocess.rs 1700 https://github.com/rustfs/backlog/issues/1742 Existing in-process harness; split in a dedicated behavior-reviewed task.
-crates/core/tests/params_and_dispatch.rs 1361 https://github.com/rustfs/backlog/issues/1742 One response suite sharing the same operation specs and full_router; split when a second subject appears.
+crates/core/tests/params_and_dispatch.rs 1381 https://github.com/rustfs/backlog/issues/1742 One response suite sharing the same operation specs and full_router; split when a second subject appears.
 crates/gateway/src/service.rs 1425 https://github.com/rustfs/backlog/issues/1742 Existing pipeline assembly; split in a dedicated behavior-reviewed task.
 crates/core/tests/dialect.rs 900 https://github.com/rustfs/backlog/issues/1742 Existing dialect matrix; split in a dedicated behavior-reviewed task.
-crates/core/tests/registration.rs 854 https://github.com/rustfs/backlog/issues/1742 Existing registration matrix; split in a dedicated behavior-reviewed task.
+crates/core/tests/registration.rs 855 https://github.com/rustfs/backlog/issues/1742 Existing registration matrix; split in a dedicated behavior-reviewed task.
 crates/model/src/lower/mod.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing lowering module; split in a dedicated behavior-reviewed task.
 crates/gateway/tests/authz_contract.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing authorization matrix; split in a dedicated behavior-reviewed task.
 crates/core/tests/lifecycle_roundtrip.rs 900 https://github.com/rustfs/backlog/issues/1742 Property, its generators and its boundary tests in one file; split the boundaries out in a dedicated behavior-reviewed task.
