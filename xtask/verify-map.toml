@@ -117,6 +117,14 @@ name = "GetBucketLogging"
 cases = "c-bucketconfig-0009,c-bucketconfig-0026"
 
 [[operation]]
+name = "GetBucketMetadataConfiguration"
+cases = ""
+
+[[operation]]
+name = "GetBucketMetadataTableConfiguration"
+cases = ""
+
+[[operation]]
 name = "GetBucketNotificationConfiguration"
 cases = "c-bucketconfig-0011,c-bucketconfig-0024"
 

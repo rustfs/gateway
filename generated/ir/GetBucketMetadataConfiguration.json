@@ -1,0 +1,502 @@
+{
+  "ir_version": "2",
+  "operation": "GetBucketMetadataConfiguration",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 280,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "metadataConfiguration" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:GetBucketMetadataTableConfiguration",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 1048576 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "GetBucketMetadataConfigurationResult",
+                            "wire_name": null,
+                            "required": false,
+                            "binding": { "kind": "Payload" },
+                            "type": { "kind": "Structure", "shape": "GetBucketMetadataConfigurationResult" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "AnnotationTableConfigurationResult": {
+                                                      "kind": "Structure",
+                                                      "fields": [
+                                                                  {
+                                                                    "name": "ConfigurationState",
+                                                                    "wire_name": "ConfigurationState",
+                                                                    "required": true,
+                                                                    "binding": { "kind": "BodyXml" },
+                                                                    "type": {
+                                                                              "kind": "StringEnum",
+                                                                              "values": ["ENABLED", "DISABLED"]
+                                                                            },
+                                                                    "hot": false,
+                                                                    "quirk_refs": []
+                                                                  },
+                                                                  {
+                                                                    "name": "TableStatus",
+                                                                    "wire_name": "TableStatus",
+                                                                    "required": false,
+                                                                    "binding": { "kind": "BodyXml" },
+                                                                    "type": { "kind": "String" },
+                                                                    "hot": false,
+                                                                    "quirk_refs": []
+                                                                  },
+                                                                  {
+                                                                    "name": "Error",
+                                                                    "wire_name": "Error",
+                                                                    "required": false,
+                                                                    "binding": { "kind": "BodyXml" },
+                                                                    "type": {
+                                                                              "kind": "Structure",
+                                                                              "shape": "ErrorDetails"
+                                                                            },
+                                                                    "hot": false,
+                                                                    "quirk_refs": []
+                                                                  },
+                                                                  {
+                                                                    "name": "TableName",
+                                                                    "wire_name": "TableName",
+                                                                    "required": false,
+                                                                    "binding": { "kind": "BodyXml" },
+                                                                    "type": { "kind": "String" },
+                                                                    "hot": false,
+                                                                    "quirk_refs": []
+                                                                  },
+                                                                  {
+                                                                    "name": "TableArn",
+                                                                    "wire_name": "TableArn",
+                                                                    "required": false,
+                                                                    "binding": { "kind": "BodyXml" },
+                                                                    "type": { "kind": "String" },
+                                                                    "hot": false,
+                                                                    "quirk_refs": []
+                                                                  },
+                                                                  {
+                                                                    "name": "Role",
+                                                                    "wire_name": "Role",
+                                                                    "required": false,
+                                                                    "binding": { "kind": "BodyXml" },
+                                                                    "type": { "kind": "String" },
+                                                                    "hot": false,
+                                                                    "quirk_refs": []
+                                                                  }
+                                                                ],
+                                                      "xml": {
+                                                               "element_order": [
+                                                                                  "ConfigurationState",
+                                                                                  "TableStatus",
+                                                                                  "Error",
+                                                                                  "TableName",
+                                                                                  "TableArn",
+                                                                                  "Role"
+                                                                                ],
+                                                               "empty_value_policy": {
+                                                                                       "ConfigurationState": "emit",
+                                                                                       "TableStatus": "emit",
+                                                                                       "Error": "emit",
+                                                                                       "TableName": "emit",
+                                                                                       "TableArn": "emit",
+                                                                                       "Role": "emit"
+                                                                                     },
+                                                               "attributes": []
+                                                             }
+                                                    },
+              "DestinationResult": {
+                                     "kind": "Structure",
+                                     "fields": [
+                                                 {
+                                                   "name": "TableBucketType",
+                                                   "wire_name": "TableBucketType",
+                                                   "required": false,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "StringEnum", "values": ["aws", "customer"] },
+                                                   "hot": false,
+                                                   "quirk_refs": []
+                                                 },
+                                                 {
+                                                   "name": "TableBucketArn",
+                                                   "wire_name": "TableBucketArn",
+                                                   "required": false,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "String" },
+                                                   "hot": false,
+                                                   "quirk_refs": []
+                                                 },
+                                                 {
+                                                   "name": "TableNamespace",
+                                                   "wire_name": "TableNamespace",
+                                                   "required": false,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "String" },
+                                                   "hot": false,
+                                                   "quirk_refs": []
+                                                 }
+                                               ],
+                                     "xml": {
+                                              "element_order": ["TableBucketType", "TableBucketArn", "TableNamespace"],
+                                              "empty_value_policy": {
+                                                                      "TableBucketType": "emit",
+                                                                      "TableBucketArn": "emit",
+                                                                      "TableNamespace": "emit"
+                                                                    },
+                                              "attributes": []
+                                            }
+                                   },
+              "ErrorDetails": {
+                                "kind": "Structure",
+                                "fields": [
+                                            {
+                                              "name": "ErrorCode",
+                                              "wire_name": "ErrorCode",
+                                              "required": false,
+                                              "binding": { "kind": "BodyXml" },
+                                              "type": { "kind": "String" },
+                                              "hot": false,
+                                              "quirk_refs": []
+                                            },
+                                            {
+                                              "name": "ErrorMessage",
+                                              "wire_name": "ErrorMessage",
+                                              "required": false,
+                                              "binding": { "kind": "BodyXml" },
+                                              "type": { "kind": "String" },
+                                              "hot": false,
+                                              "quirk_refs": []
+                                            }
+                                          ],
+                                "xml": {
+                                         "element_order": ["ErrorCode", "ErrorMessage"],
+                                         "empty_value_policy": { "ErrorCode": "emit", "ErrorMessage": "emit" },
+                                         "attributes": []
+                                       }
+                              },
+              "GetBucketMetadataConfigurationResult": {
+                                                        "kind": "Structure",
+                                                        "fields": [
+                                                                    {
+                                                                      "name": "MetadataConfigurationResult",
+                                                                      "wire_name": "MetadataConfigurationResult",
+                                                                      "required": true,
+                                                                      "binding": { "kind": "BodyXml" },
+                                                                      "type": {
+                                                                                "kind": "Structure",
+                                                                                "shape": "MetadataConfigurationResult"
+                                                                              },
+                                                                      "hot": false,
+                                                                      "quirk_refs": []
+                                                                    }
+                                                                  ],
+                                                        "xml": {
+                                                                 "element_order": ["MetadataConfigurationResult"],
+                                                                 "empty_value_policy": {
+                                                                                         "MetadataConfigurationResult": "emit"
+                                                                                       },
+                                                                 "attributes": []
+                                                               }
+                                                      },
+              "InventoryTableConfigurationResult": {
+                                                     "kind": "Structure",
+                                                     "fields": [
+                                                                 {
+                                                                   "name": "ConfigurationState",
+                                                                   "wire_name": "ConfigurationState",
+                                                                   "required": true,
+                                                                   "binding": { "kind": "BodyXml" },
+                                                                   "type": {
+                                                                             "kind": "StringEnum",
+                                                                             "values": ["ENABLED", "DISABLED"]
+                                                                           },
+                                                                   "hot": false,
+                                                                   "quirk_refs": []
+                                                                 },
+                                                                 {
+                                                                   "name": "TableStatus",
+                                                                   "wire_name": "TableStatus",
+                                                                   "required": false,
+                                                                   "binding": { "kind": "BodyXml" },
+                                                                   "type": { "kind": "String" },
+                                                                   "hot": false,
+                                                                   "quirk_refs": []
+                                                                 },
+                                                                 {
+                                                                   "name": "Error",
+                                                                   "wire_name": "Error",
+                                                                   "required": false,
+                                                                   "binding": { "kind": "BodyXml" },
+                                                                   "type": {
+                                                                             "kind": "Structure",
+                                                                             "shape": "ErrorDetails"
+                                                                           },
+                                                                   "hot": false,
+                                                                   "quirk_refs": []
+                                                                 },
+                                                                 {
+                                                                   "name": "TableName",
+                                                                   "wire_name": "TableName",
+                                                                   "required": false,
+                                                                   "binding": { "kind": "BodyXml" },
+                                                                   "type": { "kind": "String" },
+                                                                   "hot": false,
+                                                                   "quirk_refs": []
+                                                                 },
+                                                                 {
+                                                                   "name": "TableArn",
+                                                                   "wire_name": "TableArn",
+                                                                   "required": false,
+                                                                   "binding": { "kind": "BodyXml" },
+                                                                   "type": { "kind": "String" },
+                                                                   "hot": false,
+                                                                   "quirk_refs": []
+                                                                 }
+                                                               ],
+                                                     "xml": {
+                                                              "element_order": [
+                                                                                 "ConfigurationState",
+                                                                                 "TableStatus",
+                                                                                 "Error",
+                                                                                 "TableName",
+                                                                                 "TableArn"
+                                                                               ],
+                                                              "empty_value_policy": {
+                                                                                      "ConfigurationState": "emit",
+                                                                                      "TableStatus": "emit",
+                                                                                      "Error": "emit",
+                                                                                      "TableName": "emit",
+                                                                                      "TableArn": "emit"
+                                                                                    },
+                                                              "attributes": []
+                                                            }
+                                                   },
+              "JournalTableConfigurationResult": {
+                                                   "kind": "Structure",
+                                                   "fields": [
+                                                               {
+                                                                 "name": "TableStatus",
+                                                                 "wire_name": "TableStatus",
+                                                                 "required": true,
+                                                                 "binding": { "kind": "BodyXml" },
+                                                                 "type": { "kind": "String" },
+                                                                 "hot": false,
+                                                                 "quirk_refs": []
+                                                               },
+                                                               {
+                                                                 "name": "Error",
+                                                                 "wire_name": "Error",
+                                                                 "required": false,
+                                                                 "binding": { "kind": "BodyXml" },
+                                                                 "type": {
+                                                                           "kind": "Structure",
+                                                                           "shape": "ErrorDetails"
+                                                                         },
+                                                                 "hot": false,
+                                                                 "quirk_refs": []
+                                                               },
+                                                               {
+                                                                 "name": "TableName",
+                                                                 "wire_name": "TableName",
+                                                                 "required": true,
+                                                                 "binding": { "kind": "BodyXml" },
+                                                                 "type": { "kind": "String" },
+                                                                 "hot": false,
+                                                                 "quirk_refs": []
+                                                               },
+                                                               {
+                                                                 "name": "TableArn",
+                                                                 "wire_name": "TableArn",
+                                                                 "required": false,
+                                                                 "binding": { "kind": "BodyXml" },
+                                                                 "type": { "kind": "String" },
+                                                                 "hot": false,
+                                                                 "quirk_refs": []
+                                                               },
+                                                               {
+                                                                 "name": "RecordExpiration",
+                                                                 "wire_name": "RecordExpiration",
+                                                                 "required": true,
+                                                                 "binding": { "kind": "BodyXml" },
+                                                                 "type": {
+                                                                           "kind": "Structure",
+                                                                           "shape": "RecordExpiration"
+                                                                         },
+                                                                 "hot": false,
+                                                                 "quirk_refs": []
+                                                               }
+                                                             ],
+                                                   "xml": {
+                                                            "element_order": [
+                                                                               "TableStatus",
+                                                                               "Error",
+                                                                               "TableName",
+                                                                               "TableArn",
+                                                                               "RecordExpiration"
+                                                                             ],
+                                                            "empty_value_policy": {
+                                                                                    "TableStatus": "emit",
+                                                                                    "Error": "emit",
+                                                                                    "TableName": "emit",
+                                                                                    "TableArn": "emit",
+                                                                                    "RecordExpiration": "emit"
+                                                                                  },
+                                                            "attributes": []
+                                                          }
+                                                 },
+              "MetadataConfigurationResult": {
+                                               "kind": "Structure",
+                                               "fields": [
+                                                           {
+                                                             "name": "DestinationResult",
+                                                             "wire_name": "DestinationResult",
+                                                             "required": true,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": {
+                                                                       "kind": "Structure",
+                                                                       "shape": "DestinationResult"
+                                                                     },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           },
+                                                           {
+                                                             "name": "JournalTableConfigurationResult",
+                                                             "wire_name": "JournalTableConfigurationResult",
+                                                             "required": false,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": {
+                                                                       "kind": "Structure",
+                                                                       "shape": "JournalTableConfigurationResult"
+                                                                     },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           },
+                                                           {
+                                                             "name": "InventoryTableConfigurationResult",
+                                                             "wire_name": "InventoryTableConfigurationResult",
+                                                             "required": false,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": {
+                                                                       "kind": "Structure",
+                                                                       "shape": "InventoryTableConfigurationResult"
+                                                                     },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           },
+                                                           {
+                                                             "name": "AnnotationTableConfigurationResult",
+                                                             "wire_name": "AnnotationTableConfigurationResult",
+                                                             "required": false,
+                                                             "binding": { "kind": "BodyXml" },
+                                                             "type": {
+                                                                       "kind": "Structure",
+                                                                       "shape": "AnnotationTableConfigurationResult"
+                                                                     },
+                                                             "hot": false,
+                                                             "quirk_refs": []
+                                                           }
+                                                         ],
+                                               "xml": {
+                                                        "element_order": [
+                                                                           "DestinationResult",
+                                                                           "JournalTableConfigurationResult",
+                                                                           "InventoryTableConfigurationResult",
+                                                                           "AnnotationTableConfigurationResult"
+                                                                         ],
+                                                        "empty_value_policy": {
+                                                                                "DestinationResult": "emit",
+                                                                                "JournalTableConfigurationResult": "emit",
+                                                                                "InventoryTableConfigurationResult": "emit",
+                                                                                "AnnotationTableConfigurationResult": "emit"
+                                                                              },
+                                                        "attributes": []
+                                                      }
+                                             },
+              "RecordExpiration": {
+                                    "kind": "Structure",
+                                    "fields": [
+                                                {
+                                                  "name": "Expiration",
+                                                  "wire_name": "Expiration",
+                                                  "required": true,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "StringEnum", "values": ["ENABLED", "DISABLED"] },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "Days",
+                                                  "wire_name": "Days",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "Integer" },
+                                                  "hot": false,
+                                                  "quirk_refs": []
+                                                }
+                                              ],
+                                    "xml": {
+                                             "element_order": ["Expiration", "Days"],
+                                             "empty_value_policy": { "Expiration": "emit", "Days": "emit" },
+                                             "attributes": []
+                                           }
+                                  }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["NoSuchBucket", "AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [],
+  "quirks": [],
+  "ext_points": []
+}

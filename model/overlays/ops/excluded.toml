@@ -35,8 +35,6 @@ operations = [
   "CreateBucketMetadataTableConfiguration",
   "DeleteBucketMetadataConfiguration",
   "DeleteBucketMetadataTableConfiguration",
-  "GetBucketMetadataConfiguration",
-  "GetBucketMetadataTableConfiguration",
   "UpdateBucketMetadataAnnotationTableConfiguration",
   "UpdateBucketMetadataInventoryTableConfiguration",
   "UpdateBucketMetadataJournalTableConfiguration",

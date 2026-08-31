@@ -82,6 +82,14 @@ summary = "ListDirectoryBuckets is an account-level GET on the S3 Express region
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html"
 summary = "ListBuckets is an account-level GET on the ordinary S3 endpoint and returns the general bucket namespace."
 
+[evidence.get-bucket-metadata-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetadataConfiguration.html"
+summary = "GetBucketMetadataConfiguration is a bucket GET carrying the metadataConfiguration subresource and uses the metadata-table IAM action."
+
+[evidence.get-bucket-metadata-table-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetadataTableConfiguration.html"
+summary = "GetBucketMetadataTableConfiguration is the legacy bucket GET carrying the metadataTable subresource and uses the metadata-table IAM action."
+
 [evidence.complete-multipart-upload]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
 summary = "completion is a POST to the object key carrying the upload id."
@@ -3797,6 +3805,336 @@ evidence = ["list-bucket-inventory-configurations", "list-objects"]
 
 [[shadowing]]
 winner = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-configuration", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-configuration", "get-bucket-location"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-configuration", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-configuration", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-configuration", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-configuration", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-configuration", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-configuration", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-configuration", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-configuration", "list-objects-v2"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-configuration", "list-object-versions"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so a V2 metadata-configuration read satisfies it too. The subresource row wins at 280 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["get-bucket-metadata-configuration", "list-objects"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-table-configuration", "get-bucket-location"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-table-configuration", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-table-configuration", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-table-configuration", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-table-configuration", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-table-configuration", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-table-configuration", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-table-configuration", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-table-configuration", "list-objects-v2"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metadata-table-configuration", "list-object-versions"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so a legacy metadata-table read satisfies it too. The subresource row wins at 281 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["get-bucket-metadata-table-configuration", "list-objects"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
 shadowed = "GetBucketAbac"
 reason_ref = "two-subresource-keys"
 evidence = ["get-bucket-accelerate-configuration", "get-bucket-abac"]
@@ -4239,6 +4577,42 @@ winner = "CreateSession"
 shadowed = "ListObjectVersions"
 reason_ref = "two-subresource-keys"
 evidence = ["create-session", "list-object-versions"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["create-session", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetBucketMetadataConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetBucketMetadataTableConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-bucket-metadata-table-configuration"]
 
 [[shadowing]]
 winner = "ListDirectoryBuckets"

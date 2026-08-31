@@ -31,6 +31,8 @@
   277  GetBucketInventoryConfiguration          /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("inventory") ∧ QueryPresent("id")
   278  ListBucketInventoryConfigurations        /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("inventory")
   279  CreateSession                            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("session")
+  280  GetBucketMetadataConfiguration           /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("metadataConfiguration")
+  281  GetBucketMetadataTableConfiguration      /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("metadataTable")
   300  GetBucketLocation                        /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("location")
   310  GetBucketCors                            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("cors")
   320  PutBucketCors                            /{Bucket}            Method(PUT) ∧ Target(Bucket) ∧ QueryPresent("cors")

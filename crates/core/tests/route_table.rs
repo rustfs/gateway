@@ -2626,3 +2626,67 @@ fn analytics_reads_share_the_get_configuration_authorization_contract() {
         assert_eq!(auth.resource, ResourceShape::Bucket, "{}", spec.name);
     }
 }
+
+// ── Bucket metadata reads ────────────────────────────────────────────────────
+
+/// Metadata configuration reads select their V2 and V1 operations before ListObjects.
+#[test]
+fn bucket_metadata_reads_route_by_their_exact_subresource() {
+    let table = generated_table();
+    for (request, expected) in [
+        ("GET /bucket?metadataConfiguration", "GetBucketMetadataConfiguration"),
+        ("GET /bucket?metadataTable", "GetBucketMetadataTableConfiguration"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(request).target(TargetKind::Bucket)), Some(expected));
+    }
+}
+
+/// Negative controls keep the sibling key, object target and other methods outside both rows.
+#[test]
+fn n_bucket_metadata_reads_do_not_claim_neighbour_controls() {
+    let table = generated_table();
+    for (request, expected) in [
+        (
+            Req::new("GET /bucket?metadataConfigurationx").target(TargetKind::Bucket),
+            Some("ListObjects"),
+        ),
+        (
+            Req::new("GET /bucket?metadataConfiguration").target(TargetKind::Object),
+            Some("GetObject"),
+        ),
+        (
+            Req::new("HEAD /bucket?metadataConfiguration").target(TargetKind::Bucket),
+            Some("HeadBucket"),
+        ),
+        (Req::new("GET /bucket?metadataTablex").target(TargetKind::Bucket), Some("ListObjects")),
+        (Req::new("GET /bucket?metadataTable").target(TargetKind::Object), Some("GetObject")),
+        (Req::new("DELETE /bucket?metadataTable").target(TargetKind::Bucket), None),
+    ] {
+        assert_eq!(routed(&table, &request), expected);
+    }
+}
+
+/// Both metadata generations share the reviewed bucket authorization contract.
+#[test]
+fn bucket_metadata_reads_share_the_metadata_table_authorization_contract() {
+    for spec in [
+        <rustfs_gateway_types::dto::GetBucketMetadataConfiguration as Operation>::spec(),
+        <rustfs_gateway_types::dto::GetBucketMetadataTableConfiguration as Operation>::spec(),
+    ] {
+        let auth = spec.auth.expect("a metadata read declares authorization");
+        assert_eq!(auth.action, "s3:GetBucketMetadataTableConfiguration", "{}", spec.name);
+        assert_eq!(auth.resource, ResourceShape::Bucket, "{}", spec.name);
+    }
+    for (name, floor) in [
+        (
+            "GetBucketMetadataConfiguration",
+            <rustfs_gateway_types::dto::GetBucketMetadataConfiguration as Operation>::floor(),
+        ),
+        (
+            "GetBucketMetadataTableConfiguration",
+            <rustfs_gateway_types::dto::GetBucketMetadataTableConfiguration as Operation>::floor(),
+        ),
+    ] {
+        assert_eq!(floor.service(), SigService::S3, "{name}");
+    }
+}

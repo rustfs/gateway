@@ -10,6 +10,7 @@ AnalyticsConfiguration 3
 AnalyticsExportDestination 1
 AnalyticsS3BucketDestination 4
 AnnotationEntry 6
+AnnotationTableConfigurationResult 6
 BlockedEncryptionTypes 1
 Bucket 4
 BucketLifecycleConfiguration 1
@@ -64,9 +65,11 @@ DeletePublicAccessBlockInput 2
 DeletePublicAccessBlockOutput 0
 DeletedObject 4
 Destination 7
+DestinationResult 3
 Encryption 3
 EncryptionConfiguration 1
 Error 4
+ErrorDetails 2
 ErrorDocument 1
 EventBridgeConfiguration 0
 ExistingObjectReplication 1
@@ -93,6 +96,12 @@ GetBucketLocationInput 2
 GetBucketLocationOutput 1
 GetBucketLoggingInput 2
 GetBucketLoggingOutput 1
+GetBucketMetadataConfigurationInput 2
+GetBucketMetadataConfigurationOutput 1
+GetBucketMetadataConfigurationResult 1
+GetBucketMetadataTableConfigurationInput 2
+GetBucketMetadataTableConfigurationOutput 1
+GetBucketMetadataTableConfigurationResult 3
 GetBucketNotificationConfigurationInput 2
 GetBucketNotificationConfigurationOutput 4
 GetBucketOwnershipControlsInput 2
@@ -151,6 +160,8 @@ InventoryEncryption 2
 InventoryFilter 1
 InventoryS3BucketDestination 5
 InventorySchedule 1
+InventoryTableConfigurationResult 5
+JournalTableConfigurationResult 5
 JsonInput 1
 JsonOutput 1
 LambdaFunctionConfiguration 4
@@ -181,7 +192,9 @@ ListObjectsV2Output 13
 ListPartsInput 10
 ListPartsOutput 16
 LoggingEnabled 4
+MetadataConfigurationResult 4
 MetadataEntry 2
+MetadataTableConfigurationResult 1
 Metrics 2
 MultipartUpload 8
 NoncurrentVersionExpiration 2
@@ -247,6 +260,7 @@ PutObjectTaggingOutput 1
 PutPublicAccessBlockInput 5
 PutPublicAccessBlockOutput 0
 QueueConfiguration 4
+RecordExpiration 2
 Redirect 5
 RedirectAllRequestsTo 2
 RenameObjectInput 12
@@ -267,6 +281,7 @@ RestoreStatus 2
 RoutingRule 2
 S3KeyFilter 1
 S3Location 8
+S3TablesDestinationResult 4
 ScanRange 2
 SelectObjectContentInput 12
 SelectObjectContentOutput 0
