@@ -1314,3 +1314,23 @@ fn n_unhandled_rename_object_is_refused_instead_of_dispatched_as_put_object() {
         .expect("the registered PutObject neighbour remains served");
     assert_eq!(plain.entry.op_name, "PutObject");
 }
+
+/// An unhandled annotation deletion is refused by name instead of deleting the parent object.
+#[test]
+fn n_unhandled_delete_object_annotation_is_refused_instead_of_deleting_the_object() {
+    let mut registry = Registry::new();
+    registry.register(&DELETE_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    let error = router
+        .dispatch(&Req::new("DELETE /bucket/key?annotation&annotationName=name").parts())
+        .expect_err("this registry has no DeleteObjectAnnotation handler");
+    assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED);
+    assert_eq!(error.message(), NOT_REGISTERED_MESSAGE);
+    assert_eq!(error.operation(), Some("DeleteObjectAnnotation"));
+
+    let plain = router
+        .dispatch(&Req::new("DELETE /bucket/key").parts())
+        .expect("the registered DeleteObject neighbour remains served");
+    assert_eq!(plain.entry.op_name, "DeleteObject");
+}

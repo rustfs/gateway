@@ -57,6 +57,10 @@ name = "DeleteObject"
 cases = "c-object-0003"
 
 [[operation]]
+name = "DeleteObjectAnnotation"
+cases = ""
+
+[[operation]]
 name = "DeleteObjectTagging"
 cases = "c-tagging-0022"
 

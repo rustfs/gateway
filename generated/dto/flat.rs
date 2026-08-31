@@ -102,6 +102,10 @@ pub use crate::ops::delete_bucket_website::{
 pub use crate::ops::delete_object::{
     DeleteObject, Input as DeleteObjectInput, InputBuilder as DeleteObjectInputBuilder, Output as DeleteObjectOutput,
 };
+pub use crate::ops::delete_object_annotation::{
+    DeleteObjectAnnotation, Input as DeleteObjectAnnotationInput, InputBuilder as DeleteObjectAnnotationInputBuilder,
+    Output as DeleteObjectAnnotationOutput,
+};
 pub use crate::ops::delete_object_tagging::{
     DeleteObjectTagging, Input as DeleteObjectTaggingInput, InputBuilder as DeleteObjectTaggingInputBuilder,
     Output as DeleteObjectTaggingOutput,

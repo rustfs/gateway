@@ -35,6 +35,7 @@ mod delete_bucket_replication;
 mod delete_bucket_tagging;
 mod delete_bucket_website;
 mod delete_object;
+mod delete_object_annotation;
 mod delete_object_tagging;
 mod delete_objects;
 mod delete_public_access_block;

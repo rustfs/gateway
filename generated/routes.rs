@@ -863,6 +863,20 @@ pub const ROUTES: &[RouteRow] = &[
         ],
     },
     RouteRow {
+        operation: "DeleteObjectAnnotation",
+        precedence: 590,
+        method: "DELETE",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 204,
+        not_configured: None,
+        predicates: &[
+            RoutePredicate::Method("DELETE"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("annotation"),
+        ],
+    },
+    RouteRow {
         operation: "ListObjectsV2",
         precedence: 600,
         method: "GET",

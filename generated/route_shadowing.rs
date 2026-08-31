@@ -3234,11 +3234,38 @@ pub const SHADOWING: &[ShadowingDecl] = &[
         ],
     },
     ShadowingDecl {
+        winner: "AbortMultipartUpload",
+        shadowed: "DeleteObjectAnnotation",
+        reason: "A DELETE carrying both ?uploadId and ?annotation names an in-progress upload and a committed-object annotation at once. The multipart band (430) is tried before the annotation row (590), consistently keeping uploadId-bound requests on the multipart resource.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html — an abort is a DELETE to the object key carrying the upload id as a query parameter.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectAnnotation.html — DeleteObjectAnnotation permanently removes one named annotation through DELETE on an object key with ?annotation and annotationName, while leaving the object itself in place.",
+        ],
+    },
+    ShadowingDecl {
         winner: "DeleteObjectTagging",
         shadowed: "DeleteObject",
         reason: "Clearing a tag set is a DELETE to the object key plus ?tagging, and DeleteObject accepts every such request. DeleteObjectTagging is tried first (500 before 1000). The other order is the worst outcome in the table: the object itself is removed, and the 204 a successful untag answers with is indistinguishable from the 204 the delete answers with.",
         evidence: &[
             "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectTagging.html — a tag-set removal is a DELETE to the object key carrying the ?tagging subresource, and it leaves the object in place.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html — an object delete is the same method and path with no upload id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteObjectTagging",
+        shadowed: "DeleteObjectAnnotation",
+        reason: "A DELETE carrying both ?tagging and ?annotation names two different metadata subresources. The established tagging row (500) is tried before the annotation row (590), so admitting annotations cannot silently change the meaning of an existing tagging request.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectTagging.html — a tag-set removal is a DELETE to the object key carrying the ?tagging subresource, and it leaves the object in place.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectAnnotation.html — DeleteObjectAnnotation permanently removes one named annotation through DELETE on an object key with ?annotation and annotationName, while leaving the object itself in place.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "DeleteObjectAnnotation",
+        shadowed: "DeleteObject",
+        reason: "Removing one named annotation is a DELETE to the object key plus ?annotation and annotationName, and DeleteObject accepts every such request. DeleteObjectAnnotation is tried first (590 before 1000); the opposite order would permanently remove the object while returning the same 204 success status.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjectAnnotation.html — DeleteObjectAnnotation permanently removes one named annotation through DELETE on an object key with ?annotation and annotationName, while leaving the object itself in place.",
             "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html — an object delete is the same method and path with no upload id.",
         ],
     },
