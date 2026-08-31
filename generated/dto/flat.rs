@@ -27,12 +27,13 @@ pub use crate::ops::enums::{
     AccessTier, Acl, ArchiveStatus, CannedAcl, ChecksumAlgorithm, ChecksumMode, ChecksumType, CompressionType, EncodingType,
     EncryptionType, Events, ExpressionType, FileHeaderInfo, Format, Frequency, IncludedObjectVersions, LocationConstraint,
     MetadataDirective, MfaDelete, Mode, Name, ObjectLockEnabled, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership,
-    OptionalFields, PartitionDateSource, Payer, Permission, Protocol, QuoteFields, ReplicationStatus, RequestCharged,
-    RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective, Tier,
+    OptionalFields, OutputSchemaVersion, PartitionDateSource, Payer, Permission, Protocol, QuoteFields, ReplicationStatus,
+    RequestCharged, RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective, Tier,
     TransitionDefaultMinimumObjectSize, Type,
 };
 pub use crate::ops::shapes::{
     AbacStatus, AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, AccessControlTranslation,
+    AnalyticsAndOperator, AnalyticsConfiguration, AnalyticsExportDestination, AnalyticsFilter, AnalyticsS3BucketDestination,
     AnnotationEntry, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration, BucketLoggingStatus, Checksum, CommonPrefix,
     CompletedMultipartUpload, CompletedPart, Condition, CorsConfiguration, CorsRule, CreateBucketConfiguration, CsvInput,
     CsvOutput, DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication, DeletedObject, Destination, Encryption,
@@ -49,8 +50,9 @@ pub use crate::ops::shapes::{
     ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationTime,
     ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest, RestoreStatus, RoutingRule, S3KeyFilter,
     S3Location, ScanRange, SelectParameters, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
-    ServerSideEncryptionRule, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects, Ssekms, Sses3, Tag, Tagging,
-    TargetGrant, TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition, VersioningConfiguration, WebsiteConfiguration,
+    ServerSideEncryptionRule, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects, Ssekms, Sses3, StorageClassAnalysis,
+    StorageClassAnalysisDataExport, Tag, Tagging, TargetGrant, TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition,
+    VersioningConfiguration, WebsiteConfiguration,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -129,6 +131,10 @@ pub use crate::ops::get_bucket_accelerate_configuration::{
 };
 pub use crate::ops::get_bucket_acl::{
     GetBucketAcl, Input as GetBucketAclInput, InputBuilder as GetBucketAclInputBuilder, Output as GetBucketAclOutput,
+};
+pub use crate::ops::get_bucket_analytics_configuration::{
+    GetBucketAnalyticsConfiguration, Input as GetBucketAnalyticsConfigurationInput,
+    InputBuilder as GetBucketAnalyticsConfigurationInputBuilder, Output as GetBucketAnalyticsConfigurationOutput,
 };
 pub use crate::ops::get_bucket_cors::{
     GetBucketCors, Input as GetBucketCorsInput, InputBuilder as GetBucketCorsInputBuilder, Output as GetBucketCorsOutput,
@@ -236,6 +242,10 @@ pub use crate::ops::head_bucket::{
 };
 pub use crate::ops::head_object::{
     HeadObject, Input as HeadObjectInput, InputBuilder as HeadObjectInputBuilder, Output as HeadObjectOutput,
+};
+pub use crate::ops::list_bucket_analytics_configurations::{
+    Input as ListBucketAnalyticsConfigurationsInput, InputBuilder as ListBucketAnalyticsConfigurationsInputBuilder,
+    ListBucketAnalyticsConfigurations, Output as ListBucketAnalyticsConfigurationsOutput,
 };
 pub use crate::ops::list_bucket_intelligent_tiering_configurations::{
     Input as ListBucketIntelligentTieringConfigurationsInput,

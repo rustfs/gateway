@@ -25,6 +25,8 @@
   270  GetBucketOwnershipControls               /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("ownershipControls")
   272  GetBucketIntelligentTieringConfiguration /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("intelligent-tiering") ∧ QueryPresent("id")
   273  ListBucketIntelligentTieringConfigurations /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("intelligent-tiering")
+  274  GetBucketAnalyticsConfiguration          /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("analytics") ∧ QueryPresent("id")
+  275  ListBucketAnalyticsConfigurations        /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("analytics")
   276  GetBucketAbac                            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("abac")
   277  GetBucketInventoryConfiguration          /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("inventory") ∧ QueryPresent("id")
   278  ListBucketInventoryConfigurations        /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("inventory")

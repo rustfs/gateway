@@ -33,7 +33,9 @@
 
 use std::fmt::Write as _;
 
-use rustfs_gateway_model::ir::{AttributeSource, Binding, ETagRender, EmptyValue, Field, OmitWhen, OperationIr, Shape, Type};
+use rustfs_gateway_model::ir::{
+    AttributeSource, Binding, ETagRender, EmptyValue, Field, OmitWhen, OperationIr, Shape, ShapeKind, Type,
+};
 
 use super::{CodecRules, attribute_name, carried_as_attribute, expr, media, url};
 use crate::emit::dto::naming;
@@ -389,6 +391,21 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
             let _ = writeln!(out, "{pad}    writer.close();");
             let _ = writeln!(out, "{pad}}}");
         }
+        Type::Union(inner_name) => {
+            let writer_fn = format!("write_{}", naming::module_name(inner_name));
+            let argument = shape_writer_argument(plan, inner_name);
+            let open = open_structure(ir, inner_name, &wire, "v", "&mut writer")?;
+            if field.required {
+                let _ = writeln!(out, "{pad}{{");
+                let _ = writeln!(out, "{pad}    let v = &{source};");
+            } else {
+                let _ = writeln!(out, "{pad}if let Some(v) = {source}.as_ref() {{");
+            }
+            let _ = writeln!(out, "{pad}    {open}");
+            let _ = writeln!(out, "{pad}    {writer_fn}(&mut writer, v{argument})?;");
+            let _ = writeln!(out, "{pad}    writer.close();");
+            let _ = writeln!(out, "{pad}}}");
+        }
         other => {
             let rendered = wire_expr(other, member, &ir.operation, encoded)?;
             let call = element_call(other, policy);
@@ -522,6 +539,9 @@ fn empty_policy(policy: &[(String, EmptyValue)], member: &str, required: bool) -
 
 /// Renders the writer for one nested response shape.
 pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<String, String> {
+    if shape.kind == ShapeKind::Union {
+        return union_writer(ir, name, shape);
+    }
     let plan = url::plan(ir)?;
     let type_name = naming::type_name(name);
     let order = if shape.xml.element_order.is_empty() {
@@ -561,7 +581,7 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
         let policy = empty_policy(&shape.xml.empty_value_policy, &field.name, field.required);
         let encoded = plan.encodes_shape_member(name, &field.name);
         match &field.ty {
-            Type::Structure(_) | Type::List { .. } => {
+            Type::Structure(_) | Type::Union(_) | Type::List { .. } => {
                 out.push_str(&shape_child(ir, &plan, field, &source, &wire)?);
             }
             other => {
@@ -588,7 +608,7 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
 fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, wire: &str) -> Result<String, String> {
     let mut out = String::new();
     match &field.ty {
-        Type::Structure(inner) => {
+        Type::Structure(inner) | Type::Union(inner) => {
             let writer_fn = format!("write_{}", naming::module_name(inner));
             let argument = shape_writer_argument(plan, inner);
             let open = open_structure(ir, inner, wire, "v", "writer")?;
@@ -644,6 +664,57 @@ fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         }
         _ => {}
     }
+    Ok(out)
+}
+
+/// Renders one response-side structural union by matching the selected modeled variant.
+fn union_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<String, String> {
+    let plan = url::plan(ir)?;
+    let module = naming::module_name(name);
+    let type_name = naming::type_name(name);
+    let mut out = String::new();
+    let _ = writeln!(out, "/// Writes the selected `{name}` variant as its modeled XML child.");
+    out.push_str(&shape_writer_signature(&module, &type_name, plan.encodes_shape(name)));
+    out.push_str("    match value {\n");
+    for field in &shape.fields {
+        let variant = naming::type_name(&field.name);
+        let wire = field.wire_name.clone().unwrap_or_else(|| field.name.clone());
+        let encoded = plan.encodes_shape_member(name, &field.name);
+        match &field.ty {
+            Type::Structure(inner) | Type::Union(inner) => {
+                let writer_fn = format!("write_{}", naming::module_name(inner));
+                let argument = shape_writer_argument(&plan, inner);
+                let open = open_structure(ir, inner, &wire, "v", "writer")?;
+                let _ = writeln!(out, "        dto::{type_name}::{variant}(v) => {{");
+                let _ = writeln!(out, "            {open}");
+                let _ = writeln!(out, "            {writer_fn}(writer, v{argument})?;");
+                out.push_str("            writer.close();\n");
+                out.push_str("        }\n");
+            }
+            Type::List { .. } | Type::Map { .. } | Type::Blob { .. } | Type::Checksum(_) | Type::ChecksumSpec => {
+                return Err(expr::unsupported(
+                    &ir.operation,
+                    &field.name,
+                    "a response structural-union variant must carry a scalar or nested shape",
+                ));
+            }
+            scalar => {
+                let rendered = wire_expr(scalar, &field.name, &ir.operation, encoded)?;
+                let call = element_call(scalar, empty_policy(&shape.xml.empty_value_policy, &field.name, true));
+                let _ = writeln!(out, "        dto::{type_name}::{variant}(v) => writer.{call}(\"{wire}\", {rendered}),");
+            }
+        }
+    }
+    out.push_str(
+        "        _ => {\n\
+         \x20           return Err(CodecError::internal(\n\
+         \x20               \"an output structural union holds a variant this codec does not know\",\n\
+         \x20           ));\n\
+         \x20       }\n\
+         \x20   }\n\
+         \x20   Ok(())\n\
+         }\n",
+    );
     Ok(out)
 }
 

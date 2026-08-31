@@ -262,6 +262,14 @@ summary = "GetBucketAbac is selected by the ?abac subresource on a general-purpo
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketInventoryConfiguration.html"
 summary = "GetBucketInventoryConfiguration is selected by ?inventory with a required id on a bucket GET and returns one configuration rather than object keys."
 
+[evidence.get-bucket-analytics-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAnalyticsConfiguration.html"
+summary = "GetBucketAnalyticsConfiguration is selected by ?analytics with a required id on a bucket GET and returns the named storage analysis configuration rather than object keys."
+
+[evidence.list-bucket-analytics-configurations]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketAnalyticsConfigurations.html"
+summary = "ListBucketAnalyticsConfigurations is selected by bare ?analytics on a bucket GET and returns paginated configuration documents rather than object keys."
+
 [evidence.list-bucket-inventory-configurations]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketInventoryConfigurations.html"
 summary = "ListBucketInventoryConfigurations is selected by bare ?inventory on a bucket GET and returns configuration metadata rather than object keys."
@@ -3153,6 +3161,336 @@ evidence = ["list-bucket-intelligent-tiering-configurations", "list-objects"]
 
 [[shadowing]]
 winner = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketAnalyticsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-analytics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetBucketAbac"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-bucket-abac"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "ListBucketAnalyticsConfigurations"
+reason = "Both rows name ?analytics, but only the single-configuration read requires id. The id-bearing row wins at 274 before the bare list at 275; without id the get row does not match."
+evidence = ["get-bucket-analytics-configuration", "list-bucket-analytics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-bucket-location"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "list-objects-v2"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "list-object-versions"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so every named analytics read request satisfies it too. The subresource row wins at 274 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["get-bucket-analytics-configuration", "list-objects"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-bucket-location"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "list-objects-v2"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "list-object-versions"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so every analytics configuration list request satisfies it too. The subresource row wins at 275 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["list-bucket-analytics-configurations", "list-objects"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
 shadowed = "GetBucketInventoryConfiguration"
 reason_ref = "two-subresource-keys"
 evidence = ["get-bucket-accelerate-configuration", "get-bucket-inventory-configuration"]
@@ -3733,6 +4071,18 @@ winner = "CreateSession"
 shadowed = "ListObjects"
 reason = "ListObjects pins no query key, so a session request satisfies it too. The route-only session refusal wins at 279 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
 evidence = ["create-session", "list-objects"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "create-session"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "CreateSession"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "create-session"]
 
 [[shadowing]]
 winner = "GetBucketAccelerateConfiguration"

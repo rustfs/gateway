@@ -5,6 +5,10 @@ AbortMultipartUploadOutput 1
 AccelerateConfiguration 1
 AccessControlPolicy 2
 AccessControlTranslation 1
+AnalyticsAndOperator 2
+AnalyticsConfiguration 3
+AnalyticsExportDestination 1
+AnalyticsS3BucketDestination 4
 AnnotationEntry 6
 BlockedEncryptionTypes 1
 Bucket 4
@@ -73,6 +77,8 @@ GetBucketAccelerateConfigurationInput 3
 GetBucketAccelerateConfigurationOutput 2
 GetBucketAclInput 2
 GetBucketAclOutput 2
+GetBucketAnalyticsConfigurationInput 3
+GetBucketAnalyticsConfigurationOutput 1
 GetBucketCorsInput 2
 GetBucketCorsOutput 1
 GetBucketEncryptionInput 2
@@ -152,6 +158,8 @@ LifecycleExpiration 3
 LifecycleRule 9
 LifecycleRuleAndOperator 4
 LifecycleRuleFilter 5
+ListBucketAnalyticsConfigurationsInput 3
+ListBucketAnalyticsConfigurationsOutput 4
 ListBucketIntelligentTieringConfigurationsInput 3
 ListBucketIntelligentTieringConfigurationsOutput 4
 ListBucketInventoryConfigurationsInput 3
@@ -271,6 +279,8 @@ SourceSelectionCriteria 2
 SseKmsEncryptedObjects 1
 Ssekms 1
 Sses3 0
+StorageClassAnalysis 1
+StorageClassAnalysisDataExport 2
 Tag 2
 Tagging 1
 TargetGrant 2

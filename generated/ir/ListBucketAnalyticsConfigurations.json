@@ -1,0 +1,402 @@
+{
+  "ir_version": "2",
+  "operation": "ListBucketAnalyticsConfigurations",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 275,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "analytics" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:GetAnalyticsConfiguration",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 1048576 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContinuationToken",
+                           "wire_name": "continuation-token",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "OpaqueString" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "IsTruncated",
+                            "wire_name": "IsTruncated",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Boolean" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ContinuationToken",
+                            "wire_name": "ContinuationToken",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "OpaqueString" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "NextContinuationToken",
+                            "wire_name": "NextContinuationToken",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "OpaqueString" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "AnalyticsConfigurationList",
+                            "wire_name": "AnalyticsConfiguration",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "AnalyticsConfiguration" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "AnalyticsAndOperator": {
+                                        "kind": "Structure",
+                                        "fields": [
+                                                    {
+                                                      "name": "Prefix",
+                                                      "wire_name": "Prefix",
+                                                      "required": false,
+                                                      "binding": { "kind": "BodyXml" },
+                                                      "type": { "kind": "String" },
+                                                      "hot": false,
+                                                      "quirk_refs": []
+                                                    },
+                                                    {
+                                                      "name": "Tags",
+                                                      "wire_name": "Tag",
+                                                      "required": false,
+                                                      "binding": { "kind": "BodyXml" },
+                                                      "type": {
+                                                                "kind": "List",
+                                                                "member": { "kind": "Structure", "shape": "Tag" },
+                                                                "flattened": true,
+                                                                "wrapper_name": null
+                                                              },
+                                                      "hot": false,
+                                                      "quirk_refs": []
+                                                    }
+                                                  ],
+                                        "xml": {
+                                                 "element_order": ["Prefix", "Tags"],
+                                                 "empty_value_policy": { "Prefix": "emit", "Tags": "emit" },
+                                                 "attributes": []
+                                               }
+                                      },
+              "AnalyticsConfiguration": {
+                                          "kind": "Structure",
+                                          "fields": [
+                                                      {
+                                                        "name": "Id",
+                                                        "wire_name": "Id",
+                                                        "required": true,
+                                                        "binding": { "kind": "BodyXml" },
+                                                        "type": { "kind": "String" },
+                                                        "hot": false,
+                                                        "quirk_refs": []
+                                                      },
+                                                      {
+                                                        "name": "Filter",
+                                                        "wire_name": "Filter",
+                                                        "required": false,
+                                                        "binding": { "kind": "BodyXml" },
+                                                        "type": { "kind": "Union", "shape": "AnalyticsFilter" },
+                                                        "hot": false,
+                                                        "quirk_refs": []
+                                                      },
+                                                      {
+                                                        "name": "StorageClassAnalysis",
+                                                        "wire_name": "StorageClassAnalysis",
+                                                        "required": true,
+                                                        "binding": { "kind": "BodyXml" },
+                                                        "type": { "kind": "Structure", "shape": "StorageClassAnalysis" },
+                                                        "hot": false,
+                                                        "quirk_refs": []
+                                                      }
+                                                    ],
+                                          "xml": {
+                                                   "element_order": ["Id", "Filter", "StorageClassAnalysis"],
+                                                   "empty_value_policy": {
+                                                                           "Id": "emit",
+                                                                           "Filter": "emit",
+                                                                           "StorageClassAnalysis": "emit"
+                                                                         },
+                                                   "attributes": []
+                                                 }
+                                        },
+              "AnalyticsExportDestination": {
+                                              "kind": "Structure",
+                                              "fields": [
+                                                          {
+                                                            "name": "S3BucketDestination",
+                                                            "wire_name": "S3BucketDestination",
+                                                            "required": true,
+                                                            "binding": { "kind": "BodyXml" },
+                                                            "type": {
+                                                                      "kind": "Structure",
+                                                                      "shape": "AnalyticsS3BucketDestination"
+                                                                    },
+                                                            "hot": false,
+                                                            "quirk_refs": []
+                                                          }
+                                                        ],
+                                              "xml": {
+                                                       "element_order": ["S3BucketDestination"],
+                                                       "empty_value_policy": { "S3BucketDestination": "emit" },
+                                                       "attributes": []
+                                                     }
+                                            },
+              "AnalyticsFilter": {
+                                   "kind": "Union",
+                                   "fields": [
+                                               {
+                                                 "name": "Prefix",
+                                                 "wire_name": "Prefix",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "String" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "Tag",
+                                                 "wire_name": "Tag",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Structure", "shape": "Tag" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "And",
+                                                 "wire_name": "And",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Structure", "shape": "AnalyticsAndOperator" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               }
+                                             ],
+                                   "xml": {
+                                            "element_order": ["Prefix", "Tag", "And"],
+                                            "empty_value_policy": { "Prefix": "emit", "Tag": "emit", "And": "emit" },
+                                            "attributes": []
+                                          }
+                                 },
+              "AnalyticsS3BucketDestination": {
+                                                "kind": "Structure",
+                                                "fields": [
+                                                            {
+                                                              "name": "Format",
+                                                              "wire_name": "Format",
+                                                              "required": true,
+                                                              "binding": { "kind": "BodyXml" },
+                                                              "type": { "kind": "StringEnum", "values": ["CSV"] },
+                                                              "hot": false,
+                                                              "quirk_refs": []
+                                                            },
+                                                            {
+                                                              "name": "BucketAccountId",
+                                                              "wire_name": "BucketAccountId",
+                                                              "required": false,
+                                                              "binding": { "kind": "BodyXml" },
+                                                              "type": { "kind": "String" },
+                                                              "hot": false,
+                                                              "quirk_refs": []
+                                                            },
+                                                            {
+                                                              "name": "Bucket",
+                                                              "wire_name": "Bucket",
+                                                              "required": true,
+                                                              "binding": { "kind": "BodyXml" },
+                                                              "type": { "kind": "BucketName" },
+                                                              "hot": false,
+                                                              "quirk_refs": []
+                                                            },
+                                                            {
+                                                              "name": "Prefix",
+                                                              "wire_name": "Prefix",
+                                                              "required": false,
+                                                              "binding": { "kind": "BodyXml" },
+                                                              "type": { "kind": "String" },
+                                                              "hot": false,
+                                                              "quirk_refs": []
+                                                            }
+                                                          ],
+                                                "xml": {
+                                                         "element_order": [
+                                                                            "Format",
+                                                                            "BucketAccountId",
+                                                                            "Bucket",
+                                                                            "Prefix"
+                                                                          ],
+                                                         "empty_value_policy": {
+                                                                                 "Format": "emit",
+                                                                                 "BucketAccountId": "emit",
+                                                                                 "Bucket": "emit",
+                                                                                 "Prefix": "emit"
+                                                                               },
+                                                         "attributes": []
+                                                       }
+                                              },
+              "StorageClassAnalysis": {
+                                        "kind": "Structure",
+                                        "fields": [
+                                                    {
+                                                      "name": "DataExport",
+                                                      "wire_name": "DataExport",
+                                                      "required": false,
+                                                      "binding": { "kind": "BodyXml" },
+                                                      "type": {
+                                                                "kind": "Structure",
+                                                                "shape": "StorageClassAnalysisDataExport"
+                                                              },
+                                                      "hot": false,
+                                                      "quirk_refs": []
+                                                    }
+                                                  ],
+                                        "xml": {
+                                                 "element_order": ["DataExport"],
+                                                 "empty_value_policy": { "DataExport": "emit" },
+                                                 "attributes": []
+                                               }
+                                      },
+              "StorageClassAnalysisDataExport": {
+                                                  "kind": "Structure",
+                                                  "fields": [
+                                                              {
+                                                                "name": "OutputSchemaVersion",
+                                                                "wire_name": "OutputSchemaVersion",
+                                                                "required": true,
+                                                                "binding": { "kind": "BodyXml" },
+                                                                "type": { "kind": "StringEnum", "values": ["V_1"] },
+                                                                "hot": false,
+                                                                "quirk_refs": []
+                                                              },
+                                                              {
+                                                                "name": "Destination",
+                                                                "wire_name": "Destination",
+                                                                "required": true,
+                                                                "binding": { "kind": "BodyXml" },
+                                                                "type": {
+                                                                          "kind": "Structure",
+                                                                          "shape": "AnalyticsExportDestination"
+                                                                        },
+                                                                "hot": false,
+                                                                "quirk_refs": []
+                                                              }
+                                                            ],
+                                                  "xml": {
+                                                           "element_order": ["OutputSchemaVersion", "Destination"],
+                                                           "empty_value_policy": {
+                                                                                   "OutputSchemaVersion": "emit",
+                                                                                   "Destination": "emit"
+                                                                                 },
+                                                           "attributes": []
+                                                         }
+                                                },
+              "Tag": {
+                       "kind": "Structure",
+                       "fields": [
+                                   {
+                                     "name": "Key",
+                                     "wire_name": "Key",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "String" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   },
+                                   {
+                                     "name": "Value",
+                                     "wire_name": "Value",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "String" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   }
+                                 ],
+                       "xml": {
+                                "element_order": ["Key", "Value"],
+                                "empty_value_policy": { "Key": "emit", "Value": "emit" },
+                                "attributes": []
+                              }
+                     }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "ListBucketAnalyticsConfigurationResult",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": ["IsTruncated", "ContinuationToken", "NextContinuationToken", "AnalyticsConfigurationList"],
+           "empty_value_policy": {
+                                   "IsTruncated": "emit",
+                                   "ContinuationToken": "emit",
+                                   "NextContinuationToken": "emit",
+                                   "AnalyticsConfigurationList": "emit"
+                                 },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["NoSuchBucket", "AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [],
+  "quirks": [],
+  "ext_points": []
+}

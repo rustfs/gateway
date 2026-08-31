@@ -1498,3 +1498,28 @@ fn n_unhandled_list_directory_buckets_is_refused_instead_of_dispatching_list_buc
         .expect("the registered ordinary ListBuckets neighbour remains served");
     assert_eq!(served.entry.op_name, "ListBuckets");
 }
+
+/// Unhandled analytics reads are refused by name instead of returning listed object keys.
+#[test]
+fn n_unhandled_analytics_reads_are_refused_instead_of_dispatching_list_objects() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, operation) in [
+        ("GET /bucket?analytics&id=archive", "GetBucketAnalyticsConfiguration"),
+        ("GET /bucket?analytics", "ListBucketAnalyticsConfigurations"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("the analytics handler is absent");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(operation), "{line}");
+    }
+
+    let plain = router
+        .dispatch(&Req::new("GET /bucket").parts())
+        .expect("plain bucket GET remains registered");
+    assert_eq!(plain.spec.name, "ListObjects");
+}
