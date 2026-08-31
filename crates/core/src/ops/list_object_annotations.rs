@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! `ListObjectAnnotations`: paginated metadata for annotations attached to one object.
+//! Shares: nothing.
 //!
 //! Responsible for: the operation identity, security floor and authorization contract needed to
 //! reserve `GET /{Bucket}/{Key+}?annotation` without `annotationName` independently of backend

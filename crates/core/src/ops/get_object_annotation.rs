@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! `GetObjectAnnotation`: retrieval of one named object annotation.
+//! Shares: nothing.
 //!
 //! Responsible for: the operation identity, security floor and authorization contract needed to
 //! reserve `GET /{Bucket}/{Key+}?annotation&annotationName=...` independently of backend
