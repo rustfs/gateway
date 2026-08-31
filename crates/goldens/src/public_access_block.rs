@@ -124,6 +124,14 @@ const NEW_WRITER_PAB_SOURCE: &str =
     "crates/ecstore/src/bucket/metadata_sys.rs::NEW_WRITER_CONFIGS[13] (BUCKET_PUBLIC_ACCESS_BLOCK_CONFIG)";
 const NEW_WRITER_REVISION: &str = "ca46ae9e56c167998f7139f4d3cfd5914280f4aa";
 
+pub(crate) fn source_a_rows() -> Vec<crate::source_a_census::SourceARow> {
+    vec![crate::source_a_census::SourceARow::accepted_sample(
+        ConfigKind::PublicAccessBlock,
+        NEW_WRITER_PAB_SOURCE,
+        NEW_WRITER_PAB_SHA256,
+    )]
+}
+
 fn configuration(
     block_public_acls: Option<bool>,
     ignore_public_acls: Option<bool>,

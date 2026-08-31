@@ -24,6 +24,7 @@ use rustfs_gateway_types::persistence::{
     PersistedTargetObjectKeyFormat, parse_bucket_logging, serialize_bucket_logging,
 };
 
+use crate::source_a_census::SourceARow;
 use crate::{
     ConfigKind, CorpusCaseEvidence, CorpusCoverageError, CorpusVariant, FamilyCorpusEvidence, FourWayCodec, GoldenFailure,
     GoldenSample, RejectedGoldenSample, SampleOrigin, assert_four_way,
@@ -45,6 +46,14 @@ const NEW_WRITER_LOGGING_SHA256: &str = "8765391c6f36056db1a73da9ddedce92f07391c
 const NEW_WRITER_LOGGING_SOURCE: &str =
     "crates/ecstore/src/bucket/metadata_sys.rs::NEW_WRITER_CONFIGS[9] (BUCKET_LOGGING_CONFIG)";
 const NEW_WRITER_REVISION: &str = "ca46ae9e56c167998f7139f4d3cfd5914280f4aa";
+
+pub(crate) fn source_a_rows() -> Vec<SourceARow> {
+    vec![SourceARow::accepted_sample(
+        ConfigKind::Logging,
+        NEW_WRITER_LOGGING_SOURCE,
+        NEW_WRITER_LOGGING_SHA256,
+    )]
+}
 
 type AcceptedLoggingCase = (GoldenSample<PersistedBucketLoggingStatus>, &'static [CorpusVariant]);
 type RejectedLoggingCase = (RejectedGoldenSample, &'static [CorpusVariant]);

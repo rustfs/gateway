@@ -27,6 +27,7 @@ use rustfs_gateway_types::persistence::{
 use sha2::{Digest, Sha256};
 
 use crate::ConfigKind;
+use crate::source_a_census::SourceARow;
 
 const RUSTFS_COMMIT: &str = "c876df53f5097618b1817568a471cbb8b4f26ee8";
 const CONSTANTS_FILE_SHA256: &str = "ac3966d7b1da55987199602ffbe66d5d506b874dbfd2c041627e9ebfedf407b8";
@@ -65,6 +66,18 @@ fn bindings() -> [SourceBinding; 2] {
             bytes: crate::object_lock::ENABLED_WITHOUT_RULE,
         },
     ]
+}
+
+pub(crate) fn source_a_rows() -> Vec<SourceARow> {
+    bindings()
+        .into_iter()
+        .flat_map(|binding| {
+            [
+                SourceARow::accepted_alias(binding.kind, binding.source_ref, binding.sha256),
+                SourceARow::accepted_alias(binding.kind, binding.callsite_ref, binding.sha256),
+            ]
+        })
+        .collect()
 }
 
 fn validate_bindings(candidates: &[SourceBinding]) -> Result<(), String> {

@@ -23,6 +23,7 @@ use rustfs_gateway_types::persistence::{
     PersistedLifecycleConfiguration, PersistedLifecycleExpiration, PersistedLifecycleFilter, PersistedLifecycleRule,
 };
 
+use crate::source_a_census::SourceARow;
 use crate::{AcceptedCorpusCase, ConfigKind, CorpusVariant, GoldenSample, SampleOrigin};
 
 const CORS_100: &[u8] = include_bytes!("../../../conformance/fixtures/cors/one-hundred-rules.xml");
@@ -81,6 +82,13 @@ pub(crate) fn fixture_bindings() -> [FixtureBinding; 4] {
             http_accepts: false,
         },
     ]
+}
+
+pub(crate) fn source_a_rows() -> Vec<SourceARow> {
+    fixture_bindings()
+        .into_iter()
+        .map(|binding| SourceARow::accepted_sample(binding.kind, binding.path, binding.sha256))
+        .collect()
 }
 
 fn origin(binding: FixtureBinding) -> SampleOrigin {

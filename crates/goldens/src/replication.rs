@@ -28,6 +28,8 @@ use crate::{
     GoldenSample, RejectedGoldenSample, SampleOrigin, assert_four_way,
 };
 
+pub(crate) mod source_a_census;
+
 const MINIMAL: &[u8] = b"<ReplicationConfiguration><Role>arn:aws:iam::123456789012:role/replication</Role><Rule><Destination><Bucket>arn:aws:s3:::target</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>";
 const NAMESPACE: &[u8] = br#"<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::123456789012:role/replication</Role><Rule><Destination><Bucket>arn:aws:s3:::target</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>"#;
 const UNKNOWN_TOP: &[u8] = b"<ReplicationConfiguration><FutureTopLevel>future</FutureTopLevel><Role>arn:aws:iam::123456789012:role/replication</Role><Rule><Destination><Bucket>arn:aws:s3:::target</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>";

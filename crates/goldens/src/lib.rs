@@ -41,6 +41,7 @@ mod object_lock;
 mod public_access_block;
 mod replication;
 mod source_a_boundary;
+mod source_a_census;
 mod source_a_create_defaults;
 mod source_a_lifecycle;
 mod source_a_new_writer;
@@ -214,6 +215,10 @@ impl<T> ConcreteFamilyCorpus<T> {
 /// duplicated bytes, missing polarity, or an incomplete required-variant set.
 pub fn build_persistence_corpus_report() -> Result<CorpusReport, CorpusCoverageError> {
     let families = all_family_corpus_evidence()?;
+    source_a_census::validate(&families).map_err(|reason| CorpusCoverageError::InvalidEvidence {
+        kind: ConfigKind::Cors,
+        reason: format!("source-(a) union census: {reason}"),
+    })?;
     build_corpus_report(&ConfigKind::ALL, &families)
 }
 

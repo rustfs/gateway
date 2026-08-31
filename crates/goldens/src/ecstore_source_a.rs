@@ -19,6 +19,7 @@
 //! ecstore metadata tests at the pinned revision. Downstream: Tagging and Replication goldens.
 
 use crate::ConfigKind;
+use crate::source_a_census::SourceARow;
 
 /// The RustFS revision that owns these physical fixtures.
 pub(crate) const SOURCE_REVISION: &str = "c876df53f5097618b1817568a471cbb8b4f26ee8";
@@ -85,6 +86,21 @@ pub(crate) fn fixture_bindings(kind: ConfigKind) -> impl Iterator<Item = Fixture
         .into_iter()
         .filter(move |(fixture_kind, _)| *fixture_kind == kind)
         .map(|(_, binding)| binding)
+}
+
+pub(crate) fn source_a_rows() -> Vec<SourceARow> {
+    FIXTURES
+        .iter()
+        .flat_map(|(kind, (_, sha256, source_refs))| {
+            source_refs.iter().enumerate().map(move |(index, source_ref)| {
+                if index == 0 {
+                    SourceARow::accepted_sample(*kind, source_ref, sha256)
+                } else {
+                    SourceARow::accepted_alias(*kind, source_ref, sha256)
+                }
+            })
+        })
+        .collect()
 }
 
 /// Renders one primary repository location plus any exact-byte aliases.
