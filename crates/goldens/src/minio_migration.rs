@@ -14,18 +14,26 @@
 
 //! Real MinIO-to-RustFS migrated persisted-XML evidence.
 //!
-//! Responsible for: running raw MinIO-written Lifecycle, Object Lock, and Replication bytes through D1-D5.
+//! Responsible for: running six raw MinIO-written persisted XML families through D1-D5.
 //! NOT responsible for: synthesizing variants or decoding the source `.metadata.bin` at test time.
 //! Upstream: the RustFS real-MinIO migration fixture. Downstream: the aggregate persistence rollback gate.
 
 use rustfs_gateway_types::{
-    compat::{parse_s3s_lifecycle, parse_s3s_object_lock, parse_s3s_replication},
-    persistence::{PersistedLifecycleConfiguration, PersistedObjectLockConfiguration, PersistedReplicationConfiguration},
+    compat::{
+        parse_s3s_bucket_encryption, parse_s3s_lifecycle, parse_s3s_object_lock, parse_s3s_replication, parse_s3s_tagging,
+        parse_s3s_versioning,
+    },
+    cors_tagging::PersistedTagging,
+    persistence::{
+        PersistedBucketEncryptionConfiguration, PersistedLifecycleConfiguration, PersistedObjectLockConfiguration,
+        PersistedReplicationConfiguration, PersistedVersioningConfiguration,
+    },
 };
 
 use crate::{
-    ConfigKind, Direction, GoldenFailure, GoldenSample, SampleOrigin, assert_lifecycle_four_way, assert_object_lock_four_way,
-    assert_replication_four_way,
+    ConfigKind, Direction, GoldenFailure, GoldenSample, SampleOrigin, assert_bucket_encryption_four_way,
+    assert_lifecycle_four_way, assert_object_lock_four_way, assert_replication_four_way, assert_tagging_four_way,
+    assert_versioning_four_way,
 };
 
 const SOURCE: &str = "https://github.com/rustfs/rustfs/blob/7df0920c801998d4f5e65776767d746f362a2975/crates/ecstore/tests/fixtures/minio/bucket_metadata.blob.hex";
@@ -34,9 +42,15 @@ const VERSION: &str = "RELEASE.2025-07-23T15-54-02Z";
 const LIFECYCLE_SHA256: &str = "18887b7a076a3429d80f1a04fed3c772d296ec968d478d382f78cba01704d0fb";
 const OBJECT_LOCK_SHA256: &str = "77ddad84d9aaa703c0f621f916484c7d8833fbb4f77fbeca2c4fc16a9b07522f";
 const REPLICATION_SHA256: &str = "43f149b5afcdeac67f52059b4f15b604912b1627f2c0503e85aecef5a752ccad";
+const VERSIONING_SHA256: &str = "482d4e510b5cdcf0bbf3a044e82832dc711f4f28757a6c06eb21758282a73ef7";
+const BUCKET_ENCRYPTION_SHA256: &str = "df4e3e6cf7a0b4af67ba58f41eaa596d54579eea2ed2f993da09600f59413711";
+const TAGGING_SHA256: &str = "606b9240d3b90605a36076e93411ceb7245be8908aec6872117e2dc1276cd782";
 const LIFECYCLE: &[u8] = b"<LifecycleConfiguration><Rule><ID>d96i4g89k8h26a95st60</ID><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><Expiration><Days>30</Days></Expiration><NoncurrentVersionExpiration><NoncurrentDays>7</NoncurrentDays></NoncurrentVersionExpiration></Rule><ExpiryUpdatedAt>2026-07-07T15:58:57.337315Z</ExpiryUpdatedAt></LifecycleConfiguration>";
 const OBJECT_LOCK: &[u8] = b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>7</Days></DefaultRetention></Rule></ObjectLockConfiguration>";
 const REPLICATION: &[u8] = b"<ReplicationConfiguration><Rule><ID>d96i4m09k8h2vldifkag</ID><Status>Enabled</Status><Priority>1</Priority><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication><DeleteReplication><Status>Enabled</Status></DeleteReplication><Destination><Bucket>arn:minio:replication::ef5859af-120a-4218-94b5-be23470f3c60:interop-dr</Bucket></Destination><SourceSelectionCriteria><ReplicaModifications><Status>Enabled</Status></ReplicaModifications></SourceSelectionCriteria><Filter><Prefix></Prefix></Filter><ExistingObjectReplication><Status>Enabled</Status></ExistingObjectReplication></Rule><Role></Role></ReplicationConfiguration>";
+const VERSIONING: &[u8] = b"<VersioningConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Status>Enabled</Status></VersioningConfiguration>";
+const BUCKET_ENCRYPTION: &[u8] = b"<ServerSideEncryptionConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
+const TAGGING: &[u8] = b"<Tagging><TagSet><Tag><Key>team</Key><Value>storage</Value></Tag><Tag><Key>env</Key><Value>prod</Value></Tag></TagSet></Tagging>";
 
 fn sample<T>(kind: ConfigKind, bytes: &[u8], sha256: &str, value: T, notes: &str) -> GoldenSample<T> {
     GoldenSample {
@@ -95,7 +109,51 @@ pub(crate) fn replication_sample() -> Result<GoldenSample<PersistedReplicationCo
     ))
 }
 
+pub(crate) fn versioning_sample() -> Result<GoldenSample<PersistedVersioningConfiguration>, GoldenFailure> {
+    let value = parse_s3s_versioning(VERSIONING).map_err(input_failure)?.structure;
+    Ok(sample(
+        ConfigKind::Versioning,
+        VERSIONING,
+        VERSIONING_SHA256,
+        value,
+        "Source-(c) MinIO-written versioning bytes migrated unchanged through RustFS bucket metadata migration.",
+    ))
+}
+
+pub(crate) fn bucket_encryption_sample() -> Result<GoldenSample<PersistedBucketEncryptionConfiguration>, GoldenFailure> {
+    let value = parse_s3s_bucket_encryption(BUCKET_ENCRYPTION)
+        .map_err(input_failure)?
+        .structure;
+    Ok(sample(
+        ConfigKind::BucketEncryption,
+        BUCKET_ENCRYPTION,
+        BUCKET_ENCRYPTION_SHA256,
+        value,
+        "Source-(c) MinIO-written SSE-S3 encryption bytes migrated unchanged through RustFS bucket metadata migration.",
+    ))
+}
+
+pub(crate) fn tagging_sample() -> Result<GoldenSample<PersistedTagging>, GoldenFailure> {
+    let value = parse_s3s_tagging(TAGGING).map_err(input_failure)?.structure;
+    Ok(sample(
+        ConfigKind::Tagging,
+        TAGGING,
+        TAGGING_SHA256,
+        value,
+        "Source-(c) MinIO-written bucket-tagging bytes migrated unchanged through RustFS bucket metadata migration.",
+    ))
+}
+
 pub(crate) fn run() -> Result<Vec<(ConfigKind, usize)>, (ConfigKind, GoldenFailure)> {
+    let versioning = versioning_sample().and_then(|sample| assert_versioning_four_way(&sample));
+    versioning.map_err(|failure| (ConfigKind::Versioning, failure))?;
+
+    let bucket_encryption = bucket_encryption_sample().and_then(|sample| assert_bucket_encryption_four_way(&sample));
+    bucket_encryption.map_err(|failure| (ConfigKind::BucketEncryption, failure))?;
+
+    let tagging = tagging_sample().and_then(|sample| assert_tagging_four_way(&sample));
+    tagging.map_err(|failure| (ConfigKind::Tagging, failure))?;
+
     let lifecycle = lifecycle_sample().and_then(|sample| assert_lifecycle_four_way(&sample));
     lifecycle.map_err(|failure| (ConfigKind::Lifecycle, failure))?;
 
@@ -106,6 +164,9 @@ pub(crate) fn run() -> Result<Vec<(ConfigKind, usize)>, (ConfigKind, GoldenFailu
     replication.map_err(|failure| (ConfigKind::Replication, failure))?;
 
     Ok(vec![
+        (ConfigKind::Versioning, 1),
+        (ConfigKind::BucketEncryption, 1),
+        (ConfigKind::Tagging, 1),
         (ConfigKind::Lifecycle, 1),
         (ConfigKind::ObjectLock, 1),
         (ConfigKind::Replication, 1),
@@ -123,6 +184,9 @@ mod tests {
         assert_eq!(
             counts,
             vec![
+                (ConfigKind::Versioning, 1),
+                (ConfigKind::BucketEncryption, 1),
+                (ConfigKind::Tagging, 1),
                 (ConfigKind::Lifecycle, 1),
                 (ConfigKind::ObjectLock, 1),
                 (ConfigKind::Replication, 1),
