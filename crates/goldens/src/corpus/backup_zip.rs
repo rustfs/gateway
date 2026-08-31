@@ -213,15 +213,29 @@ mod tests {
     #[test]
     fn g_zip_001_old_archive_is_new_readable_and_byte_exact() {
         let report = prove_backup_compatibility().expect("old backup bytes remain new-readable");
-        assert_eq!(report.old_to_new_samples, 182);
+        assert_eq!(report.old_to_new_samples, 183);
         assert_eq!(report.family_count, 13);
     }
 
     #[test]
     fn g_zip_002_new_archive_is_old_readable_after_rollback() {
         let report = prove_backup_compatibility().expect("new backup bytes remain old-readable");
-        assert_eq!(report.new_to_old_samples, 182);
+        assert_eq!(report.new_to_old_samples, 183);
         assert!(report.archive_size > 0);
+    }
+
+    #[test]
+    fn g_d1_007_chinese_and_emoji_tagging_bytes_are_in_the_backup_zip() {
+        let path = "tagging/735381e7a7d72e9d905395a44d7f4751c308b8bde5d9eaad400ab11c732518c3.xml";
+        let cases = collect_backup_cases().expect("the checked-in corpus is complete");
+        let expected = cases
+            .iter()
+            .find(|case| case.path == path)
+            .expect("the Chinese and emoji historical bytes have a backup path");
+        let archive = write_backup_archive(&cases).expect("the checked-in corpus archives");
+        let entries = read_backup_archive(&archive).expect("the checked-in archive is readable");
+
+        assert_eq!(entries.get(path), Some(&expected.bytes));
     }
 
     #[test]
