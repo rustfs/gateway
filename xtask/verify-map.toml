@@ -89,6 +89,10 @@ name = "GetBucketEncryption"
 cases = "c-encryption-0002,c-encryption-0003,c-encryption-0012,c-encryption-0021"
 
 [[operation]]
+name = "GetBucketIntelligentTieringConfiguration"
+cases = ""
+
+[[operation]]
 name = "GetBucketLifecycleConfiguration"
 cases = "c-lifecycle-0002,c-lifecycle-0003,c-lifecycle-0004,c-lifecycle-0005,c-lifecycle-0006,c-lifecycle-0007,c-lifecycle-0013,c-lifecycle-0037,c-lifecycle-0039"
 
@@ -183,6 +187,10 @@ cases = "c-bkt-0008,c-bkt-0009,c-bkt-0025,c-bkt-0026"
 [[operation]]
 name = "HeadObject"
 cases = "c-object-0002,c-object-0008,c-object-0018,c-object-0028,c-object-0038,c-select-restore-0004,c-select-restore-0005,c-select-restore-0019"
+
+[[operation]]
+name = "ListBucketIntelligentTieringConfigurations"
+cases = ""
 
 [[operation]]
 name = "ListBuckets"

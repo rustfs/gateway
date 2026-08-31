@@ -33,6 +33,7 @@
 //! this implementation can actually compute, while `enums::ChecksumAlgorithm` is whatever
 //! the wire may carry.
 
+mod access_tier;
 mod acl;
 mod archive_status;
 mod canned_acl;
@@ -71,6 +72,7 @@ mod tier;
 mod transition_default_minimum_object_size;
 mod r#type;
 
+pub use self::access_tier::AccessTier;
 pub use self::acl::Acl;
 pub use self::archive_status::ArchiveStatus;
 pub use self::canned_acl::CannedAcl;

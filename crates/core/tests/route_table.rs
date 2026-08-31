@@ -35,6 +35,7 @@
 use crate::support;
 
 use http::Method;
+use rustfs_gateway_core::op::{Operation, ResourceShape};
 use rustfs_gateway_core::route::{
     ArnForm, HostClass, Predicate, RouteBuildError, RouteTable, ShadowingDecl, ShadowingDecls, ShadowingPolicy, TargetKind,
     generated_entries,
@@ -2402,5 +2403,59 @@ fn n_get_bucket_ownership_controls_does_not_claim_neighbour_controls() {
     ] {
         let request = Req::new(line);
         assert_ne!(routed(&table, &request), Some("GetBucketOwnershipControls"), "{line}");
+    }
+}
+
+// ── Intelligent-tiering configuration reads ────────────────────────────────────────
+
+/// The id-bearing selector chooses one configuration while the bare subresource chooses the list.
+#[test]
+fn intelligent_tiering_reads_route_ahead_of_list_objects() {
+    let table = generated_table();
+    for (line, operation) in [
+        ("GET /bucket?intelligent-tiering&id=archive", "GetBucketIntelligentTieringConfiguration"),
+        ("GET /bucket?intelligent-tiering", "ListBucketIntelligentTieringConfigurations"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(operation), "{line}");
+    }
+}
+
+/// Negative controls keep object targets, other methods and an absent id outside the get row.
+#[test]
+fn n_intelligent_tiering_reads_do_not_claim_neighbour_controls() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket")), Some("ListObjects"));
+    assert_ne!(
+        routed(&table, &Req::new("GET /bucket?intelligent-tiering")),
+        Some("GetBucketIntelligentTieringConfiguration")
+    );
+    for line in [
+        "GET /bucket/key?intelligent-tiering&id=archive",
+        "HEAD /bucket?intelligent-tiering&id=archive",
+        "PUT /bucket?intelligent-tiering&id=archive",
+    ] {
+        assert_ne!(
+            routed(&table, &Req::new(line)),
+            Some("GetBucketIntelligentTieringConfiguration"),
+            "{line}"
+        );
+        assert_ne!(
+            routed(&table, &Req::new(line)),
+            Some("ListBucketIntelligentTieringConfigurations"),
+            "{line}"
+        );
+    }
+}
+
+/// Both read forms use the one bucket-level IAM action AWS assigns to this configuration family.
+#[test]
+fn intelligent_tiering_reads_share_the_get_configuration_authorization_contract() {
+    for spec in [
+        <rustfs_gateway_types::dto::GetBucketIntelligentTieringConfiguration as Operation>::spec(),
+        <rustfs_gateway_types::dto::ListBucketIntelligentTieringConfigurations as Operation>::spec(),
+    ] {
+        let auth = spec.auth.expect("both intelligent-tiering reads declare authorization");
+        assert_eq!(auth.action, "s3:GetIntelligentTieringConfiguration", "{}", spec.name);
+        assert_eq!(auth.resource, ResourceShape::Bucket, "{}", spec.name);
     }
 }

@@ -1,0 +1,338 @@
+{
+  "ir_version": "2",
+  "operation": "ListBucketIntelligentTieringConfigurations",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 273,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "intelligent-tiering" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:GetIntelligentTieringConfiguration",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 1048576 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ContinuationToken",
+                           "wire_name": "continuation-token",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "OpaqueString" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "IsTruncated",
+                            "wire_name": "IsTruncated",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "Boolean" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ContinuationToken",
+                            "wire_name": "ContinuationToken",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "OpaqueString" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "NextContinuationToken",
+                            "wire_name": "NextContinuationToken",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "OpaqueString" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "IntelligentTieringConfigurationList",
+                            "wire_name": "IntelligentTieringConfiguration",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": {
+                                      "kind": "List",
+                                      "member": { "kind": "Structure", "shape": "IntelligentTieringConfiguration" },
+                                      "flattened": true,
+                                      "wrapper_name": null
+                                    },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "IntelligentTieringAndOperator": {
+                                                 "kind": "Structure",
+                                                 "fields": [
+                                                             {
+                                                               "name": "Prefix",
+                                                               "wire_name": "Prefix",
+                                                               "required": false,
+                                                               "binding": { "kind": "BodyXml" },
+                                                               "type": { "kind": "String" },
+                                                               "hot": false,
+                                                               "quirk_refs": []
+                                                             },
+                                                             {
+                                                               "name": "Tags",
+                                                               "wire_name": "Tag",
+                                                               "required": false,
+                                                               "binding": { "kind": "BodyXml" },
+                                                               "type": {
+                                                                         "kind": "List",
+                                                                         "member": {
+                                                                                     "kind": "Structure",
+                                                                                     "shape": "Tag"
+                                                                                   },
+                                                                         "flattened": true,
+                                                                         "wrapper_name": null
+                                                                       },
+                                                               "hot": false,
+                                                               "quirk_refs": []
+                                                             }
+                                                           ],
+                                                 "xml": {
+                                                          "element_order": ["Prefix", "Tags"],
+                                                          "empty_value_policy": { "Prefix": "emit", "Tags": "emit" },
+                                                          "attributes": []
+                                                        }
+                                               },
+              "IntelligentTieringConfiguration": {
+                                                   "kind": "Structure",
+                                                   "fields": [
+                                                               {
+                                                                 "name": "Id",
+                                                                 "wire_name": "Id",
+                                                                 "required": true,
+                                                                 "binding": { "kind": "BodyXml" },
+                                                                 "type": { "kind": "String" },
+                                                                 "hot": false,
+                                                                 "quirk_refs": []
+                                                               },
+                                                               {
+                                                                 "name": "Filter",
+                                                                 "wire_name": "Filter",
+                                                                 "required": false,
+                                                                 "binding": { "kind": "BodyXml" },
+                                                                 "type": {
+                                                                           "kind": "Structure",
+                                                                           "shape": "IntelligentTieringFilter"
+                                                                         },
+                                                                 "hot": false,
+                                                                 "quirk_refs": []
+                                                               },
+                                                               {
+                                                                 "name": "Status",
+                                                                 "wire_name": "Status",
+                                                                 "required": true,
+                                                                 "binding": { "kind": "BodyXml" },
+                                                                 "type": {
+                                                                           "kind": "StringEnum",
+                                                                           "values": ["Enabled", "Disabled"]
+                                                                         },
+                                                                 "hot": false,
+                                                                 "quirk_refs": []
+                                                               },
+                                                               {
+                                                                 "name": "Tierings",
+                                                                 "wire_name": "Tiering",
+                                                                 "required": true,
+                                                                 "binding": { "kind": "BodyXml" },
+                                                                 "type": {
+                                                                           "kind": "List",
+                                                                           "member": {
+                                                                                       "kind": "Structure",
+                                                                                       "shape": "Tiering"
+                                                                                     },
+                                                                           "flattened": true,
+                                                                           "wrapper_name": null
+                                                                         },
+                                                                 "hot": false,
+                                                                 "quirk_refs": []
+                                                               }
+                                                             ],
+                                                   "xml": {
+                                                            "element_order": ["Id", "Filter", "Status", "Tierings"],
+                                                            "empty_value_policy": {
+                                                                                    "Id": "emit",
+                                                                                    "Filter": "emit",
+                                                                                    "Status": "emit",
+                                                                                    "Tierings": "emit"
+                                                                                  },
+                                                            "attributes": []
+                                                          }
+                                                 },
+              "IntelligentTieringFilter": {
+                                            "kind": "Structure",
+                                            "fields": [
+                                                        {
+                                                          "name": "Prefix",
+                                                          "wire_name": "Prefix",
+                                                          "required": false,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "String" },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        },
+                                                        {
+                                                          "name": "Tag",
+                                                          "wire_name": "Tag",
+                                                          "required": false,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": { "kind": "Structure", "shape": "Tag" },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        },
+                                                        {
+                                                          "name": "And",
+                                                          "wire_name": "And",
+                                                          "required": false,
+                                                          "binding": { "kind": "BodyXml" },
+                                                          "type": {
+                                                                    "kind": "Structure",
+                                                                    "shape": "IntelligentTieringAndOperator"
+                                                                  },
+                                                          "hot": false,
+                                                          "quirk_refs": []
+                                                        }
+                                                      ],
+                                            "xml": {
+                                                     "element_order": ["Prefix", "Tag", "And"],
+                                                     "empty_value_policy": {
+                                                                             "Prefix": "emit",
+                                                                             "Tag": "emit",
+                                                                             "And": "emit"
+                                                                           },
+                                                     "attributes": []
+                                                   }
+                                          },
+              "Tag": {
+                       "kind": "Structure",
+                       "fields": [
+                                   {
+                                     "name": "Key",
+                                     "wire_name": "Key",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "String" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   },
+                                   {
+                                     "name": "Value",
+                                     "wire_name": "Value",
+                                     "required": true,
+                                     "binding": { "kind": "BodyXml" },
+                                     "type": { "kind": "String" },
+                                     "hot": true,
+                                     "quirk_refs": []
+                                   }
+                                 ],
+                       "xml": {
+                                "element_order": ["Key", "Value"],
+                                "empty_value_policy": { "Key": "emit", "Value": "emit" },
+                                "attributes": []
+                              }
+                     },
+              "Tiering": {
+                           "kind": "Structure",
+                           "fields": [
+                                       {
+                                         "name": "Days",
+                                         "wire_name": "Days",
+                                         "required": true,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": { "kind": "Integer" },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       },
+                                       {
+                                         "name": "AccessTier",
+                                         "wire_name": "AccessTier",
+                                         "required": true,
+                                         "binding": { "kind": "BodyXml" },
+                                         "type": {
+                                                   "kind": "StringEnum",
+                                                   "values": ["ARCHIVE_ACCESS", "DEEP_ARCHIVE_ACCESS"]
+                                                 },
+                                         "hot": false,
+                                         "quirk_refs": []
+                                       }
+                                     ],
+                           "xml": {
+                                    "element_order": ["Days", "AccessTier"],
+                                    "empty_value_policy": { "Days": "emit", "AccessTier": "emit" },
+                                    "attributes": []
+                                  }
+                         }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": "ListBucketIntelligentTieringConfigurationsOutput",
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [
+                              "IsTruncated",
+                              "ContinuationToken",
+                              "NextContinuationToken",
+                              "IntelligentTieringConfigurationList"
+                            ],
+           "empty_value_policy": {
+                                   "IsTruncated": "emit",
+                                   "ContinuationToken": "emit",
+                                   "NextContinuationToken": "emit",
+                                   "IntelligentTieringConfigurationList": "emit"
+                                 },
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["NoSuchBucket", "AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [],
+  "quirks": [],
+  "ext_points": []
+}

@@ -234,6 +234,14 @@ summary = "GetObjectTorrent is selected by the ?torrent subresource on an object
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketOwnershipControls.html"
 summary = "GetBucketOwnershipControls is selected by the ?ownershipControls subresource on a bucket GET and returns the stored object-ownership rules rather than an object listing."
 
+[evidence.get-bucket-intelligent-tiering-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketIntelligentTieringConfiguration.html"
+summary = "GetBucketIntelligentTieringConfiguration is a bucket GET selected by ?intelligent-tiering plus a required id and returns that named policy rather than object keys."
+
+[evidence.list-bucket-intelligent-tiering-configurations]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketIntelligentTieringConfigurations.html"
+summary = "ListBucketIntelligentTieringConfigurations is a bucket GET selected by bare ?intelligent-tiering and returns policy documents rather than an object listing."
+
 [evidence.get-public-access-block]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html"
 summary = "GetPublicAccessBlock is selected by the ?publicAccessBlock subresource alone and answers with the four stored switches."
@@ -2848,6 +2856,277 @@ winner   = "RenameObject"
 shadowed = "PutObject"
 reason   = "Every rename is also accepted by PutObject, whose selector pins only PUT and an object target. RenameObject wins at 780 before PutObject at 800; the reverse order writes an empty object to the destination instead of returning operation-specific NotImplemented."
 evidence = ["rename-object", "put-object"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "GetBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "GetBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "GetBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "GetBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "GetBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "GetBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "GetBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "GetBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "get-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketIntelligentTieringConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-intelligent-tiering-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "ListBucketIntelligentTieringConfigurations"
+reason = "Both rows name ?intelligent-tiering, but only the single-configuration read requires id. The id-bearing row wins at 272 before the bare list at 273; without id the get row does not match."
+evidence = ["get-bucket-intelligent-tiering-configuration", "list-bucket-intelligent-tiering-configurations"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-location"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "list-objects-v2"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "list-object-versions"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so every named intelligent-tiering read request satisfies it too. The subresource row wins at 272 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["get-bucket-intelligent-tiering-configuration", "list-objects"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-location"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "list-objects-v2"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "list-object-versions"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so every intelligent-tiering configuration list request satisfies it too. The subresource row wins at 273 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["list-bucket-intelligent-tiering-configurations", "list-objects"]
+
 
 [[shadowing]]
 winner = "GetBucketAccelerateConfiguration"
