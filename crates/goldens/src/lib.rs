@@ -43,6 +43,7 @@ mod source_a_boundary;
 mod source_a_lifecycle;
 mod source_a_new_writer;
 mod source_b_mc;
+mod source_b_rclone;
 mod tagging;
 mod versioning;
 mod website;
