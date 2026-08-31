@@ -1552,7 +1552,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `InventoryS3BucketDestination` (Structure) — `AccountId: String`, `Bucket: BucketName`, `Format: StringEnum`, `Prefix: String`, `Encryption: Structure(InventoryEncryption)`
 - `InventorySchedule` (Structure) — `Frequency: StringEnum`
 - `SSEKMS` (Structure) — `KeyId: String`
-- `SSES3` (Structure) — 
+- `SSES3` (Structure)
 
 ### GetBucketLifecycleConfiguration
 
@@ -1699,7 +1699,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `Grantee` (Structure) — `DisplayName: String`, `EmailAddress: String`, `ID: String`, `URI: String`, `Type: StringEnum`
 - `LoggingEnabled` (Structure) — `TargetBucket: String`, `TargetGrants: List<Structure(TargetGrant)>(Grant)`, `TargetPrefix: String`, `TargetObjectKeyFormat: Structure(TargetObjectKeyFormat)`
 - `PartitionedPrefix` (Structure) — `PartitionDateSource: StringEnum`
-- `SimplePrefix` (Structure) — 
+- `SimplePrefix` (Structure)
 - `TargetGrant` (Structure) — `Grantee: Structure(Grantee)`, `Permission: StringEnum`
 - `TargetObjectKeyFormat` (Structure) — `SimplePrefix: Structure(SimplePrefix)`, `PartitionedPrefix: Structure(PartitionedPrefix)`
 
@@ -1746,7 +1746,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Body shapes**
 
-- `EventBridgeConfiguration` (Structure) — 
+- `EventBridgeConfiguration` (Structure)
 - `FilterRule` (Structure) — `Name: StringEnum`, `Value: String`
 - `LambdaFunctionConfiguration` (Structure) — `Id: String`, `LambdaFunctionArn: String`, `Events: List<StringEnum>(flattened)`, `Filter: Structure(NotificationConfigurationFilter)`
 - `NotificationConfigurationFilter` (Structure) — `Key: Structure(S3KeyFilter)`
@@ -2740,7 +2740,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `InventoryS3BucketDestination` (Structure) — `AccountId: String`, `Bucket: BucketName`, `Format: StringEnum`, `Prefix: String`, `Encryption: Structure(InventoryEncryption)`
 - `InventorySchedule` (Structure) — `Frequency: StringEnum`
 - `SSEKMS` (Structure) — `KeyId: String`
-- `SSES3` (Structure) — 
+- `SSES3` (Structure)
 
 ### ListBuckets
 
@@ -3456,7 +3456,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `Grantee` (Structure) — `DisplayName: String`, `EmailAddress: String`, `ID: String`, `URI: String`, `Type: StringEnum`
 - `LoggingEnabled` (Structure) — `TargetBucket: String`, `TargetGrants: List<Structure(TargetGrant)>(Grant)`, `TargetPrefix: String`, `TargetObjectKeyFormat: Structure(TargetObjectKeyFormat)`
 - `PartitionedPrefix` (Structure) — `PartitionDateSource: StringEnum`
-- `SimplePrefix` (Structure) — 
+- `SimplePrefix` (Structure)
 - `TargetGrant` (Structure) — `Grantee: Structure(Grantee)`, `Permission: StringEnum`
 - `TargetObjectKeyFormat` (Structure) — `SimplePrefix: Structure(SimplePrefix)`, `PartitionedPrefix: Structure(PartitionedPrefix)`
 
@@ -3503,7 +3503,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Body shapes**
 
-- `EventBridgeConfiguration` (Structure) — 
+- `EventBridgeConfiguration` (Structure)
 - `FilterRule` (Structure) — `Name: StringEnum`, `Value: String`
 - `LambdaFunctionConfiguration` (Structure) — `Id: String`, `LambdaFunctionArn: String`, `Events: List<StringEnum>(flattened)`, `Filter: Structure(NotificationConfigurationFilter)`
 - `NotificationConfiguration` (Structure) — `TopicConfigurations: List<Structure(TopicConfiguration)>(flattened)`, `QueueConfigurations: List<Structure(QueueConfiguration)>(flattened)`, `LambdaFunctionConfigurations: List<Structure(LambdaFunctionConfiguration)>(flattened)`, `EventBridgeConfiguration: Structure(EventBridgeConfiguration)`
@@ -4301,7 +4301,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `MetadataEntry` (Structure) — `Name: String`, `Value: String`
 - `OutputLocation` (Structure) — `S3: Structure(S3Location)`
 - `OutputSerialization` (Structure) — `CSV: Structure(CSVOutput)`, `JSON: Structure(JSONOutput)`
-- `ParquetInput` (Structure) — 
+- `ParquetInput` (Structure)
 - `RestoreRequest` (Structure) — `Days: Integer`, `GlacierJobParameters: Structure(GlacierJobParameters)`, `Type: StringEnum`, `Tier: StringEnum`, `Description: String`, `SelectParameters: Structure(SelectParameters)`, `OutputLocation: Structure(OutputLocation)`
 - `S3Location` (Structure) — `BucketName: BucketName`, `Prefix: String`, `Encryption: Structure(Encryption)`, `CannedACL: StringEnum`, `AccessControlList: List<Structure(Grant)>(Grant)`, `Tagging: Structure(Tagging)`, `UserMetadata: List<Structure(MetadataEntry)>(MetadataEntry)`, `StorageClass: StringEnum`
 - `SelectParameters` (Structure) — `InputSerialization: Structure(InputSerialization)`, `ExpressionType: StringEnum`, `Expression: String`, `OutputSerialization: Structure(OutputSerialization)`
@@ -4364,7 +4364,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `JSONInput` (Structure) — `Type: StringEnum`
 - `JSONOutput` (Structure) — `RecordDelimiter: String`
 - `OutputSerialization` (Structure) — `CSV: Structure(CSVOutput)`, `JSON: Structure(JSONOutput)`
-- `ParquetInput` (Structure) — 
+- `ParquetInput` (Structure)
 - `RequestProgress` (Structure) — `Enabled: Boolean`
 - `ScanRange` (Structure) — `Start: Long`, `End: Long`
 

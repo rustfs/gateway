@@ -34,6 +34,7 @@ mod ledger_tests;
 mod mutate_tests;
 mod naming_contract_tests;
 mod operations_json_tests;
+mod operations_md_tests;
 mod request_body_mode_tests;
 mod runtime_contract_tests;
 mod tagging_tests;
