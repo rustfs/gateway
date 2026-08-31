@@ -39,7 +39,7 @@ const VERSIONING_SHA256: &str = "9ab3f03babdbcc8a7b4c74f25c7519ea38231c1f0b54c88
 const CORS_METADATA_SHA256: &str = "ecf2a7031cc2f8278b9f3aa7d7df4b398dc9f8d1d227b357787233e02b3c7b1e";
 const LIFECYCLE_METADATA_SHA256: &str = "29f448cea830579b7a0f3500673d2a410c14aacdd1e0067fd867c6029f1247d5";
 const VERSIONING_METADATA_SHA256: &str = "753d65b377a884342ffa1c5503952c7df82c74b57f98ca52bca58988fd00cab4";
-const CAPTURE_VERSION: &str = "@aws-sdk/client-s3@3.1121.0; npm-tarball-sha256:24fc6c5d5d422e1772177fd10298c19572f13e01e720e6db0034b53b1aa8214b; npm-shasum:6fc78ca0169448f3eb07dd5e9f519e870eb1b21e; npm-integrity:sha512-hBnoqaVBeWdkgXcJElMXA2yUZWkBCBntu2qmN+tfqmzC+j4LzJC3ox8qIgS2WdMS1cb8UwyBogUVrkRXybNm0A==; node@v22.22.2; rustfs@c876df53f5097618b1817568a471cbb8b4f26ee8; rustfs-server-sha256:48e39ce70afeb390c729345c65ff10481db047e22f7f1d6b3c0863db6fea467c; rustfs-cli-sha256:264bc47c0fc9ca07ff1494c9aca8f95982d6406b716d6535a81c7e030f5463f9";
+pub(crate) const CAPTURE_VERSION: &str = "@aws-sdk/client-s3@3.1121.0; npm-tarball-sha256:24fc6c5d5d422e1772177fd10298c19572f13e01e720e6db0034b53b1aa8214b; npm-shasum:6fc78ca0169448f3eb07dd5e9f519e870eb1b21e; npm-integrity:sha512-hBnoqaVBeWdkgXcJElMXA2yUZWkBCBntu2qmN+tfqmzC+j4LzJC3ox8qIgS2WdMS1cb8UwyBogUVrkRXybNm0A==; node@v22.22.2; rustfs@c876df53f5097618b1817568a471cbb8b4f26ee8; rustfs-server-sha256:48e39ce70afeb390c729345c65ff10481db047e22f7f1d6b3c0863db6fea467c; rustfs-cli-sha256:264bc47c0fc9ca07ff1494c9aca8f95982d6406b716d6535a81c7e030f5463f9";
 const CANONICAL_VARIANT: &[CorpusVariant] = &[CorpusVariant::Canonical];
 
 fn origin(sha256: &str) -> SampleOrigin {

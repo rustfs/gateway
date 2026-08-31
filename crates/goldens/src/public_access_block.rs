@@ -170,7 +170,11 @@ fn rejected(bytes: Vec<u8>, sha256: &str, notes: &str, variant: CorpusVariant) -
 }
 
 fn public_access_block_accepted_samples() -> Vec<(GoldenSample<PersistedPublicAccessBlockConfiguration>, Vec<CorpusVariant>)> {
-    vec![
+    let all_true_notes = format!(
+        "all four switches enabled in old serializer order; {}",
+        crate::source_b_js_v3_pab::all_true_alias_note()
+    );
+    let mut cases = vec![
         (
             sample(
                 EMPTY,
@@ -185,7 +189,7 @@ fn public_access_block_accepted_samples() -> Vec<(GoldenSample<PersistedPublicAc
                 ALL_TRUE,
                 "ea08b0fff9a3578a8e60f3da84d74dfdb9ddb7d970baa2d01641c68d6f363b2f",
                 configuration(Some(true), Some(true), Some(true), Some(true)),
-                "all four switches enabled in old serializer order",
+                &all_true_notes,
             ),
             vec![CorpusVariant::Canonical],
         ),
@@ -261,7 +265,9 @@ fn public_access_block_accepted_samples() -> Vec<(GoldenSample<PersistedPublicAc
             ),
             vec![CorpusVariant::Crlf],
         ),
-    ]
+    ];
+    cases.extend(crate::source_b_js_v3_pab::cases());
+    cases
 }
 
 fn public_access_block_rejected_samples() -> Vec<(RejectedGoldenSample, Vec<CorpusVariant>)> {
