@@ -155,8 +155,25 @@ fn rejected(bytes: &[u8], variants: &[CorpusVariant], notes: &str) -> RejectedCo
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct LifecycleBehaviorProjection {
     enabled: Vec<bool>,
+    whole_bucket: Vec<bool>,
 }
-
+fn rule_matches_whole_bucket(rule: &PersistedLifecycleRule) -> bool {
+    let legacy_prefix_is_empty = rule.prefix.as_deref().is_none_or(str::is_empty);
+    let filter_is_empty = rule.filter.as_ref().is_none_or(|filter| {
+        let and_is_empty = filter.and.as_ref().is_none_or(|and| {
+            and.object_size_greater_than.is_none()
+                && and.object_size_less_than.is_none()
+                && and.prefix.as_deref().is_none_or(str::is_empty)
+                && and.tags.as_ref().is_none_or(Vec::is_empty)
+        });
+        and_is_empty
+            && filter.object_size_greater_than.is_none()
+            && filter.object_size_less_than.is_none()
+            && filter.prefix.as_deref().is_none_or(str::is_empty)
+            && filter.tag.is_none()
+    });
+    legacy_prefix_is_empty && filter_is_empty
+}
 #[derive(Clone, Copy, Debug)]
 struct LifecycleCodec;
 
@@ -200,12 +217,14 @@ impl FourWayCodec for LifecycleCodec {
     fn old_behavior(&self, value: &Self::OldParsed) -> Self::Behavior {
         LifecycleBehaviorProjection {
             enabled: value.rule_enabled.clone(),
+            whole_bucket: value.structure.rules.iter().map(rule_matches_whole_bucket).collect(),
         }
     }
 
     fn new_behavior(&self, value: &Self::NewParsed) -> Self::Behavior {
         LifecycleBehaviorProjection {
             enabled: value.rules.iter().map(PersistedLifecycleRule::enabled).collect(),
+            whole_bucket: value.rules.iter().map(rule_matches_whole_bucket).collect(),
         }
     }
 }
@@ -731,6 +750,38 @@ mod tests {
                 .direction,
             crate::Direction::D5Behavior
         );
+    }
+
+    #[test]
+    fn empty_and_restrictive_filters_project_the_same_scope_on_both_sides() {
+        let old = LifecycleCodec
+            .old_parse(EMPTY_WRAPPERS)
+            .expect("the pinned old parser accepts an explicit empty filter");
+        let new = LifecycleCodec
+            .new_parse(EMPTY_WRAPPERS)
+            .expect("the production parser accepts an explicit empty filter");
+        let old_behavior = LifecycleCodec.old_behavior(&old);
+        let new_behavior = LifecycleCodec.new_behavior(&new);
+        assert_eq!(old_behavior, new_behavior);
+        assert_eq!(old_behavior.whole_bucket, vec![true]);
+        let mut filtered = minimal();
+        filtered.rules[0].filter = Some(PersistedLifecycleFilter {
+            prefix: Some("logs/".to_owned()),
+            ..PersistedLifecycleFilter::default()
+        });
+        let filtered_bytes = LifecycleCodec
+            .old_serialize(&filtered)
+            .expect("the pinned old serializer accepts a restrictive filter");
+        let old_filtered = LifecycleCodec
+            .old_parse(&filtered_bytes)
+            .expect("the pinned old parser reads a restrictive filter");
+        let new_filtered = LifecycleCodec
+            .new_parse(&filtered_bytes)
+            .expect("the production parser reads a restrictive filter");
+        let old_filtered_behavior = LifecycleCodec.old_behavior(&old_filtered);
+        let new_filtered_behavior = LifecycleCodec.new_behavior(&new_filtered);
+        assert_eq!(old_filtered_behavior, new_filtered_behavior);
+        assert_eq!(old_filtered_behavior.whole_bucket, vec![false]);
     }
 
     #[test]
