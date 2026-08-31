@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! `GetBucketAbac`: retrieval of one bucket's attribute-based access-control status.
+//! Shares: nothing.
 //!
 //! Responsible for: the operation identity, security floor and authorization contract needed to
 //! reserve `GET /{Bucket}?abac` independently of backend registration.
