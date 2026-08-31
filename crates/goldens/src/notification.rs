@@ -470,7 +470,7 @@ mod corpus_cases {
         }
 
         #[test]
-        fn fifteen_traceable_samples_pass_d1_through_d5() {
+        fn seventeen_traceable_samples_pass_d1_through_d5() {
             for (case, _) in accepted_cases() {
                 assert_notification_four_way(&case).expect("Notification sample passes D1-D5");
             }
