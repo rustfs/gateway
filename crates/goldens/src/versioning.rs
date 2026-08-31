@@ -36,6 +36,9 @@ const BODY_LITERAL_PERSISTED: &[u8] = br#"<VersioningConfiguration><Status>Enabl
 const BARE_BODY_LITERAL: &[u8] = b"Enabled";
 const EMPTY: &[u8] = br#"<VersioningConfiguration></VersioningConfiguration>"#;
 const EMPTY_STATUS: &[u8] = br#"<VersioningConfiguration><Status></Status></VersioningConfiguration>"#;
+const UNKNOWN_STATUS: &[u8] = br#"<VersioningConfiguration><Status>Paused</Status></VersioningConfiguration>"#;
+const MALFORMED_UNKNOWN_STATUS: &[u8] =
+    br#"<VersioningConfiguration><Status>Paused & Pending</Status></VersioningConfiguration>"#;
 const DUPLICATE_STATUS: &[u8] =
     br#"<VersioningConfiguration><Status>Enabled</Status><Status>Suspended</Status></VersioningConfiguration>"#;
 const OLD_UNREADABLE: &[u8] = b"<not-versioning>";
@@ -228,6 +231,16 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfi
                 &[CorpusVariant::UnknownTopLevel],
             ),
             accepted(
+                UNKNOWN_STATUS,
+                "c59f6c3dd6288e8cd2714b710b890d92170c2526f5a90781ef974565f806e465",
+                PersistedVersioningConfiguration {
+                    status: Some("Paused".to_owned()),
+                    ..PersistedVersioningConfiguration::default()
+                },
+                "g-d5-002 unknown Status is old-readable and must remain disabled in both behavior projections",
+                &[CorpusVariant::Extension],
+            ),
+            accepted(
                 BODY_LITERAL_PERSISTED,
                 "dd6f6f21cc8680cc5c32bba98d4297e37552279d7e326a35df847ed2713f2d6a",
                 PersistedVersioningConfiguration {
@@ -267,6 +280,11 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfi
         ],
         rejected: vec![
             rejected(DUPLICATE_STATUS, "duplicate Status", &[CorpusVariant::DuplicateField]),
+            rejected(
+                MALFORMED_UNKNOWN_STATUS,
+                "an unknown Status does not relax XML well-formedness",
+                &[CorpusVariant::Extension],
+            ),
             rejected(
                 BARE_BODY_LITERAL,
                 "the HTTP compatibility decoder accepts this literal, but persistence receives its canonical XML output",
@@ -359,6 +377,31 @@ mod tests {
     }
 
     #[test]
+    fn unknown_status_keeps_the_same_disabled_behavior_projection() {
+        let sample = accepted_sample(UNKNOWN_STATUS);
+        let old = VersioningCodec
+            .old_parse(&sample.bytes)
+            .expect("the pinned old string newtype accepts an unknown status");
+        let new = VersioningCodec
+            .new_parse(&sample.bytes)
+            .expect("the production persistence parser accepts the same unknown status");
+        let old_behavior = VersioningCodec.old_behavior(&old);
+        let new_behavior = VersioningCodec.new_behavior(&new);
+
+        assert_eq!(old_behavior.versioning_status.as_deref(), Some("Paused"));
+        assert!(!old_behavior.versioning_enabled);
+        assert_eq!(old_behavior, new_behavior);
+        assert_versioning_four_way(&sample).expect("g-d5-002 requires all five directions over the persisted row");
+    }
+
+    #[test]
+    fn malformed_unknown_status_is_rejected_by_both_real_parsers() {
+        let sample = rejected_sample(MALFORMED_UNKNOWN_STATUS);
+        assert!(VersioningCodec.old_parse(&sample.bytes).is_err());
+        assert!(VersioningCodec.new_parse(&sample.bytes).is_err());
+    }
+
+    #[test]
     fn minio_body_literal_value_has_old_persistence_bytes() {
         let case = corpus_evidence()
             .accepted
@@ -403,6 +446,7 @@ mod tests {
         reject_new_output_in_old: bool,
         reject_historical_in_new: bool,
         new_structure_drift: bool,
+        old_behavior_drift: bool,
         new_behavior_drift: bool,
     }
 
@@ -452,7 +496,11 @@ mod tests {
             VersioningCodec.new_serialize(value)
         }
         fn old_behavior(&self, value: &Self::OldParsed) -> Self::Behavior {
-            VersioningCodec.old_behavior(value)
+            let mut projection = VersioningCodec.old_behavior(value);
+            if self.old_behavior_drift {
+                projection.versioning_enabled = !projection.versioning_enabled;
+            }
+            projection
         }
         fn new_behavior(&self, value: &Self::NewParsed) -> Self::Behavior {
             let mut projection = VersioningCodec.new_behavior(value);
@@ -470,6 +518,7 @@ mod tests {
             reject_new_output_in_old: false,
             reject_historical_in_new: false,
             new_structure_drift: false,
+            old_behavior_drift: false,
             new_behavior_drift: false,
         }
     }
@@ -520,12 +569,24 @@ mod tests {
     }
 
     #[test]
-    fn d5_detects_behavior_drift_after_structure_matches() {
+    fn d5_detects_old_behavior_drift_for_an_unknown_status() {
+        let mut codec = mutant();
+        codec.old_behavior_drift = true;
+        assert_eq!(
+            assert_four_way(&codec, &accepted_sample(UNKNOWN_STATUS))
+                .expect_err("D5 must reject the pinned-old decision drifting to enabled")
+                .direction,
+            Direction::D5Behavior
+        );
+    }
+
+    #[test]
+    fn d5_detects_new_behavior_drift_for_an_unknown_status() {
         let mut codec = mutant();
         codec.new_behavior_drift = true;
         assert_eq!(
-            assert_four_way(&codec, &base_sample())
-                .expect_err("D5 must use independent behavior projections")
+            assert_four_way(&codec, &accepted_sample(UNKNOWN_STATUS))
+                .expect_err("D5 must reject the production decision drifting to enabled")
                 .direction,
             Direction::D5Behavior
         );
