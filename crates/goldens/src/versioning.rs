@@ -47,6 +47,7 @@ const WRONG_ROOT: &[u8] = b"<Other></Other>";
 const TWO_ROOTS: &[u8] = b"<VersioningConfiguration></VersioningConfiguration><Other></Other>";
 const INVALID_UTF8: &[u8] = b"\xff";
 const EMPTY_INPUT: &[u8] = b"";
+const SOURCE_B_BOTO3: &[u8] = b"<VersioningConfiguration><Status>Suspended</Status></VersioningConfiguration>";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct VersioningBehaviorProjection {
@@ -207,6 +208,27 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfi
             CorpusVariant::Extension,
         ],
         accepted: vec![
+            AcceptedCorpusCase {
+                sample: GoldenSample {
+                    kind: ConfigKind::Versioning,
+                    bytes: SOURCE_B_BOTO3.to_vec(),
+                    value: PersistedVersioningConfiguration {
+                        status: Some("Suspended".to_owned()),
+                        ..PersistedVersioningConfiguration::default()
+                    },
+                    origin: SampleOrigin {
+                        source: "Source-(b) live boto3 client matrix capture".to_owned(),
+                        producer: "boto3 1.40.21 against disposable RustFS; rustfs-cli raw export".to_owned(),
+                        version: "botocore@1.40.76; rustfs-server@sha256:e294d7887fbea1992496146f98c32e3b517efc6dec9e53bb592fff9a04bb2ae9; rustfs-cli@c876df53f5097618b1817568a471cbb8b4f26ee8"
+                            .to_owned(),
+                        sha256: "7ecd6025d6e250b27b84aed6bc0df05b96726bce8df5b0a1ab57e9889ce8fe29"
+                            .to_owned(),
+                    },
+                    notes: "byte-exact Versioning XML persisted after a structured boto3 PutBucketVersioning request"
+                        .to_owned(),
+                },
+                variants: vec![CorpusVariant::Canonical],
+            },
             historical(),
             accepted(
                 ALL_FIELDS,
@@ -296,6 +318,16 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfi
             rejected(TWO_ROOTS, "two document roots", &[CorpusVariant::DuplicateField]),
             rejected(INVALID_UTF8, "invalid UTF-8", &[CorpusVariant::Canonical]),
             rejected(EMPTY_INPUT, "missing document", &[CorpusVariant::MissingField]),
+            rejected(
+                b"<VersioningConfiguration><Status>Suspended</Status>",
+                "source-(b) Suspended capture with a missing root close",
+                &[CorpusVariant::BodyLiteral],
+            ),
+            rejected(
+                b"<VersioningConfiguration><Status>Suspended</Status></Other>",
+                "source-(b) Suspended capture with a mismatched root close",
+                &[CorpusVariant::BodyLiteral],
+            ),
         ],
     }
 }
@@ -306,7 +338,7 @@ mod tests {
     use crate::Direction;
 
     fn base_sample() -> GoldenSample<PersistedVersioningConfiguration> {
-        corpus_evidence().accepted[0].sample.clone()
+        accepted_sample(HISTORICAL)
     }
 
     fn accepted_sample(bytes: &[u8]) -> GoldenSample<PersistedVersioningConfiguration> {
@@ -330,6 +362,18 @@ mod tests {
     #[test]
     fn four_way_versioning_pilot_passes_all_five_directions() {
         assert_versioning_four_way(&base_sample()).expect("the independent old and new codecs agree");
+    }
+
+    #[test]
+    fn source_b_boto3_versioning_capture_is_registered() {
+        let sample = corpus_evidence()
+            .accepted
+            .into_iter()
+            .find(|case| case.sample.origin.source.starts_with("Source-(b)"))
+            .expect("the live boto3 Versioning capture is registered")
+            .sample;
+        assert_eq!(sample.origin.sha256, "7ecd6025d6e250b27b84aed6bc0df05b96726bce8df5b0a1ab57e9889ce8fe29");
+        assert_eq!(sample.bytes.len(), 77);
     }
 
     #[test]

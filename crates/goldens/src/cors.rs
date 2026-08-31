@@ -34,6 +34,7 @@ const UNKNOWN_TOP: &[u8] = b"<CORSConfiguration><Future>future</Future><CORSRule
 const UNKNOWN_NESTED: &[u8] = b"<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><Future>future</Future><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>";
 const UNKNOWN_ATTRIBUTES: &[u8] = b"<CORSConfiguration future=\"root\"><CORSRule future=\"rule\"><AllowedMethod future=\"method\">GET</AllowedMethod><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>";
 const ALTERNATE_ORDER: &[u8] = b"<CORSConfiguration><CORSRule><MaxAgeSeconds>-1</MaxAgeSeconds><AllowedOrigin>*</AllowedOrigin><ID>x</ID><AllowedMethod>HEAD</AllowedMethod></CORSRule></CORSConfiguration>";
+const SOURCE_B_BOTO3: &[u8] = b"<CORSConfiguration><CORSRule><AllowedHeader>authorization</AllowedHeader><AllowedHeader>content-type</AllowedHeader><AllowedHeader>x-amz-date</AllowedHeader><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://source-b.example.test</AllowedOrigin><ExposeHeader>etag</ExposeHeader><ExposeHeader>x-amz-version-id</ExposeHeader><ID>boto3-cors</ID><MaxAgeSeconds>600</MaxAgeSeconds></CORSRule></CORSConfiguration>";
 
 type AcceptedCorsCase = (GoldenSample<PersistedCorsConfiguration>, &'static [CorpusVariant]);
 type RejectedCorsCase = (RejectedGoldenSample, &'static [CorpusVariant]);
@@ -107,6 +108,34 @@ fn accepted_cases() -> Vec<AcceptedCorsCase> {
         "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>{large_origin}</AllowedOrigin></CORSRule></CORSConfiguration>"
     );
     vec![
+        (
+            GoldenSample {
+                kind: ConfigKind::Cors,
+                bytes: SOURCE_B_BOTO3.to_vec(),
+                value: PersistedCorsConfiguration {
+                    cors_rules: vec![PersistedCorsRule {
+                        allowed_headers: Some(vec![
+                            "authorization".to_owned(),
+                            "content-type".to_owned(),
+                            "x-amz-date".to_owned(),
+                        ]),
+                        allowed_methods: vec!["GET".to_owned(), "PUT".to_owned()],
+                        allowed_origins: vec!["https://source-b.example.test".to_owned()],
+                        expose_headers: Some(vec!["etag".to_owned(), "x-amz-version-id".to_owned()]),
+                        id: Some("boto3-cors".to_owned()),
+                        max_age_seconds: Some(600),
+                    }],
+                },
+                origin: SampleOrigin {
+                    source: "Source-(b) live boto3 client matrix capture".to_owned(),
+                    producer: "boto3 1.40.21 against disposable RustFS; rustfs-cli raw export".to_owned(),
+                    version: "botocore@1.40.76; rustfs-server@sha256:e294d7887fbea1992496146f98c32e3b517efc6dec9e53bb592fff9a04bb2ae9; rustfs-cli@c876df53f5097618b1817568a471cbb8b4f26ee8".to_owned(),
+                    sha256: "be55a446cff4f490a1e978281abc85174eccab433bf7a0890d2ff198a474052a".to_owned(),
+                },
+                notes: "byte-exact CORS XML persisted after a structured boto3 PutBucketCors request".to_owned(),
+            },
+            &[CorpusVariant::Canonical],
+        ),
         accepted(
             REPRESENTATIVE.to_vec(),
             "03e02728783595d08321ee1e224b29a1e006bc741b1d3a47ce5947d1eab339f1",
@@ -275,6 +304,16 @@ mod tests {
         for (case, _) in accepted_cases() {
             assert_cors_four_way(&case).unwrap_or_else(|error| panic!("CORS {}: {error}", case.notes));
         }
+    }
+
+    #[test]
+    fn source_b_boto3_cors_capture_is_registered() {
+        let (sample, _) = accepted_cases()
+            .into_iter()
+            .find(|(sample, _)| sample.origin.source.starts_with("Source-(b)"))
+            .expect("the live boto3 CORS capture is registered");
+        assert_eq!(sample.origin.sha256, "be55a446cff4f490a1e978281abc85174eccab433bf7a0890d2ff198a474052a");
+        assert_eq!(sample.bytes.len(), 447);
     }
 
     #[test]
@@ -486,6 +525,6 @@ mod tests {
         let evidence = corpus_evidence().expect("CORS corpus evidence is traceable");
         let report =
             build_corpus_report(&[ConfigKind::Cors], &[evidence]).expect("CORS concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("cors: accepted=5 rejected=10"));
+        assert!(report.render().contains("cors: accepted=6 rejected=10"));
     }
 }

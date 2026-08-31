@@ -17,7 +17,10 @@
 //! Responsible for: binding independent pinned-s3s and production Lifecycle codecs to D1-D5.
 //! NOT responsible for: HTTP lifecycle policy validation, other configuration families, or CI.
 //! Upstream: `rustfs-gateway-types` persistence and compat seams. Downstream: migration gates.
-
+use crate::{
+    AcceptedCorpusCase, ConcreteFamilyCorpus, ConfigKind, CorpusVariant, FourWayCodec, GoldenFailure, GoldenSample,
+    RejectedCorpusCase, RejectedGoldenSample, SampleOrigin, assert_four_way,
+};
 use rustfs_gateway_types::compat::{S3sLifecycleObservation, parse_s3s_lifecycle, serialize_s3s_lifecycle};
 use rustfs_gateway_types::persistence::{
     PersistedAbortIncompleteMultipartUpload, PersistedDelMarkerExpiration, PersistedLifecycleAnd,
@@ -27,11 +30,7 @@ use rustfs_gateway_types::persistence::{
 };
 use sha2::{Digest, Sha256};
 
-use crate::{
-    AcceptedCorpusCase, ConcreteFamilyCorpus, ConfigKind, CorpusVariant, FourWayCodec, GoldenFailure, GoldenSample,
-    RejectedCorpusCase, RejectedGoldenSample, SampleOrigin, assert_four_way,
-};
-
+mod source_b;
 #[cfg(test)]
 const MINIMAL: &[u8] = b"<LifecycleConfiguration><Rule><Status>Enabled</Status></Rule></LifecycleConfiguration>";
 const NAMESPACE: &[u8] = b"<LifecycleConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Rule><Status>Enabled</Status></Rule></LifecycleConfiguration>";
@@ -271,7 +270,7 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedLifecycleConfig
     wrappers.rules[0].noncurrent_version_transitions = Some(vec![PersistedNoncurrentVersionTransition::default()]);
     wrappers.rules[0].transitions = Some(vec![PersistedTransition::default()]);
 
-    let accepted = [
+    let mut accepted: Vec<_> = [
         (NAMESPACE, minimal(), vec![CorpusVariant::Namespace], "old-readable namespace declaration"),
         (
             UNKNOWN_TOP_LEVEL,
@@ -310,6 +309,7 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedLifecycleConfig
         variants,
     })
     .collect();
+    accepted.push(source_b::case());
 
     let mut refused = vec![
         rejected(b"<LifecycleConfiguration><Rule><Future>future</Future><Status>Enabled</Status></Rule></LifecycleConfiguration>", &[CorpusVariant::UnknownNested], "unknown Rule child"),
