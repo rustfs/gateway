@@ -92,6 +92,7 @@ pub mod put_object_lock_configuration;
 pub mod put_object_retention;
 pub mod put_object_tagging;
 pub mod put_public_access_block;
+pub mod rename_object;
 pub mod restore_object;
 pub mod select_object_content;
 pub mod upload_part;

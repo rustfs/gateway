@@ -89,6 +89,7 @@ mod put_object_lock_configuration;
 mod put_object_retention;
 mod put_object_tagging;
 mod put_public_access_block;
+mod rename_object;
 mod restore_object;
 mod select_object_content;
 mod upload_part;

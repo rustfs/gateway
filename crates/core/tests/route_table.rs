@@ -2243,3 +2243,53 @@ fn n_the_declared_winner_wins_beside_an_acl_subresource() {
         assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
     }
 }
+
+// ── RenameObject ────────────────────────────────────────────────────────────────────────────
+
+/// The literal rename subresource routes to the protocol operation, not an object upload.
+#[test]
+fn rename_object_routes_ahead_of_put_object() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("PUT /bucket/key?renameObject")), Some("RenameObject"));
+}
+
+/// Negative — a rename request cannot create or overwrite the destination with an empty body.
+#[test]
+fn n_rename_object_is_never_claimed_by_put_or_copy_object() {
+    let table = generated_table();
+    let plain = Req::new("PUT /bucket/key?renameObject");
+    assert_ne!(routed(&table, &plain), Some("PutObject"));
+
+    let with_copy_source = plain.header("x-amz-copy-source", "/other/source");
+    assert_eq!(routed(&table, &with_copy_source), Some("RenameObject"));
+    assert_ne!(routed(&table, &with_copy_source), Some("CopyObject"));
+}
+
+/// Negative controls prove method, object target and the literal query key all participate.
+#[test]
+fn n_rename_object_does_not_claim_neighbour_controls() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("PUT /bucket/key")), Some("PutObject"));
+    assert_ne!(routed(&table, &Req::new("GET /bucket/key?renameObject")), Some("RenameObject"));
+    assert_ne!(routed(&table, &Req::new("PUT /bucket?renameObject")), Some("RenameObject"));
+    assert_eq!(
+        routed(&table, &Req::new("PUT /bucket/key?renameObject&partNumber=1&uploadId=u")),
+        Some("UploadPart")
+    );
+    assert_eq!(
+        routed(
+            &table,
+            &Req::new("PUT /bucket/key?renameObject&partNumber=1&uploadId=u").header("x-amz-copy-source", "/other/source")
+        ),
+        Some("UploadPartCopy")
+    );
+    for (query, expected) in [
+        ("tagging", "PutObjectTagging"),
+        ("retention", "PutObjectRetention"),
+        ("legal-hold", "PutObjectLegalHold"),
+        ("acl", "PutObjectAcl"),
+    ] {
+        let line = format!("PUT /bucket/key?renameObject&{query}");
+        assert_eq!(routed(&table, &Req::new(&line)), Some(expected), "{line}");
+    }
+}

@@ -25,5 +25,4 @@ ListBucketMetricsConfigurations -> ListObjects
 ListDirectoryBuckets -> ListBuckets
 ListObjectAnnotations -> GetObject
 PutObjectAnnotation -> PutObject
-RenameObject -> PutObject
 UpdateObjectEncryption -> PutObject

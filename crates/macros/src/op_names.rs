@@ -89,6 +89,7 @@ pub(crate) static OPERATION_NAMES: &[&str] = &[
     "PutObjectRetention",
     "PutObjectTagging",
     "PutPublicAccessBlock",
+    "RenameObject",
     "RestoreObject",
     "SelectObjectContent",
     "UploadPart",

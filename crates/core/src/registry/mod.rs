@@ -348,6 +348,7 @@ fn standard_handler_deadline_class(name: &str) -> Option<HandlerDeadlineClass> {
         | "PutObjectRetention"
         | "PutObjectTagging"
         | "PutPublicAccessBlock"
+        | "RenameObject"
         | "RestoreObject"
         | "SelectObjectContent"
         | "UploadPart"

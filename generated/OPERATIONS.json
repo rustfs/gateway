@@ -977,6 +977,15 @@
                                                            ],
                                             "precedence": 226
                                           },
+                  "RenameObject": {
+                                    "method": "PUT",
+                                    "path_shape": "/{Bucket}/{Key+}",
+                                    "query_keys": ["renameObject"],
+                                    "key_headers": ["x-amz-rename-source"],
+                                    "host_classes": [],
+                                    "error_codes": ["AccessDenied", "InvalidRequest", "IdempotencyParameterMismatch"],
+                                    "precedence": 780
+                                  },
                   "RestoreObject": {
                                      "method": "POST",
                                      "path_shape": "/{Bucket}/{Key+}",
@@ -1141,6 +1150,7 @@
                           "PutObjectRetention",
                           "PutObjectTagging",
                           "PutPublicAccessBlock",
+                          "RenameObject",
                           "UploadPart",
                           "UploadPartCopy"
                         ]
@@ -1217,6 +1227,7 @@
                                            "PutObjectLegalHold",
                                            "PutObjectRetention",
                                            "PutObjectTagging",
+                                           "RenameObject",
                                            "RestoreObject",
                                            "SelectObjectContent",
                                            "UploadPart",
@@ -1303,6 +1314,7 @@
                                            "GetPublicAccessBlock",
                                            "PutPublicAccessBlock"
                                          ],
+                    "renameObject": ["RenameObject"],
                     "replication": [
                                      "CreateBucket",
                                      "DeleteBucket",
@@ -1375,7 +1387,8 @@
                      "x-amz-checksum-": ["CompleteMultipartUpload", "PutObject", "UploadPart"],
                      "x-amz-copy-source": ["CopyObject", "UploadPartCopy"],
                      "x-amz-meta-": ["CopyObject", "CreateMultipartUpload", "GetObject", "HeadObject", "PutObject"],
-                     "x-amz-object-attributes": ["GetObjectAttributes"]
+                     "x-amz-object-attributes": ["GetObjectAttributes"],
+                     "x-amz-rename-source": ["RenameObject"]
                    },
   "by_host_class": {},
   "by_error_code": {
@@ -1448,6 +1461,7 @@
                                        "PutObjectRetention",
                                        "PutObjectTagging",
                                        "PutPublicAccessBlock",
+                                       "RenameObject",
                                        "RestoreObject",
                                        "SelectObjectContent",
                                        "UploadPart",
@@ -1481,6 +1495,7 @@
                      "EntityTooLarge": ["CopyObject", "PutObject", "UploadPart"],
                      "EntityTooSmall": ["CompleteMultipartUpload"],
                      "ExpressionTooLong": ["SelectObjectContent"],
+                     "IdempotencyParameterMismatch": ["RenameObject"],
                      "IncompleteBody": ["PutObject", "UploadPart"],
                      "InvalidArgument": [
                                           "AbortMultipartUpload",
@@ -1552,6 +1567,7 @@
                                          "PutObjectLegalHold",
                                          "PutObjectLockConfiguration",
                                          "PutObjectRetention",
+                                         "RenameObject",
                                          "RestoreObject",
                                          "SelectObjectContent",
                                          "UploadPartCopy"
@@ -1796,6 +1812,7 @@
                      "710": ["CreateBucket"],
                      "720": ["DeleteBucket"],
                      "730": ["HeadBucket"],
+                     "780": ["RenameObject"],
                      "790": ["CopyObject"],
                      "800": ["PutObject"],
                      "900": ["GetObject"],
