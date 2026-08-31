@@ -39,6 +39,7 @@ mod notification;
 mod object_lock;
 mod public_access_block;
 mod replication;
+mod source_a_boundary;
 mod tagging;
 mod versioning;
 mod website;

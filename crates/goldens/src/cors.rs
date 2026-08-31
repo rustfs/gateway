@@ -108,7 +108,7 @@ fn accepted_cases() -> Vec<AcceptedCorsCase> {
     let large_xml = format!(
         "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>{large_origin}</AllowedOrigin></CORSRule></CORSConfiguration>"
     );
-    vec![
+    let mut cases: Vec<AcceptedCorsCase> = vec![
         (
             GoldenSample {
                 kind: ConfigKind::Cors,
@@ -207,7 +207,9 @@ fn accepted_cases() -> Vec<AcceptedCorsCase> {
             "persistence-sized origin is independent from HTTP header limits",
             &[CorpusVariant::LargeValue],
         ),
-    ]
+    ];
+    cases.extend(crate::source_a_boundary::cors_cases());
+    cases
 }
 
 fn rejected_cases() -> Vec<RejectedCorsCase> {
@@ -563,6 +565,6 @@ mod tests {
         let evidence = corpus_evidence().expect("CORS corpus evidence is traceable");
         let report =
             build_corpus_report(&[ConfigKind::Cors], &[evidence]).expect("CORS concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("cors: accepted=7 rejected=10"));
+        assert!(report.render().contains("cors: accepted=9 rejected=10"));
     }
 }
