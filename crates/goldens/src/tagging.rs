@@ -212,6 +212,26 @@ fn accepted_cases() -> Vec<AcceptedTaggingCase> {
         },
         &[CorpusVariant::Canonical, CorpusVariant::Unicode],
     ));
+    for (bytes, sha256, source_refs) in crate::ecstore_source_a::fixture_bindings(ConfigKind::Tagging) {
+        let value = parse_s3s_tagging(bytes)
+            .expect("the RustFS ecstore Tagging fixture is old-readable")
+            .structure;
+        cases.push((
+            GoldenSample {
+                kind: ConfigKind::Tagging,
+                bytes: bytes.to_vec(),
+                value,
+                origin: SampleOrigin {
+                    source: crate::ecstore_source_a::provenance_source(source_refs),
+                    producer: "rustfs/rustfs ecstore metadata test fixture".to_owned(),
+                    version: crate::ecstore_source_a::SOURCE_REVISION.to_owned(),
+                    sha256: sha256.to_owned(),
+                },
+                notes: "RustFS ecstore persists this Tagging document byte-exactly".to_owned(),
+            },
+            &[CorpusVariant::Canonical],
+        ));
+    }
     cases
 }
 
@@ -587,7 +607,7 @@ mod tests {
         let evidence = corpus_evidence().expect("Tagging corpus evidence is traceable");
         let report = build_corpus_report(&[ConfigKind::Tagging], &[evidence])
             .expect("Tagging concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("tagging: accepted=13 rejected=13"));
+        assert!(report.render().contains("tagging: accepted=15 rejected=13"));
     }
 
     #[test]
@@ -602,5 +622,29 @@ mod tests {
         assert_eq!(sample.origin.source, NEW_WRITER_TAGGING_SOURCE);
         assert_eq!(sample.origin.version, NEW_WRITER_REVISION);
         assert_tagging_four_way(sample).expect("the RustFS new-writer Tagging fixture passes D1-D5");
+    }
+
+    #[test]
+    fn ecstore_tagging_fixtures_are_registered_once_by_exact_sha() {
+        for (sha256, source) in [
+            (
+                "6a6c84a2c75d7125d9792de21a0fef4d7f65c8ce107709c1b68d2f8264ab90ba",
+                "crates/ecstore/src/bucket/metadata.rs::tests::tagging_update_config_clears_parsed_config_on_delete::tagging_xml",
+            ),
+            (
+                "7f46d946932dcb5747aefef2fe35536332a37d0df71354675804b484689dc826",
+                "crates/ecstore/src/bucket/metadata.rs::tests::marshal_msg_complete_example::tagging_xml (aliases: crates/ecstore/src/bucket/metadata_test.rs::marshal_msg_complete_example::tagging_xml)",
+            ),
+        ] {
+            let matches = accepted_cases()
+                .into_iter()
+                .filter(|(sample, _)| sample.origin.sha256 == sha256)
+                .collect::<Vec<_>>();
+            assert_eq!(matches.len(), 1, "the ecstore Tagging SHA must be registered exactly once");
+            let sample = &matches[0].0;
+            assert_eq!(sample.origin.source, source);
+            assert_eq!(sample.origin.version, "c876df53f5097618b1817568a471cbb8b4f26ee8");
+            assert_tagging_four_way(sample).expect("the RustFS ecstore Tagging fixture passes D1-D5");
+        }
     }
 }
