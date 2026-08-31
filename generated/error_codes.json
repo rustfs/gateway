@@ -50,6 +50,11 @@
              "EntityTooSmall": { "constant": "ENTITY_TOO_SMALL", "status": 400, "server_fault": false },
              "ExpiredToken": { "constant": "EXPIRED_TOKEN", "status": 400, "server_fault": false },
              "ExpressionTooLong": { "constant": "EXPRESSION_TOO_LONG", "status": 400, "server_fault": false },
+             "IdempotencyParameterMismatch": {
+                                               "constant": "IDEMPOTENCY_PARAMETER_MISMATCH",
+                                               "status": 400,
+                                               "server_fault": false
+                                             },
              "IllegalVersioningConfigurationException": {
                                                           "constant": "ILLEGAL_VERSIONING_CONFIGURATION",
                                                           "status": 400,
@@ -265,6 +270,7 @@
                    "ENTITY_TOO_SMALL": ["EntityTooSmall"],
                    "EXPIRED_TOKEN": ["ExpiredToken"],
                    "EXPRESSION_TOO_LONG": ["ExpressionTooLong"],
+                   "IDEMPOTENCY_PARAMETER_MISMATCH": ["IdempotencyParameterMismatch"],
                    "ILLEGAL_VERSIONING_CONFIGURATION": ["IllegalVersioningConfigurationException"],
                    "INCOMPLETE_BODY": ["IncompleteBody"],
                    "INCORRECT_NUMBER_OF_FILES_IN_POST_REQUEST": ["IncorrectNumberOfFilesInPostRequest"],
@@ -375,6 +381,7 @@
                           "EntityTooSmall",
                           "ExpiredToken",
                           "ExpressionTooLong",
+                          "IdempotencyParameterMismatch",
                           "IllegalVersioningConfigurationException",
                           "IncompleteBody",
                           "IncorrectNumberOfFilesInPostRequest",
@@ -503,6 +510,7 @@
                                   "EntityTooSmall",
                                   "ExpiredToken",
                                   "ExpressionTooLong",
+                                  "IdempotencyParameterMismatch",
                                   "IllegalVersioningConfigurationException",
                                   "IncompleteBody",
                                   "IncorrectNumberOfFilesInPostRequest",

@@ -301,6 +301,9 @@ pub use crate::ops::put_public_access_block::{
     Input as PutPublicAccessBlockInput, InputBuilder as PutPublicAccessBlockInputBuilder, Output as PutPublicAccessBlockOutput,
     PutPublicAccessBlock,
 };
+pub use crate::ops::rename_object::{
+    Input as RenameObjectInput, InputBuilder as RenameObjectInputBuilder, Output as RenameObjectOutput, RenameObject,
+};
 pub use crate::ops::restore_object::{
     Input as RestoreObjectInput, InputBuilder as RestoreObjectInputBuilder, Output as RestoreObjectOutput, RestoreObject,
 };

@@ -23,13 +23,7 @@
 #
 # This file is the conflict unit for the family. Nothing outside it may declare these operations.
 
-include = ["CopyObject", "UploadPartCopy"]
-
-[[deferred]]
-reason = "P5 copy family; RenameObject is a single-bucket move with no source-authorization stage and no AWS wire form to conform to."
-operations = [
-  "RenameObject",
-]
+include = ["CopyObject", "RenameObject", "UploadPartCopy"]
 
 # =============================================================================================
 # Precedence, in one place so the ordering argument is reviewable without reading two tables.
@@ -52,6 +46,22 @@ operations = [
 # rather than a branch: a copy that fails after the head has been flushed answers `200` with an
 # `<Error>` document in the body, and a client that reads the status alone concludes success.
 # =============================================================================================
+
+# =============================================================================================
+# RenameObject
+#
+# A deferred rename is claimed by PutObject, which turns a metadata-only move request into an
+# empty object write. The literal model subresource is the discriminator; the required source
+# header remains a parameter so a malformed rename is refused as RenameObject, never reclassified.
+# =============================================================================================
+[op.RenameObject]
+precedence = 780
+auth_action = "s3express:CreateSession"
+error_codes = ["AccessDenied", "InvalidRequest"]
+url_encoded_fields = []
+input_hot = ["Key", "RenameSource", "ClientToken"]
+output_hot = []
+
 [op.CopyObject]
 precedence = 790
 header_present = ["x-amz-copy-source"]

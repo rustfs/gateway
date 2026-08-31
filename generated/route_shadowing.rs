@@ -3629,4 +3629,76 @@ pub const SHADOWING: &[ShadowingDecl] = &[
             "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html — a plain object write is the same method and path with neither of those parameters.",
         ],
     },
+    ShadowingDecl {
+        winner: "UploadPartCopy",
+        shadowed: "RenameObject",
+        reason: "A request carrying partNumber, uploadId, a copy source and ?renameObject reaches both rows. The multipart copy band (400) is tried before RenameObject (780), so the request remains part-scoped rather than moving an object mid-upload.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html — a part copy is a part upload whose bytes come from a source object named by a header rather than from the body.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html — RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UploadPart",
+        shadowed: "RenameObject",
+        reason: "A part upload that also carries ?renameObject reaches both rows. The multipart band (410) wins before RenameObject (780), preserving the upload-id capability boundary.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html — a part upload is a PUT to the object key carrying the part number and the upload id as query parameters.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html — RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutObjectTagging",
+        shadowed: "RenameObject",
+        reason: "The tagging and rename subresources name different object mutations in one PUT. The established document band (490) wins before RenameObject (780), so the request is not reclassified by source order.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectTagging.html — a tag-set write is a PUT to the object key carrying the ?tagging subresource, and its body is a tagging document rather than object data.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html — RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutObjectRetention",
+        shadowed: "RenameObject",
+        reason: "The retention and rename subresources name different object mutations in one PUT. The retention band (520) wins before RenameObject (780).",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectRetention.html — a retention write is a PUT to the object key carrying the ?retention subresource, and its body is a Retention document rather than object data.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html — RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutObjectLegalHold",
+        shadowed: "RenameObject",
+        reason: "The legal-hold and rename subresources name different object mutations in one PUT. The legal-hold band (540) wins before RenameObject (780).",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html — a legal-hold write is a PUT to the object key carrying the ?legal-hold subresource, and its body is a LegalHold document rather than object data.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html — RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutObjectAcl",
+        shadowed: "RenameObject",
+        reason: "The ACL and rename subresources name different object mutations in one PUT. The ACL band (560) wins before RenameObject (780).",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAcl.html — an ACL write is a PUT to the object key carrying the ?acl subresource, and its body is an AccessControlPolicy rather than object data.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html — RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "RenameObject",
+        shadowed: "CopyObject",
+        reason: "A PUT carrying both ?renameObject and x-amz-copy-source reaches both rows. RenameObject wins at 780 before CopyObject at 790, so an unsupported rename is refused instead of copying a source object over the destination.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html — RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html — a copy is a PUT to the destination key whose source is named by a header, and which carries no request body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "RenameObject",
+        shadowed: "PutObject",
+        reason: "Every rename is also accepted by PutObject, whose selector pins only PUT and an object target. RenameObject wins at 780 before PutObject at 800; the reverse order writes an empty object to the destination instead of returning operation-specific NotImplemented.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html — RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html — a plain object write is the same method and path with neither of those parameters.",
+        ],
+    },
 ];

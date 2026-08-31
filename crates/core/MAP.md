@@ -11,6 +11,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/lib.rs` | Module wiring and public re-exports. | Start here for a core task. |
 | `src/op.rs` | Operation identity, origin and authorization requirements. | Add an operation or inspect standard-name rules. |
 | `src/ops/*.rs` | Exactly one `impl Operation` per AWS operation. | Change one operation's static contract. |
+| `src/ops/rename_object.rs` | Reserves the directory-bucket rename contract independently of backend registration. | A rename request routes to PutObject or declares the wrong authorization floor. |
 | `src/ops/shared/` | Explicit cross-operation protocol logic. | A list/copy/conditional/ACL/checksum rule affects several operations. |
 | `src/route/mod.rs` | Routing module map and pre-auth invariant. | Start a routing task. |
 | `src/route/selector.rs` | Route predicates and entries. | Add or interpret a predicate. |

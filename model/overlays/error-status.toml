@@ -141,6 +141,11 @@ constant = "INLINE_DATA_TOO_LARGE"
 status = 400
 
 [[code]]
+name = "IdempotencyParameterMismatch"
+constant = "IDEMPOTENCY_PARAMETER_MISMATCH"
+status = 400
+
+[[code]]
 name = "InvalidArgument"
 constant = "INVALID_ARGUMENT"
 status = 400

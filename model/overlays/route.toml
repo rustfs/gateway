@@ -82,6 +82,10 @@ summary = "completion is a POST to the object key carrying the upload id."
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
 summary = "a copy is a PUT to the destination key whose source is named by a header, and which carries no request body."
 
+[evidence.rename-object]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html"
+summary = "RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body."
+
 [evidence.create-multipart-upload]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html"
 summary = "initiation is a POST to the object key carrying the ?uploads subresource and no upload id."
@@ -2741,3 +2745,50 @@ shadowed = "PutObject"
 reason   = "An ACL write is a PUT to the object key plus ?acl, and PutObject accepts every such request. PutObjectAcl is tried first (560 before 800). The other order is the PutObjectAcl -> PutObject line the debt register carried, and it is not a mis-route but a data loss: the <AccessControlPolicy> document is stored as the object, destroying the bytes the caller only wanted to change the permissions of, and answering 200 for it."
 evidence = ["put-object-acl", "put-object"]
 
+[[shadowing]]
+winner   = "UploadPartCopy"
+shadowed = "RenameObject"
+reason   = "A request carrying partNumber, uploadId, a copy source and ?renameObject reaches both rows. The multipart copy band (400) is tried before RenameObject (780), so the request remains part-scoped rather than moving an object mid-upload."
+evidence = ["upload-part-copy", "rename-object"]
+
+[[shadowing]]
+winner   = "UploadPart"
+shadowed = "RenameObject"
+reason   = "A part upload that also carries ?renameObject reaches both rows. The multipart band (410) wins before RenameObject (780), preserving the upload-id capability boundary."
+evidence = ["upload-part", "rename-object"]
+
+[[shadowing]]
+winner   = "PutObjectTagging"
+shadowed = "RenameObject"
+reason   = "The tagging and rename subresources name different object mutations in one PUT. The established document band (490) wins before RenameObject (780), so the request is not reclassified by source order."
+evidence = ["put-object-tagging", "rename-object"]
+
+[[shadowing]]
+winner   = "PutObjectRetention"
+shadowed = "RenameObject"
+reason   = "The retention and rename subresources name different object mutations in one PUT. The retention band (520) wins before RenameObject (780)."
+evidence = ["put-object-retention", "rename-object"]
+
+[[shadowing]]
+winner   = "PutObjectLegalHold"
+shadowed = "RenameObject"
+reason   = "The legal-hold and rename subresources name different object mutations in one PUT. The legal-hold band (540) wins before RenameObject (780)."
+evidence = ["put-object-legal-hold", "rename-object"]
+
+[[shadowing]]
+winner   = "PutObjectAcl"
+shadowed = "RenameObject"
+reason   = "The ACL and rename subresources name different object mutations in one PUT. The ACL band (560) wins before RenameObject (780)."
+evidence = ["put-object-acl", "rename-object"]
+
+[[shadowing]]
+winner   = "RenameObject"
+shadowed = "CopyObject"
+reason   = "A PUT carrying both ?renameObject and x-amz-copy-source reaches both rows. RenameObject wins at 780 before CopyObject at 790, so an unsupported rename is refused instead of copying a source object over the destination."
+evidence = ["rename-object", "copy-object"]
+
+[[shadowing]]
+winner   = "RenameObject"
+shadowed = "PutObject"
+reason   = "Every rename is also accepted by PutObject, whose selector pins only PUT and an object target. RenameObject wins at 780 before PutObject at 800; the reverse order writes an empty object to the destination instead of returning operation-specific NotImplemented."
+evidence = ["rename-object", "put-object"]

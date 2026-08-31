@@ -132,6 +132,12 @@ impl ErrorCode {
         status: StatusCode::BAD_REQUEST,
     };
 
+    /// `IdempotencyParameterMismatch`, HTTP `400`.
+    pub const IDEMPOTENCY_PARAMETER_MISMATCH: Self = Self {
+        name: Cow::Borrowed("IdempotencyParameterMismatch"),
+        status: StatusCode::BAD_REQUEST,
+    };
+
     /// `InvalidArgument`, HTTP `400`.
     pub const INVALID_ARGUMENT: Self = Self {
         name: Cow::Borrowed("InvalidArgument"),
@@ -802,6 +808,7 @@ pub(super) const CODE_TABLE: &[(&str, StatusCode)] = &[
     ("IncompleteBody", StatusCode::BAD_REQUEST),
     ("IncorrectNumberOfFilesInPostRequest", StatusCode::BAD_REQUEST),
     ("InlineDataTooLarge", StatusCode::BAD_REQUEST),
+    ("IdempotencyParameterMismatch", StatusCode::BAD_REQUEST),
     ("InvalidArgument", StatusCode::BAD_REQUEST),
     ("InvalidBucketName", StatusCode::BAD_REQUEST),
     ("InvalidChunkSizeError", StatusCode::BAD_REQUEST),

@@ -996,6 +996,20 @@ pub const ROUTES: &[RouteRow] = &[
         ],
     },
     RouteRow {
+        operation: "RenameObject",
+        precedence: 780,
+        method: "PUT",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        not_configured: None,
+        predicates: &[
+            RoutePredicate::Method("PUT"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("renameObject"),
+        ],
+    },
+    RouteRow {
         operation: "CopyObject",
         precedence: 790,
         method: "PUT",

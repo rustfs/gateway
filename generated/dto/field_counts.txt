@@ -206,6 +206,8 @@ PutPublicAccessBlockOutput 0
 QueueConfiguration 4
 Redirect 5
 RedirectAllRequestsTo 2
+RenameObjectInput 12
+RenameObjectOutput 0
 ReplicaModifications 1
 ReplicationConfiguration 2
 ReplicationRule 9
