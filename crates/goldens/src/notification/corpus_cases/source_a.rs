@@ -15,9 +15,9 @@
 //! RustFS repository Notification persistence fixtures.
 //!
 //! Responsible for: preserving exact source-(a) XML bytes, test identifiers, aliases, and
-//! revisions from RustFS Notification tests and new-writer metadata constants. NOT responsible for: defining generic
-//! Notification corpus boundaries or codec behavior. Upstream: the pinned RustFS repository
-//! revision. Downstream: the parent Notification D1-D5 and backup ZIP corpus.
+//! revisions from RustFS Notification tests and metadata fixtures. NOT responsible for: defining
+//! generic Notification corpus boundaries or codec behavior. Upstream: the pinned RustFS
+//! repository revision. Downstream: the parent Notification D1-D5 and backup ZIP corpus.
 
 use rustfs_gateway_types::compat::parse_s3s_notification;
 #[cfg(test)]
@@ -33,6 +33,9 @@ const NEW_WRITER_SOURCE: &str = "crates/ecstore/src/bucket/metadata_sys.rs::NEW_
 const NEW_WRITER_REVISION: &str = "ca46ae9e56c167998f7139f4d3cfd5914280f4aa";
 const NEW_WRITER_NOTIFICATION: &[u8] = br#"<NotificationConfiguration/>"#;
 const NEW_WRITER_NOTIFICATION_SHA256: &str = "c1f563b9bdb5fcdc9ef642ba79826762a94492d592ac89676fbc7e570b004c96";
+const ECSTORE_CLOUDWATCH_SOURCE: &str = "crates/ecstore/src/bucket/metadata.rs::tests::marshal_msg_complete_example::notification_xml (alias: crates/ecstore/src/bucket/metadata_test.rs::marshal_msg_complete_example::notification_xml)";
+const ECSTORE_CLOUDWATCH: &[u8] = br#"<NotificationConfiguration><CloudWatchConfiguration><Id>notification1</Id><Event>s3:ObjectCreated:*</Event><CloudWatchConfiguration><LogGroupName>test-log-group</LogGroupName></CloudWatchConfiguration></CloudWatchConfiguration></NotificationConfiguration>"#;
+const ECSTORE_CLOUDWATCH_SHA256: &str = "60f422ed2bc9a9d19766165bd86398ca147c32912a4579f344891624a26e9832";
 
 const BUG_AND_URL_ENCODED: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
 <NotificationConfiguration>
@@ -339,6 +342,24 @@ pub(super) fn accepted_cases() -> Vec<AcceptedNotificationCase> {
         },
         &[CorpusVariant::EmptyElement],
     ));
+    let value = parse_s3s_notification(ECSTORE_CLOUDWATCH)
+        .expect("the RustFS ecstore CloudWatch fixture is old-readable")
+        .structure;
+    cases.push((
+        GoldenSample {
+            kind: ConfigKind::Notification,
+            bytes: ECSTORE_CLOUDWATCH.to_vec(),
+            value,
+            origin: SampleOrigin {
+                source: ECSTORE_CLOUDWATCH_SOURCE.to_owned(),
+                producer: "rustfs/rustfs ecstore bucket-metadata test fixture".to_owned(),
+                version: SOURCE_REVISION.to_owned(),
+                sha256: ECSTORE_CLOUDWATCH_SHA256.to_owned(),
+            },
+            notes: "Both migration codecs accept and discard the unsupported CloudWatchConfiguration; this records parity, not CloudWatch support (rustfs/backlog#2109)".to_owned(),
+        },
+        &[CorpusVariant::UnknownTopLevel],
+    ));
     cases
 }
 
@@ -428,5 +449,35 @@ mod tests {
         assert_eq!(sample.origin.version, NEW_WRITER_REVISION);
         super::super::super::assert_notification_four_way(sample)
             .expect("the RustFS new-writer Notification fixture passes D1-D5");
+    }
+
+    #[test]
+    fn ecstore_cloudwatch_fixture_is_measured_and_registered_as_accepted() {
+        let old = parse_s3s_notification(ECSTORE_CLOUDWATCH)
+            .expect("the pinned old parser accepts and discards CloudWatchConfiguration");
+        let new =
+            parse_notification(ECSTORE_CLOUDWATCH).expect("the new parser must preserve the pinned old acceptance boundary");
+        assert_eq!(new, old.structure);
+        assert!(!old.behavior.event_bridge_enabled);
+        assert!(old.behavior.lambda_routes.is_empty());
+        assert!(old.behavior.queue_routes.is_empty());
+        assert!(old.behavior.topic_routes.is_empty());
+
+        let matches = super::super::accepted_cases()
+            .into_iter()
+            .filter(|(sample, _)| sample.origin.sha256 == "60f422ed2bc9a9d19766165bd86398ca147c32912a4579f344891624a26e9832")
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "the ecstore CloudWatch SHA must have one accepted registration");
+        let (sample, variants) = &matches[0];
+        assert_eq!(sample.bytes, ECSTORE_CLOUDWATCH);
+        assert_eq!(
+            sample.origin.source,
+            "crates/ecstore/src/bucket/metadata.rs::tests::marshal_msg_complete_example::notification_xml (alias: crates/ecstore/src/bucket/metadata_test.rs::marshal_msg_complete_example::notification_xml)"
+        );
+        assert_eq!(sample.origin.version, "c876df53f5097618b1817568a471cbb8b4f26ee8");
+        assert_eq!(sample.origin.sha256, ECSTORE_CLOUDWATCH_SHA256);
+        assert_eq!(*variants, &[CorpusVariant::UnknownTopLevel]);
+        super::super::super::assert_notification_four_way(sample)
+            .expect("the RustFS ecstore CloudWatch fixture passes D1-D5 discard parity");
     }
 }
