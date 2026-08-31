@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! `RenameObject`: one in-bucket object rename on the directory-bucket surface.
+//! Shares: nothing.
 //!
 //! Responsible for: the operation identity, security floor and authorization contract needed to
 //! reserve `PUT /{Bucket}/{Key+}?renameObject` independently of backend registration.
