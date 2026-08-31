@@ -106,7 +106,12 @@ fn aws_cli_case() -> AcceptedCorpusCase<PersistedLifecycleConfiguration> {
 }
 
 pub(super) fn cases() -> Vec<AcceptedCorpusCase<PersistedLifecycleConfiguration>> {
-    vec![boto3_case(), aws_cli_case(), crate::source_b_mc::lifecycle_case()]
+    vec![
+        boto3_case(),
+        aws_cli_case(),
+        crate::source_b_mc::lifecycle_case(),
+        crate::source_b_js_v3::lifecycle_case(),
+    ]
 }
 
 #[cfg(test)]

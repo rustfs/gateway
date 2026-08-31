@@ -255,6 +255,7 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfi
                 },
                 variants: vec![CorpusVariant::Canonical],
             },
+            crate::source_b_js_v3::versioning_case(),
             historical(),
             accepted(
                 ALL_FIELDS,
