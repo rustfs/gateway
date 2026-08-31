@@ -309,7 +309,7 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedLifecycleConfig
         variants,
     })
     .collect();
-    accepted.push(source_b::case());
+    accepted.extend(source_b::cases());
 
     let mut refused = vec![
         rejected(b"<LifecycleConfiguration><Rule><Future>future</Future><Status>Enabled</Status></Rule></LifecycleConfiguration>", &[CorpusVariant::UnknownNested], "unknown Rule child"),

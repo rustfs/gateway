@@ -20,13 +20,14 @@
 
 use super::*;
 
-const XML: &[u8] = b"<LifecycleConfiguration><ExpiryUpdatedAt>2026-08-31T03:18:31.259Z</ExpiryUpdatedAt><Rule><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload><Expiration><Days>30</Days></Expiration><Filter><Prefix>archive/</Prefix></Filter><ID>boto3-lifecycle</ID><Status>Enabled</Status></Rule></LifecycleConfiguration>";
+const BOTO3_XML: &[u8] = b"<LifecycleConfiguration><ExpiryUpdatedAt>2026-08-31T03:18:31.259Z</ExpiryUpdatedAt><Rule><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload><Expiration><Days>30</Days></Expiration><Filter><Prefix>archive/</Prefix></Filter><ID>boto3-lifecycle</ID><Status>Enabled</Status></Rule></LifecycleConfiguration>";
+const AWS_CLI_XML: &[u8] = b"<LifecycleConfiguration><ExpiryUpdatedAt>2026-08-31T03:57:41.836Z</ExpiryUpdatedAt><Rule><AbortIncompleteMultipartUpload><DaysAfterInitiation>3</DaysAfterInitiation></AbortIncompleteMultipartUpload><Expiration><Days>45</Days></Expiration><Filter><Prefix>cli/</Prefix></Filter><ID>aws-cli-lifecycle</ID><Status>Enabled</Status></Rule></LifecycleConfiguration>";
 
-pub(super) fn case() -> AcceptedCorpusCase<PersistedLifecycleConfiguration> {
+fn boto3_case() -> AcceptedCorpusCase<PersistedLifecycleConfiguration> {
     AcceptedCorpusCase {
         sample: GoldenSample {
             kind: ConfigKind::Lifecycle,
-            bytes: XML.to_vec(),
+            bytes: BOTO3_XML.to_vec(),
             value: PersistedLifecycleConfiguration {
                 expiry_updated_at: Some("2026-08-31T03:18:31.259Z".to_owned()),
                 rules: vec![PersistedLifecycleRule {
@@ -63,14 +64,71 @@ pub(super) fn case() -> AcceptedCorpusCase<PersistedLifecycleConfiguration> {
     }
 }
 
+fn aws_cli_case() -> AcceptedCorpusCase<PersistedLifecycleConfiguration> {
+    AcceptedCorpusCase {
+        sample: GoldenSample {
+            kind: ConfigKind::Lifecycle,
+            bytes: AWS_CLI_XML.to_vec(),
+            value: PersistedLifecycleConfiguration {
+                expiry_updated_at: Some("2026-08-31T03:57:41.836Z".to_owned()),
+                rules: vec![PersistedLifecycleRule {
+                    abort_incomplete_multipart_upload: Some(PersistedAbortIncompleteMultipartUpload {
+                        days_after_initiation: Some(3),
+                    }),
+                    expiration: Some(PersistedLifecycleExpiration {
+                        days: Some(45),
+                        ..PersistedLifecycleExpiration::default()
+                    }),
+                    filter: Some(PersistedLifecycleFilter {
+                        prefix: Some("cli/".to_owned()),
+                        ..PersistedLifecycleFilter::default()
+                    }),
+                    id: Some("aws-cli-lifecycle".to_owned()),
+                    del_marker_expiration: None,
+                    noncurrent_version_expiration: None,
+                    noncurrent_version_transitions: None,
+                    prefix: None,
+                    status: "Enabled".to_owned(),
+                    transitions: None,
+                }],
+            },
+            origin: SampleOrigin {
+                source: "Source-(b) live aws-cli client matrix capture".to_owned(),
+                producer: "aws-cli 1.44.87 against disposable RustFS; rustfs-cli raw export".to_owned(),
+                version: "botocore@1.42.97; rustfs-server@sha256:1174803fcd0051a4a008fdaaed29fc7e8e7e16b07abdf8108553a439523e998a; rustfs-cli@c876df53f5097618b1817568a471cbb8b4f26ee8".to_owned(),
+                sha256: "240a19991600e5ebeabdf4147638dc5f29a07fe5ed4d7347645be8c212889b5d".to_owned(),
+            },
+            notes: "byte-exact Lifecycle XML persisted after an aws-cli put-bucket-lifecycle-configuration request"
+                .to_owned(),
+        },
+        variants: vec![CorpusVariant::Canonical, CorpusVariant::TimestampPrecision],
+    }
+}
+
+pub(super) fn cases() -> [AcceptedCorpusCase<PersistedLifecycleConfiguration>; 2] {
+    [boto3_case(), aws_cli_case()]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn source_b_boto3_lifecycle_capture_is_registered() {
-        let sample = case().sample;
+        let sample = boto3_case().sample;
         assert_eq!(sample.origin.sha256, "2c2ef93c0173c836faef692592ccb400771cd65b9ff64afee941fd7253b4ed00");
         assert_eq!(sample.bytes.len(), 360);
+    }
+
+    #[test]
+    fn source_b_aws_cli_lifecycle_capture_is_registered() {
+        let sample = super::super::corpus_evidence()
+            .accepted
+            .into_iter()
+            .find(|case| case.sample.origin.producer.starts_with("aws-cli"))
+            .expect("the live aws-cli Lifecycle capture is registered")
+            .sample;
+        assert_eq!(sample.origin.sha256, "240a19991600e5ebeabdf4147638dc5f29a07fe5ed4d7347645be8c212889b5d");
+        assert_eq!(sample.bytes.len(), 358);
     }
 }
