@@ -231,16 +231,21 @@ fn routing_rule() -> impl Strategy<Value = dto::RoutingRule> {
     (prop::option::of(condition()), redirect()).prop_map(|(condition, redirect)| dto::RoutingRule { condition, redirect })
 }
 
-/// A non-empty key, respecting the one floor `ObjectKey` puts on every generated document: empty
+/// A non-empty key, respecting the two floors `ObjectKey` puts on every generated document: empty
 /// is refused by the decoder (`value::object_key`), so a generator that produced it would be
-/// testing a document `ErrorDocument` can never legally carry.
+/// testing a document `ErrorDocument` can never legally carry; and `..` — the alphabet's only way
+/// to spell a whole-key traversal segment, since there is no `/` to make it one segment among
+/// several — is refused by the same decoder's unconditional `floor_check_key`
+/// (`n_an_error_document_key_naming_a_traversal_segment_is_refused` pins that this really is the
+/// intended behaviour here, unlike `Tag.Key`'s `rustfs/backlog#1896` repair: `ErrorDocument.Key`
+/// names an object a later `GetObject` fetches, so the traversal floor is doing its job).
 ///
 /// No `/` in the alphabet. `ObjectKey::materialize_decoded` runs the deployment's `SlashPolicy`
 /// on top of the emptiness floor, and a bare key generator hitting that policy's own boundaries
 /// (a leading, trailing or doubled separator) would be exercising key normalisation, not this
 /// family's document shape — that surface has its own tests.
 fn object_key_text() -> impl Strategy<Value = String> {
-    "[a-zA-Z0-9&<>\"'éü _.-]{1,24}"
+    "[a-zA-Z0-9&<>\"'éü _.-]{1,24}".prop_filter("the decoder's traversal floor refuses a whole-key `..`", |key| key != "..")
 }
 
 fn redirect_all_requests_to() -> impl Strategy<Value = dto::RedirectAllRequestsTo> {
@@ -457,6 +462,22 @@ fn n_a_redirect_replacing_the_key_twice_survives_the_decoder_and_is_refused_afte
 #[test]
 fn n_an_empty_body_is_not_an_empty_document() {
     assert!(decode_write("").is_err(), "an empty body is not a website configuration");
+}
+
+/// `ErrorDocument.Key` naming a path-traversal segment is refused by the decoder's floor
+/// (`gateway#461`/`gateway#521`): `value::object_key` runs `floor_check_key` over every body-carried
+/// key, and that floor refuses a key whose only segment is `..`, unconditionally, before
+/// `validate_website` is ever consulted. Unlike `Tag.Key` (`rustfs/backlog#1896`), `ErrorDocument.Key`
+/// really does name an object a `GetObject` will later fetch to serve the error page, so the floor is
+/// the correct behaviour here rather than a bug to repair — `object_key_text()` below excludes `..`
+/// from what the round-trip property samples for exactly this reason.
+#[test]
+fn n_an_error_document_key_naming_a_traversal_segment_is_refused() {
+    let document = "<WebsiteConfiguration><ErrorDocument><Key>..</Key></ErrorDocument></WebsiteConfiguration>";
+
+    let error = decode_write(document).expect_err("a key that is only a traversal segment must not be stored");
+
+    assert_eq!(error.member(), Some("Key"), "{error:?}");
 }
 
 /// An unknown top-level element is skipped rather than refused, and — the half that matters — it
