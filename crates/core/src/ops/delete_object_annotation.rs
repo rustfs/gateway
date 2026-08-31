@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! `DeleteObjectAnnotation`: permanent removal of one named object annotation.
+//! Shares: nothing.
 //!
 //! Responsible for: the operation identity, required annotation name, security floor and
 //! authorization contract needed to reserve `DELETE /{Bucket}/{Key+}?annotation` independently
