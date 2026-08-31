@@ -18,6 +18,9 @@
 //! NOT responsible for: replication policy validation, execution, or other configuration families.
 //! Upstream: types persistence and compat seams. Downstream: the P9 migration golden gate.
 
+#[cfg(test)]
+mod writable_fields;
+
 use rustfs_gateway_types::compat::{S3sReplicationObservation, parse_s3s_replication, serialize_s3s_replication};
 use rustfs_gateway_types::persistence::{
     PersistedReplicationConfiguration, ReplicationBehaviorProjection, parse_replication, serialize_replication,
