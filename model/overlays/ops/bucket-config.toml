@@ -39,10 +39,12 @@ include = [
   "GetBucketAnalyticsConfiguration",
   "GetBucketInventoryConfiguration",
   "GetBucketIntelligentTieringConfiguration",
+  "GetBucketMetricsConfiguration",
   "GetBucketTagging",
   "ListBucketAnalyticsConfigurations",
   "ListBucketInventoryConfigurations",
   "ListBucketIntelligentTieringConfigurations",
+  "ListBucketMetricsConfigurations",
   "PutBucketTagging",
 ]
 
@@ -141,6 +143,25 @@ url_encoded_fields = []
 input_hot = ["ContinuationToken"]
 output_hot = ["IsTruncated", "NextContinuationToken"]
 
+[op.GetBucketMetricsConfiguration]
+precedence = 282
+query_present = ["id"]
+auth_action = "s3:GetMetricsConfiguration"
+response_max_bytes = 65536
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = ["Id"]
+output_hot = ["MetricsConfiguration"]
+
+[op.ListBucketMetricsConfigurations]
+precedence = 283
+auth_action = "s3:GetMetricsConfiguration"
+response_max_bytes = 1048576
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = ["ContinuationToken"]
+output_hot = ["IsTruncated", "NextContinuationToken"]
+
 [op.GetBucketInventoryConfiguration]
 precedence = 277
 query_present = ["id"]
@@ -168,8 +189,6 @@ operations = [
   "DeleteBucketInventoryConfiguration",
   "DeleteBucketMetricsConfiguration",
   "DeleteBucketOwnershipControls",
-  "GetBucketMetricsConfiguration",
-  "ListBucketMetricsConfigurations",
   "PutBucketAnalyticsConfiguration",
   "PutBucketIntelligentTieringConfiguration",
   "PutBucketInventoryConfiguration",

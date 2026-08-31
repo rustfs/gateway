@@ -278,6 +278,14 @@ summary = "GetBucketAnalyticsConfiguration is selected by ?analytics with a requ
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketAnalyticsConfigurations.html"
 summary = "ListBucketAnalyticsConfigurations is selected by bare ?analytics on a bucket GET and returns paginated configuration documents rather than object keys."
 
+[evidence.get-bucket-metrics-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html"
+summary = "GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys."
+
+[evidence.list-bucket-metrics-configurations]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html"
+summary = "ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys."
+
 [evidence.list-bucket-inventory-configurations]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketInventoryConfigurations.html"
 summary = "ListBucketInventoryConfigurations is selected by bare ?inventory on a bucket GET and returns configuration metadata rather than object keys."
@@ -3498,6 +3506,385 @@ reason_ref = "two-subresource-keys"
 evidence = ["list-bucket-analytics-configurations", "list-bucket-inventory-configurations"]
 
 [[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "ListBucketMetricsConfigurations"
+reason = "Both rows name ?metrics, but only the single-configuration read requires id. The id-bearing row wins at 282 before the bare list at 283; without id the get row does not match."
+evidence = ["get-bucket-metrics-configuration", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so every named metrics read request satisfies it too. The subresource row wins at 282 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["get-bucket-metrics-configuration", "list-objects"]
+
+[[shadowing]]
+winner = "ListBucketMetricsConfigurations"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so every metrics configuration list request satisfies it too. The subresource row wins at 283 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["list-bucket-metrics-configurations", "list-objects"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketMetadataConfiguration"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "get-bucket-metadata-configuration"]
+
+[[shadowing]]
+winner = "GetBucketMetadataTableConfiguration"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "get-bucket-metadata-table-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAnalyticsConfiguration"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-analytics-configuration", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "ListBucketAnalyticsConfigurations"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-analytics-configurations", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "get-bucket-metrics-configuration"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "list-bucket-metrics-configurations"]
+
+[[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "get-bucket-location"]
+
+[[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "list-objects-v2"]
+
+[[shadowing]]
+winner = "GetBucketMetricsConfiguration"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "list-object-versions"]
+
+[[shadowing]]
+winner = "ListBucketMetricsConfigurations"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "get-bucket-location"]
+
+[[shadowing]]
+winner = "ListBucketMetricsConfigurations"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "ListBucketMetricsConfigurations"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "ListBucketMetricsConfigurations"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "ListBucketMetricsConfigurations"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "ListBucketMetricsConfigurations"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "ListBucketMetricsConfigurations"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "ListBucketMetricsConfigurations"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "ListBucketMetricsConfigurations"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "list-objects-v2"]
+
+[[shadowing]]
+winner = "ListBucketMetricsConfigurations"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "list-object-versions"]
+
+
+[[shadowing]]
 winner = "GetBucketAccelerateConfiguration"
 shadowed = "GetBucketInventoryConfiguration"
 reason_ref = "two-subresource-keys"
@@ -4421,6 +4808,18 @@ winner = "ListBucketAnalyticsConfigurations"
 shadowed = "CreateSession"
 reason_ref = "two-subresource-keys"
 evidence = ["list-bucket-analytics-configurations", "create-session"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "GetBucketMetricsConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-metrics-configuration", "create-session"]
+
+[[shadowing]]
+winner = "CreateSession"
+shadowed = "ListBucketMetricsConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-metrics-configurations", "create-session"]
 
 [[shadowing]]
 winner = "GetBucketAccelerateConfiguration"

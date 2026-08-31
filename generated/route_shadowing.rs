@@ -4656,6 +4656,573 @@ pub const SHADOWING: &[ShadowingDecl] = &[
         ],
     },
     ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Both rows name ?metrics, but only the single-configuration read requires id. The id-bearing row wins at 282 before the bare list at 283; without id the get row does not match.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "ListObjects",
+        reason: "ListObjects pins no query key, so every named metrics read request satisfies it too. The subresource row wins at 282 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html — ListObjects is what a GET on a bucket means when no other subresource claimed it, so it pins no query key.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketMetricsConfigurations",
+        shadowed: "ListObjects",
+        reason: "ListObjects pins no query key, so every metrics configuration list request satisfies it too. The subresource row wins at 283 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html — ListObjects is what a GET on a bucket means when no other subresource claimed it, so it pins no query key.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetadataConfiguration",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetadataConfiguration.html — GetBucketMetadataConfiguration is a bucket GET carrying the metadataConfiguration subresource and uses the metadata-table IAM action.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetadataTableConfiguration",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetadataTableConfiguration.html — GetBucketMetadataTableConfiguration is the legacy bucket GET carrying the metadataTable subresource and uses the metadata-table IAM action.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetadataConfiguration",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetadataConfiguration.html — GetBucketMetadataConfiguration is a bucket GET carrying the metadataConfiguration subresource and uses the metadata-table IAM action.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetadataTableConfiguration",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetadataTableConfiguration.html — GetBucketMetadataTableConfiguration is the legacy bucket GET carrying the metadataTable subresource and uses the metadata-table IAM action.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAccelerateConfiguration",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAccelerateConfiguration.html — GetBucketAccelerateConfiguration is selected by the ?accelerate subresource alone and answers with the stored configuration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAccelerateConfiguration",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAccelerateConfiguration.html — GetBucketAccelerateConfiguration is selected by the ?accelerate subresource alone and answers with the stored configuration document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketLogging",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLogging.html — GetBucketLogging is selected by the ?logging subresource alone and answers with the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketLogging",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLogging.html — GetBucketLogging is selected by the ?logging subresource alone and answers with the stored logging document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketNotificationConfiguration",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketNotificationConfiguration.html — GetBucketNotificationConfiguration is selected by the ?notification subresource alone and answers with the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketNotificationConfiguration",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketNotificationConfiguration.html — GetBucketNotificationConfiguration is selected by the ?notification subresource alone and answers with the stored notification document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketPolicy",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html — GetBucketPolicy is selected by the ?policy subresource alone and answers with the stored policy document as JSON.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketPolicy",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicy.html — GetBucketPolicy is selected by the ?policy subresource alone and answers with the stored policy document as JSON.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketPolicyStatus",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicyStatus.html — GetBucketPolicyStatus is selected by the ?policyStatus subresource, which is a different key from ?policy and answers a different document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketPolicyStatus",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketPolicyStatus.html — GetBucketPolicyStatus is selected by the ?policyStatus subresource, which is a different key from ?policy and answers a different document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetPublicAccessBlock",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html — GetPublicAccessBlock is selected by the ?publicAccessBlock subresource alone and answers with the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetPublicAccessBlock",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html — GetPublicAccessBlock is selected by the ?publicAccessBlock subresource alone and answers with the four stored switches.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketRequestPayment",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketRequestPayment.html — GetBucketRequestPayment is selected by the ?requestPayment subresource alone and answers with the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketRequestPayment",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketRequestPayment.html — GetBucketRequestPayment is selected by the ?requestPayment subresource alone and answers with the stored payer.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketVersioning",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketVersioning.html — GetBucketVersioning is selected by the ?versioning subresource alone and answers with the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketVersioning",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketVersioning.html — GetBucketVersioning is selected by the ?versioning subresource alone and answers with the stored versioning state.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketWebsite",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketWebsite.html — GetBucketWebsite is selected by the ?website subresource alone and answers with the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketWebsite",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketWebsite.html — GetBucketWebsite is selected by the ?website subresource alone and answers with the stored website document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAcl",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAcl.html — GetBucketAcl is selected by the ?acl subresource on a bucket GET and answers with the access control policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAcl",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAcl.html — GetBucketAcl is selected by the ?acl subresource on a bucket GET and answers with the access control policy document.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketOwnershipControls",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketOwnershipControls.html — GetBucketOwnershipControls is selected by the ?ownershipControls subresource on a bucket GET and returns the stored object-ownership rules rather than an object listing.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketOwnershipControls",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketOwnershipControls.html — GetBucketOwnershipControls is selected by the ?ownershipControls subresource on a bucket GET and returns the stored object-ownership rules rather than an object listing.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketIntelligentTieringConfiguration",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketIntelligentTieringConfiguration.html — GetBucketIntelligentTieringConfiguration is a bucket GET selected by ?intelligent-tiering plus a required id and returns that named policy rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketIntelligentTieringConfiguration",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketIntelligentTieringConfiguration.html — GetBucketIntelligentTieringConfiguration is a bucket GET selected by ?intelligent-tiering plus a required id and returns that named policy rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketIntelligentTieringConfigurations",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketIntelligentTieringConfigurations.html — ListBucketIntelligentTieringConfigurations is a bucket GET selected by bare ?intelligent-tiering and returns policy documents rather than an object listing.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketIntelligentTieringConfigurations",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketIntelligentTieringConfigurations.html — ListBucketIntelligentTieringConfigurations is a bucket GET selected by bare ?intelligent-tiering and returns policy documents rather than an object listing.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAnalyticsConfiguration",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAnalyticsConfiguration.html — GetBucketAnalyticsConfiguration is selected by ?analytics with a required id on a bucket GET and returns the named storage analysis configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAnalyticsConfiguration",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAnalyticsConfiguration.html — GetBucketAnalyticsConfiguration is selected by ?analytics with a required id on a bucket GET and returns the named storage analysis configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketAnalyticsConfigurations",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketAnalyticsConfigurations.html — ListBucketAnalyticsConfigurations is selected by bare ?analytics on a bucket GET and returns paginated configuration documents rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketAnalyticsConfigurations",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketAnalyticsConfigurations.html — ListBucketAnalyticsConfigurations is selected by bare ?analytics on a bucket GET and returns paginated configuration documents rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketAbac",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html — GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketInventoryConfiguration",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketInventoryConfiguration.html — GetBucketInventoryConfiguration is selected by ?inventory with a required id on a bucket GET and returns one configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketInventoryConfiguration",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketInventoryConfiguration.html — GetBucketInventoryConfiguration is selected by ?inventory with a required id on a bucket GET and returns one configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketInventoryConfigurations",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketInventoryConfigurations.html — ListBucketInventoryConfigurations is selected by bare ?inventory on a bucket GET and returns configuration metadata rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketInventoryConfigurations",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketInventoryConfigurations.html — ListBucketInventoryConfigurations is selected by bare ?inventory on a bucket GET and returns configuration metadata rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "GetBucketLocation",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html — GetBucketLocation is selected by the ?location subresource alone and takes no other query input.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "GetBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketCors.html — GetBucketCors is selected by the ?cors subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "GetBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html — a bucket tag-set read is a GET on the bucket carrying the ?tagging subresource, and it defines no other selector.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "GetBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLifecycleConfiguration.html — GetBucketLifecycleConfiguration is selected by the ?lifecycle subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "GetBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketEncryption.html — GetBucketEncryption is selected by the ?encryption subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "GetBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketReplication.html — GetBucketReplication is selected by the ?replication subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "GetObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectLockConfiguration.html — the lock-configuration read is a GET on the bucket carrying the ?object-lock subresource, and it defines no other selector.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "ListMultipartUploads",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html — ListMultipartUploads is selected by the ?uploads subresource and defines no other selector.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "ListObjectsV2",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html — ListObjectsV2 is selected by list-type=2 and treats unrecognised query keys as inert.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "GetBucketMetricsConfiguration",
+        shadowed: "ListObjectVersions",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html — ListObjectVersions is selected by the ?versions subresource and ignores query keys it does not define.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketMetricsConfigurations",
+        shadowed: "GetBucketLocation",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html — GetBucketLocation is selected by the ?location subresource alone and takes no other query input.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketMetricsConfigurations",
+        shadowed: "GetBucketCors",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketCors.html — GetBucketCors is selected by the ?cors subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketMetricsConfigurations",
+        shadowed: "GetBucketTagging",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketTagging.html — a bucket tag-set read is a GET on the bucket carrying the ?tagging subresource, and it defines no other selector.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketMetricsConfigurations",
+        shadowed: "GetBucketLifecycleConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLifecycleConfiguration.html — GetBucketLifecycleConfiguration is selected by the ?lifecycle subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketMetricsConfigurations",
+        shadowed: "GetBucketEncryption",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketEncryption.html — GetBucketEncryption is selected by the ?encryption subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketMetricsConfigurations",
+        shadowed: "GetBucketReplication",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketReplication.html — GetBucketReplication is selected by the ?replication subresource alone and answers with the stored configuration document.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketMetricsConfigurations",
+        shadowed: "GetObjectLockConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectLockConfiguration.html — the lock-configuration read is a GET on the bucket carrying the ?object-lock subresource, and it defines no other selector.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketMetricsConfigurations",
+        shadowed: "ListMultipartUploads",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html — ListMultipartUploads is selected by the ?uploads subresource and defines no other selector.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketMetricsConfigurations",
+        shadowed: "ListObjectsV2",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html — ListObjectsV2 is selected by list-type=2 and treats unrecognised query keys as inert.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListBucketMetricsConfigurations",
+        shadowed: "ListObjectVersions",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html — ListObjectVersions is selected by the ?versions subresource and ignores query keys it does not define.",
+        ],
+    },
+    ShadowingDecl {
         winner: "GetBucketAccelerateConfiguration",
         shadowed: "GetBucketInventoryConfiguration",
         reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
@@ -6038,6 +6605,24 @@ pub const SHADOWING: &[ShadowingDecl] = &[
         reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
         evidence: &[
             "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketAnalyticsConfigurations.html — ListBucketAnalyticsConfigurations is selected by bare ?analytics on a bucket GET and returns paginated configuration documents rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateSession.html — CreateSession is selected by GET on a directory bucket carrying the session query subresource.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "CreateSession",
+        shadowed: "GetBucketMetricsConfiguration",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketMetricsConfiguration.html — GetBucketMetricsConfiguration is selected by ?metrics with a required id on a bucket GET and returns the named request-metrics configuration rather than object keys.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateSession.html — CreateSession is selected by GET on a directory bucket carrying the session query subresource.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "CreateSession",
+        shadowed: "ListBucketMetricsConfigurations",
+        reason: "Two bucket subresource keys in one request ask two questions at once. AWS documents no such combination, so the answer is fixed by precedence rather than left to source order: the earlier row answers and the later reading is ignored rather than merged into it.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketMetricsConfigurations.html — ListBucketMetricsConfigurations is selected by bare ?metrics on a bucket GET and returns paginated request-metrics configurations rather than object keys.",
             "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateSession.html — CreateSession is selected by GET on a directory bucket carrying the session query subresource.",
         ],
     },

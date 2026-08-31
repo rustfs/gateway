@@ -33,6 +33,8 @@
   279  CreateSession                            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("session")
   280  GetBucketMetadataConfiguration           /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("metadataConfiguration")
   281  GetBucketMetadataTableConfiguration      /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("metadataTable")
+  282  GetBucketMetricsConfiguration            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("metrics") ∧ QueryPresent("id")
+  283  ListBucketMetricsConfigurations          /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("metrics")
   300  GetBucketLocation                        /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("location")
   310  GetBucketCors                            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("cors")
   320  PutBucketCors                            /{Bucket}            Method(PUT) ∧ Target(Bucket) ∧ QueryPresent("cors")

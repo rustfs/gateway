@@ -2690,3 +2690,47 @@ fn bucket_metadata_reads_share_the_metadata_table_authorization_contract() {
         assert_eq!(floor.service(), SigService::S3, "{name}");
     }
 }
+
+// ── Bucket metrics reads ────────────────────────────────────────────────────────
+
+/// The id-bearing selector chooses one metrics configuration while the bare key lists them.
+#[test]
+fn metrics_reads_route_ahead_of_list_objects() {
+    let table = generated_table();
+    for (line, operation) in [
+        ("GET /bucket?metrics&id=archive", "GetBucketMetricsConfiguration"),
+        ("GET /bucket?metrics", "ListBucketMetricsConfigurations"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(operation), "{line}");
+    }
+}
+
+/// Negative controls keep plain listing, object targets, nearby keys and other methods outside both rows.
+#[test]
+fn n_metrics_reads_do_not_claim_neighbour_controls() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket")), Some("ListObjects"));
+    assert_ne!(routed(&table, &Req::new("GET /bucket?metrics")), Some("GetBucketMetricsConfiguration"));
+    for line in [
+        "GET /bucket/key?metrics&id=archive",
+        "GET /bucket?metrics-report&id=archive",
+        "HEAD /bucket?metrics&id=archive",
+        "PUT /bucket?metrics&id=archive",
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some("GetBucketMetricsConfiguration"), "{line}");
+        assert_ne!(routed(&table, &Req::new(line)), Some("ListBucketMetricsConfigurations"), "{line}");
+    }
+}
+
+/// Both read forms use the one bucket-level IAM action assigned to this configuration family.
+#[test]
+fn metrics_reads_share_the_get_configuration_authorization_contract() {
+    for spec in [
+        <rustfs_gateway_types::dto::GetBucketMetricsConfiguration as Operation>::spec(),
+        <rustfs_gateway_types::dto::ListBucketMetricsConfigurations as Operation>::spec(),
+    ] {
+        let auth = spec.auth.expect("both metrics reads declare authorization");
+        assert_eq!(auth.action, "s3:GetMetricsConfiguration", "{}", spec.name);
+        assert_eq!(auth.resource, ResourceShape::Bucket, "{}", spec.name);
+    }
+}
