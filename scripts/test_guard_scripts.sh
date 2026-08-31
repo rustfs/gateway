@@ -11478,18 +11478,29 @@ expect_fail_with_diagnostic check_op_file_shape.sh \
 # -----------------------------------------------------------------------------
 # The route-coverage register has to move in both directions or it stops being a
 # measurement. Growing it silently is how `PUT /b/k?acl` came to write the ACL
-# document over the object — the row at 560 has since retired that line, which is
-# why the mutation below names `RenameObject` instead; shrinking it silently is
-# how a closed exposure keeps being counted, and a count that only ever says the
-# same number is a count nobody reads.
+# document over the object; shrinking it silently is how a closed exposure keeps
+# being counted, and a count that only ever says the same number is a count nobody
+# reads. The mutation removes the first live debt row rather than naming one
+# operation, because successful route work deliberately retires those names.
 #
 # Both controls therefore mutate the register rather than the tree, because the
 # register is the artefact the guard exists to keep honest.
 # -----------------------------------------------------------------------------
 
 mut_forgotten_exposure() {
-    grep -v 'RenameObject' scripts/allowances/route-coverage-allowances.txt >/tmp/rc-allow.$$
-    mv /tmp/rc-allow.$$ scripts/allowances/route-coverage-allowances.txt
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/allowances/route-coverage-allowances.txt")
+lines = path.read_text().splitlines(keepends=True)
+for index, line in enumerate(lines):
+    if line.strip() and not line.lstrip().startswith("#"):
+        del lines[index]
+        path.write_text("".join(lines))
+        break
+else:
+    raise SystemExit("route-coverage mutation subject is missing")
+PYEOF
 }
 expect_fail check_route_coverage.sh \
     'a swallowed operation missing from the register' mut_forgotten_exposure
