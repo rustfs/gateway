@@ -7,6 +7,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | File | Responsibility | Read it when |
 | --- | --- | --- |
 | `src/lib.rs` | Runs fail-closed persistence compatibility assertions against independent old and new codecs. | Adding a configuration family or changing a D1-D5 assertion. |
+| `src/acceptance_census.rs` | Binds the exact 39 P9-01 IDs to runtime or pinned external evidence without counting blockers as passing. | Auditing final case closure, blocker disposition, or census mutations. |
 | `src/corpus.rs` | Derives coverage from concrete traceable accepted/rejected samples without claiming aggregate completeness. | Wiring family-owned sample collections or changing corpus validation. |
 | `src/corpus/backup_zip.rs` | Proves old/new backup archives preserve every accepted persisted XML byte and remain readable in both migration directions. | Auditing backup import/export rollback evidence or its fail-closed archive checks. |
 | `src/source_a_boundary.rs` | Binds the four physical CORS and Lifecycle rule-cap fixtures to exact source-(a) paths, case IDs, and SHA-256 digests. | Auditing physical fixture census or rule-count boundary migration evidence. |

@@ -28,6 +28,7 @@ use core::fmt;
 use sha2::{Digest, Sha256};
 
 mod accelerate_payment;
+mod acceptance_census;
 mod bucket_encryption;
 mod corpus;
 mod cors;
@@ -55,6 +56,10 @@ mod versioning;
 mod website;
 
 pub use accelerate_payment::{assert_accelerate_four_way, assert_request_payment_four_way};
+pub use acceptance_census::{
+    AcceptanceCaseReport, AcceptanceCaseStatus, AcceptanceCensusError, AcceptanceCensusReport, build_acceptance_census,
+    require_acceptance_closure,
+};
 pub use bucket_encryption::assert_bucket_encryption_four_way;
 pub use corpus::{
     CorpusCaseEvidence, CorpusCoverageError, CorpusReport, CorpusVariant, FamilyCorpusEvidence, RejectedGoldenSample,
