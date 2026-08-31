@@ -120,7 +120,7 @@ fn namespace_case() -> AcceptedWebsiteCase {
 }
 
 fn accepted_cases() -> Vec<AcceptedWebsiteCase> {
-    vec![
+    let mut cases = vec![
         accepted(
             EMPTY,
             "08b83bc276606aa2ce48152256014689d10181375cbdfaad0adb8aa2d3a02fc9",
@@ -217,7 +217,9 @@ fn accepted_cases() -> Vec<AcceptedWebsiteCase> {
             "present empty routing list",
             &[CorpusVariant::EmptyElement],
         ),
-    ]
+    ];
+    cases.extend(crate::source_b_js_v3_website::cases());
+    cases
 }
 
 fn rejected_cases() -> Vec<RejectedWebsiteCase> {
@@ -518,6 +520,6 @@ mod tests {
         let evidence = website_corpus_evidence().expect("Website corpus evidence is traceable");
         let report = crate::build_corpus_report(&[ConfigKind::Website], &[evidence])
             .expect("Website concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("website: accepted=10 rejected=17"));
+        assert!(report.render().contains("website: accepted=13 rejected=17"));
     }
 }

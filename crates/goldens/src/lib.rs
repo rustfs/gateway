@@ -44,6 +44,7 @@ mod source_a_lifecycle;
 mod source_a_new_writer;
 mod source_b_js_v3;
 mod source_b_js_v3_pab;
+mod source_b_js_v3_website;
 mod source_b_mc;
 mod source_b_rclone;
 mod tagging;
