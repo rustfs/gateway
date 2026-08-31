@@ -40,6 +40,7 @@ mod object_lock;
 mod public_access_block;
 mod replication;
 mod source_a_boundary;
+mod source_a_new_writer;
 mod tagging;
 mod versioning;
 mod website;
