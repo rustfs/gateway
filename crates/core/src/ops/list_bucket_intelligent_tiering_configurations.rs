@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! `ListBucketIntelligentTieringConfigurations`: listing of one bucket's tiering policies.
+//! Shares: nothing.
 //!
 //! Responsible for: the operation identity, security floor and authorization contract needed to
 //! reserve bare `GET /{Bucket}?intelligent-tiering` independently of backend registration.

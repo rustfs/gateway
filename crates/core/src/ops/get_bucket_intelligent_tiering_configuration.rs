@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! `GetBucketIntelligentTieringConfiguration`: retrieval of one named tiering policy.
+//! Shares: nothing.
 //!
 //! Responsible for: the operation identity, security floor and authorization contract needed to
 //! reserve `GET /{Bucket}?intelligent-tiering&id=...` independently of backend registration.
