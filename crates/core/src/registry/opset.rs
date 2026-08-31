@@ -36,7 +36,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use crate::op::standard_operation_names;
+use crate::op::standard_handler_operation_names;
 
 /// How many names are listed before the message truncates.
 ///
@@ -78,7 +78,7 @@ impl OperationSet {
     /// curated sets, they belong there and this function stays as it is.
     #[must_use]
     pub fn aws_full() -> Self {
-        Self::of(standard_operation_names())
+        Self::of(standard_handler_operation_names())
     }
 
     /// This set plus another.

@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The macro's generated operation list is the route table's, or this test is red.
+//! The macro's generated operation list is the typed subset of the route table, or this test is red.
 //!
 //! Responsible for: proving that codegen owns `src/op_names.rs` and that it says exactly what
-//! `rustfs_gateway_core::standard_operation_names()` says.
+//! the generated route rows marked as handler-registerable say.
 //! NOT responsible for: the mapping between a method name and an operation (`src/tests`).
 //! Upstream: `rustfs-gateway-core`. Downstream: nothing.
 
@@ -51,19 +51,22 @@ fn the_operation_names_are_codegen_owned() {
     );
 }
 
-/// Positive — both generated consumers agree, name for name and in the same order.
+/// Positive — both generated typed consumers agree, name for name and in the same order.
 #[test]
 fn the_generated_operation_names_match_the_route_table() {
-    let expected: Vec<String> = rustfs_gateway_core::standard_operation_names()
-        .into_iter()
-        .map(str::to_owned)
+    let mut expected: Vec<String> = rustfs_gateway_core::route::ROUTES
+        .iter()
+        .filter(|row| row.handler_registration)
+        .map(|row| row.operation.to_owned())
         .collect();
+    expected.sort();
+    expected.dedup();
     assert_eq!(
         generated_names(),
         expected,
         "crates/macros/src/op_names.rs has drifted from the generated route table; regenerate with \
-         `cargo xtask codegen`, because a name the macro accepts and the router does not is a \
-         handler nothing can reach"
+         `cargo xtask codegen`, because a name the macro accepts without a typed route surface is \
+         a handler that cannot be registered truthfully"
     );
 }
 

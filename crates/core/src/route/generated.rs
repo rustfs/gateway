@@ -56,6 +56,8 @@ use crate::contracts::{SELECT_TYPE_ROUTE_PREDICATE, SelectTypeRoutePredicatePoli
 pub struct RouteRow {
     /// The operation name.
     pub operation: &'static str,
+    /// Whether codegen emitted the typed surfaces a backend can register a handler for.
+    pub handler_registration: bool,
     /// Position in the ordered table; lower is tried first.
     pub precedence: u16,
     /// The method, as an IR spelling.
@@ -287,6 +289,7 @@ mod tests {
     fn synthetic_row(predicates: &'static [RoutePredicate]) -> RouteRow {
         RouteRow {
             operation: "SyntheticProbe",
+            handler_registration: true,
             precedence: 999,
             method: "POST",
             target: "Object",

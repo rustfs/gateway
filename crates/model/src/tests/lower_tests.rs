@@ -194,7 +194,7 @@ fn n_rejects_a_capability_outside_the_query() {
 #[test]
 fn n_fails_when_an_operation_is_neither_included_nor_deferred() {
     let err = load("include = []\n").expect_err("an undecided operation is a hard failure");
-    assert!(format!("{err}").contains("neither included nor deferred"), "{err}");
+    assert!(format!("{err}").contains("neither included, route-only nor deferred"), "{err}");
 }
 
 #[test]

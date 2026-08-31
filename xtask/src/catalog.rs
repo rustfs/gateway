@@ -225,7 +225,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    use rustfs_gateway_core::route::generated_entries;
+    use rustfs_gateway_core::route::ROUTES;
 
     #[test]
     fn operation_contract_rejects_a_missing_mapped_case() {
@@ -255,13 +255,20 @@ mod tests {
 
         let mapped: BTreeSet<_> = parse_verify_map(&actual).into_iter().map(|entry| entry.name).collect();
         let modeled: BTreeSet<_> = operations.into_iter().map(|operation| operation.operation).collect();
-        let routed: BTreeSet<_> = generated_entries()
-            .expect("the runtime route entries must build")
-            .into_iter()
-            .map(|entry| entry.op_name.to_owned())
+        let routed: BTreeSet<_> = ROUTES
+            .iter()
+            .filter(|row| row.handler_registration)
+            .map(|row| row.operation.to_owned())
+            .collect();
+        let route_only: BTreeSet<_> = ROUTES
+            .iter()
+            .filter(|row| !row.handler_registration)
+            .map(|row| row.operation.to_owned())
             .collect();
         assert_eq!(mapped, modeled);
         assert_eq!(mapped, routed);
+        assert!(route_only.contains("CreateSession"));
+        assert!(mapped.is_disjoint(&route_only));
     }
 
     #[test]

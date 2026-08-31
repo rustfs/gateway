@@ -26,11 +26,17 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use rustfs_gateway_model::ir::*;
+use rustfs_gateway_model::lower::RouteOnly;
 
 use super::spec_toml::{predicate, type_name};
 
 /// Renders `OPERATIONS.md` for the whole generated set.
-pub fn render(operations: &[OperationIr], deferred: &BTreeMap<String, String>) -> String {
+pub fn render(
+    operations: &[OperationIr],
+    route_only: &[RouteOnly],
+    route_only_reasons: &BTreeMap<String, String>,
+    deferred: &BTreeMap<String, String>,
+) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
@@ -129,11 +135,41 @@ pub fn render(operations: &[OperationIr], deferred: &BTreeMap<String, String>) -
         detail(&mut out, ir);
     }
 
+    let _ = writeln!(out, "## Route-only operations\n");
+    let _ = writeln!(
+        out,
+        "Protocol-known request selectors that produce an operation-specific refusal. They emit no\n\
+         DTO, codec, operation spec or handler-registration surface.\n"
+    );
+    let _ = writeln!(out, "| Operation | Method and path | Selector | Reason |");
+    let _ = writeln!(out, "| --- | --- | --- | --- |");
+    for route in route_only {
+        let selectors = route
+            .http
+            .predicates
+            .iter()
+            .map(|value| format!("`{}`", predicate(value)))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let reason = route_only_reasons
+            .get(&route.operation)
+            .map_or("route-only operation", String::as_str);
+        let _ = writeln!(
+            out,
+            "| {} | `{} {}` | {} | {} |",
+            route.operation,
+            route.http.method.as_str(),
+            route.http.path_shape,
+            selectors,
+            reason
+        );
+    }
+
     let _ = writeln!(out, "## Deferred operations\n");
     let _ = writeln!(
         out,
         "In the pinned model but deliberately not generated. Codegen fails on any operation that is\n\
-         in neither list, so this table is exhaustive by construction.\n"
+         in none of the included, route-only or deferred lists, so these tables are exhaustive by construction.\n"
     );
     let _ = writeln!(out, "| Operation | Reason |");
     let _ = writeln!(out, "| --- | --- |");

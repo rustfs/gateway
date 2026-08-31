@@ -18,11 +18,15 @@
 # `include` nor a [[deferred]] group. An upstream addition is therefore a build failure that
 # needs a decision, never silence.
 
-[[deferred]]
-reason = "Out of scope for the gateway: S3 Express One Zone session credentials."
+[[route_only]]
+reason = "The request shape is protocol-known, but session credential DTOs and codecs remain deliberately unavailable."
 operations = [
   "CreateSession",
 ]
+
+[op.CreateSession]
+precedence = 279
+target = "Bucket"
 
 [[deferred]]
 reason = "Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane."

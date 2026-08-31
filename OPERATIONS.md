@@ -4474,16 +4474,23 @@ An `Error` body can follow an already-flushed `200`.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
+## Route-only operations
+
+Protocol-known request selectors that produce an operation-specific refusal. They emit no
+DTO, codec, operation spec or handler-registration surface.
+
+| Operation | Method and path | Selector | Reason |
+| --- | --- | --- | --- |
+| CreateSession | `GET /{Bucket}` | `Method GET` AND `Target Bucket` AND `QueryPresent ?session` | The request shape is protocol-known, but session credential DTOs and codecs remain deliberately unavailable. |
 ## Deferred operations
 
 In the pinned model but deliberately not generated. Codegen fails on any operation that is
-in neither list, so this table is exhaustive by construction.
+in none of the included, route-only or deferred lists, so these tables are exhaustive by construction.
 
 | Operation | Reason |
 | --- | --- |
 | CreateBucketMetadataConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
 | CreateBucketMetadataTableConfiguration | Out of scope for the gateway: S3 Tables and bucket metadata table configuration, a separate AWS surface with its own control plane. |
-| CreateSession | Out of scope for the gateway: S3 Express One Zone session credentials. |
 | DeleteBucketAnalyticsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
 | DeleteBucketIntelligentTieringConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
 | DeleteBucketInventoryConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |

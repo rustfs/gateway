@@ -30,6 +30,7 @@ use std::fmt::Write as _;
 
 use rustfs_gateway_model::ShadowingDecl;
 use rustfs_gateway_model::ir::*;
+use rustfs_gateway_model::lower::RouteOnly;
 
 const LICENSE: &str = "\
 // Copyright 2026 RustFS Team
@@ -77,7 +78,7 @@ pub fn macro_operation_names(operations: &[OperationIr]) -> String {
 }
 
 /// Renders the ordered route table.
-pub fn routes(operations: &[OperationIr]) -> String {
+pub fn routes(operations: &[OperationIr], route_only: &[RouteOnly]) -> String {
     let mut out = String::from(LICENSE);
     let _ = writeln!(
         out,
@@ -87,21 +88,37 @@ pub fn routes(operations: &[OperationIr]) -> String {
          // from it. Lower precedence is tried first. Data only: the including crate defines\n\
          // `RouteRow` and `RoutePredicate`.\n"
     );
-    let mut ordered: Vec<&OperationIr> = operations.iter().collect();
-    ordered.sort_by_key(|ir| (ir.http.precedence, ir.operation.clone()));
+    let mut ordered: Vec<(&str, &Http, Option<&str>, bool)> = operations
+        .iter()
+        .map(|operation| {
+            (
+                operation.operation.as_str(),
+                &operation.http,
+                operation.errors.not_configured.as_deref(),
+                true,
+            )
+        })
+        .chain(
+            route_only
+                .iter()
+                .map(|operation| (operation.operation.as_str(), &operation.http, None, false)),
+        )
+        .collect();
+    ordered.sort_by_key(|(name, http, _, _)| (http.precedence, *name));
 
     let _ = writeln!(out, "pub const ROUTES: &[RouteRow] = &[");
-    for ir in ordered {
+    for (operation, http, not_configured, handler_registration) in ordered {
         let _ = writeln!(out, "    RouteRow {{");
-        let _ = writeln!(out, "        operation: \"{}\",", ir.operation);
-        let _ = writeln!(out, "        precedence: {},", ir.http.precedence);
-        let _ = writeln!(out, "        method: \"{}\",", ir.http.method.as_str());
-        let _ = writeln!(out, "        target: \"{}\",", ir.http.target.as_str());
-        let _ = writeln!(out, "        path_shape: \"{}\",", ir.http.path_shape);
-        let _ = writeln!(out, "        success_status: {},", ir.http.success_status);
-        let _ = writeln!(out, "        not_configured: {},", optional_code(ir.errors.not_configured.as_deref()));
+        let _ = writeln!(out, "        operation: \"{operation}\",");
+        let _ = writeln!(out, "        handler_registration: {handler_registration},");
+        let _ = writeln!(out, "        precedence: {},", http.precedence);
+        let _ = writeln!(out, "        method: \"{}\",", http.method.as_str());
+        let _ = writeln!(out, "        target: \"{}\",", http.target.as_str());
+        let _ = writeln!(out, "        path_shape: \"{}\",", http.path_shape);
+        let _ = writeln!(out, "        success_status: {},", http.success_status);
+        let _ = writeln!(out, "        not_configured: {},", optional_code(not_configured));
         let _ = writeln!(out, "        predicates: &[");
-        for p in &ir.http.predicates {
+        for p in &http.predicates {
             let _ = writeln!(out, "            {},", predicate(p));
         }
         let _ = writeln!(out, "        ],");
