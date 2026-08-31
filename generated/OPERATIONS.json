@@ -669,6 +669,15 @@
                                    "error_codes": ["AccessDenied"],
                                    "precedence": 100
                                  },
+                  "ListDirectoryBuckets": {
+                                            "method": "GET",
+                                            "path_shape": "/",
+                                            "query_keys": ["continuation-token", "max-directory-buckets"],
+                                            "key_headers": [],
+                                            "host_classes": ["S3Express"],
+                                            "error_codes": ["AccessDenied"],
+                                            "precedence": 90
+                                          },
                   "ListMultipartUploads": {
                                             "method": "GET",
                                             "path_shape": "/{Bucket}",
@@ -1247,6 +1256,7 @@
                           "ListBucketIntelligentTieringConfigurations",
                           "ListBucketInventoryConfigurations",
                           "ListBuckets",
+                          "ListDirectoryBuckets",
                           "ListMultipartUploads",
                           "ListObjectAnnotations",
                           "ListObjectVersions",
@@ -1291,7 +1301,7 @@
                         ]
                },
   "by_path_shape": {
-                     "/": ["ListBuckets"],
+                     "/": ["ListBuckets", "ListDirectoryBuckets"],
                      "/{Bucket}": [
                                     "CreateBucket",
                                     "DeleteBucket",
@@ -1416,6 +1426,7 @@
                                             "ListBucketIntelligentTieringConfigurations",
                                             "ListBucketInventoryConfigurations",
                                             "ListBuckets",
+                                            "ListDirectoryBuckets",
                                             "ListObjectAnnotations",
                                             "ListObjectsV2"
                                           ],
@@ -1465,6 +1476,7 @@
                     "marker": ["ListObjects"],
                     "max-annotation-results": ["ListObjectAnnotations"],
                     "max-buckets": ["ListBuckets"],
+                    "max-directory-buckets": ["ListDirectoryBuckets"],
                     "max-keys": ["ListObjectVersions", "ListObjects", "ListObjectsV2"],
                     "max-parts": ["ListParts"],
                     "max-uploads": ["ListMultipartUploads"],
@@ -1597,7 +1609,7 @@
                      "x-amz-object-attributes": ["GetObjectAttributes"],
                      "x-amz-rename-source": ["RenameObject"]
                    },
-  "by_host_class": {},
+  "by_host_class": { "S3Express": ["ListDirectoryBuckets"] },
   "by_error_code": {
                      "AccessDenied": [
                                        "AbortMultipartUpload",
@@ -1650,6 +1662,7 @@
                                        "ListBucketIntelligentTieringConfigurations",
                                        "ListBucketInventoryConfigurations",
                                        "ListBuckets",
+                                       "ListDirectoryBuckets",
                                        "ListMultipartUploads",
                                        "ListObjectVersions",
                                        "ListObjects",
@@ -2056,6 +2069,7 @@
                      "780": ["RenameObject"],
                      "790": ["CopyObject"],
                      "800": ["PutObject"],
+                     "90": ["ListDirectoryBuckets"],
                      "900": ["GetObject"],
                      "950": ["HeadObject"]
                    }

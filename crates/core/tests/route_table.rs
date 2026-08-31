@@ -37,6 +37,7 @@ use rustfs_gateway_core::route::{
     ArnForm, HostClass, Predicate, RouteBuildError, RouteTable, ShadowingDecl, ShadowingDecls, ShadowingPolicy, TargetKind,
     generated_entries,
 };
+use rustfs_gateway_sig::SigService;
 use support::{Req, entry, fixture_entries, fixture_table, sweep_requests};
 
 /// The evidence a fixture declaration carries. Real declarations cite AWS or a defect report.
@@ -2531,4 +2532,50 @@ fn inventory_reads_share_the_get_configuration_authorization_contract() {
         assert_eq!(auth.action, "s3:GetInventoryConfiguration", "{}", spec.name);
         assert_eq!(auth.resource, ResourceShape::Bucket, "{}", spec.name);
     }
+}
+
+// ── ListDirectoryBuckets ────────────────────────────────────────────────────────
+
+/// The S3 Express control endpoint selects directory-bucket listing, not ordinary ListBuckets.
+#[test]
+fn list_directory_buckets_routes_by_endpoint_family() {
+    let table = generated_table();
+    let request = Req::new("GET /?max-directory-buckets=10")
+        .target(TargetKind::Service)
+        .host_class(HostClass::S3Express);
+    assert_eq!(routed(&table, &request), Some("ListDirectoryBuckets"));
+}
+
+/// Negative controls keep standard endpoints, bucket targets and other methods outside the row.
+#[test]
+fn n_list_directory_buckets_does_not_claim_neighbour_controls() {
+    let table = generated_table();
+    let standard = Req::new("GET /").target(TargetKind::Service).host_class(HostClass::Standard);
+    assert_eq!(routed(&table, &standard), Some("ListBuckets"));
+    for request in [
+        Req::new("HEAD /")
+            .target(TargetKind::Service)
+            .host_class(HostClass::S3Express),
+        Req::new("GET /bucket")
+            .target(TargetKind::Bucket)
+            .host_class(HostClass::S3Express),
+        Req::new("GET /?max-directory-buckets=10")
+            .target(TargetKind::Service)
+            .host_class(HostClass::Standard),
+    ] {
+        assert_ne!(routed(&table, &request), Some("ListDirectoryBuckets"));
+    }
+}
+
+/// Directory-bucket listing uses the S3 Express service scope and account-level IAM action.
+#[test]
+fn list_directory_buckets_uses_the_express_service_authorization_contract() {
+    let spec = <rustfs_gateway_types::dto::ListDirectoryBuckets as Operation>::spec();
+    let auth = spec.auth.expect("ListDirectoryBuckets declares authorization");
+    assert_eq!(auth.action, "s3express:ListAllMyDirectoryBuckets");
+    assert_eq!(auth.resource, ResourceShape::Service);
+    assert_eq!(
+        <rustfs_gateway_types::dto::ListDirectoryBuckets as Operation>::floor().service(),
+        SigService::S3Express
+    );
 }

@@ -74,6 +74,14 @@ text = "ListObjects is what a GET on a bucket means when no other row claimed it
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html"
 summary = "an abort is a DELETE to the object key carrying the upload id as a query parameter."
 
+[evidence.list-directory-buckets]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListDirectoryBuckets.html"
+summary = "ListDirectoryBuckets is an account-level GET on the S3 Express regional control endpoint and returns only directory buckets."
+
+[evidence.list-buckets]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html"
+summary = "ListBuckets is an account-level GET on the ordinary S3 endpoint and returns the general bucket namespace."
+
 [evidence.complete-multipart-upload]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
 summary = "completion is a POST to the object key carrying the upload id."
@@ -3881,3 +3889,9 @@ winner = "CreateSession"
 shadowed = "ListObjectVersions"
 reason_ref = "two-subresource-keys"
 evidence = ["create-session", "list-object-versions"]
+
+[[shadowing]]
+winner = "ListDirectoryBuckets"
+shadowed = "ListBuckets"
+reason = "ListBuckets constrains only GET and the service target, so it also accepts requests to the S3 Express control endpoint. ListDirectoryBuckets wins at 90 for HostClass(S3Express) before the ordinary listing at 100; the reverse order exposes the wrong bucket namespace."
+evidence = ["list-directory-buckets", "list-buckets"]

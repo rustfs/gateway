@@ -25,7 +25,7 @@
 # `empty_value` through `output_required`, `url_encoded_fields`, `default_int` — so that neither
 # operation's implementation branches on which version it is.
 
-include = ["ListBuckets", "ListObjectVersions", "ListObjects", "ListObjectsV2"]
+include = ["ListBuckets", "ListDirectoryBuckets", "ListObjectVersions", "ListObjects", "ListObjectsV2"]
 
 # =============================================================================================
 # ListObjectsV2
@@ -368,6 +368,16 @@ output_hot = ["Owner", "Buckets"]
 # AWS writes the owner before the entry list.
 element_order = ["Owner", "Buckets", "ContinuationToken", "Prefix"]
 
+[op.ListDirectoryBuckets]
+precedence = 90
+host_class = "S3Express"
+auth_action = "s3express:ListAllMyDirectoryBuckets"
+response_max_bytes = 1048576
+error_codes = ["AccessDenied"]
+url_encoded_fields = []
+input_hot = ["ContinuationToken", "MaxDirectoryBuckets"]
+output_hot = ["Buckets", "ContinuationToken"]
+
 [[op.ListBuckets.field]]
 side = "input"
 name = "MaxBuckets"
@@ -511,7 +521,3 @@ hot = ["Name", "CreationDate"]
 [[shape.Bucket.field]]
 name = "Name"
 quirks = ["q-wrapped-0062"]
-
-[[deferred]]
-reason = "Directory buckets are an S3 Express dialect with their own endpoint and session auth; the listing shape is shared with this family but the addressing is not, and it needs its own reviewed pass."
-operations = ["ListDirectoryBuckets"]

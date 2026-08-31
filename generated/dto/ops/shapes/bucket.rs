@@ -21,7 +21,7 @@
 //! NOT responsible for: how it is written to the wire.
 //! Upstream: `cargo xtask codegen`. Downstream: `crate::ops::shapes`.
 
-/// The `Bucket` body shape. Reached from: ListBuckets.
+/// The `Bucket` body shape. Reached from: ListBuckets, ListDirectoryBuckets.
 ///
 /// Public fields plus `Default`, and never `#[non_exhaustive]` — ADR-0004 P1. Do not
 /// destructure it exhaustively (P3). A required member is a bare type and an optional one is

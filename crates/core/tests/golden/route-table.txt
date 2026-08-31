@@ -1,3 +1,4 @@
+   90  ListDirectoryBuckets                     /                    Method(GET) ∧ Target(Service) ∧ HostClass(S3Express)
   100  ListBuckets                              /                    Method(GET) ∧ Target(Service)
   200  GetBucketAccelerateConfiguration         /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("accelerate")
   201  PutBucketAccelerateConfiguration         /{Bucket}            Method(PUT) ∧ Target(Bucket) ∧ QueryPresent("accelerate")

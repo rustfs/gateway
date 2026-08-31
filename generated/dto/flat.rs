@@ -249,6 +249,10 @@ pub use crate::ops::list_bucket_inventory_configurations::{
 pub use crate::ops::list_buckets::{
     Input as ListBucketsInput, InputBuilder as ListBucketsInputBuilder, ListBuckets, Output as ListBucketsOutput,
 };
+pub use crate::ops::list_directory_buckets::{
+    Input as ListDirectoryBucketsInput, InputBuilder as ListDirectoryBucketsInputBuilder, ListDirectoryBuckets,
+    Output as ListDirectoryBucketsOutput,
+};
 pub use crate::ops::list_multipart_uploads::{
     Input as ListMultipartUploadsInput, InputBuilder as ListMultipartUploadsInputBuilder, ListMultipartUploads,
     Output as ListMultipartUploadsOutput,

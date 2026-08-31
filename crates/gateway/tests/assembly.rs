@@ -143,6 +143,7 @@ fn an_undeclared_shadowing_route_is_refused() {
     static SHADOWS_LIST_BUCKETS: &[rustfs_gateway::Predicate] = &[
         rustfs_gateway::Predicate::Method(http::Method::GET),
         rustfs_gateway::Predicate::Target(rustfs_gateway::TargetKind::Service),
+        rustfs_gateway::Predicate::HostClass(rustfs_gateway_core::route::HostClass::Standard),
     ];
     let error = wired()
         .register::<Ping, _>(Arc::new(Backend))

@@ -158,6 +158,8 @@ ListBucketInventoryConfigurationsInput 3
 ListBucketInventoryConfigurationsOutput 4
 ListBucketsInput 4
 ListBucketsOutput 4
+ListDirectoryBucketsInput 2
+ListDirectoryBucketsOutput 2
 ListMultipartUploadsInput 9
 ListMultipartUploadsOutput 13
 ListObjectAnnotationsInput 8

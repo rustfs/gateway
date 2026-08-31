@@ -20,6 +20,21 @@
 
 pub const ROUTES: &[RouteRow] = &[
     RouteRow {
+        operation: "ListDirectoryBuckets",
+        handler_registration: true,
+        precedence: 90,
+        method: "GET",
+        target: "Service",
+        path_shape: "/",
+        success_status: 200,
+        not_configured: None,
+        predicates: &[
+            RoutePredicate::Method("GET"),
+            RoutePredicate::Target("Service"),
+            RoutePredicate::HostClass("S3Express"),
+        ],
+    },
+    RouteRow {
         operation: "ListBuckets",
         handler_registration: true,
         precedence: 100,

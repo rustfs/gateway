@@ -26,7 +26,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `annotationName` | [DeleteObjectAnnotation](#deleteobjectannotation), [GetObjectAnnotation](#getobjectannotation), [ListObjectAnnotations](#listobjectannotations) (absent) |
 | `attributes` | [GetObjectAnnotation](#getobjectannotation) (absent), [GetObjectAttributes](#getobjectattributes), [GetObjectTorrent](#getobjecttorrent) (absent), [ListObjectAnnotations](#listobjectannotations) (absent) |
 | `bucket-region` | [ListBuckets](#listbuckets) |
-| `continuation-token` | [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations), [ListBuckets](#listbuckets), [ListObjectAnnotations](#listobjectannotations), [ListObjectsV2](#listobjectsv2) |
+| `continuation-token` | [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations), [ListBuckets](#listbuckets), [ListDirectoryBuckets](#listdirectorybuckets), [ListObjectAnnotations](#listobjectannotations), [ListObjectsV2](#listobjectsv2) |
 | `cors` | [CreateBucket](#createbucket) (absent), [DeleteBucket](#deletebucket) (absent), [DeleteBucketCors](#deletebucketcors), [GetBucketCors](#getbucketcors), [PutBucketCors](#putbucketcors) |
 | `delete` | [DeleteObjects](#deleteobjects) |
 | `delimiter` | [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
@@ -45,6 +45,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `marker` | [ListObjects](#listobjects) |
 | `max-annotation-results` | [ListObjectAnnotations](#listobjectannotations) |
 | `max-buckets` | [ListBuckets](#listbuckets) |
+| `max-directory-buckets` | [ListDirectoryBuckets](#listdirectorybuckets) |
 | `max-keys` | [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
 | `max-parts` | [ListParts](#listparts) |
 | `max-uploads` | [ListMultipartUploads](#listmultipartuploads) |
@@ -205,7 +206,7 @@ such a row as though the key selected the operation is the opposite of what the 
 
 | Error code | Operations |
 | --- | --- |
-| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketPolicy](#deletebucketpolicy), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteBucketWebsite](#deletebucketwebsite), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetBucketAbac](#getbucketabac), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetBucketAcl](#getbucketacl), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketLogging](#getbucketlogging), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [GetBucketOwnershipControls](#getbucketownershipcontrols), [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus), [GetBucketReplication](#getbucketreplication), [GetBucketRequestPayment](#getbucketrequestpayment), [GetBucketTagging](#getbuckettagging), [GetBucketVersioning](#getbucketversioning), [GetBucketWebsite](#getbucketwebsite), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetObjectTorrent](#getobjecttorrent), [GetPublicAccessBlock](#getpublicaccessblock), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations), [ListBuckets](#listbuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RenameObject](#renameobject), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
+| `AccessDenied` | [AbortMultipartUpload](#abortmultipartupload), [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [CreateBucket](#createbucket), [CreateMultipartUpload](#createmultipartupload), [DeleteBucket](#deletebucket), [DeleteBucketCors](#deletebucketcors), [DeleteBucketEncryption](#deletebucketencryption), [DeleteBucketLifecycle](#deletebucketlifecycle), [DeleteBucketPolicy](#deletebucketpolicy), [DeleteBucketReplication](#deletebucketreplication), [DeleteBucketTagging](#deletebuckettagging), [DeleteBucketWebsite](#deletebucketwebsite), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [DeleteObjects](#deleteobjects), [DeletePublicAccessBlock](#deletepublicaccessblock), [GetBucketAbac](#getbucketabac), [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration), [GetBucketAcl](#getbucketacl), [GetBucketCors](#getbucketcors), [GetBucketEncryption](#getbucketencryption), [GetBucketIntelligentTieringConfiguration](#getbucketintelligenttieringconfiguration), [GetBucketInventoryConfiguration](#getbucketinventoryconfiguration), [GetBucketLifecycleConfiguration](#getbucketlifecycleconfiguration), [GetBucketLocation](#getbucketlocation), [GetBucketLogging](#getbucketlogging), [GetBucketNotificationConfiguration](#getbucketnotificationconfiguration), [GetBucketOwnershipControls](#getbucketownershipcontrols), [GetBucketPolicy](#getbucketpolicy), [GetBucketPolicyStatus](#getbucketpolicystatus), [GetBucketReplication](#getbucketreplication), [GetBucketRequestPayment](#getbucketrequestpayment), [GetBucketTagging](#getbuckettagging), [GetBucketVersioning](#getbucketversioning), [GetBucketWebsite](#getbucketwebsite), [GetObject](#getobject), [GetObjectAcl](#getobjectacl), [GetObjectAttributes](#getobjectattributes), [GetObjectLegalHold](#getobjectlegalhold), [GetObjectLockConfiguration](#getobjectlockconfiguration), [GetObjectRetention](#getobjectretention), [GetObjectTagging](#getobjecttagging), [GetObjectTorrent](#getobjecttorrent), [GetPublicAccessBlock](#getpublicaccessblock), [HeadBucket](#headbucket), [HeadObject](#headobject), [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations), [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations), [ListBuckets](#listbuckets), [ListDirectoryBuckets](#listdirectorybuckets), [ListMultipartUploads](#listmultipartuploads), [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2), [ListParts](#listparts), [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration), [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketNotificationConfiguration](#putbucketnotificationconfiguration), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketTagging](#putbuckettagging), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutObjectTagging](#putobjecttagging), [PutPublicAccessBlock](#putpublicaccessblock), [RenameObject](#renameobject), [RestoreObject](#restoreobject), [SelectObjectContent](#selectobjectcontent), [UploadPart](#uploadpart), [UploadPartCopy](#uploadpartcopy) |
 | `BadDigest` | [PutBucketAcl](#putbucketacl), [PutBucketCors](#putbucketcors), [PutBucketEncryption](#putbucketencryption), [PutBucketLifecycleConfiguration](#putbucketlifecycleconfiguration), [PutBucketLogging](#putbucketlogging), [PutBucketPolicy](#putbucketpolicy), [PutBucketReplication](#putbucketreplication), [PutBucketRequestPayment](#putbucketrequestpayment), [PutBucketVersioning](#putbucketversioning), [PutBucketWebsite](#putbucketwebsite), [PutObject](#putobject), [PutObjectAcl](#putobjectacl), [PutObjectLegalHold](#putobjectlegalhold), [PutObjectLockConfiguration](#putobjectlockconfiguration), [PutObjectRetention](#putobjectretention), [PutPublicAccessBlock](#putpublicaccessblock), [UploadPart](#uploadpart) |
 | `BucketAlreadyExists` | [CreateBucket](#createbucket) |
 | `BucketAlreadyOwnedByYou` | [CreateBucket](#createbucket) |
@@ -327,6 +328,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | [ListBucketIntelligentTieringConfigurations](#listbucketintelligenttieringconfigurations) | GET | `/{Bucket}` | `continuation-token`, `intelligent-tiering` | — | 200 | `NoSuchBucket`, `AccessDenied` | — |
 | [ListBucketInventoryConfigurations](#listbucketinventoryconfigurations) | GET | `/{Bucket}` | `continuation-token`, `inventory` | — | 200 | `NoSuchBucket`, `AccessDenied` | — |
 | [ListBuckets](#listbuckets) | GET | `/` | `bucket-region`, `continuation-token`, `max-buckets`, `prefix` | — | 200 | `AccessDenied` | `q-token-0021`, `q-wrapped-0062`, `q-order-0066`, `q-buckets-0071` |
+| [ListDirectoryBuckets](#listdirectorybuckets) | GET | `/` | `continuation-token`, `max-directory-buckets` | — | 200 | `AccessDenied` | — |
 | [ListMultipartUploads](#listmultipartuploads) | GET | `/{Bucket}` | `delimiter`, `encoding-type`, `key-marker`, `max-uploads`, `prefix`, `upload-id-marker`, `uploads` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect` | `q-encoding-0015`, `q-mpu-upload-0032`, `q-mpu-marker-0040` |
 | [ListObjectAnnotations](#listobjectannotations) | GET | `/{Bucket}/{Key+}` | `acl`, `annotation`, `annotation-prefix`, `annotationName`, `attributes`, `continuation-token`, `legal-hold`, `max-annotation-results`, `retention`, `tagging`, `uploadId`, `versionId` | — | 200 | `InvalidPrefix`, `NoSuchBucket`, `NoSuchKey` | — |
 | [ListObjectVersions](#listobjectversions) | GET | `/{Bucket}` | `delimiter`, `encoding-type`, `key-marker`, `max-keys`, `prefix`, `version-id-marker`, `versions` | — | 200 | `NoSuchBucket`, `AccessDenied`, `InvalidArgument`, `PermanentRedirect` | `q-root-0060`, `q-version-0061`, `q-order-0066`, `q-encoding-0067`, `q-maxkeys-0068`, `q-interleave-0069`, `q-marker-0070` |
@@ -369,6 +371,7 @@ First match wins; lower precedence is tried first.
 
 | Precedence | Operation | Predicates |
 | --- | --- | --- |
+| 90 | [ListDirectoryBuckets](#listdirectorybuckets) | `Method GET` AND `Target Service` AND `HostClass S3Express` |
 | 100 | [ListBuckets](#listbuckets) | `Method GET` AND `Target Service` |
 | 200 | [GetBucketAccelerateConfiguration](#getbucketaccelerateconfiguration) | `Method GET` AND `Target Bucket` AND `QueryPresent ?accelerate` |
 | 201 | [PutBucketAccelerateConfiguration](#putbucketaccelerateconfiguration) | `Method PUT` AND `Target Bucket` AND `QueryPresent ?accelerate` |
@@ -2790,6 +2793,50 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `Bucket` (Structure) — `Name: BucketName`, `CreationDate: Timestamp(Iso8601)`, `BucketRegion: String`, `BucketArn: String`
 - `Owner` (Structure) — `DisplayName: String`, `ID: String`
 
+### ListDirectoryBuckets
+
+`GET /` &rarr; 200 · target Service · precedence 90 · auth Required (`s3express:ListAllMyDirectoryBuckets`, presigned allowed) · spec `spec/operations/ListDirectoryBuckets.toml`
+
+**Route predicates**
+
+- `Method GET`
+- `Target Service`
+- `HostClass S3Express`
+
+**Query keys**
+
+- routed on, present: —
+- routed on, exact value: —
+- routed on, absent: —
+- read as parameters: `continuation-token`, `max-directory-buckets`
+
+**Headers**
+
+- request: —
+- response: —
+- required: —
+
+**Body**
+
+- request: None (None)
+- response: XmlBody (Full, at most 1048576 bytes)
+- response root: `<ListAllMyDirectoryBucketsResult>`, xmlns emit
+- element order: `Buckets`, `ContinuationToken`
+
+**Error codes**
+
+`AccessDenied`
+
+**Quirks**
+
+- `q-wrapped-0062` (flattened on `ListBuckets`) — The bucket listing wraps its entries in an enclosing element, the one listing in this family that is not flattened.
+
+Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
+
+**Body shapes**
+
+- `Bucket` (Structure) — `Name: BucketName`, `CreationDate: Timestamp(Iso8601)`, `BucketRegion: String`, `BucketArn: String`
+
 ### ListMultipartUploads
 
 `GET /{Bucket}` &rarr; 200 · target Bucket · precedence 460 · auth Required (`s3:ListBucketMultipartUploads`, presigned allowed) · spec `spec/operations/ListMultipartUploads.toml`
@@ -4504,7 +4551,6 @@ in none of the included, route-only or deferred lists, so these tables are exhau
 | GetBucketMetricsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
 | ListBucketAnalyticsConfigurations | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
 | ListBucketMetricsConfigurations | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
-| ListDirectoryBuckets | Directory buckets are an S3 Express dialect with their own endpoint and session auth; the listing shape is shared with this family but the addressing is not, and it needs its own reviewed pass. |
 | PutBucketAbac | The ?abac write changes the access-control mode and remains deferred for its own validation and migration review; routing the read does not define or weaken that write contract. |
 | PutBucketAnalyticsConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
 | PutBucketIntelligentTieringConfiguration | Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet. |
