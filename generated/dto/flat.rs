@@ -31,7 +31,7 @@ pub use crate::ops::enums::{
     Tier, TransitionDefaultMinimumObjectSize, Type,
 };
 pub use crate::ops::shapes::{
-    AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, AccessControlTranslation,
+    AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, AccessControlTranslation, AnnotationEntry,
     BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration, BucketLoggingStatus, Checksum, CommonPrefix,
     CompletedMultipartUpload, CompletedPart, Condition, CorsConfiguration, CorsRule, CreateBucketConfiguration, CsvInput,
     CsvOutput, DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication, DeletedObject, Destination, Encryption,
@@ -180,6 +180,10 @@ pub use crate::ops::get_object::{
 pub use crate::ops::get_object_acl::{
     GetObjectAcl, Input as GetObjectAclInput, InputBuilder as GetObjectAclInputBuilder, Output as GetObjectAclOutput,
 };
+pub use crate::ops::get_object_annotation::{
+    GetObjectAnnotation, Input as GetObjectAnnotationInput, InputBuilder as GetObjectAnnotationInputBuilder,
+    Output as GetObjectAnnotationOutput,
+};
 pub use crate::ops::get_object_attributes::{
     GetObjectAttributes, Input as GetObjectAttributesInput, InputBuilder as GetObjectAttributesInputBuilder,
     Output as GetObjectAttributesOutput,
@@ -216,6 +220,10 @@ pub use crate::ops::list_buckets::{
 pub use crate::ops::list_multipart_uploads::{
     Input as ListMultipartUploadsInput, InputBuilder as ListMultipartUploadsInputBuilder, ListMultipartUploads,
     Output as ListMultipartUploadsOutput,
+};
+pub use crate::ops::list_object_annotations::{
+    Input as ListObjectAnnotationsInput, InputBuilder as ListObjectAnnotationsInputBuilder, ListObjectAnnotations,
+    Output as ListObjectAnnotationsOutput,
 };
 pub use crate::ops::list_object_versions::{
     Input as ListObjectVersionsInput, InputBuilder as ListObjectVersionsInputBuilder, ListObjectVersions,

@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `ReplicationStatus` string enumeration. Bound by: GetObject, HeadObject.
+/// The `ReplicationStatus` string enumeration. Bound by: GetObject, GetObjectAnnotation, HeadObject, ListObjectAnnotations.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`ReplicationStatus::custom`]. Adding a constant is a minor version

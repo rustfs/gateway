@@ -15,13 +15,11 @@ GetBucketMetadataConfiguration -> ListObjects
 GetBucketMetadataTableConfiguration -> ListObjects
 GetBucketMetricsConfiguration -> ListObjects
 GetBucketOwnershipControls -> ListObjects
-GetObjectAnnotation -> GetObject
 GetObjectTorrent -> GetObject
 ListBucketAnalyticsConfigurations -> ListObjects
 ListBucketIntelligentTieringConfigurations -> ListObjects
 ListBucketInventoryConfigurations -> ListObjects
 ListBucketMetricsConfigurations -> ListObjects
 ListDirectoryBuckets -> ListBuckets
-ListObjectAnnotations -> GetObject
 PutObjectAnnotation -> PutObject
 UpdateObjectEncryption -> PutObject

@@ -14,11 +14,12 @@
 
 # Family: the object-annotation control surface.
 #
-# DeleteObjectAnnotation is admitted before the rest of the family because deferring its DELETE
-# selector lets DeleteObject claim the request and remove the object itself. The operation has no
-# request body, so its model-required input is representable without weakening a DTO field.
+# These operations are admitted before the rest of the family because deferring their selectors
+# lets DeleteObject or GetObject claim the requests. Delete has no request body, Get has only a
+# response stream, and List has a bounded result page, so every model-required input remains
+# representable without weakening a DTO field.
 
-include = ["DeleteObjectAnnotation"]
+include = ["DeleteObjectAnnotation", "GetObjectAnnotation", "ListObjectAnnotations"]
 
 [op.DeleteObjectAnnotation]
 precedence = 590
@@ -27,3 +28,22 @@ error_codes = ["NoSuchBucket", "NoSuchKey"]
 url_encoded_fields = []
 input_hot = ["Key", "AnnotationName", "VersionId"]
 output_hot = ["ObjectVersionId"]
+
+[op.GetObjectAnnotation]
+precedence = 591
+query_present = ["annotationName"]
+query_absent = ["acl", "attributes", "legal-hold", "retention", "tagging", "uploadId"]
+auth_action = "s3:GetObjectAnnotation"
+error_codes = ["NoSuchAnnotation", "NoSuchBucket", "NoSuchKey"]
+url_encoded_fields = []
+input_hot = ["Key", "AnnotationName", "VersionId"]
+output_hot = ["ETag", "ContentLength", "ObjectVersionId"]
+
+[op.ListObjectAnnotations]
+precedence = 592
+query_absent = ["acl", "annotationName", "attributes", "legal-hold", "retention", "tagging", "uploadId"]
+auth_action = "s3:ListObjectAnnotations"
+error_codes = ["InvalidPrefix", "NoSuchBucket", "NoSuchKey"]
+url_encoded_fields = []
+input_hot = ["Key", "AnnotationPrefix", "MaxAnnotationResults", "ContinuationToken", "VersionId"]
+output_hot = ["Annotations", "AnnotationCount", "NextContinuationToken", "ObjectVersionId"]

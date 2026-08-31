@@ -4,6 +4,7 @@ AbortMultipartUploadOutput 1
 AccelerateConfiguration 1
 AccessControlPolicy 2
 AccessControlTranslation 1
+AnnotationEntry 6
 BlockedEncryptionTypes 1
 Bucket 4
 BucketLifecycleConfiguration 1
@@ -97,6 +98,8 @@ GetBucketWebsiteInput 2
 GetBucketWebsiteOutput 4
 GetObjectAclInput 5
 GetObjectAclOutput 3
+GetObjectAnnotationInput 7
+GetObjectAnnotationOutput 19
 GetObjectAttributesInput 11
 GetObjectAttributesOutput 9
 GetObjectAttributesParts 6
@@ -133,6 +136,8 @@ ListBucketsInput 4
 ListBucketsOutput 4
 ListMultipartUploadsInput 9
 ListMultipartUploadsOutput 13
+ListObjectAnnotationsInput 8
+ListObjectAnnotationsOutput 10
 ListObjectVersionsInput 9
 ListObjectVersionsOutput 14
 ListObjectsInput 8

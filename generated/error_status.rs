@@ -200,6 +200,12 @@ impl ErrorCode {
         status: StatusCode::BAD_REQUEST,
     };
 
+    /// `InvalidPrefix`, HTTP `400`.
+    pub const INVALID_PREFIX: Self = Self {
+        name: Cow::Borrowed("InvalidPrefix"),
+        status: StatusCode::BAD_REQUEST,
+    };
+
     /// `InvalidRequest`, HTTP `400`.
     ///
     /// The general-purpose rejection, and the fallback for a code with no table row.
@@ -572,6 +578,12 @@ impl ErrorCode {
         status: StatusCode::FORBIDDEN,
     };
 
+    /// `NoSuchAnnotation`, HTTP `404`.
+    pub const NO_SUCH_ANNOTATION: Self = Self {
+        name: Cow::Borrowed("NoSuchAnnotation"),
+        status: StatusCode::NOT_FOUND,
+    };
+
     /// `NoSuchBucket`, HTTP `404`.
     pub const NO_SUCH_BUCKET: Self = Self {
         name: Cow::Borrowed("NoSuchBucket"),
@@ -819,6 +831,7 @@ pub(super) const CODE_TABLE: &[(&str, StatusCode)] = &[
     ("InvalidPartNumber", StatusCode::BAD_REQUEST),
     ("InvalidPartOrder", StatusCode::BAD_REQUEST),
     ("InvalidPolicyDocument", StatusCode::BAD_REQUEST),
+    ("InvalidPrefix", StatusCode::BAD_REQUEST),
     ("InvalidRequest", StatusCode::BAD_REQUEST),
     ("InvalidRetentionPeriod", StatusCode::BAD_REQUEST),
     ("InvalidSOAPRequest", StatusCode::BAD_REQUEST),
@@ -877,6 +890,7 @@ pub(super) const CODE_TABLE: &[(&str, StatusCode)] = &[
     ("SignatureDoesNotMatch", StatusCode::FORBIDDEN),
     ("ObjectAlreadyInActiveTierError", StatusCode::FORBIDDEN),
     ("ObjectNotInActiveTierError", StatusCode::FORBIDDEN),
+    ("NoSuchAnnotation", StatusCode::NOT_FOUND),
     ("NoSuchBucket", StatusCode::NOT_FOUND),
     ("NoSuchBucketPolicy", StatusCode::NOT_FOUND),
     ("NoSuchCORSConfiguration", StatusCode::NOT_FOUND),
