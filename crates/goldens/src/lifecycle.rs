@@ -39,7 +39,6 @@ const ALTERNATE_ORDER: &[u8] = b"<LifecycleConfiguration><Rule><Transition><Stor
 const UNKNOWN_STATUS: &[u8] = b"<LifecycleConfiguration><Rule><Status>FutureStatus</Status></Rule></LifecycleConfiguration>";
 const SIX_DIGIT_TIMESTAMP: &[u8] = b"<LifecycleConfiguration><ExpiryUpdatedAt>2026-08-30T12:34:56.123456Z</ExpiryUpdatedAt><Rule><Status>Enabled</Status></Rule></LifecycleConfiguration>";
 const EMPTY_WRAPPERS: &[u8] = b"<LifecycleConfiguration><Rule><AbortIncompleteMultipartUpload></AbortIncompleteMultipartUpload><DelMarkerExpiration></DelMarkerExpiration><Expiration></Expiration><Filter><And></And></Filter><NoncurrentVersionExpiration></NoncurrentVersionExpiration><NoncurrentVersionTransition></NoncurrentVersionTransition><Status>Enabled</Status><Transition></Transition></Rule></LifecycleConfiguration>";
-
 fn minimal() -> PersistedLifecycleConfiguration {
     PersistedLifecycleConfiguration {
         rules: vec![PersistedLifecycleRule {
@@ -311,6 +310,7 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedLifecycleConfig
     .collect();
     accepted.extend(source_b::cases());
     accepted.extend(crate::source_a_boundary::lifecycle_cases());
+    accepted.push(crate::source_a_lifecycle::lifecycle_case());
     accepted.extend(crate::source_a_new_writer::lifecycle_cases());
     let mut refused = vec![
         rejected(b"<LifecycleConfiguration><Rule><Future>future</Future><Status>Enabled</Status></Rule></LifecycleConfiguration>", &[CorpusVariant::UnknownNested], "unknown Rule child"),
