@@ -259,7 +259,11 @@ fn detail(out: &mut String, ir: &OperationIr) {
                 .map(|f| format!("`{}: {}`", f.name, type_name(&f.ty)))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let _ = writeln!(out, "- `{name}` ({}) — {members}", shape.kind.as_str());
+            if members.is_empty() {
+                let _ = writeln!(out, "- `{name}` ({})", shape.kind.as_str());
+            } else {
+                let _ = writeln!(out, "- `{name}` ({}) — {members}", shape.kind.as_str());
+            }
         }
     }
     let _ = writeln!(out);
