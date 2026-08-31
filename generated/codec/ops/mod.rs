@@ -50,6 +50,8 @@ mod get_bucket_inventory_configuration;
 mod get_bucket_lifecycle_configuration;
 mod get_bucket_location;
 mod get_bucket_logging;
+mod get_bucket_metadata_configuration;
+mod get_bucket_metadata_table_configuration;
 mod get_bucket_notification_configuration;
 mod get_bucket_ownership_controls;
 mod get_bucket_policy;

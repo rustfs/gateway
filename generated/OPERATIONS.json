@@ -370,6 +370,28 @@
                                         "error_codes": ["NoSuchBucket", "AccessDenied"],
                                         "precedence": 205
                                       },
+                  "GetBucketMetadataConfiguration": {
+                                                      "method": "GET",
+                                                      "path_shape": "/{Bucket}",
+                                                      "query_keys": ["metadataConfiguration"],
+                                                      "key_headers": [],
+                                                      "host_classes": [],
+                                                      "error_codes": ["NoSuchBucket", "AccessDenied"],
+                                                      "precedence": 280
+                                                    },
+                  "GetBucketMetadataTableConfiguration": {
+                                                           "method": "GET",
+                                                           "path_shape": "/{Bucket}",
+                                                           "query_keys": ["metadataTable"],
+                                                           "key_headers": [],
+                                                           "host_classes": [],
+                                                           "error_codes": [
+                                                                            "NoSuchBucket",
+                                                                            "AccessDenied",
+                                                                            "MethodNotAllowed"
+                                                                          ],
+                                                           "precedence": 281
+                                                         },
                   "GetBucketNotificationConfiguration": {
                                                           "method": "GET",
                                                           "path_shape": "/{Bucket}",
@@ -1253,6 +1275,8 @@
                           "GetBucketLifecycleConfiguration",
                           "GetBucketLocation",
                           "GetBucketLogging",
+                          "GetBucketMetadataConfiguration",
+                          "GetBucketMetadataTableConfiguration",
                           "GetBucketNotificationConfiguration",
                           "GetBucketOwnershipControls",
                           "GetBucketPolicy",
@@ -1345,6 +1369,8 @@
                                     "GetBucketLifecycleConfiguration",
                                     "GetBucketLocation",
                                     "GetBucketLogging",
+                                    "GetBucketMetadataConfiguration",
+                                    "GetBucketMetadataTableConfiguration",
                                     "GetBucketNotificationConfiguration",
                                     "GetBucketOwnershipControls",
                                     "GetBucketPolicy",
@@ -1513,10 +1539,10 @@
                     "max-parts": ["ListParts"],
                     "max-uploads": ["ListMultipartUploads"],
                     "metadataAnnotationTable": ["CreateBucket"],
-                    "metadataConfiguration": ["DeleteBucket"],
+                    "metadataConfiguration": ["DeleteBucket", "GetBucketMetadataConfiguration"],
                     "metadataInventoryTable": ["CreateBucket"],
                     "metadataJournalTable": ["CreateBucket"],
-                    "metadataTable": ["DeleteBucket"],
+                    "metadataTable": ["DeleteBucket", "GetBucketMetadataTableConfiguration"],
                     "metrics": ["CreateBucket", "DeleteBucket"],
                     "notification": [
                                       "CreateBucket",
@@ -1672,6 +1698,8 @@
                                        "GetBucketLifecycleConfiguration",
                                        "GetBucketLocation",
                                        "GetBucketLogging",
+                                       "GetBucketMetadataConfiguration",
+                                       "GetBucketMetadataTableConfiguration",
                                        "GetBucketNotificationConfiguration",
                                        "GetBucketOwnershipControls",
                                        "GetBucketPolicy",
@@ -1866,7 +1894,13 @@
                                        "RestoreObject",
                                        "SelectObjectContent"
                                      ],
-                     "MethodNotAllowed": ["CopyObject", "GetObject", "HeadObject", "UploadPartCopy"],
+                     "MethodNotAllowed": [
+                                           "CopyObject",
+                                           "GetBucketMetadataTableConfiguration",
+                                           "GetObject",
+                                           "HeadObject",
+                                           "UploadPartCopy"
+                                         ],
                      "MissingContentLength": ["PutObject", "UploadPart"],
                      "NoSuchAnnotation": ["GetObjectAnnotation"],
                      "NoSuchBucket": [
@@ -1898,6 +1932,8 @@
                                        "GetBucketLifecycleConfiguration",
                                        "GetBucketLocation",
                                        "GetBucketLogging",
+                                       "GetBucketMetadataConfiguration",
+                                       "GetBucketMetadataTableConfiguration",
                                        "GetBucketNotificationConfiguration",
                                        "GetBucketOwnershipControls",
                                        "GetBucketPolicy",
@@ -2056,6 +2092,8 @@
                      "276": ["GetBucketAbac"],
                      "277": ["GetBucketInventoryConfiguration"],
                      "278": ["ListBucketInventoryConfigurations"],
+                     "280": ["GetBucketMetadataConfiguration"],
+                     "281": ["GetBucketMetadataTableConfiguration"],
                      "300": ["GetBucketLocation"],
                      "310": ["GetBucketCors"],
                      "320": ["PutBucketCors"],

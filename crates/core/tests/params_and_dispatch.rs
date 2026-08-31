@@ -1523,3 +1523,28 @@ fn n_unhandled_analytics_reads_are_refused_instead_of_dispatching_list_objects()
         .expect("plain bucket GET remains registered");
     assert_eq!(plain.spec.name, "ListObjects");
 }
+
+/// Unhandled metadata reads are refused by name, never answered with object-listing data.
+#[test]
+fn n_unhandled_bucket_metadata_reads_are_refused_instead_of_dispatching_list_objects() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (request, expected) in [
+        ("GET /bucket?metadataConfiguration", "GetBucketMetadataConfiguration"),
+        ("GET /bucket?metadataTable", "GetBucketMetadataTableConfiguration"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(request).target(TargetKind::Bucket).parts())
+            .expect_err("the metadata read handler is absent");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED);
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE);
+        assert_eq!(error.operation(), Some(expected));
+    }
+
+    let plain = router
+        .dispatch(&Req::new("GET /bucket").target(TargetKind::Bucket).parts())
+        .expect("the registered ListObjects neighbour remains served");
+    assert_eq!(plain.entry.op_name, "ListObjects");
+}

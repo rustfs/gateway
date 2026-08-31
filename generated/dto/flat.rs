@@ -24,35 +24,38 @@
 //! Upstream: `crate::ops`. Downstream: every consumer mid-migration.
 
 pub use crate::ops::enums::{
-    AccessTier, Acl, ArchiveStatus, CannedAcl, ChecksumAlgorithm, ChecksumMode, ChecksumType, CompressionType, EncodingType,
-    EncryptionType, Events, ExpressionType, FileHeaderInfo, Format, Frequency, IncludedObjectVersions, LocationConstraint,
-    MetadataDirective, MfaDelete, Mode, Name, ObjectLockEnabled, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership,
-    OptionalFields, OutputSchemaVersion, PartitionDateSource, Payer, Permission, Protocol, QuoteFields, ReplicationStatus,
-    RequestCharged, RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective, Tier,
-    TransitionDefaultMinimumObjectSize, Type,
+    AccessTier, Acl, ArchiveStatus, CannedAcl, ChecksumAlgorithm, ChecksumMode, ChecksumType, CompressionType,
+    ConfigurationState, EncodingType, EncryptionType, Events, Expiration, ExpressionType, FileHeaderInfo, Format, Frequency,
+    IncludedObjectVersions, LocationConstraint, MetadataDirective, MfaDelete, Mode, Name, ObjectLockEnabled,
+    ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, OptionalFields, OutputSchemaVersion, PartitionDateSource, Payer,
+    Permission, Protocol, QuoteFields, ReplicationStatus, RequestCharged, RequestPayer, ServerSideEncryption, SseAlgorithm,
+    Status, StorageClass, TableBucketType, TaggingDirective, Tier, TransitionDefaultMinimumObjectSize, Type,
 };
 pub use crate::ops::shapes::{
     AbacStatus, AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, AccessControlTranslation,
     AnalyticsAndOperator, AnalyticsConfiguration, AnalyticsExportDestination, AnalyticsFilter, AnalyticsS3BucketDestination,
-    AnnotationEntry, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration, BucketLoggingStatus, Checksum, CommonPrefix,
-    CompletedMultipartUpload, CompletedPart, Condition, CorsConfiguration, CorsRule, CreateBucketConfiguration, CsvInput,
-    CsvOutput, DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication, DeletedObject, Destination, Encryption,
-    EncryptionConfiguration, Error, ErrorDocument, EventBridgeConfiguration, ExistingObjectReplication, FilterRule,
-    GetObjectAttributesParts, GlacierJobParameters, Grant, Grantee, IndexDocument, Initiator, InputSerialization,
-    IntelligentTieringAndOperator, IntelligentTieringConfiguration, IntelligentTieringFilter, InventoryConfiguration,
-    InventoryDestination, InventoryEncryption, InventoryFilter, InventoryS3BucketDestination, InventorySchedule, JsonInput,
-    JsonOutput, LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
-    LoggingEnabled, MetadataEntry, Metrics, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
-    NotificationConfiguration, NotificationConfigurationFilter, Object, ObjectIdentifier, ObjectLockConfiguration,
-    ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, OutputLocation, OutputSerialization,
-    Owner, OwnershipControls, OwnershipControlsRule, ParquetInput, Part, PartitionedPrefix, PolicyStatus,
-    PublicAccessBlockConfiguration, QueueConfiguration, Redirect, RedirectAllRequestsTo, ReplicaModifications,
-    ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationTime,
-    ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest, RestoreStatus, RoutingRule, S3KeyFilter,
-    S3Location, ScanRange, SelectParameters, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
-    ServerSideEncryptionRule, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects, Ssekms, Sses3, StorageClassAnalysis,
-    StorageClassAnalysisDataExport, Tag, Tagging, TargetGrant, TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition,
-    VersioningConfiguration, WebsiteConfiguration,
+    AnnotationEntry, AnnotationTableConfigurationResult, BlockedEncryptionTypes, Bucket, BucketLifecycleConfiguration,
+    BucketLoggingStatus, Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, Condition, CorsConfiguration, CorsRule,
+    CreateBucketConfiguration, CsvInput, CsvOutput, DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication,
+    DeletedObject, Destination, DestinationResult, Encryption, EncryptionConfiguration, Error, ErrorDetails, ErrorDocument,
+    EventBridgeConfiguration, ExistingObjectReplication, FilterRule, GetBucketMetadataConfigurationResult,
+    GetBucketMetadataTableConfigurationResult, GetObjectAttributesParts, GlacierJobParameters, Grant, Grantee, IndexDocument,
+    Initiator, InputSerialization, IntelligentTieringAndOperator, IntelligentTieringConfiguration, IntelligentTieringFilter,
+    InventoryConfiguration, InventoryDestination, InventoryEncryption, InventoryFilter, InventoryS3BucketDestination,
+    InventorySchedule, InventoryTableConfigurationResult, JournalTableConfigurationResult, JsonInput, JsonOutput,
+    LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
+    LoggingEnabled, MetadataConfigurationResult, MetadataEntry, MetadataTableConfigurationResult, Metrics, MultipartUpload,
+    NoncurrentVersionExpiration, NoncurrentVersionTransition, NotificationConfiguration, NotificationConfigurationFilter, Object,
+    ObjectIdentifier, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart,
+    ObjectVersion, OutputLocation, OutputSerialization, Owner, OwnershipControls, OwnershipControlsRule, ParquetInput, Part,
+    PartitionedPrefix, PolicyStatus, PublicAccessBlockConfiguration, QueueConfiguration, RecordExpiration, Redirect,
+    RedirectAllRequestsTo, ReplicaModifications, ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator,
+    ReplicationRuleFilter, ReplicationTime, ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest,
+    RestoreStatus, RoutingRule, S3KeyFilter, S3Location, S3TablesDestinationResult, ScanRange, SelectParameters,
+    ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix,
+    SourceSelectionCriteria, SseKmsEncryptedObjects, Ssekms, Sses3, StorageClassAnalysis, StorageClassAnalysisDataExport, Tag,
+    Tagging, TargetGrant, TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition, VersioningConfiguration,
+    WebsiteConfiguration,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -163,6 +166,14 @@ pub use crate::ops::get_bucket_location::{
 pub use crate::ops::get_bucket_logging::{
     GetBucketLogging, Input as GetBucketLoggingInput, InputBuilder as GetBucketLoggingInputBuilder,
     Output as GetBucketLoggingOutput,
+};
+pub use crate::ops::get_bucket_metadata_configuration::{
+    GetBucketMetadataConfiguration, Input as GetBucketMetadataConfigurationInput,
+    InputBuilder as GetBucketMetadataConfigurationInputBuilder, Output as GetBucketMetadataConfigurationOutput,
+};
+pub use crate::ops::get_bucket_metadata_table_configuration::{
+    GetBucketMetadataTableConfiguration, Input as GetBucketMetadataTableConfigurationInput,
+    InputBuilder as GetBucketMetadataTableConfigurationInputBuilder, Output as GetBucketMetadataTableConfigurationOutput,
 };
 pub use crate::ops::get_bucket_notification_configuration::{
     GetBucketNotificationConfiguration, Input as GetBucketNotificationConfigurationInput,
