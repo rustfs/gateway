@@ -1,0 +1,392 @@
+{
+  "ir_version": "2",
+  "operation": "GetBucketInventoryConfiguration",
+  "http": {
+            "method": "GET",
+            "target": "Bucket",
+            "precedence": 277,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Bucket" },
+                            { "kind": "QueryPresent", "key": "inventory" },
+                            { "kind": "QueryPresent", "key": "id" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}"
+          },
+  "auth": {
+            "requirement": "Required",
+            "action": "s3:GetInventoryConfiguration",
+            "presigned_allowed": true,
+            "service": "s3"
+          },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 1048576 }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Id",
+                           "wire_name": "id",
+                           "required": true,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "InventoryConfiguration",
+                            "wire_name": null,
+                            "required": false,
+                            "binding": { "kind": "Payload" },
+                            "type": { "kind": "Structure", "shape": "InventoryConfiguration" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {
+              "InventoryConfiguration": {
+                                          "kind": "Structure",
+                                          "fields": [
+                                                      {
+                                                        "name": "Destination",
+                                                        "wire_name": "Destination",
+                                                        "required": true,
+                                                        "binding": { "kind": "BodyXml" },
+                                                        "type": { "kind": "Structure", "shape": "InventoryDestination" },
+                                                        "hot": false,
+                                                        "quirk_refs": []
+                                                      },
+                                                      {
+                                                        "name": "IsEnabled",
+                                                        "wire_name": "IsEnabled",
+                                                        "required": true,
+                                                        "binding": { "kind": "BodyXml" },
+                                                        "type": { "kind": "Boolean" },
+                                                        "hot": false,
+                                                        "quirk_refs": []
+                                                      },
+                                                      {
+                                                        "name": "Filter",
+                                                        "wire_name": "Filter",
+                                                        "required": false,
+                                                        "binding": { "kind": "BodyXml" },
+                                                        "type": { "kind": "Structure", "shape": "InventoryFilter" },
+                                                        "hot": false,
+                                                        "quirk_refs": []
+                                                      },
+                                                      {
+                                                        "name": "Id",
+                                                        "wire_name": "Id",
+                                                        "required": true,
+                                                        "binding": { "kind": "BodyXml" },
+                                                        "type": { "kind": "String" },
+                                                        "hot": false,
+                                                        "quirk_refs": []
+                                                      },
+                                                      {
+                                                        "name": "IncludedObjectVersions",
+                                                        "wire_name": "IncludedObjectVersions",
+                                                        "required": true,
+                                                        "binding": { "kind": "BodyXml" },
+                                                        "type": { "kind": "StringEnum", "values": ["All", "Current"] },
+                                                        "hot": false,
+                                                        "quirk_refs": []
+                                                      },
+                                                      {
+                                                        "name": "OptionalFields",
+                                                        "wire_name": "OptionalFields",
+                                                        "required": false,
+                                                        "binding": { "kind": "BodyXml" },
+                                                        "type": {
+                                                                  "kind": "List",
+                                                                  "member": {
+                                                                              "kind": "StringEnum",
+                                                                              "values": [
+                                                                                          "Size",
+                                                                                          "LastModifiedDate",
+                                                                                          "StorageClass",
+                                                                                          "ETag",
+                                                                                          "IsMultipartUploaded",
+                                                                                          "ReplicationStatus",
+                                                                                          "EncryptionStatus",
+                                                                                          "ObjectLockRetainUntilDate",
+                                                                                          "ObjectLockMode",
+                                                                                          "ObjectLockLegalHoldStatus",
+                                                                                          "IntelligentTieringAccessTier",
+                                                                                          "BucketKeyStatus",
+                                                                                          "ChecksumAlgorithm",
+                                                                                          "ObjectAccessControlList",
+                                                                                          "ObjectOwner",
+                                                                                          "LifecycleExpirationDate"
+                                                                                        ]
+                                                                            },
+                                                                  "flattened": false,
+                                                                  "wrapper_name": "Field"
+                                                                },
+                                                        "hot": false,
+                                                        "quirk_refs": []
+                                                      },
+                                                      {
+                                                        "name": "Schedule",
+                                                        "wire_name": "Schedule",
+                                                        "required": true,
+                                                        "binding": { "kind": "BodyXml" },
+                                                        "type": { "kind": "Structure", "shape": "InventorySchedule" },
+                                                        "hot": false,
+                                                        "quirk_refs": []
+                                                      }
+                                                    ],
+                                          "xml": {
+                                                   "element_order": [
+                                                                      "Destination",
+                                                                      "IsEnabled",
+                                                                      "Filter",
+                                                                      "Id",
+                                                                      "IncludedObjectVersions",
+                                                                      "OptionalFields",
+                                                                      "Schedule"
+                                                                    ],
+                                                   "empty_value_policy": {
+                                                                           "Destination": "emit",
+                                                                           "IsEnabled": "emit",
+                                                                           "Filter": "emit",
+                                                                           "Id": "emit",
+                                                                           "IncludedObjectVersions": "emit",
+                                                                           "OptionalFields": "emit",
+                                                                           "Schedule": "emit"
+                                                                         },
+                                                   "attributes": []
+                                                 }
+                                        },
+              "InventoryDestination": {
+                                        "kind": "Structure",
+                                        "fields": [
+                                                    {
+                                                      "name": "S3BucketDestination",
+                                                      "wire_name": "S3BucketDestination",
+                                                      "required": true,
+                                                      "binding": { "kind": "BodyXml" },
+                                                      "type": {
+                                                                "kind": "Structure",
+                                                                "shape": "InventoryS3BucketDestination"
+                                                              },
+                                                      "hot": false,
+                                                      "quirk_refs": []
+                                                    }
+                                                  ],
+                                        "xml": {
+                                                 "element_order": ["S3BucketDestination"],
+                                                 "empty_value_policy": { "S3BucketDestination": "emit" },
+                                                 "attributes": []
+                                               }
+                                      },
+              "InventoryEncryption": {
+                                       "kind": "Structure",
+                                       "fields": [
+                                                   {
+                                                     "name": "SSES3",
+                                                     "wire_name": "SSE-S3",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Structure", "shape": "SSES3" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "SSEKMS",
+                                                     "wire_name": "SSE-KMS",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Structure", "shape": "SSEKMS" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   }
+                                                 ],
+                                       "xml": {
+                                                "element_order": ["SSES3", "SSEKMS"],
+                                                "empty_value_policy": { "SSES3": "emit", "SSEKMS": "emit" },
+                                                "attributes": []
+                                              }
+                                     },
+              "InventoryFilter": {
+                                   "kind": "Structure",
+                                   "fields": [
+                                               {
+                                                 "name": "Prefix",
+                                                 "wire_name": "Prefix",
+                                                 "required": true,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "String" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
+                                               }
+                                             ],
+                                   "xml": {
+                                            "element_order": ["Prefix"],
+                                            "empty_value_policy": { "Prefix": "emit" },
+                                            "attributes": []
+                                          }
+                                 },
+              "InventoryS3BucketDestination": {
+                                                "kind": "Structure",
+                                                "fields": [
+                                                            {
+                                                              "name": "AccountId",
+                                                              "wire_name": "AccountId",
+                                                              "required": false,
+                                                              "binding": { "kind": "BodyXml" },
+                                                              "type": { "kind": "String" },
+                                                              "hot": false,
+                                                              "quirk_refs": []
+                                                            },
+                                                            {
+                                                              "name": "Bucket",
+                                                              "wire_name": "Bucket",
+                                                              "required": true,
+                                                              "binding": { "kind": "BodyXml" },
+                                                              "type": { "kind": "BucketName" },
+                                                              "hot": false,
+                                                              "quirk_refs": []
+                                                            },
+                                                            {
+                                                              "name": "Format",
+                                                              "wire_name": "Format",
+                                                              "required": true,
+                                                              "binding": { "kind": "BodyXml" },
+                                                              "type": {
+                                                                        "kind": "StringEnum",
+                                                                        "values": ["CSV", "ORC", "Parquet"]
+                                                                      },
+                                                              "hot": false,
+                                                              "quirk_refs": []
+                                                            },
+                                                            {
+                                                              "name": "Prefix",
+                                                              "wire_name": "Prefix",
+                                                              "required": false,
+                                                              "binding": { "kind": "BodyXml" },
+                                                              "type": { "kind": "String" },
+                                                              "hot": false,
+                                                              "quirk_refs": []
+                                                            },
+                                                            {
+                                                              "name": "Encryption",
+                                                              "wire_name": "Encryption",
+                                                              "required": false,
+                                                              "binding": { "kind": "BodyXml" },
+                                                              "type": {
+                                                                        "kind": "Structure",
+                                                                        "shape": "InventoryEncryption"
+                                                                      },
+                                                              "hot": false,
+                                                              "quirk_refs": []
+                                                            }
+                                                          ],
+                                                "xml": {
+                                                         "element_order": [
+                                                                            "AccountId",
+                                                                            "Bucket",
+                                                                            "Format",
+                                                                            "Prefix",
+                                                                            "Encryption"
+                                                                          ],
+                                                         "empty_value_policy": {
+                                                                                 "AccountId": "emit",
+                                                                                 "Bucket": "emit",
+                                                                                 "Format": "emit",
+                                                                                 "Prefix": "emit",
+                                                                                 "Encryption": "emit"
+                                                                               },
+                                                         "attributes": []
+                                                       }
+                                              },
+              "InventorySchedule": {
+                                     "kind": "Structure",
+                                     "fields": [
+                                                 {
+                                                   "name": "Frequency",
+                                                   "wire_name": "Frequency",
+                                                   "required": true,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "StringEnum", "values": ["Daily", "Weekly"] },
+                                                   "hot": false,
+                                                   "quirk_refs": []
+                                                 }
+                                               ],
+                                     "xml": {
+                                              "element_order": ["Frequency"],
+                                              "empty_value_policy": { "Frequency": "emit" },
+                                              "attributes": []
+                                            }
+                                   },
+              "SSEKMS": {
+                          "kind": "Structure",
+                          "fields": [
+                                      {
+                                        "name": "KeyId",
+                                        "wire_name": "KeyId",
+                                        "required": true,
+                                        "binding": { "kind": "BodyXml" },
+                                        "type": { "kind": "String" },
+                                        "hot": false,
+                                        "quirk_refs": []
+                                      }
+                                    ],
+                          "xml": {
+                                   "element_order": ["KeyId"],
+                                   "empty_value_policy": { "KeyId": "emit" },
+                                   "attributes": []
+                                 }
+                        },
+              "SSES3": {
+                         "kind": "Structure",
+                         "fields": [],
+                         "xml": { "element_order": [], "empty_value_policy": {}, "attributes": [] }
+                       }
+            },
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": { "not_configured": null, "allows_error_after_200": false, "codes": ["NoSuchBucket", "AccessDenied"] },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [],
+  "quirks": [],
+  "ext_points": []
+}

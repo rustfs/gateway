@@ -2487,3 +2487,49 @@ fn get_bucket_abac_uses_the_bucket_authorization_contract() {
     assert_eq!(auth.action, "s3:GetBucketAbac");
     assert_eq!(auth.resource, ResourceShape::Bucket);
 }
+
+// ── Bucket inventory reads ──────────────────────────────────────────────────────
+
+/// The id-bearing selector chooses one inventory configuration while the bare key lists them.
+#[test]
+fn inventory_reads_route_ahead_of_list_objects() {
+    let table = generated_table();
+    for (line, operation) in [
+        ("GET /bucket?inventory&id=archive", "GetBucketInventoryConfiguration"),
+        ("GET /bucket?inventory", "ListBucketInventoryConfigurations"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(operation), "{line}");
+    }
+}
+
+/// Negative controls keep object targets, other methods and an absent id outside the get row.
+#[test]
+fn n_inventory_reads_do_not_claim_neighbour_controls() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket")), Some("ListObjects"));
+    assert_ne!(
+        routed(&table, &Req::new("GET /bucket?inventory")),
+        Some("GetBucketInventoryConfiguration")
+    );
+    for line in [
+        "GET /bucket/key?inventory&id=archive",
+        "HEAD /bucket?inventory&id=archive",
+        "PUT /bucket?inventory&id=archive",
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some("GetBucketInventoryConfiguration"), "{line}");
+        assert_ne!(routed(&table, &Req::new(line)), Some("ListBucketInventoryConfigurations"), "{line}");
+    }
+}
+
+/// Both read forms use the one bucket-level IAM action AWS assigns to this configuration family.
+#[test]
+fn inventory_reads_share_the_get_configuration_authorization_contract() {
+    for spec in [
+        <rustfs_gateway_types::dto::GetBucketInventoryConfiguration as Operation>::spec(),
+        <rustfs_gateway_types::dto::ListBucketInventoryConfigurations as Operation>::spec(),
+    ] {
+        let auth = spec.auth.expect("both inventory reads declare authorization");
+        assert_eq!(auth.action, "s3:GetInventoryConfiguration", "{}", spec.name);
+        assert_eq!(auth.resource, ResourceShape::Bucket, "{}", spec.name);
+    }
+}

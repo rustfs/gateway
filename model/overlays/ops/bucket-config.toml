@@ -36,8 +36,10 @@
 
 include = [
   "DeleteBucketTagging",
+  "GetBucketInventoryConfiguration",
   "GetBucketIntelligentTieringConfiguration",
   "GetBucketTagging",
+  "ListBucketInventoryConfigurations",
   "ListBucketIntelligentTieringConfigurations",
   "PutBucketTagging",
 ]
@@ -118,6 +120,25 @@ url_encoded_fields = []
 input_hot = ["ContinuationToken"]
 output_hot = ["IsTruncated", "NextContinuationToken"]
 
+[op.GetBucketInventoryConfiguration]
+precedence = 277
+query_present = ["id"]
+auth_action = "s3:GetInventoryConfiguration"
+response_max_bytes = 1048576
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = ["Id"]
+output_hot = ["InventoryConfiguration"]
+
+[op.ListBucketInventoryConfigurations]
+precedence = 278
+auth_action = "s3:GetInventoryConfiguration"
+response_max_bytes = 1048576
+error_codes = ["NoSuchBucket", "AccessDenied"]
+url_encoded_fields = []
+input_hot = ["ContinuationToken"]
+output_hot = ["IsTruncated", "NextContinuationToken"]
+
 [[deferred]]
 reason = "Two groups, deferred for two different reasons, and neither is one of the nine configurations the 200-249 band covers. OwnershipControls belongs with the ACL family that landed at 250/260 and did not take it: BucketOwnerEnforced is the ownership value that disables ACLs outright, so the switch and the grant grammar answer each other and are reviewed together. The analytics, inventory, metrics and intelligent-tiering sets are the only bucket subresources that are keyed — each carries an id, so each has a list operation beside its triple and a selector that pins a query key both with and without a value, which is a routing shape no band in the table has yet."
 operations = [
@@ -127,10 +148,8 @@ operations = [
   "DeleteBucketMetricsConfiguration",
   "DeleteBucketOwnershipControls",
   "GetBucketAnalyticsConfiguration",
-  "GetBucketInventoryConfiguration",
   "GetBucketMetricsConfiguration",
   "ListBucketAnalyticsConfigurations",
-  "ListBucketInventoryConfigurations",
   "ListBucketMetricsConfigurations",
   "PutBucketAnalyticsConfiguration",
   "PutBucketIntelligentTieringConfiguration",

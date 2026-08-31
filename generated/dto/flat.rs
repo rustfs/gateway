@@ -25,10 +25,11 @@
 
 pub use crate::ops::enums::{
     AccessTier, Acl, ArchiveStatus, CannedAcl, ChecksumAlgorithm, ChecksumMode, ChecksumType, CompressionType, EncodingType,
-    EncryptionType, Events, ExpressionType, FileHeaderInfo, LocationConstraint, MetadataDirective, MfaDelete, Mode, Name,
-    ObjectLockEnabled, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, PartitionDateSource, Payer, Permission,
-    Protocol, QuoteFields, ReplicationStatus, RequestCharged, RequestPayer, ServerSideEncryption, SseAlgorithm, Status,
-    StorageClass, TaggingDirective, Tier, TransitionDefaultMinimumObjectSize, Type,
+    EncryptionType, Events, ExpressionType, FileHeaderInfo, Format, Frequency, IncludedObjectVersions, LocationConstraint,
+    MetadataDirective, MfaDelete, Mode, Name, ObjectLockEnabled, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership,
+    OptionalFields, PartitionDateSource, Payer, Permission, Protocol, QuoteFields, ReplicationStatus, RequestCharged,
+    RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TaggingDirective, Tier,
+    TransitionDefaultMinimumObjectSize, Type,
 };
 pub use crate::ops::shapes::{
     AbacStatus, AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, AccessControlTranslation,
@@ -37,8 +38,9 @@ pub use crate::ops::shapes::{
     CsvOutput, DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication, DeletedObject, Destination, Encryption,
     EncryptionConfiguration, Error, ErrorDocument, EventBridgeConfiguration, ExistingObjectReplication, FilterRule,
     GetObjectAttributesParts, GlacierJobParameters, Grant, Grantee, IndexDocument, Initiator, InputSerialization,
-    IntelligentTieringAndOperator, IntelligentTieringConfiguration, IntelligentTieringFilter, JsonInput, JsonOutput,
-    LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
+    IntelligentTieringAndOperator, IntelligentTieringConfiguration, IntelligentTieringFilter, InventoryConfiguration,
+    InventoryDestination, InventoryEncryption, InventoryFilter, InventoryS3BucketDestination, InventorySchedule, JsonInput,
+    JsonOutput, LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
     LoggingEnabled, MetadataEntry, Metrics, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
     NotificationConfiguration, NotificationConfigurationFilter, Object, ObjectIdentifier, ObjectLockConfiguration,
     ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, OutputLocation, OutputSerialization,
@@ -47,8 +49,8 @@ pub use crate::ops::shapes::{
     ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationTime,
     ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest, RestoreStatus, RoutingRule, S3KeyFilter,
     S3Location, ScanRange, SelectParameters, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
-    ServerSideEncryptionRule, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects, Tag, Tagging, TargetGrant,
-    TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition, VersioningConfiguration, WebsiteConfiguration,
+    ServerSideEncryptionRule, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects, Ssekms, Sses3, Tag, Tagging,
+    TargetGrant, TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition, VersioningConfiguration, WebsiteConfiguration,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -139,6 +141,10 @@ pub use crate::ops::get_bucket_intelligent_tiering_configuration::{
     GetBucketIntelligentTieringConfiguration, Input as GetBucketIntelligentTieringConfigurationInput,
     InputBuilder as GetBucketIntelligentTieringConfigurationInputBuilder,
     Output as GetBucketIntelligentTieringConfigurationOutput,
+};
+pub use crate::ops::get_bucket_inventory_configuration::{
+    GetBucketInventoryConfiguration, Input as GetBucketInventoryConfigurationInput,
+    InputBuilder as GetBucketInventoryConfigurationInputBuilder, Output as GetBucketInventoryConfigurationOutput,
 };
 pub use crate::ops::get_bucket_lifecycle_configuration::{
     GetBucketLifecycleConfiguration, Input as GetBucketLifecycleConfigurationInput,
@@ -235,6 +241,10 @@ pub use crate::ops::list_bucket_intelligent_tiering_configurations::{
     Input as ListBucketIntelligentTieringConfigurationsInput,
     InputBuilder as ListBucketIntelligentTieringConfigurationsInputBuilder, ListBucketIntelligentTieringConfigurations,
     Output as ListBucketIntelligentTieringConfigurationsOutput,
+};
+pub use crate::ops::list_bucket_inventory_configurations::{
+    Input as ListBucketInventoryConfigurationsInput, InputBuilder as ListBucketInventoryConfigurationsInputBuilder,
+    ListBucketInventoryConfigurations, Output as ListBucketInventoryConfigurationsOutput,
 };
 pub use crate::ops::list_buckets::{
     Input as ListBucketsInput, InputBuilder as ListBucketsInputBuilder, ListBuckets, Output as ListBucketsOutput,

@@ -8,12 +8,10 @@
 # Regenerate: GATEWAY_WRITE_ROUTE_ALLOWANCES=1 scripts/check_route_coverage.sh
 CreateSession -> ListObjects
 GetBucketAnalyticsConfiguration -> ListObjects
-GetBucketInventoryConfiguration -> ListObjects
 GetBucketMetadataConfiguration -> ListObjects
 GetBucketMetadataTableConfiguration -> ListObjects
 GetBucketMetricsConfiguration -> ListObjects
 ListBucketAnalyticsConfigurations -> ListObjects
-ListBucketInventoryConfigurations -> ListObjects
 ListBucketMetricsConfigurations -> ListObjects
 ListDirectoryBuckets -> ListBuckets
 PutObjectAnnotation -> PutObject
