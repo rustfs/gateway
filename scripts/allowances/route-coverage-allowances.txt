@@ -9,13 +9,11 @@
 CreateSession -> ListObjects
 GetBucketAbac -> ListObjects
 GetBucketAnalyticsConfiguration -> ListObjects
-GetBucketIntelligentTieringConfiguration -> ListObjects
 GetBucketInventoryConfiguration -> ListObjects
 GetBucketMetadataConfiguration -> ListObjects
 GetBucketMetadataTableConfiguration -> ListObjects
 GetBucketMetricsConfiguration -> ListObjects
 ListBucketAnalyticsConfigurations -> ListObjects
-ListBucketIntelligentTieringConfigurations -> ListObjects
 ListBucketInventoryConfigurations -> ListObjects
 ListBucketMetricsConfigurations -> ListObjects
 ListDirectoryBuckets -> ListBuckets

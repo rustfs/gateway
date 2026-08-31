@@ -74,6 +74,8 @@ GetBucketCorsInput 2
 GetBucketCorsOutput 1
 GetBucketEncryptionInput 2
 GetBucketEncryptionOutput 1
+GetBucketIntelligentTieringConfigurationInput 3
+GetBucketIntelligentTieringConfigurationOutput 1
 GetBucketLifecycleConfigurationInput 2
 GetBucketLifecycleConfigurationOutput 2
 GetBucketLocationInput 2
@@ -129,6 +131,9 @@ HeadObjectOutput 43
 IndexDocument 1
 Initiator 2
 InputSerialization 4
+IntelligentTieringAndOperator 2
+IntelligentTieringConfiguration 4
+IntelligentTieringFilter 3
 JsonInput 1
 JsonOutput 1
 LambdaFunctionConfiguration 4
@@ -136,6 +141,8 @@ LifecycleExpiration 3
 LifecycleRule 9
 LifecycleRuleAndOperator 4
 LifecycleRuleFilter 5
+ListBucketIntelligentTieringConfigurationsInput 3
+ListBucketIntelligentTieringConfigurationsOutput 4
 ListBucketsInput 4
 ListBucketsOutput 4
 ListMultipartUploadsInput 9
@@ -251,6 +258,7 @@ Tag 2
 Tagging 1
 TargetGrant 2
 TargetObjectKeyFormat 2
+Tiering 2
 TopicConfiguration 4
 Transition 3
 UploadPartCopyInput 19
