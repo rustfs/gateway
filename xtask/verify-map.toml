@@ -85,6 +85,10 @@ name = "GetBucketAcl"
 cases = "c-acl-0001,c-acl-0004,c-acl-0028,c-acl-0034"
 
 [[operation]]
+name = "GetBucketAnalyticsConfiguration"
+cases = ""
+
+[[operation]]
 name = "GetBucketCors"
 cases = "c-cors-0002,c-cors-0012,c-cors-0025,c-sig-0505"
 
@@ -195,6 +199,10 @@ cases = "c-bkt-0008,c-bkt-0009,c-bkt-0025,c-bkt-0026"
 [[operation]]
 name = "HeadObject"
 cases = "c-object-0002,c-object-0008,c-object-0018,c-object-0028,c-object-0038,c-select-restore-0004,c-select-restore-0005,c-select-restore-0019"
+
+[[operation]]
+name = "ListBucketAnalyticsConfigurations"
+cases = ""
 
 [[operation]]
 name = "ListBucketIntelligentTieringConfigurations"

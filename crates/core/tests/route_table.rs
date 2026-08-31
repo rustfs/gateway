@@ -2579,3 +2579,50 @@ fn list_directory_buckets_uses_the_express_service_authorization_contract() {
         SigService::S3Express
     );
 }
+
+// ── Bucket analytics reads ──────────────────────────────────────────────────────
+
+/// The id-bearing selector chooses one analytics configuration while the bare key lists them.
+#[test]
+fn analytics_reads_route_ahead_of_list_objects() {
+    let table = generated_table();
+    for (line, operation) in [
+        ("GET /bucket?analytics&id=archive", "GetBucketAnalyticsConfiguration"),
+        ("GET /bucket?analytics", "ListBucketAnalyticsConfigurations"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(operation), "{line}");
+    }
+}
+
+/// Negative controls keep plain listing, object targets, nearby keys and other methods outside both rows.
+#[test]
+fn n_analytics_reads_do_not_claim_neighbour_controls() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket")), Some("ListObjects"));
+    assert_ne!(
+        routed(&table, &Req::new("GET /bucket?analytics")),
+        Some("GetBucketAnalyticsConfiguration")
+    );
+    for line in [
+        "GET /bucket/key?analytics&id=archive",
+        "GET /bucket?analytics-report&id=archive",
+        "HEAD /bucket?analytics&id=archive",
+        "PUT /bucket?analytics&id=archive",
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some("GetBucketAnalyticsConfiguration"), "{line}");
+        assert_ne!(routed(&table, &Req::new(line)), Some("ListBucketAnalyticsConfigurations"), "{line}");
+    }
+}
+
+/// Both read forms use the one bucket-level IAM action assigned to this configuration family.
+#[test]
+fn analytics_reads_share_the_get_configuration_authorization_contract() {
+    for spec in [
+        <rustfs_gateway_types::dto::GetBucketAnalyticsConfiguration as Operation>::spec(),
+        <rustfs_gateway_types::dto::ListBucketAnalyticsConfigurations as Operation>::spec(),
+    ] {
+        let auth = spec.auth.expect("both analytics reads declare authorization");
+        assert_eq!(auth.action, "s3:GetAnalyticsConfiguration", "{}", spec.name);
+        assert_eq!(auth.resource, ResourceShape::Bucket, "{}", spec.name);
+    }
+}

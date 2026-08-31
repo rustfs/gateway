@@ -16,12 +16,14 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/ops/get_object_torrent.rs` | Reserves a torrent descriptor read independently of the parent object body. | A torrent GET routes to GetObject or declares the wrong authorization floor. |
 | `src/ops/get_bucket_ownership_controls.rs` | Reserves an ownership-controls read independently of bucket object listing. | An ownership-controls GET routes to ListObjects or declares the wrong authorization floor. |
 | `src/ops/get_bucket_abac.rs` | Reserves an ABAC status read independently of bucket object listing. | An ABAC GET routes to ListObjects or declares the wrong authorization floor. |
+| `src/ops/get_bucket_analytics_configuration.rs` | Reserves one named analytics-configuration read independently of bucket object listing. | An id-bearing analytics GET routes to ListObjects or declares the wrong authorization floor. |
 | `src/ops/get_bucket_intelligent_tiering_configuration.rs` | Reserves one named tiering-configuration read independently of bucket object listing. | An id-bearing intelligent-tiering GET routes to ListObjects or declares the wrong authorization floor. |
 | `src/ops/get_bucket_inventory_configuration.rs` | Reserves one named inventory-configuration read independently of bucket object listing. | An id-bearing inventory GET routes to ListObjects or declares the wrong authorization floor. |
 | `src/ops/list_bucket_intelligent_tiering_configurations.rs` | Reserves tiering-configuration listing independently of bucket object listing. | A bare intelligent-tiering GET routes to ListObjects or declares the wrong authorization floor. |
 | `src/ops/list_bucket_inventory_configurations.rs` | Reserves inventory-configuration listing independently of bucket object listing. | A bare inventory GET routes to ListObjects or declares the wrong authorization floor. |
 | `src/ops/list_directory_buckets.rs` | Reserves directory-bucket listing independently of ordinary account bucket listing. | An S3 Express control GET routes to ListBuckets or uses the S3 signature floor. |
 | `src/ops/list_object_annotations.rs` | Reserves annotation metadata listing independently of the parent object body. | An annotation listing routes to GetObject or declares the wrong authorization floor. |
+| `src/ops/list_bucket_analytics_configurations.rs` | Reserves analytics-configuration listing independently of bucket object listing. | A bare analytics GET routes to ListObjects or declares the wrong authorization floor. |
 | `src/ops/rename_object.rs` | Reserves the directory-bucket rename contract independently of backend registration. | A rename request routes to PutObject or declares the wrong authorization floor. |
 | `src/ops/shared/` | Explicit cross-operation protocol logic. | A list/copy/conditional/ACL/checksum rule affects several operations. |
 | `src/route/mod.rs` | Routing module map and pre-auth invariant. | Start a routing task. |
