@@ -321,6 +321,15 @@
                                                                 "error_codes": ["NoSuchBucket", "AccessDenied"],
                                                                 "precedence": 272
                                                               },
+                  "GetBucketInventoryConfiguration": {
+                                                       "method": "GET",
+                                                       "path_shape": "/{Bucket}",
+                                                       "query_keys": ["id", "inventory"],
+                                                       "key_headers": [],
+                                                       "host_classes": [],
+                                                       "error_codes": ["NoSuchBucket", "AccessDenied"],
+                                                       "precedence": 277
+                                                     },
                   "GetBucketLifecycleConfiguration": {
                                                        "method": "GET",
                                                        "path_shape": "/{Bucket}",
@@ -642,6 +651,15 @@
                                                                   "error_codes": ["NoSuchBucket", "AccessDenied"],
                                                                   "precedence": 273
                                                                 },
+                  "ListBucketInventoryConfigurations": {
+                                                         "method": "GET",
+                                                         "path_shape": "/{Bucket}",
+                                                         "query_keys": ["continuation-token", "inventory"],
+                                                         "key_headers": [],
+                                                         "host_classes": [],
+                                                         "error_codes": ["NoSuchBucket", "AccessDenied"],
+                                                         "precedence": 278
+                                                       },
                   "ListBuckets": {
                                    "method": "GET",
                                    "path_shape": "/",
@@ -1203,6 +1221,7 @@
                           "GetBucketCors",
                           "GetBucketEncryption",
                           "GetBucketIntelligentTieringConfiguration",
+                          "GetBucketInventoryConfiguration",
                           "GetBucketLifecycleConfiguration",
                           "GetBucketLocation",
                           "GetBucketLogging",
@@ -1226,6 +1245,7 @@
                           "GetObjectTorrent",
                           "GetPublicAccessBlock",
                           "ListBucketIntelligentTieringConfigurations",
+                          "ListBucketInventoryConfigurations",
                           "ListBuckets",
                           "ListMultipartUploads",
                           "ListObjectAnnotations",
@@ -1290,6 +1310,7 @@
                                     "GetBucketCors",
                                     "GetBucketEncryption",
                                     "GetBucketIntelligentTieringConfiguration",
+                                    "GetBucketInventoryConfiguration",
                                     "GetBucketLifecycleConfiguration",
                                     "GetBucketLocation",
                                     "GetBucketLogging",
@@ -1306,6 +1327,7 @@
                                     "GetPublicAccessBlock",
                                     "HeadBucket",
                                     "ListBucketIntelligentTieringConfigurations",
+                                    "ListBucketInventoryConfigurations",
                                     "ListMultipartUploads",
                                     "ListObjectVersions",
                                     "ListObjects",
@@ -1392,6 +1414,7 @@
                     "bucket-region": ["ListBuckets"],
                     "continuation-token": [
                                             "ListBucketIntelligentTieringConfigurations",
+                                            "ListBucketInventoryConfigurations",
                                             "ListBuckets",
                                             "ListObjectAnnotations",
                                             "ListObjectsV2"
@@ -1408,14 +1431,19 @@
                                     "PutBucketEncryption"
                                   ],
                     "fetch-owner": ["ListObjectsV2"],
-                    "id": ["GetBucketIntelligentTieringConfiguration"],
+                    "id": ["GetBucketIntelligentTieringConfiguration", "GetBucketInventoryConfiguration"],
                     "intelligent-tiering": [
                                              "CreateBucket",
                                              "DeleteBucket",
                                              "GetBucketIntelligentTieringConfiguration",
                                              "ListBucketIntelligentTieringConfigurations"
                                            ],
-                    "inventory": ["CreateBucket", "DeleteBucket"],
+                    "inventory": [
+                                   "CreateBucket",
+                                   "DeleteBucket",
+                                   "GetBucketInventoryConfiguration",
+                                   "ListBucketInventoryConfigurations"
+                                 ],
                     "key-marker": ["ListMultipartUploads", "ListObjectVersions"],
                     "legal-hold": [
                                     "GetObjectAnnotation",
@@ -1595,6 +1623,7 @@
                                        "GetBucketCors",
                                        "GetBucketEncryption",
                                        "GetBucketIntelligentTieringConfiguration",
+                                       "GetBucketInventoryConfiguration",
                                        "GetBucketLifecycleConfiguration",
                                        "GetBucketLocation",
                                        "GetBucketLogging",
@@ -1619,6 +1648,7 @@
                                        "HeadBucket",
                                        "HeadObject",
                                        "ListBucketIntelligentTieringConfigurations",
+                                       "ListBucketInventoryConfigurations",
                                        "ListBuckets",
                                        "ListMultipartUploads",
                                        "ListObjectVersions",
@@ -1816,6 +1846,7 @@
                                        "GetBucketCors",
                                        "GetBucketEncryption",
                                        "GetBucketIntelligentTieringConfiguration",
+                                       "GetBucketInventoryConfiguration",
                                        "GetBucketLifecycleConfiguration",
                                        "GetBucketLocation",
                                        "GetBucketLogging",
@@ -1841,6 +1872,7 @@
                                        "HeadBucket",
                                        "HeadObject",
                                        "ListBucketIntelligentTieringConfigurations",
+                                       "ListBucketInventoryConfigurations",
                                        "ListMultipartUploads",
                                        "ListObjectAnnotations",
                                        "ListObjectVersions",
@@ -1971,6 +2003,8 @@
                      "272": ["GetBucketIntelligentTieringConfiguration"],
                      "273": ["ListBucketIntelligentTieringConfigurations"],
                      "276": ["GetBucketAbac"],
+                     "277": ["GetBucketInventoryConfiguration"],
+                     "278": ["ListBucketInventoryConfigurations"],
                      "300": ["GetBucketLocation"],
                      "310": ["GetBucketCors"],
                      "320": ["PutBucketCors"],

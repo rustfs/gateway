@@ -1444,3 +1444,28 @@ fn n_unhandled_get_bucket_abac_is_refused_instead_of_dispatching_list_objects() 
         .expect("the registered ListObjects neighbour remains served");
     assert_eq!(plain.entry.op_name, "ListObjects");
 }
+
+/// Unhandled inventory reads are refused by name instead of returning listed object keys.
+#[test]
+fn n_unhandled_inventory_reads_are_refused_instead_of_dispatching_list_objects() {
+    let mut registry = Registry::new();
+    registry.register(&LIST_OBJECTS).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, operation) in [
+        ("GET /bucket?inventory&id=archive", "GetBucketInventoryConfiguration"),
+        ("GET /bucket?inventory", "ListBucketInventoryConfigurations"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("the inventory handler is absent");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(operation), "{line}");
+    }
+
+    let plain = router
+        .dispatch(&Req::new("GET /bucket").parts())
+        .expect("the registered ListObjects neighbour remains served");
+    assert_eq!(plain.entry.op_name, "ListObjects");
+}

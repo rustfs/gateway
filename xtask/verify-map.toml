@@ -97,6 +97,10 @@ name = "GetBucketIntelligentTieringConfiguration"
 cases = ""
 
 [[operation]]
+name = "GetBucketInventoryConfiguration"
+cases = ""
+
+[[operation]]
 name = "GetBucketLifecycleConfiguration"
 cases = "c-lifecycle-0002,c-lifecycle-0003,c-lifecycle-0004,c-lifecycle-0005,c-lifecycle-0006,c-lifecycle-0007,c-lifecycle-0013,c-lifecycle-0037,c-lifecycle-0039"
 
@@ -194,6 +198,10 @@ cases = "c-object-0002,c-object-0008,c-object-0018,c-object-0028,c-object-0038,c
 
 [[operation]]
 name = "ListBucketIntelligentTieringConfigurations"
+cases = ""
+
+[[operation]]
+name = "ListBucketInventoryConfigurations"
 cases = ""
 
 [[operation]]

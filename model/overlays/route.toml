@@ -246,6 +246,14 @@ summary = "ListBucketIntelligentTieringConfigurations is a bucket GET selected b
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAbac.html"
 summary = "GetBucketAbac is selected by the ?abac subresource on a general-purpose bucket GET and returns one access-control status rather than object keys."
 
+[evidence.get-bucket-inventory-configuration]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketInventoryConfiguration.html"
+summary = "GetBucketInventoryConfiguration is selected by ?inventory with a required id on a bucket GET and returns one configuration rather than object keys."
+
+[evidence.list-bucket-inventory-configurations]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBucketInventoryConfigurations.html"
+summary = "ListBucketInventoryConfigurations is selected by bare ?inventory on a bucket GET and returns configuration metadata rather than object keys."
+
 [evidence.get-public-access-block]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetPublicAccessBlock.html"
 summary = "GetPublicAccessBlock is selected by the ?publicAccessBlock subresource alone and answers with the four stored switches."
@@ -3130,6 +3138,312 @@ winner = "ListBucketIntelligentTieringConfigurations"
 shadowed = "ListObjects"
 reason = "ListObjects pins no query key, so every intelligent-tiering configuration list request satisfies it too. The subresource row wins at 273 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
 evidence = ["list-bucket-intelligent-tiering-configurations", "list-objects"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "GetBucketInventoryConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "get-bucket-inventory-configuration"]
+
+[[shadowing]]
+winner = "GetBucketAccelerateConfiguration"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-accelerate-configuration", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketLogging"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-logging", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketNotificationConfiguration"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-notification-configuration", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketPolicy"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketPolicyStatus"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-policy-status", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetPublicAccessBlock"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-public-access-block", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketRequestPayment"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-request-payment", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketVersioning"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-versioning", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketWebsite"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-website", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketAcl"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-acl", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketOwnershipControls"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-ownership-controls", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketIntelligentTieringConfiguration"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-intelligent-tiering-configuration", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "ListBucketIntelligentTieringConfigurations"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-intelligent-tiering-configurations", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketAbac"
+shadowed = "ListBucketInventoryConfigurations"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-abac", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "ListBucketInventoryConfigurations"
+reason = "Both rows name ?inventory, but only the single-configuration read requires id. The id-bearing row wins at 277 before the bare list at 278; without id the get row does not match."
+evidence = ["get-bucket-inventory-configuration", "list-bucket-inventory-configurations"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "get-bucket-location"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "list-objects-v2"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["get-bucket-inventory-configuration", "list-object-versions"]
+
+[[shadowing]]
+winner = "GetBucketInventoryConfiguration"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so every named inventory read request satisfies it too. The subresource row wins at 277 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["get-bucket-inventory-configuration", "list-objects"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "GetBucketLocation"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "get-bucket-location"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "GetBucketCors"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "get-bucket-cors"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "GetBucketTagging"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "get-bucket-tagging"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "GetBucketLifecycleConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "get-bucket-lifecycle-configuration"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "GetBucketEncryption"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "get-bucket-encryption"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "GetBucketReplication"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "get-bucket-replication"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "GetObjectLockConfiguration"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "get-object-lock-configuration"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "ListMultipartUploads"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "list-multipart-uploads"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "ListObjectsV2"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "list-objects-v2"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "ListObjectVersions"
+reason_ref = "two-subresource-keys"
+evidence = ["list-bucket-inventory-configurations", "list-object-versions"]
+
+[[shadowing]]
+winner = "ListBucketInventoryConfigurations"
+shadowed = "ListObjects"
+reason = "ListObjects pins no query key, so every inventory configuration list request satisfies it too. The subresource row wins at 278 before the listing fallback at 700; the reverse order exposes object keys under the wrong operation contract."
+evidence = ["list-bucket-inventory-configurations", "list-objects"]
 
 [[shadowing]]
 winner = "GetBucketAccelerateConfiguration"
