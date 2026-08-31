@@ -11,7 +11,7 @@ it, and `cargo xtask spec verify` fails when either has drifted from it.
 There is no fallback row. A code with no entry here has no constant and no status, and
 reaches the wire only through `ErrorCode::custom`, which makes its caller name the status.
 
-114 codes: 3 redirect, 107 client, 4 server.
+116 codes: 3 redirect, 109 client, 4 server.
 
 ## The 5xx allowlist
 
@@ -37,9 +37,9 @@ The other direction: what a status can mean when a client sees it.
 | 301 | redirect | `PermanentRedirect` |
 | 304 | redirect | `NotModified` |
 | 307 | redirect | `TemporaryRedirect` |
-| 400 | client | `AmbiguousGrantByEmailAddress`, `AuthorizationHeaderMalformed`, `AuthorizationQueryParametersError`, `BadDigest`, `CSVParsingError`, `CredentialsNotSupported`, `EncryptionTypeMismatch`, `EntityTooLarge`, `EntityTooSmall`, `ExpiredToken`, `ExpressionTooLong`, `IdempotencyParameterMismatch`, `IllegalVersioningConfigurationException`, `IncompleteBody`, `IncorrectNumberOfFilesInPostRequest`, `InlineDataTooLarge`, `InvalidArgument`, `InvalidBucketName`, `InvalidChunkSizeError`, `InvalidColumnIndex`, `InvalidCompressionFormat`, `InvalidDataType`, `InvalidDigest`, `InvalidEncryptionAlgorithmError`, `InvalidExpressionType`, `InvalidLocationConstraint`, `InvalidPart`, `InvalidPartNumber`, `InvalidPartOrder`, `InvalidPolicyDocument`, `InvalidRequest`, `InvalidRetentionPeriod`, `InvalidSOAPRequest`, `InvalidStorageClass`, `InvalidTag`, `InvalidTargetBucketForLogging`, `InvalidTextEncoding`, `InvalidToken`, `InvalidURI`, `InvalidWriteOffset`, `JSONParsingError`, `KeyTooLongError`, `MalformedACLError`, `MalformedPOSTRequest`, `MalformedPolicy`, `MalformedXML`, `MaxMessageLengthExceeded`, `MaxPostPreDataLengthExceededError`, `MetadataTooLarge`, `MissingRequestBodyError`, `MissingSecurityElement`, `MissingSecurityHeader`, `NoLoggingStatusForKey`, `ObjectSerializationConflict`, `OverMaxRecordSize`, `ParseUnexpectedToken`, `RequestIsNotMultiPartContent`, `RequestTimeout`, `TokenRefreshRequired`, `TooManyBuckets`, `TooManyParts`, `UnexpectedContent`, `UnresolvableGrantByEmailAddress`, `UnsupportedFunction`, `UserKeyMustBeSpecified`, `XAmzContentChecksumMismatch`, `XAmzContentSHA256Mismatch` |
+| 400 | client | `AmbiguousGrantByEmailAddress`, `AuthorizationHeaderMalformed`, `AuthorizationQueryParametersError`, `BadDigest`, `CSVParsingError`, `CredentialsNotSupported`, `EncryptionTypeMismatch`, `EntityTooLarge`, `EntityTooSmall`, `ExpiredToken`, `ExpressionTooLong`, `IdempotencyParameterMismatch`, `IllegalVersioningConfigurationException`, `IncompleteBody`, `IncorrectNumberOfFilesInPostRequest`, `InlineDataTooLarge`, `InvalidArgument`, `InvalidBucketName`, `InvalidChunkSizeError`, `InvalidColumnIndex`, `InvalidCompressionFormat`, `InvalidDataType`, `InvalidDigest`, `InvalidEncryptionAlgorithmError`, `InvalidExpressionType`, `InvalidLocationConstraint`, `InvalidPart`, `InvalidPartNumber`, `InvalidPartOrder`, `InvalidPolicyDocument`, `InvalidPrefix`, `InvalidRequest`, `InvalidRetentionPeriod`, `InvalidSOAPRequest`, `InvalidStorageClass`, `InvalidTag`, `InvalidTargetBucketForLogging`, `InvalidTextEncoding`, `InvalidToken`, `InvalidURI`, `InvalidWriteOffset`, `JSONParsingError`, `KeyTooLongError`, `MalformedACLError`, `MalformedPOSTRequest`, `MalformedPolicy`, `MalformedXML`, `MaxMessageLengthExceeded`, `MaxPostPreDataLengthExceededError`, `MetadataTooLarge`, `MissingRequestBodyError`, `MissingSecurityElement`, `MissingSecurityHeader`, `NoLoggingStatusForKey`, `ObjectSerializationConflict`, `OverMaxRecordSize`, `ParseUnexpectedToken`, `RequestIsNotMultiPartContent`, `RequestTimeout`, `TokenRefreshRequired`, `TooManyBuckets`, `TooManyParts`, `UnexpectedContent`, `UnresolvableGrantByEmailAddress`, `UnsupportedFunction`, `UserKeyMustBeSpecified`, `XAmzContentChecksumMismatch`, `XAmzContentSHA256Mismatch` |
 | 403 | client | `AccessDenied`, `AccessForbidden`, `AccountProblem`, `AllAccessDisabled`, `CrossLocationLoggingProhibited`, `InvalidAccessKeyId`, `InvalidObjectState`, `InvalidPayer`, `InvalidSecurity`, `NotSignedUp`, `ObjectAlreadyInActiveTierError`, `ObjectNotInActiveTierError`, `RequestTimeTooSkewed`, `SignatureDoesNotMatch` |
-| 404 | client | `NoSuchBucket`, `NoSuchBucketPolicy`, `NoSuchCORSConfiguration`, `NoSuchKey`, `NoSuchLifecycleConfiguration`, `NoSuchObjectLockConfiguration`, `NoSuchPublicAccessBlockConfiguration`, `NoSuchTagSet`, `NoSuchUpload`, `NoSuchVersion`, `NoSuchWebsiteConfiguration`, `NotFound`, `ObjectLockConfigurationNotFoundError`, `ReplicationConfigurationNotFoundError`, `ServerSideEncryptionConfigurationNotFoundError` |
+| 404 | client | `NoSuchAnnotation`, `NoSuchBucket`, `NoSuchBucketPolicy`, `NoSuchCORSConfiguration`, `NoSuchKey`, `NoSuchLifecycleConfiguration`, `NoSuchObjectLockConfiguration`, `NoSuchPublicAccessBlockConfiguration`, `NoSuchTagSet`, `NoSuchUpload`, `NoSuchVersion`, `NoSuchWebsiteConfiguration`, `NotFound`, `ObjectLockConfigurationNotFoundError`, `ReplicationConfigurationNotFoundError`, `ServerSideEncryptionConfigurationNotFoundError` |
 | 405 | client | `MethodNotAllowed` |
 | 409 | client | `BucketAlreadyExists`, `BucketAlreadyOwnedByYou`, `BucketNotEmpty`, `ConditionalRequestConflict`, `InvalidBucketState`, `OperationAborted`, `RestoreAlreadyInProgress` |
 | 411 | client | `MissingContentLength` |
@@ -97,6 +97,7 @@ The other direction: what a status can mean when a client sees it.
 | `InvalidPartOrder` | 400 | `ErrorCode::INVALID_PART_ORDER` | — |
 | `InvalidPayer` | 403 | `ErrorCode::INVALID_PAYER` | — |
 | `InvalidPolicyDocument` | 400 | `ErrorCode::INVALID_POLICY_DOCUMENT` | — |
+| `InvalidPrefix` | 400 | `ErrorCode::INVALID_PREFIX` | — |
 | `InvalidRange` | 416 | `ErrorCode::INVALID_RANGE` | The requested range cannot be satisfied at all. A range that merely runs past the end is clamped and answered with 206 instead. |
 | `InvalidRequest` | 400 | `ErrorCode::INVALID_REQUEST` | The general-purpose rejection, and the fallback for a code with no table row. |
 | `InvalidRetentionPeriod` | 400 | `ErrorCode::INVALID_RETENTION_PERIOD` | — |
@@ -124,6 +125,7 @@ The other direction: what a status can mean when a client sees it.
 | `MissingSecurityElement` | 400 | `ErrorCode::MISSING_SECURITY_ELEMENT` | — |
 | `MissingSecurityHeader` | 400 | `ErrorCode::MISSING_SECURITY_HEADER` | — |
 | `NoLoggingStatusForKey` | 400 | `ErrorCode::NO_LOGGING_STATUS_FOR_KEY` | — |
+| `NoSuchAnnotation` | 404 | `ErrorCode::NO_SUCH_ANNOTATION` | — |
 | `NoSuchBucket` | 404 | `ErrorCode::NO_SUCH_BUCKET` | — |
 | `NoSuchBucketPolicy` | 404 | `ErrorCode::NO_SUCH_BUCKET_POLICY` | — |
 | `NoSuchCORSConfiguration` | 404 | `ErrorCode::NO_SUCH_CORS_CONFIGURATION` | — |

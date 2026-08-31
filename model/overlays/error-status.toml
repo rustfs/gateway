@@ -197,6 +197,11 @@ constant = "INVALID_POLICY_DOCUMENT"
 status = 400
 
 [[code]]
+name = "InvalidPrefix"
+constant = "INVALID_PREFIX"
+status = 400
+
+[[code]]
 name = "InvalidRequest"
 constant = "INVALID_REQUEST"
 status = 400
@@ -529,6 +534,11 @@ status = 403
 note = ["A copy whose source is still in an archive tier. A 403, not a 409."]
 
 # ── 404 ───────────────────────────────────────────────────────────────────────────────────
+[[code]]
+name = "NoSuchAnnotation"
+constant = "NO_SUCH_ANNOTATION"
+status = 404
+
 [[code]]
 name = "NoSuchBucket"
 constant = "NO_SUCH_BUCKET"

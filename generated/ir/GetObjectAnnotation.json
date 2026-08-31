@@ -1,0 +1,298 @@
+{
+  "ir_version": "2",
+  "operation": "GetObjectAnnotation",
+  "http": {
+            "method": "GET",
+            "target": "Object",
+            "precedence": 591,
+            "predicates": [
+                            { "kind": "Method", "method": "GET" },
+                            { "kind": "Target", "target": "Object" },
+                            { "kind": "QueryPresent", "key": "annotation" },
+                            { "kind": "QueryPresent", "key": "annotationName" },
+                            { "kind": "QueryAbsent", "key": "acl" },
+                            { "kind": "QueryAbsent", "key": "attributes" },
+                            { "kind": "QueryAbsent", "key": "legal-hold" },
+                            { "kind": "QueryAbsent", "key": "retention" },
+                            { "kind": "QueryAbsent", "key": "tagging" },
+                            { "kind": "QueryAbsent", "key": "uploadId" }
+                          ],
+            "success_status": 200,
+            "alt_success_statuses": [],
+            "path_shape": "/{Bucket}/{Key+}"
+          },
+  "auth": { "requirement": "Required", "action": "s3:GetObjectAnnotation", "presigned_allowed": true, "service": "s3" },
+  "payload": {
+               "request": { "kind": "None", "buffering": "None", "max_bytes": null },
+               "response": { "kind": "StreamingBlob", "buffering": "Streaming", "max_bytes": null }
+             },
+  "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
+  "input": {
+             "fields": [
+                         {
+                           "name": "Bucket",
+                           "wire_name": "Bucket",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": false },
+                           "type": { "kind": "BucketName" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "Key",
+                           "wire_name": "Key",
+                           "required": true,
+                           "binding": { "kind": "UriLabel", "greedy": true },
+                           "type": { "kind": "ObjectKey" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "AnnotationName",
+                           "wire_name": "annotationName",
+                           "required": true,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "VersionId",
+                           "wire_name": "versionId",
+                           "required": false,
+                           "binding": { "kind": "Query" },
+                           "type": { "kind": "String" },
+                           "hot": true,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "RequestPayer",
+                           "wire_name": "x-amz-request-payer",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["requester"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ExpectedBucketOwner",
+                           "wire_name": "x-amz-expected-bucket-owner",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "String" },
+                           "hot": false,
+                           "quirk_refs": []
+                         },
+                         {
+                           "name": "ChecksumMode",
+                           "wire_name": "x-amz-checksum-mode",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": { "kind": "StringEnum", "values": ["ENABLED"] },
+                           "hot": false,
+                           "quirk_refs": []
+                         }
+                       ]
+           },
+  "output": {
+              "fields": [
+                          {
+                            "name": "AnnotationPayload",
+                            "wire_name": null,
+                            "required": false,
+                            "binding": { "kind": "Payload" },
+                            "type": { "kind": "Blob", "streaming": true },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ObjectVersionId",
+                            "wire_name": "x-amz-object-version-id",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "LastModified",
+                            "wire_name": "last-modified",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Timestamp", "format": "HttpDate" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ContentLength",
+                            "wire_name": "content-length",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Long" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ETag",
+                            "wire_name": "etag",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "ETag", "render": "HeaderQuoted" },
+                            "hot": true,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumCRC32",
+                            "wire_name": "x-amz-checksum-crc32",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumCRC32C",
+                            "wire_name": "x-amz-checksum-crc32c",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumCRC64NVME",
+                            "wire_name": "x-amz-checksum-crc64nvme",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumSHA1",
+                            "wire_name": "x-amz-checksum-sha1",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumSHA256",
+                            "wire_name": "x-amz-checksum-sha256",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumSHA512",
+                            "wire_name": "x-amz-checksum-sha512",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumMD5",
+                            "wire_name": "x-amz-checksum-md5",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumXXHASH64",
+                            "wire_name": "x-amz-checksum-xxhash64",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumXXHASH3",
+                            "wire_name": "x-amz-checksum-xxhash3",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumXXHASH128",
+                            "wire_name": "x-amz-checksum-xxhash128",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumType",
+                            "wire_name": "x-amz-checksum-type",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["COMPOSITE", "FULL_OBJECT"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ServerSideEncryption",
+                            "wire_name": "x-amz-server-side-encryption",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "RequestCharged",
+                            "wire_name": "x-amz-request-charged",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["requester"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ReplicationStatus",
+                            "wire_name": "x-amz-replication-status",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": {
+                                      "kind": "StringEnum",
+                                      "values": ["COMPLETE", "PENDING", "FAILED", "REPLICA", "COMPLETED"]
+                                    },
+                            "hot": false,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
+  "shapes": {},
+  "xml": {
+           "request_root": null,
+           "request_root_aliases": [],
+           "response_root": null,
+           "xmlns": "emit",
+           "unwrapped_output": false,
+           "element_order": [],
+           "empty_value_policy": {},
+           "url_encoded_fields": [],
+           "attributes": [],
+           "body_literal": false
+         },
+  "errors": {
+              "not_configured": null,
+              "allows_error_after_200": false,
+              "codes": ["NoSuchAnnotation", "NoSuchBucket", "NoSuchKey"]
+            },
+  "derived_resources": [],
+  "head_mirrors": null,
+  "quirk_refs": [],
+  "quirks": [],
+  "ext_points": []
+}

@@ -3594,6 +3594,24 @@ pub const SHADOWING: &[ShadowingDecl] = &[
         ],
     },
     ShadowingDecl {
+        winner: "GetObjectAnnotation",
+        shadowed: "GetObject",
+        reason: "A named annotation read is a GET to the object key plus ?annotation and annotationName, and GetObject accepts every such request. GetObjectAnnotation is tried first (591 before 900); the opposite order would disclose the parent object bytes under the wrong authorization action.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAnnotation.html — GetObjectAnnotation reads one named annotation through GET on an object key carrying ?annotation and the required annotationName query parameter, and returns the annotation payload rather than the object body.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html — an object read is the same method and path with no upload id.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "ListObjectAnnotations",
+        shadowed: "GetObject",
+        reason: "An annotation listing is a GET to the object key plus ?annotation without annotationName, and GetObject accepts every such request. ListObjectAnnotations is tried first (592 before 900); the opposite order would return the parent object body instead of annotation metadata.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectAnnotations.html — ListObjectAnnotations pages annotation metadata through GET on an object key carrying ?annotation without annotationName, and returns an XML listing rather than the object body.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html — an object read is the same method and path with no upload id.",
+        ],
+    },
+    ShadowingDecl {
         winner: "UploadPartCopy",
         shadowed: "PutObjectAcl",
         reason: "PUT /b/k?partNumber&uploadId&acl with x-amz-copy-source is a part copy that also names the ACL subresource. The multipart band (400) is tried before the ACL row (560), the same order the tagging and retention writes already keep.",

@@ -141,6 +141,10 @@ name = "GetObjectAcl"
 cases = "c-acl-0011,c-acl-0029,c-acl-0033"
 
 [[operation]]
+name = "GetObjectAnnotation"
+cases = ""
+
+[[operation]]
 name = "GetObjectAttributes"
 cases = "c-etag-0001"
 
@@ -179,6 +183,10 @@ cases = "c-authz-0007,c-authz-1009,c-authz-1010,c-authz-1015,c-list-0015,c-list-
 [[operation]]
 name = "ListMultipartUploads"
 cases = "c-mpu-0011,c-mpu-0012,c-mpu-0013,c-mpu-0047"
+
+[[operation]]
+name = "ListObjectAnnotations"
+cases = ""
 
 [[operation]]
 name = "ListObjectVersions"

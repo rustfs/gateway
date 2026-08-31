@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `ServerSideEncryption` string enumeration. Bound by: CompleteMultipartUpload, CopyObject, CreateMultipartUpload, GetObject, HeadObject, PutObject, UploadPart, UploadPartCopy.
+/// The `ServerSideEncryption` string enumeration. Bound by: CompleteMultipartUpload, CopyObject, CreateMultipartUpload, GetObject, GetObjectAnnotation, HeadObject, PutObject, UploadPart, UploadPartCopy.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`ServerSideEncryption::custom`]. Adding a constant is a minor version

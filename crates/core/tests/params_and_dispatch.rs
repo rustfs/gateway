@@ -1334,3 +1334,28 @@ fn n_unhandled_delete_object_annotation_is_refused_instead_of_deleting_the_objec
         .expect("the registered DeleteObject neighbour remains served");
     assert_eq!(plain.entry.op_name, "DeleteObject");
 }
+
+/// Unhandled annotation reads are refused by name instead of returning the parent object body.
+#[test]
+fn n_unhandled_object_annotation_reads_are_refused_instead_of_dispatching_get_object() {
+    let mut registry = Registry::new();
+    registry.register(&GET_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    for (line, operation) in [
+        ("GET /bucket/key?annotation&annotationName=name", "GetObjectAnnotation"),
+        ("GET /bucket/key?annotation", "ListObjectAnnotations"),
+    ] {
+        let error = router
+            .dispatch(&Req::new(line).parts())
+            .expect_err("this registry has no object-annotation read handler");
+        assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED, "{line}");
+        assert_eq!(error.message(), NOT_REGISTERED_MESSAGE, "{line}");
+        assert_eq!(error.operation(), Some(operation), "{line}");
+    }
+
+    let plain = router
+        .dispatch(&Req::new("GET /bucket/key").parts())
+        .expect("the registered GetObject neighbour remains served");
+    assert_eq!(plain.entry.op_name, "GetObject");
+}

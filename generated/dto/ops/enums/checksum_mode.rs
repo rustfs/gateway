@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `ChecksumMode` string enumeration. Bound by: GetObject, HeadObject.
+/// The `ChecksumMode` string enumeration. Bound by: GetObject, GetObjectAnnotation, HeadObject.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`ChecksumMode::custom`]. Adding a constant is a minor version

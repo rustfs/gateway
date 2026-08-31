@@ -198,6 +198,10 @@ summary = "GetBucketWebsite is selected by the ?website subresource alone and an
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
 summary = "an object read is the same method and path with no upload id."
 
+[evidence.get-object-annotation]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAnnotation.html"
+summary = "GetObjectAnnotation reads one named annotation through GET on an object key carrying ?annotation and the required annotationName query parameter, and returns the annotation payload rather than the object body."
+
 [evidence.get-object-acl]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectAcl.html"
 summary = "an ACL read is a GET to the object key carrying the ?acl subresource, and it answers with the access control policy rather than with the object."
@@ -233,6 +237,10 @@ summary = "ListMultipartUploads is selected by the ?uploads subresource and defi
 [evidence.list-object-versions]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html"
 summary = "ListObjectVersions is selected by the ?versions subresource and ignores query keys it does not define."
+
+[evidence.list-object-annotations]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectAnnotations.html"
+summary = "ListObjectAnnotations pages annotation metadata through GET on an object key carrying ?annotation without annotationName, and returns an XML listing rather than the object body."
 
 [evidence.list-objects]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html"
@@ -2724,6 +2732,18 @@ winner   = "GetObjectAcl"
 shadowed = "GetObject"
 reason   = "An ACL read is a GET to the object key plus ?acl, and GetObject accepts every such request. GetObjectAcl is tried first (550 before 900). The other order is the GetObjectAcl -> GetObject line the debt register carried: a caller asking who may read an object is handed the object's bytes instead."
 evidence = ["get-object-acl", "get-object"]
+
+[[shadowing]]
+winner   = "GetObjectAnnotation"
+shadowed = "GetObject"
+reason   = "A named annotation read is a GET to the object key plus ?annotation and annotationName, and GetObject accepts every such request. GetObjectAnnotation is tried first (591 before 900); the opposite order would disclose the parent object bytes under the wrong authorization action."
+evidence = ["get-object-annotation", "get-object"]
+
+[[shadowing]]
+winner   = "ListObjectAnnotations"
+shadowed = "GetObject"
+reason   = "An annotation listing is a GET to the object key plus ?annotation without annotationName, and GetObject accepts every such request. ListObjectAnnotations is tried first (592 before 900); the opposite order would return the parent object body instead of annotation metadata."
+evidence = ["list-object-annotations", "get-object"]
 
 [[shadowing]]
 winner   = "UploadPartCopy"

@@ -2328,3 +2328,32 @@ fn n_delete_object_annotation_does_not_claim_neighbour_controls() {
         Some("DeleteObjectTagging")
     );
 }
+
+// ── GetObjectAnnotation / ListObjectAnnotations ─────────────────────────────────────────────
+
+/// A named annotation read and an annotation listing each select their own operation.
+#[test]
+fn object_annotation_reads_route_ahead_of_get_object() {
+    let table = generated_table();
+    assert_eq!(
+        routed(&table, &Req::new("GET /bucket/key?annotation&annotationName=name")),
+        Some("GetObjectAnnotation")
+    );
+    assert_eq!(routed(&table, &Req::new("GET /bucket/key?annotation")), Some("ListObjectAnnotations"));
+}
+
+/// Negative controls keep the parent object read and unrelated shapes outside both rows.
+#[test]
+fn n_object_annotation_reads_do_not_claim_neighbour_controls() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("GET /bucket/key")), Some("GetObject"));
+    for line in [
+        "HEAD /bucket/key?annotation&annotationName=name",
+        "GET /bucket?annotation&annotationName=name",
+        "DELETE /bucket/key?annotation&annotationName=name",
+    ] {
+        let request = Req::new(line);
+        assert_ne!(routed(&table, &request), Some("GetObjectAnnotation"), "{line}");
+        assert_ne!(routed(&table, &request), Some("ListObjectAnnotations"), "{line}");
+    }
+}
