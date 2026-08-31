@@ -40,6 +40,11 @@ const EMPTY_KEY_FORMAT: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBu
 const SIMPLE_PREFIX: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetObjectKeyFormat><SimplePrefix></SimplePrefix></TargetObjectKeyFormat><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
 const PARTITIONED_PREFIX: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetObjectKeyFormat><PartitionedPrefix><PartitionDateSource>EventTime</PartitionDateSource></PartitionedPrefix></TargetObjectKeyFormat><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
 const FULL_GRANT: &[u8] = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetGrants><Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"CanonicalUser\"><DisplayName>delivery</DisplayName><ID>canonical-id</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></TargetGrants><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>";
+const NEW_WRITER_LOGGING: &[u8] = br#"<BucketLoggingStatus/>"#;
+const NEW_WRITER_LOGGING_SHA256: &str = "8765391c6f36056db1a73da9ddedce92f07391cfffd70687bafba7c53c8e981b";
+const NEW_WRITER_LOGGING_SOURCE: &str =
+    "crates/ecstore/src/bucket/metadata_sys.rs::NEW_WRITER_CONFIGS[9] (BUCKET_LOGGING_CONFIG)";
+const NEW_WRITER_REVISION: &str = "ca46ae9e56c167998f7139f4d3cfd5914280f4aa";
 
 type AcceptedLoggingCase = (GoldenSample<PersistedBucketLoggingStatus>, &'static [CorpusVariant]);
 type RejectedLoggingCase = (RejectedGoldenSample, &'static [CorpusVariant]);
@@ -135,7 +140,7 @@ fn accepted_cases() -> Vec<AcceptedLoggingCase> {
         }),
         permission: Some("FULL_CONTROL".to_owned()),
     }]);
-    vec![
+    let mut cases = vec![
         accepted(
             EMPTY,
             "793250b29f13f41065355f5dbacde7476e500a047882380079067dcc543dfde7",
@@ -207,7 +212,26 @@ fn accepted_cases() -> Vec<AcceptedLoggingCase> {
             "canonical-user full-control grant",
             &[CorpusVariant::Canonical],
         ),
-    ]
+    ];
+    let value = parse_s3s_bucket_logging(NEW_WRITER_LOGGING)
+        .expect("the RustFS new-writer Logging fixture is old-readable")
+        .structure;
+    cases.push((
+        GoldenSample {
+            kind: ConfigKind::Logging,
+            bytes: NEW_WRITER_LOGGING.to_vec(),
+            value,
+            origin: SampleOrigin {
+                source: NEW_WRITER_LOGGING_SOURCE.to_owned(),
+                producer: "rustfs/rustfs new bucket-metadata writer fixture".to_owned(),
+                version: NEW_WRITER_REVISION.to_owned(),
+                sha256: NEW_WRITER_LOGGING_SHA256.to_owned(),
+            },
+            notes: "RustFS new writer emits a self-closing disabled Logging configuration".to_owned(),
+        },
+        &[CorpusVariant::EmptyElement],
+    ));
+    cases
 }
 
 fn rejected_cases() -> Vec<RejectedLoggingCase> {
@@ -541,6 +565,20 @@ mod tests {
         let evidence = bucket_logging_corpus_evidence().expect("Logging corpus evidence is traceable");
         let report = crate::build_corpus_report(&[ConfigKind::Logging], &[evidence])
             .expect("Logging concrete cases satisfy the coverage contract");
-        assert!(report.render().contains("logging: accepted=11 rejected=17"));
+        assert!(report.render().contains("logging: accepted=12 rejected=17"));
+    }
+
+    #[test]
+    fn new_writer_logging_fixture_is_registered_once_by_exact_sha() {
+        let matches = accepted_cases()
+            .into_iter()
+            .filter(|(sample, _)| sample.origin.sha256 == NEW_WRITER_LOGGING_SHA256)
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "the new-writer Logging SHA must be registered exactly once");
+        let sample = &matches[0].0;
+        assert_eq!(sample.bytes, NEW_WRITER_LOGGING);
+        assert_eq!(sample.origin.source, NEW_WRITER_LOGGING_SOURCE);
+        assert_eq!(sample.origin.version, NEW_WRITER_REVISION);
+        assert_bucket_logging_four_way(sample).expect("the RustFS new-writer Logging fixture passes D1-D5");
     }
 }

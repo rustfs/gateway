@@ -118,6 +118,11 @@ const ALTERNATE_ORDER: &[u8] = b"<PublicAccessBlockConfiguration><RestrictPublic
 const UPPERCASE_BOOLEANS: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicAcls>TRUE</BlockPublicAcls><IgnorePublicAcls>FALSE</IgnorePublicAcls></PublicAccessBlockConfiguration>";
 const CRLF: &[u8] =
     b"<PublicAccessBlockConfiguration>\r\n<BlockPublicAcls>true</BlockPublicAcls>\r\n</PublicAccessBlockConfiguration>";
+const NEW_WRITER_PAB: &[u8] = br#"<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>false</RestrictPublicBuckets></PublicAccessBlockConfiguration>"#;
+const NEW_WRITER_PAB_SHA256: &str = "a19ebff082ac54c44e8d434b02d1d14fdd7adfeb342d565738001869961f76e9";
+const NEW_WRITER_PAB_SOURCE: &str =
+    "crates/ecstore/src/bucket/metadata_sys.rs::NEW_WRITER_CONFIGS[13] (BUCKET_PUBLIC_ACCESS_BLOCK_CONFIG)";
+const NEW_WRITER_REVISION: &str = "ca46ae9e56c167998f7139f4d3cfd5914280f4aa";
 
 fn configuration(
     block_public_acls: Option<bool>,
@@ -267,6 +272,24 @@ fn public_access_block_accepted_samples() -> Vec<(GoldenSample<PersistedPublicAc
         ),
     ];
     cases.extend(crate::source_b_js_v3_pab::cases());
+    let value = parse_s3s_public_access_block(NEW_WRITER_PAB)
+        .expect("the RustFS new-writer PAB fixture is old-readable")
+        .structure;
+    cases.push((
+        GoldenSample {
+            kind: ConfigKind::PublicAccessBlock,
+            bytes: NEW_WRITER_PAB.to_vec(),
+            value,
+            origin: SampleOrigin {
+                source: NEW_WRITER_PAB_SOURCE.to_owned(),
+                producer: "rustfs/rustfs new bucket-metadata writer fixture".to_owned(),
+                version: NEW_WRITER_REVISION.to_owned(),
+                sha256: NEW_WRITER_PAB_SHA256.to_owned(),
+            },
+            notes: "RustFS new writer emits all PAB switches with RestrictPublicBuckets disabled".to_owned(),
+        },
+        vec![CorpusVariant::AlternateOrder],
+    ));
     cases
 }
 
@@ -576,5 +599,19 @@ mod tests {
         codec.panic_on_old_parse = true;
         let failure = assert_four_way(&codec, &invalid).expect_err("mislabeled PAB sample must fail closed");
         assert_eq!(failure.direction, Direction::Input);
+    }
+
+    #[test]
+    fn new_writer_pab_fixture_is_registered_once_by_exact_sha() {
+        let matches = public_access_block_accepted_samples()
+            .into_iter()
+            .filter(|(sample, _)| sample.origin.sha256 == NEW_WRITER_PAB_SHA256)
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "the new-writer PAB SHA must be registered exactly once");
+        let sample = &matches[0].0;
+        assert_eq!(sample.bytes, NEW_WRITER_PAB);
+        assert_eq!(sample.origin.source, NEW_WRITER_PAB_SOURCE);
+        assert_eq!(sample.origin.version, NEW_WRITER_REVISION);
+        assert_public_access_block_four_way(sample).expect("the RustFS new-writer PAB fixture passes D1-D5");
     }
 }

@@ -107,7 +107,7 @@ mod tests {
         let output = String::from_utf8(stdout).expect("the report is UTF-8");
         assert_eq!(status, ExitCode::SUCCESS);
         assert!(stderr.is_empty());
-        assert!(output.starts_with("D1..D5 all clean, 180 samples across 13 families\n"));
+        assert!(output.starts_with("D1..D5 all clean, 182 samples across 13 families\n"));
         assert_eq!(output.lines().filter(|line| line.contains(": samples=")).count(), 13);
     }
 
