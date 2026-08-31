@@ -139,7 +139,7 @@ mod tests {
     fn core_shard_executes_seven_real_families() {
         let report = run_four_way_core_shard().expect("all core persistence samples pass D1-D5");
         assert_eq!(report.families.len(), 7);
-        assert_eq!(report.sample_count, 72);
+        assert_eq!(report.sample_count, 73);
         assert_eq!(
             report.sample_count,
             report.families.iter().map(|family| family.sample_count).sum::<usize>()
