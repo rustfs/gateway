@@ -191,7 +191,11 @@ fn rejected(bytes: &[u8], notes: &str, variants: &[CorpusVariant]) -> RejectedCo
 
 pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedVersioningConfiguration> {
     let prefix = "p".repeat(1024 * 1024);
-    let versioning_alias_note = crate::source_b_mc::versioning_alias_note();
+    let versioning_alias_note = format!(
+        "{}; {}",
+        crate::source_b_mc::versioning_alias_note(),
+        crate::source_b_rclone::versioning_alias_note()
+    );
     let large_bytes = format!(
         "<VersioningConfiguration><ExcludedPrefixes><Prefix>{prefix}</Prefix></ExcludedPrefixes></VersioningConfiguration>"
     )
