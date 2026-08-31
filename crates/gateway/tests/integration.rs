@@ -64,6 +64,8 @@ mod governor_streaming;
 mod handler_panic;
 #[path = "ingest_assembly.rs"]
 mod ingest_assembly;
+#[path = "lifecycle_reachability.rs"]
+mod lifecycle_reachability;
 #[path = "middleware.rs"]
 mod middleware;
 #[path = "monomorphic.rs"]
