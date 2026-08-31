@@ -340,6 +340,28 @@ mod tests {
     }
 
     #[test]
+    fn g_d2_006_logging_grantee_namespace_keeps_exact_text_and_position() {
+        let value = accepted_cases()
+            .into_iter()
+            .find_map(|(sample, _)| (sample.bytes == FULL_GRANT).then_some(sample.value))
+            .expect("the Logging corpus contains the namespace-emitting grant value");
+        let old = serialize_s3s_bucket_logging(&value).expect("the pinned old serializer accepts the grant value");
+        let new = serialize_bucket_logging(&value);
+
+        assert_eq!(new, old, "the production and pinned old serializers must emit identical bytes");
+        assert_eq!(new, FULL_GRANT, "the complete persisted XML pins namespace placement");
+
+        let prefix = b"<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetGrants><Grant>";
+        let namespaced_grantee = b"<Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"CanonicalUser\">";
+        assert_eq!(
+            new.windows(namespaced_grantee.len())
+                .position(|window| window == namespaced_grantee),
+            Some(prefix.len()),
+            "the namespace declaration text must start on the Grantee opening tag"
+        );
+    }
+
+    #[test]
     fn n_required_logging_members_match_the_old_refusals() {
         for (case, _) in rejected_cases()
             .into_iter()
