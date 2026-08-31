@@ -14,7 +14,9 @@
 
 //! Lifecycle persistence compatibility evidence.
 //!
-//! Responsible for: Lifecycle D1-D5; not responsible for HTTP validation. Upstream: gateway types. Downstream: migration gates.
+//! Responsible for: binding independent pinned-s3s and production Lifecycle codecs to D1-D5.
+//! NOT responsible for: HTTP lifecycle policy validation, other configuration families, or CI.
+//! Upstream: `rustfs-gateway-types` persistence and compat seams. Downstream: migration gates.
 
 use rustfs_gateway_types::compat::{S3sLifecycleObservation, parse_s3s_lifecycle, serialize_s3s_lifecycle};
 use rustfs_gateway_types::persistence::{
