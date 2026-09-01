@@ -229,6 +229,12 @@ if [[ "${#matched_files[@]}" -gt 0 ]]; then
     diagnostic_count=0
     while IFS= read -r line; do
         [[ -n "$line" ]] || continue
+        # This one exact sentence states the clean-room prohibition; it does not claim that any
+        # implementation came from the server. Keep the exception narrower than a path allowance
+        # so a positive copied/ported provenance statement in the same crate still fails.
+        if [[ "$line" == crates/dialect-minio/MAP.md:[0-9]*:This\ crate\ is\ clean-room\ protocol\ code.\ It\ must\ never\ be\ derived\ from\ MinIO\ server\ source. ]]; then
+            continue
+        fi
         file="${line%%:*}"
         if [[ "$file" != "$last_file" ]]; then
             fail "${file}: claims its contents came from an AGPL implementation; a port is a derivative work, not inspiration"

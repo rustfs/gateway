@@ -66,6 +66,8 @@ pub enum ExtError {
     InvalidValue(&'static str),
     /// An extension encoder did not produce one well-formed element.
     InvalidXml,
+    /// The static parent codec rejected a known member or document shape.
+    ParentCodec,
     /// A parent codec did not declare the extension's known-sibling slot.
     UnsupportedInsertionSlot {
         /// Static parent shape.
@@ -90,6 +92,7 @@ impl fmt::Display for ExtError {
             Self::MissingRequired(name) => write!(formatter, "missing required extension member {name}"),
             Self::InvalidValue(name) => write!(formatter, "invalid extension member {name}"),
             Self::InvalidXml => formatter.write_str("extension encoder produced invalid XML"),
+            Self::ParentCodec => formatter.write_str("the static parent XML codec rejected the document"),
             Self::UnsupportedInsertionSlot {
                 parent,
                 local_name,
@@ -305,6 +308,11 @@ impl<T> PersistedXml<T> {
     /// Returns the complete decoded value or the refusal that preserved the original bytes.
     pub fn value(&self) -> Result<&T, &ExtError> {
         self.decoded.as_ref()
+    }
+
+    /// Returns the complete decoded value mutably, or the refusal that preserved the source.
+    pub fn value_mut(&mut self) -> Result<&mut T, &mut ExtError> {
+        self.decoded.as_mut()
     }
 
     /// Accepts replacement bytes only after a complete decode.

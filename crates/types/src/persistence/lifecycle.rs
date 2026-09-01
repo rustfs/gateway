@@ -21,6 +21,7 @@
 use rustfs_gateway_xml::{XmlLimits, XmlNode, XmlWriter, parse_with_limits};
 
 use super::{PersistenceCodecError, optional_child, optional_child_text};
+use crate::ext::{CodecPolicy, ExtError, Extensions, PersistedXml};
 use crate::{Timestamp, TimestampFormat};
 
 /// The complete Lifecycle configuration persisted by the old RustFS path.
@@ -30,6 +31,15 @@ pub struct PersistedLifecycleConfiguration {
     pub expiry_updated_at: Option<String>,
     /// Lifecycle rules in their persisted order.
     pub rules: Vec<PersistedLifecycleRule>,
+}
+
+/// A persisted Lifecycle configuration plus per-rule runtime extension values.
+#[derive(Debug)]
+pub struct ExtensibleLifecycleConfiguration {
+    /// Static known fields decoded by the production Lifecycle codec.
+    pub configuration: PersistedLifecycleConfiguration,
+    /// Runtime extension values, one entry for each rule at the same index.
+    pub rule_extensions: Vec<Extensions>,
 }
 
 /// One persisted Lifecycle rule.
@@ -186,6 +196,74 @@ pub fn parse_lifecycle(input: &[u8]) -> Result<PersistedLifecycleConfiguration, 
         expiry_updated_at: optional_timestamp(&root, "ExpiryUpdatedAt")?,
         rules,
     })
+}
+
+/// Decodes persisted Lifecycle bytes with a borrowed runtime extension policy.
+///
+/// The exact input is retained even when the static parent codec, one extension vtable, or one
+/// unregistered child refuses the document. Callers can inspect that refusal but cannot replace
+/// the stored bytes through [`PersistedXml::replacement`].
+#[must_use]
+pub fn parse_lifecycle_with_policy(input: &[u8], policy: &CodecPolicy) -> PersistedXml<ExtensibleLifecycleConfiguration> {
+    PersistedXml::decode(input.to_vec(), |source| parse_extensible_lifecycle(source, policy))
+}
+
+fn parse_extensible_lifecycle(input: &[u8], policy: &CodecPolicy) -> Result<ExtensibleLifecycleConfiguration, ExtError> {
+    let bound = input.len().max(1);
+    let Some(limits) = XmlLimits::new(bound, bound, bound, bound, bound) else {
+        unreachable!("max(1) makes every persistence XML limit non-zero");
+    };
+    let root = parse_with_limits(input, limits).map_err(|_| ExtError::ParentCodec)?;
+    if root.name != "LifecycleConfiguration" {
+        return Err(ExtError::ParentCodec);
+    }
+    let mut rules = Vec::new();
+    let mut rule_extensions = Vec::new();
+    for rule in root.children_named("Rule") {
+        let (rule, extensions) = parse_extensible_rule(rule, policy)?;
+        rules.push(rule);
+        rule_extensions.push(extensions);
+    }
+    if rules.is_empty() {
+        return Err(ExtError::ParentCodec);
+    }
+    let expiry_updated_at = optional_timestamp(&root, "ExpiryUpdatedAt").map_err(|_| ExtError::ParentCodec)?;
+    Ok(ExtensibleLifecycleConfiguration {
+        configuration: PersistedLifecycleConfiguration {
+            expiry_updated_at,
+            rules,
+        },
+        rule_extensions,
+    })
+}
+
+const STATIC_RULE_CHILDREN: &[&str] = &[
+    "AbortIncompleteMultipartUpload",
+    "Expiration",
+    "Filter",
+    "ID",
+    "NoncurrentVersionExpiration",
+    "NoncurrentVersionTransition",
+    "Prefix",
+    "Status",
+    "Transition",
+];
+
+fn parse_extensible_rule(rule: &XmlNode, policy: &CodecPolicy) -> Result<(PersistedLifecycleRule, Extensions), ExtError> {
+    let mut static_rule = rule.clone();
+    static_rule
+        .children
+        .retain(|child| STATIC_RULE_CHILDREN.contains(&child.name.as_str()));
+    let parsed = parse_rule(&static_rule).map_err(|_| ExtError::ParentCodec)?;
+    let mut extensions = Extensions::default();
+    for child in rule
+        .children
+        .iter()
+        .filter(|child| !STATIC_RULE_CHILDREN.contains(&child.name.as_str()))
+    {
+        policy.decode_unknown("LifecycleRule", child, &mut extensions)?;
+    }
+    Ok((parsed, extensions))
 }
 
 fn parse_rule(rule: &XmlNode) -> Result<PersistedLifecycleRule, PersistenceCodecError> {
@@ -374,6 +452,85 @@ pub fn serialize_lifecycle(value: &PersistedLifecycleConfiguration) -> Result<Ve
     }
     writer.close();
     Ok(writer.finish().into_bytes())
+}
+
+/// Serializes a completely decoded Lifecycle document with registered extensions.
+///
+/// Registered fields are emitted only at a sibling slot the static parent declares. The
+/// `LifecycleRule` parent exposes `Expiration` as the insertion point before `Filter`, `ID`, and
+/// `Status`; every other requested slot fails closed.
+pub fn serialize_lifecycle_with_policy(
+    value: &ExtensibleLifecycleConfiguration,
+    policy: &CodecPolicy,
+) -> Result<Vec<u8>, ExtError> {
+    if value.configuration.rules.is_empty() || value.configuration.rules.len() != value.rule_extensions.len() {
+        return Err(ExtError::ParentCodec);
+    }
+    policy.validate_slots("LifecycleRule", &["Expiration"])?;
+    let mut writer = XmlWriter::fragment();
+    writer.open("LifecycleConfiguration", None);
+    write_timestamp(&mut writer, "ExpiryUpdatedAt", value.configuration.expiry_updated_at.as_deref())
+        .map_err(|_| ExtError::ParentCodec)?;
+    for (rule, extensions) in value.configuration.rules.iter().zip(&value.rule_extensions) {
+        write_extensible_rule(&mut writer, rule, extensions, policy)?;
+    }
+    writer.close();
+    Ok(writer.finish().into_bytes())
+}
+
+fn write_extensible_rule(
+    writer: &mut XmlWriter,
+    value: &PersistedLifecycleRule,
+    extensions: &Extensions,
+    policy: &CodecPolicy,
+) -> Result<(), ExtError> {
+    writer.open("Rule", None);
+    if let Some(action) = value.abort_incomplete_multipart_upload.as_ref() {
+        writer.open("AbortIncompleteMultipartUpload", None);
+        write_number(writer, "DaysAfterInitiation", action.days_after_initiation);
+        writer.close();
+    }
+    if let Some(action) = value.expiration.as_ref() {
+        writer.open("Expiration", None);
+        write_timestamp(writer, "Date", action.date.as_deref()).map_err(|_| ExtError::ParentCodec)?;
+        write_number(writer, "Days", action.days);
+        write_bool(writer, "ExpiredObjectAllVersions", action.expired_object_all_versions);
+        write_bool(writer, "ExpiredObjectDeleteMarker", action.expired_object_delete_marker);
+        writer.close();
+    }
+    policy.encode_after("LifecycleRule", "Expiration", extensions, writer)?;
+    if let Some(filter) = value.filter.as_ref() {
+        write_filter(writer, filter);
+    }
+    write_optional(writer, "ID", value.id.as_deref());
+    if let Some(action) = value.noncurrent_version_expiration.as_ref() {
+        writer.open("NoncurrentVersionExpiration", None);
+        write_number(writer, "NewerNoncurrentVersions", action.newer_noncurrent_versions);
+        write_number(writer, "NoncurrentDays", action.noncurrent_days);
+        writer.close();
+    }
+    if let Some(actions) = value.noncurrent_version_transitions.as_deref() {
+        for action in actions {
+            writer.open("NoncurrentVersionTransition", None);
+            write_number(writer, "NewerNoncurrentVersions", action.newer_noncurrent_versions);
+            write_number(writer, "NoncurrentDays", action.noncurrent_days);
+            write_optional(writer, "StorageClass", action.storage_class.as_deref());
+            writer.close();
+        }
+    }
+    write_optional(writer, "Prefix", value.prefix.as_deref());
+    writer.element("Status", &value.status);
+    if let Some(actions) = value.transitions.as_deref() {
+        for action in actions {
+            writer.open("Transition", None);
+            write_timestamp(writer, "Date", action.date.as_deref()).map_err(|_| ExtError::ParentCodec)?;
+            write_number(writer, "Days", action.days);
+            write_optional(writer, "StorageClass", action.storage_class.as_deref());
+            writer.close();
+        }
+    }
+    writer.close();
+    Ok(())
 }
 
 fn write_rule(writer: &mut XmlWriter, value: &PersistedLifecycleRule) -> Result<(), PersistenceCodecError> {

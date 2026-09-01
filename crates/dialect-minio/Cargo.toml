@@ -1,0 +1,29 @@
+[package]
+name = "rustfs-gateway-dialect-minio"
+description = "Clean-room MinIO protocol dialect extensions for RustFS Gateway"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+autotests = false
+
+[package.metadata.gateway]
+ring = 1
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+rustfs-gateway-types = { workspace = true }
+rustfs-gateway-xml = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
