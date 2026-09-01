@@ -14,9 +14,9 @@
 
 //! Production-registry contract for the filesystem reference backend.
 //!
-//! Responsible for: proving bucket, object, and multipart CRUD through signed requests to a real
-//! `S3Service`, including storage-boundary refusals and S3 not-found/idempotency behavior.
-//! NOT responsible for: versioning, lifecycle policy, ordinary listing, or example binaries.
+//! Responsible for: proving bucket, object, multipart, versioning, and listing CRUD through signed
+//! requests to a real `S3Service`, including storage-boundary refusals and not-found behavior.
+//! NOT responsible for: lifecycle policy, expanded example binaries, or production durability.
 //! Upstream: `rustfs-gateway-fs` and the public gateway facade. Downstream: the crate verification gate.
 
 #[path = "crud/versioning.rs"]
@@ -27,6 +27,9 @@ mod listing;
 
 #[path = "crud/multipart_listing.rs"]
 mod multipart_listing;
+
+#[path = "crud/multipart_versioning.rs"]
+mod multipart_versioning;
 
 use std::path::PathBuf;
 use std::sync::Arc;
