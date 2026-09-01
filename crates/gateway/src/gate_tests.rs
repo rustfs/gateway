@@ -47,7 +47,7 @@ fn body_timeout_server(timeouts: BodyTimeouts) -> (RunningServer, Arc<AtomicUsiz
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| value.parse().ok());
             let body = SealedBody::seal(Some(request.into_body()), declared_length);
-            let proof = Authenticated::granted_for_test();
+            let proof = MetadataAdmission::granted_for_test();
             let mut response = match body
                 .read(&proof, roomy(), timeouts, None, BodyDigestObligation::None, BodyIntegrity::NONE)
                 .await
@@ -144,7 +144,7 @@ fn a_rejected_verdict_mints_no_proof() {
         rustfs_gateway_sig::AuthError::RequestTimeTooSkewed,
         rustfs_gateway_sig::AuthError::AccessDenied,
     ] {
-        assert!(Authenticated::of(&Verdict::reject(error)).is_none(), "{error:?}");
+        assert!(MetadataAdmission::of(&Verdict::reject(error)).is_none(), "{error:?}");
     }
 }
 
@@ -163,7 +163,7 @@ async fn an_absent_body_still_discharges_the_claim_it_carried() {
     let integrity = crate::integrity::resolve(&view, &http::Method::PUT, "PutObject").expect("one well-formed claim");
     let error = SealedBody::<crate::probe::ObservedBody>::seal(None, None)
         .read(
-            &Authenticated::granted_for_test(),
+            &MetadataAdmission::granted_for_test(),
             roomy(),
             BodyTimeouts::S3,
             None,
@@ -179,7 +179,7 @@ async fn an_absent_body_still_discharges_the_claim_it_carried() {
 /// frame is polled, so the refusal costs nothing.
 #[tokio::test]
 async fn an_oversized_declared_body_is_refused_without_being_read() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"x")]);
     let ceilings = BodyCeilings {
         buffered: 1024,
@@ -199,7 +199,7 @@ async fn an_oversized_declared_body_is_refused_without_being_read() {
 /// limit that only fires on a declared length is one a client removes by not declaring it.
 #[tokio::test]
 async fn an_undeclared_oversized_body_is_still_refused() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let (body, _) = crate::probe::ObservedBody::new([Bytes::from(vec![0_u8; 4096])]);
     let ceilings = BodyCeilings {
         buffered: 1024,
@@ -248,7 +248,7 @@ async fn c_ing_0044_c_lim_0027_gzip_wire_bytes_set_the_body_ceiling() {
     .expect("gzip metadata is not a framing error");
     assert!(ingest.is_none(), "gzip never selects a decoder");
 
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(GZIP_STREAM)]);
     let opaque = SealedBody::seal(Some(body), Some(RAW_BYTES))
         .read(
@@ -294,7 +294,7 @@ async fn c_ing_0044_c_lim_0027_gzip_wire_bytes_set_the_body_ceiling() {
 /// and then complained" are the same test.
 #[tokio::test]
 async fn the_declared_cap_is_refused_at_the_frame_that_crosses_it() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let frames = core::iter::repeat_n(Bytes::from(vec![b'k'; 64]), 100);
     let (body, read) = crate::probe::ObservedBody::new(frames);
     let ceilings = BodyCeilings {
@@ -317,7 +317,7 @@ async fn the_declared_cap_is_refused_at_the_frame_that_crosses_it() {
 /// declares more than the cap never has a frame polled at all.
 #[tokio::test]
 async fn a_declared_length_past_the_operation_cap_is_refused_unread() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"x")]);
     let ceilings = BodyCeilings {
         buffered: 1 << 20,
@@ -335,7 +335,7 @@ async fn a_declared_length_past_the_operation_cap_is_refused_unread() {
 /// Positive — an absent body reads as empty rather than as an error.
 #[tokio::test]
 async fn an_absent_body_reads_as_empty() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let sealed: SealedBody<crate::probe::ObservedBody> = SealedBody::seal(None, None);
     assert!(
         sealed
@@ -349,7 +349,7 @@ async fn an_absent_body_reads_as_empty() {
 /// Positive — a body inside both ceilings arrives whole, in frame order.
 #[tokio::test]
 async fn a_body_inside_every_ceiling_arrives_whole() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"first-"), Bytes::from_static(b"second")]);
     let bytes = SealedBody::seal(Some(body), Some(12))
         .read(&proof, roomy(), BodyTimeouts::S3, None, BodyDigestObligation::None, BodyIntegrity::NONE)
@@ -415,7 +415,7 @@ const CHUNK_FRAME_BYTES: u64 = 70;
 /// that still had bytes queued on it.
 #[tokio::test]
 async fn a_framed_body_is_pulled_to_the_end_of_the_transport() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let wire: &[u8] = b"b\r\nhello world\r\n0\r\n\r\n";
     let frames = wire.chunks(4).map(Bytes::copy_from_slice).collect::<Vec<_>>();
     let (body, read) = crate::probe::ObservedBody::new(frames);
@@ -447,7 +447,7 @@ async fn a_framed_body_is_pulled_to_the_end_of_the_transport() {
 /// this, and without this case that arrangement is untested.
 #[tokio::test]
 async fn a_framed_body_past_the_ceiling_is_a_413_and_not_an_incomplete_body() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new(framed_chunks(100));
     let ceilings = BodyCeilings {
         buffered: 1024,
@@ -483,7 +483,7 @@ async fn a_framed_body_past_the_ceiling_is_a_413_and_not_an_incomplete_body() {
 /// to collapse onto.
 #[tokio::test]
 async fn a_framed_body_past_the_operation_cap_is_a_400_invalid_request() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let (body, _) = crate::probe::ObservedBody::new(framed_chunks(100));
     let ceilings = BodyCeilings {
         buffered: 1 << 20,
@@ -610,7 +610,7 @@ where
             .build()
             .expect("a current-thread runtime");
         let outcome = runtime.block_on(async move {
-            let proof = Authenticated::granted_for_test();
+            let proof = MetadataAdmission::granted_for_test();
             SealedBody::seal(Some(body), None)
                 .read(&proof, roomy(), BodyTimeouts::S3, ingest, BodyDigestObligation::None, BodyIntegrity::NONE)
                 .await
@@ -729,7 +729,7 @@ fn payload_free_frames_paid_for_a_byte_at_a_time_are_bounded_by_the_ceiling() {
 /// can legitimately produce.
 #[tokio::test]
 async fn a_legal_run_of_payload_free_frames_still_delivers_the_body() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let run = crate::wire_read::MAX_PAYLOAD_FREE_FRAME_RUN as usize;
     let mut frames = Vec::new();
     for payload in [Bytes::from_static(b"a"), Bytes::from_static(b"b"), Bytes::new()] {

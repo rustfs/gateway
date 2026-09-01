@@ -71,7 +71,7 @@
 //! service buffer whatever it liked by sending a request it was always going to be refused.
 //!
 //! That order is no longer a property of this function. `crate::gate::SealedBody::read` takes an
-//! `&crate::gate::Authenticated`, and the only constructor of one is fallible on a
+//! `&crate::gate::MetadataAdmission`, and the only constructor of one is fallible on a
 //! [`rustfs_gateway_sig::Verdict`] — so the read below cannot be moved above the verifier without
 //! failing to compile, which is what axiom A3 asks of an ordering contract.
 //!
@@ -146,7 +146,7 @@ use crate::ext::{
     HostResolver, InputAuthzRequest, Observer, PolicySnapshot, PolicySource, PolicyTimeout, RequestContext, RequestEvent,
     ResolvedHost, ResponseView, RoutedView, ServerExtensions, SigV2Authentication, StageFilter, WireHead, emit_safely,
 };
-use crate::gate::{Authenticated, BodyCeilings, BodyDigestObligation, SealedBody};
+use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedBody};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::payload_header::{payload_mode, presigned_body_obligation};
@@ -156,7 +156,7 @@ use crate::render::{
     S3Error, from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth, from_sse,
     from_wire_reject, render,
 };
-use crate::request_config::{BodyRead, Entered, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
+use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::routing::RoutingStore;
 use crate::trace::{RequestTrace, TraceSource};
@@ -207,7 +207,7 @@ struct AuthorizedRoute {
 
 struct ReadForDecode {
     policy: Arc<PolicySnapshot>,
-    config: RequestConfig<BodyRead>,
+    config: RequestConfig<Guarded>,
 }
 
 struct RequestEntryContext {
@@ -523,13 +523,14 @@ impl S3Service {
             Ok(wire) => wire,
             Err(reject) => return outcome.refuse(from_wire_reject(reject)),
         };
-        let config = config.accepted();
+        let config = config.wire();
 
         let resolved = self.inner.host_resolver.resolve(&HostQuery {
             host: wire.host(),
             path: wire.raw_path().as_str(),
             method: wire.method(),
         });
+        let config = config.targeted();
         let target_origin = resolved.origin();
 
         // ── CORS preflight ───────────────────────────────────────────────────────────────
@@ -825,7 +826,7 @@ impl S3Service {
         // unreachable — `rejection()` was `None` one line ago — and is refused rather than
         // unwrapped, because "the signature was fine, take my word for it" is exactly the sentence
         // this type exists to make unspellable.
-        let Some(authenticated) = Authenticated::of(&verdict) else {
+        let Some(metadata_admission) = MetadataAdmission::of(&verdict) else {
             return outcome
                 .refuse_handler(HandlerError::internal_error("the request could not be shown to have been authenticated"));
         };
@@ -846,7 +847,7 @@ impl S3Service {
             AcceptedBody::Ordinary(_) => meta.key().cloned(),
             AcceptedBody::PostObject(post) => Some(post.key().clone()),
         };
-        let config = config.authenticated();
+        let config = config.meta_auth();
         outcome.identity = verdict.identity().cloned();
 
         let Some(requirement) = M::auth(&op) else {
@@ -1025,7 +1026,7 @@ impl S3Service {
                     let integrity = crate::integrity::resolve(&body_wire.headers(), body_wire.method(), operation)?;
                     sealed
                         .handoff(
-                            &authenticated,
+                            &metadata_admission,
                             (request_body_mode, ceilings, body_deadlines, body_quota),
                             ingest,
                             body_digest,
@@ -1033,12 +1034,12 @@ impl S3Service {
                         )
                         .await?
                 }
-                AcceptedBody::PostObject(post) => (*post).handoff(&authenticated)?,
+                AcceptedBody::PostObject(post) => (*post).handoff(&metadata_admission)?,
             };
             Ok((
                 ReadForDecode {
                     policy: state.policy,
-                    config: state.config.body_read().with_body_monitor(body_monitor),
+                    config: state.config.guarded().with_body_monitor(body_monitor),
                 },
                 body,
             ))
@@ -1146,7 +1147,7 @@ impl S3Service {
                 .await;
                 return Err(from_denial(denial, response_kind));
             }
-            Ok((decisions, config.input_authorized()))
+            Ok((decisions, config.authorized()))
         };
 
         let execution = match std::panic::catch_unwind(AssertUnwindSafe(|| {

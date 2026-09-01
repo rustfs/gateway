@@ -107,7 +107,7 @@ pub(crate) mod sealed {
 
     use super::*;
     use crate::render::S3Error;
-    use crate::request_config::{InputAuthorized, RequestConfig};
+    use crate::request_config::{Authorized, RequestConfig};
     use crate::request_deadline::{
         BodyMonitoredOutcome, HandlerCancellationOutcome, commit_with_progress_deadline, handler_with_body_monitor,
         handler_with_request_cancellation,
@@ -127,7 +127,7 @@ pub(crate) mod sealed {
         fn take_body_monitor(&mut self) -> Option<crate::request_body::BodyMonitor>;
     }
 
-    impl HandlerDeadlinePolicy for RequestConfig<InputAuthorized> {
+    impl HandlerDeadlinePolicy for RequestConfig<Authorized> {
         fn handler_deadline(&self, class: rustfs_gateway_core::HandlerDeadlineClass) -> Duration {
             self.config().handler_deadline(class)
         }

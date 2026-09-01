@@ -14,8 +14,9 @@
 
 //! The proof a stage must hold before it may read a request body, and the bounded read itself.
 //!
-//! Responsible for: [`Authenticated`] — evidence that this request's signature was judged and not
-//! rejected — [`SealedBody`], which owns the body and publishes exactly one way to turn it into
+//! Responsible for: [`MetadataAdmission`] — evidence that this request's metadata credential
+//! surface was judged and not rejected, without claiming that a streaming payload is verified —
+//! [`SealedBody`], which owns the body and publishes exactly one way to turn it into
 //! bytes, [`BodyCeilings`], the two independent bounds that read is subject to, and
 //! [`BodyTimeouts`], the first-byte and between-frame idle deadlines.
 //! NOT responsible for: deciding who the caller is (`crate::ext::Authenticator` and
@@ -28,14 +29,14 @@
 //!
 //! # Why this is a type and not a comment
 //!
-//! "The signature is verified before any body byte is read" was, until this module existed, a
+//! "The object payload is exposed only after metadata admission" was, until this module existed, a
 //! property of the order in which `crate::service::run` happened to call two functions. Nothing
-//! stopped a later edit from moving the read back above the verifier, and nothing would have gone
-//! red if it had: every conformance case that measures it asserts on a transport that reports the
-//! whole body as sent regardless. Axiom A3 says ordering contracts are fixed by types, and this is
-//! that fix — [`SealedBody::read`] takes an [`&Authenticated`], [`Authenticated::of`] is the only
-//! constructor of one and it is fallible on the verdict, so a pipeline that reads the body first
-//! does not compile.
+//! stopped a later edit from moving the handoff back above the verifier, and nothing would have
+//! gone red if it had. Axiom A3 says ordering contracts are fixed by types, and this is that fix —
+//! [`SealedBody::read`] takes a [`&MetadataAdmission`], [`MetadataAdmission::of`] is the only
+//! constructor of one and it is fallible on the verdict, so a pipeline that exposes ordinary body
+//! bytes first does not compile. POST Object may parse its bounded text prelude before admission,
+//! but its file stream has the same proof-gated handoff.
 //!
 //! The cost of getting it wrong is not hypothetical. A request with a bad signature and a very
 //! large body makes an implementation that reads first do the attacker's work: the transfer is
@@ -73,13 +74,13 @@ use crate::wire_read::{RequestBodyUnfinished, WireFrames, WireProgress, WireRead
 ///
 /// Borrows the verdict rather than copying anything out of it, so one cannot be built beside a
 /// verdict that says something else. It carries no data: its whole value is that holding one is
-/// only possible after [`Authenticated::of`] has looked at a real verdict.
-pub(crate) struct Authenticated<'a> {
+/// only possible after [`MetadataAdmission::of`] has looked at a real verdict.
+pub(crate) struct MetadataAdmission<'a> {
     /// Held only to tie the proof's lifetime to the verdict it was read from.
     _verdict: core::marker::PhantomData<&'a Verdict>,
 }
 
-impl<'a> Authenticated<'a> {
+impl<'a> MetadataAdmission<'a> {
     /// The only constructor outside this file's own tests. `None` when the verdict rejects.
     ///
     /// There is deliberately no infallible form and no `Default`: "assume it authenticated" must
@@ -188,7 +189,7 @@ where
         crate::post_object::PostObjectPrelude::read(self.body, content_type, limits, timeouts).await
     }
 
-    /// Reads the body, bounded twice, and only for a caller holding an [`Authenticated`].
+    /// Reads the body, bounded twice, and only for a caller holding a [`MetadataAdmission`].
     ///
     /// The announced check runs first, so a body claiming more than a ceiling is refused without a
     /// single frame being polled. The delivered check runs inside the frame loop, so a body that
@@ -201,7 +202,7 @@ where
     /// assembly's ceiling, and `IncompleteBody` for a body that did not arrive as it was framed.
     pub(crate) async fn read(
         self,
-        _proof: &Authenticated<'_>,
+        _proof: &MetadataAdmission<'_>,
         ceilings: BodyCeilings,
         timeouts: BodyTimeouts,
         ingest: Option<crate::chunked::ChunkIngest>,
@@ -310,7 +311,7 @@ where
     /// authenticated framing decision.
     pub(crate) fn stream(
         self,
-        _proof: &Authenticated<'_>,
+        _proof: &MetadataAdmission<'_>,
         body_plan: (BodyCeilings, BodyTimeouts, Option<std::sync::Arc<dyn crate::BodyQuota>>),
         ingest: Option<crate::chunked::ChunkIngest>,
         digest: BodyDigestObligation,
@@ -329,7 +330,7 @@ where
 
     pub(crate) async fn handoff(
         self,
-        proof: &Authenticated<'_>,
+        proof: &MetadataAdmission<'_>,
         body_plan: (RequestBodyMode, BodyCeilings, BodyTimeouts, Option<std::sync::Arc<dyn crate::BodyQuota>>),
         ingest: Option<crate::chunked::ChunkIngest>,
         digest: BodyDigestObligation,
@@ -497,7 +498,7 @@ mod unfinished_body_tests {
     use rustfs_gateway_types::ErrorCode;
 
     use super::{
-        Authenticated, BodyCeilings, BodyDigestObligation, BodyTimeouts, SealedBody, body_idle_timeout, body_quota_refusal,
+        BodyCeilings, BodyDigestObligation, BodyTimeouts, MetadataAdmission, SealedBody, body_idle_timeout, body_quota_refusal,
         body_throughput_timeout, incomplete, past_buffered_ceiling,
     };
     use crate::close::ConnectionIntent;
@@ -575,7 +576,7 @@ mod unfinished_body_tests {
         let ingest = unsigned_ingest(4096)?;
         SealedBody::seal(Some(body), Some(4096))
             .read(
-                &Authenticated::granted_for_test(),
+                &MetadataAdmission::granted_for_test(),
                 BodyCeilings::of("PutObject", 1024 * 1024),
                 BodyTimeouts::S3,
                 Some(ingest),

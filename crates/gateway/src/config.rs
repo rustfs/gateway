@@ -503,33 +503,37 @@ mod tests {
 
     // a-asm-0006: stable load anchors prove replacement cannot split the entry snapshot.
     #[test]
-    fn all_eight_pipeline_stages_share_one_arc() {
+    fn all_ten_pipeline_stages_share_one_arc() {
         let store = Arc::new(ArcSwap::from_pointee(ServiceConfig::new(8)));
         let handle = ConfigHandle::new(&store);
         let entry = load_entry(&store);
         let mut seen = Vec::new();
 
-        let accepted = RequestConfig::enter(Arc::clone(&entry)).accepted();
-        seen.push(Arc::clone(accepted.config()));
-        let routed = accepted.routed();
+        let entered = RequestConfig::enter(Arc::clone(&entry));
+        seen.push(Arc::clone(entered.config()));
+        let wire = entered.wire();
+        seen.push(Arc::clone(wire.config()));
+        let targeted = wire.targeted();
+        seen.push(Arc::clone(targeted.config()));
+        let routed = targeted.routed();
         seen.push(Arc::clone(routed.config()));
         let governed = routed.governed(crate::Lease::admit());
         seen.push(Arc::clone(governed.config()));
         handle.store(ServiceConfig::new(16));
         let replacement = load_replacement(&store);
         assert!(!Arc::ptr_eq(&entry, &replacement), "the mid-request replacement did not happen");
-        let authenticated = governed.authenticated();
-        seen.push(Arc::clone(authenticated.config()));
-        let route_authorized = authenticated.route_authorized();
+        let meta_auth = governed.meta_auth();
+        seen.push(Arc::clone(meta_auth.config()));
+        let route_authorized = meta_auth.route_authorized();
         seen.push(Arc::clone(route_authorized.config()));
-        let body_read = route_authorized.body_read();
-        seen.push(Arc::clone(body_read.config()));
-        let decoded = body_read.decoded();
+        let guarded = route_authorized.guarded();
+        seen.push(Arc::clone(guarded.config()));
+        let decoded = guarded.decoded();
         seen.push(Arc::clone(decoded.config()));
-        let input_authorized = decoded.input_authorized();
-        seen.push(Arc::clone(input_authorized.config()));
+        let authorized = decoded.authorized();
+        seen.push(Arc::clone(authorized.config()));
 
-        assert_eq!(seen.len(), 8);
+        assert_eq!(seen.len(), 10);
         for snapshot in seen {
             assert!(Arc::ptr_eq(&entry, &snapshot));
         }

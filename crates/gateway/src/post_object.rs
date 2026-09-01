@@ -32,7 +32,7 @@ use rustfs_gateway_types::dto::PostObjectInput;
 use rustfs_gateway_types::{BucketName, NamePolicy, ObjectKey};
 
 use crate::close::ConnectionIntent;
-use crate::gate::{Authenticated, BodyCeilings, BodyDigestObligation, BodyTimeouts};
+use crate::gate::{BodyCeilings, BodyDigestObligation, BodyTimeouts, MetadataAdmission};
 use crate::render::{S3Error, from_handler};
 use crate::request_body::{BodyMonitor, StreamingRead};
 use crate::wire_read::{WireFrames, WireProgress};
@@ -209,7 +209,7 @@ where
         &self.key
     }
 
-    pub(crate) fn handoff(self, _proof: &Authenticated<'_>) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
+    pub(crate) fn handoff(self, _proof: &MetadataAdmission<'_>) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
         let body = PostFileBody {
             frames: self.frames,
             first: self.first_file_bytes,

@@ -14,7 +14,7 @@ cases=(
     'a-asm-0003|scripts/check_minimal_assembly_lines.sh|BEGIN MINIMAL ASSEMBLY'
     'a-asm-0004|crates/gateway/tests/assembly_order.rs|fn one_request_has_one_aggregate_extension_order'
     'a-asm-0005|crates/gateway/src/ext/host.rs|fn the_default_resolver_does_not_read_the_host'
-    'a-asm-0006|crates/gateway/src/config.rs|fn all_eight_pipeline_stages_share_one_arc'
+    'a-asm-0006|crates/gateway/src/config.rs|fn all_ten_pipeline_stages_share_one_arc'
     'a-asm-0007|scripts/check_monomorphic_dispatch.sh|direct_after "$state"'
     'a-asm-0008|crates/gateway/tests/pipeline.rs|fn an_event_stream_and_a_document_share_one_service_exit'
     'a-asm-0009|crates/gateway/tests/assembly.rs|fn a_asm_0009_and_0010_missing_authorizer_is_refused_at_build'

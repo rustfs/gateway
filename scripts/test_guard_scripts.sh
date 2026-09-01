@@ -5844,7 +5844,7 @@ from pathlib import Path
 path = Path("crates/gateway/src/request_config.rs")
 path.write_text(path.read_text() + """
 pub(crate) struct BorrowedStage<'a>(&'a [u8]);
-impl RequestConfig<InputAuthorized> {
+impl RequestConfig<Authorized> {
     pub(crate) fn borrowed<'a>(self) -> RequestConfig<BorrowedStage<'a>> { self.advance() }
 }
 """)
@@ -5853,17 +5853,11 @@ PY
 expect_fail check_pipeline_stage_shape.sh \
     'a newly added real request stage carrying a lifetime' mut_pipeline_new_stage_has_lifetime
 
-probe_pipeline_non_unit_stage_allowed() {
-    local sandbox rc=0
-    cases=$((cases + 1))
-    guard_case_owned "$cases" || return 0
-    make_sandbox
-    sandbox="$SANDBOX"
-    GATEWAY_SANDBOX="$sandbox" python3 - <<'PY'
-import os
+mut_pipeline_non_unit_stage() {
+    python3 - <<'PY'
 from pathlib import Path
 
-path = Path(os.environ["GATEWAY_SANDBOX"]) / "crates/gateway/src/request_config.rs"
+path = Path("crates/gateway/src/request_config.rs")
 text = path.read_text().replace(
     "pub(crate) struct Entered;",
     "pub(crate) struct Entered { marker: core::marker::PhantomData<()> }",
@@ -5871,41 +5865,71 @@ text = path.read_text().replace(
 )
 path.write_text(text)
 PY
-    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_pipeline_stage_shape.sh" >/dev/null 2>&1 || rc=$?
-    if [[ "$rc" -eq 0 ]]; then
-        pass_msg 'check_pipeline_stage_shape.sh permits a non-unit stage'
-    else
-        fail_msg 'check_pipeline_stage_shape.sh requires unit stage markers'
-    fi
 }
-probe_pipeline_non_unit_stage_allowed
+expect_fail check_pipeline_stage_shape.sh \
+    'a request stage carrying data outside the owned carrier' mut_pipeline_non_unit_stage
 
-probe_pipeline_multiple_roots_allowed() {
-    local sandbox rc=0
-    cases=$((cases + 1))
-    guard_case_owned "$cases" || return 0
-    make_sandbox
-    sandbox="$SANDBOX"
-    GATEWAY_SANDBOX="$sandbox" python3 - <<'PY'
-import os
-from pathlib import Path
+mut_pipeline_multiple_roots() {
+    cat >>crates/gateway/src/request_config.rs <<'RUST'
 
-path = Path(os.environ["GATEWAY_SANDBOX"]) / "crates/gateway/src/request_config.rs"
-path.write_text(path.read_text() + """
 pub(crate) struct Alternative;
 impl RequestConfig<Alternative> {
-    pub(crate) fn input_authorized(self) -> RequestConfig<InputAuthorized> { self.advance() }
+    pub(crate) fn authorized(self) -> RequestConfig<Authorized> { self.advance() }
 }
-""")
+RUST
+}
+expect_fail check_pipeline_stage_shape.sh \
+    'an alternative root entering the request transition closure' mut_pipeline_multiple_roots
+
+mut_pipeline_predecode_stage_is_generic() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/src/request_config.rs")
+text = path.read_text().replace(
+    "pub(crate) struct Routed;",
+    "pub(crate) struct Routed<O>(core::marker::PhantomData<fn() -> O>);",
+    1,
+)
+path.write_text(text)
 PY
-    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_pipeline_stage_shape.sh" >/dev/null 2>&1 || rc=$?
-    if [[ "$rc" -eq 0 ]]; then
-        pass_msg 'check_pipeline_stage_shape.sh permits multiple transition roots'
-    else
-        fail_msg 'check_pipeline_stage_shape.sh requires one exact transition chain'
-    fi
 }
-probe_pipeline_multiple_roots_allowed
+expect_fail check_pipeline_stage_shape.sh \
+    'a pre-decode request stage carrying an operation generic' \
+    mut_pipeline_predecode_stage_is_generic
+
+mut_pipeline_service_skips_targeted() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text().replace(
+    "let config = config.targeted();",
+    "let config = config;",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_pipeline_stage_shape.sh \
+    'the production service skipping host targeting' mut_pipeline_service_skips_targeted
+
+mut_pipeline_dynamic_decode_moves_after_authorization() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/src/operation_mode.rs")
+text = path.read_text().replace(
+    "let decoded = entry.decode(meta, body).map_err(StaticDispatchError::Codec)?;",
+    "let decoded = entry.decode_after_authorization(meta, body).map_err(StaticDispatchError::Codec)?;",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_pipeline_stage_shape.sh \
+    'the erased decoder moving outside its guarded boundary' \
+    mut_pipeline_dynamic_decode_moves_after_authorization
 
 mut_pipeline_stage_borrows_request() {
     python3 - <<'PY'

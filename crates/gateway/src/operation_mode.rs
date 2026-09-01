@@ -30,7 +30,7 @@ use rustfs_gateway_core::{
 use crate::dispatch::{DispatchTable, ErasedAnswer};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::render::S3Error;
-use crate::request_config::{InputAuthorized, RequestConfig};
+use crate::request_config::{Authorized, RequestConfig};
 use crate::request_deadline::{BodyMonitoredOutcome, handler_with_body_monitor};
 
 pub(crate) trait OperationMode {
@@ -62,7 +62,7 @@ pub(crate) trait OperationMode {
         Read: FnOnce(S) -> ReadFuture + Send + 'a,
         ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
-        InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<InputAuthorized>), E>> + Send + 'a;
+        InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<Authorized>), E>> + Send + 'a;
 }
 
 pub(crate) struct DynamicMode<'a> {
@@ -106,7 +106,7 @@ impl OperationMode for DynamicMode<'_> {
         Read: FnOnce(S) -> ReadFuture + Send + 'a,
         ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
-        InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<InputAuthorized>), E>> + Send + 'a,
+        InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<Authorized>), E>> + Send + 'a,
     {
         Box::pin(async move {
             let route_state = authorize_route().await.map_err(StaticDispatchError::Route)?;
@@ -197,7 +197,7 @@ where
         Read: FnOnce(S) -> ReadFuture + Send + 'a,
         ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
-        InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<InputAuthorized>), E>> + Send + 'a,
+        InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<Authorized>), E>> + Send + 'a,
     {
         Operations::dispatch(operation, meta, Arc::clone(&self.backend), authorize_route, read_body, authorize_input)
     }
@@ -260,14 +260,15 @@ mod tests {
                         Ok::<_, S3Error>((
                             Vec::new(),
                             RequestConfig::enter(Arc::new(crate::ServiceConfig::new(1)))
-                                .accepted()
+                                .wire()
+                                .targeted()
                                 .routed()
                                 .governed(crate::Lease::admit())
-                                .authenticated()
+                                .meta_auth()
                                 .route_authorized()
-                                .body_read()
+                                .guarded()
                                 .decoded()
-                                .input_authorized(),
+                                .authorized(),
                         ))
                     }
                 },

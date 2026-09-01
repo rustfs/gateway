@@ -23,7 +23,7 @@
 //!
 //! Why a source guard at all, when the compiler already refuses the wrong order: the compiler
 //! refuses it *given the current signature*. Nothing stops a later change from adding
-//! `Authenticated::assume()`, and that one line would silently restore the property to what it was
+//! `MetadataAdmission::assume()`, and that one line would silently restore the property to what it was
 //! — a comment. Each guard below is paired with a proof that it can fire, because a guard never
 //! shown to fail is indistinguishable from one that cannot.
 
@@ -53,7 +53,7 @@ fn request_body() -> String {
 /// Scoped to the block rather than to the file, because the file also holds `BodyCeilings::of` and
 /// the refusal constructors, all of which return a `Self` that has nothing to do with the proof.
 fn constructors_of_the_proof(text: &str) -> Vec<&str> {
-    const OPENS: &str = "impl<'a> Authenticated<'a> {";
+    const OPENS: &str = "impl<'a> MetadataAdmission<'a> {";
     let Some(start) = text.find(OPENS) else { return Vec::new() };
     let rest = text.get(start.saturating_add(OPENS.len())..).unwrap_or_default();
     // The block ends at the first line that is a lone closing brace in column zero.
@@ -65,7 +65,7 @@ fn constructors_of_the_proof(text: &str) -> Vec<&str> {
             let trimmed = line.trim_start();
             trimmed.starts_with("fn ") || trimmed.starts_with("pub(crate) fn ") || trimmed.starts_with("pub(crate) const fn ")
         })
-        .filter(|line| line.contains("-> Option<Self>") || line.contains("-> Self") || line.contains("-> Authenticated"))
+        .filter(|line| line.contains("-> Option<Self>") || line.contains("-> Self") || line.contains("-> MetadataAdmission"))
         .collect()
 }
 
@@ -114,7 +114,7 @@ fn the_body_read_still_demands_the_proof() {
     // chunk ingest did — reformats the signature across several lines without silently disarming
     // the guard. The guard is about the proof being taken, not about where rustfmt put it.
     assert!(
-        signature.contains("_proof: &Authenticated<'_>"),
+        signature.contains("_proof: &MetadataAdmission<'_>"),
         "`SealedBody::read` must keep the proof in its signature: {signature:?}"
     );
 }
@@ -127,7 +127,7 @@ fn the_pipeline_seals_before_it_authenticates_and_reads_after() {
     let source = service();
     let sealed = source.find("SealedBody::seal(").expect("the body is sealed");
     let admitted = source.find(".floor.admit(").expect("the floor admits");
-    let proof = source.find("Authenticated::of(&verdict)").expect("the proof is minted");
+    let proof = source.find("MetadataAdmission::of(&verdict)").expect("the proof is minted");
     let handoff = source.find(".handoff(").expect("the body is handed off");
     assert!(sealed < admitted, "the body must be sealed before the floor sees the request");
     assert!(admitted < proof, "the proof must be minted from a verdict the floor produced");

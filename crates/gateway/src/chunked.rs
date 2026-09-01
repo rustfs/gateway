@@ -27,8 +27,8 @@
 //! `crate::service`'s order is fixed by types: `govern → admit → authenticate → authorize →
 //! contradict → read body → decode → dispatch`. Chunk decoding is part of *reading the body* — it
 //! is the last thing that happens to the octets before they become an operation's input — so it
-//! runs inside [`crate::gate::SealedBody::read`], which takes an `&crate::gate::Authenticated` and
-//! therefore cannot be reached before the verifier. That is not a convention: `Authenticated` has
+//! runs inside [`crate::gate::SealedBody::read`], which takes an `&crate::gate::MetadataAdmission` and
+//! therefore cannot be reached before the verifier. That is not a convention: `MetadataAdmission` has
 //! one fallible constructor, so a pipeline that decoded first does not compile.
 //!
 //! It has to be after the verifier for a second reason of its own. A signed `aws-chunked` body's
