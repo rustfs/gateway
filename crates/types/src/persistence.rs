@@ -629,3 +629,96 @@ pub fn serialize_public_access_block(value: &PersistedPublicAccessBlockConfigura
     writer.close();
     writer.finish().into_bytes()
 }
+
+/// Parses persisted Public Access Block bytes directly into the generated HTTP DTO.
+///
+/// This is the production persistence bridge: it keeps the old persistence parser as the one
+/// byte-level authority while letting metadata consumers use the same typed shape as the PUT and
+/// GET operation codecs.
+///
+/// # Errors
+///
+/// Returns [`PersistenceCodecError`] under the same malformed, wrong-root, duplicate-field, and
+/// invalid-boolean conditions as [`parse_public_access_block`].
+pub fn parse_public_access_block_dto(input: &[u8]) -> Result<crate::dto::PublicAccessBlockConfiguration, PersistenceCodecError> {
+    let persisted = parse_public_access_block(input)?;
+    Ok(crate::dto::PublicAccessBlockConfiguration {
+        block_public_acls: persisted.block_public_acls,
+        ignore_public_acls: persisted.ignore_public_acls,
+        block_public_policy: persisted.block_public_policy,
+        restrict_public_buckets: persisted.restrict_public_buckets,
+    })
+}
+
+/// Serializes the generated Public Access Block DTO with the historical persistence writer.
+///
+/// Field presence is retained: an omitted switch remains absent rather than being materialized as
+/// `false`. The resulting member order is the old-writer persistence contract, not the HTTP GET
+/// response order.
+#[must_use]
+pub fn serialize_public_access_block_dto(value: &crate::dto::PublicAccessBlockConfiguration) -> Vec<u8> {
+    serialize_public_access_block(&PersistedPublicAccessBlockConfiguration {
+        block_public_acls: value.block_public_acls,
+        ignore_public_acls: value.ignore_public_acls,
+        block_public_policy: value.block_public_policy,
+        restrict_public_buckets: value.restrict_public_buckets,
+    })
+}
+
+#[cfg(test)]
+mod dto_bridge_tests {
+    use crate::dto::PublicAccessBlockConfiguration;
+
+    use super::{PersistenceCodecError, parse_public_access_block_dto, serialize_public_access_block_dto};
+
+    #[test]
+    fn public_access_block_dto_bridge_preserves_presence_and_old_writer_order() {
+        let dto = PublicAccessBlockConfiguration {
+            block_public_acls: Some(true),
+            ignore_public_acls: Some(false),
+            block_public_policy: Some(true),
+            restrict_public_buckets: None,
+        };
+
+        let bytes = serialize_public_access_block_dto(&dto);
+        assert_eq!(
+            bytes,
+            b"<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><IgnorePublicAcls>false</IgnorePublicAcls></PublicAccessBlockConfiguration>"
+        );
+        let parsed = parse_public_access_block_dto(&bytes).expect("the bridge reads its own persistence bytes");
+        assert_eq!(parsed.block_public_acls, dto.block_public_acls);
+        assert_eq!(parsed.ignore_public_acls, dto.ignore_public_acls);
+        assert_eq!(parsed.block_public_policy, dto.block_public_policy);
+        assert_eq!(parsed.restrict_public_buckets, dto.restrict_public_buckets);
+    }
+
+    #[test]
+    fn public_access_block_dto_bridge_rejects_a_wrong_family() {
+        assert_eq!(
+            parse_public_access_block_dto(b"<Tagging></Tagging>").expect_err("a different family must fail"),
+            PersistenceCodecError::WrongRoot
+        );
+    }
+
+    #[test]
+    fn public_access_block_dto_bridge_rejects_a_duplicate_switch() {
+        assert_eq!(
+            parse_public_access_block_dto(
+                b"<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><BlockPublicAcls>false</BlockPublicAcls></PublicAccessBlockConfiguration>"
+            )
+            .expect_err("a repeated switch must fail"),
+            PersistenceCodecError::DuplicateField
+        );
+    }
+
+    #[test]
+    fn public_access_block_dto_bridge_rejects_a_noncanonical_boolean() {
+        assert_eq!(
+            parse_public_access_block_dto(
+                b"<PublicAccessBlockConfiguration><RestrictPublicBuckets>1</RestrictPublicBuckets></PublicAccessBlockConfiguration>"
+            )
+            .expect_err("numeric boolean syntax must fail"),
+            PersistenceCodecError::InvalidBoolean
+        );
+    }
+}
