@@ -37,9 +37,9 @@ crates/gateway/src/probe.rs:69
 crates/gateway/src/request_config.rs:63
 crates/gateway/src/request_deadline.rs:301
 crates/gateway/src/request_deadline.rs:308
-crates/gateway/src/service.rs:242
-crates/gateway/src/service.rs:256
-crates/gateway/src/service.rs:303
-crates/gateway/src/service.rs:316
-crates/gateway/src/service.rs:331
-crates/gateway/src/service.rs:352
+crates/gateway/src/service.rs:243
+crates/gateway/src/service.rs:257
+crates/gateway/src/service.rs:304
+crates/gateway/src/service.rs:317
+crates/gateway/src/service.rs:332
+crates/gateway/src/service.rs:353

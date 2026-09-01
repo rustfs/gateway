@@ -30,6 +30,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/invariants.rs` | HEAD/bodyless and SSE-C response rules | A forbidden body or key reaches the wire |
 | `src/monomorphic.rs` | Concrete-backend service and type-level operation set | Building or auditing static dispatch |
 | `src/operation_mode.rs` | Dynamic/static adapters for the common pipeline | Auditing how a routed operation reaches its codec and handler |
+| `src/panic_boundary.rs` | Panic isolation for deployment-provided futures | An extension panic escapes the request boundary |
 | `src/posture.rs` | Startup-only security posture rendering and the public assembly snapshot | Auditing deployment security visibility |
 | `src/request_deadline.rs` | Runtime-independent policy and failure-floor deadlines | Editing timeout mechanics used by the request pipeline |
 | `src/request_body.rs` | Live verified request-body producer, terminal verdict, and progress signal | A streaming upload crosses the codec or handler boundary |
@@ -40,7 +41,6 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/wire.rs` | Drained response preserving header order | Asserting exact response shape |
 | `src/transport.rs` | Assembly-path vocabulary | A runner names its transport |
 | `src/sig.rs` | Signature re-exports | A caller needs signing vocabulary |
-
 ## Extension points
 
 | File | Responsibility | Read it when |
@@ -51,6 +51,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/ext/sigv2.rs` | `SigV2Authentication` and the SigV2 half of the built-in authenticator | A SigV2 client fails to authenticate |
 | `src/ext/authorizer.rs` | Two-stage authorization contract | Writing policy decisions |
 | `src/ext/authz_audit.rs` | Read-only decision audit sink | Recording authorization outcomes |
+| `src/ext/bucket_owner.rs` | Fail-closed bucket-owner lookup for expected-owner assertions | Wiring bucket metadata ownership into request admission |
 | `src/ext/policy.rs` | One policy snapshot per request | Two stages disagree on policy |
 | `src/ext/credentials.rs` | Credential provider and secret-safe values | Wiring IAM or STS credentials |
 | `src/ext/credential_guard.rs` | Provider timeout, panic isolation, negative cache | Bounding credential lookup work |
@@ -65,7 +66,6 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/ext/observer.rs` | Final response observer | Wiring logs or metrics |
 | `src/ext/filter.rs` | Wire, routed, and response seams | Rewriting untyped HTTP shape |
 | `src/ext/oplayer.rs` | Typed per-operation middleware | Rewriting one DTO |
-
 ## Tests and examples
 
 | Path | Contract |

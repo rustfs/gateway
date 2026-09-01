@@ -1,0 +1,48 @@
+# c-object-0050 — no assertion means no owner lookup.
+
+[case]
+id = "c-object-0050"
+schema_version = 1
+title = "An absent expected owner header does not consult the owner source"
+rationale = """
+The owner source is an assertion verifier, not a new dependency of every object request. This case
+runs with that source unavailable and sends no owner header; the successful read proves ordinary
+traffic neither waits for nor fails with an extension it did not ask the framework to use."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The expected bucket owner request header is optional, so a request that omits it is not subject to that comparison."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object-owner-gate"
+
+[[setup.objects]]
+bucket = "conf-object-owner-gate"
+key = "ordinary/read.txt"
+content_type = "text/plain"
+body = { utf8 = "ordinary read" }
+
+[request]
+method = "GET"
+target = "/conf-object-owner-gate/ordinary/read.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "text/plain"
+
+[expect.body]
+exact_utf8 = "ordinary read"

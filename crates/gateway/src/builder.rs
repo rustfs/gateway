@@ -59,9 +59,9 @@ use crate::clock::{Clock, ClockPosture, ClockSkewAck, MAX_CLOCK_SKEW_SECONDS, Sy
 use crate::config::{ConfigHandle, ConfigStore, ServiceConfig};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
-    Authenticator, Authorizer, AuthzAuditSink, CachedCorsSource, CorsCacheConfig, CorsSource, DefaultGovernor, Governor,
-    GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoCors, NoObserver, NoPolicy, Observer, OpLayer, OpLayerSlot,
-    PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
+    Authenticator, Authorizer, AuthzAuditSink, BucketOwnerSource, CachedCorsSource, CorsCacheConfig, CorsSource, DefaultGovernor,
+    Governor, GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoBucketOwner, NoCors, NoObserver, NoPolicy, Observer,
+    OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
 };
 use crate::posture::{SecurityPosture, log_startup_posture};
 use crate::routing::RoutingSnapshot;
@@ -118,6 +118,7 @@ pub struct ServiceBuilder {
     policy_source: Arc<dyn PolicySource>,
     policy_timeout: PolicyTimeout,
     authz_audit: Arc<dyn AuthzAuditSink>,
+    bucket_owner_source: Arc<dyn BucketOwnerSource>,
     host_resolver: Arc<dyn HostResolver>,
     governor_rates: GovernorRates,
     governor: Option<Arc<dyn Governor>>,
@@ -177,6 +178,7 @@ impl ServiceBuilder {
             policy_source: Arc::new(NoPolicy),
             policy_timeout: PolicyTimeout::default(),
             authz_audit: Arc::new(NoAuthzAudit),
+            bucket_owner_source: Arc::new(NoBucketOwner),
             host_resolver: Arc::new(PathStyleOnly),
             governor_rates: GovernorRates::default(),
             governor: None,
@@ -414,6 +416,16 @@ impl ServiceBuilder {
     #[must_use]
     pub fn host_resolver(mut self, resolver: impl HostResolver) -> Self {
         self.host_resolver = Arc::new(resolver);
+        self
+    }
+
+    /// Installs the source used to enforce `x-amz-expected-bucket-owner`.
+    ///
+    /// The default [`NoBucketOwner`] makes a presented assertion fail closed. Requests that do not
+    /// carry the header never call this source and retain their existing path.
+    #[must_use]
+    pub fn bucket_owner_source(mut self, source: impl BucketOwnerSource) -> Self {
+        self.bucket_owner_source = Arc::new(source);
         self
     }
 
@@ -658,6 +670,7 @@ impl ServiceBuilder {
             policy_timeout: self.policy_timeout,
             authz_audit: self.authz_audit,
             authz_clock: Arc::new(SystemMonotonic::new()),
+            bucket_owner_source: self.bucket_owner_source,
             host_resolver: self.host_resolver,
             governor,
             observer: self.observer,

@@ -91,6 +91,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{collections::BTreeMap, path::PathBuf};
 mod conditional_race;
+mod security;
 mod sigv2;
 use crate::exec::ServiceRuntime;
 use crate::fixture::{Fixture, StoredObject, Stub};
@@ -102,6 +103,7 @@ use crate::observation::{
 use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::time;
 use crate::value::Value;
+use security::{FixedDecision, FixtureBucketOwner};
 /// The access key id every case names as `valid`.
 pub const VALID_ACCESS_KEY: &str = "AKIAIOSFODNN7EXAMPLE";
 /// Its secret. The AWS documentation example key, which is what makes a hand-checked signature
@@ -150,27 +152,6 @@ pub const HOST: &str = "s3.example.com";
 pub const BASE_DOMAINS: [&str; 2] = [HOST, "s3.us-east-1.example.com"];
 /// The region every case signs for.
 pub const REGION: &str = "us-east-1";
-
-struct FixedDecision(Decision);
-
-impl Authorizer for FixedDecision {
-    fn authorize_route<'a>(
-        &'a self,
-        _context: &'a RequestContext<'a>,
-        _request: &'a AuthzRequest<'a>,
-    ) -> BoxFuture<'a, Decision> {
-        Box::pin(async move { self.0 })
-    }
-
-    fn authorize_input<'a>(
-        &'a self,
-        _context: &'a RequestContext<'a>,
-        request: &'a InputAuthzRequest<'a>,
-    ) -> BoxFuture<'a, InputDecisions> {
-        let decisions = request.decide_all(self.0, |_| self.0);
-        Box::pin(async move { decisions })
-    }
-}
 
 struct SameSnapshot {
     first: Mutex<Option<(SnapshotId, i64)>>,
@@ -469,6 +450,9 @@ impl InProcess {
             .register::<dto::UploadPartCopy, _>(Arc::clone(&backend))
             .cors_source(FixtureCors {
                 state: Arc::clone(&self.state),
+            })
+            .bucket_owner_source(FixtureBucketOwner {
+                available: !matches!(self.case_id.as_str(), "c-object-0049" | "c-object-0050"),
             })
             .authenticator(if self.case_id == "c-cred-0012" {
                 SigV4Authenticator::with_guard_config(

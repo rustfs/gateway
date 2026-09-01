@@ -1,0 +1,56 @@
+# c-object-0051 — owner mismatch is refused before an upload body is read.
+
+[case]
+id = "c-object-0051"
+schema_version = 1
+title = "A mismatched owner assertion refuses before reading an object body"
+rationale = """
+The expected owner is request metadata, so the framework can decide it before consuming an upload.
+Reading the body first wastes untrusted bandwidth and makes a cross-account refusal depend on a
+potentially unbounded stream; this case pins both the 403 and the pre-body position of the gate."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["security", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "PutObject accepts the expected bucket owner header and returns 403 when it does not match the actual bucket owner."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object-owner-gate"
+
+[[setup.objects]]
+bucket = "conf-object-owner-gate"
+key = "private/write.txt"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-object-owner-gate/private/write.txt"
+headers = { "content-type" = "text/plain", "x-amz-expected-bucket-owner" = "000000000000" }
+body = { utf8 = "must not be consumed or stored" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "AccessDenied"
+request_id_present = true
+
+[expect.request_progress]
+body_fully_sent = false
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>AccessDenied</Code>"]
+not_contains_utf8 = ["must not be consumed or stored"]
