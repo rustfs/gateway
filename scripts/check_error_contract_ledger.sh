@@ -35,13 +35,12 @@ set -euo pipefail
 # §4.4's hardest rule is that a caller without `s3:ListBucket` must be answered `AccessDenied` for
 # an object that is not there, because a `404` in that position is an existence oracle over every
 # key in the bucket. `ResourceVisibility::Hidden` is where the gateway decides that, and the two
-# tests this row names prove the decision and prove the masked message reveals nothing. What they
-# do not prove is that anything ever selects it: every production and fixture construction site
-# passes `Visible` — `crates/gateway/src/commit.rs:138`, `crates/conformance/src/fixture.rs:1849`
-# and `:1859` — so `Hidden` is reachable from tests alone. The row is `bound` because the rule has
-# a real assertion at the layer that owns it, and this paragraph is here so that nobody reads the
-# green line as "the oracle is closed end to end". rustfs/backlog#1680 tracks the case form as
-# `c-obj-0048`, blocked on a fixture that cannot deny a permission.
+# tests this row names prove the decision and prove the masked message reveals nothing. The
+# production pipeline also asks its input authorizer a non-gating `s3:ListBucket` question for
+# GetObject and narrows a handler-confirmed miss to `Hidden` when that answer is not Allow.
+# `conformance/cases/object/c-object-0052.toml` proves both wire arms and proves that denying list
+# permission does not block an existing object's bytes. This row stays bound to the core tests
+# because this ledger owns error resolution; the object-semantics ledger owns the production seam.
 #
 # # Why some rows point at a shell function
 #

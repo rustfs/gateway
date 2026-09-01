@@ -79,7 +79,7 @@ requirements=(
     'c-obj-0045|negative|bound|crates/http/tests/framing_smuggling.rs::fn c_wire_0063_an_over_large_declared_body_is_400_entity_too_large_and_never_drained'
     'c-obj-0046|negative|bound|conformance/cases/object/c-object-0008.toml::/expect/body/size=0'
     'c-obj-0047|negative|blocked|rustfs/backlog#1680::c-bkt-0025 asserts the bodyless head error for the 404 arm; the 403 arm needs a policy the fixture cannot deny a head with'
-    'c-obj-0048|negative|blocked|rustfs/backlog#1680::hiding existence behind s3:ListBucket needs a per-key policy decision the fixture does not take, and a case that cannot flip the permission proves neither arm'
+    'c-obj-0048|negative|bound|conformance/cases/object/c-object-0052.toml::/exchanges/0/expect/status=403;conformance/cases/object/c-object-0052.toml::/exchanges/0/expect/body/not_contains_utf8/0=hidden/missing.txt;conformance/cases/object/c-object-0052.toml::/exchanges/3/expect/status=404;conformance/cases/object/c-object-0052.toml::/exchanges/3/expect/error/code=NoSuchKey;conformance/cases/object/c-object-0052.toml::/exchanges/4/expect/status=200'
     'c-obj-0049|negative|bound|conformance/cases/object/c-object-0036.toml::/exchanges/1/expect/error/code=MethodNotAllowed;conformance/cases/object/c-object-0038.toml::/exchanges/1/expect/status=405'
     'c-obj-0050|negative|bound|conformance/cases/object/c-object-0037.toml::/exchanges/1/expect/error/code=NoSuchKey;conformance/cases/object/c-object-0037.toml::/exchanges/1/expect/headers_present/x-amz-delete-marker=true'
     'c-obj-0051|negative|bound|conformance/cases/object/c-object-0046.toml::/expect/error/code=AccessDenied;conformance/cases/object/c-object-0051.toml::/expect/request_progress/body_fully_sent=False'
@@ -157,6 +157,7 @@ case_polarity=(
     'conformance/cases/object/c-object-0045.toml|positive'
     'conformance/cases/object/c-object-0046.toml|negative'
     'conformance/cases/object/c-object-0051.toml|negative'
+    'conformance/cases/object/c-object-0052.toml|negative'
     'conformance/cases/tagging/c-tagging-0019.toml|positive'
 )
 

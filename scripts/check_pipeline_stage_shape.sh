@@ -195,7 +195,7 @@ production_transitions = (
     "config: config.route_authorized(),",
     "config: state.config.guarded(sse).with_body_monitor(body_monitor),",
     "let config = state.config.decoded();",
-    "let config = config.authorized();",
+    "let config = config.with_missing_object_visibility(visibility).authorized();",
 )
 cursor = -1
 for transition in production_transitions:

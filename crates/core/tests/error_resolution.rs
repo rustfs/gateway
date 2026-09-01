@@ -341,6 +341,49 @@ fn a_visible_missing_object_preserves_its_key_and_masking_removes_it() {
     assert!(hidden.details().is_empty());
 }
 
+/// Negative — a post-authorization visibility restriction must rewrite the contextual error and
+/// erase the key rather than changing only the cached public code.
+#[test]
+fn n_a_visible_handler_miss_can_be_restricted_without_retaining_the_key() {
+    let error: HandlerError = HandlerErrorContext::missing_object_for(
+        ObjectKey::new("private/missing.txt").expect("a valid key"),
+        MissingObject::Key,
+        ResourceVisibility::Visible,
+    )
+    .into();
+    let context = ErrorContext::ordinary(error.hide_missing_object()).expect("the restricted context remains sealed");
+    let hidden = resolve(context, ResponseKind::Other);
+    assert_eq!(hidden.code(), Some(&ErrorCode::ACCESS_DENIED));
+    assert!(hidden.details().is_empty());
+}
+
+/// Negative — a current delete marker is a sharper existence oracle than an ordinary miss, so the
+/// monotonic restriction removes both marker headers as well as the key detail.
+#[test]
+fn n_restricting_a_current_delete_marker_removes_every_existence_signal() {
+    let error: HandlerError = HandlerErrorContext::current_delete_marker(
+        ResourceVisibility::Visible,
+        Some(ObjectKey::new("private/deleted.txt").expect("a valid key")),
+        1_767_326_645,
+    )
+    .expect("a renderable instant")
+    .into();
+    let context = ErrorContext::ordinary(error.hide_missing_object()).expect("the restricted context remains sealed");
+    let hidden = resolve(context, ResponseKind::Other);
+    assert_eq!(hidden.code(), Some(&ErrorCode::ACCESS_DENIED));
+    assert!(hidden.headers().is_empty());
+    assert!(hidden.details().is_empty());
+}
+
+/// Positive control — the restriction is deliberately narrow and cannot turn an unrelated
+/// contextual miss into AccessDenied.
+#[test]
+fn restricting_object_visibility_does_not_rewrite_a_missing_bucket() {
+    let error: HandlerError = HandlerErrorContext::missing_bucket().into();
+    let context = ErrorContext::ordinary(error.hide_missing_object()).expect("the unrelated context remains sealed");
+    assert_eq!(resolve(context, ResponseKind::Other).code(), Some(&ErrorCode::NO_SUCH_BUCKET));
+}
+
 #[test]
 fn a_visible_missing_object_omits_a_key_that_xml_cannot_represent() {
     let resolution = resolve(

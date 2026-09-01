@@ -85,7 +85,7 @@ use rustfs_gateway::{
     Governor, GovernorRequest, GuardedCredentialProvider, HandlerDeadlineConfig, HandlerResult, InputAuthzRequest,
     InputDecisions, Lease, Limits, Next, ObservedBody, PolicyError, PolicySnapshot, ProviderError, RegionSet, Req,
     RequestContext, S3Service, ServiceBuilder, ServiceConfig, SessionBinding, SigV4Authenticator, SnapshotId, StaticCredentials,
-    VirtualHostStyle, WireRequest, allow_when, collect, dto, fn_credential_provider, op_layer, policy_from,
+    VirtualHostStyle, WireRequest, allow_when, collect, decide_with, dto, fn_credential_provider, op_layer, policy_from,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -477,6 +477,7 @@ impl InProcess {
         } else {
             builder
         };
+        let missing_object_visibility = self.case_id == "c-object-0052";
         let builder = match self.case_id.as_str() {
             "c-authz-0005" => builder.authorizer(SameSnapshot { first: Mutex::new(None) }),
             "c-authz-1009" => builder
@@ -491,10 +492,21 @@ impl InProcess {
                         current: Arc::clone(&self.authz_policy_version),
                     })
             }
-            _ => builder.authorizer(allow_when(|request| {
-                !request.is_anonymous()
-                    && !(request.action == "s3:GetObject"
+            _ => builder.authorizer(decide_with(move |request| {
+                if request.is_anonymous()
+                    || (request.action == "s3:GetObject"
                         && request.bucket.is_some_and(|bucket| bucket.as_str() == "authz-denied-source"))
+                {
+                    Decision::Deny
+                } else if missing_object_visibility && request.action == "s3:ListBucket" {
+                    match request.key.map(|key| key.as_str()) {
+                        Some("visible/missing.txt") => Decision::Allow,
+                        Some("uncertain/missing.txt") => Decision::Indeterminate,
+                        _ => Decision::Deny,
+                    }
+                } else {
+                    Decision::Allow
+                }
             })),
         };
         let builder = sigv2::configure_case(builder, &self.case_id);

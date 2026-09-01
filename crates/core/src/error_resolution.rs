@@ -291,6 +291,16 @@ impl ErrorContext {
     pub const fn cors_forbidden() -> Self {
         Self(ErrorCase::CorsForbidden)
     }
+
+    fn hide_missing_object(self) -> Self {
+        match self.0 {
+            ErrorCase::MissingObject(kind, _, _) => Self(ErrorCase::MissingObject(kind, ResourceVisibility::Hidden, None)),
+            ErrorCase::CurrentDeleteMarker(_, _, at) => {
+                Self(ErrorCase::CurrentDeleteMarker(ResourceVisibility::Hidden, None, at))
+            }
+            other => Self(other),
+        }
+    }
 }
 
 /// A closed context that an authenticated operation handler may return as a [`HandlerError`].
@@ -387,6 +397,10 @@ impl HandlerErrorContext {
 
     pub(crate) fn into_error_context(self) -> ErrorContext {
         self.0
+    }
+
+    pub(crate) fn hide_missing_object(self) -> Self {
+        Self(self.0.hide_missing_object())
     }
 }
 

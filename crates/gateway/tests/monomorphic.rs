@@ -32,8 +32,9 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use rustfs_gateway::{
-    AssemblyError, ClockSkewAck, Handler, HandlerCancellation, HandlerDeadlineConfig, HandlerResult, HeadPart, Next,
-    OperationSetEnd, OperationSetNode, Req, RuleRef, ServiceBuilder, ServiceConfig, WireResponse, dto, op_layer,
+    AssemblyError, ClockSkewAck, Decision, Handler, HandlerCancellation, HandlerDeadlineConfig, HandlerErrorContext,
+    HandlerResult, HeadPart, MissingObject, Next, OperationSetEnd, OperationSetNode, Req, ResourceVisibility, RuleRef,
+    ServiceBuilder, ServiceConfig, WireResponse, decide_with, dto, op_layer,
 };
 use support::{Backend, ContentPing, HeadPing, Ping, PingOutput, plain, wired};
 
@@ -42,6 +43,7 @@ type OrdinaryOperations = OperationSetNode<
     OperationSetNode<HeadPing, OperationSetNode<ContentPing, OperationSetNode<dto::ListBuckets, OperationSetEnd>>>,
 >;
 type SelectOperations = OperationSetNode<dto::SelectObjectContent, OperationSetEnd>;
+type GetObjectOperations = OperationSetNode<dto::GetObject, OperationSetEnd>;
 
 fn ordinary_builder(backend: Arc<Backend>) -> ServiceBuilder {
     wired()
@@ -228,6 +230,67 @@ async fn static_and_dynamic_document_shapes_are_identical() {
         let static_response = collect(monomorphic.call_bytes(plain(method, uri)).await).await;
         assert_wire_parity(&dynamic_response, &static_response);
     }
+}
+
+struct MissingGetObject;
+
+impl Handler<dto::GetObject> for MissingGetObject {
+    async fn call(&self, request: Req<dto::GetObject>) -> HandlerResult<dto::GetObject> {
+        Err(
+            HandlerErrorContext::missing_object_for(request.input().key.clone(), MissingObject::Key, ResourceVisibility::Visible)
+                .into(),
+        )
+    }
+
+    async fn call_with_context(
+        &self,
+        request: Req<dto::GetObject>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<dto::GetObject> {
+        Err(
+            HandlerErrorContext::missing_object_for(request.input().key.clone(), MissingObject::Key, ResourceVisibility::Visible)
+                .into(),
+        )
+    }
+}
+
+/// Negative — dynamic and monomorphic dispatch both apply the non-gating ListBucket verdict only
+/// after the handler confirms a miss, and neither may retain the key in the refusal document.
+#[tokio::test]
+async fn n_static_and_dynamic_dispatch_hide_the_same_missing_object() {
+    fn builder() -> ServiceBuilder {
+        support::wired_at_signed_time().authorizer(decide_with(|request| {
+            if request.action == "s3:ListBucket" {
+                Decision::Deny
+            } else {
+                Decision::Allow
+            }
+        }))
+    }
+
+    let dynamic = builder()
+        .register::<dto::GetObject, _>(Arc::new(MissingGetObject))
+        .build()
+        .expect("a complete dynamic assembly");
+    let backend = Arc::new(MissingGetObject);
+    let monomorphic = builder()
+        .register::<dto::GetObject, _>(Arc::clone(&backend))
+        .build_monomorphic::<_, GetObjectOperations>(backend)
+        .expect("a complete static assembly");
+
+    let target = "/example-bucket/private/missing.txt";
+    let dynamic = collect(dynamic.call_bytes(support::signed_with(http::Method::GET, target, &[])).await).await;
+    let monomorphic = collect(
+        monomorphic
+            .call_bytes(support::signed_with(http::Method::GET, target, &[]))
+            .await,
+    )
+    .await;
+    assert_wire_parity(&dynamic, &monomorphic);
+    assert_eq!(dynamic.status(), http::StatusCode::FORBIDDEN);
+    let body = std::str::from_utf8(dynamic.body()).expect("a UTF-8 error document");
+    assert!(body.contains("<Code>AccessDenied</Code>"), "{body}");
+    assert!(!body.contains("private/missing.txt"), "{body}");
 }
 
 struct CommittedCopy(support::CopyCommit);

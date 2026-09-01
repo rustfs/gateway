@@ -125,6 +125,8 @@ pub(crate) mod sealed {
         fn request_cancellation(&self) -> Option<tokio::sync::watch::Receiver<bool>>;
 
         fn take_body_monitor(&mut self) -> Option<crate::request_body::BodyMonitor>;
+
+        fn hide_missing_object(&self) -> bool;
     }
 
     impl HandlerDeadlinePolicy for RequestConfig<Authorized> {
@@ -150,6 +152,10 @@ pub(crate) mod sealed {
 
         fn take_body_monitor(&mut self) -> Option<crate::request_body::BodyMonitor> {
             RequestConfig::take_body_monitor(self)
+        }
+
+        fn hide_missing_object(&self) -> bool {
+            RequestConfig::hide_missing_object(self)
         }
     }
 
@@ -302,6 +308,7 @@ pub(crate) mod sealed {
                         let deadline = request_config.handler_deadline(deadline_class);
                         let cleanup_grace = request_config.handler_cleanup_grace();
                         let commit_progress = request_config.commit_progress_deadline();
+                        let hide_missing_object = request_config.hide_missing_object();
                         let request_cancellation = request_config.request_cancellation();
                         let body_monitor = request_config.take_body_monitor();
                         let (deadline_cancellation, context) = HandlerCancellationSource::pair();
@@ -348,6 +355,13 @@ pub(crate) mod sealed {
                         };
                         response
                             .map(|response| response.map_commit_work(|work| commit_with_progress_deadline(work, commit_progress)))
+                            .map_err(|error| {
+                                if hide_missing_object {
+                                    error.hide_missing_object()
+                                } else {
+                                    error
+                                }
+                            })
                             .map_err(StaticDispatchError::Handler)
                     },
                 ))

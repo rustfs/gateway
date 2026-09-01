@@ -119,6 +119,7 @@ impl OperationMode for DynamicMode<'_> {
                 .await
                 .map_err(StaticDispatchError::Input)?;
             let authorized = entry.authorize(decoded, &decisions).map_err(StaticDispatchError::Denied)?;
+            let hide_missing_object = request_config.hide_missing_object();
             let body_monitor = request_config.take_body_monitor();
             let cleanup_grace = request_config.config().handler_cleanup_grace();
             let invocation = entry
@@ -130,7 +131,15 @@ impl OperationMode for DynamicMode<'_> {
                     BodyMonitoredOutcome::Completed(answer) => answer,
                     BodyMonitoredOutcome::Failed(error) => return Err(StaticDispatchError::Body(E::from(error))),
                 };
-            let (answer, status) = answer.map_err(StaticDispatchError::Handler)?;
+            let (answer, status) = answer
+                .map_err(|error| {
+                    if hide_missing_object {
+                        error.hide_missing_object()
+                    } else {
+                        error
+                    }
+                })
+                .map_err(StaticDispatchError::Handler)?;
             match answer {
                 ErasedAnswer::Settled(output) => entry
                     .encode(output, meta, status)

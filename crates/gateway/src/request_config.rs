@@ -19,7 +19,7 @@
 //! NOT responsible for: loading or replacing configuration, or implementing a pipeline stage.
 //! Upstream: [`crate::S3Service`]. Downstream: the ordered pipeline in `service.rs`.
 
-use crate::{ConfigSnapshot, Lease};
+use crate::{ConfigSnapshot, Decision, Lease};
 use rustfs_gateway_core::SseEnforced;
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -76,6 +76,7 @@ pub(crate) struct RequestConfig<S> {
     body_monitor: Option<crate::request_body::BodyMonitor>,
     governor_lease: Option<Lease>,
     sse: Option<SseEnforced>,
+    hide_missing_object: bool,
     stage: core::marker::PhantomData<fn() -> S>,
 }
 
@@ -88,6 +89,7 @@ impl RequestConfig<Entered> {
             body_monitor: None,
             governor_lease: None,
             sse: None,
+            hide_missing_object: false,
             stage: core::marker::PhantomData,
         }
     }
@@ -152,6 +154,11 @@ impl RequestConfig<Guarded> {
 }
 
 impl RequestConfig<Decoded> {
+    pub(crate) fn with_missing_object_visibility(mut self, decision: Option<Decision>) -> Self {
+        self.hide_missing_object = decision.is_some_and(|decision| decision != Decision::Allow);
+        self
+    }
+
     pub(crate) fn authorized(self) -> RequestConfig<Authorized> {
         self.advance()
     }
@@ -191,6 +198,10 @@ impl<S> RequestConfig<S> {
         self.governor_lease.as_ref().and_then(Lease::body_quota)
     }
 
+    pub(crate) fn hide_missing_object(&self) -> bool {
+        self.hide_missing_object
+    }
+
     fn advance<N>(self) -> RequestConfig<N> {
         RequestConfig {
             snapshot: self.snapshot,
@@ -199,6 +210,7 @@ impl<S> RequestConfig<S> {
             body_monitor: self.body_monitor,
             governor_lease: self.governor_lease,
             sse: self.sse,
+            hide_missing_object: self.hide_missing_object,
             stage: core::marker::PhantomData,
         }
     }
