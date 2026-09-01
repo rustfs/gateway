@@ -7948,6 +7948,88 @@ probe_global_registry_guard_missing_python() {
 }
 probe_global_registry_guard_missing_python
 
+mut_handler_bundle_trait() {
+    cat >>crates/core/src/handler.rs <<'RS'
+
+pub trait ObjectApi:
+    Handler<rustfs_gateway_types::dto::GetObject>
+    + Handler<rustfs_gateway_types::dto::PutObject>
+{
+}
+RS
+}
+expect_fail check_no_bundle_trait.sh \
+    '[c-reg-1003] a multi-operation Handler bundle supertrait' mut_handler_bundle_trait
+
+mut_handler_bundle_where_clause() {
+    cat >>crates/core/src/handler.rs <<'RS'
+
+pub trait ObjectApi
+where
+    Self: crate::handler::Handler<rustfs_gateway_types::dto::GetObject>
+        + crate::handler::Handler<rustfs_gateway_types::dto::PutObject>,
+{
+}
+RS
+}
+expect_fail check_no_bundle_trait.sh \
+    '[c-reg-1003] a qualified Handler bundle hidden in a where clause' mut_handler_bundle_where_clause
+
+mut_extension_async_fn() {
+    cat >>crates/gateway/src/ext/observer.rs <<'RS'
+
+pub trait AsyncObserver {
+    async fn observe(&self);
+}
+RS
+}
+expect_fail check_dyn_policy.sh \
+    '[c-reg-1013] AFIT on a non-handler extension trait' mut_extension_async_fn
+
+mut_extension_rpitit_future() {
+    cat >>crates/gateway/src/ext/observer.rs <<'RS'
+
+pub trait RpititObserver {
+    fn observe(&self) -> impl core::future::Future<Output = ()> + Send;
+}
+RS
+}
+expect_fail check_dyn_policy.sh \
+    '[c-reg-1013] RPITIT Future on a non-handler extension trait' mut_extension_rpitit_future
+
+mut_extension_async_trait_macro() {
+    cat >>crates/gateway/src/ext/observer.rs <<'RS'
+
+#[async_trait::async_trait]
+pub trait MacroObserver {
+    async fn observe(&self);
+}
+RS
+}
+expect_fail check_dyn_policy.sh \
+    '[c-reg-1013] async_trait on an extension trait' mut_extension_async_trait_macro
+
+probe_registry_trait_policy_decoys() {
+    local output rc=0 sandbox
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    make_sandbox
+    sandbox="$SANDBOX"
+    cat >>"$sandbox/crates/core/src/handler.rs" <<'RS'
+
+// trait CommentBundle: Handler<A> + Handler<B> {}
+const TRAIT_POLICY_DECOY: &str = "trait StringBundle: Handler<A> + Handler<B> { async fn call(); }";
+RS
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_no_bundle_trait.sh" >/dev/null 2>&1 || rc=$?
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_dyn_policy.sh" >/dev/null 2>&1 || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'registry trait-policy guards ignore comment and string decoys'
+    else
+        fail_msg 'registry trait-policy guards reported a comment or string decoy'
+    fi
+}
+probe_registry_trait_policy_decoys
+
 mut_c_sig_0126_derived_signature() {
     cat >crates/sig/src/proof.rs <<'RS'
 // Copyright 2026 RustFS Team

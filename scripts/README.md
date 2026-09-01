@@ -105,6 +105,8 @@ fixed now so that the same check does not get written twice under two names.
 | `check_no_planning_docs.sh` | Agent notes and planning documents are not tracked by git (closes the `git add -f` hole that `.gitignore` leaves open) | P0 |
 | `check_protected_files.sh` | Existing contract paths, `rust-version`, and deleted conformance cases require a literal `BREAKING` declaration in the PR body; new ADRs and cases remain unrestricted | P0-09 |
 | `check_no_global_registry_deps.sh` | No `inventory` / `linkme` / `ctor` dependency in any `Cargo.toml` (ADR-0003) | P0-07 |
+| `check_no_bundle_trait.sh` | No multi-operation `Handler` bundle supertrait; completeness stays a one-line registry check | P4-06 |
+| `check_dyn_policy.sh` | Only core `Operation` and `Handler` may use AFIT/RPITIT; extension traits use `BoxFuture` | P4-06 |
 | `check_macro_governance.sh` | The handler macro keeps adjacent macro-free docs, no link magic, no minted public types, unchanged method bodies, and registry equivalence | P4-07 |
 | `check_ct_eq.sh` | Secret-bearing types (`Signature`, `Secret`, `SigningKey`, …) derive no `PartialEq` / `Eq` / `Debug`; every hand-written `PartialEq` calls `::subtle::ConstantTimeEq::ct_eq`; aliases and look-alike helpers cannot restore ordinary equality | P0 (before P2) |
 | `check_role_verdicts.sh` | PR bodies record each path-triggered advisory role with substantive evidence; deterministic presence is enforced but verdict judgement never blocks CI | P0-10 |
