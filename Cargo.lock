@@ -1801,6 +1801,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustfs-gateway-fs"
+version = "0.1.3"
+dependencies = [
+ "bytes",
+ "hex",
+ "http",
+ "md-5",
+ "rustfs-gateway",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "rustfs-gateway-goldens"
 version = "0.1.0"
 dependencies = [
