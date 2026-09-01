@@ -28,6 +28,9 @@ mod listing;
 #[path = "crud/multipart_listing.rs"]
 mod multipart_listing;
 
+#[path = "crud/multipart_sizing.rs"]
+mod multipart_sizing;
+
 #[path = "crud/multipart_versioning.rs"]
 mod multipart_versioning;
 
@@ -318,8 +321,9 @@ async fn multipart_parts_publish_once_through_the_production_registry() {
         404
     );
 
+    let first_body = Bytes::from(vec![b'h'; multipart_sizing::MIN_PART_SIZE]);
     let second = upload_part(&service, "multipart", "joined.txt", &upload_id, 2, b"world").await;
-    let first = upload_part(&service, "multipart", "joined.txt", &upload_id, 1, b"hello ").await;
+    let first = multipart_sizing::upload_owned(&service, "multipart", "joined.txt", &upload_id, 1, first_body.clone()).await;
     let listed = exchange(
         &service,
         signed(http::Method::GET, &format!("/multipart/joined.txt?uploadId={upload_id}"), Bytes::new()),
@@ -334,7 +338,9 @@ async fn multipart_parts_publish_once_through_the_production_registry() {
     assert!(element(completed.body(), "ETag").is_some_and(|value| value.contains("-2")));
     let fetched = exchange(&service, signed(http::Method::GET, "/multipart/joined.txt", Bytes::new())).await;
     assert_eq!(fetched.status(), 200);
-    assert_eq!(fetched.body().as_ref(), b"hello world");
+    let mut expected = first_body.to_vec();
+    expected.extend_from_slice(b"world");
+    assert_eq!(fetched.body().as_ref(), expected);
     let spent = exchange(
         &service,
         signed(http::Method::GET, &format!("/multipart/joined.txt?uploadId={upload_id}"), Bytes::new()),
