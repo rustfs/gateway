@@ -994,10 +994,8 @@ impl S3Service {
         let body_headers = &headers;
         let body_wire = &wire;
         let read_body = move |state: AuthorizedRoute| async move {
-            if let Err(rejection) = rustfs_gateway_core::sse::enforce(body_meta, connection, &body_service.inner.sse) {
-                return Err(from_sse(rejection, response_kind));
-            }
-
+            let sse = rustfs_gateway_core::sse::enforce(body_meta, connection, &body_service.inner.sse)
+                .map_err(|rejection| from_sse(rejection, response_kind))?;
             let ingest = match framing_mode.as_ref() {
                 Some(payload) => {
                     let seed = crate::chunked::presented_signature_hex(body_headers, body_wire.query().as_str());
@@ -1039,7 +1037,7 @@ impl S3Service {
             Ok((
                 ReadForDecode {
                     policy: state.policy,
-                    config: state.config.guarded().with_body_monitor(body_monitor),
+                    config: state.config.guarded(sse).with_body_monitor(body_monitor),
                 },
                 body,
             ))
@@ -1147,9 +1145,11 @@ impl S3Service {
                 .await;
                 return Err(from_denial(denial, response_kind));
             }
-            Ok((decisions, config.authorized()))
+            let config = config.authorized();
+            let map = |error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive);
+            let sse = config.sse().cloned().map_err(map)?;
+            Ok((decisions, config, sse))
         };
-
         let execution = match std::panic::catch_unwind(AssertUnwindSafe(|| {
             mode.dispatch(op, operation, &meta, authorize_route, read_body, authorize_input)
         })) {

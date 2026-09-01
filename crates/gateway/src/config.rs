@@ -526,7 +526,7 @@ mod tests {
         seen.push(Arc::clone(meta_auth.config()));
         let route_authorized = meta_auth.route_authorized();
         seen.push(Arc::clone(route_authorized.config()));
-        let guarded = route_authorized.guarded();
+        let guarded = route_authorized.guarded(crate::request_config::sse_proof_for_test());
         seen.push(Arc::clone(guarded.config()));
         let decoded = guarded.decoded();
         seen.push(Arc::clone(decoded.config()));

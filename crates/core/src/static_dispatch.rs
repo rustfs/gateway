@@ -227,7 +227,7 @@ where
         Read: FnOnce(S) -> ReadFuture,
         ReadFuture: Future<Output = Result<(T, RequestBody), E>>,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture,
-        InputFuture: Future<Output = Result<(Vec<Decision>, G), E>>,
+        InputFuture: Future<Output = Result<(Vec<Decision>, G, crate::SseEnforced), E>>,
     {
         Self::dispatch_with_handler(
             routed_operation,
@@ -289,7 +289,7 @@ where
         Read: FnOnce(S) -> ReadFuture,
         ReadFuture: Future<Output = Result<(T, RequestBody), E>>,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture,
-        InputFuture: Future<Output = Result<(Vec<Decision>, G), E>>,
+        InputFuture: Future<Output = Result<(Vec<Decision>, G, crate::SseEnforced), E>>,
         Invoke: FnOnce(Arc<B>, crate::Req<O>, G) -> InvokeFuture,
         InvokeFuture: Future<Output = Result<crate::Resp<O>, StaticDispatchError<E>>>,
     {
@@ -303,11 +303,11 @@ where
         let (body_state, body) = read_body(route_state).await.map_err(StaticDispatchError::Body)?;
         let decoded = decode::<O>(meta, body).map_err(StaticDispatchError::Codec)?;
         let resources = resources::<O>(&decoded).map_err(StaticDispatchError::Codec)?;
-        let (decisions, request_guard) = authorize_input_callback(body_state, resources)
+        let (decisions, request_guard, sse) = authorize_input_callback(body_state, resources)
             .await
             .map_err(StaticDispatchError::Input)?;
         let authorized = authorize::<O>(decoded, &decisions).map_err(StaticDispatchError::Denied)?;
-        let response = invoke_handler(backend, authorized.into_request(), request_guard).await?;
+        let response = invoke_handler(backend, authorized.into_request(sse), request_guard).await?;
         let (answer, status) = response.into_parts();
         match answer {
             Answer::Settled(output) => encode::<O>(output, meta, status)

@@ -112,16 +112,18 @@ pub struct Req<O: Operation> {
     input: Box<O::Input>,
     resources: O::DerivedResources,
     read: crate::AuthorizedRead,
+    sse: crate::SseEnforced,
 }
 
 impl<O: Operation> Req<O> {
     /// Converts the framework's authorization proof into a handler request.
-    pub(crate) fn from_authorized(authorized: crate::Authorized<O>) -> Self {
+    pub(crate) fn from_authorized(authorized: crate::Authorized<O>, sse: crate::SseEnforced) -> Self {
         let (input, resources, read) = authorized.into_parts();
         Self {
             input: Box::new(input),
             resources,
             read,
+            sse,
         }
     }
 
@@ -138,6 +140,15 @@ impl<O: Operation> Req<O> {
     /// Proof that every resource in [`Self::resources`] was allowed.
     pub const fn read_proof(&self) -> &crate::AuthorizedRead {
         &self.read
+    }
+
+    /// Proof produced by the framework's SSE transport and header gate for this exact request.
+    ///
+    /// The proof carries only key fingerprints and a managed algorithm, never raw customer-key
+    /// bytes. It cannot be constructed directly; direct handler tests must call
+    /// [`crate::sse::enforce`] and pass its result to [`Req::new`].
+    pub const fn sse(&self) -> &crate::SseEnforced {
+        &self.sse
     }
 
     /// The decoded input, mutably.
@@ -167,11 +178,12 @@ where
     /// Registry and wire dispatch still require [`crate::Authorized<O>`]; this constructor cannot
     /// be used for copy, batch-delete, or any future operation with derived resources.
     #[must_use]
-    pub fn new(input: O::Input) -> Self {
+    pub fn new(input: O::Input, sse: crate::SseEnforced) -> Self {
         Self {
             input: Box::new(input),
             resources: crate::NoDerived,
             read: crate::AuthorizedRead::empty(),
+            sse,
         }
     }
 }

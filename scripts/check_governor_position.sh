@@ -171,7 +171,7 @@ markers = (
     ("sealed body", r"SealedBody::seal\s*\("),
     ("POST Object pre-auth body read", r"\bsealed\s*\.post_object_prelude\s*\("),
     ("ordinary body read", r"\bsealed\s*\.handoff\s*\("),
-    ("guarded stage", r"state\.config\.guarded\(\)"),
+    ("guarded stage", r"state\.config\.guarded\(sse\)"),
 )
 positions = []
 for description, pattern in markers:

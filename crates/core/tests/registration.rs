@@ -51,7 +51,7 @@ use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{
     GetBucketLocation, GetBucketLocationInput, GetBucketLocationOutput, PutObject, PutObjectInput, PutObjectOutput,
 };
-use support::{Req as RouteReq, block_on, entry};
+use support::{Req as RouteReq, block_on, entry, sse_proof};
 
 fn erased_get_bucket_location() -> rustfs_gateway_core::ErasedRequest {
     let request = Request::builder()
@@ -314,7 +314,7 @@ fn an_erased_registration_still_calls_the_typed_handler() {
 
     let invocation = router
         .registry()
-        .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+        .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default(), sse_proof())
         .expect("input authorization succeeds")
         .expect("GetBucketLocation is registered");
     let response = block_on(invocation).expect("the handler answers");
@@ -352,7 +352,7 @@ fn two_backends_coexist_in_one_process() {
     let region_of = |router: &rustfs_gateway_core::Router| {
         let invocation = router
             .registry()
-            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default(), sse_proof())
             .expect("input authorization succeeds")
             .expect("registered");
         block_on(invocation)
@@ -390,7 +390,7 @@ fn a_namespaced_third_party_operation_registers() {
     let answer = block_on(
         router
             .registry()
-            .authorize_and_invoke_no_derived::<AdminSetConfig>(())
+            .authorize_and_invoke_no_derived::<AdminSetConfig>((), sse_proof())
             .expect("input authorization succeeds")
             .expect("registered"),
     );
@@ -412,10 +412,10 @@ fn require_passes_on_a_covered_set() {
 /// Positive — the input-to-operation mapping lets a migration keep its existing signatures.
 #[test]
 fn the_reverse_mapping_names_the_operation_its_input_belongs_to() {
-    let request: S3Request<PutObjectInput> = Req::new(PutObjectInput::default());
+    let request: S3Request<PutObjectInput> = Req::new(PutObjectInput::default(), sse_proof());
     assert_eq!(request.operation_name(), "PutObject");
 
-    let other: S3Request<GetBucketLocationInput> = Req::new(GetBucketLocationInput::default());
+    let other: S3Request<GetBucketLocationInput> = Req::new(GetBucketLocationInput::default(), sse_proof());
     assert_eq!(other.operation_name(), "GetBucketLocation");
 }
 
@@ -430,7 +430,7 @@ fn a_spec_registration_without_a_handler_still_routes() {
     assert_eq!(registry.handler_names().count(), 0);
     assert!(
         registry
-            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default())
+            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default(), sse_proof())
             .expect("input authorization succeeds")
             .is_none()
     );
@@ -457,7 +457,7 @@ fn an_unregistered_operation_is_not_implemented() {
     assert!(
         router
             .registry()
-            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default(), sse_proof())
             .expect("input authorization succeeds")
             .is_none()
     );
@@ -611,7 +611,7 @@ fn a_second_registration_does_not_win() {
 
     let answer = block_on(
         registry
-            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default(), sse_proof())
             .expect("input authorization succeeds")
             .expect("registered"),
     )
@@ -694,7 +694,7 @@ fn a_failed_rebuild_leaves_the_running_router_alone() {
     let answer = block_on(
         running
             .registry()
-            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default(), sse_proof())
             .expect("input authorization succeeds")
             .expect("still registered"),
     );
@@ -854,18 +854,18 @@ fn an_erased_call_with_the_wrong_payload_is_an_error_not_a_panic() {
     let call = router
         .registry()
         .handlers()
-        .invoke_erased("PutObject", wrong)
+        .invoke_erased("PutObject", wrong, sse_proof())
         .expect("PutObject is registered");
     let error = block_on(call).expect_err("the payload is another operation's");
     assert_eq!(error.code(), &ErrorCode::INTERNAL_ERROR);
     assert!(error.message().contains("PutObject"), "{error}");
 }
-
 /// Negative — an erased call for an operation nobody registered finds nothing.
 #[test]
 fn an_erased_call_for_an_unregistered_operation_finds_nothing() {
     let router = RouterBuilder::new().build().expect("an empty backend still builds");
-    let payload = erased_get_bucket_location();
-    assert!(router.registry().handlers().invoke_erased("PutObject", payload).is_none());
-    assert!(router.registry().handlers().is_empty());
+    let handlers = router.registry().handlers();
+    let call = handlers.invoke_erased("PutObject", erased_get_bucket_location(), sse_proof());
+    assert!(call.is_none());
+    assert!(handlers.is_empty());
 }

@@ -31,6 +31,8 @@ use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{CompleteMultipartUpload, CompleteMultipartUploadOutput};
 
+use crate::support::sse_proof;
+
 static SPEC: OperationSpec = OperationSpec::builder("example:StaticProbe", 200, None)
     .handler_deadline_class(HandlerDeadlineClass::Standard)
     .required_params(&[])
@@ -125,7 +127,7 @@ async fn the_static_entry_preserves_the_authorization_order() {
         },
         move |(), resources| async move {
             input_trail.lock().expect("trail lock").push("input-authorize");
-            Ok::<_, &'static str>((vec![rustfs_gateway_core::Decision::Allow; resources.len()], ()))
+            Ok::<_, &'static str>((vec![rustfs_gateway_core::Decision::Allow; resources.len()], (), sse_proof()))
         },
     )
     .await
@@ -150,7 +152,7 @@ async fn a_routed_identity_mismatch_is_fail_closed() {
         backend,
         || async { Ok::<_, &'static str>(()) },
         |()| async { Ok::<_, &'static str>(((), RequestBody::Buffered(Bytes::new()))) },
-        |(), _| async { Ok::<_, &'static str>((Vec::new(), ())) },
+        |(), _| async { Ok::<_, &'static str>((Vec::new(), (), sse_proof())) },
     )
     .await;
 

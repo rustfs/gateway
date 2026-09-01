@@ -24,14 +24,16 @@ use rustfs_gateway_core::Req;
 use rustfs_gateway_types::dto::{GetObject, PutObject, PutObjectInput};
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
+use crate::support::sse_proof;
+
 const _: () = assert!(size_of::<Req<PutObject>>() <= 136);
 const _: () = assert!(size_of::<Req<GetObject>>() <= 136);
 
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(size_of::<Req<PutObject>>() == 32);
+const _: () = assert!(size_of::<Req<PutObject>>() == 96);
 
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(size_of::<Req<GetObject>>() == 32);
+const _: () = assert!(size_of::<Req<GetObject>>() == 96);
 
 #[test]
 fn c_dto_n011_req_put_object_has_the_boxed_snapshot_and_stays_within_the_ceiling() {
@@ -41,7 +43,7 @@ fn c_dto_n011_req_put_object_has_the_boxed_snapshot_and_stays_within_the_ceiling
         size_of::<Req<PutObject>>()
     );
     #[cfg(target_pointer_width = "64")]
-    assert_eq!(size_of::<Req<PutObject>>(), 32, "the boxed request snapshot drifted");
+    assert_eq!(size_of::<Req<PutObject>>(), 96, "the boxed request snapshot drifted");
 }
 
 #[test]
@@ -52,7 +54,7 @@ fn c_enc_0039_req_get_object_has_the_boxed_snapshot_and_stays_within_the_ceiling
         size_of::<Req<GetObject>>()
     );
     #[cfg(target_pointer_width = "64")]
-    assert_eq!(size_of::<Req<GetObject>>(), 32, "the boxed request snapshot drifted");
+    assert_eq!(size_of::<Req<GetObject>>(), 96, "the boxed request snapshot drifted");
 }
 
 #[test]
@@ -64,7 +66,7 @@ fn public_fields_default_and_fru_survive_the_cold_request_representation() {
         content_type: Some("text/plain".to_owned()),
         ..Default::default()
     };
-    let request: Req<PutObject> = Req::new(input);
+    let request: Req<PutObject> = Req::new(input, sse_proof());
 
     assert_eq!(request.input().content_type.as_deref(), Some("text/plain"));
     let input = request.into_input();

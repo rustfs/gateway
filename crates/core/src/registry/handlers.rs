@@ -61,6 +61,7 @@ use std::task::{Context, Poll};
 
 use crate::Authorized;
 use crate::HandlerContext;
+use crate::SseEnforced;
 use crate::handler::{BoxFuture, Handler, HandlerError, Resp};
 use crate::op::Operation;
 use crate::registry::codecs::{ErasedCodec, ErasedDecode, ErasedEncode};
@@ -89,7 +90,8 @@ pub type ErasedResponse = Box<dyn Any + Send>;
 /// `Arc` rather than `Box` so that [`super::Registry`] stays `Clone`: a router is cheap to hand to
 /// another task, and a registry that could not be cloned would push that cost onto everything
 /// holding one.
-pub type ErasedHandler = Arc<dyn Fn(ErasedRequest) -> BoxFuture<'static, Result<ErasedResponse, HandlerError>> + Send + Sync>;
+pub type ErasedHandler =
+    Arc<dyn Fn(ErasedRequest, SseEnforced) -> BoxFuture<'static, Result<ErasedResponse, HandlerError>> + Send + Sync>;
 
 /// Erases an operation and a backend into one closure.
 ///
@@ -100,9 +102,9 @@ where
     O: Operation,
     B: Handler<O>,
 {
-    Arc::new(move |request: ErasedRequest| {
+    Arc::new(move |request: ErasedRequest, sse: SseEnforced| {
         let implementation = Arc::clone(&implementation);
-        erase_request::<O, B>(implementation, request, None)
+        erase_request::<O, B>(implementation, request, sse, None)
     })
 }
 
@@ -113,15 +115,20 @@ where
 /// the monomorphic path have migrated.
 pub fn erase_authorized_handler_with_context<O, B>(
     implementation: Arc<B>,
-) -> Arc<impl Fn(ErasedRequest, HandlerContext) -> BoxFuture<'static, Result<ErasedResponse, HandlerError>> + Send + Sync>
+) -> Arc<
+    impl Fn(ErasedRequest, HandlerContext, SseEnforced) -> BoxFuture<'static, Result<ErasedResponse, HandlerError>> + Send + Sync,
+>
 where
     O: Operation,
     B: Handler<O>,
 {
     Arc::new(
-        move |request: ErasedRequest, context: HandlerContext| -> BoxFuture<'static, Result<ErasedResponse, HandlerError>> {
+        move |request: ErasedRequest,
+              context: HandlerContext,
+              sse: SseEnforced|
+              -> BoxFuture<'static, Result<ErasedResponse, HandlerError>> {
             let implementation = Arc::clone(&implementation);
-            erase_request::<O, B>(implementation, request, Some(context))
+            erase_request::<O, B>(implementation, request, sse, Some(context))
         },
     )
 }
@@ -129,6 +136,7 @@ where
 fn erase_request<O, B>(
     implementation: Arc<B>,
     request: ErasedRequest,
+    sse: SseEnforced,
     context: Option<HandlerContext>,
 ) -> BoxFuture<'static, Result<ErasedResponse, HandlerError>>
 where
@@ -141,32 +149,39 @@ where
             .downcast::<Authorized<O>>()
             .map_err(|_| mismatch::<O>())?;
         match context {
-            Some(context) => dispatch_with_context::<O, B>(implementation, *authorized, context).await,
-            None => dispatch::<O, B>(implementation, *authorized).await,
+            Some(context) => dispatch_with_context::<O, B>(implementation, *authorized, sse, context).await,
+            None => dispatch::<O, B>(implementation, *authorized, sse).await,
         }
     })
 }
 
 /// The only typed transition from authorization into a backend call.
-async fn dispatch<O, B>(implementation: Arc<B>, authorized: Authorized<O>) -> Result<ErasedResponse, HandlerError>
+async fn dispatch<O, B>(
+    implementation: Arc<B>,
+    authorized: Authorized<O>,
+    sse: SseEnforced,
+) -> Result<ErasedResponse, HandlerError>
 where
     O: Operation,
     B: Handler<O>,
 {
-    let response = implementation.call(authorized.into_request()).await?;
+    let response = implementation.call(authorized.into_request(sse)).await?;
     Ok(Box::new(response) as ErasedResponse)
 }
 
 async fn dispatch_with_context<O, B>(
     implementation: Arc<B>,
     authorized: Authorized<O>,
+    sse: SseEnforced,
     context: HandlerContext,
 ) -> Result<ErasedResponse, HandlerError>
 where
     O: Operation,
     B: Handler<O>,
 {
-    let response = implementation.call_with_context(authorized.into_request(), context).await?;
+    let response = implementation
+        .call_with_context(authorized.into_request(sse), context)
+        .await?;
     Ok(Box::new(response) as ErasedResponse)
 }
 
@@ -331,10 +346,10 @@ impl HandlerTable {
     /// `None` when nothing is registered under [`Operation::NAME`] — the caller answers that with
     /// a 501, which is what makes a partial backend legal without a single default method.
     #[must_use]
-    pub(crate) fn invoke<O: Operation>(&self, request: Authorized<O>) -> Option<Invocation<O>> {
+    pub(crate) fn invoke<O: Operation>(&self, request: Authorized<O>, sse: SseEnforced) -> Option<Invocation<O>> {
         let handler = self.handler(O::NAME)?;
         Some(Invocation {
-            inner: handler(ErasedRequest::authorized(request)),
+            inner: handler(ErasedRequest::authorized(request), sse),
             operation: PhantomData,
         })
     }
@@ -348,9 +363,10 @@ impl HandlerTable {
         &self,
         name: &str,
         request: ErasedRequest,
+        sse: SseEnforced,
     ) -> Option<BoxFuture<'static, Result<ErasedResponse, HandlerError>>> {
         let handler = self.handler(name)?;
-        Some(handler(request))
+        Some(handler(request, sse))
     }
 }
 

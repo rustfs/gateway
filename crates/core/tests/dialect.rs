@@ -44,7 +44,7 @@ use rustfs_gateway_core::registry::{BuildError, HandlerDeadlineClass, OperationS
 use rustfs_gateway_core::route::{HostClass, Predicate, RouteBuildError, ShadowingDecl, TargetKind};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::HeadObject;
-use support::{Req as RouteReq, block_on};
+use support::{Req as RouteReq, block_on, sse_proof};
 
 // ── the worked example ───────────────────────────────────────────────────────────────────────
 //
@@ -217,7 +217,7 @@ fn a_declared_dialect_operation_reaches_its_own_handler() {
     let answer = block_on(
         router
             .registry()
-            .authorize_and_invoke_no_derived::<HeadObjectReport>(())
+            .authorize_and_invoke_no_derived::<HeadObjectReport>((), sse_proof())
             .expect("input authorization succeeds")
             .expect("registered"),
     );

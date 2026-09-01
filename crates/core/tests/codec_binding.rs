@@ -52,7 +52,7 @@ use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{
     GetBucketLocation, GetBucketLocationOutput, LocationConstraint, PutObject, PutObjectOutput, UploadPart, UploadPartOutput,
 };
-use support::block_on;
+use support::{block_on, sse_proof};
 
 // ── a backend ────────────────────────────────────────────────────────────────────────────────
 
@@ -164,7 +164,7 @@ fn a_name_alone_carries_a_request_through_decode_handler_and_encode() {
     let resources = (entry.resources)(&decoded).expect("derived resources");
     let decisions = vec![rustfs_gateway_core::Decision::Allow; resources.len()];
     let authorized = (entry.authorize)(decoded, &decisions).expect("input authorization");
-    let answer = block_on((entry.handler)(authorized)).expect("the erased handler answers");
+    let answer = block_on((entry.handler)(authorized, sse_proof())).expect("the erased handler answers");
     let response = (entry.encode)(answer, &view).expect("the erased encoder writes the answer");
 
     assert_eq!(response.status, StatusCode::OK);
@@ -208,7 +208,7 @@ fn the_encoder_takes_the_status_from_the_answer_and_not_from_the_spec() {
     let resources = (entry.resources)(&decoded).expect("derived resources");
     let decisions = vec![rustfs_gateway_core::Decision::Allow; resources.len()];
     let authorized = (entry.authorize)(decoded, &decisions).expect("input authorization");
-    let answer = block_on((entry.handler)(authorized)).expect("answers");
+    let answer = block_on((entry.handler)(authorized, sse_proof())).expect("answers");
     let response = (entry.encode)(answer, &view).expect("encodes");
 
     assert_eq!(response.status, StatusCode::PARTIAL_CONTENT);

@@ -18168,7 +18168,7 @@ PYEOF
 }
 expect_cargo_test_fail_with_diagnostic rustfs-gateway-core integration \
     dto_cold_split::c_dto_n011_req_put_object_has_the_boxed_snapshot_and_stays_within_the_ceiling \
-    'evaluation panicked: assertion failed: size_of::<Req<PutObject>>() == 32' mut_req_input_box_removed
+    'evaluation panicked: assertion failed: size_of::<Req<PutObject>>() == 96' mut_req_input_box_removed
 
 fi
 
@@ -19159,8 +19159,8 @@ from pathlib import Path
 
 path = Path("crates/core/src/static_dispatch.rs")
 text = path.read_text()
-subject = "invoke_handler(backend, authorized.into_request(), request_guard)"
-replacement = "invoke_handler(backend, authorized.into_request(), ())"
+subject = "invoke_handler(backend, authorized.into_request(sse), request_guard)"
+replacement = "invoke_handler(backend, authorized.into_request(sse), ())"
 if text.count(subject) != 1:
     raise SystemExit("missing unique static handler injection mutation subject")
 path.write_text(text.replace(subject, replacement, 1))

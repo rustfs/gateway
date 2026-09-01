@@ -56,12 +56,28 @@
 
 use std::process::Command;
 
+use bytes::Bytes;
 use rustfs_gateway::dto;
-use rustfs_gateway::{BucketName, Handler, Req};
+use rustfs_gateway::{
+    BucketName, Handler, Limits, MetaView, Req, SseConfig, SseEnforced, TargetKind, TransportSecurity, WireRequest,
+};
 
 use crate::exec::block_on;
 
 use super::{Fixture, StoredObject, Stub};
+
+fn sse_proof() -> SseEnforced {
+    let request = http::Request::builder()
+        .method(http::Method::GET)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .body(Bytes::new())
+        .expect("valid proof fixture");
+    let wire = WireRequest::accept(request, &Limits::default()).expect("accepted proof fixture");
+    let meta = MetaView::of(&wire, TargetKind::Service).expect("service proof fixture");
+    rustfs_gateway::enforce_sse(&meta, TransportSecurity::Encrypted, &SseConfig::strict())
+        .expect("an empty encrypted request passes SSE enforcement")
+}
 
 /// The profiler must be the global allocator for `dhat::HeapStats` to mean anything.
 ///
@@ -126,11 +142,14 @@ fn bucket(count: usize) -> Stub {
 
 /// One `ListObjectsV2` for the first page of the bucket.
 fn request() -> Req<dto::ListObjectsV2> {
-    Req::new(dto::ListObjectsV2Input {
-        bucket: BucketName::new("conf-list-big".to_owned()).expect("a valid bucket name"),
-        max_keys: Some(PAGE),
-        ..dto::ListObjectsV2Input::default()
-    })
+    Req::new(
+        dto::ListObjectsV2Input {
+            bucket: BucketName::new("conf-list-big".to_owned()).expect("a valid bucket name"),
+            max_keys: Some(PAGE),
+            ..dto::ListObjectsV2Input::default()
+        },
+        sse_proof(),
+    )
 }
 
 /// What one page out of a bucket of `count` keys costs: blocks allocated, and bytes allocated.

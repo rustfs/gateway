@@ -180,7 +180,7 @@ pub(crate) mod sealed {
             Read: FnOnce(S) -> ReadFuture + Send + 'a,
             ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
             Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
-            InputFuture: Future<Output = Result<(Vec<Decision>, G), E>> + Send + 'a;
+            InputFuture: Future<Output = Result<(Vec<Decision>, G, rustfs_gateway_core::SseEnforced), E>> + Send + 'a;
     }
 
     impl<H> Set<H> for OperationSetEnd
@@ -219,7 +219,7 @@ pub(crate) mod sealed {
             Read: FnOnce(S) -> ReadFuture + Send + 'a,
             ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
             Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
-            InputFuture: Future<Output = Result<(Vec<Decision>, G), E>> + Send + 'a,
+            InputFuture: Future<Output = Result<(Vec<Decision>, G, rustfs_gateway_core::SseEnforced), E>> + Send + 'a,
         {
             Box::pin(async move {
                 Err(StaticDispatchError::OperationMismatch {
@@ -283,7 +283,7 @@ pub(crate) mod sealed {
             Read: FnOnce(S) -> ReadFuture + Send + 'a,
             ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
             Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
-            InputFuture: Future<Output = Result<(Vec<Decision>, G), E>> + Send + 'a,
+            InputFuture: Future<Output = Result<(Vec<Decision>, G, rustfs_gateway_core::SseEnforced), E>> + Send + 'a,
         {
             if operation == O::NAME {
                 Box::pin(StaticOperation::<O>::dispatch_with_handler(

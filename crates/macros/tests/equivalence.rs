@@ -35,9 +35,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
 
+use bytes::Bytes;
+use http::Request;
 use rustfs_gateway_core::handler::{Handler, HandlerResult, Req, Resp};
 use rustfs_gateway_core::registry::RouterBuilder;
-use rustfs_gateway_core::{HandlerContext, Router, dispatch};
+use rustfs_gateway_core::{HandlerContext, MetaView, Router, SseConfig, SseEnforced, TargetKind, TransportSecurity, dispatch};
+use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_macros::handlers;
 
 // The proc-macro crate's own equivalence test stands in for the public facade without creating a
@@ -47,6 +50,19 @@ use rustfs_gateway_types::dto::{
     GetBucketLocation, GetBucketLocationInput, GetBucketLocationOutput, ListObjectsV2, ListObjectsV2Input, ListObjectsV2Output,
     LocationConstraint, PutObject, PutObjectInput, PutObjectOutput,
 };
+
+fn sse_proof() -> SseEnforced {
+    let request = Request::builder()
+        .method(http::Method::GET)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .body(Bytes::new())
+        .expect("valid proof fixture");
+    let wire = WireRequest::accept(request, &Limits::default()).expect("accepted proof fixture");
+    let meta = MetaView::of(&wire, TargetKind::Service).expect("service proof fixture");
+    rustfs_gateway_core::sse::enforce(&meta, TransportSecurity::Encrypted, &SseConfig::strict())
+        .expect("an empty encrypted request passes SSE enforcement")
+}
 
 // ── the macro form ───────────────────────────────────────────────────────────────────────────
 
@@ -260,7 +276,7 @@ fn the_two_forms_answer_identically() {
     let one = block_on(
         generated
             .registry()
-            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default(), sse_proof())
             .expect("input authorization succeeds")
             .expect("registered"),
     )
@@ -268,7 +284,7 @@ fn the_two_forms_answer_identically() {
     let two = block_on(
         written
             .registry()
-            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default())
+            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default(), sse_proof())
             .expect("input authorization succeeds")
             .expect("registered"),
     )
@@ -289,7 +305,7 @@ fn the_two_forms_answer_identically() {
     let one = block_on(
         generated
             .registry()
-            .authorize_and_invoke_no_derived::<ListObjectsV2>(ListObjectsV2Input::default())
+            .authorize_and_invoke_no_derived::<ListObjectsV2>(ListObjectsV2Input::default(), sse_proof())
             .expect("input authorization succeeds")
             .expect("registered"),
     )
@@ -297,7 +313,7 @@ fn the_two_forms_answer_identically() {
     let two = block_on(
         written
             .registry()
-            .authorize_and_invoke_no_derived::<ListObjectsV2>(ListObjectsV2Input::default())
+            .authorize_and_invoke_no_derived::<ListObjectsV2>(ListObjectsV2Input::default(), sse_proof())
             .expect("input authorization succeeds")
             .expect("registered"),
     )
@@ -308,7 +324,7 @@ fn the_two_forms_answer_identically() {
     let one = block_on(
         generated
             .registry()
-            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default())
+            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default(), sse_proof())
             .expect("input authorization succeeds")
             .expect("registered"),
     )
@@ -316,7 +332,7 @@ fn the_two_forms_answer_identically() {
     let two = block_on(
         written
             .registry()
-            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default())
+            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default(), sse_proof())
             .expect("input authorization succeeds")
             .expect("registered"),
     )
@@ -346,7 +362,7 @@ fn the_macro_registers_nothing_it_was_not_given() {
     assert!(
         router
             .registry()
-            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default())
+            .authorize_and_invoke_no_derived::<PutObject>(PutObjectInput::default(), sse_proof())
             .expect("input authorization succeeds")
             .is_none()
     );
