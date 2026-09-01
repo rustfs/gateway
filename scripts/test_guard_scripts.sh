@@ -11503,23 +11503,29 @@ expect_fail_with_diagnostic check_op_file_shape.sh \
 # reads. The mutation removes the first live debt row rather than naming one
 # operation, because successful route work deliberately retires those names.
 #
-# Both controls therefore mutate the register rather than the tree, because the
-# register is the artefact the guard exists to keep honest.
+# Once the register reaches zero debt, there is no live row to remove. The
+# missing-row control therefore creates one real exposure from the guard's two
+# runtime inputs: it marks a modeled operation deferred and makes its generated
+# selector name the wrong operation. The stale-row control still mutates the
+# register directly. Together they keep both directions observable at zero.
 # -----------------------------------------------------------------------------
 
 mut_forgotten_exposure() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("scripts/allowances/route-coverage-allowances.txt")
-lines = path.read_text().splitlines(keepends=True)
-for index, line in enumerate(lines):
-    if line.strip() and not line.lstrip().startswith("#"):
-        del lines[index]
-        path.write_text("".join(lines))
-        break
-else:
-    raise SystemExit("route-coverage mutation subject is missing")
+overlay = Path("model/overlays/ops/object-advanced.toml")
+overlay.write_text(
+    overlay.read_text()
+    + '\n[[deferred]]\noperations = ["UpdateObjectEncryption"]\n'
+)
+
+routes = Path("generated/routes.rs")
+text = routes.read_text()
+subject = 'operation: "UpdateObjectEncryption"'
+if text.count(subject) != 1:
+    raise SystemExit("route-coverage generated-row mutation subject is not unique")
+routes.write_text(text.replace(subject, 'operation: "UpdateObjectEncryptionProbe"', 1))
 PYEOF
 }
 expect_fail check_route_coverage.sh \

@@ -278,22 +278,22 @@ mod tests {
     /// this one can produce the token this declaration needs. That is the point of the test as much
     /// as the refusal is — a third party cannot reach this state at all.
     ///
-    /// The name is `UpdateObjectEncryption`, which the pinned model defines and this build defers.
-    /// It was `GetObjectTorrent` until that operation gained a row; the rule under test is unchanged,
-    /// and the example simply has to be an operation that is still rowless — a property of the
-    /// table, not of the check.
+    /// The name is `WriteGetObjectResponse`, which the pinned model defines but the gateway excludes.
+    /// It was `UpdateObjectEncryption` until that operation gained a row; the rule under test is
+    /// unchanged, and the example simply has to be an operation that is still rowless — a property
+    /// of the table, not of the check.
     struct NotInTheTable;
 
-    static SPEC: OperationSpec = OperationSpec::builder("UpdateObjectEncryption", 200, None)
+    static SPEC: OperationSpec = OperationSpec::builder("WriteGetObjectResponse", 200, None)
         .handler_deadline_class(HandlerDeadlineClass::Standard)
         .required_params(&[])
         .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
         .build();
 
-    static FLOOR: OperationFloor = OperationFloor::builtin("UpdateObjectEncryption", SigService::S3);
+    static FLOOR: OperationFloor = OperationFloor::builtin("WriteGetObjectResponse", SigService::S3);
 
     impl Operation for NotInTheTable {
-        const NAME: &'static str = "UpdateObjectEncryption";
+        const NAME: &'static str = "WriteGetObjectResponse";
         const ORIGIN: OperationOrigin = OperationOrigin::Standard(StandardOperation::TOKEN);
         type Input = ();
         type Output = ();
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(
             check_operation::<NotInTheTable>(),
             Err(RegistryError::UnknownStandardOperation {
-                name: "UpdateObjectEncryption"
+                name: "WriteGetObjectResponse"
             })
         );
     }

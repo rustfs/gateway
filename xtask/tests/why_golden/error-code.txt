@@ -1,4 +1,4 @@
-RULE      NoSuchKey — S3 error code status=404 produced by CopyObject, DeleteObjectAnnotation, DeleteObjectTagging, GetObject, GetObjectAcl, GetObjectAnnotation, GetObjectAttributes, GetObjectLegalHold, GetObjectRetention, GetObjectTagging, GetObjectTorrent, HeadObject, ListObjectAnnotations, PutObjectAcl, PutObjectAnnotation, PutObjectLegalHold, PutObjectRetention, PutObjectTagging, RestoreObject, SelectObjectContent, UploadPartCopy
+RULE      NoSuchKey — S3 error code status=404 produced by CopyObject, DeleteObjectAnnotation, DeleteObjectTagging, GetObject, GetObjectAcl, GetObjectAnnotation, GetObjectAttributes, GetObjectLegalHold, GetObjectRetention, GetObjectTagging, GetObjectTorrent, HeadObject, ListObjectAnnotations, PutObjectAcl, PutObjectAnnotation, PutObjectLegalHold, PutObjectRetention, PutObjectTagging, RestoreObject, SelectObjectContent, UpdateObjectEncryption, UploadPartCopy
 EVIDENCE  NONE
 CASES     c-copy-0025 — A copy source that is an ARN of another service is refused rather than read as a bucket name
           c-copy-0034 — A copy from a missing key answers NoSuchKey and from a missing bucket answers NoSuchBucket
@@ -32,6 +32,7 @@ SPEC      spec/operations/CopyObject.toml:errors
           spec/operations/PutObjectTagging.toml:errors
           spec/operations/RestoreObject.toml:errors
           spec/operations/SelectObjectContent.toml:errors
+          spec/operations/UpdateObjectEncryption.toml:errors
           spec/operations/UploadPartCopy.toml:errors
 RELATED   CopyObject
           DeleteObjectAnnotation
@@ -53,4 +54,5 @@ RELATED   CopyObject
           PutObjectTagging
           RestoreObject
           SelectObjectContent
+          UpdateObjectEncryption
           UploadPartCopy

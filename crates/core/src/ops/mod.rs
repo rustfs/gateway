@@ -127,5 +127,6 @@ pub mod put_public_access_block;
 pub mod rename_object;
 pub mod restore_object;
 pub mod select_object_content;
+pub mod update_object_encryption;
 pub mod upload_part;
 pub mod upload_part_copy;

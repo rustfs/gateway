@@ -1253,6 +1253,23 @@
                                                           ],
                                            "precedence": 580
                                          },
+                  "UpdateObjectEncryption": {
+                                              "method": "PUT",
+                                              "path_shape": "/{Bucket}/{Key+}",
+                                              "query_keys": ["annotation", "encryption", "versionId"],
+                                              "key_headers": [],
+                                              "host_classes": [],
+                                              "error_codes": [
+                                                               "NoSuchBucket",
+                                                               "NoSuchKey",
+                                                               "AccessDenied",
+                                                               "InvalidRequest",
+                                                               "MalformedXML",
+                                                               "InvalidArgument",
+                                                               "BadDigest"
+                                                             ],
+                                              "precedence": 596
+                                            },
                   "UploadPart": {
                                   "method": "PUT",
                                   "path_shape": "/{Bucket}/{Key+}",
@@ -1389,6 +1406,7 @@
                           "PutObjectTagging",
                           "PutPublicAccessBlock",
                           "RenameObject",
+                          "UpdateObjectEncryption",
                           "UploadPart",
                           "UploadPartCopy"
                         ]
@@ -1485,6 +1503,7 @@
                                            "RenameObject",
                                            "RestoreObject",
                                            "SelectObjectContent",
+                                           "UpdateObjectEncryption",
                                            "UploadPart",
                                            "UploadPartCopy"
                                          ]
@@ -1518,7 +1537,8 @@
                                     "GetObjectAnnotation",
                                     "GetObjectTorrent",
                                     "ListObjectAnnotations",
-                                    "PutObjectAnnotation"
+                                    "PutObjectAnnotation",
+                                    "UpdateObjectEncryption"
                                   ],
                     "annotation-prefix": ["ListObjectAnnotations"],
                     "annotationName": [
@@ -1554,7 +1574,8 @@
                                     "DeleteBucket",
                                     "DeleteBucketEncryption",
                                     "GetBucketEncryption",
-                                    "PutBucketEncryption"
+                                    "PutBucketEncryption",
+                                    "UpdateObjectEncryption"
                                   ],
                     "fetch-owner": ["ListObjectsV2"],
                     "id": [
@@ -1717,7 +1738,8 @@
                                    "PutObjectLegalHold",
                                    "PutObjectRetention",
                                    "PutObjectTagging",
-                                   "RestoreObject"
+                                   "RestoreObject",
+                                   "UpdateObjectEncryption"
                                  ],
                     "versioning": ["CreateBucket", "GetBucketVersioning", "PutBucketVersioning"],
                     "versions": ["ListObjectVersions"],
@@ -1827,6 +1849,7 @@
                                        "RenameObject",
                                        "RestoreObject",
                                        "SelectObjectContent",
+                                       "UpdateObjectEncryption",
                                        "UploadPart",
                                        "UploadPartCopy"
                                      ],
@@ -1849,6 +1872,7 @@
                                     "PutObjectLockConfiguration",
                                     "PutObjectRetention",
                                     "PutPublicAccessBlock",
+                                    "UpdateObjectEncryption",
                                     "UploadPart"
                                   ],
                      "BucketAlreadyExists": ["CreateBucket"],
@@ -1903,6 +1927,7 @@
                                           "PutPublicAccessBlock",
                                           "RestoreObject",
                                           "SelectObjectContent",
+                                          "UpdateObjectEncryption",
                                           "UploadPart",
                                           "UploadPartCopy"
                                         ],
@@ -1939,6 +1964,7 @@
                                          "RenameObject",
                                          "RestoreObject",
                                          "SelectObjectContent",
+                                         "UpdateObjectEncryption",
                                          "UploadPartCopy"
                                        ],
                      "InvalidStorageClass": ["CreateMultipartUpload"],
@@ -1970,7 +1996,8 @@
                                        "PutObjectTagging",
                                        "PutPublicAccessBlock",
                                        "RestoreObject",
-                                       "SelectObjectContent"
+                                       "SelectObjectContent",
+                                       "UpdateObjectEncryption"
                                      ],
                      "MethodNotAllowed": [
                                            "CopyObject",
@@ -2067,6 +2094,7 @@
                                        "PutPublicAccessBlock",
                                        "RestoreObject",
                                        "SelectObjectContent",
+                                       "UpdateObjectEncryption",
                                        "UploadPart",
                                        "UploadPartCopy"
                                      ],
@@ -2093,6 +2121,7 @@
                                     "PutObjectTagging",
                                     "RestoreObject",
                                     "SelectObjectContent",
+                                    "UpdateObjectEncryption",
                                     "UploadPartCopy"
                                   ],
                      "NoSuchLifecycleConfiguration": ["GetBucketLifecycleConfiguration"],
@@ -2221,6 +2250,7 @@
                      "592": ["ListObjectAnnotations"],
                      "593": ["PutObjectAnnotation"],
                      "595": ["GetObjectTorrent"],
+                     "596": ["UpdateObjectEncryption"],
                      "600": ["ListObjectsV2"],
                      "610": ["ListObjectVersions"],
                      "650": ["DeleteObjects"],

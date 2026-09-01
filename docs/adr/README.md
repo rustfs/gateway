@@ -71,6 +71,7 @@ second copy is a second thing to keep in sync.
 | 0013 | Freeze committed response heads before detached work | Accepted |
 | 0014 | Self-held HTTP/1.1 response transport | Accepted |
 | 0015 | Required streaming request members use controlled construction | Accepted |
+| 0016 | Explicit construction for required structural-union inputs | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

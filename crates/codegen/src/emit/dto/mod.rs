@@ -37,7 +37,9 @@
 //! is a wire-invalid placeholder (P10) rather than a plausible value, plus a `check_required` on
 //! each generated struct that keeps one off the decode path.
 //! [`registry::Registry::required_gap`] is the P2 gate: a required member whose type genuinely has
-//! no `Default` fails the run instead of being quietly wrapped back up in an `Option`.
+//! no `Default` fails the run instead of being quietly wrapped back up in an `Option`. ADR-0016
+//! narrows one exception: a top-level request structural union stays bare, while that one Input
+//! omits `Default` and requires the union at builder construction time.
 //!
 //! The rest follows: string enumerations are `Cow` newtypes so that a new AWS value stays a minor
 //! bump (P4), and only structural unions carry `#[non_exhaustive]` (P5).
@@ -137,7 +139,10 @@ fn check_required_members_have_defaults(operations: &[&OperationIr], registry: &
         let sides = [("input", ir.input.as_slice()), ("output", ir.output.as_slice())];
         for (side, fields) in sides {
             for field in fields {
-                if side == "input" && controlled_body.is_some_and(|body| body.name == field.name) {
+                if side == "input"
+                    && (controlled_body.is_some_and(|body| body.name == field.name)
+                        || requires_explicit_input_construction(field))
+                {
                     continue;
                 }
                 if let Some(reason) = required_gap(registry, field) {
@@ -192,6 +197,12 @@ fn required_gap(registry: &Registry, field: &Field) -> Option<&'static str> {
         return None;
     }
     registry.required_gap(&field.ty)
+}
+
+/// Whether this top-level input field selects the explicit-construction path from ADR-0016.
+#[must_use]
+pub(super) fn requires_explicit_input_construction(field: &Field) -> bool {
+    field.required && matches!(field.ty, rustfs_gateway_model::ir::Type::Union(_))
 }
 
 /// The ADR-0004 P9 baseline: `<TypeName> <public field count>`, one per line, sorted by name.
@@ -314,7 +325,11 @@ pub fn check_required_impl(type_name: &str, baseline_name: &str, fields: &[Field
             continue;
         }
         let name = naming::field_name(&field.name);
-        if matches!(field.ty, rustfs_gateway_model::ir::Type::Structure(_)) {
+        if matches!(field.ty, rustfs_gateway_model::ir::Type::Union(_)) {
+            // ADR-0016: a required union has no placeholder. The constructor or decoder must
+            // provide a real variant before the struct can exist, so there is nothing to recheck.
+            continue;
+        } else if matches!(field.ty, rustfs_gateway_model::ir::Type::Structure(_)) {
             body.push_str(&format!("        self.{name}.check_required()?;\n"));
         } else {
             body.push_str(&format!(

@@ -1241,6 +1241,22 @@ pub const ROUTES: &[RouteRow] = &[
         ],
     },
     RouteRow {
+        operation: "UpdateObjectEncryption",
+        handler_registration: true,
+        precedence: 596,
+        method: "PUT",
+        target: "Object",
+        path_shape: "/{Bucket}/{Key+}",
+        success_status: 200,
+        not_configured: None,
+        predicates: &[
+            RoutePredicate::Method("PUT"),
+            RoutePredicate::Target("Object"),
+            RoutePredicate::QueryPresent("encryption"),
+            RoutePredicate::QueryAbsent("annotation"),
+        ],
+    },
+    RouteRow {
         operation: "ListObjectsV2",
         handler_registration: true,
         precedence: 600,

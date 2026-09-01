@@ -110,6 +110,7 @@ pub(crate) static OPERATION_NAMES: &[&str] = &[
     "RenameObject",
     "RestoreObject",
     "SelectObjectContent",
+    "UpdateObjectEncryption",
     "UploadPart",
     "UploadPartCopy",
 ];

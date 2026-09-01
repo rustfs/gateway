@@ -128,6 +128,9 @@ mod tagging_roundtrip;
 #[path = "tolerant_conditions.rs"]
 mod tolerant_conditions;
 
+#[path = "update_object_encryption_roundtrip.rs"]
+mod update_object_encryption_roundtrip;
+
 #[path = "upload_capability.rs"]
 mod upload_capability;
 

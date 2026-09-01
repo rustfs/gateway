@@ -357,6 +357,10 @@ name = "SelectObjectContent"
 cases = "c-select-restore-0008,c-select-restore-0009,c-select-restore-0020,c-select-restore-0021,c-select-restore-0022,c-select-restore-0023,c-select-restore-0024,c-select-restore-0025,c-select-restore-0026,c-select-restore-0027,c-select-restore-0028,c-select-restore-0029,c-select-restore-0030,c-select-restore-0031,c-select-restore-0032,c-select-restore-0033,c-select-restore-0034,c-select-restore-0035,c-select-restore-0036,c-select-restore-0037,c-select-restore-0038,c-select-restore-0044,c-select-restore-0045,c-select-restore-0046,c-select-restore-0047,c-select-restore-0048"
 
 [[operation]]
+name = "UpdateObjectEncryption"
+cases = ""
+
+[[operation]]
 name = "UploadPart"
 cases = "c-mpu-0018,c-mpu-0024,c-mpu-0025,c-mpu-0027,c-mpu-0028,c-mpu-0029,c-mpu-0030,c-mpu-0031,c-mpu-0043,c-mpu-0044,c-mpu-0045"
 

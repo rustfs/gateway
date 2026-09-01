@@ -719,7 +719,7 @@ fn require_reports_the_missing_operations_on_one_line() {
         text,
         "backend is missing handlers for: AbortMultipartUpload, CompleteMultipartUpload, CopyObject, \
          CreateBucket, CreateMultipartUpload, DeleteBucket, DeleteBucketCors, DeleteBucketEncryption, DeleteBucketLifecycle, \
-         DeleteBucketPolicy, ... and 80 more (90 of 91)"
+         DeleteBucketPolicy, ... and 81 more (91 of 92)"
     );
     assert_eq!(
         missing.missing(),
@@ -812,11 +812,12 @@ fn require_reports_the_missing_operations_on_one_line() {
             "RenameObject",
             "RestoreObject",
             "SelectObjectContent",
+            "UpdateObjectEncryption",
             "UploadPart",
             "UploadPartCopy"
         ]
     );
-    assert_eq!(missing.required(), 91);
+    assert_eq!(missing.required(), 92);
 }
 
 /// Negative — a long list is truncated and still says how much is missing in total.

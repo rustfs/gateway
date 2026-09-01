@@ -68,6 +68,9 @@ text = "A subresource key and a listing key in one request name a configuration 
 [reason.subresource-over-fallback]
 text = "ListObjects is what a GET on a bucket means when no other row claimed it, so its selector pins no query key and every subresource read satisfies it too. That is not a conflict but the design, and it is the whole reason this band sits at 200: a row behind the fallback would hand every configuration read back to the key listing, which is the defect the band exists to retire."
 
+[reason.object-write-subresources]
+text = "Two writable object subresource selectors in one request ask for incompatible mutations of the same key. AWS documents no combined operation, so the existing precedence bands decide one operation fail-closed instead of merging their bodies or falling through to the object replacement path."
+
 
 # ----------------------------------------------------------------------- evidence
 [evidence.abort-multipart-upload]
@@ -109,6 +112,10 @@ summary = "initiation is a POST to the object key carrying the ?uploads subresou
 [evidence.create-session]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateSession.html"
 summary = "CreateSession is selected by GET on a directory bucket carrying the session query subresource."
+
+[evidence.update-object-encryption]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateObjectEncryption.html"
+summary = "UpdateObjectEncryption is a PUT to an existing object carrying the encryption query subresource and a required ObjectEncryption XML body."
 
 [evidence.delete-bucket-cors]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucketCors.html"
@@ -5028,3 +5035,57 @@ winner = "ListDirectoryBuckets"
 shadowed = "ListBuckets"
 reason = "ListBuckets constrains only GET and the service target, so it also accepts requests to the S3 Express control endpoint. ListDirectoryBuckets wins at 90 for HostClass(S3Express) before the ordinary listing at 100; the reverse order exposes the wrong bucket namespace."
 evidence = ["list-directory-buckets", "list-buckets"]
+
+[[shadowing]]
+winner = "UploadPartCopy"
+shadowed = "UpdateObjectEncryption"
+reason_ref = "object-write-subresources"
+evidence = ["upload-part-copy", "update-object-encryption"]
+
+[[shadowing]]
+winner = "UploadPart"
+shadowed = "UpdateObjectEncryption"
+reason_ref = "object-write-subresources"
+evidence = ["upload-part", "update-object-encryption"]
+
+[[shadowing]]
+winner = "PutObjectTagging"
+shadowed = "UpdateObjectEncryption"
+reason_ref = "object-write-subresources"
+evidence = ["put-object-tagging", "update-object-encryption"]
+
+[[shadowing]]
+winner = "PutObjectRetention"
+shadowed = "UpdateObjectEncryption"
+reason_ref = "object-write-subresources"
+evidence = ["put-object-retention", "update-object-encryption"]
+
+[[shadowing]]
+winner = "PutObjectLegalHold"
+shadowed = "UpdateObjectEncryption"
+reason_ref = "object-write-subresources"
+evidence = ["put-object-legal-hold", "update-object-encryption"]
+
+[[shadowing]]
+winner = "PutObjectAcl"
+shadowed = "UpdateObjectEncryption"
+reason_ref = "object-write-subresources"
+evidence = ["put-object-acl", "update-object-encryption"]
+
+[[shadowing]]
+winner = "UpdateObjectEncryption"
+shadowed = "RenameObject"
+reason_ref = "object-write-subresources"
+evidence = ["update-object-encryption", "rename-object"]
+
+[[shadowing]]
+winner = "UpdateObjectEncryption"
+shadowed = "CopyObject"
+reason = "A request carrying both ?encryption and x-amz-copy-source satisfies both operations. The encryption update wins at 596 before CopyObject at 790, so an unsupported update is refused instead of replacing the destination from the source and discarding its required encryption document."
+evidence = ["update-object-encryption", "copy-object"]
+
+[[shadowing]]
+winner = "UpdateObjectEncryption"
+shadowed = "PutObject"
+reason = "Every encryption update is also accepted by PutObject, whose selector pins only PUT and an object target. UpdateObjectEncryption wins at 596 before PutObject at 800; the reverse order stores the ObjectEncryption document as the object body and destroys the bytes the caller meant to re-encrypt."
+evidence = ["update-object-encryption", "put-object"]

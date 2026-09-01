@@ -23,7 +23,7 @@
 
 use std::borrow::Cow;
 
-/// The `RequestCharged` string enumeration. Bound by: AbortMultipartUpload, CompleteMultipartUpload, CopyObject, CreateMultipartUpload, DeleteObject, DeleteObjectAnnotation, DeleteObjects, GetBucketAccelerateConfiguration, GetObject, GetObjectAcl, GetObjectAnnotation, GetObjectAttributes, GetObjectTorrent, HeadObject, ListMultipartUploads, ListObjectAnnotations, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, PutObject, PutObjectAcl, PutObjectAnnotation, PutObjectLegalHold, PutObjectLockConfiguration, PutObjectRetention, RestoreObject, UploadPart, UploadPartCopy.
+/// The `RequestCharged` string enumeration. Bound by: AbortMultipartUpload, CompleteMultipartUpload, CopyObject, CreateMultipartUpload, DeleteObject, DeleteObjectAnnotation, DeleteObjects, GetBucketAccelerateConfiguration, GetObject, GetObjectAcl, GetObjectAnnotation, GetObjectAttributes, GetObjectTorrent, HeadObject, ListMultipartUploads, ListObjectAnnotations, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, PutObject, PutObjectAcl, PutObjectAnnotation, PutObjectLegalHold, PutObjectLockConfiguration, PutObjectRetention, RestoreObject, UpdateObjectEncryption, UploadPart, UploadPartCopy.
 ///
 /// An open set: compare against the associated constants, and build a value the pinned
 /// model does not declare with [`RequestCharged::custom`]. Adding a constant is a minor version

@@ -30,8 +30,24 @@ use rustfs_gateway_model::ir::{Field, OperationIr};
 use super::registry::Registry;
 use super::{
     DtoReport, LICENSE, check_required_impl, controlled_required_body, debug_impl, derives, field_decl, name_list, naming,
-    registry, use_group,
+    registry, requires_explicit_input_construction, use_group,
 };
+
+#[derive(Clone, Copy)]
+enum InputConstruction<'a> {
+    Default,
+    RequiredBody(&'a Field),
+    RequiredUnion,
+}
+
+impl<'a> InputConstruction<'a> {
+    fn controlled_body(self) -> Option<&'a Field> {
+        match self {
+            Self::RequiredBody(body) => Some(body),
+            Self::Default | Self::RequiredUnion => None,
+        }
+    }
+}
 
 /// Renders one operation's module.
 pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) -> String {
@@ -94,6 +110,13 @@ pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) 
     );
 
     let controlled_body = controlled_required_body(&ir.input);
+    let explicit_input = ir.input.iter().any(requires_explicit_input_construction);
+    let input_construction = match (controlled_body, explicit_input) {
+        (Some(body), false) => InputConstruction::RequiredBody(body),
+        (None, true) => InputConstruction::RequiredUnion,
+        (None, false) => InputConstruction::Default,
+        (Some(_), true) => unreachable!("an input cannot require both streaming-body and union construction"),
+    };
     out.push_str(&data_struct(
         "Input",
         &format!("The `{op}` request."),
@@ -101,7 +124,7 @@ pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) 
         registry,
         report,
         &format!("{marker}Input"),
-        controlled_body,
+        input_construction,
     ));
     out.push_str(&data_struct(
         "Output",
@@ -110,9 +133,9 @@ pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) 
         registry,
         report,
         &format!("{marker}Output"),
-        None,
+        InputConstruction::Default,
     ));
-    out.push_str(&builder(&ir.input, registry, controlled_body));
+    out.push_str(&builder(&ir.input, registry, input_construction));
     report.builders += 1;
     out
 }
@@ -125,13 +148,13 @@ fn data_struct(
     registry: &Registry,
     report: &mut DtoReport,
     baseline_name: &str,
-    controlled_body: Option<&Field>,
+    construction: InputConstruction<'_>,
 ) -> String {
     let clonable = fields.iter().all(|f| registry.is_clonable(&f.ty));
     let has_secret = fields.iter().any(registry::is_redacted);
     let mut out = String::new();
 
-    if controlled_body.is_some() {
+    if matches!(construction, InputConstruction::RequiredBody(_)) {
         let _ = write!(
             out,
             "/// {summary}\n\
@@ -146,6 +169,19 @@ fn data_struct(
              /// read off the type instead of unwrapped. Placeholder defaults on ordinary required\n\
              /// members are refused by [`{name}::check_required`] before the value leaves the decode\n\
              /// path.\n"
+        );
+    } else if matches!(construction, InputConstruction::RequiredUnion) {
+        let _ = writeln!(out, "/// {summary}");
+        let _ = write!(
+            out,
+            "///\n\
+             /// Public fields, no `#[non_exhaustive]`, and deliberately no `Default` — ADR-0016. A\n\
+             /// required structural union has no neutral value, so the builder requires it up front\n\
+             /// rather than fabricating a variant or wrapping the public field in `Option`.\n\
+             ///\n\
+             /// Required members remain bare and optional members remain `Option<T>`. Construct this\n\
+             /// request with [`{name}::builder`] or a complete struct literal, and never destructure it\n\
+             /// exhaustively.\n"
         );
     } else {
         let _ = write!(
@@ -166,7 +202,7 @@ fn data_struct(
     if !clonable {
         out.push_str("///\n/// Not `Clone`: it owns a streaming body.\n");
     }
-    out.push_str(&derives(clonable, has_secret, controlled_body.is_none()));
+    out.push_str(&derives(clonable, has_secret, matches!(construction, InputConstruction::Default)));
     if fields.is_empty() {
         // An operation whose output is `smithy.api#Unit` has no members at all, and rustfmt
         // spells the empty struct `{}` on one line. Emitting anything else would make the first
@@ -179,7 +215,7 @@ fn data_struct(
         }
         out.push_str("}\n\n");
     }
-    out.push_str(&check_required_impl(name, baseline_name, fields, controlled_body));
+    out.push_str(&check_required_impl(name, baseline_name, fields, construction.controlled_body()));
     out.push('\n');
     if has_secret {
         out.push_str(&debug_impl(name, fields));
@@ -196,26 +232,19 @@ fn data_struct(
 const MAX_WIDTH: usize = 130;
 
 /// Renders the input builder. ADR-0004 P7: recommended, never the only path.
-fn builder(fields: &[Field], registry: &Registry, controlled_body: Option<&Field>) -> String {
+fn builder(fields: &[Field], registry: &Registry, construction: InputConstruction<'_>) -> String {
     let mut out = String::new();
-    let builder_derive = if controlled_body.is_some() {
-        ""
-    } else {
-        "#[derive(Default)]\n"
-    };
-    let _ = write!(
-        out,
-        "/// A builder for [`Input`].\n\
-         ///\n\
-         /// The recommended construction path, not the only one — the public fields stay public\n\
-         /// (ADR-0004 P7), so a caller that prefers a struct literal keeps it.\n\
-         {builder_derive}\
-         pub struct InputBuilder {{\n    input: Input,\n}}\n\n\
-         impl Input {{\n",
-    );
-    if let Some(body) = controlled_body {
+    if let InputConstruction::RequiredBody(body) = construction {
         let name = naming::field_name(&body.name);
         let ty = Registry::type_with_enums(&body.ty, &body.name);
+        out.push_str(
+            "/// A builder for [`Input`].\n\
+             ///\n\
+             /// The recommended construction path, not the only one — the public fields stay public\n\
+             /// (ADR-0004 P7), so a caller that prefers a struct literal keeps it.\n\
+             pub struct InputBuilder {\n    input: Input,\n}\n\n\
+             impl Input {\n",
+        );
         let _ = write!(
             out,
             "    /// Constructs this input from its required request body.\n    \
@@ -239,11 +268,58 @@ fn builder(fields: &[Field], registry: &Registry, controlled_body: Option<&Field
              pub fn builder({name}: {ty}) -> InputBuilder {{\n        \
                  InputBuilder {{\n            input: Self::from_required_body({name}),\n        }}\n    }}\n}}\n\n"
         );
+    } else if matches!(construction, InputConstruction::RequiredUnion) {
+        out.push_str(
+            "/// A builder for [`Input`].\n\
+             ///\n\
+             /// The required structural union is supplied up front; public fields remain public.\n\
+             pub struct InputBuilder {\n    input: Input,\n}\n\nimpl Input {\n",
+        );
+        let required = fields
+            .iter()
+            .filter(|field| requires_explicit_input_construction(field))
+            .collect::<Vec<_>>();
+        let arguments = required
+            .iter()
+            .map(|field| {
+                format!(
+                    "{}: {}",
+                    naming::field_name(&field.name),
+                    Registry::type_with_enums(&field.ty, &field.name)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(out, "    /// Starts a builder with every required non-default member.");
+        out.push_str("    #[must_use]\n");
+        let _ = writeln!(out, "    pub fn builder({arguments}) -> InputBuilder {{");
+        out.push_str("        InputBuilder {\n            input: Input {\n");
+        for field in fields {
+            let name = naming::field_name(&field.name);
+            let value = if requires_explicit_input_construction(field) {
+                name.clone()
+            } else {
+                "Default::default()".to_owned()
+            };
+            if name == value {
+                let _ = writeln!(out, "                {name},");
+            } else {
+                let _ = writeln!(out, "                {name}: {value},");
+            }
+        }
+        out.push_str("            },\n        }\n    }\n}\n\n");
     } else {
         out.push_str(
-            "    /// Starts a builder.\n    \
-             #[must_use]\n    \
-             pub fn builder() -> InputBuilder {\n        InputBuilder::default()\n    }\n}\n\n",
+            "/// A builder for [`Input`].\n\
+             ///\n\
+             /// The recommended construction path, not the only one — the public fields stay public\n\
+             /// (ADR-0004 P7), so a caller that prefers a struct literal keeps it.\n\
+             #[derive(Default)]\n\
+             pub struct InputBuilder {\n    input: Input,\n}\n\n\
+             impl Input {\n    \
+                 /// Starts a builder.\n    \
+                 #[must_use]\n    \
+                 pub fn builder() -> InputBuilder {\n        InputBuilder::default()\n    }\n}\n\n",
         );
     }
     out.push_str("impl InputBuilder {\n");

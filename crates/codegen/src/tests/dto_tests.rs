@@ -340,7 +340,7 @@ fn c_dto_0010_a_required_streaming_payload_has_a_controlled_constructor() {
 }
 
 #[test]
-fn c_dto_n035_only_a_controlled_required_body_removes_input_default() {
+fn c_dto_n035_only_a_controlled_required_member_removes_input_default() {
     for (name, body) in rust_bodies() {
         let Some(module) = name.strip_prefix("ops/") else {
             continue;
@@ -354,12 +354,15 @@ fn c_dto_n035_only_a_controlled_required_body_removes_input_default() {
             .rev()
             .find(|line| line.starts_with("#[derive("))
             .expect("Input has an explicit derive policy");
-        if name == "ops/put_object_annotation.rs" {
-            assert!(!derive.contains("Default"), "the live request body has no truthful default");
+        if matches!(name.as_str(), "ops/put_object_annotation.rs" | "ops/update_object_encryption.rs") {
+            assert!(
+                !derive.contains("Default"),
+                "a required stream or structural union has no truthful default"
+            );
         } else {
             assert!(
                 derive.contains("Default"),
-                "{name} lost `Input: Default` without a controlled required body"
+                "{name} lost `Input: Default` without a controlled required member"
             );
         }
     }

@@ -939,7 +939,7 @@ fn n_the_encryption_key_on_an_object_does_not_reach_a_bucket_encryption_row() {
     let table = generated_table();
     for (line, expected) in [
         ("GET /bucket/key?encryption", "GetObject"),
-        ("PUT /bucket/key?encryption", "PutObject"),
+        ("PUT /bucket/key?encryption", "UpdateObjectEncryption"),
         ("DELETE /bucket/key?encryption", "DeleteObject"),
     ] {
         assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
@@ -2767,4 +2767,49 @@ fn metrics_reads_share_the_get_configuration_authorization_contract() {
         assert_eq!(auth.action, "s3:GetMetricsConfiguration", "{}", spec.name);
         assert_eq!(auth.resource, ResourceShape::Bucket, "{}", spec.name);
     }
+}
+
+// ── Object encryption update ───────────────────────────────────────────────────
+
+/// The encryption subresource selects the update operation with or without a version selector.
+#[test]
+fn update_object_encryption_routes_ahead_of_put_object() {
+    let table = generated_table();
+    for line in ["PUT /bucket/key?encryption", "PUT /bucket/key?encryption&versionId=v1"] {
+        assert_eq!(routed(&table, &Req::new(line)), Some("UpdateObjectEncryption"), "{line}");
+    }
+}
+
+/// Negative controls keep the destructive fallback and unrelated selectors outside the row.
+#[test]
+fn n_update_object_encryption_does_not_claim_neighbour_controls() {
+    let table = generated_table();
+    for (line, expected) in [
+        ("PUT /bucket/key", "PutObject"),
+        ("PUT /bucket?encryption", "PutBucketEncryption"),
+        ("GET /bucket/key?encryption", "GetObject"),
+        ("PUT /bucket/key?encryption-detail", "PutObject"),
+        ("PUT /bucket/key?uploadId=u&partNumber=1&encryption", "UploadPart"),
+        ("PUT /bucket/key?tagging&encryption", "PutObjectTagging"),
+    ] {
+        assert_eq!(routed(&table, &Req::new(line)), Some(expected), "{line}");
+    }
+}
+
+/// The update subresource remains authoritative even when a copy-only header is also present.
+#[test]
+fn n_a_copy_source_header_cannot_turn_an_encryption_update_into_copy_object() {
+    let table = generated_table();
+    let request = Req::new("PUT /bucket/key?encryption").header("x-amz-copy-source", "/source/key");
+    assert_eq!(routed(&table, &request), Some("UpdateObjectEncryption"));
+}
+
+/// The operation uses its object-scoped update permission and no head-only required parameter.
+#[test]
+fn update_object_encryption_uses_the_object_update_authorization_contract() {
+    let spec = <rustfs_gateway_types::dto::UpdateObjectEncryption as Operation>::spec();
+    let auth = spec.auth.expect("UpdateObjectEncryption declares authorization");
+    assert_eq!(auth.action, "s3:UpdateObjectEncryption");
+    assert_eq!(auth.resource, ResourceShape::Object);
+    assert!(spec.required_params.is_empty(), "the required union is in the XML body");
 }
