@@ -74,7 +74,7 @@ requirements=(
     'c-obj-0040|negative|bound|conformance/cases/object/c-object-0043.toml::/exchanges/0/expect/error/code=XAmzContentChecksumMismatch'
     'c-obj-0041|negative|bound|conformance/cases/object/c-object-0043.toml::/exchanges/0/expect/error/code=XAmzContentChecksumMismatch;conformance/cases/object/c-object-0043.toml::/exchanges/1/expect/error/code=BadDigest'
     'c-obj-0042|negative|bound|conformance/cases/object/c-object-0030.toml::/expect/status=411;conformance/cases/object/c-object-0030.toml::/expect/error/code=MissingContentLength;conformance/cases/object/c-object-0030.toml::/expect/connection_after=closed'
-    'c-obj-0043|negative|blocked|rustfs/backlog#1680::c-mpu-0043 is the part form and needs the socket transport; the object form needs the same transport and a PutObject staging that does not exist yet'
+    'c-obj-0043|negative|bound|conformance/cases/object/c-object-0054.toml::/exchanges/0/request/headers/content-length=1048576;conformance/cases/object/c-object-0054.toml::/exchanges/0/request/chunks/0/raw_utf8~only a few bytes;conformance/cases/object/c-object-0054.toml::/exchanges/0/request/chunks/1/action=half_close;conformance/cases/object/c-object-0054.toml::/exchanges/0/expect/status=400;conformance/cases/object/c-object-0054.toml::/exchanges/0/expect/headers_absent/0=etag;conformance/cases/object/c-object-0054.toml::/exchanges/0/expect/error/code=IncompleteBody;conformance/cases/object/c-object-0054.toml::/exchanges/1/expect/status=404;conformance/cases/object/c-object-0054.toml::/exchanges/1/expect/error/code=NoSuchKey'
     'c-obj-0044|negative|blocked|rustfs/backlog#1699::neither transport carries out dataChunk.delay_ms as wall-clock pacing, so a read-interval timeout cannot be provoked from a case'
     'c-obj-0045|negative|bound|crates/http/tests/framing_smuggling.rs::fn c_wire_0063_an_over_large_declared_body_is_400_entity_too_large_and_never_drained'
     'c-obj-0046|negative|bound|conformance/cases/object/c-object-0008.toml::/expect/body/size=0'
@@ -160,6 +160,7 @@ case_polarity=(
     'conformance/cases/object/c-object-0051.toml|negative'
     'conformance/cases/object/c-object-0052.toml|negative'
     'conformance/cases/object/c-object-0053.toml|negative'
+    'conformance/cases/object/c-object-0054.toml|negative'
     'conformance/cases/tagging/c-tagging-0019.toml|positive'
 )
 

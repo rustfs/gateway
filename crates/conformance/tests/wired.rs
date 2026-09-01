@@ -208,6 +208,28 @@ fn a_truncated_upload_is_refused_and_leaves_nothing_behind() {
     assert_eq!(only(&in_process).verdict, Verdict::Skipped);
 }
 
+/// Negative — a short PutObject is refused and the fixture has no object to return afterwards.
+///
+/// This is distinct from the multipart proof above: PutObject publishes directly under the final
+/// key, so its second exchange catches a partial object crossing that operation's commit boundary.
+#[test]
+fn a_truncated_object_write_is_refused_and_leaves_no_readable_object() {
+    let report = run_over_a_socket("c-object-0054");
+    let outcome = only(&report);
+    assert_eq!(outcome.verdict, Verdict::Passed, "{:?}", failures(outcome));
+
+    let in_process = run("c-object-0054");
+    let in_process_outcome = only(&in_process);
+    assert_eq!(in_process_outcome.verdict, Verdict::Skipped);
+    assert!(
+        in_process_outcome
+            .skip_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("half_close")
+    );
+}
+
 /// Negative — the socket reaches a real overlapping conditional-write conflict.
 ///
 /// Both requests are dispatched on distinct connections, and the fixture rendezvous holds the
