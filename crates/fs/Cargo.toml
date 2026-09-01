@@ -1,0 +1,31 @@
+[package]
+name = "rustfs-gateway-fs"
+description = "Filesystem reference backend for rustfs-gateway"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[package.metadata.gateway]
+ring = 1
+
+[lints]
+workspace = true
+
+[dependencies]
+rustfs-gateway = { workspace = true }
+bytes = { workspace = true }
+hex = { workspace = true }
+http = { workspace = true }
+md-5 = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "sync"] }
+
+[dev-dependencies]
+bytes = { workspace = true }
+http = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "rt-multi-thread"] }
