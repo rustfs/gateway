@@ -1793,8 +1793,9 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-dialect-minio"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "proptest",
  "rustfs-gateway-types",
  "rustfs-gateway-xml",
 ]

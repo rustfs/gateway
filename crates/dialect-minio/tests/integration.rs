@@ -15,10 +15,11 @@
 //! Concrete lifecycle-extension round-trip and persistence safety.
 //!
 //! Responsible for: binding the existing c-lifecycle-0018 pressure to a registered typed field,
-//! exact sibling placement, and fail-closed RMW. NOT responsible for: literal bodies, error
+//! exact sibling placement, property coverage over valid values, and fail-closed RMW. NOT responsible for: literal bodies, error
 //! rendering, or any other vendor extension. Upstream: ADR-0007 and public protocol evidence.
 //! Downstream: the P6 dialect integration surface.
 
+use proptest::prelude::*;
 use rustfs_gateway_dialect_minio::{DelMarkerExpiration, MinioLifecycleDialect};
 use rustfs_gateway_types::ext::ExtError;
 
@@ -37,6 +38,42 @@ fn c_dial_0001_to_0002_registered_lifecycle_field_survives_real_rmw_in_its_exact
     decoded.configuration.rules[0].id = Some("changed".to_owned());
 
     assert_eq!(dialect.rewrite(&persisted).expect("a complete read may be replaced"), CHANGED);
+}
+
+proptest! {
+    /// Every valid positive day count survives a real persisted mutation in the registered slot.
+    #[test]
+    fn registered_lifecycle_days_survive_arbitrary_real_rmw(
+        days in 1i32..=i32::MAX,
+        suffix in "[a-zA-Z0-9_-]{1,24}",
+    ) {
+        let source = format!(
+            "<LifecycleConfiguration><Rule><Expiration><Days>7</Days></Expiration>\
+             <DelMarkerExpiration><Days>{days}</Days></DelMarkerExpiration>\
+             <Filter><Prefix>del/</Prefix></Filter><ID>before</ID><Status>Enabled</Status>\
+             </Rule></LifecycleConfiguration>"
+        );
+        let dialect = MinioLifecycleDialect::new().expect("one concrete registration is unique");
+        let mut persisted = dialect.decode_persisted(source.as_bytes());
+        let decoded = persisted.value_mut().expect("the registered document decodes completely");
+        prop_assert_eq!(
+            decoded.rule_extensions[0].get::<DelMarkerExpiration>(),
+            Some(&DelMarkerExpiration { days })
+        );
+        let changed = format!("changed-{suffix}");
+        decoded.configuration.rules[0].id = Some(changed.clone());
+
+        let encoded = String::from_utf8(dialect.rewrite(&persisted).expect("a complete read may be replaced"))
+            .expect("the XML writer emits UTF-8");
+        let expiration = encoded.find("</Expiration>").expect("the known sibling is present");
+        let extension = encoded.find("<DelMarkerExpiration>").expect("the registered field is present");
+        let filter = encoded.find("<Filter>").expect("the following known sibling is present");
+        prop_assert!(expiration < extension && extension < filter, "extension left its declared slot: {encoded}");
+        let days_fragment = format!("<Days>{days}</Days></DelMarkerExpiration>");
+        let id_fragment = format!("<ID>{changed}</ID>");
+        prop_assert!(encoded.contains(&days_fragment));
+        prop_assert!(encoded.contains(&id_fragment));
+    }
 }
 
 #[test]

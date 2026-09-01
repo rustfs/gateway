@@ -19,11 +19,9 @@
 # project; upstream issue and documentation prose stays under its author's copyright and is never
 # pasted here.
 #
-# One dialect of the issue's list is deliberately absent: MinIO's `<DelMarkerExpiration>` element
-# inside a rule needs the `ExtField` codec mechanism (task P1-08), which does not exist in this
-# workspace yet. Until it does, the element is covered by q-lc-0006 — skipped on decode, absent
-# from the re-encoded document — and registering a round-trip quirk nothing can satisfy would be
-# a claim no case checks.
+# MinIO's `<DelMarkerExpiration>` uses the runtime `ExtField` path rather than a second generated
+# DTO surface. The generic HTTP codec stays dialect-neutral and lenient; persisted read-modify-write
+# selects the concrete policy explicitly and blocks replacement when decoding is incomplete.
 
 [[quirk]]
 id      = "q-lc-0001"
@@ -242,3 +240,21 @@ cases   = ["c-lifecycle-0028"]
   kind    = "s3s-issue"
   ref     = "https://github.com/s3s-project/s3s/issues/428"
   summary = "Upstream's lifecycle configuration types could not round-trip stored documents, which is the failure mode a strict enum decode reintroduces."
+
+[[quirk]]
+id      = "q-lc-0015"
+kind    = "dialect_ext_field"
+classification = "contract"
+target  = "PersistedLifecycleRule.DelMarkerExpiration"
+summary = "A selected MinIO lifecycle policy preserves DelMarkerExpiration in its typed slot immediately after Expiration; an unselected policy does not make the vendor field global, and any unregistered or malformed persisted child retains the original bytes and blocks replacement."
+cases   = ["c-lifecycle-0018"]
+
+  [[quirk.evidence]]
+  kind    = "s3s-pr"
+  ref     = "https://github.com/s3s-project/s3s/pull/611"
+  summary = "A real S3-compatible client family sends DelMarkerExpiration inside LifecycleRule, which previously forced a separate generated codec surface upstream."
+
+  [[quirk.evidence]]
+  kind    = "rustfs-test"
+  ref     = "crates/dialect-minio/tests/integration.rs"
+  summary = "The clean-room runtime test proves both selected exact-slot preservation and unselected, unregistered, and malformed fail-closed persistence behavior."

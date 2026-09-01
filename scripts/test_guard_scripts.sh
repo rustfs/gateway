@@ -12705,6 +12705,89 @@ expect_fail check_cors_credentials_exclusive.sh \
     'the credentials constant renamed, leaving the guard with nothing to check' mut_credentials_constant_renamed
 
 # -----------------------------------------------------------------------------
+# check_codec_policy.sh
+#
+# Lifecycle deliberately has two controls: the selected persisted MinIO policy preserves its
+# registered field, while the unselected generic HTTP codec keeps skipping vendor elements. These
+# mutations attack both directions and the protected record joining them.
+# -----------------------------------------------------------------------------
+
+mut_codec_policy_registration_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/dialect-minio/src/lib.rs")
+text = path.read_text()
+old = "        policy.register::<DelMarkerExpiration>()?;\n"
+if text.count(old) != 1:
+    raise SystemExit("codec policy registration mutation anchor is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the selected lifecycle dialect dropping its concrete registration' \
+    mut_codec_policy_registration_removed
+
+mut_codec_policy_default_made_lenient() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/types/src/ext.rs")
+text = path.read_text()
+old = "        Self::new(UnknownElementPolicy::AllowRegistered)\n"
+if text.count(old) != 1:
+    raise SystemExit("codec policy default mutation anchor is not unique")
+path.write_text(text.replace(old, "        Self::new(UnknownElementPolicy::Lenient)\n", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'persisted security-relevant XML becoming silently lenient' \
+    mut_codec_policy_default_made_lenient
+
+mut_codec_policy_slot_moved() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/dialect-minio/src/lib.rs")
+text = path.read_text()
+old = '    const INSERT_AFTER: &\'static str = "Expiration";\n'
+if text.count(old) != 1:
+    raise SystemExit("codec policy slot mutation anchor is not unique")
+path.write_text(text.replace(old, '    const INSERT_AFTER: &\'static str = "Status";\n', 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'DelMarkerExpiration leaving its reviewed sibling slot' \
+    mut_codec_policy_slot_moved
+
+mut_codec_policy_unselected_control_weakened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/lifecycle/c-lifecycle-0018.toml")
+text = path.read_text()
+old = 'not_contains_utf8 = ["DelMarkerExpiration", "FutureKnob"]\n'
+if text.count(old) != 1:
+    raise SystemExit("codec policy no-dialect mutation anchor is not unique")
+path.write_text(text.replace(old, 'not_contains_utf8 = ["FutureKnob"]\n', 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the no-dialect control no longer proving the vendor field is not global' \
+    mut_codec_policy_unselected_control_weakened
+
+mut_codec_policy_contract_renamed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("model/overlays/quirks/lifecycle.toml")
+text = path.read_text()
+old = 'id      = "q-lc-0015"\n'
+if text.count(old) != 1:
+    raise SystemExit("codec policy quirk mutation anchor is not unique")
+path.write_text(text.replace(old, 'id      = "q-lc-9999"\n', 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the protected lifecycle dialect contract leaving its deterministic id' \
+    mut_codec_policy_contract_renamed
+
+# -----------------------------------------------------------------------------
 # check_no_minio_source.sh
 #
 # The clean-room provenance guard. Rule 1 (AGPL licence text) is exemptable through
@@ -17384,7 +17467,7 @@ path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_quirk_ledger.sh \
-    'one protected record leaving the 97/160/91 classification ledger' mut_quirk_ledger_classification_count
+    'one protected record leaving the 101/160/89 classification ledger' mut_quirk_ledger_classification_count
 if ! python3 - "$QUIRK_LEDGER_PARSE_CACHE" "$SANDBOX/model/overlays/quirks/object.toml" <<'PYEOF'
 import hashlib
 import pathlib
