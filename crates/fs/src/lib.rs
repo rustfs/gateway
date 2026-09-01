@@ -15,8 +15,8 @@
 //! Filesystem-backed reference handlers for `rustfs-gateway`.
 //!
 //! Responsible for: a small, inspectable persistence backend used to exercise real S3 handlers,
-//! including atomically published multipart uploads.
-//! NOT responsible for: production durability, versioning, lifecycle policy, or ordinary listing.
+//! including atomically published multipart uploads and persistent object versions.
+//! NOT responsible for: production durability, lifecycle policy, or ordinary object listing.
 //! Upstream: `rustfs-gateway`. Downstream: examples and backend contract tests.
 
 #![doc = include_str!("../README.md")]
@@ -32,8 +32,8 @@ use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
     AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CreateBucket,
     CreateBucketOutput, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketOutput, DeleteObject,
-    DeleteObjectOutput, GetObject, GetObjectOutput, HeadBucket, HeadBucketOutput, HeadObject, HeadObjectOutput, ListParts,
-    ListPartsOutput, Part, PutObject, PutObjectOutput, UploadPart, UploadPartOutput,
+    GetBucketVersioning, GetObject, HeadBucket, HeadBucketOutput, HeadObject, ListObjectVersions, ListParts, ListPartsOutput,
+    Part, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
     BucketName, ByteStream, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey,
@@ -44,6 +44,7 @@ use tokio::io::AsyncWriteExt as _;
 
 const OBJECTS_DIR: &str = "objects";
 const UPLOADS_DIR: &str = "uploads";
+const VERSIONS_DIR: &str = "versions";
 const PARTS_DIR: &str = "parts";
 const UPLOAD_RECORD: &str = "record";
 
@@ -56,10 +57,13 @@ macro_rules! reference_operations {
             multipart CreateMultipartUpload => "CreateMultipartUpload",
             crud DeleteBucket => "DeleteBucket",
             crud DeleteObject => "DeleteObject",
+            versioning GetBucketVersioning => "GetBucketVersioning",
             crud GetObject => "GetObject",
             crud HeadBucket => "HeadBucket",
             crud HeadObject => "HeadObject",
+            versioning ListObjectVersions => "ListObjectVersions",
             multipart ListParts => "ListParts",
+            versioning PutBucketVersioning => "PutBucketVersioning",
             crud PutObject => "PutObject",
             multipart UploadPart => "UploadPart",
         }
@@ -82,6 +86,9 @@ macro_rules! register_crud_entries {
     ($backend:expr, $builder:expr; multipart $operation:ty => $name:literal, $($rest:tt)*) => {
         register_crud_entries!($backend, $builder; $($rest)*)
     };
+    ($backend:expr, $builder:expr; versioning $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_crud_entries!($backend, $builder; $($rest)*)
+    };
 }
 
 macro_rules! register_multipart_entries {
@@ -92,7 +99,22 @@ macro_rules! register_multipart_entries {
     ($backend:expr, $builder:expr; crud $operation:ty => $name:literal, $($rest:tt)*) => {
         register_multipart_entries!($backend, $builder; $($rest)*)
     };
+    ($backend:expr, $builder:expr; versioning $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_multipart_entries!($backend, $builder; $($rest)*)
+    };
 }
+
+macro_rules! register_versioning_entries {
+    ($backend:expr, $builder:expr;) => { $builder };
+    ($backend:expr, $builder:expr; versioning $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_versioning_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
+    };
+    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_versioning_entries!($backend, $builder; $($rest)*)
+    };
+}
+
+mod versioning;
 
 #[derive(Clone)]
 struct UploadRecord {
@@ -119,6 +141,7 @@ impl RecordedUpload for UploadRecord {
 pub struct FsBackend {
     root: PathBuf,
     temporary_id: AtomicU64,
+    version_lock: tokio::sync::Mutex<()>,
 }
 
 impl FsBackend {
@@ -143,6 +166,7 @@ impl FsBackend {
         Ok(Self {
             root: std::fs::canonicalize(root.as_ref())?,
             temporary_id: AtomicU64::new(0),
+            version_lock: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -173,6 +197,17 @@ impl FsBackend {
         reference_operations!(register)
     }
 
+    /// Registers bucket versioning and version-aware object operations.
+    #[must_use]
+    pub fn register_versioning(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
+        macro_rules! register {
+            ($($operations:tt)*) => {
+                register_versioning_entries!(self, builder; $($operations)*)
+            };
+        }
+        reference_operations!(register)
+    }
+
     fn bucket_path(&self, bucket: &str) -> PathBuf {
         self.root.join(format!("b-{}", hex::encode(bucket.as_bytes())))
     }
@@ -183,6 +218,10 @@ impl FsBackend {
 
     fn uploads_path(&self, bucket: &str) -> PathBuf {
         self.bucket_path(bucket).join(UPLOADS_DIR)
+    }
+
+    fn versions_path(&self, bucket: &str) -> PathBuf {
+        self.bucket_path(bucket).join(VERSIONS_DIR)
     }
 
     fn object_path(&self, bucket: &str, key: &str) -> PathBuf {
@@ -211,7 +250,8 @@ impl FsBackend {
     async fn require_bucket(&self, bucket: &str) -> Result<(), HandlerError> {
         self.require_directory(&self.bucket_path(bucket), no_such_bucket()).await?;
         self.require_directory(&self.objects_path(bucket), storage_error()).await?;
-        self.require_directory(&self.uploads_path(bucket), storage_error()).await
+        self.require_directory(&self.uploads_path(bucket), storage_error()).await?;
+        self.require_directory(&self.versions_path(bucket), storage_error()).await
     }
 
     async fn read_object(&self, bucket: &str, key: &str) -> Result<(Vec<u8>, std::fs::Metadata), HandlerError> {
@@ -229,12 +269,6 @@ impl FsBackend {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Err(no_such_key(key)),
             Err(_) => Err(storage_error()),
         }
-    }
-
-    async fn write_object(&self, bucket: &str, key: &str, bytes: &[u8]) -> Result<(), HandlerError> {
-        self.require_bucket(bucket).await?;
-        let objects = self.objects_path(bucket);
-        self.write_atomic(&objects, &self.object_path(bucket, key), bytes).await
     }
 
     async fn write_atomic(&self, directory: &Path, destination: &Path, bytes: &[u8]) -> Result<(), HandlerError> {
@@ -418,7 +452,7 @@ impl Handler<CreateBucket> for FsBackend {
         match tokio::fs::create_dir(&path).await {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                self.require_directory(&path, no_such_bucket()).await?;
+                self.require_bucket(bucket).await?;
                 return Ok(Resp::new(CreateBucketOutput {
                     location: Some(format!("/{bucket}")),
                 }));
@@ -430,6 +464,12 @@ impl Handler<CreateBucket> for FsBackend {
             return Err(storage_error());
         }
         if tokio::fs::create_dir(path.join(UPLOADS_DIR)).await.is_err() {
+            let _ = tokio::fs::remove_dir(path.join(OBJECTS_DIR)).await;
+            let _ = tokio::fs::remove_dir(&path).await;
+            return Err(storage_error());
+        }
+        if tokio::fs::create_dir(path.join(VERSIONS_DIR)).await.is_err() {
+            let _ = tokio::fs::remove_dir(path.join(UPLOADS_DIR)).await;
             let _ = tokio::fs::remove_dir(path.join(OBJECTS_DIR)).await;
             let _ = tokio::fs::remove_dir(&path).await;
             return Err(storage_error());
@@ -455,7 +495,11 @@ impl Handler<DeleteBucket> for FsBackend {
         self.require_bucket(bucket).await?;
         let objects = self.objects_path(bucket);
         let uploads = self.uploads_path(bucket);
-        if !self.directory_is_empty(&objects).await? || !self.directory_is_empty(&uploads).await? {
+        let versions = self.versions_path(bucket);
+        if !self.directory_is_empty(&objects).await?
+            || !self.directory_is_empty(&uploads).await?
+            || !self.directory_is_empty(&versions).await?
+        {
             return Err(HandlerError::new(
                 ErrorCode::BUCKET_NOT_EMPTY,
                 "The bucket you tried to delete is not empty",
@@ -463,72 +507,21 @@ impl Handler<DeleteBucket> for FsBackend {
         }
         tokio::fs::remove_dir(&objects).await.map_err(|_| storage_error())?;
         tokio::fs::remove_dir(&uploads).await.map_err(|_| storage_error())?;
+        tokio::fs::remove_dir(&versions).await.map_err(|_| storage_error())?;
+        match tokio::fs::remove_file(self.bucket_path(bucket).join(versioning::STATUS_FILE)).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Err(storage_error()),
+        }
+        match tokio::fs::remove_file(self.bucket_path(bucket).join(versioning::SEQUENCE_FILE)).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Err(storage_error()),
+        }
         tokio::fs::remove_dir(self.bucket_path(bucket))
             .await
             .map_err(|_| storage_error())?;
         Ok(Resp::new(DeleteBucketOutput::default()))
-    }
-}
-
-impl Handler<PutObject> for FsBackend {
-    async fn call(&self, request: Req<PutObject>) -> HandlerResult<PutObject> {
-        let input = request.into_input();
-        let bytes = drain(input.body).await?;
-        self.write_object(input.bucket.as_str(), input.key.as_str(), &bytes).await?;
-        Ok(Resp::new(PutObjectOutput {
-            size: i64::try_from(bytes.len()).ok(),
-            e_tag: etag(&bytes)?,
-            ..PutObjectOutput::default()
-        }))
-    }
-}
-
-impl Handler<GetObject> for FsBackend {
-    async fn call(&self, request: Req<GetObject>) -> HandlerResult<GetObject> {
-        let input = request.input();
-        let (bytes, metadata) = self.read_object(input.bucket.as_str(), input.key.as_str()).await?;
-        Ok(Resp::new(GetObjectOutput {
-            content_length: i64::try_from(bytes.len()).ok(),
-            e_tag: Some(etag(&bytes)?),
-            last_modified: Some(last_modified(&metadata)),
-            body: Some(ByteStream::from_bytes(bytes::Bytes::from(bytes))),
-            ..GetObjectOutput::default()
-        }))
-    }
-}
-
-impl Handler<HeadObject> for FsBackend {
-    async fn call(&self, request: Req<HeadObject>) -> HandlerResult<HeadObject> {
-        let input = request.input();
-        let (bytes, metadata) = self.read_object(input.bucket.as_str(), input.key.as_str()).await?;
-        Ok(Resp::new(HeadObjectOutput {
-            content_length: i64::try_from(bytes.len()).ok(),
-            e_tag: Some(etag(&bytes)?),
-            last_modified: Some(last_modified(&metadata)),
-            ..HeadObjectOutput::default()
-        }))
-    }
-}
-
-impl Handler<DeleteObject> for FsBackend {
-    async fn call(&self, request: Req<DeleteObject>) -> HandlerResult<DeleteObject> {
-        let input = request.input();
-        self.require_bucket(input.bucket.as_str()).await?;
-        let path = self.object_path(input.bucket.as_str(), input.key.as_str());
-        match tokio::fs::symlink_metadata(&path).await {
-            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
-                tokio::fs::remove_file(path).await.map_err(|_| storage_error())?;
-            }
-            Ok(_) => {
-                return Err(HandlerError::new(
-                    ErrorCode::INVALID_REQUEST,
-                    "the object path is not a safe regular file",
-                ));
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => return Err(storage_error()),
-        }
-        Ok(Resp::new(DeleteObjectOutput::default()))
     }
 }
 
