@@ -20,11 +20,14 @@
 
 use core::fmt;
 
+use crate::cors_tagging::{CorsTaggingCodecError, PersistedTag, PersistedTagging, parse_tagging, serialize_tagging};
+
 use super::{
     PersistedAccelerateConfiguration, PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule,
     PersistedEncryptionByDefault, PersistedPublicAccessBlockConfiguration, PersistedRequestPaymentConfiguration,
-    PersistenceCodecError, parse_accelerate, parse_bucket_encryption, parse_public_access_block, parse_request_payment,
-    serialize_accelerate, serialize_bucket_encryption, serialize_public_access_block, serialize_request_payment,
+    PersistedVersioningConfiguration, PersistenceCodecError, parse_accelerate, parse_bucket_encryption,
+    parse_public_access_block, parse_request_payment, parse_versioning, serialize_accelerate, serialize_bucket_encryption,
+    serialize_public_access_block, serialize_request_payment, serialize_versioning,
 };
 
 /// A generated DTO cannot be represented by the historical persistence shape.
@@ -34,6 +37,8 @@ pub enum PersistenceBridgeError {
     Codec(PersistenceCodecError),
     /// A present generated DTO member has no lossless historical persistence representation.
     UnsupportedMember(&'static str),
+    /// A present persisted member has no lossless generated DTO representation.
+    UnsupportedPersistedMember(&'static str),
 }
 
 impl fmt::Display for PersistenceBridgeError {
@@ -41,6 +46,9 @@ impl fmt::Display for PersistenceBridgeError {
         match self {
             Self::Codec(error) => write!(formatter, "persistence codec refused the DTO: {error}"),
             Self::UnsupportedMember(member) => write!(formatter, "persistence format cannot represent DTO member {member}"),
+            Self::UnsupportedPersistedMember(member) => {
+                write!(formatter, "generated DTO cannot represent persisted member {member}")
+            }
         }
     }
 }
@@ -51,6 +59,105 @@ impl From<PersistenceCodecError> for PersistenceBridgeError {
     fn from(error: PersistenceCodecError) -> Self {
         Self::Codec(error)
     }
+}
+
+/// A persisted Tagging document cannot be represented by the generated DTO.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TaggingBridgeError {
+    /// The historical Tagging codec refused the bytes.
+    Codec(CorsTaggingCodecError),
+    /// A generated required member is absent in historically accepted persistence bytes.
+    MissingRequiredMember(&'static str),
+}
+
+impl fmt::Display for TaggingBridgeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Codec(error) => write!(formatter, "Tagging persistence codec refused the DTO: {error}"),
+            Self::MissingRequiredMember(member) => write!(formatter, "persisted Tagging document is missing DTO member {member}"),
+        }
+    }
+}
+
+impl std::error::Error for TaggingBridgeError {}
+
+impl From<CorsTaggingCodecError> for TaggingBridgeError {
+    fn from(error: CorsTaggingCodecError) -> Self {
+        Self::Codec(error)
+    }
+}
+
+/// Parses persisted Tagging bytes directly into the generated HTTP DTO.
+///
+/// # Errors
+///
+/// Returns [`TaggingBridgeError::Codec`] when the historical parser rejects the bytes, and
+/// [`TaggingBridgeError::MissingRequiredMember`] when historically accepted optional tag fields
+/// cannot satisfy the generated DTO's required members.
+pub fn parse_tagging_dto(input: &[u8]) -> Result<crate::dto::Tagging, TaggingBridgeError> {
+    let persisted = parse_tagging(input)?;
+    let tag_set = persisted
+        .tag_set
+        .into_iter()
+        .map(|tag| {
+            Ok(crate::dto::Tag {
+                key: tag.key.ok_or(TaggingBridgeError::MissingRequiredMember("Tag.Key"))?,
+                value: tag.value.ok_or(TaggingBridgeError::MissingRequiredMember("Tag.Value"))?,
+            })
+        })
+        .collect::<Result<Vec<_>, TaggingBridgeError>>()?;
+    Ok(crate::dto::Tagging { tag_set })
+}
+
+/// Serializes the generated Tagging DTO with the historical persistence writer.
+#[must_use]
+pub fn serialize_tagging_dto(value: &crate::dto::Tagging) -> Vec<u8> {
+    serialize_tagging(&PersistedTagging {
+        tag_set: value
+            .tag_set
+            .iter()
+            .map(|tag| PersistedTag {
+                key: Some(tag.key.clone()),
+                value: Some(tag.value.clone()),
+            })
+            .collect(),
+    })
+}
+
+/// Parses persisted Versioning bytes directly into the generated HTTP DTO.
+///
+/// # Errors
+///
+/// Returns [`PersistenceBridgeError::Codec`] when the historical parser rejects the bytes, and
+/// [`PersistenceBridgeError::UnsupportedPersistedMember`] when a MinIO extension is present and
+/// therefore cannot be represented without loss by the generated DTO.
+pub fn parse_versioning_dto(input: &[u8]) -> Result<crate::dto::VersioningConfiguration, PersistenceBridgeError> {
+    let persisted = parse_versioning(input)?;
+    if persisted.exclude_folders.is_some() {
+        return Err(PersistenceBridgeError::UnsupportedPersistedMember(
+            "VersioningConfiguration.ExcludeFolders",
+        ));
+    }
+    if persisted.excluded_prefixes.is_some() {
+        return Err(PersistenceBridgeError::UnsupportedPersistedMember(
+            "VersioningConfiguration.ExcludedPrefixes",
+        ));
+    }
+    Ok(crate::dto::VersioningConfiguration {
+        mfa_delete: persisted.mfa_delete.map(crate::dto::MfaDelete::custom),
+        status: persisted.status.map(crate::dto::Status::custom),
+    })
+}
+
+/// Serializes the generated Versioning DTO with the historical persistence writer.
+#[must_use]
+pub fn serialize_versioning_dto(value: &crate::dto::VersioningConfiguration) -> Vec<u8> {
+    serialize_versioning(&PersistedVersioningConfiguration {
+        status: value.status.as_ref().map(|status| status.as_str().to_owned()),
+        mfa_delete: value.mfa_delete.as_ref().map(|state| state.as_str().to_owned()),
+        exclude_folders: None,
+        excluded_prefixes: None,
+    })
 }
 
 /// Parses persisted Transfer Acceleration bytes directly into the generated HTTP DTO.
@@ -195,14 +302,116 @@ pub fn serialize_public_access_block_dto(value: &crate::dto::PublicAccessBlockCo
 mod tests {
     use crate::dto::{
         AccelerateConfiguration, BlockedEncryptionTypes, Payer, PublicAccessBlockConfiguration, RequestPaymentConfiguration,
-        ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SseAlgorithm,
+        ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SseAlgorithm, Tag, Tagging,
+        VersioningConfiguration,
     };
 
     use super::{
-        PersistenceBridgeError, PersistenceCodecError, parse_accelerate_dto, parse_bucket_encryption_dto,
-        parse_public_access_block_dto, parse_request_payment_dto, serialize_accelerate_dto, serialize_bucket_encryption_dto,
-        serialize_public_access_block_dto, serialize_request_payment_dto,
+        PersistenceBridgeError, PersistenceCodecError, TaggingBridgeError, parse_accelerate_dto, parse_bucket_encryption_dto,
+        parse_public_access_block_dto, parse_request_payment_dto, parse_tagging_dto, parse_versioning_dto,
+        serialize_accelerate_dto, serialize_bucket_encryption_dto, serialize_public_access_block_dto,
+        serialize_request_payment_dto, serialize_tagging_dto, serialize_versioning_dto,
     };
+
+    #[test]
+    fn tagging_dto_bridge_preserves_required_members_and_the_old_writer_order() {
+        let dto = Tagging {
+            tag_set: vec![Tag {
+                key: "project".to_owned(),
+                value: "launch".to_owned(),
+            }],
+        };
+
+        let bytes = serialize_tagging_dto(&dto);
+        assert_eq!(
+            bytes,
+            b"<Tagging><TagSet><Tag><Key>project</Key><Value>launch</Value></Tag></TagSet></Tagging>"
+        );
+        let parsed = parse_tagging_dto(&bytes).expect("the bridge reads its own persistence bytes");
+        assert_eq!(parsed.tag_set[0].key, "project");
+        assert_eq!(parsed.tag_set[0].value, "launch");
+    }
+
+    #[test]
+    fn tagging_dto_bridge_rejects_a_wrong_family() {
+        assert_eq!(
+            parse_tagging_dto(b"<VersioningConfiguration></VersioningConfiguration>").expect_err("a different family must fail"),
+            TaggingBridgeError::Codec(crate::cors_tagging::CorsTaggingCodecError::WrongRoot)
+        );
+    }
+
+    #[test]
+    fn tagging_dto_bridge_rejects_a_missing_tag_set() {
+        assert_eq!(
+            parse_tagging_dto(b"<Tagging></Tagging>").expect_err("the required wrapper must be present"),
+            TaggingBridgeError::Codec(crate::cors_tagging::CorsTaggingCodecError::MissingField("TagSet"))
+        );
+    }
+
+    #[test]
+    fn tagging_dto_bridge_rejects_a_missing_required_tag_member() {
+        assert_eq!(
+            parse_tagging_dto(b"<Tagging><TagSet><Tag><Value>value</Value></Tag></TagSet></Tagging>")
+                .expect_err("a generated required key cannot be invented"),
+            TaggingBridgeError::MissingRequiredMember("Tag.Key")
+        );
+    }
+
+    #[test]
+    fn versioning_dto_bridge_preserves_presence_and_the_old_writer_order() {
+        let dto = VersioningConfiguration {
+            mfa_delete: Some("FutureMfa".into()),
+            status: Some("FutureStatus".into()),
+        };
+
+        let bytes = serialize_versioning_dto(&dto);
+        assert_eq!(
+            bytes,
+            b"<VersioningConfiguration><MfaDelete>FutureMfa</MfaDelete><Status>FutureStatus</Status></VersioningConfiguration>"
+        );
+        let parsed = parse_versioning_dto(&bytes).expect("the bridge reads its own persistence bytes");
+        assert_eq!(parsed.mfa_delete.as_ref().map(|value| value.as_str()), Some("FutureMfa"));
+        assert_eq!(parsed.status.as_ref().map(|value| value.as_str()), Some("FutureStatus"));
+    }
+
+    #[test]
+    fn versioning_dto_bridge_rejects_a_wrong_family() {
+        assert_eq!(
+            parse_versioning_dto(b"<Tagging></Tagging>").expect_err("a different family must fail"),
+            PersistenceBridgeError::Codec(PersistenceCodecError::WrongRoot)
+        );
+    }
+
+    #[test]
+    fn versioning_dto_bridge_rejects_a_duplicate_status() {
+        assert_eq!(
+            parse_versioning_dto(
+                b"<VersioningConfiguration><Status>Enabled</Status><Status>Suspended</Status></VersioningConfiguration>"
+            )
+            .expect_err("a repeated status must fail"),
+            PersistenceBridgeError::Codec(PersistenceCodecError::DuplicateField)
+        );
+    }
+
+    #[test]
+    fn versioning_dto_bridge_refuses_the_folder_extension() {
+        assert_eq!(
+            parse_versioning_dto(b"<VersioningConfiguration><ExcludeFolders>true</ExcludeFolders></VersioningConfiguration>")
+                .expect_err("a persisted extension cannot be dropped"),
+            PersistenceBridgeError::UnsupportedPersistedMember("VersioningConfiguration.ExcludeFolders")
+        );
+    }
+
+    #[test]
+    fn versioning_dto_bridge_refuses_the_prefix_extension() {
+        assert_eq!(
+            parse_versioning_dto(
+                b"<VersioningConfiguration><ExcludedPrefixes><Prefix>tmp/</Prefix></ExcludedPrefixes></VersioningConfiguration>"
+            )
+            .expect_err("a persisted extension cannot be dropped"),
+            PersistenceBridgeError::UnsupportedPersistedMember("VersioningConfiguration.ExcludedPrefixes")
+        );
+    }
 
     #[test]
     fn accelerate_dto_bridge_preserves_presence_and_the_old_writer_order() {
