@@ -658,8 +658,8 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
         }
 
         let upload = self.upload_path(input.bucket.as_str(), &upload_id);
-        let mut part_bytes = Vec::with_capacity(requested.len());
-        let mut digest_bytes = Vec::with_capacity(requested.len() * 16);
+        let mut completed_bytes = Vec::new();
+        let mut part_digests = Vec::with_capacity(requested.len());
         for (number, expected) in &requested {
             let path = Self::part_path(&upload, *number);
             let metadata = tokio::fs::symlink_metadata(&path).await.map_err(|error| match error.kind() {
@@ -680,33 +680,10 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
                     "a completed part entity tag does not match the uploaded part",
                 ));
             }
-            digest_bytes.extend_from_slice(&Md5::digest(&bytes));
-            part_bytes.push(bytes);
+            part_digests.push(Md5::digest(&bytes).into());
+            completed_bytes.extend_from_slice(&bytes);
         }
-
-        let objects = self.objects_path(input.bucket.as_str());
-        let temporary = objects.join(format!(
-            ".tmp-complete-{}-{}",
-            std::process::id(),
-            self.temporary_id.fetch_add(1, Ordering::Relaxed)
-        ));
-        let mut file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-            .await
-            .map_err(|_| storage_error())?;
-        for bytes in &part_bytes {
-            if file.write_all(bytes).await.is_err() {
-                let _ = tokio::fs::remove_file(&temporary).await;
-                return Err(storage_error());
-            }
-        }
-        if file.sync_all().await.is_err() {
-            let _ = tokio::fs::remove_file(&temporary).await;
-            return Err(storage_error());
-        }
-        drop(file);
+        let composite = ETag::from_part_digests(&part_digests).map_err(|_| storage_error())?;
 
         let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
             ".complete-{}-{}",
@@ -714,21 +691,23 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             self.temporary_id.fetch_add(1, Ordering::Relaxed)
         ));
         tokio::fs::rename(&upload, &tombstone).await.map_err(|_| no_such_upload())?;
-        let destination = self.object_path(input.bucket.as_str(), input.key.as_str());
-        if tokio::fs::rename(&temporary, destination).await.is_err() {
-            let _ = tokio::fs::rename(&tombstone, &upload).await;
-            let _ = tokio::fs::remove_file(&temporary).await;
-            return Err(storage_error());
-        }
+        let published = match self
+            .publish_object(input.bucket.as_str(), input.key.as_str(), &completed_bytes, &composite)
+            .await
+        {
+            Ok(published) => published,
+            Err(error) => {
+                let _ = tokio::fs::rename(&tombstone, &upload).await;
+                return Err(error);
+            }
+        };
         let _ = tokio::fs::remove_dir_all(tombstone).await;
-
-        let composite =
-            ETag::new(format!("{}-{}", hex::encode(Md5::digest(&digest_bytes)), requested.len())).map_err(|_| storage_error())?;
         Ok(Resp::new(CompleteMultipartUploadOutput {
             location: Some(format!("/{}/{}", input.bucket.as_str(), input.key.as_str())),
             bucket: Some(input.bucket),
             key: Some(input.key),
             e_tag: Some(composite),
+            version_id: published.version_id,
             ..CompleteMultipartUploadOutput::default()
         }))
     }

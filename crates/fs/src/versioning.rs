@@ -14,10 +14,12 @@
 
 //! Persistent bucket versioning and version-aware object handlers.
 //!
-//! Responsible for: storing opaque versions and delete markers, selecting current or explicit
-//! versions, and enumerating a deterministic version census.
-//! NOT responsible for: multipart version publication, lifecycle, copy, tags, or ordinary listing.
-//! Upstream: the filesystem safety primitives in the crate root. Downstream: production handlers.
+//! Responsible for: publishing ordinary and multipart object bytes into opaque/null versions,
+//! storing delete markers, selecting current or explicit versions, and enumerating a deterministic
+//! version census.
+//! NOT responsible for: multipart part validation, lifecycle, copy, tags, or ordinary listing.
+//! Upstream: the filesystem safety primitives and validated multipart assembly. Downstream:
+//! production object, multipart-completion, and version-listing handlers.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -30,7 +32,7 @@ use rustfs_gateway::dto::{
     PutBucketVersioning, PutBucketVersioningOutput, PutObject, PutObjectOutput, Status, StorageClass,
 };
 use rustfs_gateway::{
-    ByteStream, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Req,
+    ByteStream, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Req,
     ResourceVisibility, Resp, Timestamp, validate_versioning,
 };
 use sha2::{Digest as _, Sha256};
@@ -77,7 +79,47 @@ pub(super) struct CurrentObjectRecord {
     pub(super) size: i64,
 }
 
+pub(super) struct PublishedObject {
+    pub(super) size: i64,
+    pub(super) version_id: Option<String>,
+}
+
 impl FsBackend {
+    pub(super) async fn publish_object(
+        &self,
+        bucket: &str,
+        key: &str,
+        bytes: &[u8],
+        e_tag: &ETag,
+    ) -> Result<PublishedObject, HandlerError> {
+        let _guard = self.version_lock.lock().await;
+        let state = self.versioning_state(bucket).await?;
+        let existing = self.version_records(bucket).await?;
+        let version_id = if matches!(state, VersioningState::Enabled) {
+            None
+        } else {
+            Some("null")
+        };
+        let record = self
+            .publish_version(bucket, key, version_id, Some(bytes), Some(e_tag))
+            .await?;
+        if version_id.is_some() {
+            self.remove_null_versions(
+                &existing
+                    .into_iter()
+                    .filter(|held| held.path != record.path)
+                    .collect::<Vec<_>>(),
+                key,
+            )
+            .await?;
+            self.remove_legacy_object(bucket, key).await?;
+        }
+        Ok(PublishedObject {
+            size: record.size,
+            version_id: (!matches!(state, VersioningState::Never)).then_some(record.version_id),
+        })
+    }
+
     pub(super) async fn current_object_records(&self, bucket: &str) -> Result<Vec<CurrentObjectRecord>, HandlerError> {
         let records = self.version_records(bucket).await?;
         let mut current = BTreeMap::<String, VersionRecord>::new();
@@ -221,6 +263,7 @@ impl FsBackend {
         key: &str,
         version_id: Option<&str>,
         body: Option<&[u8]>,
+        e_tag: Option<&ETag>,
     ) -> Result<VersionRecord, HandlerError> {
         let held = self.version_records(bucket).await?;
         let sequence = self.next_version_sequence(bucket, &held).await?;
@@ -235,12 +278,12 @@ impl FsBackend {
             self.temporary_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         tokio::fs::create_dir(&temporary).await.map_err(|_| storage_error())?;
-        let object_metadata = match body {
-            Some(bytes) => Some((
-                hex::encode(md5::Md5::digest(bytes)),
-                i64::try_from(bytes.len()).map_err(|_| storage_error())?,
-            )),
-            None => None,
+        let object_metadata = match (body, e_tag) {
+            (Some(bytes), Some(e_tag)) => {
+                Some((e_tag.opaque_tag().to_owned(), i64::try_from(bytes.len()).map_err(|_| storage_error())?))
+            }
+            (None, None) => None,
+            _ => return Err(storage_error()),
         };
         let result = async {
             let (kind, tag, size) = match (body, object_metadata) {
@@ -398,32 +441,14 @@ impl Handler<PutObject> for FsBackend {
     async fn call(&self, request: Req<PutObject>) -> HandlerResult<PutObject> {
         let input = request.into_input();
         let bytes = drain(input.body).await?;
-        let _guard = self.version_lock.lock().await;
-        let state = self.versioning_state(input.bucket.as_str()).await?;
-        let existing = self.version_records(input.bucket.as_str()).await?;
-        let version_id = if matches!(state, VersioningState::Enabled) {
-            None
-        } else {
-            Some("null")
-        };
-        let record = self
-            .publish_version(input.bucket.as_str(), input.key.as_str(), version_id, Some(&bytes))
+        let e_tag = etag(&bytes)?;
+        let published = self
+            .publish_object(input.bucket.as_str(), input.key.as_str(), &bytes, &e_tag)
             .await?;
-        if version_id.is_some() {
-            self.remove_null_versions(
-                &existing
-                    .into_iter()
-                    .filter(|held| held.path != record.path)
-                    .collect::<Vec<_>>(),
-                input.key.as_str(),
-            )
-            .await?;
-            self.remove_legacy_object(input.bucket.as_str(), input.key.as_str()).await?;
-        }
         Ok(Resp::new(PutObjectOutput {
-            size: Some(record.size),
-            e_tag: etag(&bytes)?,
-            version_id: (!matches!(state, VersioningState::Never)).then_some(record.version_id),
+            size: Some(published.size),
+            e_tag,
+            version_id: published.version_id,
             ..PutObjectOutput::default()
         }))
     }
@@ -545,7 +570,7 @@ impl Handler<DeleteObject> for FsBackend {
             }
             VersioningState::Enabled => {
                 let marker = self
-                    .publish_version(input.bucket.as_str(), input.key.as_str(), None, None)
+                    .publish_version(input.bucket.as_str(), input.key.as_str(), None, None, None)
                     .await?;
                 Ok(Resp::new(DeleteObjectOutput {
                     delete_marker: Some(true),
@@ -555,7 +580,7 @@ impl Handler<DeleteObject> for FsBackend {
             }
             VersioningState::Suspended => {
                 let marker = self
-                    .publish_version(input.bucket.as_str(), input.key.as_str(), Some("null"), None)
+                    .publish_version(input.bucket.as_str(), input.key.as_str(), Some("null"), None, None)
                     .await?;
                 self.remove_null_versions(
                     &records
