@@ -87,10 +87,10 @@ use rustfs_gateway::{
     RequestContext, S3Service, ServiceBuilder, ServiceConfig, SessionBinding, SigV4Authenticator, SnapshotId, StaticCredentials,
     VirtualHostStyle, WireRequest, allow_when, collect, dto, fn_credential_provider, op_layer, policy_from,
 };
-use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::{collections::BTreeMap, path::PathBuf};
+mod conditional_race;
 mod sigv2;
 use crate::exec::ServiceRuntime;
 use crate::fixture::{Fixture, StoredObject, Stub};
@@ -561,38 +561,6 @@ impl InProcess {
     pub(crate) fn set_fixture_now(&self, unix_seconds: i64) {
         if let Ok(mut fixture) = self.state.lock() {
             fixture.now = unix_seconds;
-        }
-    }
-
-    /// Arms the fixture rendezvous for one batch of conditional writes to the same resource.
-    pub(crate) fn begin_conditional_race(&self, participants: usize) -> Result<(), SutError> {
-        let coordinator = self
-            .state
-            .lock()
-            .map_err(|_| SutError::Environment("the fixture state was left poisoned".to_owned()))?
-            .conditional_race_coordinator();
-        coordinator
-            .begin(participants)
-            .map_err(|reason| SutError::Environment(reason.to_owned()))
-    }
-
-    /// Waits until the named prefix of a concurrent batch has reached its conditional check.
-    pub(crate) fn wait_for_conditional_checks(&self, minimum: usize, timeout: std::time::Duration) -> Result<(), SutError> {
-        let coordinator = self
-            .state
-            .lock()
-            .map_err(|_| SutError::Environment("the fixture state was left poisoned".to_owned()))?
-            .conditional_race_coordinator();
-        coordinator
-            .wait_until_checked(minimum, timeout)
-            .map_err(|reason| SutError::Environment(reason.to_owned()))
-    }
-
-    /// Disarms the fixture rendezvous after every concurrent response has been observed.
-    pub(crate) fn end_conditional_race(&self) {
-        let coordinator = self.state.lock().ok().map(|fixture| fixture.conditional_race_coordinator());
-        if let Some(coordinator) = coordinator {
-            coordinator.end();
         }
     }
 
