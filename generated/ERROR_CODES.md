@@ -11,7 +11,7 @@ it, and `cargo xtask spec verify` fails when either has drifted from it.
 There is no fallback row. A code with no entry here has no constant and no status, and
 reaches the wire only through `ErrorCode::custom`, which makes its caller name the status.
 
-116 codes: 3 redirect, 109 client, 4 server.
+120 codes: 3 redirect, 113 client, 4 server.
 
 ## The 5xx allowlist
 
@@ -37,13 +37,14 @@ The other direction: what a status can mean when a client sees it.
 | 301 | redirect | `PermanentRedirect` |
 | 304 | redirect | `NotModified` |
 | 307 | redirect | `TemporaryRedirect` |
-| 400 | client | `AmbiguousGrantByEmailAddress`, `AuthorizationHeaderMalformed`, `AuthorizationQueryParametersError`, `BadDigest`, `CSVParsingError`, `CredentialsNotSupported`, `EncryptionTypeMismatch`, `EntityTooLarge`, `EntityTooSmall`, `ExpiredToken`, `ExpressionTooLong`, `IdempotencyParameterMismatch`, `IllegalVersioningConfigurationException`, `IncompleteBody`, `IncorrectNumberOfFilesInPostRequest`, `InlineDataTooLarge`, `InvalidArgument`, `InvalidBucketName`, `InvalidChunkSizeError`, `InvalidColumnIndex`, `InvalidCompressionFormat`, `InvalidDataType`, `InvalidDigest`, `InvalidEncryptionAlgorithmError`, `InvalidExpressionType`, `InvalidLocationConstraint`, `InvalidPart`, `InvalidPartNumber`, `InvalidPartOrder`, `InvalidPolicyDocument`, `InvalidPrefix`, `InvalidRequest`, `InvalidRetentionPeriod`, `InvalidSOAPRequest`, `InvalidStorageClass`, `InvalidTag`, `InvalidTargetBucketForLogging`, `InvalidTextEncoding`, `InvalidToken`, `InvalidURI`, `InvalidWriteOffset`, `JSONParsingError`, `KeyTooLongError`, `MalformedACLError`, `MalformedPOSTRequest`, `MalformedPolicy`, `MalformedXML`, `MaxMessageLengthExceeded`, `MaxPostPreDataLengthExceededError`, `MetadataTooLarge`, `MissingRequestBodyError`, `MissingSecurityElement`, `MissingSecurityHeader`, `NoLoggingStatusForKey`, `ObjectSerializationConflict`, `OverMaxRecordSize`, `ParseUnexpectedToken`, `RequestIsNotMultiPartContent`, `RequestTimeout`, `TokenRefreshRequired`, `TooManyBuckets`, `TooManyParts`, `UnexpectedContent`, `UnresolvableGrantByEmailAddress`, `UnsupportedFunction`, `UserKeyMustBeSpecified`, `XAmzContentChecksumMismatch`, `XAmzContentSHA256Mismatch` |
+| 400 | client | `AmbiguousGrantByEmailAddress`, `AnnotationLimitExceeded`, `AnnotationNameTooLong`, `AuthorizationHeaderMalformed`, `AuthorizationQueryParametersError`, `BadDigest`, `CSVParsingError`, `CredentialsNotSupported`, `EncryptionTypeMismatch`, `EntityTooLarge`, `EntityTooSmall`, `ExpiredToken`, `ExpressionTooLong`, `IdempotencyParameterMismatch`, `IllegalVersioningConfigurationException`, `IncompleteBody`, `IncorrectNumberOfFilesInPostRequest`, `InlineDataTooLarge`, `InvalidAnnotationName`, `InvalidArgument`, `InvalidBucketName`, `InvalidChunkSizeError`, `InvalidColumnIndex`, `InvalidCompressionFormat`, `InvalidDataType`, `InvalidDigest`, `InvalidEncryptionAlgorithmError`, `InvalidExpressionType`, `InvalidLocationConstraint`, `InvalidPart`, `InvalidPartNumber`, `InvalidPartOrder`, `InvalidPolicyDocument`, `InvalidPrefix`, `InvalidRequest`, `InvalidRetentionPeriod`, `InvalidSOAPRequest`, `InvalidStorageClass`, `InvalidTag`, `InvalidTargetBucketForLogging`, `InvalidTextEncoding`, `InvalidToken`, `InvalidURI`, `InvalidWriteOffset`, `JSONParsingError`, `KeyTooLongError`, `MalformedACLError`, `MalformedPOSTRequest`, `MalformedPolicy`, `MalformedXML`, `MaxMessageLengthExceeded`, `MaxPostPreDataLengthExceededError`, `MetadataTooLarge`, `MissingRequestBodyError`, `MissingSecurityElement`, `MissingSecurityHeader`, `NoLoggingStatusForKey`, `ObjectSerializationConflict`, `OverMaxRecordSize`, `ParseUnexpectedToken`, `RequestIsNotMultiPartContent`, `RequestTimeout`, `TokenRefreshRequired`, `TooManyBuckets`, `TooManyParts`, `UnexpectedContent`, `UnresolvableGrantByEmailAddress`, `UnsupportedFunction`, `UserKeyMustBeSpecified`, `XAmzContentChecksumMismatch`, `XAmzContentSHA256Mismatch` |
 | 403 | client | `AccessDenied`, `AccessForbidden`, `AccountProblem`, `AllAccessDisabled`, `CrossLocationLoggingProhibited`, `InvalidAccessKeyId`, `InvalidObjectState`, `InvalidPayer`, `InvalidSecurity`, `NotSignedUp`, `ObjectAlreadyInActiveTierError`, `ObjectNotInActiveTierError`, `RequestTimeTooSkewed`, `SignatureDoesNotMatch` |
 | 404 | client | `NoSuchAnnotation`, `NoSuchBucket`, `NoSuchBucketPolicy`, `NoSuchCORSConfiguration`, `NoSuchKey`, `NoSuchLifecycleConfiguration`, `NoSuchObjectLockConfiguration`, `NoSuchPublicAccessBlockConfiguration`, `NoSuchTagSet`, `NoSuchUpload`, `NoSuchVersion`, `NoSuchWebsiteConfiguration`, `NotFound`, `ObjectLockConfigurationNotFoundError`, `ReplicationConfigurationNotFoundError`, `ServerSideEncryptionConfigurationNotFoundError` |
 | 405 | client | `MethodNotAllowed` |
 | 409 | client | `BucketAlreadyExists`, `BucketAlreadyOwnedByYou`, `BucketNotEmpty`, `ConditionalRequestConflict`, `InvalidBucketState`, `OperationAborted`, `RestoreAlreadyInProgress` |
 | 411 | client | `MissingContentLength` |
 | 412 | client | `PreconditionFailed` |
+| 415 | client | `UnsupportedMediaType` |
 | 416 | client | `InvalidRange` |
 | 500 | server | `InternalError` |
 | 501 | server | `NotImplemented` |
@@ -58,6 +59,8 @@ The other direction: what a status can mean when a client sees it.
 | `AccountProblem` | 403 | `ErrorCode::ACCOUNT_PROBLEM` | — |
 | `AllAccessDisabled` | 403 | `ErrorCode::ALL_ACCESS_DISABLED` | — |
 | `AmbiguousGrantByEmailAddress` | 400 | `ErrorCode::AMBIGUOUS_GRANT_BY_EMAIL_ADDRESS` | — |
+| `AnnotationLimitExceeded` | 400 | `ErrorCode::ANNOTATION_LIMIT_EXCEEDED` | — |
+| `AnnotationNameTooLong` | 400 | `ErrorCode::ANNOTATION_NAME_TOO_LONG` | — |
 | `AuthorizationHeaderMalformed` | 400 | `ErrorCode::AUTHORIZATION_HEADER_MALFORMED` | The signing region in the credential scope does not match the bucket's region. The error body carries an extra `<Region>` element, which is why error bodies are not a fixed shape. |
 | `AuthorizationQueryParametersError` | 400 | `ErrorCode::AUTHORIZATION_QUERY_PARAMETERS_ERROR` | — |
 | `BadDigest` | 400 | `ErrorCode::BAD_DIGEST` | `Content-MD5` was well formed but did not match the body. |
@@ -80,6 +83,7 @@ The other direction: what a status can mean when a client sees it.
 | `InlineDataTooLarge` | 400 | `ErrorCode::INLINE_DATA_TOO_LARGE` | — |
 | `InternalError` | 500 | `ErrorCode::INTERNAL_ERROR` | Reserved for genuine server faults. It is never a fallback: see [`ErrorCode::default_status`]. |
 | `InvalidAccessKeyId` | 403 | `ErrorCode::INVALID_ACCESS_KEY_ID` | — |
+| `InvalidAnnotationName` | 400 | `ErrorCode::INVALID_ANNOTATION_NAME` | — |
 | `InvalidArgument` | 400 | `ErrorCode::INVALID_ARGUMENT` | — |
 | `InvalidBucketName` | 400 | `ErrorCode::INVALID_BUCKET_NAME` | — |
 | `InvalidBucketState` | 409 | `ErrorCode::INVALID_BUCKET_STATE` | — |
@@ -166,6 +170,7 @@ The other direction: what a status can mean when a client sees it.
 | `UnexpectedContent` | 400 | `ErrorCode::UNEXPECTED_CONTENT` | — |
 | `UnresolvableGrantByEmailAddress` | 400 | `ErrorCode::UNRESOLVABLE_GRANT_BY_EMAIL_ADDRESS` | — |
 | `UnsupportedFunction` | 400 | `ErrorCode::UNSUPPORTED_FUNCTION` | — |
+| `UnsupportedMediaType` | 415 | `ErrorCode::UNSUPPORTED_MEDIA_TYPE` | — |
 | `UserKeyMustBeSpecified` | 400 | `ErrorCode::USER_KEY_MUST_BE_SPECIFIED` | — |
 | `XAmzContentChecksumMismatch` | 400 | `ErrorCode::X_AMZ_CONTENT_CHECKSUM_MISMATCH` | An `x-amz-checksum-*` value did not match the body. Distinct from `BadDigest`, which is the `Content-MD5` failure; SDKs branch on the difference. |
 | `XAmzContentSHA256Mismatch` | 400 | `ErrorCode::X_AMZ_CONTENT_SHA256_MISMATCH` | — |

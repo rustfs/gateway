@@ -48,6 +48,18 @@ impl ErrorCode {
         status: StatusCode::NOT_MODIFIED,
     };
 
+    /// `AnnotationLimitExceeded`, HTTP `400`.
+    pub const ANNOTATION_LIMIT_EXCEEDED: Self = Self {
+        name: Cow::Borrowed("AnnotationLimitExceeded"),
+        status: StatusCode::BAD_REQUEST,
+    };
+
+    /// `AnnotationNameTooLong`, HTTP `400`.
+    pub const ANNOTATION_NAME_TOO_LONG: Self = Self {
+        name: Cow::Borrowed("AnnotationNameTooLong"),
+        status: StatusCode::BAD_REQUEST,
+    };
+
     /// `AmbiguousGrantByEmailAddress`, HTTP `400`.
     pub const AMBIGUOUS_GRANT_BY_EMAIL_ADDRESS: Self = Self {
         name: Cow::Borrowed("AmbiguousGrantByEmailAddress"),
@@ -141,6 +153,12 @@ impl ErrorCode {
     /// `InvalidArgument`, HTTP `400`.
     pub const INVALID_ARGUMENT: Self = Self {
         name: Cow::Borrowed("InvalidArgument"),
+        status: StatusCode::BAD_REQUEST,
+    };
+
+    /// `InvalidAnnotationName`, HTTP `400`.
+    pub const INVALID_ANNOTATION_NAME: Self = Self {
+        name: Cow::Borrowed("InvalidAnnotationName"),
         status: StatusCode::BAD_REQUEST,
     };
 
@@ -758,6 +776,12 @@ impl ErrorCode {
         status: StatusCode::PRECONDITION_FAILED,
     };
 
+    /// `UnsupportedMediaType`, HTTP `415`.
+    pub const UNSUPPORTED_MEDIA_TYPE: Self = Self {
+        name: Cow::Borrowed("UnsupportedMediaType"),
+        status: StatusCode::UNSUPPORTED_MEDIA_TYPE,
+    };
+
     /// `InvalidRange`, HTTP `416`.
     ///
     /// The requested range cannot be satisfied at all. A range that merely runs past the end is
@@ -808,6 +832,8 @@ pub(super) const CODE_TABLE: &[(&str, StatusCode)] = &[
     ("PermanentRedirect", StatusCode::MOVED_PERMANENTLY),
     ("TemporaryRedirect", StatusCode::TEMPORARY_REDIRECT),
     ("NotModified", StatusCode::NOT_MODIFIED),
+    ("AnnotationLimitExceeded", StatusCode::BAD_REQUEST),
+    ("AnnotationNameTooLong", StatusCode::BAD_REQUEST),
     ("AmbiguousGrantByEmailAddress", StatusCode::BAD_REQUEST),
     ("AuthorizationHeaderMalformed", StatusCode::BAD_REQUEST),
     ("AuthorizationQueryParametersError", StatusCode::BAD_REQUEST),
@@ -822,6 +848,7 @@ pub(super) const CODE_TABLE: &[(&str, StatusCode)] = &[
     ("InlineDataTooLarge", StatusCode::BAD_REQUEST),
     ("IdempotencyParameterMismatch", StatusCode::BAD_REQUEST),
     ("InvalidArgument", StatusCode::BAD_REQUEST),
+    ("InvalidAnnotationName", StatusCode::BAD_REQUEST),
     ("InvalidBucketName", StatusCode::BAD_REQUEST),
     ("InvalidChunkSizeError", StatusCode::BAD_REQUEST),
     ("InvalidDigest", StatusCode::BAD_REQUEST),
@@ -916,6 +943,7 @@ pub(super) const CODE_TABLE: &[(&str, StatusCode)] = &[
     ("RestoreAlreadyInProgress", StatusCode::CONFLICT),
     ("MissingContentLength", StatusCode::LENGTH_REQUIRED),
     ("PreconditionFailed", StatusCode::PRECONDITION_FAILED),
+    ("UnsupportedMediaType", StatusCode::UNSUPPORTED_MEDIA_TYPE),
     ("InvalidRange", StatusCode::RANGE_NOT_SATISFIABLE),
     ("InternalError", StatusCode::INTERNAL_SERVER_ERROR),
     ("NotImplemented", StatusCode::NOT_IMPLEMENTED),

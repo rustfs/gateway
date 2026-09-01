@@ -118,6 +118,7 @@ pub mod put_bucket_versioning;
 pub mod put_bucket_website;
 pub mod put_object;
 pub mod put_object_acl;
+pub mod put_object_annotation;
 pub mod put_object_legal_hold;
 pub mod put_object_lock_configuration;
 pub mod put_object_retention;

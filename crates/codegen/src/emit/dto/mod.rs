@@ -50,7 +50,7 @@ pub mod shared;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use rustfs_gateway_model::ir::{Binding, Field, OperationIr};
+use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Type};
 
 use registry::Registry;
 
@@ -133,9 +133,13 @@ pub fn emit(operations: &[OperationIr], generated_dir: &Path) -> Result<(Vec<(Pa
 fn check_required_members_have_defaults(operations: &[&OperationIr], registry: &Registry) -> Result<(), String> {
     let mut offences: Vec<String> = Vec::new();
     for ir in operations {
+        let controlled_body = controlled_required_body(&ir.input);
         let sides = [("input", ir.input.as_slice()), ("output", ir.output.as_slice())];
         for (side, fields) in sides {
             for field in fields {
+                if side == "input" && controlled_body.is_some_and(|body| body.name == field.name) {
+                    continue;
+                }
                 if let Some(reason) = required_gap(registry, field) {
                     offences.push(format!("{}.{side}.{}: {reason}", ir.operation, field.name));
                 }
@@ -160,6 +164,27 @@ fn check_required_members_have_defaults(operations: &[&OperationIr], registry: &
         offences.len(),
         offences.join("\n  ")
     ))
+}
+
+/// The one request member that can be constructed without a placeholder default.
+///
+/// The exception is deliberately structural rather than operation-named: exactly one body-bound,
+/// required streaming blob may consume the real request body. A second body binding, an optional
+/// stream, a response stream or any non-payload binding stays behind the P2 hard failure.
+#[must_use]
+pub(crate) fn controlled_required_body(fields: &[Field]) -> Option<&Field> {
+    let mut body_fields = fields
+        .iter()
+        .filter(|field| matches!(field.binding, Binding::Payload | Binding::BodyXml | Binding::FormField));
+    let field = body_fields.next()?;
+    if body_fields.next().is_some()
+        || !field.required
+        || field.binding != Binding::Payload
+        || !matches!(field.ty, Type::Blob { streaming: true })
+    {
+        return None;
+    }
+    Some(field)
 }
 
 fn required_gap(registry: &Registry, field: &Field) -> Option<&'static str> {
@@ -222,7 +247,7 @@ pub fn field_decl(field: &Field) -> String {
 /// implementation that redacts it. `PartialEq` is never derived: AGENTS.md forbids `==` on key
 /// material, and an Input can carry an SSE-C key.
 #[must_use]
-pub fn derives(clonable: bool, has_secret: bool) -> String {
+pub fn derives(clonable: bool, has_secret: bool, defaultable: bool) -> String {
     let mut list = Vec::new();
     if !has_secret {
         list.push("Debug");
@@ -230,7 +255,9 @@ pub fn derives(clonable: bool, has_secret: bool) -> String {
     if clonable {
         list.push("Clone");
     }
-    list.push("Default");
+    if defaultable {
+        list.push("Default");
+    }
     format!("#[derive({})]\n", list.join(", "))
 }
 
@@ -277,10 +304,13 @@ pub fn debug_impl(type_name: &str, fields: &[Field]) -> String {
 /// `BucketName` or `ObjectKey` reaching a handler is a value authorization and storage would both
 /// accept and neither would recognise. The check costs one comparison per required member.
 #[must_use]
-pub fn check_required_impl(type_name: &str, baseline_name: &str, fields: &[Field]) -> String {
+pub fn check_required_impl(type_name: &str, baseline_name: &str, fields: &[Field], constructed: Option<&Field>) -> String {
     let mut body = String::new();
     for field in fields {
         if !field.required || Registry::is_container(&field.ty) {
+            continue;
+        }
+        if constructed.is_some_and(|body| body.name == field.name) {
             continue;
         }
         let name = naming::field_name(&field.name);

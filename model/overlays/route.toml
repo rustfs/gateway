@@ -374,6 +374,10 @@ summary = "PutBucketWebsite is selected by the ?website subresource on a bucket 
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
 summary = "a plain object write is the same method and path with neither of those parameters."
 
+[evidence.put-object-annotation]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAnnotation.html"
+summary = "PutObjectAnnotation stores one named payload through PUT on an object key carrying ?annotation, and the required annotationName query parameter identifies the annotation rather than the parent object."
+
 [evidence.put-object-acl]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAcl.html"
 summary = "an ACL write is a PUT to the object key carrying the ?acl subresource, and its body is an AccessControlPolicy rather than object data."
@@ -2808,6 +2812,12 @@ winner   = "ListObjectAnnotations"
 shadowed = "GetObject"
 reason   = "An annotation listing is a GET to the object key plus ?annotation without annotationName, and GetObject accepts every such request. ListObjectAnnotations is tried first (592 before 900); the opposite order would return the parent object body instead of annotation metadata."
 evidence = ["list-object-annotations", "get-object"]
+
+[[shadowing]]
+winner   = "PutObjectAnnotation"
+shadowed = "PutObject"
+reason   = "An annotation write is a PUT to the object key plus ?annotation, and PutObject accepts every such request. PutObjectAnnotation is tried first (593 before 800); the opposite order would store the annotation payload as the parent object's bytes."
+evidence = ["put-object-annotation", "put-object"]
 
 [[shadowing]]
 winner   = "GetObjectTorrent"

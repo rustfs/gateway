@@ -405,4 +405,53 @@ impl RequestBody {
             _ => None,
         }
     }
+
+    /// The live producer for a required streaming member.
+    ///
+    /// # Errors
+    ///
+    /// [`CodecError::internal`] when the pipeline hands a required-streaming codec no stream. The
+    /// mismatch is a gateway defect, not an omitted optional value, so this path fails closed.
+    pub fn into_required_stream(self) -> Result<ByteStream, CodecError> {
+        match self {
+            Self::Stream(stream) => Ok(stream),
+            Self::None => Err(CodecError::internal(
+                "this operation requires a streaming request body and was handed none",
+            )),
+            Self::Buffered(_) => Err(CodecError::internal(
+                "this operation requires a streaming request body and was handed buffered bytes",
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod request_body_tests {
+    use super::*;
+
+    #[test]
+    fn required_stream_returns_the_live_producer() {
+        let stream = ByteStream::from_bytes(Bytes::from_static(b"annotation"));
+        assert!(RequestBody::Stream(stream).into_required_stream().is_ok());
+    }
+
+    #[test]
+    fn n_required_stream_refuses_an_absent_body() {
+        let result = RequestBody::None.into_required_stream();
+        assert!(result.is_err(), "an absent body cannot satisfy a required streaming member");
+        let Err(error) = result else {
+            return;
+        };
+        assert_eq!(*error.code(), rustfs_gateway_types::ErrorCode::INTERNAL_ERROR);
+    }
+
+    #[test]
+    fn n_required_stream_refuses_a_buffered_body() {
+        let result = RequestBody::Buffered(Bytes::from_static(b"annotation")).into_required_stream();
+        assert!(result.is_err(), "a buffered body cannot masquerade as the live producer");
+        let Err(error) = result else {
+            return;
+        };
+        assert_eq!(*error.code(), rustfs_gateway_types::ErrorCode::INTERNAL_ERROR);
+    }
 }

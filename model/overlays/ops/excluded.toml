@@ -41,12 +41,6 @@ operations = [
 ]
 
 [[deferred]]
-reason = "Out of scope for the gateway: object annotations, an AWS-only metadata surface with no storage-backend equivalent."
-operations = [
-  "PutObjectAnnotation",
-]
-
-[[deferred]]
 reason = "Out of scope for the gateway: S3 Object Lambda, which requires the Object Lambda access point host class."
 operations = [
   "WriteGetObjectResponse",

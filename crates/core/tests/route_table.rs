@@ -2359,6 +2359,40 @@ fn n_object_annotation_reads_do_not_claim_neighbour_controls() {
     }
 }
 
+// ── PutObjectAnnotation ────────────────────────────────────────────────────────────────────
+
+/// A named annotation write routes to its own operation instead of replacing the parent object.
+#[test]
+fn put_object_annotation_routes_ahead_of_put_object() {
+    let table = generated_table();
+    assert_eq!(
+        routed(&table, &Req::new("PUT /bucket/key?annotation&annotationName=name")),
+        Some("PutObjectAnnotation")
+    );
+}
+
+/// Negative controls keep ordinary uploads and neighbouring object subresources outside the row.
+#[test]
+fn n_put_object_annotation_does_not_claim_neighbour_controls() {
+    let table = generated_table();
+    assert_eq!(routed(&table, &Req::new("PUT /bucket/key")), Some("PutObject"));
+    for (line, operation) in [
+        ("PUT /bucket?annotation&annotationName=name", "PutObjectAnnotation"),
+        ("GET /bucket/key?annotation&annotationName=name", "PutObjectAnnotation"),
+    ] {
+        assert_ne!(routed(&table, &Req::new(line)), Some(operation), "{line}");
+    }
+    assert_eq!(
+        routed(&table, &Req::new("PUT /bucket/key?annotation&annotationName=name&tagging")),
+        Some("PutObjectTagging")
+    );
+    assert_eq!(
+        routed(&table, &Req::new("PUT /bucket/key?annotation")),
+        Some("PutObjectAnnotation"),
+        "the annotation subresource must be reserved so a missing name cannot fall through to PutObject"
+    );
+}
+
 // ── GetObjectTorrent ───────────────────────────────────────────────────────────────────────
 
 /// A torrent metadata read selects its own operation ahead of the object-body fallback.

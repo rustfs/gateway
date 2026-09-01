@@ -225,7 +225,7 @@ fn structure(def: &ShapeDef, registry: &Registry, report: &mut DtoReport) -> Str
          /// `Option<T>`; `Default` fills a required member with a wire-invalid placeholder (P10) that\n\
          /// [`{name}::check_required`] refuses to let off the decode path.\n"
     );
-    out.push_str(&derives(clonable, has_secret));
+    out.push_str(&derives(clonable, has_secret, true));
     if def.fields.is_empty() {
         // rustfmt collapses a braces-only body onto the declaration line. Three shapes reach it:
         // `ParquetInput`, which says "this object is Parquet" and nothing more, and the
@@ -240,7 +240,7 @@ fn structure(def: &ShapeDef, registry: &Registry, report: &mut DtoReport) -> Str
         }
         out.push_str("}\n\n");
     }
-    out.push_str(&super::check_required_impl(name, name, &def.fields));
+    out.push_str(&super::check_required_impl(name, name, &def.fields, None));
     if has_secret {
         out.push('\n');
         out.push_str(&debug_impl(name, &def.fields));

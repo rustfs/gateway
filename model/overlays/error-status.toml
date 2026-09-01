@@ -69,6 +69,18 @@ note = [
 
 
 # ── 400 ───────────────────────────────────────────────────────────────────────────────────
+# Evidence: https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAnnotation.html — my
+# summary: annotation count, name-length and name-syntax refusals all use HTTP 400.
+[[code]]
+name = "AnnotationLimitExceeded"
+constant = "ANNOTATION_LIMIT_EXCEEDED"
+status = 400
+
+[[code]]
+name = "AnnotationNameTooLong"
+constant = "ANNOTATION_NAME_TOO_LONG"
+status = 400
+
 [[code]]
 name = "AmbiguousGrantByEmailAddress"
 constant = "AMBIGUOUS_GRANT_BY_EMAIL_ADDRESS"
@@ -148,6 +160,11 @@ status = 400
 [[code]]
 name = "InvalidArgument"
 constant = "INVALID_ARGUMENT"
+status = 400
+
+[[code]]
+name = "InvalidAnnotationName"
+constant = "INVALID_ANNOTATION_NAME"
 status = 400
 
 [[code]]
@@ -628,7 +645,7 @@ note = [
   "code a client reconstructs from it.",
 ]
 
-# ── 405 / 409 / 411 / 412 / 416 ───────────────────────────────────────────────────────────
+# ── 405 / 409 / 411 / 412 / 415 / 416 ─────────────────────────────────────────────────────
 [[code]]
 name = "MethodNotAllowed"
 constant = "METHOD_NOT_ALLOWED"
@@ -700,6 +717,13 @@ note = [
 name = "PreconditionFailed"
 constant = "PRECONDITION_FAILED"
 status = 412
+
+# Evidence: https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAnnotation.html — my
+# summary: a non-UTF-8 annotation payload is rejected with HTTP 415.
+[[code]]
+name = "UnsupportedMediaType"
+constant = "UNSUPPORTED_MEDIA_TYPE"
+status = 415
 
 [[code]]
 name = "InvalidRange"

@@ -101,6 +101,7 @@ mod put_bucket_versioning;
 mod put_bucket_website;
 mod put_object;
 mod put_object_acl;
+mod put_object_annotation;
 mod put_object_legal_hold;
 mod put_object_lock_configuration;
 mod put_object_retention;

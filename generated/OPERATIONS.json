@@ -1088,6 +1088,34 @@
                                                    ],
                                     "precedence": 560
                                   },
+                  "PutObjectAnnotation": {
+                                           "method": "PUT",
+                                           "path_shape": "/{Bucket}/{Key+}",
+                                           "query_keys": [
+                                                           "acl",
+                                                           "annotation",
+                                                           "annotationName",
+                                                           "attributes",
+                                                           "legal-hold",
+                                                           "renameObject",
+                                                           "retention",
+                                                           "tagging",
+                                                           "uploadId",
+                                                           "versionId"
+                                                         ],
+                                           "key_headers": ["x-amz-copy-source"],
+                                           "host_classes": [],
+                                           "error_codes": [
+                                                            "NoSuchBucket",
+                                                            "NoSuchKey",
+                                                            "AnnotationLimitExceeded",
+                                                            "AnnotationNameTooLong",
+                                                            "InvalidAnnotationName",
+                                                            "InvalidRequest",
+                                                            "UnsupportedMediaType"
+                                                          ],
+                                           "precedence": 593
+                                         },
                   "PutObjectLegalHold": {
                                           "method": "PUT",
                                           "path_shape": "/{Bucket}/{Key+}",
@@ -1354,6 +1382,7 @@
                           "PutBucketWebsite",
                           "PutObject",
                           "PutObjectAcl",
+                          "PutObjectAnnotation",
                           "PutObjectLegalHold",
                           "PutObjectLockConfiguration",
                           "PutObjectRetention",
@@ -1449,6 +1478,7 @@
                                            "ListParts",
                                            "PutObject",
                                            "PutObjectAcl",
+                                           "PutObjectAnnotation",
                                            "PutObjectLegalHold",
                                            "PutObjectRetention",
                                            "PutObjectTagging",
@@ -1474,7 +1504,8 @@
                              "GetObjectTorrent",
                              "ListObjectAnnotations",
                              "PutBucketAcl",
-                             "PutObjectAcl"
+                             "PutObjectAcl",
+                             "PutObjectAnnotation"
                            ],
                     "analytics": [
                                    "CreateBucket",
@@ -1486,15 +1517,22 @@
                                     "DeleteObjectAnnotation",
                                     "GetObjectAnnotation",
                                     "GetObjectTorrent",
-                                    "ListObjectAnnotations"
+                                    "ListObjectAnnotations",
+                                    "PutObjectAnnotation"
                                   ],
                     "annotation-prefix": ["ListObjectAnnotations"],
-                    "annotationName": ["DeleteObjectAnnotation", "GetObjectAnnotation", "ListObjectAnnotations"],
+                    "annotationName": [
+                                        "DeleteObjectAnnotation",
+                                        "GetObjectAnnotation",
+                                        "ListObjectAnnotations",
+                                        "PutObjectAnnotation"
+                                      ],
                     "attributes": [
                                     "GetObjectAnnotation",
                                     "GetObjectAttributes",
                                     "GetObjectTorrent",
-                                    "ListObjectAnnotations"
+                                    "ListObjectAnnotations",
+                                    "PutObjectAnnotation"
                                   ],
                     "bucket-region": ["ListBuckets"],
                     "continuation-token": [
@@ -1543,6 +1581,7 @@
                                     "GetObjectLegalHold",
                                     "GetObjectTorrent",
                                     "ListObjectAnnotations",
+                                    "PutObjectAnnotation",
                                     "PutObjectLegalHold"
                                   ],
                     "lifecycle": [
@@ -1604,7 +1643,7 @@
                                            "GetPublicAccessBlock",
                                            "PutPublicAccessBlock"
                                          ],
-                    "renameObject": ["RenameObject"],
+                    "renameObject": ["PutObjectAnnotation", "RenameObject"],
                     "replication": [
                                      "CreateBucket",
                                      "DeleteBucket",
@@ -1625,6 +1664,7 @@
                                    "GetObjectRetention",
                                    "GetObjectTorrent",
                                    "ListObjectAnnotations",
+                                   "PutObjectAnnotation",
                                    "PutObjectRetention"
                                  ],
                     "select": ["SelectObjectContent"],
@@ -1641,6 +1681,7 @@
                                  "GetObjectTorrent",
                                  "ListObjectAnnotations",
                                  "PutBucketTagging",
+                                 "PutObjectAnnotation",
                                  "PutObjectTagging"
                                ],
                     "torrent": ["GetObjectTorrent"],
@@ -1652,6 +1693,7 @@
                                   "GetObjectTorrent",
                                   "ListObjectAnnotations",
                                   "ListParts",
+                                  "PutObjectAnnotation",
                                   "UploadPart",
                                   "UploadPartCopy"
                                 ],
@@ -1671,6 +1713,7 @@
                                    "HeadObject",
                                    "ListObjectAnnotations",
                                    "PutObjectAcl",
+                                   "PutObjectAnnotation",
                                    "PutObjectLegalHold",
                                    "PutObjectRetention",
                                    "PutObjectTagging",
@@ -1691,7 +1734,7 @@
                      "etag": ["PutObject", "UploadPart"],
                      "x-amz-bucket-region": ["HeadBucket"],
                      "x-amz-checksum-": ["CompleteMultipartUpload", "PutObject", "UploadPart"],
-                     "x-amz-copy-source": ["CopyObject", "UploadPartCopy"],
+                     "x-amz-copy-source": ["CopyObject", "PutObjectAnnotation", "UploadPartCopy"],
                      "x-amz-meta-": ["CopyObject", "CreateMultipartUpload", "GetObject", "HeadObject", "PutObject"],
                      "x-amz-object-attributes": ["GetObjectAttributes"],
                      "x-amz-rename-source": ["RenameObject"]
@@ -1787,6 +1830,8 @@
                                        "UploadPart",
                                        "UploadPartCopy"
                                      ],
+                     "AnnotationLimitExceeded": ["PutObjectAnnotation"],
+                     "AnnotationNameTooLong": ["PutObjectAnnotation"],
                      "BadDigest": [
                                     "PutBucketAcl",
                                     "PutBucketCors",
@@ -1817,6 +1862,7 @@
                      "ExpressionTooLong": ["SelectObjectContent"],
                      "IdempotencyParameterMismatch": ["RenameObject"],
                      "IncompleteBody": ["PutObject", "UploadPart"],
+                     "InvalidAnnotationName": ["PutObjectAnnotation"],
                      "InvalidArgument": [
                                           "AbortMultipartUpload",
                                           "CompleteMultipartUpload",
@@ -1886,6 +1932,7 @@
                                          "PutBucketReplication",
                                          "PutObject",
                                          "PutObjectAcl",
+                                         "PutObjectAnnotation",
                                          "PutObjectLegalHold",
                                          "PutObjectLockConfiguration",
                                          "PutObjectRetention",
@@ -2012,6 +2059,7 @@
                                        "PutBucketWebsite",
                                        "PutObject",
                                        "PutObjectAcl",
+                                       "PutObjectAnnotation",
                                        "PutObjectLegalHold",
                                        "PutObjectLockConfiguration",
                                        "PutObjectRetention",
@@ -2039,6 +2087,7 @@
                                     "HeadObject",
                                     "ListObjectAnnotations",
                                     "PutObjectAcl",
+                                    "PutObjectAnnotation",
                                     "PutObjectLegalHold",
                                     "PutObjectRetention",
                                     "PutObjectTagging",
@@ -2090,6 +2139,7 @@
                      "ServerSideEncryptionConfigurationNotFoundError": ["GetBucketEncryption"],
                      "TooManyParts": ["PutObject"],
                      "UnsupportedFunction": ["SelectObjectContent"],
+                     "UnsupportedMediaType": ["PutObjectAnnotation"],
                      "XAmzContentChecksumMismatch": ["PutObject", "UploadPart"]
                    },
   "by_precedence": {
@@ -2169,6 +2219,7 @@
                      "590": ["DeleteObjectAnnotation"],
                      "591": ["GetObjectAnnotation"],
                      "592": ["ListObjectAnnotations"],
+                     "593": ["PutObjectAnnotation"],
                      "595": ["GetObjectTorrent"],
                      "600": ["ListObjectsV2"],
                      "610": ["ListObjectVersions"],

@@ -34,3 +34,23 @@ fn generated_codecs_publish_the_request_body_mode() {
         );
     }
 }
+
+#[test]
+fn required_streaming_payload_is_injected_once_before_other_bindings() {
+    let generated = body(&artifacts(), "generated/codec/ops/put_object_annotation.rs");
+    let constructor = "let mut input = Input::from_required_body(body.into_required_stream()?);";
+    assert!(generated.contains(constructor), "the decoder did not inject the live request body");
+    assert_eq!(
+        generated.matches("body.into_required_stream()").count(),
+        1,
+        "the live body was consumed more than once"
+    );
+    assert!(
+        !generated.contains("input.annotation_payload ="),
+        "the decoder reassigned the required body after controlled construction"
+    );
+    assert!(
+        generated.find(constructor) < generated.find("input.bucket ="),
+        "the required body must exist before ordinary bindings are decoded"
+    );
+}

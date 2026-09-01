@@ -101,6 +101,7 @@ pub(crate) static OPERATION_NAMES: &[&str] = &[
     "PutBucketWebsite",
     "PutObject",
     "PutObjectAcl",
+    "PutObjectAnnotation",
     "PutObjectLegalHold",
     "PutObjectLockConfiguration",
     "PutObjectRetention",

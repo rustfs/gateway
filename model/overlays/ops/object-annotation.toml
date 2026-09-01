@@ -19,7 +19,7 @@
 # response stream, and List has a bounded result page, so every model-required input remains
 # representable without weakening a DTO field.
 
-include = ["DeleteObjectAnnotation", "GetObjectAnnotation", "ListObjectAnnotations"]
+include = ["DeleteObjectAnnotation", "GetObjectAnnotation", "ListObjectAnnotations", "PutObjectAnnotation"]
 
 [op.DeleteObjectAnnotation]
 precedence = 590
@@ -47,3 +47,13 @@ error_codes = ["InvalidPrefix", "NoSuchBucket", "NoSuchKey"]
 url_encoded_fields = []
 input_hot = ["Key", "AnnotationPrefix", "MaxAnnotationResults", "ContinuationToken", "VersionId"]
 output_hot = ["Annotations", "AnnotationCount", "NextContinuationToken", "ObjectVersionId"]
+
+[op.PutObjectAnnotation]
+precedence = 593
+query_absent = ["acl", "attributes", "legal-hold", "renameObject", "retention", "tagging", "uploadId"]
+header_absent = ["x-amz-copy-source"]
+auth_action = "s3:PutObjectAnnotation"
+error_codes = ["NoSuchBucket", "NoSuchKey"]
+url_encoded_fields = []
+input_hot = ["Key", "AnnotationName", "AnnotationPayload", "VersionId"]
+output_hot = ["ETag", "ObjectVersionId"]

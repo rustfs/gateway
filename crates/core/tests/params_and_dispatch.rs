@@ -1365,6 +1365,25 @@ fn n_unhandled_object_annotation_reads_are_refused_instead_of_dispatching_get_ob
     assert_eq!(plain.entry.op_name, "GetObject");
 }
 
+#[test]
+fn n_unhandled_put_object_annotation_is_refused_instead_of_dispatching_put_object() {
+    let mut registry = Registry::new();
+    registry.register(&PUT_OBJECT).expect("a registrable spec");
+    let router = Router::from_generated(registry).expect("the generated table builds");
+
+    let error = router
+        .dispatch(&Req::new("PUT /bucket/key?annotation&annotationName=name").parts())
+        .expect_err("this registry has no PutObjectAnnotation handler");
+    assert_eq!(*error.code(), ErrorCode::NOT_IMPLEMENTED);
+    assert_eq!(error.message(), NOT_REGISTERED_MESSAGE);
+    assert_eq!(error.operation(), Some("PutObjectAnnotation"));
+
+    let plain = router
+        .dispatch(&Req::new("PUT /bucket/key").parts())
+        .expect("the registered PutObject neighbour remains served");
+    assert_eq!(plain.entry.op_name, "PutObject");
+}
+
 /// An unhandled torrent read is refused by name instead of returning the parent object body.
 #[test]
 fn n_unhandled_get_object_torrent_is_refused_instead_of_dispatching_get_object() {
