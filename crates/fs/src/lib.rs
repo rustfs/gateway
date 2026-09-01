@@ -382,46 +382,6 @@ impl FsBackend {
         Ok((resolved.id().to_owned(), record))
     }
 
-    async fn create_upload(&self, bucket: &BucketName, key: &ObjectKey) -> Result<String, HandlerError> {
-        self.require_bucket(bucket.as_str()).await?;
-        let uploads = self.uploads_path(bucket.as_str());
-        let upload_id = format!("fs-{:x}-{:x}", std::process::id(), self.temporary_id.fetch_add(1, Ordering::Relaxed));
-        let destination = self.upload_path(bucket.as_str(), &upload_id);
-        if tokio::fs::symlink_metadata(&destination).await.is_ok() {
-            return Err(storage_error());
-        }
-        let temporary = uploads.join(format!(
-            ".tmp-upload-{}-{}",
-            std::process::id(),
-            self.temporary_id.fetch_add(1, Ordering::Relaxed)
-        ));
-        tokio::fs::create_dir(&temporary).await.map_err(|_| storage_error())?;
-        let initialized = async {
-            tokio::fs::create_dir(temporary.join(PARTS_DIR)).await?;
-            let record = format!(
-                "{}\n{}\n{}\n{}\n",
-                hex::encode(bucket.as_str()),
-                hex::encode(key.as_str()),
-                hex::encode(&upload_id),
-                self.clock.now().unix_seconds()
-            );
-            let mut file = tokio::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(temporary.join(UPLOAD_RECORD))
-                .await?;
-            file.write_all(record.as_bytes()).await?;
-            file.sync_all().await?;
-            tokio::fs::rename(&temporary, destination).await
-        }
-        .await;
-        if initialized.is_err() {
-            let _ = tokio::fs::remove_dir_all(&temporary).await;
-            return Err(storage_error());
-        }
-        Ok(upload_id)
-    }
-
     async fn list_part_numbers(&self, upload: &Path) -> Result<Vec<i32>, HandlerError> {
         let parts = upload.join(PARTS_DIR);
         self.require_directory(&parts, no_such_upload()).await?;
@@ -580,11 +540,15 @@ impl Handler<DeleteBucket> for FsBackend {
 impl Handler<CreateMultipartUpload> for FsBackend {
     async fn call(&self, request: Req<CreateMultipartUpload>) -> HandlerResult<CreateMultipartUpload> {
         let input = request.into_input();
-        let upload_id = self.create_upload(&input.bucket, &input.key).await?;
+        let checksum = uploads::UploadChecksum::negotiate(input.checksum_algorithm.as_ref(), input.checksum_type.as_ref())?;
+        let checksum_type = checksum.map(uploads::UploadChecksum::dto_type);
+        let upload_id = self.create_upload(&input.bucket, &input.key, checksum).await?;
         Ok(Resp::new(CreateMultipartUploadOutput {
             bucket: input.bucket,
             key: input.key,
             upload_id,
+            checksum_algorithm: input.checksum_algorithm,
+            checksum_type,
             ..CreateMultipartUploadOutput::default()
         }))
     }
@@ -601,7 +565,11 @@ impl Handler<UploadPart> for FsBackend {
                 "the request body did not match its declared content length",
             ));
         }
-        let (upload_id, _) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
+        let (upload_id, record) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
+        let checksum_spec = match record.checksum {
+            Some(checksum) => Some(checksum.validate_part(input.checksum_spec, &bytes)?),
+            None => input.checksum_spec,
+        };
         let upload = self.upload_path(input.bucket.as_str(), &upload_id);
         let destination = Self::part_path(&upload, input.part_number);
         if let Ok(metadata) = tokio::fs::symlink_metadata(&destination).await
@@ -615,6 +583,7 @@ impl Handler<UploadPart> for FsBackend {
         self.write_atomic(&upload.join(PARTS_DIR), &destination, &bytes).await?;
         Ok(Resp::new(UploadPartOutput {
             e_tag: etag(&bytes)?,
+            checksum_spec,
             ..UploadPartOutput::default()
         }))
     }
@@ -678,7 +647,16 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
     async fn call(&self, request: Req<CompleteMultipartUpload>) -> HandlerResult<CompleteMultipartUpload> {
         let input = request.into_input();
         self.require_bucket(input.bucket.as_str()).await?;
-        let (upload_id, _) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
+        let (upload_id, record) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
+        let completion_claim = input.checksum_spec;
+        if let Some(checksum) = record.checksum {
+            checksum.validate_completion_type(input.checksum_type.as_ref())?;
+        } else if input.checksum_type.is_some() || completion_claim.is_some() {
+            return Err(HandlerError::new(
+                ErrorCode::INVALID_REQUEST,
+                "the completion names a checksum type for an upload without checksum negotiation",
+            ));
+        }
         let completed = input.multipart_upload.parts;
         if completed.is_empty() {
             return Err(HandlerError::new(ErrorCode::INVALID_PART, "the completion names no uploaded part"));
@@ -687,24 +665,25 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
         let mut previous = 0;
         for part in completed {
             let number = part.part_number;
-            if number <= previous {
-                return Err(HandlerError::new(
-                    ErrorCode::INVALID_PART_ORDER,
-                    "completed part numbers must be strictly increasing",
-                ));
-            }
+            uploads::validate_completion_part_number(record.checksum, previous, number)?;
             previous = number;
+            let checksum = record
+                .checksum
+                .map(|selection| selection.completed_part(&part))
+                .transpose()?
+                .flatten();
             let entity_tag = part
                 .e_tag
                 .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_PART, "a completed part has no entity tag"))?;
-            requested.push((number, entity_tag));
+            requested.push((number, entity_tag, checksum));
         }
 
         let upload = self.upload_path(input.bucket.as_str(), &upload_id);
         let mut completed_bytes = Vec::new();
         let mut part_digests = Vec::with_capacity(requested.len());
+        let mut part_checksums = Vec::with_capacity(requested.len());
         let final_part = requested.len().saturating_sub(1);
-        for (index, (number, expected)) in requested.iter().enumerate() {
+        for (index, (number, expected, expected_checksum)) in requested.iter().enumerate() {
             let path = Self::part_path(&upload, *number);
             let metadata = tokio::fs::symlink_metadata(&path).await.map_err(|error| match error.kind() {
                 io::ErrorKind::NotFound => HandlerError::new(ErrorCode::INVALID_PART, "a completed part was not uploaded"),
@@ -730,10 +709,21 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
                     "a completed part entity tag does not match the uploaded part",
                 ));
             }
+            if let Some(selection) = record.checksum {
+                let actual_checksum = selection.validate_part(*expected_checksum, &bytes)?;
+                part_checksums.push(actual_checksum);
+            }
             part_digests.push(Md5::digest(&bytes).into());
             completed_bytes.extend_from_slice(&bytes);
         }
         let composite = ETag::from_part_digests(&part_digests).map_err(|_| storage_error())?;
+        let completed_checksum = record
+            .checksum
+            .map(|selection| selection.complete(&part_checksums, &completed_bytes))
+            .transpose()?;
+        if let (Some(selection), Some(actual)) = (record.checksum, completed_checksum.as_ref()) {
+            selection.validate_completed_object(completion_claim, actual)?;
+        }
 
         let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
             ".complete-{}-{}",
@@ -752,14 +742,27 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             }
         };
         let _ = tokio::fs::remove_dir_all(tombstone).await;
-        Ok(Resp::new(CompleteMultipartUploadOutput {
+        let mut output = CompleteMultipartUploadOutput {
             location: Some(format!("/{}/{}", input.bucket.as_str(), input.key.as_str())),
             bucket: Some(input.bucket),
             key: Some(input.key),
             e_tag: Some(composite),
             version_id: published.version_id,
+            checksum_type: record.checksum.map(uploads::UploadChecksum::dto_type),
             ..CompleteMultipartUploadOutput::default()
-        }))
+        };
+        if let Some(checksum) = completed_checksum {
+            let rendered = checksum.render_base64().to_owned();
+            match checksum.algorithm() {
+                rustfs_gateway::ChecksumAlgorithm::Crc32 => output.checksum_crc32 = Some(rendered),
+                rustfs_gateway::ChecksumAlgorithm::Crc32c => output.checksum_crc32c = Some(rendered),
+                rustfs_gateway::ChecksumAlgorithm::Crc64Nvme => output.checksum_crc64nvme = Some(rendered),
+                rustfs_gateway::ChecksumAlgorithm::Sha1 => output.checksum_sha1 = Some(rendered),
+                rustfs_gateway::ChecksumAlgorithm::Sha256 => output.checksum_sha256 = Some(rendered),
+                _ => return Err(storage_error()),
+            }
+        }
+        Ok(Resp::new(output))
     }
 }
 
