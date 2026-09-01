@@ -24,7 +24,7 @@ use rustfs_gateway_http::{BodyIntegrity, ChecksumSubject, Framing, HeaderView};
 use rustfs_gateway_sig::{DeclaredTrailers, PayloadMode, TrailerName, TrailerSet};
 use rustfs_gateway_types::ErrorCode;
 
-use crate::gate::{Authenticated, BodyCeilings, BodyDigestObligation, BodyTimeouts, SealedBody};
+use crate::gate::{BodyCeilings, BodyDigestObligation, BodyTimeouts, MetadataAdmission, SealedBody};
 
 const fn roomy() -> BodyCeilings {
     BodyCeilings {
@@ -87,7 +87,7 @@ fn trailer_headers(wire_len: usize) -> HeaderMap {
 #[tokio::test]
 async fn c_ck_0002_the_streaming_production_path_accepts_a_matching_unsigned_trailer_checksum() {
     const WIRE: &[u8] = b"b\r\nhello world\r\n0\r\nx-amz-checksum-crc32:DUoRhQ==\r\n\r\n";
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let headers = trailer_headers(WIRE.len());
     let ingest = unsigned_trailered(&headers);
     assert!(ingest.is_some(), "the unsigned trailer shape is implemented");
@@ -127,7 +127,7 @@ async fn c_ck_0002_the_streaming_production_path_accepts_a_matching_unsigned_tra
 #[tokio::test]
 async fn c_ck_0039_the_streaming_production_path_refuses_a_mismatched_unsigned_trailer_checksum() {
     const WIRE: &[u8] = b"b\r\nhello world\r\n0\r\nx-amz-checksum-crc32:AAAAAA==\r\n\r\n";
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let headers = trailer_headers(WIRE.len());
     let ingest = unsigned_trailered(&headers);
     assert!(ingest.is_some(), "the unsigned trailer shape is implemented");
@@ -170,7 +170,7 @@ async fn c_ck_0003_the_streaming_production_path_accepts_a_signed_trailer_hmac()
         0;chunk-signature=3f9a21b0b8726c09b85a7d66e31ac4426f5127e2eab04820f390a81621b948e3\r\n\
         x-amz-checksum-crc32:DUoRhQ==\r\n\
         x-amz-trailer-signature:8e7095168f795d75ed6296ec35143f8d8ec11df313a8b1683c0da0ec1be72c48\r\n\r\n";
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let headers = trailer_headers(WIRE.len());
     let ingest = signed_trailered(&headers);
     assert!(ingest.is_some(), "the signed trailer shape is implemented");
@@ -214,7 +214,7 @@ async fn the_streaming_production_path_refuses_a_mismatched_signed_trailer_hmac(
         0;chunk-signature=3f9a21b0b8726c09b85a7d66e31ac4426f5127e2eab04820f390a81621b948e3\r\n\
         x-amz-checksum-crc32:DUoRhQ==\r\n\
         x-amz-trailer-signature:0000000000000000000000000000000000000000000000000000000000000000\r\n\r\n";
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let headers = trailer_headers(WIRE.len());
     let ingest = signed_trailered(&headers);
     assert!(ingest.is_some(), "the signed trailer shape is implemented");
@@ -249,7 +249,7 @@ async fn the_streaming_production_path_refuses_a_mismatched_signed_trailer_hmac(
 
 #[tokio::test]
 async fn c_ck_0041_a_matching_checksum_never_substitutes_for_the_payload_hash() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let mut headers = HeaderMap::new();
     headers.insert(HeaderName::from_static("x-amz-checksum-crc32"), HeaderValue::from_static("DUoRhQ=="));
     let integrity = BodyIntegrity::resolve(&HeaderView::new(&headers), ChecksumSubject::RequestBody).ok();
@@ -274,7 +274,7 @@ async fn c_ck_0041_a_matching_checksum_never_substitutes_for_the_payload_hash() 
 /// `c-ing-0061`. Negative — opening a stream does not poll its transport.
 #[tokio::test]
 async fn opening_a_streaming_body_does_not_read_ahead() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"first-"), Bytes::from_static(b"second")]);
     let opened = SealedBody::seal(Some(body), Some(12))
         .stream(
@@ -305,7 +305,7 @@ async fn opening_a_streaming_body_does_not_read_ahead() {
 #[tokio::test]
 async fn a_streaming_body_may_exceed_its_resident_window() {
     const FRAME_BYTES: usize = 768 * 1024;
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new([
         Bytes::from(vec![b'a'; FRAME_BYTES]),
         Bytes::from(vec![b'b'; FRAME_BYTES]),
@@ -338,7 +338,7 @@ async fn a_streaming_body_may_exceed_its_resident_window() {
 /// `c-ing-0063`. Negative — one transport frame cannot widen the resident window.
 #[tokio::test]
 async fn a_streaming_frame_wider_than_the_resident_window_is_refused() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from(vec![0_u8; 1024 * 1024 + 1])]);
     let opened = SealedBody::seal(Some(body), None)
         .stream(
@@ -363,7 +363,7 @@ async fn a_streaming_frame_wider_than_the_resident_window_is_refused() {
 /// Negative — dropping before EOF cannot manufacture a successful terminal verdict.
 #[tokio::test]
 async fn c_ck_0062_dropping_an_unread_streaming_body_refuses_commit() {
-    let proof = Authenticated::granted_for_test();
+    let proof = MetadataAdmission::granted_for_test();
     let (body, read) = crate::probe::ObservedBody::new([Bytes::from_static(b"body")]);
     let opened = SealedBody::seal(Some(body), Some(4))
         .stream(

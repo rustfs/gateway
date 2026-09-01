@@ -23,14 +23,15 @@ use crate::{ConfigSnapshot, Lease};
 use std::sync::atomic::{AtomicU8, Ordering};
 
 pub(crate) struct Entered;
-pub(crate) struct Accepted;
+pub(crate) struct Wire;
+pub(crate) struct Targeted;
 pub(crate) struct Routed;
 pub(crate) struct Governed;
-pub(crate) struct Authenticated;
+pub(crate) struct MetaAuth;
 pub(crate) struct RouteAuthorized;
-pub(crate) struct BodyRead;
+pub(crate) struct Guarded;
 pub(crate) struct Decoded;
-pub(crate) struct InputAuthorized;
+pub(crate) struct Authorized;
 
 /// How a handler completed cleanup after its deadline won the response race.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -89,12 +90,18 @@ impl RequestConfig<Entered> {
         self
     }
 
-    pub(crate) fn accepted(self) -> RequestConfig<Accepted> {
+    pub(crate) fn wire(self) -> RequestConfig<Wire> {
         self.advance()
     }
 }
 
-impl RequestConfig<Accepted> {
+impl RequestConfig<Wire> {
+    pub(crate) fn targeted(self) -> RequestConfig<Targeted> {
+        self.advance()
+    }
+}
+
+impl RequestConfig<Targeted> {
     pub(crate) fn routed(self) -> RequestConfig<Routed> {
         self.advance()
     }
@@ -108,24 +115,24 @@ impl RequestConfig<Routed> {
 }
 
 impl RequestConfig<Governed> {
-    pub(crate) fn authenticated(self) -> RequestConfig<Authenticated> {
+    pub(crate) fn meta_auth(self) -> RequestConfig<MetaAuth> {
         self.advance()
     }
 }
 
-impl RequestConfig<Authenticated> {
+impl RequestConfig<MetaAuth> {
     pub(crate) fn route_authorized(self) -> RequestConfig<RouteAuthorized> {
         self.advance()
     }
 }
 
 impl RequestConfig<RouteAuthorized> {
-    pub(crate) fn body_read(self) -> RequestConfig<BodyRead> {
+    pub(crate) fn guarded(self) -> RequestConfig<Guarded> {
         self.advance()
     }
 }
 
-impl RequestConfig<BodyRead> {
+impl RequestConfig<Guarded> {
     pub(crate) fn with_body_monitor(mut self, body_monitor: Option<crate::request_body::BodyMonitor>) -> Self {
         self.body_monitor = body_monitor;
         self
@@ -137,7 +144,7 @@ impl RequestConfig<BodyRead> {
 }
 
 impl RequestConfig<Decoded> {
-    pub(crate) fn input_authorized(self) -> RequestConfig<InputAuthorized> {
+    pub(crate) fn authorized(self) -> RequestConfig<Authorized> {
         self.advance()
     }
 }

@@ -74,7 +74,7 @@ use rustfs_gateway_sig::OperationFloor;
 use rustfs_gateway_stream::ByteStream;
 
 use crate::ext::{Next, OpLayer, Terminal};
-use crate::request_config::{InputAuthorized, RequestConfig};
+use crate::request_config::{Authorized, RequestConfig};
 use crate::request_deadline::{HandlerCancellationOutcome, commit_with_progress_deadline, handler_with_request_cancellation};
 
 /// A `Resp<O>`'s output whose `O` this table has forgotten.
@@ -124,7 +124,7 @@ impl Future for Invocation {
 }
 
 /// Call the backend with input that carries the authorization proof.
-type Invoke = Arc<dyn Fn(ErasedRequest, RequestConfig<InputAuthorized>) -> Result<Invocation, HandlerError> + Send + Sync>;
+type Invoke = Arc<dyn Fn(ErasedRequest, RequestConfig<Authorized>) -> Result<Invocation, HandlerError> + Send + Sync>;
 
 /// Write the answer back to the wire.
 type Encode = Arc<dyn Fn(ErasedOutput, &MetaView<'_>, u16) -> Result<EncodedResponse, CodecError> + Send + Sync>;
@@ -171,7 +171,7 @@ impl OperationDispatch {
             layers,
             operation: core::marker::PhantomData,
         }));
-        let invoke: Invoke = Arc::new(move |request: ErasedRequest, request_config: RequestConfig<InputAuthorized>| {
+        let invoke: Invoke = Arc::new(move |request: ErasedRequest, request_config: RequestConfig<Authorized>| {
             let (cancellation, context) = HandlerCancellationSource::pair();
             let call = handler(request, context);
             let deadline_class = O::spec()
@@ -292,11 +292,7 @@ impl OperationDispatch {
     }
 
     /// Calls the backend with authorized input.
-    pub(crate) fn invoke(
-        &self,
-        request: ErasedRequest,
-        config: RequestConfig<InputAuthorized>,
-    ) -> Result<Invocation, HandlerError> {
+    pub(crate) fn invoke(&self, request: ErasedRequest, config: RequestConfig<Authorized>) -> Result<Invocation, HandlerError> {
         (self.invoke)(request, config)
     }
 
@@ -687,14 +683,15 @@ mod tests {
         let decisions = vec![Decision::Allow; resources.len()];
         let authorized = dispatch.authorize(decoded, &decisions).expect("authorized");
         let config = RequestConfig::enter(Arc::new(config))
-            .accepted()
+            .wire()
+            .targeted()
             .routed()
             .governed(crate::Lease::admit())
-            .authenticated()
+            .meta_auth()
             .route_authorized()
-            .body_read()
+            .guarded()
             .decoded()
-            .input_authorized();
+            .authorized();
         dispatch.invoke(authorized, config)
     }
 

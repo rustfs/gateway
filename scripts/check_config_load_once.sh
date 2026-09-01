@@ -38,11 +38,11 @@ done
 [[ "$(grep -c '^crates/gateway/src/service.rs:352$' <<<"$expected")" == 1 ]] \
     || fail 'the shared request pipeline must allowlist exactly one configuration snapshot load'
 
-stages="$(grep -oE '\.(accepted|routed|governed|authenticated|route_authorized|body_read|decoded|input_authorized)\(' \
+stages="$(grep -oE '\.(wire|targeted|routed|governed|meta_auth|route_authorized|guarded|decoded|authorized)\(' \
     "${SOURCE_ROOT}/service.rs" | tr -d '.(')"
-expected_stages="$(printf '%s\n' accepted routed governed authenticated route_authorized body_read decoded input_authorized)"
+expected_stages="$(printf '%s\n' wire targeted routed governed meta_auth route_authorized guarded decoded authorized)"
 [[ "$stages" == "$expected_stages" ]] \
-    || fail 'the real S3Service path no longer consumes the snapshot through all eight stages in order'
+    || fail 'the real S3Service path no longer consumes the snapshot through all ten stages in order'
 
 python3 - "${SOURCE_ROOT}/service.rs" "${SOURCE_ROOT}/request_config.rs" <<'PY'
 from pathlib import Path
