@@ -18,6 +18,10 @@
 //! NOT responsible for: parsing XML directly, HTTP policy, routing, or migration-oracle comparison.
 //! Upstream: sibling persistence codecs. Downstream: RustFS metadata consumers using generated DTOs.
 
+mod cors_object_lock;
+
+pub use cors_object_lock::{parse_cors_dto, parse_object_lock_dto, serialize_cors_dto, serialize_object_lock_dto};
+
 use core::fmt;
 
 use crate::cors_tagging::{CorsTaggingCodecError, PersistedTag, PersistedTagging, parse_tagging, serialize_tagging};
