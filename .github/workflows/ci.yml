@@ -252,6 +252,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
         with:
           toolchain: 1.97.1
+          components: rustfmt, clippy, rust-src, rust-analyzer
       # No cargo cache: the five-minute measurement includes compiling xtask itself.
       - name: Bootstrap from a cold checkout (maximum 5 minutes)
         run: |
@@ -291,10 +292,9 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Workspace tests 1/2 (maximum 8 minutes after setup)
+      - name: Workspace tests 1/3 (maximum 8 minutes after setup)
         run: |
-          scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway
-          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
+          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types
 
   workspace-tests-2:
     name: Workspace tests 2
@@ -306,9 +306,24 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Workspace tests 2/2 (maximum 8 minutes after setup)
+      - name: Workspace tests 2/3 (maximum 8 minutes after setup)
         run: |
-          scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance --package rustfs-gateway
+          scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c 'cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'
+          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
+
+  workspace-tests-3:
+    name: Workspace tests 3
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Workspace tests 3/3 (maximum 8 minutes after setup)
+        run: |
+          scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s
 
   transport-parity:
     name: Production transport parity
@@ -593,11 +608,11 @@ jobs:
         run: |
           scripts/ci_budget.sh 60 "error status self-test" env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
 
-  # Branch protection requires this exact check name. It aggregates all twenty-two parallel jobs and must
+  # Branch protection requires this exact check name. It aggregates all twenty-three parallel jobs and must
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs]
+    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -606,6 +621,7 @@ jobs:
         env:
           WORKSPACE_RESULT: ${{ needs.workspace-tests.result }}
           WORKSPACE_2_RESULT: ${{ needs.workspace-tests-2.result }}
+          WORKSPACE_3_RESULT: ${{ needs.workspace-tests-3.result }}
           TRANSPORT_PARITY_RESULT: ${{ needs.transport-parity.result }}
           PERSISTENCE_GOLDENS_RESULT: ${{ needs.persistence-goldens.result }}
           SIGNING_SUITE_RESULT: ${{ needs.signing-suite.result }}
@@ -629,6 +645,7 @@ jobs:
         run: |
           test "$WORKSPACE_RESULT" = success
           test "$WORKSPACE_2_RESULT" = success
+          test "$WORKSPACE_3_RESULT" = success
           test "$TRANSPORT_PARITY_RESULT" = success
           test "$PERSISTENCE_GOLDENS_RESULT" = success
           test "$SIGNING_SUITE_RESULT" = success

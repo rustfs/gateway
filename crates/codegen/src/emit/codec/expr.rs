@@ -79,6 +79,9 @@ pub fn from_wire(
     name_policy: &str,
 ) -> Result<String, String> {
     Ok(match ty {
+        Type::String if crate::emit::dto::registry::is_secret_string_member(member) => {
+            "rustfs_gateway_types::SseCustomerKey::from_wire(raw)".to_owned()
+        }
         Type::String => "raw.to_owned()".to_owned(),
         Type::OpaqueString => "value::opaque(raw)".to_owned(),
         Type::Integer => match bound {
@@ -154,6 +157,9 @@ pub fn to_wire_url_encoded(ty: &Type, member: &str, operation: &str) -> Result<S
 /// header or element writer, both of which take `&str`.
 pub fn to_wire(ty: &Type, member: &str, operation: &str) -> Result<String, String> {
     Ok(match ty {
+        Type::String if crate::emit::dto::registry::is_secret_string_member(member) => {
+            return Err(unsupported(operation, member, "an SSE-C customer key can never be emitted on a response"));
+        }
         Type::String => "v.as_str()".to_owned(),
         Type::OpaqueString => "v.as_str()".to_owned(),
         Type::Integer | Type::Long => "&v.to_string()".to_owned(),
@@ -177,4 +183,23 @@ pub fn to_wire(ty: &Type, member: &str, operation: &str) -> Result<String, Strin
             ));
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use rustfs_gateway_model::ir::Type;
+
+    use super::to_wire;
+
+    #[test]
+    fn sse_customer_key_has_no_response_wire_form() {
+        let error = to_wire(&Type::String, "SSECustomerKey", "Synthetic")
+            .expect_err("a customer key must never acquire a response emitter");
+        assert!(error.contains("can never be emitted on a response"));
+    }
+
+    #[test]
+    fn ordinary_string_keeps_its_response_wire_form() {
+        assert_eq!(to_wire(&Type::String, "ContentType", "Synthetic"), Ok("v.as_str()".to_owned()));
+    }
 }

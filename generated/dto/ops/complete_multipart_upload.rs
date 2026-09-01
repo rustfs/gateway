@@ -58,7 +58,9 @@ impl CompleteMultipartUpload {
 /// read off the type instead of unwrapped. `Default` fills a required member with a
 /// wire-invalid placeholder (P10), and [`Input::check_required`] is what keeps one from
 /// leaving the decode path.
-#[derive(Clone, Default)]
+///
+/// Not `Clone`: it owns a streaming body.
+#[derive(Default)]
 pub struct Input {
     /// Wire `Bucket`, bound as UriLabel. Required.
     pub bucket: crate::BucketName,
@@ -85,7 +87,7 @@ pub struct Input {
     /// Wire `x-amz-server-side-encryption-customer-algorithm`, bound as Header. Optional.
     pub sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-key`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
-    pub sse_customer_key: Option<String>,
+    pub sse_customer_key: Option<crate::SseCustomerKey>,
     /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
     pub sse_customer_key_md5: Option<String>,
 }
@@ -150,7 +152,7 @@ impl std::fmt::Debug for Input {
 /// read off the type instead of unwrapped. `Default` fills a required member with a
 /// wire-invalid placeholder (P10), and [`Output::check_required`] is what keeps one from
 /// leaving the decode path.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct Output {
     /// Wire `Location`, bound as BodyXml. Optional.
     pub location: Option<String>,
@@ -188,7 +190,7 @@ pub struct Output {
     pub server_side_encryption: Option<crate::ops::enums::ServerSideEncryption>,
     /// Wire `x-amz-version-id`, bound as Header. Optional.
     pub version_id: Option<String>,
-    /// Wire `x-amz-server-side-encryption-aws-kms-key-id`, bound as Header. Optional.
+    /// Wire `x-amz-server-side-encryption-aws-kms-key-id`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub ssekms_key_id: Option<String>,
     /// Wire `x-amz-server-side-encryption-bucket-key-enabled`, bound as Header. Optional.
     pub bucket_key_enabled: Option<bool>,
@@ -213,6 +215,38 @@ impl Output {
     /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Output {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn redact<T>(value: &Option<T>) -> Option<&'static str> {
+            value.as_ref().map(|_| "<redacted>")
+        }
+
+        f.debug_struct("Output")
+            .field("location", &self.location)
+            .field("bucket", &self.bucket)
+            .field("key", &self.key)
+            .field("expiration", &self.expiration)
+            .field("e_tag", &self.e_tag)
+            .field("checksum_crc32", &self.checksum_crc32)
+            .field("checksum_crc32c", &self.checksum_crc32c)
+            .field("checksum_crc64nvme", &self.checksum_crc64nvme)
+            .field("checksum_sha1", &self.checksum_sha1)
+            .field("checksum_sha256", &self.checksum_sha256)
+            .field("checksum_sha512", &self.checksum_sha512)
+            .field("checksum_md5", &self.checksum_md5)
+            .field("checksum_xxhash64", &self.checksum_xxhash64)
+            .field("checksum_xxhash3", &self.checksum_xxhash3)
+            .field("checksum_xxhash128", &self.checksum_xxhash128)
+            .field("checksum_type", &self.checksum_type)
+            .field("server_side_encryption", &self.server_side_encryption)
+            .field("version_id", &self.version_id)
+            .field("ssekms_key_id", &redact(&self.ssekms_key_id))
+            .field("bucket_key_enabled", &self.bucket_key_enabled)
+            .field("request_charged", &self.request_charged)
+            .finish()
     }
 }
 
@@ -320,7 +354,7 @@ impl InputBuilder {
 
     /// Sets `SSECustomerKey`.
     #[must_use]
-    pub fn sse_customer_key(mut self, value: String) -> Self {
+    pub fn sse_customer_key(mut self, value: crate::SseCustomerKey) -> Self {
         self.input.sse_customer_key = Some(value);
         self
     }

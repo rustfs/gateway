@@ -58,7 +58,9 @@ impl HeadObject {
 /// read off the type instead of unwrapped. `Default` fills a required member with a
 /// wire-invalid placeholder (P10), and [`Input::check_required`] is what keeps one from
 /// leaving the decode path.
-#[derive(Clone, Default)]
+///
+/// Not `Clone`: it owns a streaming body.
+#[derive(Default)]
 pub struct Input {
     /// Wire `Bucket`, bound as UriLabel. Required.
     pub bucket: crate::BucketName,
@@ -91,7 +93,7 @@ pub struct Input {
     /// Wire `x-amz-server-side-encryption-customer-algorithm`, bound as Header. Optional.
     pub sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-key`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
-    pub sse_customer_key: Option<String>,
+    pub sse_customer_key: Option<crate::SseCustomerKey>,
     /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
     pub sse_customer_key_md5: Option<String>,
     /// Wire `x-amz-request-payer`, bound as Header. Optional.
@@ -169,7 +171,7 @@ impl std::fmt::Debug for Input {
 /// read off the type instead of unwrapped. `Default` fills a required member with a
 /// wire-invalid placeholder (P10), and [`Output::check_required`] is what keeps one from
 /// leaving the decode path.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct Output {
     /// Wire `x-amz-delete-marker`, bound as Header. Optional.
     pub delete_marker: Option<bool>,
@@ -237,7 +239,7 @@ pub struct Output {
     pub sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
     pub sse_customer_key_md5: Option<String>,
-    /// Wire `x-amz-server-side-encryption-aws-kms-key-id`, bound as Header. Optional.
+    /// Wire `x-amz-server-side-encryption-aws-kms-key-id`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub ssekms_key_id: Option<String>,
     /// Wire `x-amz-server-side-encryption-bucket-key-enabled`, bound as Header. Optional.
     pub bucket_key_enabled: Option<bool>,
@@ -276,6 +278,60 @@ impl Output {
     /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Output {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn redact<T>(value: &Option<T>) -> Option<&'static str> {
+            value.as_ref().map(|_| "<redacted>")
+        }
+
+        f.debug_struct("Output")
+            .field("delete_marker", &self.delete_marker)
+            .field("accept_ranges", &self.accept_ranges)
+            .field("expiration", &self.expiration)
+            .field("restore", &self.restore)
+            .field("archive_status", &self.archive_status)
+            .field("last_modified", &self.last_modified)
+            .field("content_length", &self.content_length)
+            .field("checksum_crc32", &self.checksum_crc32)
+            .field("checksum_crc32c", &self.checksum_crc32c)
+            .field("checksum_crc64nvme", &self.checksum_crc64nvme)
+            .field("checksum_sha1", &self.checksum_sha1)
+            .field("checksum_sha256", &self.checksum_sha256)
+            .field("checksum_sha512", &self.checksum_sha512)
+            .field("checksum_md5", &self.checksum_md5)
+            .field("checksum_xxhash64", &self.checksum_xxhash64)
+            .field("checksum_xxhash3", &self.checksum_xxhash3)
+            .field("checksum_xxhash128", &self.checksum_xxhash128)
+            .field("checksum_type", &self.checksum_type)
+            .field("e_tag", &self.e_tag)
+            .field("missing_meta", &self.missing_meta)
+            .field("version_id", &self.version_id)
+            .field("cache_control", &self.cache_control)
+            .field("content_disposition", &self.content_disposition)
+            .field("content_encoding", &self.content_encoding)
+            .field("content_language", &self.content_language)
+            .field("content_type", &self.content_type)
+            .field("content_range", &self.content_range)
+            .field("expires", &self.expires)
+            .field("website_redirect_location", &self.website_redirect_location)
+            .field("server_side_encryption", &self.server_side_encryption)
+            .field("metadata", &self.metadata)
+            .field("sse_customer_algorithm", &self.sse_customer_algorithm)
+            .field("sse_customer_key_md5", &self.sse_customer_key_md5)
+            .field("ssekms_key_id", &redact(&self.ssekms_key_id))
+            .field("bucket_key_enabled", &self.bucket_key_enabled)
+            .field("storage_class", &self.storage_class)
+            .field("request_charged", &self.request_charged)
+            .field("replication_status", &self.replication_status)
+            .field("parts_count", &self.parts_count)
+            .field("tag_count", &self.tag_count)
+            .field("object_lock_mode", &self.object_lock_mode)
+            .field("object_lock_retain_until_date", &self.object_lock_retain_until_date)
+            .field("object_lock_legal_hold_status", &self.object_lock_legal_hold_status)
+            .finish()
     }
 }
 
@@ -404,7 +460,7 @@ impl InputBuilder {
 
     /// Sets `SSECustomerKey`.
     #[must_use]
-    pub fn sse_customer_key(mut self, value: String) -> Self {
+    pub fn sse_customer_key(mut self, value: crate::SseCustomerKey) -> Self {
         self.input.sse_customer_key = Some(value);
         self
     }

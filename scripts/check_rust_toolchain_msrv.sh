@@ -23,7 +23,7 @@ if ! command -v ruby >/dev/null 2>&1; then
     exit 1
 fi
 
-MSRV="$(python3 - "$REPO_ROOT" <<'PY'
+TOOLCHAIN_CONTRACT="$(python3 - "$REPO_ROOT" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -70,11 +70,13 @@ for fact in (f"MSRV-{msrv}", f"**MSRV: {msrv}.**", f"**Development toolchain: {m
 msrv_doc = paths["docs/msrv.md"].read_text()
 if f"**MSRV = {msrv}**" not in msrv_doc or f"The workspace pins Rust {msrv} for development" not in msrv_doc:
     raise SystemExit("check_rust_toolchain_msrv: docs/msrv.md does not match the compiler contracts")
-print(msrv)
+print(msrv, ",".join(components))
 PY
 )"
+MSRV="${TOOLCHAIN_CONTRACT%% *}"
+TOOLCHAIN_COMPONENTS="${TOOLCHAIN_CONTRACT#* }"
 
-ruby -ryaml - "$REPO_ROOT/.github/workflows/ci.yml" "$MSRV" <<'RUBY'
+ruby -ryaml - "$REPO_ROOT/.github/workflows/ci.yml" "$MSRV" "$TOOLCHAIN_COMPONENTS" <<'RUBY'
 begin
   workflow = YAML.safe_load(File.read(ARGV.fetch(0)), permitted_classes: [], permitted_symbols: [], aliases: false)
   abort("check_rust_toolchain_msrv: CI workflow must be a mapping") unless workflow.is_a?(Hash)
@@ -104,10 +106,33 @@ begin
   # Swatinem/rust-cache's restore key, and moving that key costs every job a cold rebuild.
   # The repetition cannot drift because this guard compares every one of them to the file.
   reference = ARGV.fetch(1)
+  development_components = ARGV.fetch(2).split(",").join(", ")
 
   with = toolchain_steps.first.fetch("with")
   abort("check_rust_toolchain_msrv: rust-toolchain inputs must be a mapping") unless with.is_a?(Hash)
   abort("check_rust_toolchain_msrv: CI msrv job does not install the exact workspace MSRV") unless with["toolchain"] == reference
+
+  # Bootstrap owns fresh-checkout preparation after the compiler and its declared development
+  # components exist. If this action installs only the minimal compiler, the first measured Cargo
+  # invocation downloads rustfmt, clippy, rust-src, and rust-analyzer inside the five-minute budget.
+  bootstrap_steps = jobs.fetch("bootstrap").fetch("steps")
+  bootstrap_toolchain_index = bootstrap_steps.index do |step|
+    step.is_a?(Hash) && step.fetch("uses", "").match?(%r{\Adtolnay/rust-toolchain@})
+  end
+  bootstrap_command_index = bootstrap_steps.index do |step|
+    step.is_a?(Hash) && step.fetch("run", "").include?("timeout 300s cargo xtask bootstrap")
+  end
+  unless bootstrap_toolchain_index && bootstrap_command_index &&
+         bootstrap_toolchain_index < bootstrap_command_index
+    abort("check_rust_toolchain_msrv: bootstrap must provision its pinned toolchain before the measured command")
+  end
+  bootstrap_inputs = bootstrap_steps.fetch(bootstrap_toolchain_index).fetch("with", nil)
+  unless bootstrap_inputs == {
+           "toolchain" => reference,
+           "components" => development_components
+         }
+    abort("check_rust_toolchain_msrv: bootstrap must provision every rust-toolchain.toml component before measurement")
+  end
 
   # The defect this guard exists to make impossible: a job that installs `stable` -- by naming it,
   # or by omitting `with:` and taking the action's default -- while rust-toolchain.toml names an

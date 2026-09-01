@@ -41,7 +41,7 @@ workflow_env_keys = [
 require_equal(workflow.fetch("env", {}).keys, workflow_env_keys,
               "workflow environment may not override split-job commands")
 
-workspace_ids = ["workspace-tests", "workspace-tests-2"]
+workspace_ids = ["workspace-tests", "workspace-tests-2", "workspace-tests-3"]
 workspaces = workspace_ids.map { |job_id| jobs.fetch(job_id) }
 signing_suite = jobs.fetch("signing-suite")
 persistence_goldens = jobs.fetch("persistence-goldens")
@@ -227,11 +227,13 @@ require_equal(error_status_steps.first,
 require_equal(error_status_steps.last.keys, ["name", "run"],
               "error-status-self-test command can skip or hide failure")
 
-workspace_runs = [<<~'RUN', <<~'RUN']
-  scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway
+workspace_runs = [<<~'RUN', <<~'RUN', <<~'RUN']
+  scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types
+RUN
+  scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c 'cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'
   scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 RUN
-  scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance --package rustfs-gateway
+  scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s
 RUN
 signing_suite_run = <<~'RUN'
   scripts/ci_budget.sh 90 "signing suite build" cargo build --package xtask --bin xtask
@@ -286,8 +288,8 @@ workspaces.each_with_index do |job, index|
   require_equal(job.fetch("steps").last.fetch("run"), workspace_runs.fetch(index),
                 "#{workspace_ids[index]} command changed, lost its shard, or can hide a failure")
 end
-require_equal(workspace_runs.uniq.length, 2,
-              "the workspace test runners do not cover two distinct shards")
+require_equal(workspace_runs.uniq.length, 3,
+              "the workspace test runners do not cover three distinct shards")
 require_equal(signing_suite_steps.last.fetch("run"), signing_suite_run,
               "signing-suite command changed or can hide a failure")
 require_equal(persistence_goldens_steps.last.fetch("run"), persistence_goldens_run,
@@ -358,14 +360,15 @@ end
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "workspace-tests-2", "transport-parity", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "quirk-ledger-self-test-2", "quirk-ledger-self-test-3", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all twenty-two workers within the budget")
+              ["Test", ["workspace-tests", "workspace-tests-2", "workspace-tests-3", "transport-parity", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "target-consolidation-self-test", "quirk-ledger-self-test", "quirk-ledger-self-test-2", "quirk-ledger-self-test-3", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all twenty-three workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
 expected_env = {
   "WORKSPACE_RESULT" => "${{ needs.workspace-tests.result }}",
   "WORKSPACE_2_RESULT" => "${{ needs.workspace-tests-2.result }}",
+  "WORKSPACE_3_RESULT" => "${{ needs.workspace-tests-3.result }}",
   "TRANSPORT_PARITY_RESULT" => "${{ needs.transport-parity.result }}",
   "PERSISTENCE_GOLDENS_RESULT" => "${{ needs.persistence-goldens.result }}",
   "SIGNING_SUITE_RESULT" => "${{ needs.signing-suite.result }}",
@@ -391,6 +394,7 @@ require_equal(steps.first.fetch("env"), expected_env, "the Test step does not bi
 expected_run = <<~'RUN'
   test "$WORKSPACE_RESULT" = success
   test "$WORKSPACE_2_RESULT" = success
+  test "$WORKSPACE_3_RESULT" = success
   test "$TRANSPORT_PARITY_RESULT" = success
   test "$PERSISTENCE_GOLDENS_RESULT" = success
   test "$SIGNING_SUITE_RESULT" = success
@@ -555,4 +559,4 @@ if build_groups != [0, 1, 2, 3, 4]:
     )
 PY
 
-printf 'OK: two workspace shards, transport parity, persistence goldens, signing suite, four guard shards, target-consolidation, three quirk-ledger shards, DTO compiler, five build guard shards, error-status and TSAN workers are parallel behind Test\n'
+printf 'OK: three workspace shards, transport parity, persistence goldens, signing suite, four guard shards, target-consolidation, three quirk-ledger shards, DTO compiler, five build guard shards, error-status and TSAN workers are parallel behind Test\n'

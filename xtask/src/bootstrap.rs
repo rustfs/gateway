@@ -71,15 +71,11 @@ pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
             return ExitCode::from(3);
         }
     }
-    if let Err(error) = codegen::verify_generated() {
-        eprintln!("bootstrap: generated artifacts drifted; run `cargo xtask codegen` and inspect the diff: {error}");
-        return ExitCode::FAILURE;
-    }
-    match codegen::regenerate() {
-        Ok(report) if !json => println!("bootstrap: regenerated {} artifacts", report.files.len() + 1),
+    match codegen::verify_generated() {
+        Ok(count) if !json => println!("bootstrap: verified {count} generated artifacts"),
         Ok(_) => {}
         Err(error) => {
-            eprintln!("bootstrap: code generation failed: {error}");
+            eprintln!("bootstrap: generated artifacts drifted; run `cargo xtask codegen` and inspect the diff: {error}");
             return ExitCode::FAILURE;
         }
     }

@@ -103,6 +103,7 @@ mod render;
 mod request_body;
 mod request_config;
 mod request_deadline;
+mod routing;
 mod service;
 mod stamp;
 mod trace;
@@ -444,8 +445,8 @@ pub use tower::Service as TowerService;
 // service but not the values the service returns is not a facade.
 pub use rustfs_gateway_types::{
     AwsNameValidator, BucketName, ChecksumAlgorithm, ChecksumDigest, ChecksumSpec, ChecksumType, Checksummer, ETag, ErrorCode,
-    NamePolicy, NameRejection, NameValidator, ObjectKey, SlashPolicy, Stricter, Timestamp, TimestampFormat, decode_once,
-    floor_check_bucket, floor_check_key,
+    NamePolicy, NameRejection, NameValidator, ObjectKey, SlashPolicy, SseCustomerKey, Stricter, Timestamp, TimestampFormat,
+    decode_once, floor_check_bucket, floor_check_key,
 };
 
 #[cfg(test)]

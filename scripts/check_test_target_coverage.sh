@@ -52,6 +52,12 @@ COVERED = {
 # Members not yet consolidated. targets is what `cargo test --workspace` links for that member
 # today and is enforced exactly, so the debt cannot grow quietly while phase 2 is pending.
 EXCEPTIONS = {
+    "crates/fs": (
+        1,
+        "rustfs/gateway#277",
+        "one CRUD integration target; consolidation starts when a second source would otherwise "
+        "create another linked test binary",
+    ),
     "crates/http": (
         14,
         "rustfs/gateway#277",

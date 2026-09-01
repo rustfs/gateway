@@ -39,16 +39,15 @@
 //! lifecycle operation, to prove a recreated bucket inherits no document, and asserts nothing
 //! about the corpus.
 //!
-//! # Why the quirk binding is here and not in a mutation run
+//! # Why the quirk binding is distinct from the mutation run
 //!
 //! rustfs/backlog#1719 §9 names `cargo xtask conformance mutate --family lifecycle` and expects
-//! "every quirk kills at least one case, no UNCOVERED". That subcommand does not exist. The
-//! *coverage* half of what it would report is decidable without it, deterministically, from the
-//! corpus and the overlay: a quirk no case claims is a protocol exception this suite asserts
-//! nothing about, and a case claiming a quirk id that the overlay does not declare is a citation
-//! to nothing. Neither is what a mutation run proves — a claimed quirk is not a killed mutant —
-//! so this is written as the weaker check it is, and the family's mutation evidence stays with
-//! the pull request that adds each assertion.
+//! "every quirk kills at least one case, no UNCOVERED". That command now executes every mutable
+//! lifecycle rule, but contract records have no mutation dimension and are intentionally outside
+//! its matrix. This deterministic binding therefore remains complementary: a quirk no case claims
+//! is a protocol exception this suite asserts nothing about, and a case claiming an undeclared id
+//! is a citation to nothing. Neither is what a mutation run proves — a claimed quirk is not a
+//! killed mutant — so the mutable matrix and this closed ledger must both stay green.
 //!
 //! # Why the counts are equalities and not floors
 //!
@@ -101,6 +100,7 @@ const DECLARED_QUIRKS: &[&str] = &[
     "q-lc-0012",
     "q-lc-0013",
     "q-lc-0014",
+    "q-lc-0015",
 ];
 
 /// The three operations of the family. A family whose cases all exercise one operation is a

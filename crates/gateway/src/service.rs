@@ -134,10 +134,12 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
+use crate::assembly::AssemblyError;
+use crate::builder::ServiceBuilder;
 use crate::clock::{Clock, ClockPosture, MonotonicClock, MonotonicNow};
 use crate::close::ConnectionIntent;
 use crate::config::ConfigStore;
-use crate::dispatch::{DispatchTable, target_of};
+use crate::dispatch::target_of;
 use crate::ext::{
     AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
     AuthzRequest, AuthzStage, CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, Governor, GovernorRequest, HostQuery,
@@ -155,6 +157,7 @@ use crate::render::{
 };
 use crate::request_config::{BodyRead, Entered, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
+use crate::routing::RoutingStore;
 use crate::trace::{RequestTrace, TraceSource};
 
 /// The one sentence a request gets when the authenticator itself could not answer.
@@ -166,8 +169,7 @@ const UNAUTHENTICATED: &str = "the request could not be authenticated";
 /// Everything an assembled service holds. Behind one `Arc`, so cloning the service is one
 /// refcount bump and a connection may hold its own clone.
 pub(crate) struct Inner {
-    pub(crate) router: Router,
-    pub(crate) dispatch: DispatchTable,
+    pub(crate) routing: RoutingStore,
     /// The deployment's stage filters, in order; emptiness is checked before any seam does work.
     pub(crate) filters: Arc<[Arc<dyn StageFilter>]>,
     pub(crate) floor: SecurityFloor,
@@ -226,8 +228,9 @@ pub struct S3Service {
 
 impl core::fmt::Debug for S3Service {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let routing = self.inner.routing.load();
         f.debug_struct("S3Service")
-            .field("operations", &self.inner.dispatch.names().collect::<Vec<_>>())
+            .field("operations", &routing.dispatch.names().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }
@@ -239,7 +242,30 @@ impl S3Service {
 
     /// The operations this service answers, sorted. Everything else is `501`.
     pub fn operations(&self) -> impl Iterator<Item = &'static str> {
-        self.inner.dispatch.names()
+        let routing = self.inner.routing.load();
+        routing.dispatch.names().collect::<Vec<_>>().into_iter()
+    }
+
+    /// Atomically replaces this service's routes, codecs, handlers, and operation layers.
+    ///
+    /// The candidate builder is consumed, and only its dialect routes, operation registrations,
+    /// codecs, and operation layers participate in the replacement. The live service deliberately
+    /// retains its authenticator, authorizer, filters, limits, request configuration, and all other
+    /// deployment extension points. Every clone observes the same validated generation, while a
+    /// request already in flight keeps the generation it loaded at entry.
+    ///
+    /// Candidate validation does not emit startup or security-posture logs. The atomic store is
+    /// changed only after the candidate route and dispatch tables agree.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AssemblyError`] when the candidate registry is empty, has an unattached operation
+    /// layer, contains conflicting routes, or cannot build a matching codec/handler dispatch table.
+    /// The last-good generation remains installed on every error.
+    pub fn replace_registry(&self, builder: ServiceBuilder) -> Result<(), AssemblyError> {
+        let routing = builder.into_routing()?;
+        self.inner.routing.store(Arc::new(routing));
+        Ok(())
     }
 
     /// The acceptance ceilings in force.
@@ -276,10 +302,11 @@ impl S3Service {
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
+        let routing = self.inner.routing.load_full();
         let mode = DynamicMode {
-            dispatch: &self.inner.dispatch,
+            dispatch: &routing.dispatch,
         };
-        self.call_with_mode(request, mode).await
+        self.call_with_mode(request, mode, &routing.router).await
     }
 
     pub(crate) async fn call_monomorphic<B, H, Operations>(&self, request: Request<B>, backend: Arc<H>) -> Response<Body>
@@ -290,14 +317,15 @@ impl S3Service {
         H: Send + Sync + 'static,
         Operations: StaticSet<H>,
     {
+        let routing = self.inner.routing.load_full();
         let mode: MonomorphicMode<H, Operations> = MonomorphicMode {
             backend,
             operations: core::marker::PhantomData,
         };
-        self.call_with_mode(request, mode).await
+        self.call_with_mode(request, mode, &routing.router).await
     }
 
-    async fn call_with_mode<B, M>(&self, request: Request<B>, mode: M) -> Response<Body>
+    async fn call_with_mode<B, M>(&self, request: Request<B>, mode: M, router: &Router) -> Response<Body>
     where
         B: http_body::Body + Send + 'static,
         B::Data: Send,
@@ -338,6 +366,7 @@ impl S3Service {
                     client_addr,
                 },
                 &mode,
+                router,
             )
             .await;
         // The CORS decoration for an ordinary request, applied here because it belongs on
@@ -441,6 +470,7 @@ impl S3Service {
         config: RequestConfig<Entered>,
         context: RequestEntryContext,
         mode: &M,
+        router: &Router,
     ) -> Response<Body>
     where
         B: http_body::Body + Send + 'static,
@@ -524,7 +554,7 @@ impl S3Service {
             }
         }
 
-        let dispatched = match self.inner.router.dispatch(&RouteRequestParts {
+        let dispatched = match router.dispatch(&RouteRequestParts {
             method: wire.method(),
             path: wire.raw_path().as_str(),
             target: resolved.target,

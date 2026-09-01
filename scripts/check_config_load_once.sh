@@ -31,8 +31,12 @@ expected="$(grep -Ev '^[[:space:]]*(#|$)' "$ALLOWLIST" | LC_ALL=C sort)"
     printf 'check_config_load_once: expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
     exit 1
 }
-[[ "$(grep -c '^crates/gateway/src/service.rs:313$' <<<"$expected")" == 1 ]] \
-    || fail 'the one request-entry configuration load is not allowlisted exactly once'
+for routing_entry in 305 320; do
+    [[ "$(grep -c "^crates/gateway/src/service.rs:${routing_entry}$" <<<"$expected")" == 1 ]] \
+        || fail 'each request entry must allowlist exactly one routing snapshot load'
+done
+[[ "$(grep -c '^crates/gateway/src/service.rs:341$' <<<"$expected")" == 1 ]] \
+    || fail 'the shared request pipeline must allowlist exactly one configuration snapshot load'
 
 stages="$(grep -oE '\.(accepted|routed|governed|authenticated|route_authorized|body_read|decoded|input_authorized)\(' \
     "${SOURCE_ROOT}/service.rs" | tr -d '.(')"
@@ -46,11 +50,15 @@ import sys
 
 service = Path(sys.argv[1]).read_text(encoding="utf-8")
 request_config = Path(sys.argv[2]).read_text(encoding="utf-8")
-capture = """        let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
+routing_capture = "        let routing = self.inner.routing.load_full();\n"
+if service.count(routing_capture) != 2:
+    raise SystemExit("check_config_load_once: dynamic and monomorphic request entries must each capture one routing snapshot")
+capture = """        let config = self.inner.config.load_full();
+        let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
         let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
 """
 if service.count(capture) != 1:
-    raise SystemExit("check_config_load_once: request entry does not capture cancellation beside its one snapshot")
+    raise SystemExit("check_config_load_once: shared request entry does not capture cancellation beside its one configuration snapshot")
 for fragment in (
     "request_cancellation: Option<tokio::sync::watch::Receiver<bool>>,",
     "self.request_cancellation = request_cancellation;",
@@ -101,4 +109,4 @@ if "#[cfg" in body:
     raise SystemExit("check_config_load_once: c-lim-0005 runtime evidence is conditionally disabled")
 PY
 
-printf 'OK: c-lim-0005 observes one request snapshot; c-lim-0041 locks the sole request-entry load\n'
+printf 'OK: c-lim-0005 observes one configuration and one routing snapshot per request; c-lim-0041 rejects later reloads\n'

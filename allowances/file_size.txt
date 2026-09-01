@@ -4,7 +4,7 @@ crates/core/tests/route_table.rs 2815 https://github.com/rustfs/backlog/issues/2
 crates/conformance/src/socket.rs 1250 https://github.com/rustfs/backlog/issues/1742 Existing socket harness; its tests are split out into socket/tests.rs, the production half still wants splitting.
 crates/conformance/src/inprocess.rs 1700 https://github.com/rustfs/backlog/issues/1742 Existing in-process harness; split in a dedicated behavior-reviewed task.
 crates/core/tests/params_and_dispatch.rs 1614 https://github.com/rustfs/backlog/issues/2123 Analytics, Metadata, Metrics, PutObjectAnnotation, and UpdateObjectEncryption refusals share the full router and prove object-listing and parent-object write isolation; split only in a dedicated behavior-reviewed task.
-crates/gateway/src/service.rs 1425 https://github.com/rustfs/backlog/issues/1742 Existing pipeline assembly; split in a dedicated behavior-reviewed task.
+crates/gateway/src/service.rs 1445 https://github.com/rustfs/backlog/issues/1742 Atomic registry snapshot wiring extends the existing pipeline pending its behavior-reviewed split.
 crates/core/tests/dialect.rs 900 https://github.com/rustfs/backlog/issues/1742 Existing dialect matrix; split in a dedicated behavior-reviewed task.
 crates/core/tests/registration.rs 870 https://github.com/rustfs/backlog/issues/2123 Analytics, Metadata, Metrics, PutObjectAnnotation, and UpdateObjectEncryption add eight exact standard-operation census rows; split only in a dedicated behavior-reviewed task.
 crates/gateway/tests/authz_contract.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing authorization matrix; split in a dedicated behavior-reviewed task.
