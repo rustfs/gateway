@@ -14,8 +14,9 @@
 
 //! Filesystem-backed reference handlers for `rustfs-gateway`.
 //!
-//! Responsible for: a small, inspectable persistence backend used to exercise real S3 handlers.
-//! NOT responsible for: production durability, multipart uploads, versioning, or lifecycle policy.
+//! Responsible for: a small, inspectable persistence backend used to exercise real S3 handlers,
+//! including atomically published multipart uploads.
+//! NOT responsible for: production durability, versioning, lifecycle policy, or ordinary listing.
 //! Upstream: `rustfs-gateway`. Downstream: examples and backend contract tests.
 
 #![doc = include_str!("../README.md")]
@@ -29,39 +30,85 @@ use std::time::UNIX_EPOCH;
 
 use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
-    CreateBucket, CreateBucketOutput, DeleteBucket, DeleteBucketOutput, DeleteObject, DeleteObjectOutput, GetObject,
-    GetObjectOutput, HeadBucket, HeadBucketOutput, HeadObject, HeadObjectOutput, PutObject, PutObjectOutput,
+    AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CreateBucket,
+    CreateBucketOutput, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketOutput, DeleteObject,
+    DeleteObjectOutput, GetObject, GetObjectOutput, HeadBucket, HeadBucketOutput, HeadObject, HeadObjectOutput, ListParts,
+    ListPartsOutput, Part, PutObject, PutObjectOutput, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
-    ByteStream, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Req,
-    ResourceVisibility, Resp, ServiceBuilder, Timestamp, collect,
+    BucketName, ByteStream, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey,
+    RecordedUpload, Req, ResourceVisibility, Resp, ServiceBuilder, Timestamp, UploadIdClaim, collect, resolve_upload,
 };
 use sha2::Sha256;
 use tokio::io::AsyncWriteExt as _;
 
 const OBJECTS_DIR: &str = "objects";
+const UPLOADS_DIR: &str = "uploads";
+const PARTS_DIR: &str = "parts";
+const UPLOAD_RECORD: &str = "record";
 
-macro_rules! crud_operations {
+macro_rules! reference_operations {
     ($visitor:ident) => {
         $visitor! {
-            CreateBucket => "CreateBucket",
-            DeleteBucket => "DeleteBucket",
-            DeleteObject => "DeleteObject",
-            GetObject => "GetObject",
-            HeadBucket => "HeadBucket",
-            HeadObject => "HeadObject",
-            PutObject => "PutObject",
+            multipart AbortMultipartUpload => "AbortMultipartUpload",
+            multipart CompleteMultipartUpload => "CompleteMultipartUpload",
+            crud CreateBucket => "CreateBucket",
+            multipart CreateMultipartUpload => "CreateMultipartUpload",
+            crud DeleteBucket => "DeleteBucket",
+            crud DeleteObject => "DeleteObject",
+            crud GetObject => "GetObject",
+            crud HeadBucket => "HeadBucket",
+            crud HeadObject => "HeadObject",
+            multipart ListParts => "ListParts",
+            crud PutObject => "PutObject",
+            multipart UploadPart => "UploadPart",
         }
     };
 }
 
 macro_rules! capability_names {
-    ($($operation:ty => $name:literal,)+) => {
-        const CRUD_OPERATION_NAMES: &[&str] = &[$($name,)+];
+    ($($group:ident $operation:ty => $name:literal,)+) => {
+        const OPERATION_NAMES: &[&str] = &[$($name,)+];
     };
 }
 
-crud_operations!(capability_names);
+reference_operations!(capability_names);
+
+macro_rules! register_crud_entries {
+    ($backend:expr, $builder:expr;) => { $builder };
+    ($backend:expr, $builder:expr; crud $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_crud_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
+    };
+    ($backend:expr, $builder:expr; multipart $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_crud_entries!($backend, $builder; $($rest)*)
+    };
+}
+
+macro_rules! register_multipart_entries {
+    ($backend:expr, $builder:expr;) => { $builder };
+    ($backend:expr, $builder:expr; multipart $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_multipart_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
+    };
+    ($backend:expr, $builder:expr; crud $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_multipart_entries!($backend, $builder; $($rest)*)
+    };
+}
+
+#[derive(Clone)]
+struct UploadRecord {
+    bucket: String,
+    key: String,
+}
+
+impl RecordedUpload for UploadRecord {
+    fn bucket(&self) -> &str {
+        &self.bucket
+    }
+
+    fn key(&self) -> &str {
+        &self.key
+    }
+}
 
 /// A deliberately small filesystem reference backend.
 ///
@@ -101,20 +148,29 @@ impl FsBackend {
 
     /// The exact operations this bounded reference backend registers.
     pub fn supported_operations(&self) -> impl ExactSizeIterator<Item = &'static str> + Clone {
-        CRUD_OPERATION_NAMES.iter().copied()
+        OPERATION_NAMES.iter().copied()
     }
 
-    /// Registers every supported operation with the production service builder.
+    /// Registers the bucket and object CRUD operations with the production service builder.
     #[must_use]
     pub fn register_crud(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
         macro_rules! register {
-            ($($operation:ty => $name:literal,)+) => {{
-                let builder = builder;
-                $(let builder = builder.register::<$operation, _>(Arc::clone(self));)+
-                builder
-            }};
+            ($($operations:tt)*) => {
+                register_crud_entries!(self, builder; $($operations)*)
+            };
         }
-        crud_operations!(register)
+        reference_operations!(register)
+    }
+
+    /// Registers the bounded multipart operation family with the production service builder.
+    #[must_use]
+    pub fn register_multipart(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
+        macro_rules! register {
+            ($($operations:tt)*) => {
+                register_multipart_entries!(self, builder; $($operations)*)
+            };
+        }
+        reference_operations!(register)
     }
 
     fn bucket_path(&self, bucket: &str) -> PathBuf {
@@ -125,9 +181,22 @@ impl FsBackend {
         self.bucket_path(bucket).join(OBJECTS_DIR)
     }
 
+    fn uploads_path(&self, bucket: &str) -> PathBuf {
+        self.bucket_path(bucket).join(UPLOADS_DIR)
+    }
+
     fn object_path(&self, bucket: &str, key: &str) -> PathBuf {
         let digest = Sha256::digest(key.as_bytes());
         self.objects_path(bucket).join(format!("o-{}", hex::encode(digest)))
+    }
+
+    fn upload_path(&self, bucket: &str, upload_id: &str) -> PathBuf {
+        let digest = Sha256::digest(upload_id.as_bytes());
+        self.uploads_path(bucket).join(format!("u-{}", hex::encode(digest)))
+    }
+
+    fn part_path(upload: &Path, part_number: i32) -> PathBuf {
+        upload.join(PARTS_DIR).join(format!("p-{part_number:05}"))
     }
 
     async fn require_directory(&self, path: &Path, missing: HandlerError) -> Result<(), HandlerError> {
@@ -141,7 +210,8 @@ impl FsBackend {
 
     async fn require_bucket(&self, bucket: &str) -> Result<(), HandlerError> {
         self.require_directory(&self.bucket_path(bucket), no_such_bucket()).await?;
-        self.require_directory(&self.objects_path(bucket), storage_error()).await
+        self.require_directory(&self.objects_path(bucket), storage_error()).await?;
+        self.require_directory(&self.uploads_path(bucket), storage_error()).await
     }
 
     async fn read_object(&self, bucket: &str, key: &str) -> Result<(Vec<u8>, std::fs::Metadata), HandlerError> {
@@ -164,12 +234,16 @@ impl FsBackend {
     async fn write_object(&self, bucket: &str, key: &str, bytes: &[u8]) -> Result<(), HandlerError> {
         self.require_bucket(bucket).await?;
         let objects = self.objects_path(bucket);
-        let temporary = objects.join(format!(
+        self.write_atomic(&objects, &self.object_path(bucket, key), bytes).await
+    }
+
+    async fn write_atomic(&self, directory: &Path, destination: &Path, bytes: &[u8]) -> Result<(), HandlerError> {
+        self.require_directory(directory, storage_error()).await?;
+        let temporary = directory.join(format!(
             ".tmp-{}-{}",
             std::process::id(),
             self.temporary_id.fetch_add(1, Ordering::Relaxed)
         ));
-        let destination = self.object_path(bucket, key);
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -179,7 +253,7 @@ impl FsBackend {
         let written = async {
             file.write_all(bytes).await?;
             file.sync_all().await?;
-            tokio::fs::rename(&temporary, &destination).await
+            tokio::fs::rename(&temporary, destination).await
         }
         .await;
         if written.is_err() {
@@ -187,6 +261,108 @@ impl FsBackend {
             return Err(storage_error());
         }
         Ok(())
+    }
+
+    async fn directory_is_empty(&self, path: &Path) -> Result<bool, HandlerError> {
+        self.require_directory(path, storage_error()).await?;
+        let mut entries = tokio::fs::read_dir(path).await.map_err(|_| storage_error())?;
+        Ok(entries.next_entry().await.map_err(|_| storage_error())?.is_none())
+    }
+
+    fn read_upload_record(&self, bucket: &str, upload_id: &str) -> Option<UploadRecord> {
+        let upload = self.upload_path(bucket, upload_id);
+        let upload_metadata = std::fs::symlink_metadata(&upload).ok()?;
+        if !upload_metadata.is_dir() || upload_metadata.file_type().is_symlink() {
+            return None;
+        }
+        let parts = upload.join(PARTS_DIR);
+        let parts_metadata = std::fs::symlink_metadata(parts).ok()?;
+        if !parts_metadata.is_dir() || parts_metadata.file_type().is_symlink() {
+            return None;
+        }
+        let record = upload.join(UPLOAD_RECORD);
+        let record_metadata = std::fs::symlink_metadata(&record).ok()?;
+        if !record_metadata.is_file() || record_metadata.file_type().is_symlink() {
+            return None;
+        }
+        let encoded = std::fs::read_to_string(record).ok()?;
+        let mut lines = encoded.lines();
+        let bucket = String::from_utf8(hex::decode(lines.next()?).ok()?).ok()?;
+        let key = String::from_utf8(hex::decode(lines.next()?).ok()?).ok()?;
+        if lines.next().is_some() {
+            return None;
+        }
+        Some(UploadRecord { bucket, key })
+    }
+
+    fn resolve_upload(
+        &self,
+        claim: &UploadIdClaim,
+        bucket: &BucketName,
+        key: &ObjectKey,
+    ) -> Result<(String, UploadRecord), HandlerError> {
+        let (resolved, record) =
+            resolve_upload(claim, bucket, key, |upload_id| self.read_upload_record(bucket.as_str(), upload_id))
+                .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
+        Ok((resolved.id().to_owned(), record))
+    }
+
+    async fn create_upload(&self, bucket: &BucketName, key: &ObjectKey) -> Result<String, HandlerError> {
+        self.require_bucket(bucket.as_str()).await?;
+        let uploads = self.uploads_path(bucket.as_str());
+        let upload_id = format!("fs-{:x}-{:x}", std::process::id(), self.temporary_id.fetch_add(1, Ordering::Relaxed));
+        let destination = self.upload_path(bucket.as_str(), &upload_id);
+        if tokio::fs::symlink_metadata(&destination).await.is_ok() {
+            return Err(storage_error());
+        }
+        let temporary = uploads.join(format!(
+            ".tmp-upload-{}-{}",
+            std::process::id(),
+            self.temporary_id.fetch_add(1, Ordering::Relaxed)
+        ));
+        tokio::fs::create_dir(&temporary).await.map_err(|_| storage_error())?;
+        let initialized = async {
+            tokio::fs::create_dir(temporary.join(PARTS_DIR)).await?;
+            let record = format!("{}\n{}\n", hex::encode(bucket.as_str()), hex::encode(key.as_str()));
+            let mut file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(temporary.join(UPLOAD_RECORD))
+                .await?;
+            file.write_all(record.as_bytes()).await?;
+            file.sync_all().await?;
+            tokio::fs::rename(&temporary, destination).await
+        }
+        .await;
+        if initialized.is_err() {
+            let _ = tokio::fs::remove_dir_all(&temporary).await;
+            return Err(storage_error());
+        }
+        Ok(upload_id)
+    }
+
+    async fn list_part_numbers(&self, upload: &Path) -> Result<Vec<i32>, HandlerError> {
+        let parts = upload.join(PARTS_DIR);
+        self.require_directory(&parts, no_such_upload()).await?;
+        let mut entries = tokio::fs::read_dir(parts).await.map_err(|_| storage_error())?;
+        let mut numbers = Vec::new();
+        while let Some(entry) = entries.next_entry().await.map_err(|_| storage_error())? {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { return Err(storage_error()) };
+            let Some(number) = name.strip_prefix("p-").and_then(|value| value.parse::<i32>().ok()) else {
+                continue;
+            };
+            let metadata = entry.metadata().await.map_err(|_| storage_error())?;
+            if !metadata.is_file() || entry.file_type().await.map_err(|_| storage_error())?.is_symlink() {
+                return Err(HandlerError::new(
+                    ErrorCode::INVALID_REQUEST,
+                    "the multipart part path is not a safe regular file",
+                ));
+            }
+            numbers.push(number);
+        }
+        numbers.sort_unstable();
+        Ok(numbers)
     }
 }
 
@@ -203,6 +379,13 @@ fn no_such_key(key: &str) -> HandlerError {
         Ok(key) => HandlerErrorContext::missing_object_for(key, MissingObject::Key, ResourceVisibility::Visible).into(),
         Err(_) => storage_error(),
     }
+}
+
+fn no_such_upload() -> HandlerError {
+    HandlerError::new(
+        ErrorCode::NO_SUCH_UPLOAD,
+        "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
+    )
 }
 
 fn etag(bytes: &[u8]) -> Result<ETag, HandlerError> {
@@ -246,6 +429,11 @@ impl Handler<CreateBucket> for FsBackend {
             let _ = tokio::fs::remove_dir(&path).await;
             return Err(storage_error());
         }
+        if tokio::fs::create_dir(path.join(UPLOADS_DIR)).await.is_err() {
+            let _ = tokio::fs::remove_dir(path.join(OBJECTS_DIR)).await;
+            let _ = tokio::fs::remove_dir(&path).await;
+            return Err(storage_error());
+        }
         Ok(Resp::new(CreateBucketOutput {
             location: Some(format!("/{bucket}")),
         }))
@@ -266,14 +454,15 @@ impl Handler<DeleteBucket> for FsBackend {
         let bucket = request.input().bucket.as_str();
         self.require_bucket(bucket).await?;
         let objects = self.objects_path(bucket);
-        let mut entries = tokio::fs::read_dir(&objects).await.map_err(|_| storage_error())?;
-        if entries.next_entry().await.map_err(|_| storage_error())?.is_some() {
+        let uploads = self.uploads_path(bucket);
+        if !self.directory_is_empty(&objects).await? || !self.directory_is_empty(&uploads).await? {
             return Err(HandlerError::new(
                 ErrorCode::BUCKET_NOT_EMPTY,
                 "The bucket you tried to delete is not empty",
             ));
         }
         tokio::fs::remove_dir(&objects).await.map_err(|_| storage_error())?;
+        tokio::fs::remove_dir(&uploads).await.map_err(|_| storage_error())?;
         tokio::fs::remove_dir(self.bucket_path(bucket))
             .await
             .map_err(|_| storage_error())?;
@@ -340,5 +529,222 @@ impl Handler<DeleteObject> for FsBackend {
             Err(_) => return Err(storage_error()),
         }
         Ok(Resp::new(DeleteObjectOutput::default()))
+    }
+}
+
+impl Handler<CreateMultipartUpload> for FsBackend {
+    async fn call(&self, request: Req<CreateMultipartUpload>) -> HandlerResult<CreateMultipartUpload> {
+        let input = request.into_input();
+        let upload_id = self.create_upload(&input.bucket, &input.key).await?;
+        Ok(Resp::new(CreateMultipartUploadOutput {
+            bucket: input.bucket,
+            key: input.key,
+            upload_id,
+            ..CreateMultipartUploadOutput::default()
+        }))
+    }
+}
+
+impl Handler<UploadPart> for FsBackend {
+    async fn call(&self, request: Req<UploadPart>) -> HandlerResult<UploadPart> {
+        let input = request.into_input();
+        self.require_bucket(input.bucket.as_str()).await?;
+        let bytes = drain(input.body).await?;
+        if i64::try_from(bytes.len()).ok() != Some(input.content_length) {
+            return Err(HandlerError::new(
+                ErrorCode::INCOMPLETE_BODY,
+                "the request body did not match its declared content length",
+            ));
+        }
+        let (upload_id, _) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
+        let upload = self.upload_path(input.bucket.as_str(), &upload_id);
+        let destination = Self::part_path(&upload, input.part_number);
+        if let Ok(metadata) = tokio::fs::symlink_metadata(&destination).await
+            && (!metadata.is_file() || metadata.file_type().is_symlink())
+        {
+            return Err(HandlerError::new(
+                ErrorCode::INVALID_REQUEST,
+                "the multipart part path is not a safe regular file",
+            ));
+        }
+        self.write_atomic(&upload.join(PARTS_DIR), &destination, &bytes).await?;
+        Ok(Resp::new(UploadPartOutput {
+            e_tag: etag(&bytes)?,
+            ..UploadPartOutput::default()
+        }))
+    }
+}
+
+impl Handler<ListParts> for FsBackend {
+    async fn call(&self, request: Req<ListParts>) -> HandlerResult<ListParts> {
+        let input = request.into_input();
+        self.require_bucket(input.bucket.as_str()).await?;
+        let (upload_id, _) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
+        let upload = self.upload_path(input.bucket.as_str(), &upload_id);
+        let marker = input
+            .part_number_marker
+            .as_deref()
+            .map(str::parse::<i32>)
+            .transpose()
+            .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "part-number-marker must be an integer"))?
+            .unwrap_or_default();
+        let max_parts_value = input.max_parts.unwrap_or(1000);
+        let max_parts = usize::try_from(max_parts_value)
+            .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "max-parts must be a non-negative integer"))?;
+        let numbers = self.list_part_numbers(&upload).await?;
+        let selected: Vec<i32> = numbers
+            .iter()
+            .copied()
+            .filter(|number| *number > marker)
+            .take(max_parts)
+            .collect();
+        let is_truncated = numbers.iter().copied().filter(|number| *number > marker).count() > selected.len();
+        let mut parts = Vec::with_capacity(selected.len());
+        for number in selected {
+            let path = Self::part_path(&upload, number);
+            let metadata = tokio::fs::symlink_metadata(&path).await.map_err(|_| storage_error())?;
+            let bytes = tokio::fs::read(path).await.map_err(|_| storage_error())?;
+            parts.push(Part {
+                e_tag: etag(&bytes)?,
+                last_modified: Some(last_modified(&metadata)),
+                part_number: number,
+                size: i64::try_from(bytes.len()).map_err(|_| storage_error())?,
+                ..Part::default()
+            });
+        }
+        let next_part_number_marker = is_truncated
+            .then(|| parts.last().map(|part| part.part_number.to_string()))
+            .flatten();
+        Ok(Resp::new(ListPartsOutput {
+            bucket: input.bucket,
+            key: input.key,
+            upload_id,
+            part_number_marker: input.part_number_marker,
+            next_part_number_marker,
+            max_parts: max_parts_value,
+            is_truncated,
+            parts,
+            ..ListPartsOutput::default()
+        }))
+    }
+}
+
+impl Handler<CompleteMultipartUpload> for FsBackend {
+    async fn call(&self, request: Req<CompleteMultipartUpload>) -> HandlerResult<CompleteMultipartUpload> {
+        let input = request.into_input();
+        self.require_bucket(input.bucket.as_str()).await?;
+        let (upload_id, _) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
+        let completed = input.multipart_upload.parts;
+        if completed.is_empty() {
+            return Err(HandlerError::new(ErrorCode::INVALID_PART, "the completion names no uploaded part"));
+        }
+        let mut requested = Vec::with_capacity(completed.len());
+        let mut previous = 0;
+        for part in completed {
+            let number = part.part_number;
+            if number <= previous {
+                return Err(HandlerError::new(
+                    ErrorCode::INVALID_PART_ORDER,
+                    "completed part numbers must be strictly increasing",
+                ));
+            }
+            previous = number;
+            let entity_tag = part
+                .e_tag
+                .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_PART, "a completed part has no entity tag"))?;
+            requested.push((number, entity_tag));
+        }
+
+        let upload = self.upload_path(input.bucket.as_str(), &upload_id);
+        let mut part_bytes = Vec::with_capacity(requested.len());
+        let mut digest_bytes = Vec::with_capacity(requested.len() * 16);
+        for (number, expected) in &requested {
+            let path = Self::part_path(&upload, *number);
+            let metadata = tokio::fs::symlink_metadata(&path).await.map_err(|error| match error.kind() {
+                io::ErrorKind::NotFound => HandlerError::new(ErrorCode::INVALID_PART, "a completed part was not uploaded"),
+                _ => storage_error(),
+            })?;
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return Err(HandlerError::new(
+                    ErrorCode::INVALID_REQUEST,
+                    "the multipart part path is not a safe regular file",
+                ));
+            }
+            let bytes = tokio::fs::read(path).await.map_err(|_| storage_error())?;
+            let actual = etag(&bytes)?;
+            if actual != *expected {
+                return Err(HandlerError::new(
+                    ErrorCode::INVALID_PART,
+                    "a completed part entity tag does not match the uploaded part",
+                ));
+            }
+            digest_bytes.extend_from_slice(&Md5::digest(&bytes));
+            part_bytes.push(bytes);
+        }
+
+        let objects = self.objects_path(input.bucket.as_str());
+        let temporary = objects.join(format!(
+            ".tmp-complete-{}-{}",
+            std::process::id(),
+            self.temporary_id.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .await
+            .map_err(|_| storage_error())?;
+        for bytes in &part_bytes {
+            if file.write_all(bytes).await.is_err() {
+                let _ = tokio::fs::remove_file(&temporary).await;
+                return Err(storage_error());
+            }
+        }
+        if file.sync_all().await.is_err() {
+            let _ = tokio::fs::remove_file(&temporary).await;
+            return Err(storage_error());
+        }
+        drop(file);
+
+        let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
+            ".complete-{}-{}",
+            std::process::id(),
+            self.temporary_id.fetch_add(1, Ordering::Relaxed)
+        ));
+        tokio::fs::rename(&upload, &tombstone).await.map_err(|_| no_such_upload())?;
+        let destination = self.object_path(input.bucket.as_str(), input.key.as_str());
+        if tokio::fs::rename(&temporary, destination).await.is_err() {
+            let _ = tokio::fs::rename(&tombstone, &upload).await;
+            let _ = tokio::fs::remove_file(&temporary).await;
+            return Err(storage_error());
+        }
+        let _ = tokio::fs::remove_dir_all(tombstone).await;
+
+        let composite =
+            ETag::new(format!("{}-{}", hex::encode(Md5::digest(&digest_bytes)), requested.len())).map_err(|_| storage_error())?;
+        Ok(Resp::new(CompleteMultipartUploadOutput {
+            location: Some(format!("/{}/{}", input.bucket.as_str(), input.key.as_str())),
+            bucket: Some(input.bucket),
+            key: Some(input.key),
+            e_tag: Some(composite),
+            ..CompleteMultipartUploadOutput::default()
+        }))
+    }
+}
+
+impl Handler<AbortMultipartUpload> for FsBackend {
+    async fn call(&self, request: Req<AbortMultipartUpload>) -> HandlerResult<AbortMultipartUpload> {
+        let input = request.into_input();
+        self.require_bucket(input.bucket.as_str()).await?;
+        let (upload_id, _) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
+        let upload = self.upload_path(input.bucket.as_str(), &upload_id);
+        let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
+            ".abort-{}-{}",
+            std::process::id(),
+            self.temporary_id.fetch_add(1, Ordering::Relaxed)
+        ));
+        tokio::fs::rename(upload, &tombstone).await.map_err(|_| no_such_upload())?;
+        tokio::fs::remove_dir_all(tombstone).await.map_err(|_| storage_error())?;
+        Ok(Resp::new(AbortMultipartUploadOutput::default()))
     }
 }
