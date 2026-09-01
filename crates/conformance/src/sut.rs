@@ -148,6 +148,20 @@ pub trait Sut {
     /// merely fails the case's assertions is a successful call returning an [`Observation`].
     fn exchange(&mut self, plan: &ExchangePlan<'_>) -> Result<Observation, SutError>;
 
+    /// Performs every plan as one concurrent batch and returns observations in plan order.
+    ///
+    /// A target must not implement this by calling [`Sut::exchange`] in a loop: all requests must
+    /// be dispatched before any response is awaited. Targets without that capability fail closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SutError`] when independent concurrent dispatch is unavailable.
+    fn exchange_concurrent(&mut self, _plans: &[ExchangePlan<'_>]) -> Result<Vec<Observation>, SutError> {
+        Err(SutError::Environment(
+            "this target cannot dispatch a concurrent exchange batch".to_owned(),
+        ))
+    }
+
     /// Releases anything the case allocated. The default does nothing.
     ///
     /// # Errors
@@ -261,6 +275,10 @@ impl Sut for Scripted {
             .get(&format!("{}#{}", plan.case_id, plan.index))
             .cloned()
             .ok_or_else(|| SutError::Environment(format!("no scripted observation for {}#{}", plan.case_id, plan.index)))
+    }
+
+    fn exchange_concurrent(&mut self, plans: &[ExchangePlan<'_>]) -> Result<Vec<Observation>, SutError> {
+        plans.iter().map(|plan| self.exchange(plan)).collect()
     }
 }
 
