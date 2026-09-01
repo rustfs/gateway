@@ -1316,6 +1316,21 @@ pub const ROUTES: &[RouteRow] = &[
         ],
     },
     RouteRow {
+        operation: "PostObject",
+        handler_registration: true,
+        precedence: 700,
+        method: "POST",
+        target: "Bucket",
+        path_shape: "/{Bucket}",
+        success_status: 204,
+        not_configured: None,
+        predicates: &[
+            RoutePredicate::Method("POST"),
+            RoutePredicate::Target("Bucket"),
+            RoutePredicate::HeaderPrefix("content-type", "multipart/form-data"),
+        ],
+    },
+    RouteRow {
         operation: "CreateBucket",
         handler_registration: true,
         precedence: 710,

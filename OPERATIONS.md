@@ -4883,14 +4883,16 @@ An `Error` body can follow an already-flushed `200`.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
-## Route-only operations
+## Route-only and manually implemented operations
 
-Protocol-known request selectors that produce an operation-specific refusal. They emit no
-DTO, codec, operation spec or handler-registration surface.
+Protocol-known request selectors outside the generated model surface. A route-only row
+produces an operation-specific refusal; a manually implemented row owns its DTO, codec,
+operation spec and handler-registration surface in handwritten modules.
 
 | Operation | Method and path | Selector | Reason |
 | --- | --- | --- | --- |
 | CreateSession | `GET /{Bucket}` | `Method GET` AND `Target Bucket` AND `QueryPresent ?session` | The request shape is protocol-known, but session credential DTOs and codecs remain deliberately unavailable. |
+| PostObject | `POST /{Bucket}` | `Method POST` AND `Target Bucket` AND `HeaderPrefix content-type: multipart/form-data` | manually implemented operation |
 ## Deferred operations
 
 In the pinned model but deliberately not generated. Codegen fails on any operation that is

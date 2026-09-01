@@ -198,6 +198,107 @@ fn n_fails_when_an_operation_is_neither_included_nor_deferred() {
 }
 
 #[test]
+fn lowers_a_manual_operation_absent_from_the_model_into_a_handler_route() {
+    let lowered = load(
+        r#"
+include = ["GetThing"]
+
+[op.GetThing]
+precedence = 100
+auth_action = "s3:GetThing"
+output_required = ["Name"]
+
+[[manual]]
+reason = "the pinned model omits this standard operation"
+operations = ["PostThing"]
+
+[op.PostThing]
+method = "POST"
+path_shape = "/{Bucket}"
+target = "Bucket"
+precedence = 200
+
+[[op.PostThing.header_prefix]]
+header = "content-type"
+value = "multipart/form-data"
+"#,
+    )
+    .expect("manual operation lowers");
+    let route = lowered
+        .route_only
+        .iter()
+        .find(|route| route.operation == "PostThing")
+        .expect("manual route");
+
+    assert!(route.handler_registration);
+    assert_eq!(route.http.method, Method::Post);
+    assert!(route.http.predicates.contains(&Predicate::HeaderPrefix {
+        header: "content-type".to_owned(),
+        prefix: "multipart/form-data".to_owned(),
+    }));
+}
+
+#[test]
+fn n_rejects_a_manual_operation_that_is_already_in_the_model() {
+    let err = load(
+        r#"
+include = []
+[[manual]]
+reason = "invalid duplicate surface"
+operations = ["GetThing"]
+[op.GetThing]
+method = "POST"
+path_shape = "/{Bucket}"
+precedence = 200
+"#,
+    )
+    .expect_err("modeled operations must use the generated surface");
+
+    assert!(format!("{err}").contains("manual operation `GetThing` is in the model"), "{err}");
+}
+
+#[test]
+fn n_rejects_a_manual_operation_without_a_route_declaration() {
+    let err = load(
+        r#"
+include = ["GetThing"]
+[op.GetThing]
+precedence = 100
+auth_action = "s3:GetThing"
+output_required = ["Name"]
+[[manual]]
+reason = "missing route"
+operations = ["PostThing"]
+"#,
+    )
+    .expect_err("manual operations require route facts");
+
+    assert!(format!("{err}").contains("needs an `[op.PostThing]` route declaration"), "{err}");
+}
+
+#[test]
+fn n_rejects_a_manual_operation_without_an_http_method() {
+    let err = load(
+        r#"
+include = ["GetThing"]
+[op.GetThing]
+precedence = 100
+auth_action = "s3:GetThing"
+output_required = ["Name"]
+[[manual]]
+reason = "missing method"
+operations = ["PostThing"]
+[op.PostThing]
+path_shape = "/{Bucket}"
+precedence = 200
+"#,
+    )
+    .expect_err("manual operations require an HTTP method");
+
+    assert!(format!("{err}").contains("manual operation needs `method`"), "{err}");
+}
+
+#[test]
 fn n_fails_without_a_route_precedence() {
     let err = load("include = [\"GetThing\"]\n[op.GetThing]\nauth_action = \"s3:GetThing\"\n")
         .expect_err("precedence is a decision, not a derivation");

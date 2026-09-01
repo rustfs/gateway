@@ -113,7 +113,7 @@ fn security_posture_dry_run_reports_standard_operation_floors() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[GetObject] aws_signature_verifier=built-in\n"
+        "SECURITY_POSTURE anonymous_reachable_ops=[PostObject] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[GetObject] aws_signature_verifier=built-in\n"
     );
 }
 

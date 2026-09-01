@@ -106,6 +106,18 @@ fn post_object_matches_the_content_type_prefix_with_its_boundary() {
     assert_eq!(routed(&table, &request), Some("PostObject"));
 }
 
+/// A fixture-only selector is not a served operation. The generated production table must own
+/// the route and require a registered handler before POST Object can be called implemented.
+#[test]
+fn post_object_is_a_registered_production_route() {
+    let table = generated_table();
+    let request = Req::new("POST /bucket").header("content-type", "multipart/form-data; boundary=----abc");
+    assert_eq!(routed(&table, &request), Some("PostObject"));
+
+    let row = rustfs_gateway_core::route::row_of("PostObject").expect("PostObject has a generated route row");
+    assert!(row.handler_registration, "PostObject must reach a real handler");
+}
+
 /// c-route-0006
 #[test]
 fn the_object_lambda_response_matches_its_literal_path() {

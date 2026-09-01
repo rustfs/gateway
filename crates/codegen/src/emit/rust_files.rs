@@ -49,9 +49,19 @@ const LICENSE: &str = "\
 ";
 
 /// Renders the operation-name table consumed by `#[rustfs_gateway::handlers]`.
-pub fn macro_operation_names(operations: &[OperationIr]) -> String {
-    let mut names: Vec<&str> = operations.iter().map(|operation| operation.operation.as_str()).collect();
+pub fn macro_operation_names(operations: &[OperationIr], route_only: &[RouteOnly]) -> String {
+    let mut names: Vec<&str> = operations
+        .iter()
+        .map(|operation| operation.operation.as_str())
+        .chain(
+            route_only
+                .iter()
+                .filter(|operation| operation.handler_registration)
+                .map(|operation| operation.operation.as_str()),
+        )
+        .collect();
     names.sort_unstable();
+    names.dedup();
 
     let mut out = String::from(LICENSE);
     let _ = writeln!(
@@ -101,7 +111,7 @@ pub fn routes(operations: &[OperationIr], route_only: &[RouteOnly]) -> String {
         .chain(
             route_only
                 .iter()
-                .map(|operation| (operation.operation.as_str(), &operation.http, None, false)),
+                .map(|operation| (operation.operation.as_str(), &operation.http, None, operation.handler_registration)),
         )
         .collect();
     ordered.sort_by_key(|(name, http, _, _)| (http.precedence, *name));

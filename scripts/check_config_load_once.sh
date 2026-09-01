@@ -31,11 +31,11 @@ expected="$(grep -Ev '^[[:space:]]*(#|$)' "$ALLOWLIST" | LC_ALL=C sort)"
     printf 'check_config_load_once: expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
     exit 1
 }
-for routing_entry in 305 320; do
+for routing_entry in 316 331; do
     [[ "$(grep -c "^crates/gateway/src/service.rs:${routing_entry}$" <<<"$expected")" == 1 ]] \
         || fail 'each request entry must allowlist exactly one routing snapshot load'
 done
-[[ "$(grep -c '^crates/gateway/src/service.rs:341$' <<<"$expected")" == 1 ]] \
+[[ "$(grep -c '^crates/gateway/src/service.rs:352$' <<<"$expected")" == 1 ]] \
     || fail 'the shared request pipeline must allowlist exactly one configuration snapshot load'
 
 stages="$(grep -oE '\.(accepted|routed|governed|authenticated|route_authorized|body_read|decoded|input_authorized)\(' \

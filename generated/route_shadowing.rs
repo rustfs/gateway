@@ -7013,4 +7013,12 @@ pub const SHADOWING: &[ShadowingDecl] = &[
             "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html — a plain object write is the same method and path with neither of those parameters.",
         ],
     },
+    ShadowingDecl {
+        winner: "DeleteObjects",
+        shadowed: "PostObject",
+        reason: "PostObject is the bucket POST fallback for multipart form bodies, while DeleteObjects additionally names the delete subresource. DeleteObjects wins at 650 before the form fallback at 700 so a multipart-encoded multi-delete request cannot become an object upload.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPOST.html — PostObject uploads one object through a multipart form POST to its bucket, with the object key and policy material carried in form fields.",
+        ],
+    },
 ];

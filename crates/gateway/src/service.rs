@@ -122,8 +122,8 @@ use rustfs_gateway_core::cors::{
 };
 use rustfs_gateway_core::{
     BoxFuture, Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel,
-    ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, Router, SseConfig, StaticDispatchError, StaticDispatchOutcome,
-    TargetKind, TransportSecurity,
+    RequestBodyMode, ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, Router, SseConfig, StaticDispatchError,
+    StaticDispatchOutcome, TargetKind, TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
     resolve,
 };
@@ -150,6 +150,7 @@ use crate::gate::{Authenticated, BodyCeilings, BodyDigestObligation, SealedBody}
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::payload_header::{payload_mode, presigned_body_obligation};
+use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
 use crate::render::{
     S3Error, from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth, from_sse,
@@ -213,6 +214,16 @@ struct RequestEntryContext {
     now: RequestNow,
     connection: TransportSecurity,
     client_addr: Option<ClientAddr>,
+}
+
+enum RoutedBody<B> {
+    Ordinary(SealedBody<B>),
+    PostObject(Box<PostObjectPrelude<B>>),
+}
+
+enum AcceptedBody<B> {
+    Ordinary(SealedBody<B>),
+    PostObject(Box<ResolvedPostObject<B>>),
 }
 
 /// An assembled S3 service.
@@ -634,9 +645,10 @@ impl S3Service {
         }
 
         let query = RawQuery::new(wire.query().as_str());
-        let view = WireView::new(&headers, query);
-        let presence = detect_credentials(&view);
-        let class = if presence.any() {
+        let head_view = WireView::new(&headers, query);
+        let head_presence = detect_credentials(&head_view);
+        let is_post_object = request_body_mode == RequestBodyMode::PostObject;
+        let class = if is_post_object || head_presence.any() {
             ClassKind::CredentialLookup
         } else {
             ClassKind::Unauthenticated
@@ -655,10 +667,39 @@ impl S3Service {
         };
         let config = config.governed(lease);
 
-        // Sealed here and read at the bottom. Between the two lies every stage that can refuse
-        // this request for a reason decidable from its head, and none of them can reach the bytes:
-        // `SealedBody::read` needs an `Authenticated`, which does not exist yet.
+        // POST Object is the one protocol surface whose credentials live before the file inside
+        // the body. Its bounded text prelude is the only pre-auth body read; the returned type has
+        // no file reader, so this exception cannot consume an object byte.
         let sealed = SealedBody::seal(pending, declared_length);
+        let routed_body = if is_post_object {
+            let content_type = headers
+                .get(http::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default();
+            let prelude = match sealed
+                .post_object_prelude(
+                    content_type,
+                    rustfs_gateway_http::FormLimits::default(),
+                    config.config().request_body_deadlines(),
+                )
+                .await
+            {
+                Ok(prelude) => prelude,
+                Err(error) => return outcome.refuse(error),
+            };
+            RoutedBody::PostObject(Box::new(prelude))
+        } else {
+            RoutedBody::Ordinary(sealed)
+        };
+        let form_fields = match &routed_body {
+            RoutedBody::PostObject(prelude) => Some(prelude.form_fields()),
+            RoutedBody::Ordinary(_) => None,
+        };
+        let view = match form_fields.as_deref() {
+            Some(fields) => head_view.with_form_fields(fields),
+            None => head_view,
+        };
+        let presence = detect_credentials(&view);
 
         let chunk_sink = crate::ext::ChunkSink::new();
         // Kept out of the `match` so the read at the bottom can consult it: for an anonymous or
@@ -788,6 +829,23 @@ impl S3Service {
             return outcome
                 .refuse_handler(HandlerError::internal_error("the request could not be shown to have been authenticated"));
         };
+        let accepted_body = match routed_body {
+            RoutedBody::Ordinary(sealed) => AcceptedBody::Ordinary(sealed),
+            RoutedBody::PostObject(prelude) => {
+                let Some(bucket) = meta.bucket().cloned() else {
+                    return outcome.refuse_handler(HandlerError::internal_error("PostObject routed without a bucket"));
+                };
+                let resolved = match (*prelude).resolve(bucket, &self.inner.names, now) {
+                    Ok(resolved) => resolved,
+                    Err(error) => return outcome.refuse(error),
+                };
+                AcceptedBody::PostObject(Box::new(resolved))
+            }
+        };
+        let effective_key = match &accepted_body {
+            AcceptedBody::Ordinary(_) => meta.key().cloned(),
+            AcceptedBody::PostObject(post) => Some(post.key().clone()),
+        };
         let config = config.authenticated();
         outcome.identity = verdict.identity().cloned();
 
@@ -812,6 +870,7 @@ impl S3Service {
         let route_wire = &wire;
         let route_verdict = &verdict;
         let route_server_extensions = &server_extensions;
+        let route_effective_key = effective_key.as_ref();
         let cors_slot = Mutex::new(None);
         let route_cors = &cors_slot;
         let authorize_route = move || async move {
@@ -820,12 +879,12 @@ impl S3Service {
                 action: requirement.action,
                 resource: requirement.resource,
                 bucket: route_meta.bucket(),
-                key: route_meta.key(),
+                key: route_effective_key,
                 copy_source_identity: None,
                 version_id: None,
                 route_action: requirement.action,
                 route_bucket: route_meta.bucket(),
-                route_key: route_meta.key(),
+                route_key: route_effective_key,
                 identity: route_verdict.identity(),
                 target_origin,
             };
@@ -848,7 +907,7 @@ impl S3Service {
                             action: requirement.action,
                             resource: requirement.resource,
                             bucket: route_meta.bucket(),
-                            key: route_meta.key(),
+                            key: route_effective_key,
                             resources: std::slice::from_ref(&route_request),
                             auth_scheme,
                             identity: route_verdict.identity(),
@@ -892,7 +951,7 @@ impl S3Service {
                     action: requirement.action,
                     resource: requirement.resource,
                     bucket: route_meta.bucket(),
-                    key: route_meta.key(),
+                    key: route_effective_key,
                     resources: std::slice::from_ref(&route_request),
                     auth_scheme,
                     identity: route_verdict.identity(),
@@ -956,20 +1015,26 @@ impl S3Service {
                 None => None,
             };
 
-            let ceilings = BodyCeilings::for_mode(request_body_mode, operation, state.config.config().max_buffered_body_bytes());
             let body_deadlines = state.config.config().request_body_deadlines();
-            let body_quota = state.config.body_quota();
-            // The accepted head, not the pre-filter copy: it is the map the codec binds from.
-            let integrity = crate::integrity::resolve(&body_wire.headers(), body_wire.method(), operation)?;
-            let (body, body_monitor) = sealed
-                .handoff(
-                    &authenticated,
-                    (request_body_mode, ceilings, body_deadlines, body_quota),
-                    ingest,
-                    body_digest,
-                    integrity,
-                )
-                .await?;
+            let (body, body_monitor) = match accepted_body {
+                AcceptedBody::Ordinary(sealed) => {
+                    let ceilings =
+                        BodyCeilings::for_mode(request_body_mode, operation, state.config.config().max_buffered_body_bytes());
+                    let body_quota = state.config.body_quota();
+                    // The accepted head, not the pre-filter copy: it is the map the codec binds from.
+                    let integrity = crate::integrity::resolve(&body_wire.headers(), body_wire.method(), operation)?;
+                    sealed
+                        .handoff(
+                            &authenticated,
+                            (request_body_mode, ceilings, body_deadlines, body_quota),
+                            ingest,
+                            body_digest,
+                            integrity,
+                        )
+                        .await?
+                }
+                AcceptedBody::PostObject(post) => (*post).handoff(&authenticated)?,
+            };
             Ok((
                 ReadForDecode {
                     policy: state.policy,
@@ -983,6 +1048,7 @@ impl S3Service {
         let input_meta = &meta;
         let input_verdict = &verdict;
         let input_server_extensions = &server_extensions;
+        let input_effective_key = effective_key.as_ref();
         let authorize_input = move |state: ReadForDecode, resources: Vec<OwnedResource>| async move {
             let config = state.config.decoded();
             let route_request = AuthzRequest {
@@ -990,12 +1056,12 @@ impl S3Service {
                 action: requirement.action,
                 resource: requirement.resource,
                 bucket: input_meta.bucket(),
-                key: input_meta.key(),
+                key: input_effective_key,
                 copy_source_identity: None,
                 version_id: None,
                 route_action: requirement.action,
                 route_bucket: input_meta.bucket(),
-                route_key: input_meta.key(),
+                route_key: input_effective_key,
                 identity: input_verdict.identity(),
                 target_origin,
             };
@@ -1018,7 +1084,7 @@ impl S3Service {
                     version_id: resource.version_id(),
                     route_action: requirement.action,
                     route_bucket: input_meta.bucket(),
-                    route_key: input_meta.key(),
+                    route_key: input_effective_key,
                     identity: input_verdict.identity(),
                     target_origin,
                 });
@@ -1061,7 +1127,7 @@ impl S3Service {
                     action: requirement.action,
                     resource: requirement.resource,
                     bucket: input_meta.bucket(),
-                    key: input_meta.key(),
+                    key: input_effective_key,
                     resources: &audited_resources,
                     auth_scheme,
                     identity: input_verdict.identity(),

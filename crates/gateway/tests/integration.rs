@@ -86,6 +86,8 @@ mod patch_layer_landings;
 mod payload_transport;
 #[path = "pipeline.rs"]
 mod pipeline;
+#[path = "post_object_runtime.rs"]
+mod post_object_runtime;
 #[path = "precondition_contract.rs"]
 mod precondition_contract;
 #[path = "precondition_reachability.rs"]

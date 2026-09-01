@@ -135,11 +135,12 @@ pub fn render(
         detail(&mut out, ir);
     }
 
-    let _ = writeln!(out, "## Route-only operations\n");
+    let _ = writeln!(out, "## Route-only and manually implemented operations\n");
     let _ = writeln!(
         out,
-        "Protocol-known request selectors that produce an operation-specific refusal. They emit no\n\
-         DTO, codec, operation spec or handler-registration surface.\n"
+        "Protocol-known request selectors outside the generated model surface. A route-only row\n\
+         produces an operation-specific refusal; a manually implemented row owns its DTO, codec,\n\
+         operation spec and handler-registration surface in handwritten modules.\n"
     );
     let _ = writeln!(out, "| Operation | Method and path | Selector | Reason |");
     let _ = writeln!(out, "| --- | --- | --- | --- |");
@@ -151,9 +152,13 @@ pub fn render(
             .map(|value| format!("`{}`", predicate(value)))
             .collect::<Vec<_>>()
             .join(" AND ");
-        let reason = route_only_reasons
-            .get(&route.operation)
-            .map_or("route-only operation", String::as_str);
+        let reason = if route.handler_registration {
+            "manually implemented operation"
+        } else {
+            route_only_reasons
+                .get(&route.operation)
+                .map_or("route-only operation", String::as_str)
+        };
         let _ = writeln!(
             out,
             "| {} | `{} {}` | {} | {} |",

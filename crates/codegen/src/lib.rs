@@ -207,6 +207,8 @@ pub struct Artifacts {
     pub files: Vec<(PathBuf, String)>,
     /// The IR documents behind them.
     pub operations: Vec<OperationIr>,
+    /// Standard hand-authored operations that have a route and handler surface but no Smithy IR.
+    pub manual_operations: Vec<String>,
     /// Deferred operations and their reasons.
     pub deferred: BTreeMap<String, String>,
     /// Traits deleted while loading the model.
@@ -328,7 +330,10 @@ pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[
         out.generated_dir.join("route_shadowing.rs"),
         emit::rust_files::route_shadowing(&overlay.shadowing),
     ));
-    files.push((out.macro_operation_names(), emit::rust_files::macro_operation_names(&lowered.operations)));
+    files.push((
+        out.macro_operation_names(),
+        emit::rust_files::macro_operation_names(&lowered.operations, &lowered.route_only),
+    ));
     files.push((
         out.generated_dir.join("naming_contracts.rs"),
         emit::naming_contracts::render(&overlay.contract_rules).map_err(Error::Policy)?,
@@ -381,9 +386,16 @@ pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[
     }
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
+    let manual_operations = lowered
+        .route_only
+        .iter()
+        .filter(|operation| operation.handler_registration)
+        .map(|operation| operation.operation.clone())
+        .collect();
     Ok(Artifacts {
         files,
         operations: lowered.operations,
+        manual_operations,
         deferred: lowered.deferred,
         stripped_traits: model.stripped_trait_count(),
         dto,

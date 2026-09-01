@@ -98,6 +98,8 @@ pub struct Overlay {
     pub include: Vec<String>,
     /// Operations that emit only a route row, with the reason no typed surface is generated.
     pub route_only: BTreeMap<String, String>,
+    /// Standard operations absent from Smithy whose DTO and codec are maintained by hand.
+    pub manual: BTreeMap<String, String>,
     /// Operations that are deliberately not generated yet, with the reason.
     pub deferred: BTreeMap<String, String>,
     /// Smithy shape local name to IR scalar spelling.
@@ -125,6 +127,8 @@ pub struct Overlay {
 /// Per-operation overrides. Every field is optional; absent means "take the model's answer".
 #[derive(Debug, Default, Clone)]
 pub struct OpOverlay {
+    /// HTTP method for a manual standard operation absent from the Smithy model.
+    pub method: Option<String>,
     /// Route table position.
     pub precedence: Option<u32>,
     /// Override for what the path addresses.
@@ -149,6 +153,8 @@ pub struct OpOverlay {
     pub header_present: Vec<String>,
     /// Headers that must be absent for this route to match.
     pub header_absent: Vec<String>,
+    /// Header/value prefixes that select this route.
+    pub header_prefix: Vec<(String, String)>,
     /// The endpoint family this route requires, as an IR `host_class` spelling.
     pub host_class: Option<String>,
     /// The ARN form this route requires in the bucket position, as an IR `arn_form` spelling.
@@ -317,6 +323,16 @@ pub enum Side {
 /// Which file first declared a name, so a second declaration can name both.
 pub(super) type Origins = BTreeMap<String, String>;
 
+#[derive(Default)]
+struct OperationOrigins {
+    include: Origins,
+    route_only: Origins,
+    manual: Origins,
+    deferred: Origins,
+    op: Origins,
+    shape: Origins,
+}
+
 /// The one cross-family file: the Smithy shape name to IR scalar vocabulary.
 const SCALARS_FILE: &str = "scalars.toml";
 
@@ -341,20 +357,9 @@ impl Overlay {
         overlay.read_scalars(&dir.join(SCALARS_FILE))?;
         overlay.read_error_status(&dir.join(ERROR_STATUS_FILE))?;
 
-        let mut include_origin = Origins::new();
-        let mut route_only_origin = Origins::new();
-        let mut deferred_origin = Origins::new();
-        let mut op_origin = Origins::new();
-        let mut shape_origin = Origins::new();
+        let mut origins = OperationOrigins::default();
         for path in family_files(dir, OPS_DIR)? {
-            overlay.read_operations(
-                &path,
-                &mut include_origin,
-                &mut route_only_origin,
-                &mut deferred_origin,
-                &mut op_origin,
-                &mut shape_origin,
-            )?;
+            overlay.read_operations(&path, &mut origins)?;
         }
 
         let mut quirk_origin = Origins::new();
@@ -364,7 +369,7 @@ impl Overlay {
 
         overlay.shadowing = route::read(&dir.join(ROUTE_FILE))?;
 
-        overlay.check(&include_origin, &route_only_origin, &deferred_origin)?;
+        overlay.check(&origins.include, &origins.route_only, &origins.deferred, &origins.manual)?;
         Ok(overlay)
     }
 
@@ -381,7 +386,7 @@ impl Overlay {
     fn read_scalars(&mut self, path: &Path) -> Result<()> {
         let text = read(path)?;
         let doc = toml_lite::parse(&path.display().to_string(), &text)?;
-        for key in ["include", "route_only", "deferred", "op", "shape", "quirk"] {
+        for key in ["include", "route_only", "manual", "deferred", "op", "shape", "quirk"] {
             if doc.get(key).is_some() {
                 return Err(Error::Overlay(format!(
                     "{SCALARS_FILE} carries `{key}`; it holds `[scalar]` alone, and everything \
@@ -409,15 +414,7 @@ impl Overlay {
         Ok(())
     }
 
-    fn read_operations(
-        &mut self,
-        path: &Path,
-        include_origin: &mut Origins,
-        route_only_origin: &mut Origins,
-        deferred_origin: &mut Origins,
-        op_origin: &mut Origins,
-        shape_origin: &mut Origins,
-    ) -> Result<()> {
+    fn read_operations(&mut self, path: &Path, origins: &mut OperationOrigins) -> Result<()> {
         let file = label(path);
         let text = read(path)?;
         let doc = toml_lite::parse(&path.display().to_string(), &text)?;
@@ -436,11 +433,12 @@ impl Overlay {
         }
         if let Some(include) = doc.get("include") {
             for op in include.string_array("include")? {
-                claim(include_origin, &op, &file, "included")?;
+                claim(&mut origins.include, &op, &file, "included")?;
                 self.include.push(op);
             }
         }
-        route_only::read(&doc, &file, &mut self.route_only, route_only_origin)?;
+        route_only::read(&doc, &file, &mut self.route_only, &mut origins.route_only)?;
+        route_only::read_manual(&doc, &file, &mut self.manual, &mut origins.manual)?;
         for group in array_of_tables(&doc, "deferred") {
             let reason = group
                 .get("reason")
@@ -451,19 +449,19 @@ impl Overlay {
                 .ok_or_else(|| Error::Overlay(format!("{file}: every [[deferred]] group needs `operations`")))?
                 .string_array("deferred.operations")?;
             for op in operations {
-                claim(deferred_origin, &op, &file, "deferred")?;
+                claim(&mut origins.deferred, &op, &file, "deferred")?;
                 self.deferred.insert(op, reason.to_owned());
             }
         }
         if let Some(Toml::Table(entries)) = doc.get("op") {
             for (name, table) in entries {
-                claim(op_origin, name, &file, "declared as `[op.<Operation>]`")?;
+                claim(&mut origins.op, name, &file, "declared as `[op.<Operation>]`")?;
                 self.ops.insert(name.clone(), op_overlay(name, table)?);
             }
         }
         if let Some(Toml::Table(entries)) = doc.get("shape") {
             for (name, table) in entries {
-                claim(shape_origin, name, &file, "declared as `[shape.<Shape>]`")?;
+                claim(&mut origins.shape, name, &file, "declared as `[shape.<Shape>]`")?;
                 self.shapes.insert(name.clone(), shape_overlay(name, table)?);
             }
         }
@@ -472,13 +470,20 @@ impl Overlay {
 
     /// Checks the overlay against itself: id shapes, evidence presence, and no operation listed
     /// in more than one of included, route-only and deferred.
-    fn check(&self, include_origin: &Origins, route_only_origin: &Origins, deferred_origin: &Origins) -> Result<()> {
-        route_only::check_categories(self, include_origin, route_only_origin, deferred_origin)?;
+    fn check(
+        &self,
+        include_origin: &Origins,
+        route_only_origin: &Origins,
+        deferred_origin: &Origins,
+        manual_origin: &Origins,
+    ) -> Result<()> {
+        route_only::check_categories(self, include_origin, route_only_origin, deferred_origin, manual_origin)?;
         let routable: std::collections::BTreeSet<&str> = self
             .include
             .iter()
             .map(String::as_str)
             .chain(self.route_only.keys().map(String::as_str))
+            .chain(self.manual.keys().map(String::as_str))
             .collect();
         for decl in &self.shadowing {
             for (role, op) in [("winner", &decl.winner), ("shadowed", &decl.shadowed)] {
@@ -631,6 +636,19 @@ fn list(table: &Toml, key: &str, what: &str) -> Result<Vec<String>> {
     }
 }
 
+fn header_prefixes(table: &Toml, what: &str) -> Result<Vec<(String, String)>> {
+    let mut prefixes = Vec::new();
+    for entry in array_of_tables(table, "header_prefix") {
+        let header = required_str(entry, "header", what)?;
+        let value = required_str(entry, "value", what)?;
+        if header.is_empty() || value.is_empty() {
+            return Err(Error::Overlay(format!("{what}.header_prefix requires non-empty `header` and `value`")));
+        }
+        prefixes.push((header, value));
+    }
+    Ok(prefixes)
+}
+
 fn empty_value_table(table: &Toml, what: &str) -> Result<Vec<(String, EmptyValue)>> {
     let Some(Toml::Table(entries)) = table.get("empty_value") else {
         return Ok(Vec::new());
@@ -675,6 +693,7 @@ fn payload_overlay(table: &Toml, prefix: &str) -> PayloadOverlay {
 fn op_overlay(name: &str, table: &Toml) -> Result<OpOverlay> {
     let what = format!("op.{name}");
     Ok(OpOverlay {
+        method: opt_str(table, "method"),
         precedence: opt_u32(table, "precedence"),
         target: opt_str(table, "target"),
         path_shape: opt_str(table, "path_shape"),
@@ -694,6 +713,7 @@ fn op_overlay(name: &str, table: &Toml) -> Result<OpOverlay> {
         query_absent: list(table, "query_absent", &what)?,
         header_present: list(table, "header_present", &what)?,
         header_absent: list(table, "header_absent", &what)?,
+        header_prefix: header_prefixes(table, &what)?,
         host_class: opt_str(table, "host_class"),
         arn_form: opt_str(table, "arn_form"),
         auth_requirement: opt_str(table, "auth_requirement"),

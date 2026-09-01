@@ -169,7 +169,8 @@ markers = (
     ("governor call", r"\.governor\s*\.try_acquire\s*\("),
     ("governed stage", r"let\s+config\s*=\s*config\.governed\(lease\)\s*;"),
     ("sealed body", r"SealedBody::seal\s*\("),
-    ("body read", r"\bsealed\s*\.handoff\s*\("),
+    ("POST Object pre-auth body read", r"\bsealed\s*\.post_object_prelude\s*\("),
+    ("ordinary body read", r"\bsealed\s*\.handoff\s*\("),
     ("body-read stage", r"state\.config\.body_read\(\)"),
 )
 positions = []

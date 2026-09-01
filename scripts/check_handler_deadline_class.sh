@@ -356,8 +356,8 @@ for path in sorted(ops_dir.glob("*.rs")):
         fail(f"standard operation name is duplicated: {name}")
     operations.add(name)
 
-if len(operations) != 92:
-    fail(f"standard operation census is {len(operations)}, expected 92")
+if len(operations) != 93:
+    fail(f"standard operation census is {len(operations)}, expected 93")
 missing = sorted(operations - declared.keys())
 extra = sorted(declared.keys() - operations)
 if missing or extra:
@@ -440,14 +440,14 @@ for path in sorted((root / "crates").rglob("*.rs")):
                 fail(f"explicit OperationSpec builder does not use Standard: {relative}")
             explicit_builders += 1
 
-if central_builders != 101 or explicit_builders != 27:
+if central_builders != 102 or explicit_builders != 27:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=101 explicit=27"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=27"
     )
 
 print(
-    "check_handler_deadline_class: 133 repository builder sites are inventoried "
-    "(128 classified: 101 central standard, 27 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 134 repository builder sites are inventoried "
+    "(129 classified: 102 central standard, 27 explicit; 5 authority tests)"
 )
 PY

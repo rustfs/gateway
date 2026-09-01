@@ -35,6 +35,18 @@ pub(crate) fn operations() -> Result<Vec<OperationIr>, String> {
 }
 
 #[cfg(feature = "operation")]
+pub(crate) fn manual_operations() -> Result<Vec<String>, String> {
+    let root = repo_root();
+    let mut names: Vec<String> = rustfs_gateway_codegen::generate(&CodegenInput::at(&root), &CodegenOutput::at(&root))
+        .map_err(|error| error.to_string())?
+        .manual_operations
+        .into_iter()
+        .collect();
+    names.sort();
+    Ok(names)
+}
+
+#[cfg(feature = "operation")]
 pub(crate) fn nearest(operations: &[OperationIr], needle: &str) -> Option<String> {
     operations
         .iter()
@@ -255,6 +267,11 @@ mod tests {
 
         let mapped: BTreeSet<_> = parse_verify_map(&actual).into_iter().map(|entry| entry.name).collect();
         let modeled: BTreeSet<_> = operations.into_iter().map(|operation| operation.operation).collect();
+        let manual: BTreeSet<_> = manual_operations()
+            .expect("the manual operation catalog must load")
+            .into_iter()
+            .collect();
+        let handler_surface: BTreeSet<_> = modeled.union(&manual).cloned().collect();
         let routed: BTreeSet<_> = ROUTES
             .iter()
             .filter(|row| row.handler_registration)
@@ -266,9 +283,10 @@ mod tests {
             .map(|row| row.operation.to_owned())
             .collect();
         assert_eq!(mapped, modeled);
-        assert_eq!(mapped, routed);
+        assert_eq!(handler_surface, routed);
         assert!(route_only.contains("CreateSession"));
         assert!(mapped.is_disjoint(&route_only));
+        assert!(manual.is_disjoint(&route_only));
     }
 
     #[test]

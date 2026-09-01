@@ -1287,7 +1287,11 @@ mut_build_macro_operation_names_emission_removed() {
 from pathlib import Path
 path = Path("crates/codegen/src/lib.rs")
 text = path.read_text()
-old = '    files.push((out.macro_operation_names(), emit::rust_files::macro_operation_names(&lowered.operations)));\n'
+old = '''    files.push((
+        out.macro_operation_names(),
+        emit::rust_files::macro_operation_names(&lowered.operations, &lowered.route_only),
+    ));
+'''
 if text.count(old) != 1:
     raise SystemExit("macro operation-name emission anchor is not unique")
 path.write_text(text.replace(old, "", 1))
@@ -6186,6 +6190,22 @@ expect_fail check_has_operation_coverage.sh \
     'an Operation and reverse mapping drifting together from the codegen name' \
     mut_has_operation_input_codrift
 
+mut_has_operation_manual_authority_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("model/overlays/ops/post-object.toml")
+text = path.read_text()
+old = '[[manual]]\nreason = "Browser POST is an S3 REST operation absent from the Smithy service model; its DTO and codec are hand-authored while this overlay remains the route authority."\noperations = ["PostObject"]\n\n'
+if old not in text:
+    raise SystemExit("expected PostObject manual-operation authority is missing")
+path.write_text(text.replace(old, "", 1))
+PY
+}
+expect_fail check_has_operation_coverage.sh \
+    'a manual standard operation losing its reviewed overlay authority' \
+    mut_has_operation_manual_authority_removed
+
 probe_has_operation_guard_missing_python() {
     local output rc=0 tool_path
     cases=$((cases + 1))
@@ -10628,15 +10648,31 @@ expect_fail check_sig_case_coverage.sh \
     mut_sig_p2_04_dry_run_presigned_filter_removed \
     'check_sig_case_coverage: dry-run no longer derives the presigned operation list'
 
+mut_sig_p2_04_dry_run_anonymous_filter_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("xtask/src/security_posture.rs")
+text = path.read_text()
+old = '        .filter_map(|(name, floor)| floor.anonymous.then_some(name.as_str()))'
+if text.count(old) != 1:
+    raise SystemExit("missing dry-run anonymous-filter mutation subject")
+path.write_text(text.replace(old, '        .filter_map(|_| None)', 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'dry-run forcing the anonymous operation list empty' \
+    mut_sig_p2_04_dry_run_anonymous_filter_removed \
+    'check_sig_case_coverage: dry-run no longer derives the anonymous operation list'
+
 mut_sig_p2_04_dry_run_output_dropped_field() {
     python3 - <<'PYEOF'
 from pathlib import Path
 path = Path("xtask/src/security_posture.rs")
 text = path.read_text()
-old = '        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"'
+old = '        "SECURITY_POSTURE anonymous_reachable_ops=[{anonymous}] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"'
 if text.count(old) != 1:
     raise SystemExit("missing dry-run output mutation subject")
-new = '        // "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"\n        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}]"'
+new = '        // "SECURITY_POSTURE anonymous_reachable_ops=[{anonymous}] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"\n        "SECURITY_POSTURE anonymous_reachable_ops=[{anonymous}] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}]"'
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
@@ -13379,10 +13415,10 @@ if end < 0:
     raise SystemExit("c-lim-0039 governed-stage anchor drifted")
 block = text[start:end]
 without = text[:start] + text[end:]
-read = without.find("            let (body, body_monitor) = sealed")
+read = without.find("            let prelude = match sealed")
 if read < 0:
     raise SystemExit("c-lim-0039 body-read anchor drifted")
-insert = without.find("            Ok((", read)
+insert = without.find("            RoutedBody::PostObject", read)
 if insert < 0:
     raise SystemExit("c-lim-0039 body-read completion anchor drifted")
 decoy = '        let _governor_position_decoy = r###"' + block + '"###;\n'
@@ -13392,7 +13428,7 @@ path.write_text(without[:insert] + "\n" + block + without[insert:])
 PYEOF
 }
 expect_fail check_governor_position.sh \
-    'c-lim-0039 moving the real governor after body read beside a raw-string decoy' mut_governor_moved_after_body_read \
+    'c-lim-0039 moving the real governor after the POST Object pre-auth read beside a raw-string decoy' mut_governor_moved_after_body_read \
     'c-lim-0039 governor must remain after routing and before every body-read boundary'
 
 mut_governor_runtime_identity_removed() {

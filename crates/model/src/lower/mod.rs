@@ -87,6 +87,18 @@ pub fn lower(model: &Model, overlay: &Overlay) -> Result<Lowered> {
             return Err(Error::Overlay(format!("route-only operation `{name}` is not in the model")));
         }
     }
+    for name in overlay.manual.keys() {
+        if model_ops.contains(name) {
+            return Err(Error::Overlay(format!(
+                "manual operation `{name}` is in the model; include it instead of maintaining a second typed surface"
+            )));
+        }
+        if !overlay.ops.contains_key(name) {
+            return Err(Error::Overlay(format!(
+                "manual operation `{name}` needs an `[op.{name}]` route declaration"
+            )));
+        }
+    }
     let undecided: Vec<&String> = model_ops
         .iter()
         .filter(|n| !overlay.include.contains(n) && !overlay.route_only.contains_key(*n) && !overlay.deferred.contains_key(*n))
@@ -107,14 +119,16 @@ pub fn lower(model: &Model, overlay: &Overlay) -> Result<Lowered> {
     for name in &names {
         operations.push(lower_one(model, overlay, name)?);
     }
-    let mut route_only_names: Vec<&String> = overlay.route_only.keys().collect();
+    let mut route_only_names: Vec<&String> = overlay.route_only.keys().chain(overlay.manual.keys()).collect();
     route_only_names.sort();
+    route_only_names.dedup();
     let route_only = route_only_names
         .into_iter()
         .map(|name| {
             Ok(RouteOnly {
                 operation: name.clone(),
                 http: lower_http(model, overlay, name)?,
+                handler_registration: overlay.manual.contains_key(name),
             })
         })
         .collect::<Result<Vec<_>>>()?;

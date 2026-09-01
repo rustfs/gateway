@@ -26,6 +26,7 @@ use std::process::ExitCode;
 #[derive(Clone, Copy)]
 struct ParsedFloor {
     presigned: bool,
+    anonymous: bool,
 }
 
 pub(crate) fn command(args: &[String]) -> ExitCode {
@@ -73,8 +74,13 @@ fn dry_run(root: PathBuf) -> Result<String, String> {
         .filter_map(|(name, floor)| floor.presigned.then_some(name.as_str()))
         .collect::<Vec<_>>()
         .join(",");
+    let anonymous = floors
+        .iter()
+        .filter_map(|(name, floor)| floor.anonymous.then_some(name.as_str()))
+        .collect::<Vec<_>>()
+        .join(",");
     Ok(format!(
-        "SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"
+        "SECURITY_POSTURE anonymous_reachable_ops=[{anonymous}] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"
     ))
 }
 
@@ -158,6 +164,19 @@ fn validate_operation_impl_uses_floor(file: &syn::File, path: &Path) -> Result<(
 }
 
 fn parse_floor_expression(expression: &syn::Expr, path: &Path) -> Result<(String, ParsedFloor), String> {
+    let mut expression = expression;
+    let mut anonymous = false;
+    while let syn::Expr::MethodCall(call) = expression {
+        if !call.args.is_empty() {
+            return Err(unsupported_floor(path));
+        }
+        match call.method.to_string().as_str() {
+            "allow_post_policy" => {}
+            "allow_anonymous_after_listing_in_the_posture_report" if !anonymous => anonymous = true,
+            _ => return Err(unsupported_floor(path)),
+        }
+        expression = &call.receiver;
+    }
     let syn::Expr::Call(call) = expression else {
         return Err(unsupported_floor(path));
     };
@@ -185,7 +204,7 @@ fn parse_floor_expression(expression: &syn::Expr, path: &Path) -> Result<(String
         "builtin_presigned" => true,
         _ => return Err(unsupported_floor(path)),
     };
-    Ok((name, ParsedFloor { presigned }))
+    Ok((name, ParsedFloor { presigned, anonymous }))
 }
 
 fn unsupported_floor(path: &Path) -> String {
@@ -197,7 +216,7 @@ fn unsupported_floor(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_operation_impl_uses_floor;
+    use super::{parse_floor_expression, validate_operation_impl_uses_floor};
     use std::path::Path;
 
     #[test]
@@ -214,5 +233,28 @@ mod tests {
         .expect("fixture must parse");
 
         assert!(validate_operation_impl_uses_floor(&file, Path::new("get_object.rs")).is_err());
+    }
+
+    #[test]
+    fn audited_browser_post_widenings_are_parsed_from_the_real_const_builder_shape() {
+        let expression: syn::Expr = syn::parse_str(
+            r#"OperationFloor::builtin("PostObject", SigService::S3)
+                .allow_post_policy()
+                .allow_anonymous_after_listing_in_the_posture_report()"#,
+        )
+        .expect("fixture must parse");
+
+        let (name, floor) = parse_floor_expression(&expression, Path::new("post_object.rs")).expect("audited widenings");
+        assert_eq!(name, "PostObject");
+        assert!(!floor.presigned);
+        assert!(floor.anonymous);
+    }
+
+    #[test]
+    fn an_unknown_floor_widening_is_refused_instead_of_ignored() {
+        let expression: syn::Expr = syn::parse_str(r#"OperationFloor::builtin("PostObject", SigService::S3).allow_everything()"#)
+            .expect("fixture must parse");
+
+        assert!(parse_floor_expression(&expression, Path::new("post_object.rs")).is_err());
     }
 }
