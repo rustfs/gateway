@@ -215,7 +215,7 @@ fn a_truncated_upload_is_refused_and_leaves_nothing_behind() {
 /// therefore judged on the stale commit token and not on a condition observed after the winner.
 #[test]
 fn a_conditional_create_race_executes_over_two_sockets() {
-    let report = run_over_a_socket("c-cond-0013");
+    let report = run_over_production("c-cond-0013", ProductionDriver::Hyper);
     let outcome = only(&report);
     assert_eq!(outcome.verdict, Verdict::Passed, "{:?}", failures(outcome));
 }
