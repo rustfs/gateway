@@ -657,6 +657,7 @@ gateway_modules = (
     "monomorphic",
     "naming_policy",
     "object_lock_intent",
+    "operation_registry_wire",
     "patch_layer_landings",
     "payload_transport",
     "pipeline",
