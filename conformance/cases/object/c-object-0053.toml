@@ -1,0 +1,148 @@
+# c-object-0053 — HeadObject authorization failures remain bodyless over production Hyper.
+
+[case]
+id = "c-object-0053"
+schema_version = 1
+title = "A denied object head answers 403 without disclosing content"
+rationale = """
+Authorization happens before the object handler, but its refusal still travels through the same
+error renderer as a read. A HEAD response may not carry that error document: doing so leaks bytes
+the method forbids and corrupts connection reuse. Deny and indeterminate decisions must both fail
+closed, including when the target is absent, while an allowed head and a neighbouring GET prove the
+fixture is neither stuck on deny nor broadening the shared s3:GetObject action to every operation.
+"""
+polarity = "negative"
+operation = "HeadObject"
+tags = ["security", "error-shape", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-head-0025"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2"
+summary = "A response to a head request never carries content, including when authorization refuses the request."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html"
+summary = "HeadObject reports access failures through the status and headers rather than a response document."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object-head-authz"
+
+[[setup.objects]]
+bucket = "conf-object-head-authz"
+key = "denied/existing.txt"
+content_type = "text/plain"
+body = { utf8 = "denied object remains stored" }
+
+[[setup.objects]]
+bucket = "conf-object-head-authz"
+key = "uncertain/existing.txt"
+content_type = "text/plain"
+body = { utf8 = "indeterminate object remains stored" }
+
+[[setup.objects]]
+bucket = "conf-object-head-authz"
+key = "allowed/existing.txt"
+content_type = "text/plain"
+body = { utf8 = "allowed object" }
+
+[[setup.objects]]
+bucket = "conf-object-head-authz"
+key = "denied/missing.txt"
+absent = true
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "deny-existing-head"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object-head-authz/denied/existing.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+headers_absent = ["etag", "last-modified", "x-amz-version-id"]
+
+[exchanges.expect.body]
+size = 0
+exact_utf8 = ""
+
+[[exchanges]]
+name = "indeterminate-existing-head"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object-head-authz/uncertain/existing.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+headers_absent = ["etag", "last-modified", "x-amz-version-id"]
+
+[exchanges.expect.body]
+size = 0
+exact_utf8 = ""
+
+[[exchanges]]
+name = "deny-does-not-reveal-a-missing-key"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object-head-authz/denied/missing.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+headers_absent = ["etag", "last-modified", "x-amz-version-id"]
+
+[exchanges.expect.body]
+size = 0
+exact_utf8 = ""
+
+[[exchanges]]
+name = "allow-existing-head"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object-head-authz/allowed/existing.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.headers_present]
+"content-type" = "text/plain"
+
+[exchanges.expect.body]
+size = 0
+exact_utf8 = ""
+
+[[exchanges]]
+name = "same-action-get-remains-allowed"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object-head-authz/denied/existing.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.headers_present]
+"content-type" = "text/plain"
+
+[exchanges.expect.body]
+exact_utf8 = "denied object remains stored"
