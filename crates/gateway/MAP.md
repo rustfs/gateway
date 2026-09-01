@@ -10,7 +10,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | --- | --- | --- |
 | `src/lib.rs` | Modules and public re-exports | A downstream caller cannot name a type |
 | `src/builder.rs` | Registration, extension setters, assembly checks | Adding a knob or diagnosing `build()` |
-| `src/config.rs` | Hot config, update handle, immutable request snapshot | Adding a runtime setting or checking one-load-per-request |
+| `src/config.rs`, `src/routing.rs` | Immutable hot configuration and atomic route/dispatch snapshots | Updating either live generation or checking one-load-per-request |
 | `src/service.rs` | Ordered pipeline and `S3Service` | Moving a stage or tracing a response |
 | `src/service_tests.rs` | The pipeline's own unit suite, split out at the 800-line limit | Changing what is decidable without a request |
 | `src/adapt.rs` | tower and hyper adapters | Wiring a server or checking `Infallible` |
@@ -74,7 +74,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/assembly_order.rs` | Aggregate extension call order and counts |
 | `tests/service_clone_allocations.rs` | Zero-allocation connection clones |
 | `tests/service_concurrency.rs` | One hundred concurrent clones and requests |
-| `tests/service_config.rs` | Mid-request updates cannot tear a snapshot |
+| `tests/service_config.rs`, `tests/operation_registry_hot_update.rs` | Configuration and routing updates cannot tear an in-flight request snapshot |
 | `tests/handler_panic.rs` | Handler panic becomes 500; next request still runs |
 | `tests/pipeline.rs` | End-to-end ordering, response shapes, body progress |
 | `tests/authz_contract.rs` | Two authorization stages, audit, failure floor |

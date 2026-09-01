@@ -76,6 +76,8 @@ mod monomorphic;
 mod naming_policy;
 #[path = "object_lock_intent.rs"]
 mod object_lock_intent;
+#[path = "operation_registry_hot_update.rs"]
+mod operation_registry_hot_update;
 #[path = "operation_registry_wire.rs"]
 mod operation_registry_wire;
 #[path = "patch_layer_landings.rs"]
