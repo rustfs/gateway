@@ -187,6 +187,20 @@ impl XmlWriter {
         self.out.is_empty()
     }
 
+    /// Appends one independently validated element fragment.
+    ///
+    /// Runtime extension vtables encode into a scratch writer first. Parsing the finished fragment
+    /// here prevents a faulty extension from injecting an unbalanced close into its static parent.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::XmlError`] when `fragment` is not one bounded, well-formed XML element.
+    pub fn append_fragment(&mut self, fragment: &str) -> Result<(), crate::XmlError> {
+        crate::parse(fragment.as_bytes())?;
+        self.out.push_str(fragment);
+        Ok(())
+    }
+
     /// Finishes the document, closing anything still open.
     ///
     /// Closing rather than refusing: an encoder that returns early on an error path would

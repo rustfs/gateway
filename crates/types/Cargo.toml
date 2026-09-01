@@ -7,7 +7,7 @@ description = "S3 scalar types, operation inputs/outputs and their generated cod
 # the root `rustfs-gateway-types` dependency requirement still matches it. Keep the numeric part
 # equal to that requirement, and move the date whenever `model/s3.json` is re-pinned — the value is
 # `model/PROVENANCE.md`'s "Pinned commit date".
-version = "0.16.0+aws.2026-08-04"
+version = "0.17.0+aws.2026-08-04"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
