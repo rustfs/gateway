@@ -41,10 +41,10 @@ use std::time::Duration;
 use rustfs_gateway::dto::{Bucket, ListBuckets, ListBucketsOutput};
 use rustfs_gateway::{
     AuthRequirement, BucketName, CodecError, Credentials, EncodedResponse, Handler, HandlerResult, MetaView, Operation,
-    OperationCodec, OperationFloor, OperationSpec, Predicate, RegionSet, Req, RequestBody, ResourceShape, Resp, RouteEntry,
-    RouteSelector, ServiceBuilder, SigService, SigV4Authenticator, StaticCredentials, TargetKind, allow_when,
+    OperationCodec, OperationFloor, OperationSpec, Predicate, RegionSet, Req, RequestBody, ResourceShape, Resp, ServiceBuilder,
+    SigService, SigV4Authenticator, StaticCredentials, TargetKind, allow_when,
 };
-use rustfs_gateway_core::HandlerDeadlineClass;
+use rustfs_gateway_core::{Dialect, DialectOverlay, DialectRoute, HandlerDeadlineClass, OverlayRow};
 use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ServerError};
 
 // ── the vendor operation, which is what a dialect or an admin API looks like ────────────────────
@@ -76,6 +76,21 @@ static PING_FLOOR: OperationFloor =
 /// third-party entry that shadows a standard one without a declaration, and the refusal is what
 /// stops a vendor operation from quietly standing in front of `ListBuckets`.
 static PING_PREDICATES: &[Predicate] = &[Predicate::Method(http::Method::POST), Predicate::Target(TargetKind::Service)];
+
+static PING_OVERLAY: DialectOverlay = DialectOverlay {
+    name: "example-minimal",
+    vendor: "example",
+    operations: &[OverlayRow {
+        name: "example:Ping",
+        precedence: 50,
+        selector: "Method(POST) ∧ Target(Service)",
+        action: "example:Ping",
+        resource: ResourceShape::Service,
+        success_status: 200,
+        anonymous: true,
+        evidence: &["https://github.com/rustfs/gateway/issues/37"],
+    }],
+};
 
 impl Operation for Ping {
     const NAME: &'static str = "example:Ping";
@@ -183,15 +198,19 @@ fn build_service() -> Result<rustfs_gateway::S3Service, Box<dyn std::error::Erro
     let backend = Arc::new(InMemory {
         buckets: vec![BucketName::new("alpha")?, BucketName::new("beta")?],
     });
+    let dialect = Dialect::assemble(&PING_OVERLAY)
+        .declare::<Ping>(DialectRoute {
+            precedence: 50,
+            selector: PING_PREDICATES,
+            path_shape: "/",
+            shadows: &[],
+        })
+        .build()
+        .map_err(|errors| io::Error::other(format!("invalid example dialect: {errors:?}")))?;
     let service = ServiceBuilder::new()
         .register::<Ping, _>(Arc::clone(&backend))
         .register::<ListBuckets, _>(backend)
-        .route(RouteEntry {
-            precedence: 50,
-            selector: RouteSelector::new(PING_PREDICATES),
-            op_name: "example:Ping",
-            path_shape: "/",
-        })
+        .dialect(&dialect)
         .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"])?))
         .authorizer(allow_when(|request| request.operation == "example:Ping"))
         .build()?;

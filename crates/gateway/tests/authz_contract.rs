@@ -50,7 +50,7 @@ use rustfs_gateway::{
 };
 
 use support::vhost_stub::AlwaysVirtualHosted;
-use support::{Backend, CountingBackend, CountingBody, Ping, exchange, exchange_wire, ping_route};
+use support::{Backend, CountingBackend, CountingBody, Ping, exchange, exchange_wire};
 
 // ── the instruments ────────────────────────────────────────────────────────────────────────────
 
@@ -264,7 +264,7 @@ fn base() -> ServiceBuilder {
             rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
 }
 
 /// A backend for the one AWS operation this suite drives, so that a refusal is about a **bucket**
@@ -340,7 +340,7 @@ async fn n_indeterminate_never_reaches_the_handler() {
     let service = ServiceBuilder::new()
         .authenticator(authenticator())
         .register::<Ping, _>(Arc::new(CountingBackend::new(&reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .authorizer(decide_with(|_| Decision::Indeterminate))
         .build()
         .expect("a complete assembly");
@@ -353,7 +353,7 @@ async fn n_indeterminate_never_reaches_the_handler() {
     let allowed = ServiceBuilder::new()
         .authenticator(authenticator())
         .register::<Ping, _>(Arc::new(CountingBackend::new(&reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .authorizer(allow_when(|_| true))
         .build()
         .expect("a complete assembly");
@@ -390,7 +390,7 @@ async fn n_input_denial_never_reaches_the_handler() {
     let service = ServiceBuilder::new()
         .authenticator(authenticator())
         .register::<Ping, _>(Arc::new(CountingBackend::new(&reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .authorizer(InputDeny)
         .build()
         .expect("a complete assembly");
@@ -441,7 +441,7 @@ async fn n_an_authorizer_panic_is_not_allow() {
     let service = ServiceBuilder::new()
         .authenticator(authenticator())
         .register::<Ping, _>(Arc::new(CountingBackend::new(&reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .authorizer(PanicRoute)
         .build()
         .expect("a complete assembly");

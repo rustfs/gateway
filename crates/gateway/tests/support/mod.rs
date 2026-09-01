@@ -32,11 +32,13 @@
 
 pub mod allocations;
 mod committed;
+mod dialect;
 mod handlers;
 pub mod select;
 pub mod vhost_stub;
 
 pub use committed::{CopyCommit, copy_commit_builder, copy_commit_request};
+pub use dialect::{content_ping as content_ping_dialect, head_ping as head_ping_dialect, ping as ping_dialect};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -541,9 +543,9 @@ pub fn service() -> S3Service {
         .register::<HeadPing, _>(Arc::clone(&backend))
         .register::<ContentPing, _>(Arc::clone(&backend))
         .register::<ListBuckets, _>(backend)
-        .route(ping_route())
-        .route(head_ping_route())
-        .route(content_ping_route())
+        .dialect(&dialect::ping())
+        .dialect(&dialect::head_ping())
+        .dialect(&dialect::content_ping())
         .build()
         .expect("a complete assembly")
 }

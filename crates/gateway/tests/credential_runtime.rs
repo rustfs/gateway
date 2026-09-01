@@ -54,10 +54,10 @@ use rustfs_gateway::{
     AuthRequirement, BoxFuture, ClockSkewAck, CodecError, CredentialGuardConfig, CredentialLookup, CredentialProvider,
     Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, EncodedResponse, FixedClock, GovernorRates, Handler, HandlerResult, Limits,
     MetaView, Operation, OperationCodec, OperationFloor, OperationSpec, Predicate, ProviderError, Rate, RegionSet, Req,
-    RequestBody, ResourceShape, Resp, ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, ServiceConfig,
-    SessionBinding, SigV4Authenticator, StaticCredentials, TargetKind, WireRequest, WireResponse, allow_when, collect,
+    RequestBody, ResourceShape, Resp, ResponseBody, S3Service, ServiceBuilder, ServiceConfig, SessionBinding, SigV4Authenticator,
+    StaticCredentials, TargetKind, WireRequest, WireResponse, allow_when, collect,
 };
-use rustfs_gateway_core::HandlerDeadlineClass;
+use rustfs_gateway_core::{Dialect, DialectOverlay, DialectRoute, HandlerDeadlineClass, OverlayRow};
 
 /// The instant every request in this file is signed at and judged against.
 const NOW: i64 = 1_767_225_600;
@@ -111,6 +111,33 @@ static PREDICATES: &[Predicate] = &[
     Predicate::QueryAbsent("restore"),
     Predicate::QueryAbsent("select"),
 ];
+
+static CRED_PROBE_OVERLAY: DialectOverlay = DialectOverlay {
+    name: "example-credential-test",
+    vendor: "example",
+    operations: &[OverlayRow {
+        name: "example:CredProbe",
+        precedence: 52,
+        selector: "Method(POST) ∧ Target(Object) ∧ QueryPresent(\"credprobe\") ∧ QueryAbsent(\"uploadId\") ∧ QueryAbsent(\"uploads\") ∧ QueryAbsent(\"restore\") ∧ QueryAbsent(\"select\")",
+        action: "example:CredProbe",
+        resource: ResourceShape::Object,
+        success_status: 200,
+        anonymous: false,
+        evidence: &["https://github.com/rustfs/gateway/issues/37"],
+    }],
+};
+
+fn cred_probe_dialect() -> Dialect {
+    Dialect::assemble(&CRED_PROBE_OVERLAY)
+        .declare::<CredProbe>(DialectRoute {
+            precedence: 52,
+            selector: PREDICATES,
+            path_shape: "/{Bucket}/{Key+}",
+            shadows: &[],
+        })
+        .build()
+        .expect("the credential probe overlay and codec declaration must agree")
+}
 
 impl Operation for CredProbe {
     const NAME: &'static str = "example:CredProbe";
@@ -229,12 +256,7 @@ fn build_with_authenticator(authenticator: SigV4Authenticator, verbose_signature
     };
     builder
         .register::<CredProbe, _>(Arc::new(Backend))
-        .route(RouteEntry {
-            precedence: 52,
-            selector: RouteSelector::new(PREDICATES),
-            op_name: "example:CredProbe",
-            path_shape: "/{Bucket}/{Key+}",
-        })
+        .dialect(&cred_probe_dialect())
         .authenticator(authenticator)
         .authorizer(allow_when(|_| true))
         .clock_with_skew_ack(
@@ -259,12 +281,7 @@ fn a_closed_negative_cache_and_per_ip_bucket_are_named_in_the_posture() {
     );
     let service = ServiceBuilder::new()
         .register::<CredProbe, _>(Arc::new(Backend))
-        .route(RouteEntry {
-            precedence: 52,
-            selector: RouteSelector::new(PREDICATES),
-            op_name: "example:CredProbe",
-            path_shape: "/{Bucket}/{Key+}",
-        })
+        .dialect(&cred_probe_dialect())
         .authenticator(authenticator)
         .authorizer(allow_when(|_| true))
         .framework_governor_rates(GovernorRates {

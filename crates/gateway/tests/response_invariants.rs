@@ -23,7 +23,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use rustfs_gateway::{RedirectTarget, ResponseView, response_filter};
 
-use crate::support::{Backend, ContentPing, Ping, content_ping_route, exchange_wire, ping_route, plain, wired};
+use crate::support::{Backend, ContentPing, Ping, exchange_wire, plain, wired};
 
 /// Negative — repairing a forbidden runtime body is observable rather than a silent backend
 /// correction. One response produces one increment.
@@ -31,7 +31,7 @@ use crate::support::{Backend, ContentPing, Ping, content_ping_route, exchange_wi
 async fn c_enc_0021_a_body_on_204_is_removed_and_counted() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
                 *response.status_mut() = http::StatusCode::NO_CONTENT;
@@ -58,7 +58,7 @@ async fn c_enc_0021_a_body_on_204_is_removed_and_counted() {
 async fn c_enc_0024_content_length_with_transfer_encoding_is_rejected() {
     let service = wired()
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
                 response
@@ -82,7 +82,7 @@ async fn c_enc_0024_content_length_with_transfer_encoding_is_rejected() {
 async fn c_enc_0032_an_unconfigured_temporary_redirect_location_is_rejected() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
                 *response.status_mut() = http::StatusCode::TEMPORARY_REDIRECT;
@@ -109,7 +109,7 @@ async fn c_enc_0032_one_configured_target_does_not_authorize_another_location() 
     let service = wired()
         .allow_temporary_redirect_target(target)
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
                 *response.status_mut() = http::StatusCode::TEMPORARY_REDIRECT;
@@ -134,7 +134,7 @@ async fn a_configured_temporary_redirect_location_is_allowed() {
     let service = wired()
         .allow_temporary_redirect_target(target)
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
                 *response.status_mut() = http::StatusCode::TEMPORARY_REDIRECT;

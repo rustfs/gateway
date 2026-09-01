@@ -54,10 +54,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use rustfs_gateway::{
     AuthRequirement, CodecError, EncodedResponse, FixedClock, Handler, HandlerError, HandlerResult, KeyFingerprint, KeySide,
     MetaView, Operation, OperationCodec, OperationFloor, OperationSpec, Predicate, Req, RequestBody, ResourceShape, Resp,
-    ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, SigService, SseConfig, StageFilter, TargetKind,
-    TransportSecurity, WireHead, WireResponse, allow_when, check_part, collect, presented_customer_key, wire_filter,
+    ResponseBody, S3Service, ServiceBuilder, SigService, SseConfig, StageFilter, TargetKind, TransportSecurity, WireHead,
+    WireResponse, allow_when, check_part, collect, presented_customer_key, wire_filter,
 };
-use rustfs_gateway_core::HandlerDeadlineClass;
+use rustfs_gateway_core::{Dialect, DialectOverlay, DialectRoute, HandlerDeadlineClass, OverlayRow};
 use rustfs_gateway_types::ErrorCode;
 
 /// A 32-byte key and its true MD5.
@@ -148,6 +148,51 @@ static PART_PREDICATES: &[Predicate] = &[
     Predicate::QueryAbsent("restore"),
     Predicate::QueryAbsent("select"),
 ];
+
+static SSE_TEST_OVERLAY: DialectOverlay = DialectOverlay {
+    name: "example-sse-test",
+    vendor: "example",
+    operations: &[
+        OverlayRow {
+            name: "example:SsePut",
+            precedence: 52,
+            selector: "Method(POST) ∧ Target(Object) ∧ QueryPresent(\"sseput\") ∧ QueryAbsent(\"ssepart\") ∧ QueryAbsent(\"uploadId\") ∧ QueryAbsent(\"uploads\") ∧ QueryAbsent(\"restore\") ∧ QueryAbsent(\"select\")",
+            action: "example:SsePut",
+            resource: ResourceShape::Object,
+            success_status: 200,
+            anonymous: true,
+            evidence: &["https://github.com/rustfs/gateway/issues/37"],
+        },
+        OverlayRow {
+            name: "example:SsePart",
+            precedence: 52,
+            selector: "Method(POST) ∧ Target(Object) ∧ QueryPresent(\"ssepart\") ∧ QueryAbsent(\"sseput\") ∧ QueryAbsent(\"uploadId\") ∧ QueryAbsent(\"uploads\") ∧ QueryAbsent(\"restore\") ∧ QueryAbsent(\"select\")",
+            action: "example:SsePart",
+            resource: ResourceShape::Object,
+            success_status: 200,
+            anonymous: true,
+            evidence: &["https://github.com/rustfs/gateway/issues/37"],
+        },
+    ],
+};
+
+fn sse_test_dialect() -> Dialect {
+    Dialect::assemble(&SSE_TEST_OVERLAY)
+        .declare::<SsePut>(DialectRoute {
+            precedence: 52,
+            selector: PUT_PREDICATES,
+            path_shape: "/{Bucket}/{Key+}",
+            shadows: &[],
+        })
+        .declare::<SsePart>(DialectRoute {
+            precedence: 52,
+            selector: PART_PREDICATES,
+            path_shape: "/{Bucket}/{Key+}",
+            shadows: &[],
+        })
+        .build()
+        .expect("the SSE test overlay and codec declarations must agree")
+}
 
 impl Operation for SsePut {
     const NAME: &'static str = "example:SsePut";
@@ -278,15 +323,6 @@ impl Handler<SsePart> for Backend {
     }
 }
 
-fn route(op_name: &'static str, precedence: u16, predicates: &'static [Predicate]) -> RouteEntry {
-    RouteEntry {
-        precedence,
-        selector: RouteSelector::new(predicates),
-        op_name,
-        path_shape: "/{Bucket}/{Key+}",
-    }
-}
-
 fn build(sse: SseConfig) -> (S3Service, Arc<Backend>) {
     build_with(sse, None)
 }
@@ -296,8 +332,7 @@ fn build_with(sse: SseConfig, filter: Option<Arc<dyn StageFilter>>) -> (S3Servic
     let mut builder = ServiceBuilder::new()
         .register::<SsePut, _>(Arc::clone(&backend))
         .register::<SsePart, _>(Arc::clone(&backend))
-        .route(route("example:SsePut", 52, PUT_PREDICATES))
-        .route(route("example:SsePart", 52, PART_PREDICATES))
+        .dialect(&sse_test_dialect())
         .authenticator(rustfs_gateway::SigV4Authenticator::new(
             Arc::new(rustfs_gateway::StaticCredentials::new()),
             rustfs_gateway::RegionSet::new(["us-east-1"]).expect("non-empty"),

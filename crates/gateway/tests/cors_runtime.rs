@@ -51,10 +51,10 @@ use rustfs_gateway::{
     AuthRequirement, BoxFuture, BucketName, CachedCorsSource, CodecError, CorsCacheConfig, CorsOrigins, CorsPolicy, CorsSource,
     CorsSourceError, Credentials, EncodedResponse, FixedClock, Governor, GovernorRequest, Handler, HandlerResult, Lease,
     MetaView, NoCors, Operation, OperationCodec, OperationFloor, OperationSpec, Predicate, RegionSet, Req, RequestBody,
-    RequestNow, ResourceShape, Resp, ResponseBody, RouteEntry, RouteSelector, S3Service, ServiceBuilder, SigService,
-    SigV4Authenticator, StaticCredentials, TargetKind, WireResponse, allow_when, collect,
+    RequestNow, ResourceShape, Resp, ResponseBody, S3Service, ServiceBuilder, SigService, SigV4Authenticator, StaticCredentials,
+    TargetKind, WireResponse, allow_when, collect,
 };
-use rustfs_gateway_core::HandlerDeadlineClass;
+use rustfs_gateway_core::{Dialect, DialectOverlay, DialectRoute, HandlerDeadlineClass, OverlayRow};
 
 const RSS_CHILD_MARKER: &str = "RUSTFS_GATEWAY_CORS_RSS_CHILD";
 const RSS_TEST_NAME: &str = "cors_runtime::a_million_unique_keys_keep_rss_within_the_entry_budget";
@@ -173,13 +173,31 @@ impl Handler<rustfs_gateway::dto::GetObject> for PingBackend {
     }
 }
 
-fn bucket_ping_route() -> RouteEntry {
-    RouteEntry {
+static BUCKET_PING_OVERLAY: DialectOverlay = DialectOverlay {
+    name: "example-cors-test",
+    vendor: "example",
+    operations: &[OverlayRow {
+        name: "example:BucketPing",
         precedence: 52,
-        selector: RouteSelector::new(BUCKET_PING_PREDICATES),
-        op_name: "example:BucketPing",
-        path_shape: "/{Bucket}",
-    }
+        selector: "Method(POST) ∧ Target(Bucket) ∧ QueryPresent(\"corsping\") ∧ QueryAbsent(\"delete\")",
+        action: "example:BucketPing",
+        resource: ResourceShape::Bucket,
+        success_status: 200,
+        anonymous: true,
+        evidence: &["https://github.com/rustfs/gateway/issues/37"],
+    }],
+};
+
+fn bucket_ping_dialect() -> Dialect {
+    Dialect::assemble(&BUCKET_PING_OVERLAY)
+        .declare::<BucketPing>(DialectRoute {
+            precedence: 52,
+            selector: BUCKET_PING_PREDICATES,
+            path_shape: "/{Bucket}",
+            shadows: &[],
+        })
+        .build()
+        .expect("the bucket-ping overlay and codec declaration must agree")
 }
 
 // ── the source, counting ────────────────────────────────────────────────────────────────────────
@@ -270,7 +288,7 @@ fn build_with_source(
     let mut builder = ServiceBuilder::new()
         .register::<BucketPing, _>(Arc::new(PingBackend))
         .register::<rustfs_gateway::dto::GetObject, _>(Arc::new(PingBackend))
-        .route(bucket_ping_route())
+        .dialect(&bucket_ping_dialect())
         .authenticator(SigV4Authenticator::new(
             Arc::new(StaticCredentials::new().with(credentials)),
             RegionSet::new(["us-east-1"]).expect("non-empty"),

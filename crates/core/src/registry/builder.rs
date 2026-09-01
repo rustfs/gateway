@@ -65,6 +65,15 @@ pub enum BuildError {
         /// The name the added entry claimed.
         op_name: &'static str,
     },
+    /// A wire-reachable third-party route was not supplied by a validated dialect.
+    ///
+    /// Route-only operations without codecs remain useful for core dispatch tests, but the moment
+    /// a codec makes a route reachable from public bytes, its exact row must come from
+    /// [`Dialect`].
+    UnverifiedCodecRoute {
+        /// The operation whose codec would make the unverified row reachable.
+        op_name: &'static str,
+    },
     /// The route table or its compiled form refused to be built.
     ///
     /// This is where a third-party entry overlapping an AWS one at the same precedence lands: the
@@ -88,6 +97,10 @@ impl std::fmt::Display for BuildError {
                 "an added route entry claims the AWS operation name {op_name}; a third-party entry \
                  may not stand in front of a standard operation"
             ),
+            Self::UnverifiedCodecRoute { op_name } => write!(
+                f,
+                "the wire-reachable third-party route {op_name} was not installed by a validated dialect; use RouterBuilder::dialect"
+            ),
             Self::Route(error) => write!(f, "{error}"),
         }
     }
@@ -109,7 +122,11 @@ impl From<RouterBuildError> for BuildError {
 #[derive(Debug, Default)]
 pub struct RouterBuilder {
     registry: Registry,
+    /// Raw route-only entries. A matching codec makes one a build refusal unless an installed
+    /// dialect contains the exact same row.
     entries: Vec<RouteEntry>,
+    /// Exact route rows supplied by validated dialect values.
+    dialect_entries: Vec<RouteEntry>,
     /// One group per installed dialect, folded onto [`SHADOWING`] at build time.
     shadowing: Vec<&'static [ShadowingDecl]>,
     errors: Vec<RegistryError>,
@@ -187,7 +204,7 @@ impl RouterBuilder {
     #[must_use]
     pub fn dialect(mut self, dialect: &Dialect) -> Self {
         for operation in dialect.operations() {
-            self.entries.push(operation.entry().clone());
+            self.dialect_entries.push(operation.entry().clone());
             if !operation.shadows().is_empty() {
                 self.shadowing.push(operation.shadows());
             }
@@ -220,7 +237,9 @@ impl RouterBuilder {
     /// # Errors
     ///
     /// [`BuildError::Registration`] with every refused registration,
-    /// [`BuildError::RouteClaimsStandardName`] for an added entry wearing an AWS name, or
+    /// [`BuildError::RouteClaimsStandardName`] for an added entry wearing an AWS name,
+    /// [`BuildError::UnverifiedCodecRoute`] for a wire-reachable third-party row not supplied by a
+    /// validated dialect, or
     /// [`BuildError::Route`] when the table itself refuses — an overlap at one precedence,
     /// undeclared shadowing, or a generated row this crate cannot read.
     pub fn build(self) -> Result<Router, BuildError> {
@@ -231,9 +250,13 @@ impl RouterBuilder {
             if is_standard_operation_name(entry.op_name) {
                 return Err(BuildError::RouteClaimsStandardName { op_name: entry.op_name });
             }
+            if self.registry.codec(entry.op_name).is_some() && !self.dialect_entries.contains(entry) {
+                return Err(BuildError::UnverifiedCodecRoute { op_name: entry.op_name });
+            }
         }
         let mut entries = generated_entries().map_err(RouterBuildError::from)?;
-        entries.extend(self.entries);
+        entries.extend(self.dialect_entries.iter().cloned());
+        entries.extend(self.entries.into_iter().filter(|entry| !self.dialect_entries.contains(entry)));
         let mut shadowing: ShadowingDecls = SHADOWING;
         for group in self.shadowing {
             shadowing = shadowing.and(group);

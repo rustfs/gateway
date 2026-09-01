@@ -35,7 +35,7 @@ use rustfs_gateway::{
     AssemblyError, ClockSkewAck, Handler, HandlerCancellation, HandlerDeadlineConfig, HandlerResult, HeadPart, Next,
     OperationSetEnd, OperationSetNode, Req, RuleRef, ServiceBuilder, ServiceConfig, WireResponse, dto, op_layer,
 };
-use support::{Backend, ContentPing, HeadPing, Ping, PingOutput, content_ping_route, head_ping_route, ping_route, plain, wired};
+use support::{Backend, ContentPing, HeadPing, Ping, PingOutput, plain, wired};
 
 type OrdinaryOperations = OperationSetNode<
     Ping,
@@ -49,9 +49,9 @@ fn ordinary_builder(backend: Arc<Backend>) -> ServiceBuilder {
         .register::<HeadPing, _>(Arc::clone(&backend))
         .register::<ContentPing, _>(Arc::clone(&backend))
         .register::<dto::ListBuckets, _>(backend)
-        .route(ping_route())
-        .route(head_ping_route())
-        .route(content_ping_route())
+        .dialect(&crate::support::ping_dialect())
+        .dialect(&crate::support::head_ping_dialect())
+        .dialect(&crate::support::content_ping_dialect())
 }
 
 async fn collect(response: http::Response<rustfs_gateway::Body>) -> WireResponse {
@@ -155,7 +155,7 @@ async fn monomorphic_dispatch_reaches_the_context_aware_handler_entry() {
     let backend = Arc::new(ContextOnly::immediate());
     let monomorphic = wired()
         .register::<Ping, _>(Arc::clone(&backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build_monomorphic::<_, Operations>(backend)
         .expect("a complete static assembly");
 
@@ -180,7 +180,7 @@ async fn monomorphic_handler_deadline_signals_cleanup_and_discards_the_late_resu
     let backend = Arc::new(ContextOnly::cooperative(Arc::clone(&rollback_completed)));
     let (builder, _config) = wired()
         .register::<Ping, _>(Arc::clone(&backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .config(short_handler_deadlines());
     let monomorphic = builder
         .build_monomorphic::<_, Operations>(backend)
@@ -199,7 +199,7 @@ async fn monomorphic_handler_deadline_bounds_an_uncooperative_handler() {
     let backend = Arc::new(ContextOnly::uncooperative());
     let (builder, _config) = wired()
         .register::<Ping, _>(Arc::clone(&backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .config(short_handler_deadlines());
     let monomorphic = builder
         .build_monomorphic::<_, Operations>(backend)
@@ -344,13 +344,13 @@ async fn static_and_dynamic_handler_panics_are_identical() {
     type Operations = OperationSetNode<Ping, OperationSetEnd>;
     let dynamic = wired()
         .register::<Ping, _>(Arc::new(Panics))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete dynamic assembly");
     let static_backend = Arc::new(Panics);
     let monomorphic = wired()
         .register::<Ping, _>(Arc::clone(&static_backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build_monomorphic::<_, Operations>(static_backend)
         .expect("a complete static assembly");
 
@@ -477,7 +477,7 @@ fn a_static_operation_set_mismatch_is_refused() {
     let backend = Arc::new(Backend);
     let error = wired()
         .register::<Ping, _>(Arc::clone(&backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build_monomorphic::<_, OperationSetEnd>(backend)
         .expect_err("an empty type-level set must not claim a registered operation");
     assert!(error.to_string().contains("differ from declared static operations"));
@@ -491,7 +491,7 @@ fn a_static_service_rejects_operation_layers() {
     let backend = Arc::new(Backend);
     let error = wired()
         .register::<Ping, _>(Arc::clone(&backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .op_layer::<Ping, _>(op_layer(|request: Req<Ping>, next: Next<'_, Ping>| next.run(request)))
         .build_monomorphic::<_, Operations>(backend)
         .expect_err("a static service must not erase an operation-layer continuation");

@@ -44,7 +44,7 @@ use rustfs_gateway::{
     BoxFuture, ETag, HandlerError, HandlerResult, Next, OpLayer, Req, Resp, ResponseView, RoutedView, StageFilter, WireHead,
     op_layer, response_filter, wire_filter,
 };
-use support::{Backend, ContentPing, Ping, content_ping_route, exchange, exchange_wire, ping_route, plain, service, wired};
+use support::{Backend, ContentPing, Ping, exchange, exchange_wire, plain, service, wired};
 
 // ── recorders ───────────────────────────────────────────────────────────────────────────────────
 
@@ -117,7 +117,7 @@ const LENGTH_ECHO: &str = "x-length-seen";
 async fn a_wire_filter_supplies_a_missing_content_length() {
     let service = wired()
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .stage_filter(wire_filter(|head: &mut WireHead<'_>| {
             if head.header(&http::header::CONTENT_LENGTH).is_none() {
                 head.set_header(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("0"))?;
@@ -137,7 +137,7 @@ async fn a_wire_filter_supplies_a_missing_content_length() {
 async fn without_the_wire_filter_no_content_length_reaches_the_decoder() {
     let service = wired()
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .build()
         .expect("a complete assembly");
     let response = exchange_wire(&service, plain(http::Method::PUT, "/")).await;
@@ -154,7 +154,7 @@ async fn a_wire_filter_may_not_rewrite_the_host() {
     let counter = Arc::clone(&refusals);
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(wire_filter(move |head: &mut WireHead<'_>| {
             if head
                 .set_header(http::header::HOST, http::HeaderValue::from_static("elsewhere.example.com"))
@@ -212,7 +212,7 @@ async fn a_routed_filter_may_refuse_one_operation_by_name() {
     let counter = Arc::clone(&reached);
     let service = wired()
         .register::<Ping, _>(Arc::new(support::CountingBackend::new(&counter)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(rustfs_gateway::routed_filter(|routed: &RoutedView<'_>| {
             if routed.operation() == "example:Ping" {
                 return Err(HandlerError::new(
@@ -238,7 +238,7 @@ async fn a_routed_filter_passes_the_operation_it_does_not_name() {
     let counter = Arc::clone(&reached);
     let service = wired()
         .register::<Ping, _>(Arc::new(support::CountingBackend::new(&counter)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(rustfs_gateway::routed_filter(|routed: &RoutedView<'_>| {
             if routed.operation() == "example:SomethingElse" {
                 return Err(HandlerError::new(rustfs_gateway::ErrorCode::NOT_IMPLEMENTED, "off"));
@@ -260,7 +260,7 @@ async fn a_routed_filter_passes_the_operation_it_does_not_name() {
 async fn a_response_filter_may_add_a_header() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
                 response
@@ -291,7 +291,7 @@ async fn the_response_seam_runs_for_a_request_that_never_routed() {
     let recorder = Arc::clone(&seen);
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(response_filter(
             move |view: &ResponseView<'_>, _response: &mut http::Response<rustfs_gateway::Body>| {
                 if let Ok(mut seen) = recorder.lock() {
@@ -314,7 +314,7 @@ async fn the_response_seam_runs_for_a_request_that_never_routed() {
 async fn a_response_filter_cannot_put_a_body_on_a_304() {
     let service = wired()
         .register::<support::HeadPing, _>(Arc::new(Backend))
-        .route(support::head_ping_route())
+        .dialect(&crate::support::head_ping_dialect())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
                 *response.body_mut() = rustfs_gateway::Body::from_bytes(Bytes::from_static(b"<Nonsense/>"));
@@ -339,7 +339,7 @@ async fn a_response_filter_cannot_put_a_body_on_a_304() {
 async fn a_response_filter_cannot_leave_a_content_length_that_overstates_the_body() {
     let service = wired()
         .register::<support::ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
                 *response.body_mut() = rustfs_gateway::Body::from_bytes(Bytes::from_static(b"hi"));
@@ -362,7 +362,7 @@ async fn a_response_filter_cannot_leave_a_content_length_that_overstates_the_bod
 async fn a_response_filter_cannot_remove_the_request_identifier() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
                 response.headers_mut().remove(rustfs_gateway::REQUEST_ID_HEADER);
@@ -385,7 +385,7 @@ async fn a_response_filter_refusal_replaces_the_response_and_stops_the_rest() {
     let counter = Arc::clone(&later);
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, _response: &mut http::Response<rustfs_gateway::Body>| {
                 Err(HandlerError::new(
@@ -418,7 +418,7 @@ async fn filters_run_in_registration_order_at_every_seam() {
     let (seen, one, two, three) = trail();
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(one)
         .stage_filter(two)
         .stage_filter(three)
@@ -449,7 +449,7 @@ async fn reversing_the_registration_reverses_every_seam() {
     let (seen, one, two, three) = trail();
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(three)
         .stage_filter(two)
         .stage_filter(one)
@@ -466,7 +466,7 @@ async fn reversing_the_registration_reverses_every_seam() {
 async fn a_later_wire_filter_sees_an_earlier_ones_rewrite() {
     let service = wired()
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .stage_filter(wire_filter(|head: &mut WireHead<'_>| {
             head.set_header(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("0"))?;
             Ok(())
@@ -580,8 +580,8 @@ async fn an_op_layer_runs_for_its_own_operation() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(ping_route())
-        .route(content_ping_route())
+        .dialect(&crate::support::ping_dialect())
+        .dialect(&crate::support::content_ping_dialect())
         .op_layer::<Ping, _>(marking_layer(&marks, "ping"))
         .build()
         .expect("a complete assembly");
@@ -598,8 +598,8 @@ async fn an_op_layer_does_not_run_for_a_sibling_operation() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(ping_route())
-        .route(content_ping_route())
+        .dialect(&crate::support::ping_dialect())
+        .dialect(&crate::support::content_ping_dialect())
         .op_layer::<Ping, _>(marking_layer(&marks, "ping"))
         .build()
         .expect("a complete assembly");
@@ -615,7 +615,7 @@ async fn two_op_layers_nest_outer_to_inner_in_registration_order() {
     let marks = Arc::new(Mutex::new(Vec::new()));
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .op_layer::<Ping, _>(marking_layer(&marks, "outer"))
         .op_layer::<Ping, _>(marking_layer(&marks, "inner"))
         .build()
@@ -631,7 +631,7 @@ async fn reversing_two_op_layers_reverses_the_nesting() {
     let marks = Arc::new(Mutex::new(Vec::new()));
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .op_layer::<Ping, _>(marking_layer(&marks, "inner"))
         .op_layer::<Ping, _>(marking_layer(&marks, "outer"))
         .build()
@@ -650,7 +650,7 @@ async fn an_op_layer_may_answer_without_reaching_the_handler() {
     let counter = Arc::clone(&reached);
     let service = wired()
         .register::<Ping, _>(Arc::new(support::CountingBackend::new(&counter)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .op_layer::<Ping, _>(op_layer(|_request: Req<Ping>, _next: Next<'_, Ping>| {
             Box::pin(async {
                 Ok(Resp::new(support::PingOutput {
@@ -673,7 +673,7 @@ async fn an_op_layer_never_runs_for_a_request_authorisation_denied() {
     let marks = Arc::new(Mutex::new(Vec::new()));
     let service = support::wired_denying()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .op_layer::<Ping, _>(marking_layer(&marks, "ping"))
         .build()
         .expect("a complete assembly");
@@ -688,7 +688,7 @@ async fn an_op_layer_never_runs_for_a_request_authorisation_denied() {
 fn an_op_layer_for_an_unregistered_operation_refuses_the_build() {
     let error = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .op_layer::<ContentPing, _>(op_layer(|request: Req<ContentPing>, next: Next<'_, ContentPing>| next.run(request)))
         .build()
         .expect_err("a layer with nothing to wrap");
@@ -702,7 +702,7 @@ fn an_op_layer_for_an_unregistered_operation_refuses_the_build() {
 fn an_op_layer_for_a_registered_operation_builds() {
     wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .op_layer::<Ping, _>(op_layer(|request: Req<Ping>, next: Next<'_, Ping>| next.run(request)))
         .build()
         .expect("a layer on a registered operation");
@@ -740,7 +740,7 @@ async fn all_three_levels_are_in_force_at_once() {
     let marks = Arc::new(Mutex::new(Vec::new()));
     let mut service = wired()
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .stage_filter(wire_filter(|head: &mut WireHead<'_>| {
             head.set_header(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("0"))?;
             Ok(())
@@ -781,7 +781,7 @@ fn counter_value(counter: &Arc<AtomicUsize>) -> usize {
 fn counting_service(reached: &Arc<AtomicUsize>, filter: impl StageFilter) -> rustfs_gateway::S3Service {
     wired()
         .register::<Ping, _>(Arc::new(support::CountingBackend::new(reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(filter)
         .build()
         .expect("a complete assembly")

@@ -30,7 +30,7 @@ use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
 use rustfs_gateway::{BodyProgress, ClockSkewAck, EVENT_STREAM_CONTENT_TYPE, ObservedBody, S3Service, ServiceBuilder, dto};
-use support::{Backend, CountingBody, Failing, Ping, Recorder, RefuseEverything, exchange, ping_route, plain, wired};
+use support::{Backend, CountingBody, Failing, Ping, Recorder, RefuseEverything, exchange, plain, wired};
 
 const EXPECTED_PAYLOAD_SHA256: &str = "c32cace75647e3e184b9dce888af087f63740976550541874c37a1037b196b56";
 
@@ -46,7 +46,7 @@ fn presigned_service(reached: &Arc<std::sync::atomic::AtomicUsize>) -> S3Service
             ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
         .register::<Ping, _>(Arc::new(support::CountingBackend::new(reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly")
 }
@@ -113,7 +113,7 @@ async fn a_request_naming_no_operation_is_answered_with_the_configuration_hint()
 async fn an_unhandled_operation_reads_differently_from_an_unrouted_one() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     let (status, body) = exchange(&service, plain(http::Method::GET, "/")).await;
@@ -176,7 +176,7 @@ async fn a_framing_ambiguity_is_refused_at_acceptance() {
 async fn c_lim_0040_refusing_governor_answers_before_the_body_is_read() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .governor(RefuseEverything)
         .build()
         .expect("a complete assembly");
@@ -201,7 +201,7 @@ async fn c_lim_0040_refusing_governor_answers_before_the_body_is_read() {
 async fn an_oversized_body_is_refused() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .max_buffered_body_bytes(16)
         .build()
         .expect("a complete assembly");
@@ -229,7 +229,7 @@ async fn a_denying_authorizer_stops_an_admitted_request() {
     );
     let service = ServiceBuilder::new()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .authenticator(rustfs_gateway::SigV4Authenticator::new(
             credentials,
             rustfs_gateway::RegionSet::new(["us-east-1"]).expect("non-empty"),
@@ -249,7 +249,7 @@ async fn a_denying_authorizer_stops_an_admitted_request() {
 async fn a_failing_handler_becomes_a_response() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Failing))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     let (status, body) = exchange(&service, plain(http::Method::POST, "/")).await;
@@ -281,7 +281,7 @@ async fn the_observer_sees_refusals_as_well_as_answers() {
     let recorder = Arc::new(Recorder::default());
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .observer(Arc::clone(&recorder))
         .build()
         .expect("a complete assembly");
@@ -410,7 +410,7 @@ async fn a_success_carries_the_identifiers_as_well() {
 async fn a_fixed_source_makes_a_response_byte_comparable() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .trace_source(rustfs_gateway::FixedTrace::at(0x0123_4567_89AB_CDEF, 0))
         .build()
         .expect("a complete assembly");
@@ -639,7 +639,7 @@ async fn a_mismatched_signature_is_refused_before_the_body_is_read() {
             rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
 
@@ -676,7 +676,7 @@ async fn a_mismatched_signature_is_refused_before_the_body_is_read() {
 async fn two_different_checksum_headers_are_refused_before_the_body_is_read() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
 
@@ -707,7 +707,7 @@ async fn two_different_checksum_headers_are_refused_before_the_body_is_read() {
 async fn one_checksum_algorithm_sent_twice_is_not_a_contradiction() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
 
@@ -730,7 +730,7 @@ async fn one_checksum_algorithm_sent_twice_is_not_a_contradiction() {
 async fn an_accepted_request_has_its_body_read_to_the_end() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
 
@@ -761,7 +761,7 @@ async fn an_event_stream_and_a_document_share_one_service_exit() {
         )
         .register::<Ping, _>(Arc::new(Backend))
         .register::<dto::SelectObjectContent, _>(Arc::new(support::select::SelectBackend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     let select_body = Bytes::from_static(

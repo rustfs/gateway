@@ -29,7 +29,8 @@ use std::sync::Arc;
 
 use rustfs_gateway::dto::ListBuckets;
 use rustfs_gateway::{AssemblyError, OperationSet, RouteEntry, RouteSelector, RuleRef, ServiceBuilder};
-use support::{Backend, Impostor, Ping, Unnamespaced, ping_route, wired};
+use rustfs_gateway_core::{Dialect, DialectOverlay, DialectRoute, OverlayRow, ResourceShape};
+use support::{Backend, Impostor, Ping, Unnamespaced, wired};
 
 /// a-asm-0016. Negative — an assembly with no operation is refused. A service that answers every request with
 /// `501` is a configuration mistake, and starting it hides the mistake until traffic arrives.
@@ -145,14 +146,32 @@ fn an_undeclared_shadowing_route_is_refused() {
         rustfs_gateway::Predicate::Target(rustfs_gateway::TargetKind::Service),
         rustfs_gateway::Predicate::HostClass(rustfs_gateway_core::route::HostClass::Standard),
     ];
+    static OVERLAY: DialectOverlay = DialectOverlay {
+        name: "example-shadow-test",
+        vendor: "example",
+        operations: &[OverlayRow {
+            name: "example:Ping",
+            precedence: 10,
+            selector: "Method(GET) ∧ Target(Service) ∧ HostClass(Standard)",
+            action: "example:Ping",
+            resource: ResourceShape::Service,
+            success_status: 200,
+            anonymous: true,
+            evidence: &["https://github.com/rustfs/gateway/issues/37"],
+        }],
+    };
+    let dialect = Dialect::assemble(&OVERLAY)
+        .declare::<Ping>(DialectRoute {
+            precedence: 10,
+            selector: SHADOWS_LIST_BUCKETS,
+            path_shape: "/",
+            shadows: &[],
+        })
+        .build()
+        .expect("the test row is valid before the route table checks its undeclared overlap");
     let error = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(RouteEntry {
-            precedence: 10,
-            selector: RouteSelector::new(SHADOWS_LIST_BUCKETS),
-            op_name: "example:Ping",
-            path_shape: "/",
-        })
+        .dialect(&dialect)
         .build()
         .expect_err("shadows ListBuckets");
     assert_eq!(error.rule(), RuleRef::ROUTE);
@@ -212,7 +231,7 @@ fn the_service_is_one_arc_wide_and_cheap_to_clone() {
 fn a_vendor_operation_assembles_beside_the_aws_ones() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     assert_eq!(service.operations().collect::<Vec<_>>(), ["example:Ping"]);
@@ -223,7 +242,7 @@ fn a_vendor_operation_assembles_beside_the_aws_ones() {
 fn a_large_custom_clock_skew_is_refused_at_assembly() {
     let error = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .clock(rustfs_gateway::FixedClock::at_unix_seconds(1))
         .build()
         .expect_err("the clock is decades away from the system clock");
@@ -235,7 +254,7 @@ fn a_large_custom_clock_skew_is_refused_at_assembly() {
 fn an_acknowledged_custom_clock_is_named_in_the_posture() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .clock_with_skew_ack(
             rustfs_gateway::FixedClock::at_unix_seconds(1),
             rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
@@ -250,7 +269,7 @@ fn an_acknowledged_custom_clock_is_named_in_the_posture() {
 fn a_checked_custom_clock_is_named_in_the_posture() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .clock(rustfs_gateway::system_clock())
         .build()
         .expect("the custom source agrees with system time");
