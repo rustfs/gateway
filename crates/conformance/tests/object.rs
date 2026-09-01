@@ -191,3 +191,18 @@ fn the_truncated_write_is_selected_and_skipped_for_its_socket_reason() {
     let reason = outcome.skip_reason.as_deref().unwrap_or_default();
     assert!(reason.contains("half_close"), "{reason}");
 }
+
+/// Negative — the disconnected write stays in the object domain even though this target cannot
+/// open the fresh connection used to prove the aborted prefix was never published.
+#[test]
+fn the_disconnected_write_is_selected_and_skipped_for_its_socket_reason() {
+    let report = run_object_domain();
+    let outcome = report
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.id == "c-object-0055")
+        .expect("c-object-0055 is in the object domain");
+    assert_eq!(outcome.verdict, Verdict::Skipped);
+    let reason = outcome.skip_reason.as_deref().unwrap_or_default();
+    assert!(reason.contains("fresh connection"), "{reason}");
+}

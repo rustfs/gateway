@@ -230,6 +230,30 @@ fn a_truncated_object_write_is_refused_and_leaves_no_readable_object() {
     );
 }
 
+/// Negative — closing the client socket mid-PutObject cannot publish the received prefix.
+///
+/// The first exchange proves the scripted connection teardown ran; the fresh-connection GET is
+/// the falsifiable durability assertion. A complete PutObject/readback pair is the other-direction
+/// control, so an observer permanently reporting "missing" cannot satisfy this test.
+#[test]
+fn an_aborted_object_write_never_becomes_readable() {
+    let report = run_over_a_socket("c-object-0055");
+    let outcome = only(&report);
+    assert_eq!(
+        outcome.verdict,
+        Verdict::Passed,
+        "failures={:?}; skip={:?}",
+        failures(outcome),
+        outcome.skip_reason
+    );
+
+    let in_process = run("c-object-0055");
+    let in_process_outcome = only(&in_process);
+    assert_eq!(in_process_outcome.verdict, Verdict::Skipped);
+    let reason = in_process_outcome.skip_reason.as_deref().unwrap_or_default();
+    assert!(reason.contains("fresh connection"), "{reason}");
+}
+
 /// Negative — the socket reaches a real overlapping conditional-write conflict.
 ///
 /// Both requests are dispatched on distinct connections, and the fixture rendezvous holds the
