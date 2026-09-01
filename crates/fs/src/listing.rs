@@ -14,23 +14,26 @@
 
 //! Persistent current-object listing for the filesystem reference backend.
 //!
-//! Responsible for: ListObjects V1/V2 filtering, delimiter rollup, page sizing, marker resumption,
-//! and opaque V2 cursor minting over the version store's one current-object snapshot.
-//! NOT responsible for: version selection, upload listing, multipart completion, or lifecycle.
-//! Upstream: `versioning::current_object_records` and the shared pagination contract. Downstream:
-//! the production listing handlers registered by [`super::FsBackend::register_listing`].
+//! Responsible for: ListObjects V1/V2 and ListMultipartUploads filtering, delimiter rollup, page
+//! sizing, marker resumption, and opaque V2 cursor minting over persisted storage authorities.
+//! NOT responsible for: version selection, multipart completion, or lifecycle.
+//! Upstream: `versioning::current_object_records`, multipart upload records, and the shared List
+//! pagination contract. Downstream: production handlers registered by
+//! [`super::FsBackend::register_listing`].
 
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use rustfs_gateway::dto::{
-    CommonPrefix, ListObjects, ListObjectsOutput, ListObjectsV2, ListObjectsV2Output, Object, StorageClass,
+    CommonPrefix, ListMultipartUploads, ListMultipartUploadsOutput, ListObjects, ListObjectsOutput, ListObjectsV2,
+    ListObjectsV2Output, MultipartUpload, Object, StorageClass,
 };
 use rustfs_gateway::{
     CursorSpec, ETag, ErrorCode, Handler, HandlerError, HandlerResult, ObjectKey, Req, Resp, Timestamp, key_count,
 };
 use sha2::{Digest as _, Sha256};
 
+use super::uploads::UploadRecord;
 use super::versioning::CurrentObjectRecord;
 use super::{FsBackend, storage_error};
 
@@ -71,19 +74,22 @@ fn candidate_order(left: &Candidate, right: &Candidate) -> Ordering {
         .then_with(|| left.kind_tag().cmp(right.kind_tag()))
 }
 
+fn rolled_up_prefix(name: &str, prefix: &str, delimiter: Option<&str>) -> Option<String> {
+    let delimiter = delimiter.filter(|value| !value.is_empty())?;
+    let remainder = name.strip_prefix(prefix)?;
+    let index = remainder.find(delimiter)?;
+    Some(format!("{prefix}{}", &remainder[..index + delimiter.len()]))
+}
+
 fn build_candidates(records: Vec<CurrentObjectRecord>, prefix: &str, delimiter: Option<&str>) -> Vec<Candidate> {
-    let delimiter = delimiter.filter(|value| !value.is_empty());
     let mut candidates = Vec::new();
     let mut common_prefixes = BTreeSet::<String>::new();
     for record in records {
-        let Some(remainder) = record.key.strip_prefix(prefix) else {
+        if !record.key.starts_with(prefix) {
             continue;
-        };
-        if let Some(delimiter) = delimiter
-            && let Some(index) = remainder.find(delimiter)
-        {
-            let end = index + delimiter.len();
-            common_prefixes.insert(format!("{prefix}{}", &remainder[..end]));
+        }
+        if let Some(common_prefix) = rolled_up_prefix(&record.key, prefix, delimiter) {
+            common_prefixes.insert(common_prefix);
             continue;
         }
         candidates.push(Candidate::Object(record));
@@ -156,8 +162,9 @@ fn page_entries(page: &[Candidate]) -> Result<(Vec<Object>, Vec<CommonPrefix>), 
     Ok((contents, common_prefixes))
 }
 
-fn page_size(value: i32) -> Result<usize, HandlerError> {
-    usize::try_from(value).map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "max-keys must be a non-negative integer"))
+fn page_size(value: i32, parameter: &str) -> Result<usize, HandlerError> {
+    usize::try_from(value)
+        .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, format!("{parameter} must be a non-negative integer")))
 }
 
 impl Handler<ListObjects> for FsBackend {
@@ -168,7 +175,7 @@ impl Handler<ListObjects> for FsBackend {
         let delimiter = input.delimiter;
         let marker = input.marker.unwrap_or_default();
         let max_keys_value = input.max_keys.unwrap_or(1000);
-        let max_keys = page_size(max_keys_value)?;
+        let max_keys = page_size(max_keys_value, "max-keys")?;
         let records = self.current_object_records(bucket.as_str()).await?;
         let candidates = build_candidates(records, &prefix, delimiter.as_deref());
         let start = marker_index(&candidates, &marker);
@@ -204,7 +211,7 @@ impl Handler<ListObjectsV2> for FsBackend {
         let prefix = input.prefix.unwrap_or_default();
         let delimiter = input.delimiter;
         let max_keys_value = input.max_keys.unwrap_or(1000);
-        let max_keys = page_size(max_keys_value)?;
+        let max_keys = page_size(max_keys_value, "max-keys")?;
         let records = self.current_object_records(bucket.as_str()).await?;
         let candidates = build_candidates(records, &prefix, delimiter.as_deref());
         let continuation = input.continuation_token.as_ref().map(|token| token.as_str());
@@ -245,6 +252,131 @@ impl Handler<ListObjectsV2> for FsBackend {
             next_continuation_token,
             start_after: input.start_after,
             ..ListObjectsV2Output::default()
+        }))
+    }
+}
+
+enum UploadCandidate {
+    Upload(UploadRecord),
+    CommonPrefix(String),
+}
+
+impl UploadCandidate {
+    fn name(&self) -> &str {
+        match self {
+            Self::Upload(record) => &record.key,
+            Self::CommonPrefix(prefix) => prefix,
+        }
+    }
+
+    fn upload_id(&self) -> Option<&str> {
+        match self {
+            Self::Upload(record) => record.upload_id.as_deref(),
+            Self::CommonPrefix(_) => None,
+        }
+    }
+}
+
+fn upload_candidate_order(left: &UploadCandidate, right: &UploadCandidate) -> Ordering {
+    left.name().as_bytes().cmp(right.name().as_bytes()).then_with(|| {
+        left.upload_id()
+            .unwrap_or_default()
+            .as_bytes()
+            .cmp(right.upload_id().unwrap_or_default().as_bytes())
+    })
+}
+
+fn build_upload_candidates(records: Vec<UploadRecord>, prefix: &str, delimiter: Option<&str>) -> Vec<UploadCandidate> {
+    let mut candidates = Vec::new();
+    let mut common_prefixes = BTreeSet::<String>::new();
+    for record in records {
+        if !record.key.starts_with(prefix) {
+            continue;
+        }
+        if let Some(common_prefix) = rolled_up_prefix(&record.key, prefix, delimiter) {
+            common_prefixes.insert(common_prefix);
+            continue;
+        }
+        candidates.push(UploadCandidate::Upload(record));
+    }
+    candidates.extend(common_prefixes.into_iter().map(UploadCandidate::CommonPrefix));
+    candidates.sort_by(upload_candidate_order);
+    candidates
+}
+
+fn upload_marker_index(candidates: &[UploadCandidate], key_marker: &str, upload_id_marker: &str) -> Result<usize, HandlerError> {
+    if key_marker.is_empty() && !upload_id_marker.is_empty() {
+        return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, "upload-id-marker requires key-marker"));
+    }
+    Ok(
+        candidates.partition_point(|candidate| match candidate.name().as_bytes().cmp(key_marker.as_bytes()) {
+            Ordering::Less => true,
+            Ordering::Greater => false,
+            Ordering::Equal if upload_id_marker.is_empty() => true,
+            Ordering::Equal => candidate
+                .upload_id()
+                .is_none_or(|upload_id| upload_id.as_bytes() <= upload_id_marker.as_bytes()),
+        }),
+    )
+}
+
+fn upload_entries(page: &[UploadCandidate]) -> Result<(Vec<MultipartUpload>, Vec<CommonPrefix>), HandlerError> {
+    let mut uploads = Vec::new();
+    let mut common_prefixes = Vec::new();
+    for candidate in page {
+        match candidate {
+            UploadCandidate::Upload(record) => uploads.push(MultipartUpload {
+                upload_id: record.upload_id.clone(),
+                key: Some(ObjectKey::new(record.key.clone()).map_err(|_| storage_error())?),
+                initiated: record.initiated.map(Timestamp::from_secs),
+                ..MultipartUpload::default()
+            }),
+            UploadCandidate::CommonPrefix(prefix) => common_prefixes.push(CommonPrefix { prefix: prefix.clone() }),
+        }
+    }
+    Ok((uploads, common_prefixes))
+}
+
+impl Handler<ListMultipartUploads> for FsBackend {
+    async fn call(&self, request: Req<ListMultipartUploads>) -> HandlerResult<ListMultipartUploads> {
+        let input = request.into_input();
+        let bucket = input.bucket;
+        let prefix = input.prefix.unwrap_or_default();
+        let delimiter = input.delimiter;
+        let key_marker = input.key_marker.unwrap_or_default();
+        let upload_id_marker = input.upload_id_marker.unwrap_or_default();
+        let max_uploads_value = input.max_uploads.unwrap_or(1000);
+        let max_uploads = page_size(max_uploads_value, "max-uploads")?;
+        let records = self.active_upload_records(bucket.as_str()).await?;
+        let candidates = build_upload_candidates(records, &prefix, delimiter.as_deref());
+        let start = upload_marker_index(&candidates, &key_marker, &upload_id_marker)?;
+        let available = candidates.len().saturating_sub(start);
+        let page_len = available.min(max_uploads);
+        let is_truncated = max_uploads > 0 && available > page_len;
+        let page = &candidates[start..start + page_len];
+        let (next_key_marker, next_upload_id_marker) = if is_truncated {
+            page.last().map_or((None, None), |candidate| {
+                (Some(candidate.name().to_owned()), candidate.upload_id().map(str::to_owned))
+            })
+        } else {
+            (None, None)
+        };
+        let (uploads, common_prefixes) = upload_entries(page)?;
+
+        Ok(Resp::new(ListMultipartUploadsOutput {
+            bucket,
+            key_marker: Some(key_marker),
+            upload_id_marker: Some(upload_id_marker),
+            next_key_marker,
+            prefix: Some(prefix),
+            delimiter,
+            next_upload_id_marker,
+            max_uploads: max_uploads_value,
+            is_truncated,
+            uploads,
+            common_prefixes,
+            encoding_type: input.encoding_type,
+            ..ListMultipartUploadsOutput::default()
         }))
     }
 }
