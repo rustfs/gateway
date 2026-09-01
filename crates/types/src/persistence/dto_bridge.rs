@@ -1,0 +1,282 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Generated DTO bridges for historical persistence XML.
+//!
+//! Responsible for: lossless conversion between generated HTTP DTOs and persisted bucket-configuration shapes.
+//! NOT responsible for: parsing XML directly, HTTP policy, routing, or migration-oracle comparison.
+//! Upstream: sibling persistence codecs. Downstream: RustFS metadata consumers using generated DTOs.
+
+use core::fmt;
+
+use super::{
+    PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedEncryptionByDefault,
+    PersistedPublicAccessBlockConfiguration, PersistenceCodecError, parse_bucket_encryption, parse_public_access_block,
+    serialize_bucket_encryption, serialize_public_access_block,
+};
+
+/// A generated DTO cannot be represented by the historical persistence shape.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PersistenceBridgeError {
+    /// The underlying persistence codec refused the value.
+    Codec(PersistenceCodecError),
+    /// A present generated DTO member has no lossless historical persistence representation.
+    UnsupportedMember(&'static str),
+}
+
+impl fmt::Display for PersistenceBridgeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Codec(error) => write!(formatter, "persistence codec refused the DTO: {error}"),
+            Self::UnsupportedMember(member) => write!(formatter, "persistence format cannot represent DTO member {member}"),
+        }
+    }
+}
+
+impl std::error::Error for PersistenceBridgeError {}
+
+impl From<PersistenceCodecError> for PersistenceBridgeError {
+    fn from(error: PersistenceCodecError) -> Self {
+        Self::Codec(error)
+    }
+}
+
+/// Parses persisted Bucket Encryption bytes directly into the generated HTTP DTO.
+///
+/// The historical format has no `BlockedEncryptionTypes` member, so decoded rules leave that
+/// generated DTO field absent. The opposite direction refuses a present member instead of
+/// silently dropping it.
+///
+/// # Errors
+///
+/// Returns [`PersistenceCodecError`] under the same conditions as
+/// [`parse_bucket_encryption`].
+pub fn parse_bucket_encryption_dto(input: &[u8]) -> Result<crate::dto::ServerSideEncryptionConfiguration, PersistenceCodecError> {
+    let persisted = parse_bucket_encryption(input)?;
+    Ok(crate::dto::ServerSideEncryptionConfiguration {
+        rules: persisted
+            .rules
+            .into_iter()
+            .map(|rule| crate::dto::ServerSideEncryptionRule {
+                apply_server_side_encryption_by_default: rule.apply_server_side_encryption_by_default.map(|default| {
+                    crate::dto::ServerSideEncryptionByDefault {
+                        sse_algorithm: crate::dto::SseAlgorithm::custom(default.sse_algorithm),
+                        kms_master_key_id: default.kms_master_key_id,
+                    }
+                }),
+                bucket_key_enabled: rule.bucket_key_enabled,
+                blocked_encryption_types: None,
+            })
+            .collect(),
+    })
+}
+
+/// Serializes the generated Bucket Encryption DTO with the historical persistence writer.
+///
+/// # Errors
+///
+/// Returns [`PersistenceBridgeError::UnsupportedMember`] when a rule carries
+/// `BlockedEncryptionTypes`, because the historical persistence shape has no lossless slot for
+/// that wrapper.
+pub fn serialize_bucket_encryption_dto(
+    value: &crate::dto::ServerSideEncryptionConfiguration,
+) -> Result<Vec<u8>, PersistenceBridgeError> {
+    let rules = value
+        .rules
+        .iter()
+        .map(|rule| {
+            if rule.blocked_encryption_types.is_some() {
+                return Err(PersistenceBridgeError::UnsupportedMember(
+                    "ServerSideEncryptionRule.BlockedEncryptionTypes",
+                ));
+            }
+            Ok(PersistedBucketEncryptionRule {
+                apply_server_side_encryption_by_default: rule.apply_server_side_encryption_by_default.as_ref().map(|default| {
+                    PersistedEncryptionByDefault {
+                        sse_algorithm: default.sse_algorithm.as_str().to_owned(),
+                        kms_master_key_id: default.kms_master_key_id.clone(),
+                    }
+                }),
+                bucket_key_enabled: rule.bucket_key_enabled,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(serialize_bucket_encryption(&PersistedBucketEncryptionConfiguration { rules }))
+}
+
+/// Parses persisted Public Access Block bytes directly into the generated HTTP DTO.
+///
+/// This is the production persistence bridge: it keeps the old persistence parser as the one
+/// byte-level authority while letting metadata consumers use the same typed shape as the PUT and
+/// GET operation codecs.
+///
+/// # Errors
+///
+/// Returns [`PersistenceCodecError`] under the same malformed, wrong-root, duplicate-field, and
+/// invalid-boolean conditions as [`parse_public_access_block`].
+pub fn parse_public_access_block_dto(input: &[u8]) -> Result<crate::dto::PublicAccessBlockConfiguration, PersistenceCodecError> {
+    let persisted = parse_public_access_block(input)?;
+    Ok(crate::dto::PublicAccessBlockConfiguration {
+        block_public_acls: persisted.block_public_acls,
+        ignore_public_acls: persisted.ignore_public_acls,
+        block_public_policy: persisted.block_public_policy,
+        restrict_public_buckets: persisted.restrict_public_buckets,
+    })
+}
+
+/// Serializes the generated Public Access Block DTO with the historical persistence writer.
+///
+/// Field presence is retained: an omitted switch remains absent rather than being materialized as
+/// `false`. The resulting member order is the old-writer persistence contract, not the HTTP GET
+/// response order.
+#[must_use]
+pub fn serialize_public_access_block_dto(value: &crate::dto::PublicAccessBlockConfiguration) -> Vec<u8> {
+    serialize_public_access_block(&PersistedPublicAccessBlockConfiguration {
+        block_public_acls: value.block_public_acls,
+        ignore_public_acls: value.ignore_public_acls,
+        block_public_policy: value.block_public_policy,
+        restrict_public_buckets: value.restrict_public_buckets,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::dto::{
+        BlockedEncryptionTypes, PublicAccessBlockConfiguration, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
+        ServerSideEncryptionRule, SseAlgorithm,
+    };
+
+    use super::{
+        PersistenceBridgeError, PersistenceCodecError, parse_bucket_encryption_dto, parse_public_access_block_dto,
+        serialize_bucket_encryption_dto, serialize_public_access_block_dto,
+    };
+
+    #[test]
+    fn public_access_block_dto_bridge_preserves_presence_and_old_writer_order() {
+        let dto = PublicAccessBlockConfiguration {
+            block_public_acls: Some(true),
+            ignore_public_acls: Some(false),
+            block_public_policy: Some(true),
+            restrict_public_buckets: None,
+        };
+
+        let bytes = serialize_public_access_block_dto(&dto);
+        assert_eq!(
+            bytes,
+            b"<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><IgnorePublicAcls>false</IgnorePublicAcls></PublicAccessBlockConfiguration>"
+        );
+        let parsed = parse_public_access_block_dto(&bytes).expect("the bridge reads its own persistence bytes");
+        assert_eq!(parsed.block_public_acls, dto.block_public_acls);
+        assert_eq!(parsed.ignore_public_acls, dto.ignore_public_acls);
+        assert_eq!(parsed.block_public_policy, dto.block_public_policy);
+        assert_eq!(parsed.restrict_public_buckets, dto.restrict_public_buckets);
+    }
+
+    #[test]
+    fn public_access_block_dto_bridge_rejects_a_wrong_family() {
+        assert_eq!(
+            parse_public_access_block_dto(b"<Tagging></Tagging>").expect_err("a different family must fail"),
+            PersistenceCodecError::WrongRoot
+        );
+    }
+
+    #[test]
+    fn public_access_block_dto_bridge_rejects_a_duplicate_switch() {
+        assert_eq!(
+            parse_public_access_block_dto(
+                b"<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><BlockPublicAcls>false</BlockPublicAcls></PublicAccessBlockConfiguration>"
+            )
+            .expect_err("a repeated switch must fail"),
+            PersistenceCodecError::DuplicateField
+        );
+    }
+
+    #[test]
+    fn public_access_block_dto_bridge_rejects_a_noncanonical_boolean() {
+        assert_eq!(
+            parse_public_access_block_dto(
+                b"<PublicAccessBlockConfiguration><RestrictPublicBuckets>1</RestrictPublicBuckets></PublicAccessBlockConfiguration>"
+            )
+            .expect_err("numeric boolean syntax must fail"),
+            PersistenceCodecError::InvalidBoolean
+        );
+    }
+
+    #[test]
+    fn bucket_encryption_dto_bridge_preserves_the_old_writer_order() {
+        let dto = ServerSideEncryptionConfiguration {
+            rules: vec![ServerSideEncryptionRule {
+                apply_server_side_encryption_by_default: Some(ServerSideEncryptionByDefault {
+                    sse_algorithm: SseAlgorithm::AWS_KMS,
+                    kms_master_key_id: Some("key-id".to_owned()),
+                }),
+                bucket_key_enabled: Some(true),
+                blocked_encryption_types: None,
+            }],
+        };
+
+        let bytes = serialize_bucket_encryption_dto(&dto).expect("the standard DTO is persistence-representable");
+        assert_eq!(
+            bytes,
+            b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><KMSMasterKeyID>key-id</KMSMasterKeyID><SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>"
+        );
+        let parsed = parse_bucket_encryption_dto(&bytes).expect("the bridge reads its own persistence bytes");
+        assert_eq!(parsed.rules.len(), 1);
+        let rule = &parsed.rules[0];
+        assert_eq!(rule.bucket_key_enabled, Some(true));
+        let default = rule
+            .apply_server_side_encryption_by_default
+            .as_ref()
+            .expect("the default encryption action remains present");
+        assert_eq!(default.sse_algorithm.as_str(), "aws:kms");
+        assert_eq!(default.kms_master_key_id.as_deref(), Some("key-id"));
+        assert!(rule.blocked_encryption_types.is_none());
+    }
+
+    #[test]
+    fn bucket_encryption_dto_bridge_rejects_a_wrong_family() {
+        assert_eq!(
+            parse_bucket_encryption_dto(b"<Tagging></Tagging>").expect_err("a different family must fail"),
+            PersistenceCodecError::WrongRoot
+        );
+    }
+
+    #[test]
+    fn bucket_encryption_dto_bridge_refuses_a_member_the_persistence_shape_cannot_hold() {
+        let dto = ServerSideEncryptionConfiguration {
+            rules: vec![ServerSideEncryptionRule {
+                blocked_encryption_types: Some(BlockedEncryptionTypes {
+                    encryption_type: Vec::new(),
+                }),
+                ..ServerSideEncryptionRule::default()
+            }],
+        };
+
+        assert_eq!(
+            serialize_bucket_encryption_dto(&dto).expect_err("an unsupported wrapper must not be dropped"),
+            PersistenceBridgeError::UnsupportedMember("ServerSideEncryptionRule.BlockedEncryptionTypes")
+        );
+    }
+
+    #[test]
+    fn bucket_encryption_dto_bridge_rejects_a_duplicate_nested_switch() {
+        assert_eq!(
+            parse_bucket_encryption_dto(
+                b"<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>true</BucketKeyEnabled><BucketKeyEnabled>false</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>"
+            )
+            .expect_err("a duplicate nested switch must fail"),
+            PersistenceCodecError::DuplicateField
+        );
+    }
+}

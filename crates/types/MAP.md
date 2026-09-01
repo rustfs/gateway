@@ -7,6 +7,7 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `src/lib.rs` | Scalar modules and generated DTO mounts. | Start here for a types task. |
 | `src/ext.rs` | Runtime XML extension vtables, borrowed codec policy, typed values, and persisted rewrite guard. | Registering an extension field, selecting unknown-element behavior, or preventing lossy persisted XML replacement. |
 | `src/persistence.rs` | Feature-independent persisted bucket-configuration codecs and decision seams for the implemented families. | Adding a persistence family or changing production metadata behavior. |
+| `src/persistence/dto_bridge.rs` | Lossless bridges between generated HTTP DTOs and historical persistence shapes. | Connecting a generated configuration DTO to persisted XML without duplicating a codec. |
 | `src/persistence/accelerate_payment.rs` | Production Accelerate and Request Payment persistence codecs and runtime decisions. | Changing those two metadata families or their historical XML compatibility. |
 | `src/persistence/lifecycle.rs` | Full Lifecycle persistence structure, parser, timestamp normalization, and old-order writer. | Changing Lifecycle metadata compatibility or action semantics. |
 | `../dialect-minio/src/lib.rs` | Clean-room concrete `DelMarkerExpiration` registration consuming the generic lifecycle extension point. | Reviewing the first real runtime extension consumer without putting a vendor type in this crate. |
