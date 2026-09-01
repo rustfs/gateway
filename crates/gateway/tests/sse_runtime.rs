@@ -52,10 +52,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rustfs_gateway::{
-    AuthRequirement, CodecError, EncodedResponse, FixedClock, Handler, HandlerError, HandlerResult, KeyFingerprint, KeySide,
-    MetaView, Operation, OperationCodec, OperationFloor, OperationSpec, Predicate, Req, RequestBody, ResourceShape, Resp,
-    ResponseBody, S3Service, ServiceBuilder, SigService, SseConfig, StageFilter, TargetKind, TransportSecurity, WireHead,
-    WireResponse, allow_when, check_part, collect, presented_customer_key, wire_filter,
+    AuthRequirement, CodecError, EncodedResponse, FixedClock, Handler, HandlerError, HandlerResult, KeyFingerprint, MetaView,
+    Operation, OperationCodec, OperationFloor, OperationSpec, Predicate, Req, RequestBody, ResourceShape, Resp, ResponseBody,
+    S3Service, ServiceBuilder, SigService, SseConfig, StageFilter, TargetKind, TransportSecurity, WireHead, WireResponse,
+    allow_when, check_part, collect, wire_filter,
 };
 use rustfs_gateway_core::{Dialect, DialectOverlay, DialectRoute, HandlerDeadlineClass, OverlayRow};
 use rustfs_gateway_types::ErrorCode;
@@ -92,8 +92,10 @@ struct Backend {
 struct SsePut;
 struct SsePart;
 
-/// What the decoder read off the head: the fingerprint the framework has already validated, read
-/// again through the one public function that applies the same rules.
+/// Deliberately empty decoder output.
+///
+/// The backend must use `Req::sse`, not reconstruct the proof from a codec-specific field. Keeping
+/// an always-empty slot makes a mutation back to `request.input().0` compile and fail at run time.
 struct PresentedKey(Option<KeyFingerprint>);
 
 struct Answered;
@@ -239,12 +241,8 @@ impl Operation for SsePart {
 /// and the assertion is that the framework's response invariant removes the key anyway while
 /// leaving the algorithm and the digest, which AWS does return.
 fn decode_presented(request: &MetaView<'_>) -> Result<PresentedKey, CodecError> {
-    match presented_customer_key(request, KeySide::Target) {
-        Ok(fingerprint) => Ok(PresentedKey(fingerprint)),
-        // Unreachable through the pipeline: `enforce` refused this request several stages ago.
-        // Answered rather than unwrapped.
-        Err(rejection) => Err(CodecError::invalid_request(rejection.reason())),
-    }
+    let _ = request;
+    Ok(PresentedKey(None))
 }
 
 fn encode_echoing_everything(status: u16) -> Result<EncodedResponse, CodecError> {
@@ -278,16 +276,22 @@ impl OperationCodec for SsePart {
 impl Handler<SsePut> for Backend {
     async fn call(&self, request: Req<SsePut>) -> HandlerResult<SsePut> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        if request.input().0.is_some() {
+            return Err(HandlerError::internal_error("the fixture decoder unexpectedly carried an SSE proof"));
+        }
         if let Ok(mut bound) = self.bound.lock() {
-            *bound = request.input().0;
+            *bound = request.sse().customer_key_fingerprint().copied();
         }
         Ok(Resp::new(Answered))
     }
 
     async fn call_with_context(&self, request: Req<SsePut>, _context: rustfs_gateway::HandlerContext) -> HandlerResult<SsePut> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        if request.input().0.is_some() {
+            return Err(HandlerError::internal_error("the fixture decoder unexpectedly carried an SSE proof"));
+        }
         if let Ok(mut bound) = self.bound.lock() {
-            *bound = request.input().0;
+            *bound = request.sse().customer_key_fingerprint().copied();
         }
         Ok(Resp::new(Answered))
     }
@@ -302,7 +306,7 @@ impl Handler<SsePart> for Backend {
         };
         // The cross-request rule the framework cannot apply for a backend, applied by the backend
         // through the framework's one function.
-        check_part(bound.as_ref(), request.input().0.as_ref()).map_err(|_| {
+        check_part(bound.as_ref(), request.sse().customer_key_fingerprint()).map_err(|_| {
             HandlerError::new(ErrorCode::INVALID_ARGUMENT, "the part's encryption headers do not match the upload's")
         })?;
         Ok(Resp::new(Answered))
@@ -316,7 +320,7 @@ impl Handler<SsePart> for Backend {
         };
         // The cross-request rule the framework cannot apply for a backend, applied by the backend
         // through the framework's one function.
-        check_part(bound.as_ref(), request.input().0.as_ref()).map_err(|_| {
+        check_part(bound.as_ref(), request.sse().customer_key_fingerprint()).map_err(|_| {
             HandlerError::new(ErrorCode::INVALID_ARGUMENT, "the part's encryption headers do not match the upload's")
         })?;
         Ok(Resp::new(Answered))
@@ -421,6 +425,10 @@ async fn a_customer_key_over_a_declared_tls_connection_is_served() {
     let response = send(&service, OBJECT, &trio(KEY_A, MD5_A), Some(TransportSecurity::Encrypted)).await;
     assert_eq!(response.status().as_u16(), 200, "body: {:?}", response.body());
     assert_eq!(backend.calls.load(Ordering::SeqCst), 1, "the handler must have run");
+    assert!(
+        backend.bound.lock().expect("the fixture's upload state").is_some(),
+        "the handler received an empty decoder field instead of the pipeline-produced SSE proof"
+    );
 }
 
 /// Negative — the same request with no transport declaration is refused, and the handler is never

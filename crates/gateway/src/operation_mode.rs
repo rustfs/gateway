@@ -62,7 +62,8 @@ pub(crate) trait OperationMode {
         Read: FnOnce(S) -> ReadFuture + Send + 'a,
         ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
-        InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<Authorized>), E>> + Send + 'a;
+        InputFuture:
+            Future<Output = Result<(Vec<Decision>, RequestConfig<Authorized>, rustfs_gateway_core::SseEnforced), E>> + Send + 'a;
 }
 
 pub(crate) struct DynamicMode<'a> {
@@ -106,14 +107,15 @@ impl OperationMode for DynamicMode<'_> {
         Read: FnOnce(S) -> ReadFuture + Send + 'a,
         ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
-        InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<Authorized>), E>> + Send + 'a,
+        InputFuture:
+            Future<Output = Result<(Vec<Decision>, RequestConfig<Authorized>, rustfs_gateway_core::SseEnforced), E>> + Send + 'a,
     {
         Box::pin(async move {
             let route_state = authorize_route().await.map_err(StaticDispatchError::Route)?;
             let (body_state, body) = read_body(route_state).await.map_err(StaticDispatchError::Body)?;
             let decoded = entry.decode(meta, body).map_err(StaticDispatchError::Codec)?;
             let resources = entry.resources(&decoded).map_err(StaticDispatchError::Codec)?;
-            let (decisions, mut request_config) = authorize_input_callback(body_state, resources)
+            let (decisions, mut request_config, _sse) = authorize_input_callback(body_state, resources)
                 .await
                 .map_err(StaticDispatchError::Input)?;
             let authorized = entry.authorize(decoded, &decisions).map_err(StaticDispatchError::Denied)?;
@@ -197,7 +199,8 @@ where
         Read: FnOnce(S) -> ReadFuture + Send + 'a,
         ReadFuture: Future<Output = Result<(T, RequestBody), E>> + Send + 'a,
         Input: FnOnce(T, Vec<OwnedResource>) -> InputFuture + Send + 'a,
-        InputFuture: Future<Output = Result<(Vec<Decision>, RequestConfig<Authorized>), E>> + Send + 'a,
+        InputFuture:
+            Future<Output = Result<(Vec<Decision>, RequestConfig<Authorized>, rustfs_gateway_core::SseEnforced), E>> + Send + 'a,
     {
         Operations::dispatch(operation, meta, Arc::clone(&self.backend), authorize_route, read_body, authorize_input)
     }
@@ -257,19 +260,18 @@ mod tests {
                 move |(), _| {
                     input_callbacks.fetch_add(1, Ordering::SeqCst);
                     async {
-                        Ok::<_, S3Error>((
-                            Vec::new(),
-                            RequestConfig::enter(Arc::new(crate::ServiceConfig::new(1)))
-                                .wire()
-                                .targeted()
-                                .routed()
-                                .governed(crate::Lease::admit())
-                                .meta_auth()
-                                .route_authorized()
-                                .guarded()
-                                .decoded()
-                                .authorized(),
-                        ))
+                        let sse = crate::request_config::sse_proof_for_test();
+                        let config = RequestConfig::enter(Arc::new(crate::ServiceConfig::new(1)))
+                            .wire()
+                            .targeted()
+                            .routed()
+                            .governed(crate::Lease::admit())
+                            .meta_auth()
+                            .route_authorized()
+                            .guarded(sse.clone())
+                            .decoded()
+                            .authorized();
+                        Ok::<_, S3Error>((Vec::new(), config, sse))
                     }
                 },
             )

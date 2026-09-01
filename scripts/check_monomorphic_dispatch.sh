@@ -47,7 +47,7 @@ except (OSError, UnicodeError) as error:
 
 if static_source.count("pub async fn dispatch_with_handler<") != 1:
     fail("static dispatch does not expose one sealed handler-policy injection point")
-if static_source.count("invoke_handler(backend, authorized.into_request(), request_guard)") != 1:
+if static_source.count("invoke_handler(backend, authorized.into_request(sse), request_guard)") != 1:
     fail("static dispatch bypasses the injected handler policy after authorization")
 if monomorphic_source.count("StaticOperation::<O>::dispatch_with_handler(") != 1:
     fail("monomorphic dispatch does not use the sealed handler-policy injection point")

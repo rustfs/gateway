@@ -29,12 +29,12 @@ crates/gateway/src/ext/governor.rs:391
 crates/gateway/src/ext/governor/default.rs:531
 crates/gateway/src/ext/governor/meter.rs:63
 crates/gateway/src/ext/governor/meter.rs:90
-crates/gateway/src/ext/oplayer.rs:286
+crates/gateway/src/ext/oplayer.rs:288
 crates/gateway/src/conn/metrics.rs:128
-crates/gateway/src/operation_mode.rs:279
+crates/gateway/src/operation_mode.rs:281
 crates/gateway/src/probe.rs:60
 crates/gateway/src/probe.rs:69
-crates/gateway/src/request_config.rs:58
+crates/gateway/src/request_config.rs:63
 crates/gateway/src/request_deadline.rs:301
 crates/gateway/src/request_deadline.rs:308
 crates/gateway/src/service.rs:242

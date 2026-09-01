@@ -237,7 +237,7 @@ mod tests {
         let next = Next::new(&empty, &call);
         assert_eq!(next.depth(), 0);
         let error = next
-            .run(Req::new(Default::default()))
+            .run(Req::new(Default::default(), crate::request_config::sse_proof_for_test()))
             .await
             .expect_err("the terminal refuses");
         assert_eq!(error.message(), "the terminal");
@@ -260,7 +260,9 @@ mod tests {
         };
         let layers = [make(&seen), make(&seen)];
         let call = Refusing;
-        let _ = Next::new(&layers, &call).run(Req::new(Default::default())).await;
+        let _ = Next::new(&layers, &call)
+            .run(Req::new(Default::default(), crate::request_config::sse_proof_for_test()))
+            .await;
         assert_eq!(seen.lock().expect("not poisoned").as_slice(), [1, 0]);
     }
 
@@ -279,7 +281,7 @@ mod tests {
         let layers = [outer, inner];
         let call = Refusing;
         let response = Next::new(&layers, &call)
-            .run(Req::new(Default::default()))
+            .run(Req::new(Default::default(), crate::request_config::sse_proof_for_test()))
             .await
             .expect("the outer layer answered");
         assert_eq!(response.status(), 200);

@@ -546,13 +546,17 @@ impl Registry {
     ///
     /// Returns a fail-closed authorization error if an operation claiming `NoDerived` fails to
     /// derive its empty resource set.
-    pub fn authorize_and_invoke_no_derived<O>(&self, input: O::Input) -> Result<Option<Invocation<O>>, crate::Denied>
+    pub fn authorize_and_invoke_no_derived<O>(
+        &self,
+        input: O::Input,
+        sse: crate::SseEnforced,
+    ) -> Result<Option<Invocation<O>>, crate::Denied>
     where
         O: Operation<DerivedResources = crate::NoDerived>,
     {
         let decoded = crate::authz::prepare_input::<O>(input).map_err(|_| crate::Denied::indeterminate())?;
         let authorized = crate::authz::authorize_input(decoded, |_| crate::Decision::Indeterminate)?;
-        Ok(self.handlers.invoke(authorized))
+        Ok(self.handlers.invoke(authorized, sse))
     }
 
     /// How many operations are registered.

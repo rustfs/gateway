@@ -302,6 +302,15 @@ pub struct SseEnforced {
 }
 
 impl SseEnforced {
+    #[cfg(test)]
+    pub(crate) const fn empty_for_unit_test() -> Self {
+        Self {
+            customer: None,
+            copy_source: None,
+            managed: None,
+        }
+    }
+
     /// The digest of the key the request presented for the target object, if it presented one.
     ///
     /// This is the value a `CreateMultipartUpload` handler binds to its upload id, and the value

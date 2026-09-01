@@ -32,12 +32,28 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
 
-use http::{HeaderMap, HeaderName, HeaderValue, Method};
+use bytes::Bytes;
+use http::{HeaderMap, HeaderName, HeaderValue, Method, Request};
 use rustfs_gateway_core::route::{
     ArnForm, HostClass, Predicate, RouteEntry, RouteRequestParts, RouteSelector, RouteTable, ShadowingDecls, ShadowingPolicy,
     TargetKind,
 };
-use rustfs_gateway_http::{HeaderView, Limits, QueryIndex, QueryView};
+use rustfs_gateway_core::{MetaView, SseConfig, SseEnforced, TransportSecurity};
+use rustfs_gateway_http::{HeaderView, Limits, QueryIndex, QueryView, WireRequest};
+
+/// An empty-head enforcement proof for direct handler tests.
+pub fn sse_proof() -> SseEnforced {
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .body(Bytes::new())
+        .expect("valid proof fixture");
+    let wire = WireRequest::accept(request, &Limits::default()).expect("accepted proof fixture");
+    let meta = MetaView::of(&wire, TargetKind::Service).expect("service proof fixture");
+    rustfs_gateway_core::sse::enforce(&meta, TransportSecurity::Encrypted, &SseConfig::strict())
+        .expect("an empty encrypted request passes SSE enforcement")
+}
 
 /// An owned request the router can be pointed at.
 pub struct Req {

@@ -94,7 +94,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 ## Known gaps
 
 - Request bodies are buffered, bounded by `ServiceConfig::max_buffered_body_bytes` and operation caps.
-- `SseEnforced` is positional rather than carried on `Req<O>`; changing that needs a core API ADR.
+- `SseEnforced` crosses dynamic and monomorphic dispatch on `Req<O>` under ADR-0017.
 - Hyper consumes connection intent in the server runtime; the optional self-held driver observes it on its owned socket.
 - The header map is cloned once because `WireRequest` does not expose the accepted signing view.
 - `x-amz-id-2` is a fixed uppercase-hex token, intentionally not AWS-shaped.

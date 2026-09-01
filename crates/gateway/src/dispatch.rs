@@ -173,7 +173,7 @@ impl OperationDispatch {
         }));
         let invoke: Invoke = Arc::new(move |request: ErasedRequest, request_config: RequestConfig<Authorized>| {
             let (cancellation, context) = HandlerCancellationSource::pair();
-            let call = handler(request, context);
+            let call = handler(request, context, request_config.sse()?.clone());
             let deadline_class = O::spec()
                 .deadline_class()
                 .ok_or_else(|| HandlerError::internal_error("registered operation is missing its handler deadline class"))?;
@@ -689,7 +689,7 @@ mod tests {
             .governed(crate::Lease::admit())
             .meta_auth()
             .route_authorized()
-            .guarded()
+            .guarded(crate::request_config::sse_proof_for_test())
             .decoded()
             .authorized();
         dispatch.invoke(authorized, config)

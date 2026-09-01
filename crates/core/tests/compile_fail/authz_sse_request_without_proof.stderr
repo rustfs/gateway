@@ -1,0 +1,15 @@
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+  --> tests/compile_fail/authz_sse_request_without_proof.rs:31:13
+   |
+31 |     let _ = Req::<PutObject>::new(input);
+   |             ^^^^^^^^^^^^^^^^^^^^^------- argument #2 of type `SseEnforced` is missing
+   |
+note: associated function defined here
+  --> src/handler.rs
+   |
+   |     pub fn new(input: O::Input, sse: crate::SseEnforced) -> Self {
+   |            ^^^
+help: provide the argument
+   |
+31 |     let _ = Req::<PutObject>::new(input, /* SseEnforced */);
+   |                                        +++++++++++++++++++

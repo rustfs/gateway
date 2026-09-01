@@ -193,9 +193,9 @@ production_transitions = (
     "let config = config.governed(lease);",
     "let config = config.meta_auth();",
     "config: config.route_authorized(),",
-    "config: state.config.guarded().with_body_monitor(body_monitor),",
+    "config: state.config.guarded(sse).with_body_monitor(body_monitor),",
     "let config = state.config.decoded();",
-    "Ok((decisions, config.authorized()))",
+    "let config = config.authorized();",
 )
 cursor = -1
 for transition in production_transitions:

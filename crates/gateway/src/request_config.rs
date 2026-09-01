@@ -20,6 +20,7 @@
 //! Upstream: [`crate::S3Service`]. Downstream: the ordered pipeline in `service.rs`.
 
 use crate::{ConfigSnapshot, Lease};
+use rustfs_gateway_core::SseEnforced;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 pub(crate) struct Entered;
@@ -32,6 +33,10 @@ pub(crate) struct RouteAuthorized;
 pub(crate) struct Guarded;
 pub(crate) struct Decoded;
 pub(crate) struct Authorized;
+
+pub(crate) trait CarriesSse {}
+
+impl CarriesSse for Authorized {}
 
 /// How a handler completed cleanup after its deadline won the response race.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -70,6 +75,7 @@ pub(crate) struct RequestConfig<S> {
     request_cancellation: Option<tokio::sync::watch::Receiver<bool>>,
     body_monitor: Option<crate::request_body::BodyMonitor>,
     governor_lease: Option<Lease>,
+    sse: Option<SseEnforced>,
     stage: core::marker::PhantomData<fn() -> S>,
 }
 
@@ -81,6 +87,7 @@ impl RequestConfig<Entered> {
             request_cancellation: None,
             body_monitor: None,
             governor_lease: None,
+            sse: None,
             stage: core::marker::PhantomData,
         }
     }
@@ -127,7 +134,8 @@ impl RequestConfig<MetaAuth> {
 }
 
 impl RequestConfig<RouteAuthorized> {
-    pub(crate) fn guarded(self) -> RequestConfig<Guarded> {
+    pub(crate) fn guarded(mut self, sse: SseEnforced) -> RequestConfig<Guarded> {
+        self.sse = Some(sse);
         self.advance()
     }
 }
@@ -150,6 +158,15 @@ impl RequestConfig<Decoded> {
 }
 
 impl<S> RequestConfig<S> {
+    pub(crate) fn sse(&self) -> Result<&SseEnforced, rustfs_gateway_core::HandlerError>
+    where
+        S: CarriesSse,
+    {
+        self.sse
+            .as_ref()
+            .ok_or_else(|| rustfs_gateway_core::HandlerError::internal_error("the guarded pipeline stage lost its SSE proof"))
+    }
+
     pub(crate) fn config(&self) -> &ConfigSnapshot {
         &self.snapshot
     }
@@ -181,7 +198,27 @@ impl<S> RequestConfig<S> {
             request_cancellation: self.request_cancellation,
             body_monitor: self.body_monitor,
             governor_lease: self.governor_lease,
+            sse: self.sse,
             stage: core::marker::PhantomData,
         }
     }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)] // Fixed, in-memory test input; no external failure reaches this helper.
+pub(crate) fn sse_proof_for_test() -> SseEnforced {
+    use bytes::Bytes;
+    use rustfs_gateway_core::{MetaView, TargetKind, TransportSecurity};
+    use rustfs_gateway_http::{Limits, WireRequest};
+
+    let request = http::Request::builder()
+        .method(http::Method::GET)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .body(Bytes::new())
+        .expect("valid proof fixture");
+    let wire = WireRequest::accept(request, &Limits::default()).expect("accepted proof fixture");
+    let meta = MetaView::of(&wire, TargetKind::Service).expect("service proof fixture");
+    rustfs_gateway_core::sse::enforce(&meta, TransportSecurity::Encrypted, &rustfs_gateway_core::SseConfig::strict())
+        .expect("an empty encrypted request passes SSE enforcement")
 }

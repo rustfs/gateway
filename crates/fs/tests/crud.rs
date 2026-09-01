@@ -29,8 +29,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bytes::Bytes;
 use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
 use rustfs_gateway::{
-    BucketName, ByteStream, ClockSkewAck, Credentials, FixedClock, Handler, Limits, ObjectKey, RegionSet, Req, S3Service,
-    SigV4Authenticator, StaticCredentials, WireRequest, allow_when, collect, dto,
+    BucketName, ByteStream, ClockSkewAck, Credentials, FixedClock, Handler, Limits, MetaView, ObjectKey, RegionSet, Req,
+    S3Service, SigV4Authenticator, SseConfig, SseEnforced, StaticCredentials, TargetKind, TransportSecurity, WireRequest,
+    allow_when, collect, dto,
 };
 use rustfs_gateway_fs::FsBackend;
 use sha2::{Digest as _, Sha256};
@@ -38,6 +39,19 @@ use sha2::{Digest as _, Sha256};
 const SIGNED_AT_SECONDS: i64 = 1_767_323_045;
 const SIGNED_AT: &str = "20260102T030405Z";
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
+
+fn sse_proof() -> SseEnforced {
+    let request = http::Request::builder()
+        .method(http::Method::GET)
+        .uri("/")
+        .header("host", "s3.example.com")
+        .body(Bytes::new())
+        .expect("valid proof fixture");
+    let wire = WireRequest::accept(request, &Limits::default()).expect("accepted proof fixture");
+    let meta = MetaView::of(&wire, TargetKind::Service).expect("service proof fixture");
+    rustfs_gateway::enforce_sse(&meta, TransportSecurity::Encrypted, &SseConfig::strict())
+        .expect("an empty encrypted request passes SSE enforcement")
+}
 
 struct TestRoot(PathBuf);
 
@@ -523,13 +537,16 @@ async fn traversal_spelling_cannot_escape_the_backend_root() {
     let key = ObjectKey::new("../outside").expect("a valid opaque S3 key");
     let response = Handler::<dto::PutObject>::call(
         backend.as_ref(),
-        Req::new(dto::PutObjectInput {
-            bucket,
-            key,
-            body: Some(ByteStream::from_bytes(Bytes::from_static(b"inside"))),
-            content_length: 6,
-            ..dto::PutObjectInput::default()
-        }),
+        Req::new(
+            dto::PutObjectInput {
+                bucket,
+                key,
+                body: Some(ByteStream::from_bytes(Bytes::from_static(b"inside"))),
+                content_length: 6,
+                ..dto::PutObjectInput::default()
+            },
+            sse_proof(),
+        ),
     )
     .await
     .expect("the opaque key is stored");

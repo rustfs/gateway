@@ -434,8 +434,8 @@ impl<O: Operation> Authorized<O> {
 
     /// Consumes the proof into the request shape a handler receives.
     #[must_use]
-    pub fn into_request(self) -> crate::Req<O> {
-        crate::Req::from_authorized(self)
+    pub fn into_request(self, sse: crate::SseEnforced) -> crate::Req<O> {
+        crate::Req::from_authorized(self, sse)
     }
 
     pub(crate) fn into_parts(self) -> (O::Input, O::DerivedResources, AuthorizedRead) {
