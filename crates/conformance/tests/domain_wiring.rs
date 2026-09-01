@@ -129,10 +129,10 @@ const GATES: &[(&str, Wiring)] = &[
     // The default CI run claims AWS. These MinIO-only slash-collapse cases are executed by the
     // dedicated profile command and are the deliberate profile-gated skips here.
     ("naming", Wiring::Runs(&["c-naming-0025", "c-naming-0026", "c-naming-0027"])),
-    // `c-object-0030` writes a request head with neither a declared length nor chunked framing.
-    // Only a transport that puts bytes on a socket can express that; the in-process target is handed
-    // a parsed `http::Request`. `tests/object.rs` reads the same skip from the other side.
-    ("object", Wiring::Runs(&["c-object-0030"])),
+    // `c-object-0030` writes a raw request head, and `c-object-0054` half-closes a declared-length
+    // body. Only a transport that puts bytes on a socket can express either; the in-process target
+    // is handed a parsed `http::Request`. `tests/object.rs` reads both skips from the other side.
+    ("object", Wiring::Runs(&["c-object-0030", "c-object-0054"])),
     ("range", Wiring::Runs(&[])),
     ("replication", Wiring::Runs(&[])),
     ("select-restore", Wiring::Runs(&[])),

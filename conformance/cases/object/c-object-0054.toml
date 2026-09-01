@@ -1,0 +1,79 @@
+# c-object-0054 — a PutObject body cut short cannot publish an object.
+
+[case]
+id = "c-object-0054"
+schema_version = 1
+title = "A PutObject body shorter than Content-Length is refused and remains unreadable"
+rationale = """
+An interrupted write must fail as an incomplete HTTP message, but the status alone is not the
+durability guarantee: a gateway could publish the bytes it received and still return the correct
+error. The second exchange therefore reads the same key and proves that no partial object crossed
+the commit boundary."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["wire-bytes", "error-shape"]
+timeout_ms = 20000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "PutObject stores the request payload as the named object only when the upload succeeds."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9112#section-6.3"
+summary = "A message body shorter than its declared Content-Length is an incomplete message."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "cut-the-object-short"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/truncated-object"
+headers = { "content-length" = "1048576" }
+sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }
+
+[[exchanges.request.chunks]]
+raw_utf8 = "only a few bytes of a megabyte"
+
+[[exchanges.request.chunks]]
+action = "half_close"
+delay_ms = 50
+
+[exchanges.expect]
+kind = "response"
+status = 400
+headers_absent = ["etag"]
+
+[exchanges.expect.error]
+code = "IncompleteBody"
+request_id_present = true
+
+[exchanges.expect.timing]
+terminate_within_ms = 10000
+
+[[exchanges]]
+name = "the-object-is-not-readable"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/truncated-object"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true

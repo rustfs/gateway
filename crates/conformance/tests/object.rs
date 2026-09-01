@@ -176,3 +176,18 @@ fn the_undeclared_length_case_is_selected_and_skipped_for_its_stated_reason() {
     let reason = outcome.skip_reason.as_deref().unwrap_or_default();
     assert!(reason.contains("raw_head_utf8"), "{reason}");
 }
+
+/// Negative — the truncated write stays in the object domain even though this target cannot
+/// perform the client's half-close that makes the declared-length body incomplete.
+#[test]
+fn the_truncated_write_is_selected_and_skipped_for_its_socket_reason() {
+    let report = run_object_domain();
+    let outcome = report
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.id == "c-object-0054")
+        .expect("c-object-0054 is in the object domain");
+    assert_eq!(outcome.verdict, Verdict::Skipped);
+    let reason = outcome.skip_reason.as_deref().unwrap_or_default();
+    assert!(reason.contains("half_close"), "{reason}");
+}
