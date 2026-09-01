@@ -49,6 +49,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cors_tagging;
+pub mod ext;
 pub mod persistence;
 pub mod placeholder;
 mod scalar;

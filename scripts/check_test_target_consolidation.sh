@@ -201,6 +201,7 @@ core_modules = (
     "dto_cold_split",
     "encryption_roundtrip",
     "error_resolution",
+    "ext_field_policy",
     "golden",
     "hot_path",
     "lifecycle_roundtrip",

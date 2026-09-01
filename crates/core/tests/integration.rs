@@ -59,6 +59,9 @@ mod encryption_roundtrip;
 #[path = "error_resolution.rs"]
 mod error_resolution;
 
+#[path = "ext_field_policy.rs"]
+mod ext_field_policy;
+
 #[path = "golden.rs"]
 mod golden;
 
