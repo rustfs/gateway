@@ -109,6 +109,7 @@ async fn enabled_versions_and_delete_markers_survive_restart() {
     let census_body = body(&census);
     assert_eq!(census.status(), 200, "{census_body}");
     assert!(census_body.find(&second_id) < census_body.find(&first_id));
+    assert!(census_body.contains("<LastModified>2026-01-02T03:04:05.000Z</LastModified>"));
 
     let deleted = exchange(&running, signed(http::Method::DELETE, "/archive/report", Bytes::new())).await;
     assert_eq!(deleted.status(), 204);

@@ -36,8 +36,9 @@ use rustfs_gateway::dto::{
     Part, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
-    BucketName, ByteStream, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey,
-    RecordedUpload, Req, ResourceVisibility, Resp, ServiceBuilder, Timestamp, UploadIdClaim, collect, resolve_upload,
+    BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
+    ObjectKey, RecordedUpload, Req, ResourceVisibility, Resp, ServiceBuilder, Timestamp, UploadIdClaim, collect, resolve_upload,
+    system_clock,
 };
 use sha2::Sha256;
 use tokio::io::AsyncWriteExt as _;
@@ -142,6 +143,7 @@ pub struct FsBackend {
     root: PathBuf,
     temporary_id: AtomicU64,
     version_lock: tokio::sync::Mutex<()>,
+    clock: Arc<dyn Clock>,
 }
 
 impl FsBackend {
@@ -152,6 +154,15 @@ impl FsBackend {
     /// Returns an I/O error when the root cannot be created or resolved, or when the root itself
     /// is a symbolic link.
     pub fn open(root: impl AsRef<Path>) -> io::Result<Self> {
+        Self::open_with_clock(root, Arc::new(system_clock()))
+    }
+
+    /// Opens or creates a backend with the supplied wall clock.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error under the same conditions as [`Self::open`].
+    pub fn open_with_clock(root: impl AsRef<Path>, clock: Arc<dyn Clock>) -> io::Result<Self> {
         std::fs::create_dir_all(root.as_ref())?;
         let metadata = std::fs::symlink_metadata(root.as_ref())?;
         if metadata.file_type().is_symlink() {
@@ -167,6 +178,7 @@ impl FsBackend {
             root: std::fs::canonicalize(root.as_ref())?,
             temporary_id: AtomicU64::new(0),
             version_lock: tokio::sync::Mutex::new(()),
+            clock,
         })
     }
 

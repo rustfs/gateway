@@ -60,7 +60,10 @@ impl Drop for TestRoot {
 }
 
 fn service(root: &TestRoot) -> (Arc<FsBackend>, S3Service) {
-    let backend = Arc::new(FsBackend::open(&root.0).expect("a usable test root"));
+    let backend = Arc::new(
+        FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
+            .expect("a usable test root"),
+    );
     let credentials =
         Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid fixture credentials")));
     let builder = backend.register_crud(

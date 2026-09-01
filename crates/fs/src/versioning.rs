@@ -22,7 +22,6 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use rustfs_gateway::dto::{
@@ -191,11 +190,7 @@ impl FsBackend {
         let held = self.version_records(bucket).await?;
         let sequence = self.next_version_sequence(bucket, &held).await?;
         let version_id = version_id.map_or_else(|| opaque_version_id(bucket, key, sequence), ToOwned::to_owned);
-        let modified = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .ok()
-            .and_then(|duration| i64::try_from(duration.as_secs()).ok())
-            .unwrap_or_default();
+        let modified = self.clock.now().unix_seconds();
         let digest = Sha256::digest(format!("{sequence}\0{key}\0{version_id}").as_bytes());
         let versions = self.versions_path(bucket);
         let destination = versions.join(format!("v-{sequence:020}-{}", hex::encode(digest)));
