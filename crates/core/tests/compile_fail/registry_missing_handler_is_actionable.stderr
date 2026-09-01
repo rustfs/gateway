@@ -1,0 +1,18 @@
+error[E0277]: backend `PartialBackend` does not handle the S3 operation `RestoreObject`
+  --> tests/compile_fail/registry_missing_handler_is_actionable.rs:29:23
+   |
+29 |     require_restore::<PartialBackend>();
+   |                       ^^^^^^^^^^^^^^ no `impl Handler<RestoreObject>` for `PartialBackend`
+   |
+help: the trait `rustfs_gateway_core::Handler<RestoreObject>` is not implemented for `PartialBackend`
+  --> tests/compile_fail/registry_missing_handler_is_actionable.rs:24:1
+   |
+24 | struct PartialBackend;
+   | ^^^^^^^^^^^^^^^^^^^^^
+   = note: write `impl Handler<RestoreObject> for PartialBackend` in its own `ops/<snake_name>.rs`, or put `#[rustfs_gateway_macros::handlers]` on an inherent impl block whose method name is the snake_case spelling of `RestoreObject`
+   = note: an operation with no handler is answered with 501; a backend that must be complete should assert it with `RouterBuilder::require(OperationSet::aws_full())`
+note: required by a bound in `require_restore`
+  --> tests/compile_fail/registry_missing_handler_is_actionable.rs:26:23
+   |
+26 | fn require_restore<B: Handler<RestoreObject>>() {}
+   |                       ^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `require_restore`
