@@ -487,6 +487,7 @@ impl InProcess {
                 .policy_source(policy_from(|_| Err(PolicyError::unavailable())))
                 .authorizer(allow_when(|_| true)),
             "c-authz-1010" => builder.authorizer(FixedDecision(Decision::Indeterminate)),
+            "c-object-0053" => builder.authorizer(security::HeadObjectPolicy),
             "c-authz-1014" => {
                 let source = Arc::clone(&self.authz_policy_version);
                 builder

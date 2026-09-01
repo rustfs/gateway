@@ -27,6 +27,34 @@ use rustfs_gateway::{
 
 const BUCKET_OWNER_ACCOUNT_ID: &str = "123456789012";
 
+pub(super) struct HeadObjectPolicy;
+
+fn head_object_decision(request: &AuthzRequest<'_>) -> Decision {
+    if request.operation != "HeadObject" {
+        return Decision::Allow;
+    }
+    match request.key.map(|key| key.as_str()) {
+        Some("denied/existing.txt" | "denied/missing.txt") => Decision::Deny,
+        Some("uncertain/existing.txt") => Decision::Indeterminate,
+        _ => Decision::Allow,
+    }
+}
+
+impl Authorizer for HeadObjectPolicy {
+    fn authorize_route<'a>(&'a self, _context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        Box::pin(async move { head_object_decision(request) })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        let decisions = request.decide_all(Decision::Allow, |_| Decision::Allow);
+        Box::pin(async move { decisions })
+    }
+}
+
 pub(super) struct FixtureBucketOwner {
     pub(super) available: bool,
 }

@@ -301,6 +301,16 @@ fn both_production_drivers_expose_a_chunked_copy_result_body() {
     }
 }
 
+/// Negative — a production Hyper response cannot leak an authorization error document merely
+/// because the refused operation uses HEAD. The case carries allowed HeadObject and same-action
+/// GetObject controls so a fixture stuck on deny cannot satisfy this test.
+#[test]
+fn a_denied_head_object_is_bodyless_over_production_hyper() {
+    let report = run_over_production("c-object-0053", ProductionDriver::Hyper);
+    let outcome = only(&report);
+    assert_eq!(outcome.verdict, Verdict::Passed, "{:?}", failures(outcome));
+}
+
 /// **Negative — the in-process control for both of the above.**
 ///
 /// Neither half is answerable without a socket, and this transport says so rather than approximating
