@@ -19,6 +19,9 @@
 //! NOT responsible for: versioning, lifecycle policy, ordinary listing, or example binaries.
 //! Upstream: `rustfs-gateway-fs` and the public gateway facade. Downstream: the crate verification gate.
 
+#[path = "crud/versioning.rs"]
+mod versioning;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -57,7 +60,10 @@ impl Drop for TestRoot {
 }
 
 fn service(root: &TestRoot) -> (Arc<FsBackend>, S3Service) {
-    let backend = Arc::new(FsBackend::open(&root.0).expect("a usable test root"));
+    let backend = Arc::new(
+        FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
+            .expect("a usable test root"),
+    );
     let credentials =
         Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid fixture credentials")));
     let builder = backend.register_crud(
@@ -70,15 +76,18 @@ fn service(root: &TestRoot) -> (Arc<FsBackend>, S3Service) {
             ),
     );
     let service = backend
-        .register_multipart(builder)
+        .register_versioning(backend.register_multipart(builder))
         .build()
         .expect("the reference registry is a complete assembly");
     (backend, service)
 }
 
 fn signed(method: http::Method, target: &str, body: Bytes) -> http::Request<Bytes> {
+    signed_with_headers(method, target, body, http::HeaderMap::new())
+}
+
+fn signed_with_headers(method: http::Method, target: &str, body: Bytes, mut headers: http::HeaderMap) -> http::Request<Bytes> {
     let (path, query) = target.split_once('?').map_or((target, ""), |(path, query)| (path, query));
-    let mut headers = http::HeaderMap::new();
     headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
     let payload = if (method == http::Method::PUT && target.matches('/').count() >= 2) || !body.is_empty() {
         let digest: [u8; 32] = Sha256::digest(&body).into();
@@ -201,10 +210,13 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "CreateMultipartUpload",
             "DeleteBucket",
             "DeleteObject",
+            "GetBucketVersioning",
             "GetObject",
             "HeadBucket",
             "HeadObject",
+            "ListObjectVersions",
             "ListParts",
+            "PutBucketVersioning",
             "PutObject",
             "UploadPart"
         ]
