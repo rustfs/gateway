@@ -25,6 +25,9 @@ mod versioning;
 #[path = "crud/listing.rs"]
 mod listing;
 
+#[path = "crud/multipart_listing.rs"]
+mod multipart_listing;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -231,6 +234,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "GetObject",
             "HeadBucket",
             "HeadObject",
+            "ListMultipartUploads",
             "ListObjectVersions",
             "ListObjects",
             "ListObjectsV2",

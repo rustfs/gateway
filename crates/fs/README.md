@@ -5,7 +5,7 @@ to prove that the public `Handler` and `ServiceBuilder` APIs are sufficient to a
 service without a private adapter.
 
 This bounded implementation supports bucket and version-aware object CRUD plus `ListObjects` and
-`ListObjectsV2`,
+`ListObjectsV2`, `ListMultipartUploads`,
 `GetBucketVersioning`, `PutBucketVersioning`, `ListObjectVersions`, `CreateMultipartUpload`,
 `UploadPart`, `ListParts`, `CompleteMultipartUpload`, and `AbortMultipartUpload`.
 `FsBackend::supported_operations`, `FsBackend::register_crud`, and
@@ -17,6 +17,12 @@ Both object listings derive their current-object view from the persisted version
 by their exact UTF-8 bytes, and roll delimiter groups into page-counted common prefixes. V1 markers
 and V2 scoped opaque continuation tokens resume within that same ordering. Prefix, start-after,
 maximum page size, URL encoding, and restart recovery all use that one persisted ordering.
+
+Upload initiation records the opaque upload id and initiation time beside the existing bucket/key
+capability record. Upload listing validates and enumerates that same persisted authority, orders by
+the exact `(key, upload-id)` byte pair, rolls delimiter groups into page-counted common prefixes,
+and resumes with the required key/upload-id marker pair after restart. Abort and completion retire
+the authority before it can appear in a later page.
 
 Version records use opaque identifiers from a persistent monotonic sequence. Enabled buckets retain
 every object version and publish delete markers; suspended buckets replace only the `null` version.
@@ -31,7 +37,7 @@ and publishes the object with one rename. Abort retires the capability before re
 The backend is intentionally not production storage. It does not promise crash consistency,
 multi-process coordination, hostile concurrent filesystem mutation resistance, S3 minimum-part
 size enforcement, multipart checksum negotiation, version-aware multipart completion, lifecycle
-processing or upload listing. Bucket names never become raw path components
+processing. Bucket names never become raw path components
 and object keys never become paths; symbolic-link roots and storage components are refused.
 
 The remaining capabilities belong to later slices of rustfs/backlog#1741 rather than this core

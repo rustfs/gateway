@@ -16,7 +16,7 @@
 //!
 //! Responsible for: a small, inspectable persistence backend used to exercise real S3 handlers,
 //! including atomically published multipart uploads and persistent object versions.
-//! NOT responsible for: production durability, lifecycle policy, or ordinary object listing.
+//! NOT responsible for: production durability, lifecycle policy, or cross-process coordination.
 //! Upstream: `rustfs-gateway`. Downstream: examples and backend contract tests.
 
 #![doc = include_str!("../README.md")]
@@ -32,13 +32,12 @@ use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
     AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CreateBucket,
     CreateBucketOutput, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketOutput, DeleteObject,
-    GetBucketVersioning, GetObject, HeadBucket, HeadBucketOutput, HeadObject, ListObjectVersions, ListObjects, ListObjectsV2,
-    ListParts, ListPartsOutput, Part, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
+    GetBucketVersioning, GetObject, HeadBucket, HeadBucketOutput, HeadObject, ListMultipartUploads, ListObjectVersions,
+    ListObjects, ListObjectsV2, ListParts, ListPartsOutput, Part, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
-    ObjectKey, RecordedUpload, Req, ResourceVisibility, Resp, ServiceBuilder, Timestamp, UploadIdClaim, collect, resolve_upload,
-    system_clock,
+    ObjectKey, Req, ResourceVisibility, Resp, ServiceBuilder, Timestamp, UploadIdClaim, collect, resolve_upload, system_clock,
 };
 use sha2::Sha256;
 use tokio::io::AsyncWriteExt as _;
@@ -62,6 +61,7 @@ macro_rules! reference_operations {
             crud GetObject => "GetObject",
             crud HeadBucket => "HeadBucket",
             crud HeadObject => "HeadObject",
+            listing ListMultipartUploads => "ListMultipartUploads",
             versioning ListObjectVersions => "ListObjectVersions",
             listing ListObjects => "ListObjects",
             listing ListObjectsV2 => "ListObjectsV2",
@@ -134,23 +134,10 @@ macro_rules! register_listing_entries {
 }
 
 mod listing;
+mod uploads;
 mod versioning;
 
-#[derive(Clone)]
-struct UploadRecord {
-    bucket: String,
-    key: String,
-}
-
-impl RecordedUpload for UploadRecord {
-    fn bucket(&self) -> &str {
-        &self.bucket
-    }
-
-    fn key(&self) -> &str {
-        &self.key
-    }
-}
+use uploads::UploadRecord;
 
 /// A deliberately small filesystem reference backend.
 ///
@@ -345,32 +332,6 @@ impl FsBackend {
         Ok(entries.next_entry().await.map_err(|_| storage_error())?.is_none())
     }
 
-    fn read_upload_record(&self, bucket: &str, upload_id: &str) -> Option<UploadRecord> {
-        let upload = self.upload_path(bucket, upload_id);
-        let upload_metadata = std::fs::symlink_metadata(&upload).ok()?;
-        if !upload_metadata.is_dir() || upload_metadata.file_type().is_symlink() {
-            return None;
-        }
-        let parts = upload.join(PARTS_DIR);
-        let parts_metadata = std::fs::symlink_metadata(parts).ok()?;
-        if !parts_metadata.is_dir() || parts_metadata.file_type().is_symlink() {
-            return None;
-        }
-        let record = upload.join(UPLOAD_RECORD);
-        let record_metadata = std::fs::symlink_metadata(&record).ok()?;
-        if !record_metadata.is_file() || record_metadata.file_type().is_symlink() {
-            return None;
-        }
-        let encoded = std::fs::read_to_string(record).ok()?;
-        let mut lines = encoded.lines();
-        let bucket = String::from_utf8(hex::decode(lines.next()?).ok()?).ok()?;
-        let key = String::from_utf8(hex::decode(lines.next()?).ok()?).ok()?;
-        if lines.next().is_some() {
-            return None;
-        }
-        Some(UploadRecord { bucket, key })
-    }
-
     fn resolve_upload(
         &self,
         claim: &UploadIdClaim,
@@ -399,7 +360,13 @@ impl FsBackend {
         tokio::fs::create_dir(&temporary).await.map_err(|_| storage_error())?;
         let initialized = async {
             tokio::fs::create_dir(temporary.join(PARTS_DIR)).await?;
-            let record = format!("{}\n{}\n", hex::encode(bucket.as_str()), hex::encode(key.as_str()));
+            let record = format!(
+                "{}\n{}\n{}\n{}\n",
+                hex::encode(bucket.as_str()),
+                hex::encode(key.as_str()),
+                hex::encode(&upload_id),
+                self.clock.now().unix_seconds()
+            );
             let mut file = tokio::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
