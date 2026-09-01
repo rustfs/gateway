@@ -22,12 +22,12 @@
 use super::*;
 use std::time::Duration;
 
-const EXPIRE_ALL: &str = concat!(
+pub(super) const EXPIRE_ALL: &str = concat!(
     "<LifecycleConfiguration><Rule><Expiration><Days>1</Days></Expiration>",
     "<ID>expire-all</ID><Filter><Prefix></Prefix></Filter><Status>Enabled</Status>",
     "</Rule></LifecycleConfiguration>"
 );
-const EXPIRE_ALL_MD5: &str = "5Y4m5g4gmXjRJtprF5EAXA==";
+pub(super) const EXPIRE_ALL_MD5: &str = "5Y4m5g4gmXjRJtprF5EAXA==";
 const PREFIX_ONLY: &str = concat!(
     "<LifecycleConfiguration><Rule><Expiration><Days>1</Days></Expiration>",
     "<ID>prefix</ID><Filter><Prefix>expire/</Prefix></Filter><Status>Enabled</Status>",

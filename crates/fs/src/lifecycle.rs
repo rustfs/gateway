@@ -17,7 +17,8 @@
 //! Responsible for: validating one complete lifecycle document, atomically replacing its durable
 //! record, serving or deleting it after restart, and expiring selected current objects.
 //! NOT responsible for: transition actions, tag persistence, or scheduling repeated sweeps.
-//! Upstream: generated lifecycle DTOs and the historical persistence codec. Downstream: production handlers.
+//! Upstream: generated lifecycle DTOs and the historical persistence codec. Downstream: production handlers
+//! and the lifecycle scheduler.
 
 use std::io;
 
