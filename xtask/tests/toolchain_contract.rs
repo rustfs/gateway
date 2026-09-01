@@ -94,14 +94,23 @@ fn every_assembly_rule_reports_its_real_test_coverage() {
 }
 
 #[test]
-fn bootstrap_checks_drift_before_it_can_regenerate() {
+fn bootstrap_checks_generated_output_once_without_rewriting_it() {
+    assert_eq!(
+        BOOTSTRAP_SOURCE.matches("codegen::verify_generated()").count(),
+        1,
+        "bootstrap must verify generated output exactly once"
+    );
+    assert!(
+        !BOOTSTRAP_SOURCE.contains("codegen::regenerate()"),
+        "zero-diff verification makes immediate regeneration duplicate work"
+    );
     let verify = BOOTSTRAP_SOURCE
         .find("codegen::verify_generated()")
         .expect("bootstrap must verify generated output");
-    let regenerate = BOOTSTRAP_SOURCE
-        .find("codegen::regenerate()")
-        .expect("bootstrap must regenerate output");
-    assert!(verify < regenerate);
+    let compile = BOOTSTRAP_SOURCE
+        .find("cargo test could not start")
+        .expect("bootstrap must still compile the workspace tests");
+    assert!(verify < compile, "generated output must be verified before test compilation");
 }
 
 #[test]
