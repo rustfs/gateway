@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Owns HTTP/1.1 exchange execution, including concurrent dispatch over distinct observed client
-//! sockets. It does not select cases or judge observations. `runner` is upstream through [`Sut`],
-//! while the socket response classifier in the parent module is downstream.
+//! Responsible for: HTTP/1.1 exchange execution, including concurrent dispatch over distinct
+//! observed client sockets.
+//! Not responsible for: selecting cases or judging observations.
+//! Upstream: `runner` through [`Sut`].
+//! Downstream: the socket response classifier in the parent module.
 
 use std::collections::BTreeSet;
 
