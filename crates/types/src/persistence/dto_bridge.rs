@@ -21,9 +21,10 @@
 use core::fmt;
 
 use super::{
-    PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedEncryptionByDefault,
-    PersistedPublicAccessBlockConfiguration, PersistenceCodecError, parse_bucket_encryption, parse_public_access_block,
-    serialize_bucket_encryption, serialize_public_access_block,
+    PersistedAccelerateConfiguration, PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule,
+    PersistedEncryptionByDefault, PersistedPublicAccessBlockConfiguration, PersistedRequestPaymentConfiguration,
+    PersistenceCodecError, parse_accelerate, parse_bucket_encryption, parse_public_access_block, parse_request_payment,
+    serialize_accelerate, serialize_bucket_encryption, serialize_public_access_block, serialize_request_payment,
 };
 
 /// A generated DTO cannot be represented by the historical persistence shape.
@@ -50,6 +51,46 @@ impl From<PersistenceCodecError> for PersistenceBridgeError {
     fn from(error: PersistenceCodecError) -> Self {
         Self::Codec(error)
     }
+}
+
+/// Parses persisted Transfer Acceleration bytes directly into the generated HTTP DTO.
+///
+/// # Errors
+///
+/// Returns [`PersistenceCodecError`] under the same conditions as [`parse_accelerate`].
+pub fn parse_accelerate_dto(input: &[u8]) -> Result<crate::dto::AccelerateConfiguration, PersistenceCodecError> {
+    let persisted = parse_accelerate(input)?;
+    Ok(crate::dto::AccelerateConfiguration {
+        status: persisted.status.map(crate::dto::Status::custom),
+    })
+}
+
+/// Serializes the generated Transfer Acceleration DTO with the historical persistence writer.
+#[must_use]
+pub fn serialize_accelerate_dto(value: &crate::dto::AccelerateConfiguration) -> Vec<u8> {
+    serialize_accelerate(&PersistedAccelerateConfiguration {
+        status: value.status.as_ref().map(|status| status.as_str().to_owned()),
+    })
+}
+
+/// Parses persisted Request Payment bytes directly into the generated HTTP DTO.
+///
+/// # Errors
+///
+/// Returns [`PersistenceCodecError`] under the same conditions as [`parse_request_payment`].
+pub fn parse_request_payment_dto(input: &[u8]) -> Result<crate::dto::RequestPaymentConfiguration, PersistenceCodecError> {
+    let persisted = parse_request_payment(input)?;
+    Ok(crate::dto::RequestPaymentConfiguration {
+        payer: crate::dto::Payer::custom(persisted.payer),
+    })
+}
+
+/// Serializes the generated Request Payment DTO with the historical persistence writer.
+#[must_use]
+pub fn serialize_request_payment_dto(value: &crate::dto::RequestPaymentConfiguration) -> Vec<u8> {
+    serialize_request_payment(&PersistedRequestPaymentConfiguration {
+        payer: value.payer.as_str().to_owned(),
+    })
 }
 
 /// Parses persisted Bucket Encryption bytes directly into the generated HTTP DTO.
@@ -153,14 +194,95 @@ pub fn serialize_public_access_block_dto(value: &crate::dto::PublicAccessBlockCo
 #[cfg(test)]
 mod tests {
     use crate::dto::{
-        BlockedEncryptionTypes, PublicAccessBlockConfiguration, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
-        ServerSideEncryptionRule, SseAlgorithm,
+        AccelerateConfiguration, BlockedEncryptionTypes, Payer, PublicAccessBlockConfiguration, RequestPaymentConfiguration,
+        ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SseAlgorithm,
     };
 
     use super::{
-        PersistenceBridgeError, PersistenceCodecError, parse_bucket_encryption_dto, parse_public_access_block_dto,
-        serialize_bucket_encryption_dto, serialize_public_access_block_dto,
+        PersistenceBridgeError, PersistenceCodecError, parse_accelerate_dto, parse_bucket_encryption_dto,
+        parse_public_access_block_dto, parse_request_payment_dto, serialize_accelerate_dto, serialize_bucket_encryption_dto,
+        serialize_public_access_block_dto, serialize_request_payment_dto,
     };
+
+    #[test]
+    fn accelerate_dto_bridge_preserves_presence_and_the_old_writer_order() {
+        let dto = AccelerateConfiguration {
+            status: Some("Future".into()),
+        };
+
+        let bytes = serialize_accelerate_dto(&dto);
+        assert_eq!(bytes, b"<AccelerateConfiguration><Status>Future</Status></AccelerateConfiguration>");
+        let parsed = parse_accelerate_dto(&bytes).expect("the bridge reads its own persistence bytes");
+        assert_eq!(parsed.status.as_ref().map(|status| status.as_str()), Some("Future"));
+    }
+
+    #[test]
+    fn accelerate_dto_bridge_rejects_a_wrong_family() {
+        assert_eq!(
+            parse_accelerate_dto(b"<Tagging></Tagging>").expect_err("a different family must fail"),
+            PersistenceCodecError::WrongRoot
+        );
+    }
+
+    #[test]
+    fn accelerate_dto_bridge_rejects_a_duplicate_status() {
+        assert_eq!(
+            parse_accelerate_dto(
+                b"<AccelerateConfiguration><Status>Enabled</Status><Status>Suspended</Status></AccelerateConfiguration>"
+            )
+            .expect_err("a repeated status must fail"),
+            PersistenceCodecError::DuplicateField
+        );
+    }
+
+    #[test]
+    fn accelerate_dto_bridge_rejects_nested_status_content() {
+        assert_eq!(
+            parse_accelerate_dto(b"<AccelerateConfiguration><Status><Future>Enabled</Future></Status></AccelerateConfiguration>")
+                .expect_err("a scalar cannot carry nested content"),
+            PersistenceCodecError::UnexpectedScalarElement
+        );
+    }
+
+    #[test]
+    fn request_payment_dto_bridge_preserves_the_required_payer_and_old_writer_order() {
+        let dto = RequestPaymentConfiguration {
+            payer: Payer::custom("Future"),
+        };
+
+        let bytes = serialize_request_payment_dto(&dto);
+        assert_eq!(bytes, b"<RequestPaymentConfiguration><Payer>Future</Payer></RequestPaymentConfiguration>");
+        let parsed = parse_request_payment_dto(&bytes).expect("the bridge reads its own persistence bytes");
+        assert_eq!(parsed.payer.as_str(), "Future");
+    }
+
+    #[test]
+    fn request_payment_dto_bridge_rejects_a_wrong_family() {
+        assert_eq!(
+            parse_request_payment_dto(b"<Tagging></Tagging>").expect_err("a different family must fail"),
+            PersistenceCodecError::WrongRoot
+        );
+    }
+
+    #[test]
+    fn request_payment_dto_bridge_rejects_a_missing_payer() {
+        assert_eq!(
+            parse_request_payment_dto(b"<RequestPaymentConfiguration></RequestPaymentConfiguration>")
+                .expect_err("the required payer must be present"),
+            PersistenceCodecError::MissingRequiredField
+        );
+    }
+
+    #[test]
+    fn request_payment_dto_bridge_rejects_a_duplicate_payer() {
+        assert_eq!(
+            parse_request_payment_dto(
+                b"<RequestPaymentConfiguration><Payer>Requester</Payer><Payer>BucketOwner</Payer></RequestPaymentConfiguration>"
+            )
+            .expect_err("a repeated payer must fail"),
+            PersistenceCodecError::DuplicateField
+        );
+    }
 
     #[test]
     fn public_access_block_dto_bridge_preserves_presence_and_old_writer_order() {
