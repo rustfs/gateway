@@ -11,6 +11,7 @@ operation = "GetObject"
 tags = ["naming", "routing", "security"]
 timeout_ms = 10000
 quirks = ["q-naming-absolute-or-unc-0117"]
+applies_to = { profiles = ["aws", "strict"] }
 
 [[case.evidence]]
 url = "https://github.com/s3s-project/s3s/issues/102"

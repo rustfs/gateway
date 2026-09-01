@@ -71,11 +71,14 @@ use crate::observation::{
 };
 #[cfg(feature = "production-transports")]
 use crate::production::{ProductionDriver, ProductionServer};
-use crate::socket::{Announce, Connection, Demand, Listener, Pacer, ReadFailure, honour_the_services_intent, parse_head};
+#[cfg(test)]
+use crate::socket::{Announce, honour_the_services_intent};
+use crate::socket::{Connection, Demand, Listener, Pacer, ReadFailure, parse_head};
 use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::value::Value;
 
 mod exchange;
+mod server;
 #[cfg(test)]
 use exchange::read_concurrent_connection;
 
@@ -136,38 +139,6 @@ impl Conn {
             driver: Some(driver),
             pacer: Arc::new(Pacer::new()),
         }
-    }
-
-    /// The listener for this case, started on first use.
-    ///
-    /// One per case rather than one per exchange, because `[clock]` is a per-case declaration and
-    /// the clock is fixed at assembly time. The fixture behind it is shared with `inner`, so a
-    /// `prepare` that rebuilt the state is visible to a listener that was already running — which
-    /// is why the listener is dropped in `prepare` anyway: a new case means a new clock.
-    fn listener(&mut self, at_unix_seconds: i64, skew_ms: i64) -> Result<&Listener, SutError> {
-        if self.listener.is_none() {
-            let service = self.inner.assemble(at_unix_seconds, skew_ms)?;
-            self.listener = Some(Listener::start(service, honour_the_services_intent(), Announce::Matching)?);
-        }
-        self.listener
-            .as_ref()
-            .ok_or_else(|| SutError::Environment("the listener vanished between starting and using it".to_owned()))
-    }
-
-    fn addr(&mut self, at_unix_seconds: i64, skew_ms: i64) -> Result<std::net::SocketAddr, SutError> {
-        #[cfg(feature = "production-transports")]
-        if let Some(driver) = self.driver {
-            if self.production.is_none() {
-                let service = self.inner.assemble(at_unix_seconds, skew_ms)?;
-                self.production = Some(ProductionServer::start(service, driver)?);
-            }
-            return self
-                .production
-                .as_ref()
-                .ok_or_else(|| SutError::Environment("the production listener vanished after starting".to_owned()))?
-                .addr();
-        }
-        Ok(self.listener(at_unix_seconds, skew_ms)?.addr())
     }
 }
 
@@ -390,7 +361,7 @@ impl Sut for Conn {
         let head = self.head(&wire, &request_time)?;
         let budget = budget_of(plan.timeout_ms);
 
-        let addr = self.addr(fixed.unix_seconds, skew_ms)?;
+        let addr = self.addr(fixed.unix_seconds, skew_ms, plan.profile)?;
         // A connection that the previous exchange left closed is replaced rather than written to.
         // `connection_after` has already recorded the state it was in, so nothing is hidden by
         // opening another one; writing into a dead socket would turn a measured close into an
@@ -415,11 +386,13 @@ impl Sut for Conn {
         if let Some(production) = &self.production {
             production.enqueue_pacer(&pacer);
         } else if fresh {
-            self.listener(fixed.unix_seconds, skew_ms)?.enqueue_pacer(&pacer);
+            self.listener(fixed.unix_seconds, skew_ms, plan.profile)?
+                .enqueue_pacer(&pacer);
         }
         #[cfg(not(feature = "production-transports"))]
         if fresh {
-            self.listener(fixed.unix_seconds, skew_ms)?.enqueue_pacer(&pacer);
+            self.listener(fixed.unix_seconds, skew_ms, plan.profile)?
+                .enqueue_pacer(&pacer);
         }
         let connection = self
             .connection

@@ -11,6 +11,7 @@ operation = "GetObject"
 tags = ["naming", "routing", "encoding", "security"]
 timeout_ms = 10000
 quirks = ["q-naming-0001"]
+applies_to = { profiles = ["aws", "strict"] }
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html"

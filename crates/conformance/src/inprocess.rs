@@ -91,6 +91,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{collections::BTreeMap, path::PathBuf};
 mod conditional_race;
+mod profile;
 mod security;
 mod sigv2;
 use crate::exec::ServiceRuntime;
@@ -100,7 +101,7 @@ use crate::observation::{
     ConnectionState, Observation, Outcome, StreamTermination, decode_event_stream, has_event_stream_content_type,
     late_error_offset,
 };
-use crate::sut::{ExchangePlan, Sut, SutError};
+use crate::sut::{ExchangePlan, Profile, Sut, SutError};
 use crate::time;
 use crate::value::Value;
 use security::{FixedDecision, FixtureBucketOwner};
@@ -307,7 +308,7 @@ impl InProcess {
     ///
     /// Rebuilt per exchange rather than once, because the clock is fixed at assembly time and is a
     /// per-case declaration. Assembly is a few table inserts; a stale clock would be a wrong answer.
-    pub(crate) fn assemble(&self, at_unix_seconds: i64, skew_ms: i64) -> Result<S3Service, SutError> {
+    pub(crate) fn assemble(&self, at_unix_seconds: i64, skew_ms: i64, profile: Profile) -> Result<S3Service, SutError> {
         let backend = Arc::new(Stub::new(Arc::clone(&self.state)));
         let credentials = Credentials::new(VALID_ACCESS_KEY, VALID_SECRET)
             .map_err(|error| SutError::Environment(format!("the fixture credentials are not valid: {error}")))?;
@@ -375,7 +376,9 @@ impl InProcess {
         let deadlines = HandlerDeadlineConfig::default()
             .try_with_commit_progress(crate::sut::COMMIT_PROGRESS_DEADLINE)
             .unwrap_or_default();
+        let names = profile::name_policy(profile);
         let builder = ServiceBuilder::new()
+            .name_policy(names)
             .register::<dto::AbortMultipartUpload, _>(Arc::clone(&backend))
             .register::<dto::CompleteMultipartUpload, _>(Arc::clone(&backend))
             .register::<dto::CopyObject, _>(Arc::clone(&backend))
@@ -1296,7 +1299,7 @@ impl Sut for InProcess {
         if let Ok(mut fixture) = self.state.lock() {
             fixture.now = fixed.unix_seconds;
         }
-        let service = self.assemble(fixed.unix_seconds, skew_ms)?;
+        let service = self.assemble(fixed.unix_seconds, skew_ms, plan.profile)?;
         let wire = self.read_request(&plan.request)?;
         let arrival_timing_unobserved = wire
             .steps
