@@ -39,12 +39,14 @@ the version authority. Abort retires the capability before removing its parts.
 
 Lifecycle configuration is one atomically replaced bucket record encoded with the historical
 persistence XML codec. Complete standard rules, the transition minimum-size header, deletion, and
-restart recovery share that authority; malformed or symbolic-link records fail closed. This slice
-stores policy but deliberately does not execute expiration or transition actions.
+restart recovery share that authority; malformed or symbolic-link records fail closed. A one-shot
+expiration sweep preflights every bucket before applying enabled day/date rules to current objects.
+The debug interval maps one lifecycle day to a short duration for conformance; tag-filtered rules
+remain inert until object-tag persistence exists, and transition actions remain out of scope.
 
 The backend is intentionally not production storage. It does not promise crash consistency,
 multi-process coordination, hostile concurrent filesystem mutation resistance, S3 minimum-part
-size enforcement, multipart checksum negotiation, or lifecycle action processing. Bucket names never
+size enforcement, multipart checksum negotiation, or lifecycle transition processing. Bucket names never
 become raw path components and object keys never become paths; symbolic-link roots and storage
 components are refused.
 

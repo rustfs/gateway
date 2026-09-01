@@ -15,8 +15,8 @@
 //! Filesystem-backed reference handlers for `rustfs-gateway`.
 //!
 //! Responsible for: a small, inspectable persistence backend used to exercise real S3 handlers,
-//! including atomically published multipart uploads, persistent object versions, and lifecycle configuration.
-//! NOT responsible for: production durability, lifecycle action execution, or cross-process coordination.
+//! including atomically published multipart uploads, persistent object versions, and lifecycle expiration.
+//! NOT responsible for: production durability, lifecycle transitions, or cross-process coordination.
 //! Upstream: `rustfs-gateway`. Downstream: examples and backend contract tests.
 
 #![doc = include_str!("../README.md")]
@@ -26,7 +26,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
@@ -172,6 +172,7 @@ pub struct FsBackend {
     temporary_id: AtomicU64,
     version_lock: tokio::sync::Mutex<()>,
     clock: Arc<dyn Clock>,
+    lifecycle_day_seconds: i64,
 }
 
 impl FsBackend {
@@ -207,7 +208,25 @@ impl FsBackend {
             temporary_id: AtomicU64::new(0),
             version_lock: tokio::sync::Mutex::new(()),
             clock,
+            lifecycle_day_seconds: 24 * 60 * 60,
         })
+    }
+
+    /// Uses `interval` as one lifecycle day for the reference backend's debug mode.
+    ///
+    /// This hook lets conformance suites observe day-based expiration without waiting for wall-clock
+    /// days. Production-like callers should leave the default 24-hour day unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-input error when the interval is zero or cannot fit in signed seconds.
+    pub fn with_lifecycle_debug_interval(mut self, interval: Duration) -> io::Result<Self> {
+        let seconds = i64::try_from(interval.as_secs())
+            .ok()
+            .filter(|seconds| *seconds > 0)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the lifecycle debug interval must be non-zero"))?;
+        self.lifecycle_day_seconds = seconds;
+        Ok(self)
     }
 
     /// The exact operations this bounded reference backend registers.

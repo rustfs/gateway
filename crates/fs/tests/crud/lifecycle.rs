@@ -61,7 +61,7 @@ fn response_body(response: &rustfs_gateway::WireResponse) -> String {
     String::from_utf8_lossy(response.body()).into_owned()
 }
 
-fn lifecycle_record(root: &TestRoot, bucket: &str) -> PathBuf {
+pub(super) fn lifecycle_record(root: &TestRoot, bucket: &str) -> PathBuf {
     root.0.join(format!("b-{}/lifecycle", hex::encode(bucket)))
 }
 

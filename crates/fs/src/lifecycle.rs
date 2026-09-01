@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Persistent bucket lifecycle configuration handlers.
+//! Persistent bucket lifecycle configuration and expiration execution.
 //!
 //! Responsible for: validating one complete lifecycle document, atomically replacing its durable
-//! record, and serving or deleting that same record after restart.
-//! NOT responsible for: evaluating expiration/transition actions, lifecycle scheduling, or tags.
+//! record, serving or deleting it after restart, and expiring selected current objects.
+//! NOT responsible for: transition actions, tag persistence, or scheduling repeated sweeps.
 //! Upstream: generated lifecycle DTOs and the historical persistence codec. Downstream: production handlers.
 
 use std::io;
@@ -39,6 +39,7 @@ use rustfs_gateway::{
 };
 
 use super::{FsBackend, storage_error};
+use crate::versioning::CurrentObjectRecord;
 
 pub(super) const RECORD_FILE: &str = "lifecycle";
 const RECORD_MAGIC: &[u8] = b"FSLC1\n";
@@ -94,6 +95,118 @@ impl FsBackend {
             Err(_) => Err(storage_error()),
         }
     }
+
+    async fn lifecycle_buckets(&self) -> Result<Vec<String>, HandlerError> {
+        let mut entries = tokio::fs::read_dir(&self.root).await.map_err(|_| storage_error())?;
+        let mut buckets = Vec::new();
+        while let Some(entry) = entries.next_entry().await.map_err(|_| storage_error())? {
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(storage_error)?;
+            let encoded = name.strip_prefix("b-").ok_or_else(storage_error)?;
+            let bucket = String::from_utf8(hex::decode(encoded).map_err(|_| storage_error())?).map_err(|_| storage_error())?;
+            let file_type = entry.file_type().await.map_err(|_| storage_error())?;
+            if !file_type.is_dir() || file_type.is_symlink() || self.bucket_path(&bucket) != entry.path() {
+                return Err(HandlerError::new(
+                    ErrorCode::INVALID_REQUEST,
+                    "the lifecycle bucket path is not a safe directory",
+                ));
+            }
+            buckets.push(bucket);
+        }
+        buckets.sort();
+        Ok(buckets)
+    }
+
+    async fn optional_lifecycle(&self, bucket: &str) -> Result<Option<LifecycleRecord>, HandlerError> {
+        let path = self.lifecycle_path(bucket);
+        match tokio::fs::symlink_metadata(path).await {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(_) => Err(storage_error()),
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+                self.read_lifecycle(bucket).await.map(Some)
+            }
+            Ok(_) => Err(unsafe_record()),
+        }
+    }
+
+    /// Runs one lifecycle-expiration sweep and returns the number of current objects expired.
+    ///
+    /// Every bucket policy and current-object record is validated before the first deletion. Rules
+    /// requiring object tags remain inert until the reference backend persists observable tags.
+    /// Version-enabled buckets receive a delete marker, while never-versioned and suspended
+    /// buckets apply their existing current-object deletion semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns a handler error without deleting anything when preflight encounters corrupt or
+    /// unsafe bucket, lifecycle, or version authority.
+    pub async fn expire_lifecycle_once(&self) -> Result<usize, HandlerError> {
+        let now = self.clock.now().unix_seconds();
+        let mut selected = Vec::new();
+        for bucket in self.lifecycle_buckets().await? {
+            let Some(record) = self.optional_lifecycle(&bucket).await? else {
+                continue;
+            };
+            for object in self.current_object_records(&bucket).await? {
+                if record
+                    .configuration
+                    .rules
+                    .iter()
+                    .any(|rule| rule_expires(rule, &object, now, self.lifecycle_day_seconds))
+                {
+                    selected.push((bucket.clone(), object.key.clone(), object.sequence));
+                }
+            }
+        }
+
+        let mut expired = 0;
+        for (bucket, key, sequence) in selected {
+            if self.expire_current_if_unchanged(&bucket, &key, sequence).await? {
+                expired += 1;
+            }
+        }
+        Ok(expired)
+    }
+}
+
+fn rule_expires(rule: &LifecycleRule, object: &CurrentObjectRecord, now: i64, lifecycle_day_seconds: i64) -> bool {
+    if rule.status.as_str() != Status::ENABLED.as_str() || !rule_selects(rule, object) {
+        return false;
+    }
+    let Some(expiration) = rule.expiration.as_ref() else {
+        return false;
+    };
+    let date_elapsed = expiration.date.as_ref().is_some_and(|date| now >= date.secs());
+    let days_elapsed = expiration.days.is_some_and(|days| {
+        let Some(required_age) = i64::from(days).checked_mul(lifecycle_day_seconds) else {
+            return false;
+        };
+        now.checked_sub(object.modified).is_some_and(|age| age >= required_age)
+    });
+    date_elapsed || days_elapsed
+}
+
+fn rule_selects(rule: &LifecycleRule, object: &CurrentObjectRecord) -> bool {
+    if rule.prefix.as_deref().is_some_and(|prefix| !object.key.starts_with(prefix)) {
+        return false;
+    }
+    let Some(filter) = rule.filter.as_ref() else {
+        return true;
+    };
+    if filter.tag.is_some()
+        || filter.prefix.as_deref().is_some_and(|prefix| !object.key.starts_with(prefix))
+        || filter.object_size_greater_than.is_some_and(|minimum| object.size <= minimum)
+        || filter.object_size_less_than.is_some_and(|maximum| object.size >= maximum)
+    {
+        return false;
+    }
+    let Some(and) = filter.and.as_ref() else {
+        return true;
+    };
+    and.tags.is_empty()
+        && and.prefix.as_deref().is_none_or(|prefix| object.key.starts_with(prefix))
+        && and.object_size_greater_than.is_none_or(|minimum| object.size > minimum)
+        && and.object_size_less_than.is_none_or(|maximum| object.size < maximum)
 }
 
 impl Handler<GetBucketLifecycleConfiguration> for FsBackend {

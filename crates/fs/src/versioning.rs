@@ -145,6 +145,54 @@ impl FsBackend {
             .collect())
     }
 
+    pub(super) async fn expire_current_if_unchanged(
+        &self,
+        bucket: &str,
+        key: &str,
+        observed_sequence: u64,
+    ) -> Result<bool, HandlerError> {
+        let _guard = self.version_lock.lock().await;
+        let state = self.versioning_state(bucket).await?;
+        let records = self.version_records(bucket).await?;
+        if newest_for_key(&records, key)
+            .is_none_or(|record| record.sequence != observed_sequence || !matches!(record.kind, RecordKind::Object))
+        {
+            return Ok(false);
+        }
+        self.delete_current_locked(bucket, key, state, records).await?;
+        Ok(true)
+    }
+
+    async fn delete_current_locked(
+        &self,
+        bucket: &str,
+        key: &str,
+        state: VersioningState,
+        records: Vec<VersionRecord>,
+    ) -> Result<Option<VersionRecord>, HandlerError> {
+        match state {
+            VersioningState::Never => {
+                self.remove_null_versions(&records, key).await?;
+                self.remove_legacy_object(bucket, key).await?;
+                Ok(None)
+            }
+            VersioningState::Enabled => self.publish_version(bucket, key, None, None, None).await.map(Some),
+            VersioningState::Suspended => {
+                let marker = self.publish_version(bucket, key, Some("null"), None, None).await?;
+                self.remove_null_versions(
+                    &records
+                        .into_iter()
+                        .filter(|held| held.path != marker.path)
+                        .collect::<Vec<_>>(),
+                    key,
+                )
+                .await?;
+                self.remove_legacy_object(bucket, key).await?;
+                Ok(Some(marker))
+            }
+        }
+    }
+
     async fn versioning_state(&self, bucket: &str) -> Result<VersioningState, HandlerError> {
         self.require_bucket(bucket).await?;
         let path = self.bucket_path(bucket).join(STATUS_FILE);
@@ -562,42 +610,14 @@ impl Handler<DeleteObject> for FsBackend {
             }
             return Ok(Resp::new(DeleteObjectOutput::default()));
         }
-        match state {
-            VersioningState::Never => {
-                self.remove_null_versions(&records, input.key.as_str()).await?;
-                self.remove_legacy_object(input.bucket.as_str(), input.key.as_str()).await?;
-                Ok(Resp::new(DeleteObjectOutput::default()))
-            }
-            VersioningState::Enabled => {
-                let marker = self
-                    .publish_version(input.bucket.as_str(), input.key.as_str(), None, None, None)
-                    .await?;
-                Ok(Resp::new(DeleteObjectOutput {
-                    delete_marker: Some(true),
-                    version_id: Some(marker.version_id),
-                    ..DeleteObjectOutput::default()
-                }))
-            }
-            VersioningState::Suspended => {
-                let marker = self
-                    .publish_version(input.bucket.as_str(), input.key.as_str(), Some("null"), None, None)
-                    .await?;
-                self.remove_null_versions(
-                    &records
-                        .into_iter()
-                        .filter(|held| held.path != marker.path)
-                        .collect::<Vec<_>>(),
-                    input.key.as_str(),
-                )
-                .await?;
-                self.remove_legacy_object(input.bucket.as_str(), input.key.as_str()).await?;
-                Ok(Resp::new(DeleteObjectOutput {
-                    delete_marker: Some(true),
-                    version_id: Some(marker.version_id),
-                    ..DeleteObjectOutput::default()
-                }))
-            }
-        }
+        let marker = self
+            .delete_current_locked(input.bucket.as_str(), input.key.as_str(), state, records)
+            .await?;
+        Ok(Resp::new(DeleteObjectOutput {
+            delete_marker: marker.as_ref().map(|_| true),
+            version_id: marker.map(|record| record.version_id),
+            ..DeleteObjectOutput::default()
+        }))
     }
 }
 

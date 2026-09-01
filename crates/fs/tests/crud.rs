@@ -37,6 +37,9 @@ mod multipart_versioning;
 #[path = "crud/lifecycle.rs"]
 mod lifecycle;
 
+#[path = "crud/lifecycle_expiration.rs"]
+mod lifecycle_expiration;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -93,6 +96,10 @@ fn service(root: &TestRoot) -> (Arc<FsBackend>, S3Service) {
         FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
             .expect("a usable test root"),
     );
+    service_with_backend(backend)
+}
+
+fn service_with_backend(backend: Arc<FsBackend>) -> (Arc<FsBackend>, S3Service) {
     let credentials =
         Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid fixture credentials")));
     let builder = backend.register_crud(
