@@ -15,9 +15,9 @@
 //! Bounded background lifecycle scheduling for the filesystem reference backend.
 //!
 //! Responsible for: invoking the one-shot lifecycle executor at the configured cadence, retaining
-//! failure counts without killing the worker, and joining after an explicit shutdown. NOT
-//! responsible for: CLI parsing, transition actions, or the expiration decision itself. Upstream:
-//! `FsBackend` debug cadence. Downstream: the reference SUT listener.
+//! failure counts without killing the worker, and joining after an explicit shutdown.
+//! Not responsible for: CLI parsing, transition actions, or the expiration decision itself.
+//! Upstream: `FsBackend` debug cadence. Downstream: the reference SUT listener.
 
 use std::io;
 use std::sync::Arc;
