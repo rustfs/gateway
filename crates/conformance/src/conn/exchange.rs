@@ -25,6 +25,8 @@ use super::*;
 pub(super) struct SocketExchangeResult {
     pub(super) observation: Observation,
     pub(super) torn_down: bool,
+    pub(super) read_failure: Option<ReadFailure>,
+    pub(super) pending_input: bool,
 }
 
 pub(super) fn execute_socket_exchange(

@@ -357,6 +357,40 @@ fn a_server_that_closes_without_lingering_is_observed_reset() {
     );
 }
 
+/// Negative — a reset after the response head is a truncated response, not a reset without an answer.
+#[test]
+fn a_reset_after_the_response_head_is_classified_as_truncated() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+    let addr = listener.local_addr().expect("the kernel assigned one");
+    let served = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept client");
+        let mut seen = Vec::new();
+        let mut block = [0_u8; 4096];
+        while find_head_end(&seen).is_none() {
+            let read = stream.read(&mut block).expect("read request head");
+            seen.extend_from_slice(&block[..read]);
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\npart")
+            .expect("write partial response");
+        stream.flush().expect("flush partial response");
+        let mut waiting = [0_u8; 1];
+        stream.peek(&mut waiting).expect("observe unread request body");
+    });
+    let mut connection = Connection::open(addr).expect("the listener accepts");
+    connection
+        .write(b"PUT / HTTP/1.1\r\nhost: example.test\r\ncontent-length: 8192\r\n\r\n")
+        .expect("write request head");
+    connection.write_body(&vec![b'x'; 8192]).expect("write request body");
+
+    let failure = connection
+        .read_response_classified("PUT", Duration::from_secs(2))
+        .expect_err("partial response cannot complete");
+    served.join().expect("server exits");
+
+    assert_eq!(failure, ReadFailure::Truncated);
+}
+
 /// Negative — the server never writes two `Content-Length` headers.
 ///
 /// A duplicate is the exact shape `WireReject::DuplicateContentLength` refuses, so a server

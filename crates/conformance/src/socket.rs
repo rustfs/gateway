@@ -988,18 +988,21 @@ fn write_response(
 /// end of stream on a body the peer still expects an answer to.
 #[must_use]
 pub fn observe_connection(stream: &TcpStream) -> ConnectionState {
+    observe_connection_pending(stream).0
+}
+
+fn observe_connection_pending(stream: &TcpStream) -> (ConnectionState, bool) {
     let _ = stream.set_read_timeout(Some(OBSERVE_TIMEOUT));
     let mut probe = [0_u8; 1];
-    let mut reader = stream;
-    match reader.read(&mut probe) {
-        Ok(0) => ConnectionState::Closed,
-        Ok(_) => ConnectionState::Open,
+    match stream.peek(&mut probe) {
+        Ok(0) => (ConnectionState::Closed, false),
+        Ok(_) => (ConnectionState::Open, true),
         Err(error) => match error.kind() {
             // No answer within the window. The peer is sitting on an open connection, which is
             // exactly what `open` asserts.
-            ErrorKind::WouldBlock | ErrorKind::TimedOut => ConnectionState::Open,
-            ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted => ConnectionState::Reset,
-            _ => ConnectionState::Closed,
+            ErrorKind::WouldBlock | ErrorKind::TimedOut => (ConnectionState::Open, false),
+            ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted => (ConnectionState::Reset, false),
+            _ => (ConnectionState::Closed, false),
         },
     }
 }
@@ -1135,6 +1138,10 @@ impl Connection {
     pub fn observe(&self) -> ConnectionState {
         observe_connection(&self.stream)
     }
+
+    pub(crate) fn observe_pending(&self) -> (ConnectionState, bool) {
+        observe_connection_pending(&self.stream)
+    }
 }
 
 /// Why a response did not arrive.
@@ -1148,7 +1155,7 @@ pub enum ReadFailure {
     TimedOut,
     /// The peer ended the stream without writing anything.
     ClosedBeforeHead,
-    /// The peer ended the stream part way through the head.
+    /// The peer ended the stream before the response completed.
     Truncated,
     /// The peer reset the connection.
     Reset,
@@ -1161,7 +1168,7 @@ impl core::fmt::Display for ReadFailure {
         match self {
             ReadFailure::TimedOut => f.write_str("no response arrived inside the budget"),
             ReadFailure::ClosedBeforeHead => f.write_str("the connection ended before a response head arrived"),
-            ReadFailure::Truncated => f.write_str("the connection ended part way through a response head"),
+            ReadFailure::Truncated => f.write_str("the connection ended before the response completed"),
             ReadFailure::Reset => f.write_str("the peer reset the connection without answering"),
             ReadFailure::Malformed(detail) => write!(f, "the response head could not be read: {detail}"),
         }
@@ -1182,14 +1189,25 @@ pub struct RawResponse {
 /// Splits a response head into its status and its headers, keeping wire order and wire casing.
 fn parse_response_head(head: &str) -> Option<(u16, Vec<(String, String)>)> {
     let mut lines = head.split("\r\n");
-    let status = lines.next()?.split(' ').nth(1)?.parse::<u16>().ok()?;
+    let (version, rest) = lines.next()?.split_once(' ')?;
+    let (status, _) = rest.split_once(' ')?;
+    if version != "HTTP/1.1" || status.len() != 3 {
+        return None;
+    }
+    let status = status.parse::<u16>().ok()?;
+    if !(100..=599).contains(&status) {
+        return None;
+    }
     let mut headers = Vec::new();
     for line in lines {
         if line.is_empty() {
             continue;
         }
         let (name, value) = line.split_once(':')?;
-        headers.push((name.trim().to_owned(), value.trim().to_owned()));
+        if name.is_empty() || name.trim() != name {
+            return None;
+        }
+        headers.push((name.to_owned(), value.trim().to_owned()));
     }
     Some((status, headers))
 }

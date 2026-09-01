@@ -72,7 +72,7 @@ options:
   --profile <aws|minio|strict>
                             the profile the target claims (default aws)
   --root <dir>              corpus directory holding case.schema.json
-  --endpoint <url>          target to run against
+  --endpoint <http-url>     cleartext external target (raw TCP; no remote setup yet)
   --baseline <file>         tolerate the failures this file records; fail only on a regression
   --json <file>             write the machine-readable report
   --junit <file>            write a JUnit document
@@ -98,17 +98,6 @@ pub fn main(args: &[String]) -> ExitCode {
             return ExitCode::from(exit::USAGE);
         }
     };
-    // `--endpoint` is refused rather than ignored. A run that silently measured a service in this
-    // process while the operator believed it was measuring a server on a socket is the single
-    // worst thing this binary could do.
-    if let Some(endpoint) = &options.endpoint {
-        eprintln!(
-            "conformance: `--endpoint {endpoint}` has no transport behind it. The wired target is \
-             assembled in process from the `rustfs-gateway` facade; a socket transport is a \
-             separate piece of work and this run will not pretend to be one."
-        );
-        return ExitCode::from(exit::ENVIRONMENT);
-    }
     let root = match resolve_root(&options) {
         Ok(root) => root,
         Err(message) => {
@@ -125,7 +114,21 @@ pub fn main(args: &[String]) -> ExitCode {
             return ExitCode::from(exit::ENVIRONMENT);
         }
     }
-    // Both choices start a production server and observe it through a socket. The transport name
+    if let Some(endpoint) = &options.endpoint {
+        if matches!(options.command, Command::Validate | Command::AuditKeys) {
+            eprintln!("conformance: `--endpoint` is only meaningful for run and baseline commands");
+            return ExitCode::from(exit::USAGE);
+        }
+        let mut target = match Conn::external(root, endpoint) {
+            Ok(target) => target,
+            Err(error) => {
+                eprintln!("conformance: {error}");
+                return ExitCode::from(exit::ENVIRONMENT);
+            }
+        };
+        return execute(&options, &mut target);
+    }
+    // Both local choices start a production server and observe it through a socket. The transport name
     // selects only the production connection driver, so `diff-transports` can require their
     // per-case observations to agree.
     execute(&options, target(options.transport, root).as_mut())
@@ -361,6 +364,7 @@ impl Options {
             junit: None,
             exclude_slow: false,
         };
+        let mut transport_explicit = false;
         let mut iter = args.iter();
         let Some(first) = iter.next() else {
             return Err("no command given".to_owned());
@@ -386,6 +390,7 @@ impl Options {
                 "--json" => options.json = Some(PathBuf::from(value()?)),
                 "--junit" => options.junit = Some(PathBuf::from(value()?)),
                 "--transport" => {
+                    transport_explicit = true;
                     let text = value()?;
                     options.transport = Transport::parse(&text).ok_or_else(|| format!("unknown transport `{text}`"))?;
                 }
@@ -395,6 +400,14 @@ impl Options {
                 }
                 other => return Err(format!("unknown option `{other}`")),
             }
+        }
+        if options.endpoint.is_some() {
+            if transport_explicit {
+                return Err(
+                    "`--transport` selects an in-process assembly path and cannot be combined with `--endpoint`".to_owned(),
+                );
+            }
+            options.transport = Transport::Conn;
         }
         Ok(Some(options))
     }
@@ -571,6 +584,23 @@ mod tests {
             .expect("not help");
         assert_eq!(options.transport, Transport::Conn);
         assert_eq!(options.profile, Profile::Minio);
+    }
+
+    #[test]
+    fn endpoint_selects_the_only_external_wire_transport() {
+        let options = Options::parse(&args(&["run", "--endpoint", "http://127.0.0.1:9000"]))
+            .expect("valid options")
+            .expect("not help");
+
+        assert_eq!(options.transport, Transport::Conn);
+    }
+
+    #[test]
+    fn endpoint_rejects_a_local_transport_override() {
+        let error = Options::parse(&args(&["run", "--endpoint", "http://127.0.0.1:9000", "--transport", "hyper"]))
+            .expect_err("endpoint transport is fixed");
+
+        assert!(error.contains("--transport"));
     }
 
     #[test]

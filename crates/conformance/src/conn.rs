@@ -78,9 +78,11 @@ use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::value::Value;
 
 mod exchange;
+mod external;
 mod server;
 #[cfg(test)]
 use exchange::read_concurrent_connection;
+use external::ExternalEndpoint;
 
 /// How long the client waits on a silent server before calling the exchange wedged.
 ///
@@ -102,6 +104,7 @@ pub struct Conn {
     /// the service it assembles, the `[request]` block it reads, and the signature it computes.
     /// Reused rather than copied, so the two transports cannot disagree about what a case says.
     inner: InProcess,
+    external: Option<ExternalEndpoint>,
     listener: Option<Listener>,
     connection: Option<Connection>,
     #[cfg(feature = "production-transports")]
@@ -117,6 +120,7 @@ impl Conn {
     pub fn new(root: std::path::PathBuf) -> Conn {
         Conn {
             inner: InProcess::new(root),
+            external: None,
             listener: None,
             connection: None,
             #[cfg(feature = "production-transports")]
@@ -133,6 +137,7 @@ impl Conn {
     pub fn production(root: std::path::PathBuf, driver: ProductionDriver) -> Conn {
         Conn {
             inner: InProcess::new(root),
+            external: None,
             listener: None,
             connection: None,
             production: None,
@@ -208,7 +213,8 @@ impl Conn {
     fn structured_head(&self, wire: &Wire, request_time: &crate::time::Instant) -> Result<Head, SutError> {
         let mut headers = wire.headers.clone();
         if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("host")) {
-            headers.push(("host".to_owned(), HOST.to_owned()));
+            let host = self.external.as_ref().map_or(HOST, ExternalEndpoint::authority);
+            headers.push(("host".to_owned(), host.to_owned()));
         }
         if !wire.body.is_empty() && !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("content-length")) {
             headers.push(("content-length".to_owned(), wire.body.len().to_string()));
@@ -305,6 +311,8 @@ fn declared_content_length(headers: &[(String, String)]) -> Option<u64> {
 struct BodyProgress {
     /// Payload bytes released before the response existed.
     sent_at_response: u64,
+    /// Whether that byte count came from the peer-demand observer.
+    measured_at_response: bool,
     /// Whether everything the framing declared was written.
     fully_sent: bool,
     /// Whether this client tore the connection down as part of the body.
@@ -315,6 +323,9 @@ struct BodyProgress {
 
 impl Sut for Conn {
     fn describe(&self) -> String {
+        if let Some(endpoint) = &self.external {
+            return format!("external HTTP/1.1 endpoint at {} over raw TCP", endpoint.authority());
+        }
         #[cfg(feature = "production-transports")]
         match self.driver {
             Some(ProductionDriver::Hyper) => "rustfs-gateway production Hyper driver over loopback TCP".to_owned(),
@@ -328,6 +339,9 @@ impl Sut for Conn {
     }
 
     fn prepare(&mut self, case_id: &str, setup: Option<&Value>) -> Result<Captures, SutError> {
+        if self.external.is_some() {
+            return self.prepare_external(case_id, setup);
+        }
         // Dropped before the fixture is rebuilt: the listener holds a service assembled at the
         // previous case's clock, and a case that ran against the wrong instant is a case that
         // measured something nobody described.
@@ -341,6 +355,9 @@ impl Sut for Conn {
     }
 
     fn exchange(&mut self, plan: &ExchangePlan<'_>) -> Result<Observation, SutError> {
+        if self.external.is_some() {
+            return self.exchange_external(plan);
+        }
         let (fixed, request_time, skew_ms) = clock_of(plan.clock)?;
         let reuse = read_connection(plan.connection)?;
         self.inner.set_fixture_now(fixed.unix_seconds);
@@ -406,6 +423,11 @@ impl Sut for Conn {
     }
 
     fn exchange_concurrent(&mut self, plans: &[ExchangePlan<'_>]) -> Result<Vec<Observation>, SutError> {
+        if self.external.is_some() {
+            return Err(SutError::Environment(
+                "concurrent external endpoint exchanges are not implemented; refusing to serialize a declared race".to_owned(),
+            ));
+        }
         self.exchange_concurrent_sockets(plans)
     }
 }
@@ -451,6 +473,7 @@ fn observe_socket_exchange(
         Ok(remaining) => connection.read_response_classified(&method, remaining),
         Err(_) => Err(ReadFailure::TimedOut),
     };
+    let read_failure = read.as_ref().err().cloned();
     let ttfb_ms = elapsed_ms(started);
     let torn_down = progress.torn_down;
     let observation = match read {
@@ -492,7 +515,7 @@ fn observe_socket_exchange(
                 trailers: Vec::new(),
                 body: response.body,
                 body_bytes_before_error: before_error,
-                request_body_bytes_sent_at_response: Some(progress.sent_at_response),
+                request_body_bytes_sent_at_response: progress.measured_at_response.then_some(progress.sent_at_response),
                 request_body_fully_sent: Some(progress.fully_sent),
                 ttfb_ms: Some(ttfb_ms),
                 elapsed_ms,
@@ -510,7 +533,7 @@ fn observe_socket_exchange(
             trailers: Vec::new(),
             body: Vec::new(),
             body_bytes_before_error: None,
-            request_body_bytes_sent_at_response: Some(progress.sent_at_response),
+            request_body_bytes_sent_at_response: progress.measured_at_response.then_some(progress.sent_at_response),
             request_body_fully_sent: Some(progress.fully_sent),
             ttfb_ms: None,
             elapsed_ms: elapsed_ms(started),
@@ -527,7 +550,7 @@ fn observe_socket_exchange(
             trailers: Vec::new(),
             body: Vec::new(),
             body_bytes_before_error: None,
-            request_body_bytes_sent_at_response: Some(progress.sent_at_response),
+            request_body_bytes_sent_at_response: progress.measured_at_response.then_some(progress.sent_at_response),
             request_body_fully_sent: Some(progress.fully_sent),
             ttfb_ms: None,
             elapsed_ms: elapsed_ms(started),
@@ -542,13 +565,15 @@ fn observe_socket_exchange(
             },
         },
     };
-    let connection_after = connection.observe();
+    let (connection_after, pending_input) = connection.observe_pending();
     exchange::SocketExchangeResult {
         observation: Observation {
             connection_after: Some(connection_after),
             ..observation
         },
         torn_down,
+        read_failure,
+        pending_input,
     }
 }
 
@@ -654,6 +679,7 @@ fn write_body(
     let sent_at_response = sent_at_response.unwrap_or_else(|| connection.body_written());
     Ok(BodyProgress {
         sent_at_response,
+        measured_at_response: true,
         // What the *framing* declared, not what the chunk list happened to contain. A part that
         // announces a megabyte and writes twenty-nine bytes before half-closing has not finished
         // sending its body, and `c-chunked-0001` and `c-object-0013` both assert exactly that.

@@ -47,7 +47,12 @@ impl Connection {
             if let Some(end) = find_head_end(&buffer) {
                 break end;
             }
-            let read = self.pull(&mut buffer)?;
+            let read = match self.pull(&mut buffer) {
+                Err(ReadFailure::TimedOut | ReadFailure::Reset) if !buffer.is_empty() => {
+                    return Err(ReadFailure::Truncated);
+                }
+                result => result?,
+            };
             if read == 0 {
                 return Err(if buffer.is_empty() {
                     ReadFailure::ClosedBeforeHead
@@ -62,30 +67,29 @@ impl Connection {
         let (status, headers) = parse_response_head(&head)
             .ok_or_else(|| ReadFailure::Malformed("the response head is not a status line and headers".to_owned()))?;
         let mut body = buffer.split_off(head_end);
-        if carries_a_body(method, status)
-            && headers.iter().any(|(name, value)| {
-                name.eq_ignore_ascii_case("transfer-encoding")
-                    && value.split(',').any(|token| token.trim().eq_ignore_ascii_case("chunked"))
-            })
-        {
+        let carries_body = carries_a_body(method, status);
+        if carries_body && response_is_chunked(&headers)? {
             body = self.read_chunked_body(body)?;
             return Ok(RawResponse { status, headers, body });
         }
-        let length = if carries_a_body(method, status) {
-            headers
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-                .and_then(|(_, value)| value.parse::<usize>().ok())
-                .unwrap_or(0)
+        let length = if carries_body {
+            response_content_length(&headers)?
         } else {
-            0
+            Some(0)
         };
-        while body.len() < length {
-            if self.pull(&mut body)? == 0 {
-                break;
+        if let Some(length) = length {
+            while body.len() < length {
+                if self.pull_remainder(&mut body)? == 0 {
+                    return Err(ReadFailure::Truncated);
+                }
             }
+            if body.len() > length {
+                return Err(ReadFailure::Malformed("the response has bytes after the framed response body".to_owned()));
+            }
+            body.truncate(length);
+        } else {
+            body.clear();
         }
-        body.truncate(length);
         Ok(RawResponse { status, headers, body })
     }
 
@@ -100,13 +104,16 @@ impl Connection {
                 .map_err(|_| ReadFailure::Malformed("the response chunk size is invalid".to_owned()))?;
             if size == 0 {
                 while !self.read_crlf_line(&mut wire)?.is_empty() {}
+                if !wire.is_empty() {
+                    return Err(ReadFailure::Malformed("the response has bytes after the framed response body".to_owned()));
+                }
                 return Ok(body);
             }
             let framed = size
                 .checked_add(2)
                 .ok_or_else(|| ReadFailure::Malformed("the response chunk size overflows".to_owned()))?;
             while wire.len() < framed {
-                if self.pull(&mut wire)? == 0 {
+                if self.pull_remainder(&mut wire)? == 0 {
                     return Err(ReadFailure::Truncated);
                 }
             }
@@ -131,9 +138,58 @@ impl Connection {
             if wire.len() > 16 * 1024 {
                 return Err(ReadFailure::Malformed("the response chunk line exceeds its limit".to_owned()));
             }
-            if self.pull(wire)? == 0 {
+            if self.pull_remainder(wire)? == 0 {
                 return Err(ReadFailure::Truncated);
             }
         }
     }
+
+    fn pull_remainder(&mut self, sink: &mut Vec<u8>) -> Result<usize, ReadFailure> {
+        match self.pull(sink) {
+            Err(ReadFailure::TimedOut | ReadFailure::Reset) => Err(ReadFailure::Truncated),
+            result => result,
+        }
+    }
+}
+
+fn response_is_chunked(headers: &[(String, String)]) -> Result<bool, ReadFailure> {
+    let tokens = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("transfer-encoding"))
+        .flat_map(|(_, value)| value.split(','))
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    if tokens.is_empty() {
+        return Ok(false);
+    }
+    if !tokens.last().is_some_and(|token| token.eq_ignore_ascii_case("chunked")) {
+        return Err(ReadFailure::Malformed(
+            "the response Transfer-Encoding is not terminated by chunked framing".to_owned(),
+        ));
+    }
+    if tokens.len() != 1 {
+        return Err(ReadFailure::Malformed(
+            "only a single chunked coding is supported for response Transfer-Encoding".to_owned(),
+        ));
+    }
+    Ok(true)
+}
+
+fn response_content_length(headers: &[(String, String)]) -> Result<Option<usize>, ReadFailure> {
+    let mut length = None;
+    for token in headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+        .flat_map(|(_, value)| value.split(','))
+        .map(str::trim)
+    {
+        let current = token
+            .parse::<usize>()
+            .map_err(|_| ReadFailure::Malformed("the response Content-Length is invalid".to_owned()))?;
+        if length.is_some_and(|expected| expected != current) {
+            return Err(ReadFailure::Malformed("the response has conflicting Content-Length values".to_owned()));
+        }
+        length = Some(current);
+    }
+    Ok(length)
 }
