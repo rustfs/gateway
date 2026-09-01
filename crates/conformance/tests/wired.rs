@@ -208,21 +208,16 @@ fn a_truncated_upload_is_refused_and_leaves_nothing_behind() {
     assert_eq!(only(&in_process).verdict, Verdict::Skipped);
 }
 
-/// Negative — a case whose assertion the socket still cannot reach is **skipped with the reason**,
-/// not answered from an approximation.
+/// Negative — the socket reaches a real overlapping conditional-write conflict.
 ///
-/// `c-cond-0013` is the sharp one: this transport really can put both requests on the wire before
-/// reading either response, so the tempting move is to call the flag honoured and let the case run.
-/// It would then be judged against a strictly ordered pair — the loser meets an object that is
-/// simply there — and fail on the code, which is failing for a reason the case is not about. That
-/// reads in a report exactly like failing for the right one.
+/// Both requests are dispatched on distinct connections, and the fixture rendezvous holds the
+/// first successful check until the second has checked the same absent generation. The loser is
+/// therefore judged on the stale commit token and not on a condition observed after the winner.
 #[test]
-fn a_case_the_socket_still_cannot_stage_is_skipped_rather_than_answered() {
-    let report = run_over_a_socket("c-cond-0013");
+fn a_conditional_create_race_executes_over_two_sockets() {
+    let report = run_over_production("c-cond-0013", ProductionDriver::Hyper);
     let outcome = only(&report);
-    assert_eq!(outcome.verdict, Verdict::Skipped, "{:?}", failures(outcome));
-    let reason = outcome.skip_reason.as_deref().unwrap_or_default();
-    assert!(reason.contains("race"), "{reason}");
+    assert_eq!(outcome.verdict, Verdict::Passed, "{:?}", failures(outcome));
 }
 
 /// Negative — an exchange whose outcome is true by construction says so on the case.

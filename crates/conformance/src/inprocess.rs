@@ -87,10 +87,10 @@ use rustfs_gateway::{
     RequestContext, S3Service, ServiceBuilder, ServiceConfig, SessionBinding, SigV4Authenticator, SnapshotId, StaticCredentials,
     VirtualHostStyle, WireRequest, allow_when, collect, dto, fn_credential_provider, op_layer, policy_from,
 };
-use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::{collections::BTreeMap, path::PathBuf};
+mod conditional_race;
 mod sigv2;
 use crate::exec::ServiceRuntime;
 use crate::fixture::{Fixture, StoredObject, Stub};
