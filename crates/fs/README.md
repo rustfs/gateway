@@ -7,11 +7,12 @@ service without a private adapter.
 This bounded implementation supports bucket and version-aware object CRUD plus `ListObjects` and
 `ListObjectsV2`, `ListMultipartUploads`,
 `GetBucketVersioning`, `PutBucketVersioning`, `ListObjectVersions`, `CreateMultipartUpload`,
-`UploadPart`, `ListParts`, `CompleteMultipartUpload`, and `AbortMultipartUpload`.
+`UploadPart`, `ListParts`, `CompleteMultipartUpload`, `AbortMultipartUpload`, and lifecycle
+configuration PUT/GET/DELETE.
 `FsBackend::supported_operations`, `FsBackend::register_crud`, and
 `FsBackend::register_multipart`, `FsBackend::register_versioning`, and
-`FsBackend::register_listing` consume one crate-local operation list so the advertised set and the
-production registry cannot drift independently.
+`FsBackend::register_listing`, and `FsBackend::register_lifecycle` consume one crate-local operation
+list so the advertised set and the production registry cannot drift independently.
 
 Both object listings derive their current-object view from the persisted version records, order keys
 by their exact UTF-8 bytes, and roll delimiter groups into page-counted common prefixes. V1 markers
@@ -36,9 +37,14 @@ Multipart state remains separate from published objects. Completion validates a 
 duplicate-free part list, retires the upload capability, and publishes the assembled bytes through
 the version authority. Abort retires the capability before removing its parts.
 
+Lifecycle configuration is one atomically replaced bucket record encoded with the historical
+persistence XML codec. Complete standard rules, the transition minimum-size header, deletion, and
+restart recovery share that authority; malformed or symbolic-link records fail closed. This slice
+stores policy but deliberately does not execute expiration or transition actions.
+
 The backend is intentionally not production storage. It does not promise crash consistency,
 multi-process coordination, hostile concurrent filesystem mutation resistance, S3 minimum-part
-size enforcement, multipart checksum negotiation, or lifecycle processing. Bucket names never
+size enforcement, multipart checksum negotiation, or lifecycle action processing. Bucket names never
 become raw path components and object keys never become paths; symbolic-link roots and storage
 components are refused.
 

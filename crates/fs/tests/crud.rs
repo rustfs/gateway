@@ -14,9 +14,9 @@
 
 //! Production-registry contract for the filesystem reference backend.
 //!
-//! Responsible for: proving bucket, object, multipart, versioning, and listing CRUD through signed
+//! Responsible for: proving bucket, object, multipart, versioning, listing, and lifecycle CRUD through signed
 //! requests to a real `S3Service`, including storage-boundary refusals and not-found behavior.
-//! NOT responsible for: lifecycle policy, expanded example binaries, or production durability.
+//! NOT responsible for: lifecycle action execution, expanded example binaries, or production durability.
 //! Upstream: `rustfs-gateway-fs` and the public gateway facade. Downstream: the crate verification gate.
 
 #[path = "crud/versioning.rs"]
@@ -30,6 +30,9 @@ mod multipart_listing;
 
 #[path = "crud/multipart_versioning.rs"]
 mod multipart_versioning;
+
+#[path = "crud/lifecycle.rs"]
+mod lifecycle;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -99,7 +102,7 @@ fn service(root: &TestRoot) -> (Arc<FsBackend>, S3Service) {
             ),
     );
     let service = backend
-        .register_listing(backend.register_versioning(backend.register_multipart(builder)))
+        .register_lifecycle(backend.register_listing(backend.register_versioning(backend.register_multipart(builder))))
         .build()
         .expect("the reference registry is a complete assembly");
     (backend, service)
@@ -232,7 +235,9 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "CreateBucket",
             "CreateMultipartUpload",
             "DeleteBucket",
+            "DeleteBucketLifecycle",
             "DeleteObject",
+            "GetBucketLifecycleConfiguration",
             "GetBucketVersioning",
             "GetObject",
             "HeadBucket",
@@ -242,6 +247,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "ListObjects",
             "ListObjectsV2",
             "ListParts",
+            "PutBucketLifecycleConfiguration",
             "PutBucketVersioning",
             "PutObject",
             "UploadPart"

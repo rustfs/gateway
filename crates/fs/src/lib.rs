@@ -15,8 +15,8 @@
 //! Filesystem-backed reference handlers for `rustfs-gateway`.
 //!
 //! Responsible for: a small, inspectable persistence backend used to exercise real S3 handlers,
-//! including atomically published multipart uploads and persistent object versions.
-//! NOT responsible for: production durability, lifecycle policy, or cross-process coordination.
+//! including atomically published multipart uploads, persistent object versions, and lifecycle configuration.
+//! NOT responsible for: production durability, lifecycle action execution, or cross-process coordination.
 //! Upstream: `rustfs-gateway`. Downstream: examples and backend contract tests.
 
 #![doc = include_str!("../README.md")]
@@ -31,9 +31,10 @@ use std::time::UNIX_EPOCH;
 use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
     AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CreateBucket,
-    CreateBucketOutput, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketOutput, DeleteObject,
-    GetBucketVersioning, GetObject, HeadBucket, HeadBucketOutput, HeadObject, ListMultipartUploads, ListObjectVersions,
-    ListObjects, ListObjectsV2, ListParts, ListPartsOutput, Part, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
+    CreateBucketOutput, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketLifecycle,
+    DeleteBucketOutput, DeleteObject, GetBucketLifecycleConfiguration, GetBucketVersioning, GetObject, HeadBucket,
+    HeadBucketOutput, HeadObject, ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts,
+    ListPartsOutput, Part, PutBucketLifecycleConfiguration, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
@@ -56,7 +57,9 @@ macro_rules! reference_operations {
             crud CreateBucket => "CreateBucket",
             multipart CreateMultipartUpload => "CreateMultipartUpload",
             crud DeleteBucket => "DeleteBucket",
+            lifecycle DeleteBucketLifecycle => "DeleteBucketLifecycle",
             crud DeleteObject => "DeleteObject",
+            lifecycle GetBucketLifecycleConfiguration => "GetBucketLifecycleConfiguration",
             versioning GetBucketVersioning => "GetBucketVersioning",
             crud GetObject => "GetObject",
             crud HeadBucket => "HeadBucket",
@@ -66,6 +69,7 @@ macro_rules! reference_operations {
             listing ListObjects => "ListObjects",
             listing ListObjectsV2 => "ListObjectsV2",
             multipart ListParts => "ListParts",
+            lifecycle PutBucketLifecycleConfiguration => "PutBucketLifecycleConfiguration",
             versioning PutBucketVersioning => "PutBucketVersioning",
             crud PutObject => "PutObject",
             multipart UploadPart => "UploadPart",
@@ -95,6 +99,9 @@ macro_rules! register_crud_entries {
     ($backend:expr, $builder:expr; listing $operation:ty => $name:literal, $($rest:tt)*) => {
         register_crud_entries!($backend, $builder; $($rest)*)
     };
+    ($backend:expr, $builder:expr; lifecycle $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_crud_entries!($backend, $builder; $($rest)*)
+    };
 }
 
 macro_rules! register_multipart_entries {
@@ -109,6 +116,9 @@ macro_rules! register_multipart_entries {
         register_multipart_entries!($backend, $builder; $($rest)*)
     };
     ($backend:expr, $builder:expr; listing $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_multipart_entries!($backend, $builder; $($rest)*)
+    };
+    ($backend:expr, $builder:expr; lifecycle $operation:ty => $name:literal, $($rest:tt)*) => {
         register_multipart_entries!($backend, $builder; $($rest)*)
     };
 }
@@ -133,6 +143,17 @@ macro_rules! register_listing_entries {
     };
 }
 
+macro_rules! register_lifecycle_entries {
+    ($backend:expr, $builder:expr;) => { $builder };
+    ($backend:expr, $builder:expr; lifecycle $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_lifecycle_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
+    };
+    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_lifecycle_entries!($backend, $builder; $($rest)*)
+    };
+}
+
+mod lifecycle;
 mod listing;
 mod uploads;
 mod versioning;
@@ -232,6 +253,17 @@ impl FsBackend {
         macro_rules! register {
             ($($operations:tt)*) => {
                 register_listing_entries!(self, builder; $($operations)*)
+            };
+        }
+        reference_operations!(register)
+    }
+
+    /// Registers persistent bucket lifecycle configuration operations.
+    #[must_use]
+    pub fn register_lifecycle(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
+        macro_rules! register {
+            ($($operations:tt)*) => {
+                register_lifecycle_entries!(self, builder; $($operations)*)
             };
         }
         reference_operations!(register)
@@ -523,6 +555,11 @@ impl Handler<DeleteBucket> for FsBackend {
             Err(_) => return Err(storage_error()),
         }
         match tokio::fs::remove_file(self.bucket_path(bucket).join(versioning::SEQUENCE_FILE)).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Err(storage_error()),
+        }
+        match tokio::fs::remove_file(self.bucket_path(bucket).join(lifecycle::RECORD_FILE)).await {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(_) => return Err(storage_error()),
