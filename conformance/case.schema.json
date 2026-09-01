@@ -2,15 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/rustfs/gateway/blob/main/conformance/case.schema.json",
   "title": "rustfs-gateway conformance case",
-  "description": "Frozen schema (schema_version 1) for a single rustfs-gateway conformance case. Cases are authored as TOML; this JSON Schema validates the parsed TOML document, so the same contract governs the TOML files on disk and any JSON tooling built on top of them. See conformance/README.md for the freeze policy and the change procedure.",
+  "description": "Frozen schema (schema versions 1 and 2) for a single rustfs-gateway conformance case. Version 2 adds concurrent exchange batches while the runner continues to accept version 1 cases. Cases are authored as TOML; this JSON Schema validates the parsed TOML document, so the same contract governs the TOML files on disk and any JSON tooling built on top of them. See conformance/README.md for the freeze policy and the change procedure.",
 
-  "x-schema-version": 1,
+  "x-schema-version": 2,
   "x-frozen-on": "2026-08-05",
   "x-required-dimensions": {
     "chunk_arrival_timing": "#/$defs/dataChunk/properties/delay_ms",
     "abnormal_termination": "#/$defs/controlChunk/properties/action",
     "timeout_and_cancellation": "#/$defs/expect/properties/timing",
     "connection_reuse": "#/properties/connection/properties/reuse",
+    "connection_concurrency": "#/properties/connection/properties/concurrent",
     "backpressure": "#/properties/connection/properties/read_window_bytes",
     "clock_injection": "#/properties/clock",
     "tls_and_h2_framing": "#/$defs/requestSpec/properties/h2_frames",
@@ -53,6 +54,27 @@
     }
   ],
 
+  "allOf": [
+    {
+      "if": {
+        "required": ["connection"],
+        "properties": {
+          "connection": {
+            "required": ["concurrent"],
+            "properties": { "concurrent": { "const": true } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "case": {
+            "properties": { "schema_version": { "const": 2 } }
+          }
+        }
+      }
+    }
+  ],
+
   "$defs": {
     "caseMeta": {
       "type": "object",
@@ -65,8 +87,8 @@
           "description": "c-<domain>-<NNNN>. The domain segment must equal the directory the file lives in, and the file must be named <id>.toml."
         },
         "schema_version": {
-          "const": 1,
-          "description": "Frozen at 1. A runner MUST reject a case whose schema_version it does not know, with an explicit 'update the runner' error - never by ignoring unknown fields."
+          "enum": [1, 2],
+          "description": "Version 1 is the original frozen format. Version 2 adds connection.concurrent. A runner MUST reject a case whose schema_version it does not know, with an explicit 'update the runner' error - never by ignoring unknown fields."
         },
         "title": { "type": "string", "minLength": 4, "maxLength": 120 },
         "rationale": {
@@ -285,12 +307,23 @@
     "connection": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "required": ["pipeline", "concurrent"]
+          }
+        }
+      ],
       "properties": {
         "reuse": {
           "type": "boolean",
           "description": "true: every exchange runs on one connection and the runner fails the case if the connection is torn down between exchanges. false: a fresh connection per exchange."
         },
         "pipeline": { "type": "boolean", "description": "Write the next request before reading the previous response." },
+        "concurrent": {
+          "type": "boolean",
+          "description": "Dispatch every exchange on its own connection after all peers are ready, then await and judge the observations in declaration order. Requires schema_version 2 and is mutually exclusive with pipeline."
+        },
         "read_window_bytes": {
           "type": "integer",
           "minimum": 0,

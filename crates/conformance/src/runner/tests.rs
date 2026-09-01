@@ -22,7 +22,7 @@
 
 use super::*;
 use crate::observation::Observation;
-use crate::sut::{Scripted, Unwired};
+use crate::sut::{ExchangePlan, Scripted, SutError, Unwired};
 use std::sync::OnceLock;
 
 fn corpus() -> &'static Corpus {
@@ -368,6 +368,109 @@ fn an_environment_failure_is_a_skip_not_a_red_case() {
             .as_deref()
             .is_some_and(|r| r.starts_with("environment:"))
     );
+}
+
+#[derive(Default)]
+struct ConcurrentOnly {
+    batches: Vec<Vec<usize>>,
+    response_count: usize,
+}
+
+impl Sut for ConcurrentOnly {
+    fn describe(&self) -> String {
+        "concurrent-only test target".to_owned()
+    }
+
+    fn prepare(&mut self, _case_id: &str, _setup: Option<&Value>) -> Result<Captures, SutError> {
+        Ok(Captures::new())
+    }
+
+    fn exchange(&mut self, _plan: &ExchangePlan<'_>) -> Result<Observation, SutError> {
+        Err(SutError::Environment("the runner serialized a declared concurrent batch".to_owned()))
+    }
+
+    fn exchange_concurrent(&mut self, plans: &[ExchangePlan<'_>]) -> Result<Vec<Observation>, SutError> {
+        self.batches.push(plans.iter().map(|plan| plan.index).collect());
+        Ok((0..self.response_count)
+            .map(|_| Observation::response(200, Vec::new(), Vec::new()))
+            .collect())
+    }
+}
+
+const TWO_CONCURRENT_EXCHANGES: &str = r#"
+[connection]
+concurrent = true
+
+[[exchanges]]
+name = "first"
+[exchanges.request]
+method = "PUT"
+target = "/bucket/key"
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+name = "second"
+[exchanges.request]
+method = "PUT"
+target = "/bucket/key"
+[exchanges.expect]
+kind = "response"
+status = 200
+"#;
+
+/// Positive — both plans cross the SUT seam in one batch, preserving their declared order.
+#[test]
+fn a_concurrent_case_reaches_one_batch_instead_of_two_serial_exchanges() {
+    let case = synthetic("s-concurrent-0001", TWO_CONCURRENT_EXCHANGES);
+    let mut sut = ConcurrentOnly {
+        response_count: 2,
+        ..ConcurrentOnly::default()
+    };
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(outcome.verdict, Verdict::Passed, "{:?}", outcome.diagnostics);
+    assert_eq!(sut.batches, vec![vec![0, 1]]);
+}
+
+/// Negative — a target cannot omit one observation and leave its expectation unevaluated.
+#[test]
+fn a_concurrent_batch_with_too_few_observations_fails_closed() {
+    let case = synthetic("s-concurrent-0002", TWO_CONCURRENT_EXCHANGES);
+    let mut sut = ConcurrentOnly {
+        response_count: 1,
+        ..ConcurrentOnly::default()
+    };
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(outcome.verdict, Verdict::Failed);
+    assert!(
+        outcome
+            .failures()
+            .iter()
+            .any(|failure| failure.to_string().contains("2 observations"))
+    );
+}
+
+/// Negative — repeats imply a serial history and are not silently approximated inside a batch.
+#[test]
+fn a_concurrent_batch_refuses_exchange_repetition() {
+    let case = synthetic(
+        "s-concurrent-0003",
+        &TWO_CONCURRENT_EXCHANGES.replace("name = \"second\"", "name = \"second\"\nrepeat = 2"),
+    );
+    let mut sut = ConcurrentOnly {
+        response_count: 2,
+        ..ConcurrentOnly::default()
+    };
+    let outcome = drive(&case, &mut sut);
+    assert_eq!(outcome.verdict, Verdict::Failed);
+    assert!(
+        outcome
+            .failures()
+            .iter()
+            .any(|failure| failure.to_string().contains("repeat = 1"))
+    );
+    assert!(sut.batches.is_empty(), "an invalid batch reached the target");
 }
 
 // --- `${capture.<name>}` inside an `expect` block -----------------------------------------------
