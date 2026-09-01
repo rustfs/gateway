@@ -69,6 +69,7 @@ layers = [
             "rustfs-gateway-stream",
         },
     ),
+    ("rustfs-gateway-fs", {"rustfs-gateway"}),
     ("rustfs-gateway-conformance", {"rustfs-gateway"}),
     (
         "xtask",

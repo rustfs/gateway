@@ -18,6 +18,9 @@
 //! NOT responsible for: production durability, multipart uploads, versioning, or lifecycle policy.
 //! Upstream: `rustfs-gateway`. Downstream: examples and backend contract tests.
 
+#![doc = include_str!("../README.md")]
+#![deny(missing_docs)]
+
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
