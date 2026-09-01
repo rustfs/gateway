@@ -14,9 +14,9 @@
 
 //! Production-registry contract for the filesystem reference backend.
 //!
-//! Responsible for: proving bucket and object CRUD through signed requests to a real `S3Service`,
-//! including storage-boundary refusals and S3 not-found/idempotency behavior.
-//! NOT responsible for: multipart uploads, versioning, lifecycle policy, or example binaries.
+//! Responsible for: proving bucket, object, and multipart CRUD through signed requests to a real
+//! `S3Service`, including storage-boundary refusals and S3 not-found/idempotency behavior.
+//! NOT responsible for: versioning, lifecycle policy, ordinary listing, or example binaries.
 //! Upstream: `rustfs-gateway-fs` and the public gateway facade. Downstream: the crate verification gate.
 
 use std::path::PathBuf;
@@ -60,18 +60,19 @@ fn service(root: &TestRoot) -> (Arc<FsBackend>, S3Service) {
     let backend = Arc::new(FsBackend::open(&root.0).expect("a usable test root"));
     let credentials =
         Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid fixture credentials")));
+    let builder = backend.register_crud(
+        rustfs_gateway::ServiceBuilder::new()
+            .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("one region")))
+            .authorizer(allow_when(|_| true))
+            .clock_with_skew_ack(
+                FixedClock::at_unix_seconds(SIGNED_AT_SECONDS),
+                ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+            ),
+    );
     let service = backend
-        .register_crud(
-            rustfs_gateway::ServiceBuilder::new()
-                .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("one region")))
-                .authorizer(allow_when(|_| true))
-                .clock_with_skew_ack(
-                    FixedClock::at_unix_seconds(SIGNED_AT_SECONDS),
-                    ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
-                ),
-        )
+        .register_multipart(builder)
         .build()
-        .expect("the CRUD registry is a complete assembly");
+        .expect("the reference registry is a complete assembly");
     (backend, service)
 }
 
@@ -79,7 +80,7 @@ fn signed(method: http::Method, target: &str, body: Bytes) -> http::Request<Byte
     let (path, query) = target.split_once('?').map_or((target, ""), |(path, query)| (path, query));
     let mut headers = http::HeaderMap::new();
     headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
-    let payload = if method == http::Method::PUT && target.matches('/').count() >= 2 {
+    let payload = if (method == http::Method::PUT && target.matches('/').count() >= 2) || !body.is_empty() {
         let digest: [u8; 32] = Sha256::digest(&body).into();
         let payload = PayloadMode::ExactSha256(digest);
         headers.insert(
@@ -125,6 +126,67 @@ fn header<'a>(response: &'a rustfs_gateway::WireResponse, name: &str) -> Option<
         .find_map(|(candidate, value)| (candidate.as_str() == name).then_some(value))
 }
 
+fn element(body: &[u8], name: &str) -> Option<String> {
+    let body = std::str::from_utf8(body).ok()?;
+    let opening = format!("<{name}>");
+    let closing = format!("</{name}>");
+    let start = body.find(&opening)? + opening.len();
+    let end = body[start..].find(&closing)? + start;
+    Some(body[start..end].to_owned())
+}
+
+async fn create_bucket(service: &S3Service, bucket: &str) {
+    let response = exchange(service, signed(http::Method::PUT, &format!("/{bucket}"), Bytes::new())).await;
+    assert_eq!(response.status(), 200, "{}", String::from_utf8_lossy(response.body()));
+}
+
+async fn initiate(service: &S3Service, bucket: &str, key: &str) -> String {
+    let response = exchange(service, signed(http::Method::POST, &format!("/{bucket}/{key}?uploads"), Bytes::new())).await;
+    assert_eq!(response.status(), 200, "{}", String::from_utf8_lossy(response.body()));
+    element(response.body(), "UploadId").expect("an upload id")
+}
+
+async fn upload_part(service: &S3Service, bucket: &str, key: &str, upload_id: &str, part: i32, body: &'static [u8]) -> String {
+    let response = exchange(
+        service,
+        signed(
+            http::Method::PUT,
+            &format!("/{bucket}/{key}?partNumber={part}&uploadId={upload_id}"),
+            Bytes::from_static(body),
+        ),
+    )
+    .await;
+    assert_eq!(response.status(), 200, "{}", String::from_utf8_lossy(response.body()));
+    header(&response, "etag")
+        .expect("a part entity tag")
+        .to_str()
+        .expect("an ASCII entity tag")
+        .to_owned()
+}
+
+fn completion(parts: &[(i32, &str)]) -> Bytes {
+    let mut body = String::from("<CompleteMultipartUpload>");
+    for (number, entity_tag) in parts {
+        body.push_str(&format!("<Part><PartNumber>{number}</PartNumber><ETag>{entity_tag}</ETag></Part>"));
+    }
+    body.push_str("</CompleteMultipartUpload>");
+    Bytes::from(body)
+}
+
+async fn complete(
+    service: &S3Service,
+    bucket: &str,
+    key: &str,
+    upload_id: &str,
+    parts: &[(i32, &str)],
+) -> rustfs_gateway::WireResponse {
+    exchange(
+        service,
+        signed(http::Method::POST, &format!("/{bucket}/{key}?uploadId={upload_id}"), completion(parts)),
+    )
+    .await
+}
+
 /// Positive — one real signed exchange exercises the complete bounded CRUD path.
 #[tokio::test]
 async fn bucket_and_object_crud_runs_through_the_production_registry() {
@@ -133,13 +195,18 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
     assert_eq!(
         backend.supported_operations().collect::<Vec<_>>(),
         [
+            "AbortMultipartUpload",
+            "CompleteMultipartUpload",
             "CreateBucket",
+            "CreateMultipartUpload",
             "DeleteBucket",
             "DeleteObject",
             "GetObject",
             "HeadBucket",
             "HeadObject",
-            "PutObject"
+            "ListParts",
+            "PutObject",
+            "UploadPart"
         ]
     );
     assert_eq!(
@@ -191,6 +258,204 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             .status(),
         404
     );
+}
+
+/// Positive — parts remain private until one ordered completion publishes the final object.
+#[tokio::test]
+async fn multipart_parts_publish_once_through_the_production_registry() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "multipart").await;
+    let upload_id = initiate(&service, "multipart", "joined.txt").await;
+    assert_eq!(
+        exchange(&service, signed(http::Method::GET, "/multipart/joined.txt", Bytes::new()))
+            .await
+            .status(),
+        404
+    );
+
+    let second = upload_part(&service, "multipart", "joined.txt", &upload_id, 2, b"world").await;
+    let first = upload_part(&service, "multipart", "joined.txt", &upload_id, 1, b"hello ").await;
+    let listed = exchange(
+        &service,
+        signed(http::Method::GET, &format!("/multipart/joined.txt?uploadId={upload_id}"), Bytes::new()),
+    )
+    .await;
+    assert_eq!(listed.status(), 200, "{}", String::from_utf8_lossy(listed.body()));
+    let listed = String::from_utf8_lossy(listed.body());
+    assert!(listed.find("<PartNumber>1</PartNumber>") < listed.find("<PartNumber>2</PartNumber>"));
+
+    let completed = complete(&service, "multipart", "joined.txt", &upload_id, &[(1, &first), (2, &second)]).await;
+    assert_eq!(completed.status(), 200, "{}", String::from_utf8_lossy(completed.body()));
+    assert!(element(completed.body(), "ETag").is_some_and(|value| value.contains("-2")));
+    let fetched = exchange(&service, signed(http::Method::GET, "/multipart/joined.txt", Bytes::new())).await;
+    assert_eq!(fetched.status(), 200);
+    assert_eq!(fetched.body().as_ref(), b"hello world");
+    let spent = exchange(
+        &service,
+        signed(http::Method::GET, &format!("/multipart/joined.txt?uploadId={upload_id}"), Bytes::new()),
+    )
+    .await;
+    assert_eq!(spent.status(), 404);
+    assert!(String::from_utf8_lossy(spent.body()).contains("<Code>NoSuchUpload</Code>"));
+}
+
+/// Negative — an unknown upload id creates no part and discloses no ownership detail.
+#[tokio::test]
+async fn upload_part_refuses_an_unknown_upload() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "unknown").await;
+    let response = exchange(
+        &service,
+        signed(
+            http::Method::PUT,
+            "/unknown/key?partNumber=1&uploadId=not-minted",
+            Bytes::from_static(b"part"),
+        ),
+    )
+    .await;
+    assert_eq!(response.status(), 404, "{}", String::from_utf8_lossy(response.body()));
+    assert!(String::from_utf8_lossy(response.body()).contains("<Code>NoSuchUpload</Code>"));
+    assert_eq!(
+        exchange(&service, signed(http::Method::GET, "/unknown/key", Bytes::new()))
+            .await
+            .status(),
+        404
+    );
+}
+
+/// Negative — completion refuses a part that was never uploaded and leaves the upload active.
+#[tokio::test]
+async fn completion_refuses_a_missing_part_without_publishing() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "missing-part").await;
+    let upload_id = initiate(&service, "missing-part", "key").await;
+    let response = complete(&service, "missing-part", "key", &upload_id, &[(1, "\"deadbeef\"")]).await;
+    assert_eq!(response.status(), 400);
+    assert!(String::from_utf8_lossy(response.body()).contains("<Code>InvalidPart</Code>"));
+    assert_eq!(
+        exchange(
+            &service,
+            signed(http::Method::GET, &format!("/missing-part/key?uploadId={upload_id}"), Bytes::new(),),
+        )
+        .await
+        .status(),
+        200
+    );
+    assert_eq!(
+        exchange(&service, signed(http::Method::GET, "/missing-part/key", Bytes::new()))
+            .await
+            .status(),
+        404
+    );
+}
+
+/// Negative — completion order is strictly increasing even when every named part exists.
+#[tokio::test]
+async fn completion_refuses_descending_parts() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "part-order").await;
+    let upload_id = initiate(&service, "part-order", "key").await;
+    let first = upload_part(&service, "part-order", "key", &upload_id, 1, b"one").await;
+    let second = upload_part(&service, "part-order", "key", &upload_id, 2, b"two").await;
+    let response = complete(&service, "part-order", "key", &upload_id, &[(2, &second), (1, &first)]).await;
+    assert_eq!(response.status(), 400);
+    assert!(String::from_utf8_lossy(response.body()).contains("<Code>InvalidPartOrder</Code>"));
+    assert_eq!(
+        exchange(&service, signed(http::Method::GET, "/part-order/key", Bytes::new()))
+            .await
+            .status(),
+        404
+    );
+}
+
+/// Negative — a duplicate part number is not accepted as two concatenation instructions.
+#[tokio::test]
+async fn completion_refuses_a_duplicate_part() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "duplicate-part").await;
+    let upload_id = initiate(&service, "duplicate-part", "key").await;
+    let first = upload_part(&service, "duplicate-part", "key", &upload_id, 1, b"one").await;
+    let response = complete(&service, "duplicate-part", "key", &upload_id, &[(1, &first), (1, &first)]).await;
+    assert_eq!(response.status(), 400);
+    assert!(String::from_utf8_lossy(response.body()).contains("<Code>InvalidPartOrder</Code>"));
+    assert_eq!(
+        exchange(&service, signed(http::Method::GET, "/duplicate-part/key", Bytes::new()))
+            .await
+            .status(),
+        404
+    );
+}
+
+/// Negative — abort makes uploaded parts and their id unreachable without publishing an object.
+#[tokio::test]
+async fn abort_cleans_incomplete_state() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "aborted").await;
+    let upload_id = initiate(&service, "aborted", "key").await;
+    let _ = upload_part(&service, "aborted", "key", &upload_id, 1, b"uncommitted").await;
+    assert_eq!(
+        exchange(&service, signed(http::Method::GET, "/aborted/key", Bytes::new()))
+            .await
+            .status(),
+        404
+    );
+    assert_eq!(
+        exchange(
+            &service,
+            signed(http::Method::DELETE, &format!("/aborted/key?uploadId={upload_id}"), Bytes::new(),),
+        )
+        .await
+        .status(),
+        204
+    );
+    let listed = exchange(
+        &service,
+        signed(http::Method::GET, &format!("/aborted/key?uploadId={upload_id}"), Bytes::new()),
+    )
+    .await;
+    assert_eq!(listed.status(), 404);
+    assert!(String::from_utf8_lossy(listed.body()).contains("<Code>NoSuchUpload</Code>"));
+}
+
+/// Negative — production ingress refuses a traversal-shaped multipart key before storage.
+#[tokio::test]
+async fn multipart_traversal_spelling_is_refused_before_storage() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "multipart-safe").await;
+    let response = exchange(
+        &service,
+        signed(http::Method::POST, "/multipart-safe/%2E%2E%2Foutside?uploads", Bytes::new()),
+    )
+    .await;
+    assert_eq!(response.status(), 400);
+    assert!(String::from_utf8_lossy(response.body()).contains("<Code>InvalidArgument</Code>"));
+    assert!(!root.0.join("outside").exists());
+}
+
+/// Negative — the upload storage component may not redirect writes through a symbolic link.
+#[cfg(unix)]
+#[tokio::test]
+async fn multipart_symlink_component_is_refused() {
+    use std::os::unix::fs::symlink;
+
+    let root = TestRoot::new();
+    let outside = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "multipart-link").await;
+    let uploads = root.0.join(format!("b-{}/uploads", hex::encode("multipart-link")));
+    std::fs::remove_dir(&uploads).expect("an empty upload directory");
+    symlink(&outside.0, &uploads).expect("a test symlink");
+    let response = exchange(&service, signed(http::Method::POST, "/multipart-link/key?uploads", Bytes::new())).await;
+    assert_eq!(response.status(), 400);
+    assert!(String::from_utf8_lossy(response.body()).contains("<Code>InvalidRequest</Code>"));
+    assert_eq!(std::fs::read_dir(&outside.0).expect("the outside directory").count(), 0);
 }
 
 /// Negative — a missing bucket is resolved before an object write and no file is created.
