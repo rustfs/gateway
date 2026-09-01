@@ -232,6 +232,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "HeadBucket",
             "HeadObject",
             "ListObjectVersions",
+            "ListObjects",
             "ListObjectsV2",
             "ListParts",
             "PutBucketVersioning",

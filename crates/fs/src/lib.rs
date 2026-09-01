@@ -32,8 +32,8 @@ use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
     AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CreateBucket,
     CreateBucketOutput, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketOutput, DeleteObject,
-    GetBucketVersioning, GetObject, HeadBucket, HeadBucketOutput, HeadObject, ListObjectVersions, ListObjectsV2, ListParts,
-    ListPartsOutput, Part, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
+    GetBucketVersioning, GetObject, HeadBucket, HeadBucketOutput, HeadObject, ListObjectVersions, ListObjects, ListObjectsV2,
+    ListParts, ListPartsOutput, Part, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
@@ -63,6 +63,7 @@ macro_rules! reference_operations {
             crud HeadBucket => "HeadBucket",
             crud HeadObject => "HeadObject",
             versioning ListObjectVersions => "ListObjectVersions",
+            listing ListObjects => "ListObjects",
             listing ListObjectsV2 => "ListObjectsV2",
             multipart ListParts => "ListParts",
             versioning PutBucketVersioning => "PutBucketVersioning",
