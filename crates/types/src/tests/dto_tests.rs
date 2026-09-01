@@ -28,7 +28,7 @@ use crate::dto;
 use crate::ops::enums::{ChecksumAlgorithm, EncodingType, StorageClass};
 use crate::ops::shapes::Object;
 use crate::ops::{get_bucket_location, list_objects_v2, put_object};
-use crate::{BucketName, ETag, ObjectKey, Timestamp, WirePlaceholder};
+use crate::{BucketName, ETag, ObjectKey, SseCustomerKey, Timestamp, WirePlaceholder};
 
 // ── positive ──────────────────────────────────────────────────────────────────────────────────
 
@@ -229,12 +229,14 @@ fn c_dto_n006_a_string_enumeration_accepts_a_value_the_model_never_declared() {
 #[test]
 fn c_dto_n018_debug_never_prints_an_sse_c_key() {
     let input = put_object::Input {
-        sse_customer_key: Some("this-must-never-be-logged".to_owned()),
+        sse_customer_key: Some(SseCustomerKey::new("this-must-never-be-logged".to_owned())),
+        ssekms_key_id: Some("kms-key-id-must-never-be-logged".to_owned()),
         ssekms_encryption_context: Some("this-must-never-be-logged-either".to_owned()),
         ..Default::default()
     };
     let rendered = format!("{input:?}");
     assert!(!rendered.contains("must-never-be-logged"), "key material reached Debug: {rendered}");
+    assert!(!rendered.contains("kms-key-id"), "KMS key id reached Debug: {rendered}");
     assert!(rendered.contains("<redacted>"), "the field is still listed, with a placeholder");
 }
 

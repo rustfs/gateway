@@ -262,11 +262,21 @@ impl Registry {
     /// refuses to generate a required member whose type has none.
     #[must_use]
     pub fn field_type(field: &Field) -> String {
-        let inner = Self::type_with_enums(&field.ty, &field.name);
+        let inner = Self::field_inner_type(field);
         if Self::is_container(&field.ty) || field.required {
             inner
         } else {
             format!("Option<{inner}>")
+        }
+    }
+
+    /// The unwrapped Rust spelling for one field, including secret scalar overrides.
+    #[must_use]
+    pub fn field_inner_type(field: &Field) -> String {
+        if is_secret_string_field(field) {
+            "crate::SseCustomerKey".to_owned()
+        } else {
+            Self::type_with_enums(&field.ty, &field.name)
         }
     }
 
@@ -302,6 +312,12 @@ impl Registry {
             _ => true,
         }
     }
+
+    /// Whether a field can be cloned without copying secret material.
+    #[must_use]
+    pub fn is_field_clonable(&self, field: &Field) -> bool {
+        !is_secret_string_field(field) && self.is_clonable(&field.ty)
+    }
 }
 
 fn same_members(left: &[Field], right: &[Field]) -> bool {
@@ -316,13 +332,30 @@ fn same_members(left: &[Field], right: &[Field]) -> bool {
 pub const REDACTED_WIRE_NAMES: &[&str] = &[
     "x-amz-server-side-encryption-customer-key",
     "x-amz-copy-source-server-side-encryption-customer-key",
+    "x-amz-server-side-encryption-aws-kms-key-id",
     "x-amz-server-side-encryption-context",
 ];
+
+/// Model members whose string value must use the dedicated zeroizing DTO carrier.
+pub const SECRET_STRING_MEMBERS: &[&str] = &["SSECustomerKey", "CopySourceSSECustomerKey"];
+
+/// Whether a model member names an SSE-C customer-key string.
+#[must_use]
+pub fn is_secret_string_member(member: &str) -> bool {
+    SECRET_STRING_MEMBERS.contains(&member)
+}
+
+/// Whether a concrete field is one of the SSE-C customer-key strings.
+#[must_use]
+pub fn is_secret_string_field(field: &Field) -> bool {
+    matches!(field.ty, Type::String) && is_secret_string_member(&field.name)
+}
 
 /// Whether a field's value is secret enough that `Debug` must not print it.
 #[must_use]
 pub fn is_redacted(field: &Field) -> bool {
-    matches!(&field.ty, Type::Capability { .. })
+    is_secret_string_field(field)
+        || matches!(&field.ty, Type::Capability { .. })
         || field
             .wire_name
             .as_deref()

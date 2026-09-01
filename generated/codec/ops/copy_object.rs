@@ -177,7 +177,7 @@ impl OperationCodec for dto::CopyObject {
         // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key") {
             let raw = raw.as_ref();
-            input.sse_customer_key = Some(raw.to_owned());
+            input.sse_customer_key = Some(rustfs_gateway_types::SseCustomerKey::from_wire(raw));
         }
         // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key-md5") {
@@ -207,7 +207,7 @@ impl OperationCodec for dto::CopyObject {
         // CopySourceSSECustomerKey — header `x-amz-copy-source-server-side-encryption-customer-key`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-server-side-encryption-customer-key") {
             let raw = raw.as_ref();
-            input.copy_source_sse_customer_key = Some(raw.to_owned());
+            input.copy_source_sse_customer_key = Some(rustfs_gateway_types::SseCustomerKey::from_wire(raw));
         }
         // CopySourceSSECustomerKeyMD5 — header `x-amz-copy-source-server-side-encryption-customer-key-md5`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-server-side-encryption-customer-key-md5") {

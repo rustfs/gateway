@@ -91,7 +91,7 @@ pub struct Input {
     /// Wire `x-amz-server-side-encryption-customer-algorithm`, bound as Header. Optional.
     pub sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-key`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
-    pub sse_customer_key: Option<String>,
+    pub sse_customer_key: Option<crate::SseCustomerKey>,
     /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
     pub sse_customer_key_md5: Option<String>,
     /// Wire `x-amz-request-payer`, bound as Header. Optional.
@@ -161,7 +161,7 @@ impl std::fmt::Debug for Input {
 /// read off the type instead of unwrapped. `Default` fills a required member with a
 /// wire-invalid placeholder (P10), and [`Output::check_required`] is what keeps one from
 /// leaving the decode path.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct Output {
     /// Wire `x-amz-server-side-encryption`, bound as Header. Optional.
     pub server_side_encryption: Option<crate::ops::enums::ServerSideEncryption>,
@@ -173,7 +173,7 @@ pub struct Output {
     pub sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
     pub sse_customer_key_md5: Option<String>,
-    /// Wire `x-amz-server-side-encryption-aws-kms-key-id`, bound as Header. Optional.
+    /// Wire `x-amz-server-side-encryption-aws-kms-key-id`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub ssekms_key_id: Option<String>,
     /// Wire `x-amz-server-side-encryption-bucket-key-enabled`, bound as Header. Optional.
     pub bucket_key_enabled: Option<bool>,
@@ -199,6 +199,25 @@ impl Output {
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
         crate::reject_placeholder("UploadPartOutput", "ETag", &self.e_tag)?;
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Output {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn redact<T>(value: &Option<T>) -> Option<&'static str> {
+            value.as_ref().map(|_| "<redacted>")
+        }
+
+        f.debug_struct("Output")
+            .field("server_side_encryption", &self.server_side_encryption)
+            .field("e_tag", &self.e_tag)
+            .field("checksum_spec", &self.checksum_spec)
+            .field("sse_customer_algorithm", &self.sse_customer_algorithm)
+            .field("sse_customer_key_md5", &self.sse_customer_key_md5)
+            .field("ssekms_key_id", &redact(&self.ssekms_key_id))
+            .field("bucket_key_enabled", &self.bucket_key_enabled)
+            .field("request_charged", &self.request_charged)
+            .finish()
     }
 }
 
@@ -292,7 +311,7 @@ impl InputBuilder {
 
     /// Sets `SSECustomerKey`.
     #[must_use]
-    pub fn sse_customer_key(mut self, value: String) -> Self {
+    pub fn sse_customer_key(mut self, value: crate::SseCustomerKey) -> Self {
         self.input.sse_customer_key = Some(value);
         self
     }

@@ -58,7 +58,9 @@ impl GetObjectAttributes {
 /// read off the type instead of unwrapped. `Default` fills a required member with a
 /// wire-invalid placeholder (P10), and [`Input::check_required`] is what keeps one from
 /// leaving the decode path.
-#[derive(Clone, Default)]
+///
+/// Not `Clone`: it owns a streaming body.
+#[derive(Default)]
 pub struct Input {
     /// Wire `Bucket`, bound as UriLabel. Required.
     pub bucket: crate::BucketName,
@@ -73,7 +75,7 @@ pub struct Input {
     /// Wire `x-amz-server-side-encryption-customer-algorithm`, bound as Header. Optional.
     pub sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-key`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
-    pub sse_customer_key: Option<String>,
+    pub sse_customer_key: Option<crate::SseCustomerKey>,
     /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
     pub sse_customer_key_md5: Option<String>,
     /// Wire `x-amz-request-payer`, bound as Header. Optional.
@@ -244,7 +246,7 @@ impl InputBuilder {
 
     /// Sets `SSECustomerKey`.
     #[must_use]
-    pub fn sse_customer_key(mut self, value: String) -> Self {
+    pub fn sse_customer_key(mut self, value: crate::SseCustomerKey) -> Self {
         self.input.sse_customer_key = Some(value);
         self
     }

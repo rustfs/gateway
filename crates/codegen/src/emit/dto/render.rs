@@ -150,7 +150,7 @@ fn data_struct(
     baseline_name: &str,
     construction: InputConstruction<'_>,
 ) -> String {
-    let clonable = fields.iter().all(|f| registry.is_clonable(&f.ty));
+    let clonable = fields.iter().all(|f| registry.is_field_clonable(f));
     let has_secret = fields.iter().any(registry::is_redacted);
     let mut out = String::new();
 
@@ -281,13 +281,7 @@ fn builder(fields: &[Field], registry: &Registry, construction: InputConstructio
             .collect::<Vec<_>>();
         let arguments = required
             .iter()
-            .map(|field| {
-                format!(
-                    "{}: {}",
-                    naming::field_name(&field.name),
-                    Registry::type_with_enums(&field.ty, &field.name)
-                )
-            })
+            .map(|field| format!("{}: {}", naming::field_name(&field.name), Registry::field_inner_type(field)))
             .collect::<Vec<_>>()
             .join(", ");
         let _ = writeln!(out, "    /// Starts a builder with every required non-default member.");
@@ -325,7 +319,7 @@ fn builder(fields: &[Field], registry: &Registry, construction: InputConstructio
     out.push_str("impl InputBuilder {\n");
     for field in fields {
         let name = naming::field_name(&field.name);
-        let inner = Registry::type_with_enums(&field.ty, &field.name);
+        let inner = Registry::field_inner_type(field);
         // A container and a required member are both stored bare, so only an optional one is
         // wrapped. The setter's argument is the unwrapped type in every case.
         let bare = Registry::is_container(&field.ty) || field.required;
