@@ -75,6 +75,10 @@ use crate::socket::{Announce, Connection, Demand, Listener, Pacer, ReadFailure, 
 use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::value::Value;
 
+mod exchange;
+#[cfg(test)]
+use exchange::read_concurrent_connection;
+
 /// How long the client waits on a silent server before calling the exchange wedged.
 ///
 /// Used only when the case declares no `timeout_ms`. This is a safety net and never the path a
@@ -421,123 +425,157 @@ impl Sut for Conn {
             .connection
             .as_mut()
             .ok_or_else(|| SutError::Environment("no connection was opened".to_owned()))?;
-        connection.start_exchange();
-
-        let started = Instant::now();
-        let deadline = started + budget;
-        connection.write(&head.bytes)?;
-        let progress = write_body(connection, &pacer, &wire, head.declared_length, deadline)?;
-
-        let method = request_method(&wire, &head);
-        let read = connection.read_response_classified(&method, remaining(deadline)?);
-        let ttfb_ms = elapsed_ms(started);
-        let observation = match read {
-            Ok(response) => {
-                let elapsed_ms = elapsed_ms(started);
-                let (outcome, termination, before_error, events, event_note) = if has_event_stream_content_type(&response.headers)
-                {
-                    match decode_event_stream(&response.body) {
-                        Ok(events) => (Outcome::EventStream, None, None, events, None),
-                        Err(error) => (
-                            Outcome::StreamError,
-                            Some(StreamTermination::MalformedEventStream),
-                            None,
-                            Vec::new(),
-                            Some(format!("the event stream could not be decoded: {error}")),
-                        ),
-                    }
-                } else {
-                    match late_error_offset(response.status, &response.body) {
-                        None => (Outcome::Response, None, None, Vec::new(), None),
-                        Some(offset) => (
-                            Outcome::StreamError,
-                            Some(StreamTermination::ErrorDocument),
-                            Some(offset),
-                            Vec::new(),
-                            None,
-                        ),
-                    }
-                };
-                let mut notes = progress.notes;
-                if let Some(note) = event_note {
-                    notes.push(note);
-                }
-                Observation {
-                    outcome,
-                    stream_termination: termination,
-                    status: Some(response.status),
-                    http_version: Some("http/1.1".to_owned()),
-                    headers: response.headers,
-                    trailers: Vec::new(),
-                    body: response.body,
-                    body_bytes_before_error: before_error,
-                    request_body_bytes_sent_at_response: Some(progress.sent_at_response),
-                    request_body_fully_sent: Some(progress.fully_sent),
-                    ttfb_ms: Some(ttfb_ms),
-                    elapsed_ms,
-                    connection_after: None,
-                    events,
-                    notes,
-                }
-            }
-            Err(ReadFailure::TimedOut) => Observation {
-                outcome: Outcome::Hang,
-                stream_termination: None,
-                status: None,
-                http_version: None,
-                headers: Vec::new(),
-                trailers: Vec::new(),
-                body: Vec::new(),
-                body_bytes_before_error: None,
-                request_body_bytes_sent_at_response: Some(progress.sent_at_response),
-                request_body_fully_sent: Some(progress.fully_sent),
-                ttfb_ms: None,
-                elapsed_ms: elapsed_ms(started),
-                connection_after: None,
-                events: Vec::new(),
-                notes: progress.notes,
-            },
-            // The peer ended the stream, or reset it, before a head arrived. `connection_reset` is
-            // what the corpus spells that. When *this* client tore the connection down the note
-            // attached by `write_body` says so, because the outcome is then a fact about a socket
-            // nobody was going to answer on.
-            Err(failure) => Observation {
-                outcome: Outcome::ConnectionReset,
-                stream_termination: None,
-                status: None,
-                http_version: None,
-                headers: Vec::new(),
-                trailers: Vec::new(),
-                body: Vec::new(),
-                body_bytes_before_error: None,
-                request_body_bytes_sent_at_response: Some(progress.sent_at_response),
-                request_body_fully_sent: Some(progress.fully_sent),
-                ttfb_ms: None,
-                elapsed_ms: elapsed_ms(started),
-                connection_after: None,
-                events: Vec::new(),
-                notes: {
-                    let mut notes = progress.notes;
-                    if !progress.torn_down {
-                        notes.push(format!("the response could not be read: {failure}"));
-                    }
-                    notes
-                },
-            },
-        };
-        // Taken last, and from the socket. The response has already been read in full by now, so a
-        // server that was going to close has already sent FIN and one that is keeping the
-        // connection will sit there saying nothing — which is the cost of classifying `open`, and
-        // is deliberately outside the `elapsed_ms` a case's `terminate_within_ms` is judged
-        // against: instrumentation is not the exchange.
-        let connection_after = connection.observe();
-        if progress.torn_down {
+        let result = exchange::execute_socket_exchange(connection, &pacer, &wire, &head, budget)?;
+        if result.torn_down {
             self.connection = None;
         }
-        Ok(Observation {
+        Ok(result.observation)
+    }
+
+    fn exchange_concurrent(&mut self, plans: &[ExchangePlan<'_>]) -> Result<Vec<Observation>, SutError> {
+        self.exchange_concurrent_sockets(plans)
+    }
+}
+
+struct DispatchedExchange {
+    progress: BodyProgress,
+    started: Instant,
+    deadline: Instant,
+}
+
+fn dispatch_socket_exchange(
+    connection: &mut Connection,
+    pacer: &Arc<Pacer>,
+    wire: &Wire,
+    head: &Head,
+    budget: Duration,
+) -> Result<DispatchedExchange, SutError> {
+    connection.start_exchange();
+    let started = Instant::now();
+    let deadline = started + budget;
+    connection.write(&head.bytes)?;
+    let progress = write_body(connection, pacer, wire, head.declared_length, deadline)?;
+    Ok(DispatchedExchange {
+        progress,
+        started,
+        deadline,
+    })
+}
+
+fn observe_socket_exchange(
+    connection: &mut Connection,
+    wire: &Wire,
+    head: &Head,
+    dispatched: DispatchedExchange,
+) -> exchange::SocketExchangeResult {
+    let DispatchedExchange {
+        progress,
+        started,
+        deadline,
+    } = dispatched;
+    let method = request_method(wire, head);
+    let read = match remaining(deadline) {
+        Ok(remaining) => connection.read_response_classified(&method, remaining),
+        Err(_) => Err(ReadFailure::TimedOut),
+    };
+    let ttfb_ms = elapsed_ms(started);
+    let torn_down = progress.torn_down;
+    let observation = match read {
+        Ok(response) => {
+            let elapsed_ms = elapsed_ms(started);
+            let (outcome, termination, before_error, events, event_note) = if has_event_stream_content_type(&response.headers) {
+                match decode_event_stream(&response.body) {
+                    Ok(events) => (Outcome::EventStream, None, None, events, None),
+                    Err(error) => (
+                        Outcome::StreamError,
+                        Some(StreamTermination::MalformedEventStream),
+                        None,
+                        Vec::new(),
+                        Some(format!("the event stream could not be decoded: {error}")),
+                    ),
+                }
+            } else {
+                match late_error_offset(response.status, &response.body) {
+                    None => (Outcome::Response, None, None, Vec::new(), None),
+                    Some(offset) => (
+                        Outcome::StreamError,
+                        Some(StreamTermination::ErrorDocument),
+                        Some(offset),
+                        Vec::new(),
+                        None,
+                    ),
+                }
+            };
+            let mut notes = progress.notes;
+            if let Some(note) = event_note {
+                notes.push(note);
+            }
+            Observation {
+                outcome,
+                stream_termination: termination,
+                status: Some(response.status),
+                http_version: Some("http/1.1".to_owned()),
+                headers: response.headers,
+                trailers: Vec::new(),
+                body: response.body,
+                body_bytes_before_error: before_error,
+                request_body_bytes_sent_at_response: Some(progress.sent_at_response),
+                request_body_fully_sent: Some(progress.fully_sent),
+                ttfb_ms: Some(ttfb_ms),
+                elapsed_ms,
+                connection_after: None,
+                events,
+                notes,
+            }
+        }
+        Err(ReadFailure::TimedOut) => Observation {
+            outcome: Outcome::Hang,
+            stream_termination: None,
+            status: None,
+            http_version: None,
+            headers: Vec::new(),
+            trailers: Vec::new(),
+            body: Vec::new(),
+            body_bytes_before_error: None,
+            request_body_bytes_sent_at_response: Some(progress.sent_at_response),
+            request_body_fully_sent: Some(progress.fully_sent),
+            ttfb_ms: None,
+            elapsed_ms: elapsed_ms(started),
+            connection_after: None,
+            events: Vec::new(),
+            notes: progress.notes,
+        },
+        Err(failure) => Observation {
+            outcome: Outcome::ConnectionReset,
+            stream_termination: None,
+            status: None,
+            http_version: None,
+            headers: Vec::new(),
+            trailers: Vec::new(),
+            body: Vec::new(),
+            body_bytes_before_error: None,
+            request_body_bytes_sent_at_response: Some(progress.sent_at_response),
+            request_body_fully_sent: Some(progress.fully_sent),
+            ttfb_ms: None,
+            elapsed_ms: elapsed_ms(started),
+            connection_after: None,
+            events: Vec::new(),
+            notes: {
+                let mut notes = progress.notes;
+                if !torn_down {
+                    notes.push(format!("the response could not be read: {failure}"));
+                }
+                notes
+            },
+        },
+    };
+    let connection_after = connection.observe();
+    exchange::SocketExchangeResult {
+        observation: Observation {
             connection_after: Some(connection_after),
             ..observation
-        })
+        },
+        torn_down,
     }
 }
 

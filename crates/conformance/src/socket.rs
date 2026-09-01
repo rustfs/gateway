@@ -1029,6 +1029,16 @@ impl Connection {
         })
     }
 
+    /// Returns the local endpoint the operating system assigned this client socket.
+    ///
+    /// Concurrent batches use this observation to prove each exchange owns an independent TCP
+    /// connection rather than trusting the construction that was intended to open two.
+    pub fn local_addr(&self) -> Result<SocketAddr, SutError> {
+        self.stream
+            .local_addr()
+            .map_err(|error| SutError::Environment(format!("cannot observe the local socket endpoint: {error}")))
+    }
+
     /// Writes bytes on the connection.
     ///
     /// # Errors

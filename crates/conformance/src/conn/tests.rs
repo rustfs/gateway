@@ -68,6 +68,80 @@ fn connection_reuse_is_read_in_both_directions() {
     assert_eq!(read_connection(None), Ok(true), "one connection unless a case says otherwise");
 }
 
+/// Positive — the batch opens two independently observed client endpoints, dispatches both
+/// requests, and only then reads their responses.
+#[test]
+fn concurrent_dispatch_uses_two_real_sockets() {
+    let mut conn = target();
+    conn.prepare("s-concurrent-0001", None).expect("the empty fixture prepares");
+    let connection = block("concurrent = true\n");
+    let request = block(concat!(
+        "method = \"GET\"\ntarget = \"/missing-bucket/key\"\n",
+        "sign = { mode = \"sigv4_header\", service = \"s3\", region = \"us-east-1\", credential = \"valid\" }\n",
+    ));
+    let plans = [
+        ExchangePlan {
+            case_id: "s-concurrent-0001",
+            index: 0,
+            request: request.clone(),
+            clock: None,
+            connection: Some(&connection),
+            timeout_ms: Some(2_000),
+            transport: rustfs_gateway::Transport::Hyper,
+            profile: crate::sut::Profile::Aws,
+        },
+        ExchangePlan {
+            case_id: "s-concurrent-0001",
+            index: 1,
+            request,
+            clock: None,
+            connection: Some(&connection),
+            timeout_ms: Some(2_000),
+            transport: rustfs_gateway::Transport::Hyper,
+            profile: crate::sut::Profile::Aws,
+        },
+    ];
+    let observations = conn.exchange_concurrent(&plans).expect("both sockets are driven");
+    assert_eq!(observations.len(), 2);
+    assert!(observations.iter().all(|observation| observation.status.is_some()));
+    assert!(
+        observations
+            .iter()
+            .all(|observation| observation.connection_after == Some(ConnectionState::Open)),
+        "{:?}",
+        observations
+            .iter()
+            .map(|observation| (observation.status, observation.connection_after))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Negative — a one-request batch cannot masquerade as concurrency.
+#[test]
+fn concurrent_dispatch_requires_two_exchanges() {
+    let mut conn = target();
+    let connection = block("concurrent = true\n");
+    let plan = ExchangePlan {
+        case_id: "s-concurrent-0002",
+        index: 0,
+        request: block("method = \"GET\"\ntarget = \"/\"\n"),
+        clock: None,
+        connection: Some(&connection),
+        timeout_ms: Some(2_000),
+        transport: rustfs_gateway::Transport::Hyper,
+        profile: crate::sut::Profile::Aws,
+    };
+    let error = conn.exchange_concurrent(&[plan]).expect_err("one exchange is not concurrent");
+    assert!(error.to_string().contains("at least two"), "{error}");
+}
+
+/// Negative — reuse would collapse the independent-client meaning of the new dimension.
+#[test]
+fn concurrent_dispatch_refuses_reuse() {
+    let error = read_concurrent_connection(Some(&block("concurrent = true\nreuse = true\n"))).expect_err("reuse must be refused");
+    assert!(error.to_string().contains("reuse"), "{error}");
+}
+
 // -- Framing ------------------------------------------------------------------------------------
 
 /// Negative — the length the *head* declares is what frames the body, not the payload that follows.
