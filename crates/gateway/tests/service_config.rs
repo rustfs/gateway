@@ -26,7 +26,7 @@ use std::sync::Mutex;
 
 use bytes::Bytes;
 use rustfs_gateway::{ConfigHandle, HandlerError, ServiceConfig, StageFilter, WireHead};
-use support::{Backend, ContentPing, content_ping_route, wired};
+use support::{Backend, ContentPing, wired};
 
 /// A wire filter that updates the service configuration after request entry.
 ///
@@ -60,7 +60,7 @@ async fn c_lim_0005_hot_update_does_not_tear_an_inflight_request() {
     let (builder, handle) = wired().config(ServiceConfig::new(8));
     let service = builder
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .stage_filter(UpdatingFilter::new(handle.clone(), ServiceConfig::new(32)))
         .build()
         .expect("a complete assembly");
@@ -92,7 +92,7 @@ async fn an_earlier_handle_still_updates_after_config_is_called_again() {
     first_handle.store(ServiceConfig::new(32));
     let service = builder
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .build()
         .expect("a complete assembly");
 

@@ -57,7 +57,7 @@ use rustfs_gateway::{
     DefaultGovernor, GovernorRates, ManualMonotonic, MonotonicClock, ProviderError, Rate, RegionSet, S3Service,
     SigV4Authenticator, SystemMonotonic, Unlimited, WireResponse,
 };
-use support::{Backend, CountingBody, Ping, ping_route, wired};
+use support::{Backend, CountingBody, Ping, wired};
 
 /// The bucket every request below addresses.
 const BUCKET: &str = "governed";
@@ -89,7 +89,7 @@ async fn send(service: &S3Service, request: http::Request<Bytes>) -> WireRespons
 async fn an_assembly_that_configures_nothing_still_has_a_limit() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
 
@@ -126,7 +126,7 @@ async fn an_assembly_that_configures_nothing_still_has_a_limit() {
 async fn every_refusal_for_load_renders_the_same_bytes() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .framework_governor_rates(GovernorRates {
             aggregate: Rate::new(1_000, 0),
             per_ip: Rate::new(1_000, 0),
@@ -180,7 +180,7 @@ async fn every_refusal_for_load_renders_the_same_bytes() {
 async fn a_refusal_for_load_reads_no_body() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .governor(DefaultGovernor::with_rates(GovernorRates {
             aggregate: Rate::none(),
             ..GovernorRates::default()
@@ -210,7 +210,7 @@ async fn a_limited_assembly_recovers_when_its_clock_advances_and_not_before() {
     let clock = Arc::new(ManualMonotonic::at_millis(0));
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .governor(DefaultGovernor::with_rates_and_clock(
             GovernorRates {
                 aggregate: Rate::new(1, 1),
@@ -250,7 +250,7 @@ fn closed_credential_rates() -> GovernorRates {
 async fn a_user_governor_is_anded_with_the_framework_default() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .framework_governor_rates(GovernorRates {
             aggregate: Rate::none(),
             ..closed_credential_rates()
@@ -273,7 +273,7 @@ async fn a_user_governor_is_anded_with_the_framework_default() {
 async fn the_three_preauthentication_classes_are_metered_separately() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .framework_governor_rates(closed_credential_rates())
         .build()
         .expect("a complete assembly");
@@ -312,7 +312,7 @@ fn from(ip: &str, forwarded: &str) -> http::Request<Bytes> {
 async fn an_untrusted_forwarding_header_cannot_reset_the_per_ip_meter() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .framework_governor_rates(GovernorRates {
             aggregate: Rate::new(1_000, 0),
             per_ip: Rate::new(1, 0),
@@ -372,7 +372,7 @@ async fn credential_provider_calls_are_bounded_by_the_credential_class() {
     let service = wired()
         .authenticator(SigV4Authenticator::new(provider, RegionSet::new(["us-east-1"]).expect("one region")))
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .framework_governor_rates(load_bound_rates())
         .clock_with_skew_ack(
             support::fixed_clock(),
@@ -393,7 +393,7 @@ async fn cors_source_calls_are_bounded_by_the_preflight_class() {
     let calls = Arc::new(AtomicUsize::new(0));
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .cors_source(CountingCors {
             calls: Arc::clone(&calls),
         })
@@ -413,7 +413,7 @@ async fn backend_calls_are_bounded_by_the_unauthenticated_class() {
     let calls = Arc::new(AtomicUsize::new(0));
     let service = wired()
         .register::<Ping, _>(Arc::new(support::CountingBackend::new(&calls)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .framework_governor_rates(load_bound_rates())
         .build()
         .expect("a complete assembly");
@@ -442,7 +442,7 @@ async fn one_request_reads_the_wall_clock_once() {
     let calls = Arc::new(AtomicUsize::new(0));
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .clock(CountingClock {
             calls: Arc::clone(&calls),
             reading: Clock::now(&rustfs_gateway::system_clock()),

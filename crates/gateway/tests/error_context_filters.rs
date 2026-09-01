@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rustfs_gateway::{ErrorCode, ErrorDetail, HandlerError, RegionLabel, StageFilter, WireHead, wire_filter};
 
-use support::{Ping, exchange, ping_route, plain, wired};
+use support::{Ping, exchange, plain, wired};
 
 /// A generic pre-authentication filter cannot turn a bare contextual code into the built-in
 /// signing verifier's trusted refusal.
@@ -73,7 +73,7 @@ async fn a_wire_filter_cannot_attach_a_reserved_region_detail() {
 fn counting_service(reached: &Arc<AtomicUsize>, filter: impl StageFilter) -> rustfs_gateway::S3Service {
     wired()
         .register::<Ping, _>(Arc::new(support::CountingBackend::new(reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .stage_filter(filter)
         .build()
         .expect("a complete assembly")

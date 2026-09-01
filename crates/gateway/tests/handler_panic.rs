@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rustfs_gateway::{Handler, HandlerResult, Req, Resp};
-use support::{Ping, PingOutput, exchange, ping_route, plain, wired};
+use support::{Ping, PingOutput, exchange, plain, wired};
 
 struct PanicsOnce {
     calls: AtomicUsize,
@@ -61,7 +61,7 @@ async fn a_handler_panic_is_a_500_and_the_next_request_still_runs() {
         .register::<Ping, _>(Arc::new(PanicsOnce {
             calls: AtomicUsize::new(0),
         }))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
 

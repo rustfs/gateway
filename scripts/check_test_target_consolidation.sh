@@ -643,6 +643,7 @@ gateway_modules = (
     "cors_runtime",
     "credential_runtime",
     "custom_signature_verifier",
+    "dialect_entry",
     "error_context_filters",
     "facade_probe",
     "file_transfer",

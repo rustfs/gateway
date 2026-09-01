@@ -34,9 +34,10 @@ use http_body_util::{BodyExt, Full};
 use rustfs_gateway::{
     AuthRequirement, ByteStream, CodecError, EncodedResponse, Handler, HandlerCancellation, HandlerDeadlineClass, HandlerError,
     HandlerResult, MetaView, NoDerived, Operation, OperationCodec, OperationFloor, OperationSpec, Predicate, Req, RequestBody,
-    RequestBodyDeadlineConfig, RequestBodyMode, ResourceShape, Resp, ResponseBody, RouteEntry, RouteSelector, S3Service,
-    ServiceConfig, SigService, TargetKind,
+    RequestBodyDeadlineConfig, RequestBodyMode, ResourceShape, Resp, ResponseBody, S3Service, ServiceConfig, SigService,
+    TargetKind,
 };
+use rustfs_gateway_core::{Dialect, DialectOverlay, DialectRoute, OverlayRow};
 use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ShutdownReport};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -61,6 +62,21 @@ static STREAMING_FLOOR: OperationFloor =
     OperationFloor::custom("example:StreamingPut", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
 
 static STREAMING_PREDICATES: &[Predicate] = &[Predicate::Method(http::Method::PUT), Predicate::Target(TargetKind::Service)];
+
+static STREAMING_OVERLAY: DialectOverlay = DialectOverlay {
+    name: "example-streaming-test",
+    vendor: "example",
+    operations: &[OverlayRow {
+        name: "example:StreamingPut",
+        precedence: 50,
+        selector: "Method(PUT) ∧ Target(Service)",
+        action: "example:StreamingPut",
+        resource: ResourceShape::Service,
+        success_status: 200,
+        anonymous: true,
+        evidence: &["https://github.com/rustfs/gateway/issues/37"],
+    }],
+};
 
 impl Operation for StreamingPut {
     const NAME: &'static str = "example:StreamingPut";
@@ -100,13 +116,16 @@ impl OperationCodec for StreamingPut {
     }
 }
 
-pub(super) fn streaming_route() -> RouteEntry {
-    RouteEntry {
-        precedence: 50,
-        selector: RouteSelector::new(STREAMING_PREDICATES),
-        op_name: StreamingPut::NAME,
-        path_shape: "/",
-    }
+pub(super) fn streaming_dialect() -> Dialect {
+    Dialect::assemble(&STREAMING_OVERLAY)
+        .declare::<StreamingPut>(DialectRoute {
+            precedence: 50,
+            selector: STREAMING_PREDICATES,
+            path_shape: "/",
+            shadows: &[],
+        })
+        .build()
+        .expect("the streaming overlay and codec declaration must agree")
 }
 
 async fn first_frame(body: &mut rustfs_gateway::Body) -> Result<usize, HandlerError> {
@@ -260,7 +279,7 @@ where
             rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
         .register::<StreamingPut, _>(backend)
-        .route(streaming_route())
+        .dialect(&streaming_dialect())
         .config(ServiceConfig::new(1024 * 1024).with_request_body_deadlines(deadlines));
     builder.build().expect("a complete streaming assembly")
 }

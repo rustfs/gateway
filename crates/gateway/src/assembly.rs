@@ -74,12 +74,14 @@ impl RuleRef {
                       that collides with an AWS one, or an operation with no authorisation action",
     };
 
-    /// A route table that will not build: an overlap at one precedence, or a third-party entry
-    /// standing in front of a standard operation.
+    /// A route table that will not build: an overlap at one precedence, a third-party entry
+    /// standing in front of a standard operation, or a wire-reachable third-party operation
+    /// missing an exact validated dialect route.
     pub const ROUTE: Self = Self {
         id: "asm-route-refused",
-        explanation: "the route table refused to build: two entries overlap at one precedence, or a third-party entry stands \
-                      in front of a standard operation",
+        explanation: "the route table refused to build: two entries overlap at one precedence, a third-party entry stands \
+                      in front of a standard operation, or a wire-reachable third-party operation lacks an exact validated \
+                      dialect route",
     };
 
     /// No operation was registered at all.
@@ -280,7 +282,9 @@ impl From<BuildError> for AssemblyError {
     fn from(source: BuildError) -> Self {
         let rule = match source {
             BuildError::Registration(_) => RuleRef::REGISTRATION,
-            BuildError::RouteClaimsStandardName { .. } | BuildError::Route(_) => RuleRef::ROUTE,
+            BuildError::RouteClaimsStandardName { .. } | BuildError::UnverifiedCodecRoute { .. } | BuildError::Route(_) => {
+                RuleRef::ROUTE
+            }
         };
         Self::Router {
             source: Box::new(source),

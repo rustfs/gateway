@@ -60,7 +60,7 @@ use rustfs_gateway::{
     Observer, OperationSetEnd, OperationSetNode, Req, RequestEvent, Resp, S3Service, ServiceConfig, connection_intent_of,
 };
 use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ShutdownReport};
-use support::{Backend, Failing, Ping, PingOutput, ping_route, plain, service, wired, wired_denying};
+use support::{Backend, Failing, Ping, PingOutput, plain, service, wired, wired_denying};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Notify;
@@ -121,7 +121,7 @@ fn deadline_service(acknowledges_cleanup: bool) -> (S3Service, Arc<DeadlineBacke
     let recorder = Arc::new(DeadlineReportRecorder::default());
     let (builder, _handle) = wired()
         .register::<Ping, _>(Arc::clone(&backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .observer(Arc::clone(&recorder))
         .config(deadline_config());
     (builder.build().expect("a complete assembly"), backend, recorder)
@@ -256,7 +256,7 @@ async fn the_body_ceiling_closes_and_a_head_ceiling_does_not() {
     };
     let body_service = wired()
         .register::<Ping, _>(std::sync::Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .limits(body_limits)
         .build()
         .expect("a complete assembly");
@@ -273,7 +273,7 @@ async fn the_body_ceiling_closes_and_a_head_ceiling_does_not() {
     };
     let head_service = wired()
         .register::<Ping, _>(std::sync::Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .limits(head_limits)
         .build()
         .expect("a complete assembly");
@@ -285,7 +285,7 @@ async fn the_body_ceiling_closes_and_a_head_ceiling_does_not() {
 async fn an_authorisation_denial_keeps_the_connection() {
     let service = wired_denying()
         .register::<Ping, _>(std::sync::Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     let response = refusal(&service, plain(http::Method::POST, "/")).await;
@@ -297,7 +297,7 @@ async fn an_authorisation_denial_keeps_the_connection() {
 async fn an_ordinary_refusal_keeps_the_connection_and_no_refusal_writes_the_header() {
     let service = wired()
         .register::<Ping, _>(std::sync::Arc::new(Failing))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     let response = refusal(&service, plain(http::Method::POST, "/")).await;
@@ -354,7 +354,7 @@ async fn c_wire_0060_c_ing_0060_c_lim_0060_a_client_reset_cancels_the_handler_ro
     let backend = Arc::new(ResetBackend::new());
     let service = wired()
         .register::<Ping, _>(Arc::clone(&backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     let server = live_server_with_config(
@@ -427,7 +427,7 @@ async fn a_monomorphic_unacknowledged_handler_deadline_carries_close_intent() {
     let recorder = Arc::new(DeadlineReportRecorder::default());
     let (builder, _handle) = wired()
         .register::<Ping, _>(Arc::clone(&backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .observer(Arc::clone(&recorder))
         .config(deadline_config());
     let service = builder
@@ -449,7 +449,7 @@ async fn a_completed_handler_reports_no_deadline() {
     let recorder = Arc::new(DeadlineReportRecorder::default());
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .observer(Arc::clone(&recorder))
         .build()
         .expect("a complete assembly");
@@ -482,7 +482,7 @@ async fn c_wire_0063_c_lim_0021_an_over_large_body_is_refused_on_the_socket_befo
     };
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .limits(limits)
         .build()
         .expect("a complete assembly");

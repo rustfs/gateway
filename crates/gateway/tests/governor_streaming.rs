@@ -21,7 +21,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::streaming_request::{StreamingOutput, StreamingPut, live_server, stop, streaming_route};
+use super::streaming_request::{StreamingOutput, StreamingPut, live_server, stop, streaming_dialect};
 use super::throughput_request::{signed_chunked_request, signed_chunked_request_with_chunk_bytes};
 use crate::support;
 
@@ -191,7 +191,7 @@ fn service<G: Governor>(backend: Arc<RollbackBackend>, governor: Arc<G>) -> rust
             rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
         .register::<StreamingPut, _>(backend)
-        .route(streaming_route())
+        .dialect(&streaming_dialect())
         .governor(governor)
         .config(ServiceConfig::new(4 * 1024 * 1024));
     builder.build().expect("a complete streaming assembly")

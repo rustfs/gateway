@@ -32,7 +32,7 @@ use rustfs_gateway_core::route::{generated_entries, render_selector};
 #[cfg(feature = "dangerous-replace-signature-verifier")]
 use rustfs_gateway::sig::{AwsSignatureVerifier, DangerAck, SealedAws};
 
-use crate::support::{self, Backend, CountingBackend, Ping, exchange, ping_route};
+use crate::support::{self, Backend, CountingBackend, Ping, exchange};
 
 struct AcceptingVerifier {
     calls: Arc<AtomicUsize>,
@@ -93,7 +93,7 @@ async fn c_sig_0308_a_non_aws_request_reaches_the_installed_custom_verifier() {
             calls: Arc::clone(&calls),
         })
         .register::<Ping, _>(Arc::new(CountingBackend::new(&reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     let request = support::plain(http::Method::POST, "/");
@@ -126,7 +126,7 @@ async fn a_custom_verifier_rejection_never_reaches_the_handler() {
             calls: Arc::clone(&calls),
         })
         .register::<Ping, _>(Arc::new(CountingBackend::new(&reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     let request = support::plain(http::Method::POST, "/");
@@ -149,7 +149,7 @@ async fn a_custom_credential_cannot_be_downgraded_to_anonymous() {
         .security_floor(custom_floor())
         .custom_signature_verifier(AnonymousVerifier)
         .register::<Ping, _>(Arc::new(CountingBackend::new(&reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     let request = support::plain(http::Method::POST, "/");
@@ -199,7 +199,7 @@ async fn c_sig_0378_no_unauthenticated_security_posture_endpoint_exists() {
 
     let service = support::wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     assert!(!service.security_posture().custom_signature_verifier());

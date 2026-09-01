@@ -54,7 +54,7 @@ use std::sync::Arc;
 
 use rustfs_gateway::{ClockSkewAck, S3Service};
 
-use super::{Backend, Ping, fixed_clock, ping_route, wired};
+use super::{Backend, Ping, fixed_clock, wired};
 
 /// The assembly every allocation gate exchanges against: `example:Ping`, one backend, a clock
 /// fixed to the instant the signed fixtures were built at.
@@ -63,7 +63,7 @@ pub fn probe_service() -> S3Service {
     wired()
         .clock_with_skew_ack(fixed_clock(), ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry())
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&super::ping_dialect())
         .build()
         .expect("a complete assembly")
 }

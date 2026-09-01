@@ -42,7 +42,7 @@ use rustfs_gateway::{
 };
 use rustfs_gateway_sig::sig_v2::{SigV2Mode, SigV2Policy, SigV2Signer, SigV2StringToSignSpec};
 use rustfs_gateway_sig::{RawQuery, percent_encode};
-use support::{Ping, exchange, ping_route, wired};
+use support::{Ping, exchange, wired};
 
 /// [`support::SIGNED_AT_UNIX_SECONDS`] in the spelling SigV2's `Date` header uses.
 const SIGNED_AT_RFC1123: &str = "Fri, 02 Jan 2026 03:04:05 GMT";
@@ -63,7 +63,7 @@ fn service_with(floor: SecurityFloor, reached: &Arc<AtomicUsize>) -> S3Service {
             ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
         .register::<Ping, _>(Arc::new(support::CountingBackend::new(reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly")
 }
@@ -377,7 +377,7 @@ async fn c_sig_0581_an_authenticator_without_a_sigv2_override_refuses() {
             ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
         .register::<Ping, _>(Arc::new(support::CountingBackend::new(&reached)))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
 

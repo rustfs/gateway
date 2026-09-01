@@ -42,13 +42,12 @@ use rustfs_gateway::dto::{CorsConfiguration, CorsRule};
 use rustfs_gateway::{
     AuthRequirement, BoxFuture, BucketName, CodecError, CorsSource, CorsSourceError, EncodedResponse, Handler, HandlerResult,
     MetaView, Operation, OperationCodec, OperationFloor, OperationSpec, Predicate, Req, RequestBody, ResourceShape, Resp,
-    ResponseBody, ResponseView, RouteEntry, RouteSelector, SigService, TargetKind, VirtualHostStyle, response_filter,
-    wire_filter,
+    ResponseBody, ResponseView, SigService, TargetKind, VirtualHostStyle, response_filter, wire_filter,
 };
-use rustfs_gateway_core::HandlerDeadlineClass;
+use rustfs_gateway_core::{Dialect, DialectOverlay, DialectRoute, HandlerDeadlineClass, OverlayRow};
 use support::{
-    Backend, ContentPing, HeadPing, LENGTH_ECHO, Ping, attributes_request, attributes_service, content_ping_route, exchange,
-    exchange_wire, fixed_clock, head_ping_route, ping_route, plain, signed, wired,
+    Backend, ContentPing, HeadPing, LENGTH_ECHO, Ping, attributes_request, attributes_service, exchange, exchange_wire,
+    fixed_clock, plain, signed, wired,
 };
 
 // ── 1. BodylessStatusFixLayer → the response invariant ──────────────────────────────────────────
@@ -63,7 +62,7 @@ use support::{
 async fn bodyless_status_fix_is_the_response_invariant() {
     let service = wired()
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .build()
         .expect("a complete assembly");
 
@@ -91,8 +90,8 @@ async fn head_request_body_fix_is_the_response_invariant() {
     let service = wired()
         .register::<HeadPing, _>(Arc::new(Backend))
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(head_ping_route())
-        .route(content_ping_route())
+        .dialect(&crate::support::head_ping_dialect())
+        .dialect(&crate::support::content_ping_dialect())
         .build()
         .expect("a complete assembly");
 
@@ -158,7 +157,7 @@ async fn virtual_host_style_hint_is_the_host_resolver() {
 
     let unconfigured = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .build()
         .expect("a complete assembly");
     let (status, body) = exchange(&unconfigured, vhosted()).await;
@@ -167,7 +166,7 @@ async fn virtual_host_style_hint_is_the_host_resolver() {
 
     let configured = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .host_resolver(VirtualHostStyle::new(["s3.example.com"]).expect("a valid base domain"))
         .build()
         .expect("a complete assembly");
@@ -187,7 +186,7 @@ async fn virtual_host_style_hint_is_the_host_resolver() {
 async fn empty_body_content_length_compat_is_a_stage_filter() {
     let with_filter = wired()
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .stage_filter(wire_filter(|head: &mut rustfs_gateway::WireHead<'_>| {
             if head.header(&http::header::CONTENT_LENGTH).is_none() {
                 head.set_header(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("0"))?;
@@ -201,7 +200,7 @@ async fn empty_body_content_length_compat_is_a_stage_filter() {
 
     let without = wired()
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .build()
         .expect("a complete assembly");
     let response = exchange_wire(&without, plain(http::Method::PUT, "/")).await;
@@ -220,7 +219,7 @@ async fn empty_body_content_length_compat_is_a_stage_filter() {
 async fn s3_error_message_compat_is_a_stage_filter() {
     let rewritten = wired()
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .stage_filter(response_filter(
             |_view: &ResponseView<'_>, response: &mut http::Response<rustfs_gateway::Body>| {
                 if response.status().is_client_error() {
@@ -239,7 +238,7 @@ async fn s3_error_message_compat_is_a_stage_filter() {
 
     let plain_service = wired()
         .register::<ContentPing, _>(Arc::new(Backend))
-        .route(content_ping_route())
+        .dialect(&crate::support::content_ping_dialect())
         .build()
         .expect("a complete assembly");
     let (_, body) = exchange(&plain_service, plain(http::Method::PUT, "/?refuse")).await;
@@ -292,6 +291,33 @@ static QUERY_SHAPED_PREDICATES: &[Predicate] = &[
     Predicate::Target(TargetKind::Service),
     Predicate::QueryPresent("Action"),
 ];
+
+static QUERY_SHAPED_OVERLAY: DialectOverlay = DialectOverlay {
+    name: "example-query-test",
+    vendor: "example",
+    operations: &[OverlayRow {
+        name: "example:QueryShaped",
+        precedence: 49,
+        selector: "Method(POST) ∧ Target(Service) ∧ QueryPresent(\"Action\")",
+        action: "example:QueryShaped",
+        resource: ResourceShape::Service,
+        success_status: 200,
+        anonymous: true,
+        evidence: &["https://github.com/rustfs/gateway/issues/37"],
+    }],
+};
+
+fn query_shaped_dialect() -> Dialect {
+    Dialect::assemble(&QUERY_SHAPED_OVERLAY)
+        .declare::<QueryShaped>(DialectRoute {
+            precedence: 49,
+            selector: QUERY_SHAPED_PREDICATES,
+            path_shape: "/",
+            shadows: &[],
+        })
+        .build()
+        .expect("the query-shaped overlay and codec declaration must agree")
+}
 
 impl Operation for QueryShaped {
     const NAME: &'static str = "example:QueryShaped";
@@ -356,12 +382,7 @@ impl Handler<QueryShaped> for QueryBackend {
 async fn sts_query_api_compat_is_an_extension_operation() {
     let service = wired()
         .register::<QueryShaped, _>(Arc::new(QueryBackend))
-        .route(RouteEntry {
-            precedence: 49,
-            selector: RouteSelector::new(QUERY_SHAPED_PREDICATES),
-            op_name: "example:QueryShaped",
-            path_shape: "/",
-        })
+        .dialect(&query_shaped_dialect())
         .build()
         .expect("a complete assembly");
 
@@ -406,7 +427,7 @@ impl CorsSource for OneBucket {
 async fn conditional_cors_is_the_built_in_preflight() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
-        .route(ping_route())
+        .dialect(&crate::support::ping_dialect())
         .cors_source(OneBucket)
         .build()
         .expect("a complete assembly");

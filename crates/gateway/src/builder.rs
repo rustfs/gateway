@@ -46,7 +46,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rustfs_gateway_core::{
-    Handler, MissingHandlers, Operation, OperationCodec, OperationSet, RedirectTarget, RouterBuilder, SseConfig,
+    Dialect, Handler, MissingHandlers, Operation, OperationCodec, OperationSet, RedirectTarget, RouterBuilder, SseConfig,
 };
 use rustfs_gateway_http::Limits;
 #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -271,15 +271,27 @@ impl ServiceBuilder {
         self
     }
 
-    /// Adds a route entry for an operation this workspace does not define.
+    /// Stages a raw route entry for an operation this workspace does not define.
     ///
-    /// The entry joins the generated ones and is subject to the same build-time overlap decision,
-    /// so a third-party selector that collides with an AWS one at the same precedence refuses the
-    /// build rather than winning by sort order. An entry wearing an AWS operation name is refused
-    /// outright.
+    /// A route-only operation with no wire codec remains usable by the core router. A route paired
+    /// with a public wire codec must also be the exact row installed by [`ServiceBuilder::dialect`]
+    /// or the build fails closed. This method cannot acknowledge dialect evidence, anonymous
+    /// reachability, or reserved host classes on its own.
     #[must_use]
     pub fn route(mut self, entry: rustfs_gateway_core::RouteEntry) -> Self {
         self.router = self.router.route(entry);
+        self
+    }
+
+    /// Installs the exact route rows carried by one validated [`Dialect`] proof.
+    ///
+    /// Registration remains explicit and greppable through [`ServiceBuilder::register`], while
+    /// [`ServiceBuilder::build`] commits the route table and its handler table together. A raw row
+    /// paired with a codec is refused unless this proof contains that exact row, so callers cannot
+    /// route around the overlay's evidence and security acknowledgements.
+    #[must_use]
+    pub fn dialect(mut self, dialect: &Dialect) -> Self {
+        self.router = self.router.dialect(dialect);
         self
     }
 
