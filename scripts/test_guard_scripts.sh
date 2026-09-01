@@ -10300,7 +10300,7 @@ from pathlib import Path
 path = Path("crates/gateway/src/builder.rs")
 text = path.read_text()
 old = """        log_startup_posture(
-            dispatch.floors(),
+            routing.dispatch.floors(),
             &self.floor,
             custom_signature_verifier,
             dangerously_replaced_signature_verifier,
@@ -10308,7 +10308,7 @@ old = """        log_startup_posture(
 """
 if text.count(old) != 1:
     raise SystemExit("missing startup posture log mutation subject")
-path.write_text(text.replace(old, "        let _ = (&dispatch, &self.floor);\n", 1))
+path.write_text(text.replace(old, "        let _ = (&routing.dispatch, &self.floor);\n", 1))
 PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
@@ -16360,7 +16360,7 @@ PYEOF
 }
 expect_fail check_config_load_once.sh \
     'request entry dropping the server cancellation signal' mut_request_cancellation_capture_removed \
-    'request entry does not capture cancellation beside its one snapshot'
+    'shared request entry does not capture cancellation beside its one configuration snapshot'
 
 mut_request_cancellation_store_removed() {
     python3 - <<'PYEOF'
@@ -16432,6 +16432,39 @@ PYEOF
 }
 expect_fail check_config_load_once.sh \
     'c-lim-0041 adding a second hot-configuration read in the request pipeline' mut_second_config_load
+
+mut_request_entry_routing_snapshot_borrowed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "        let routing = self.inner.routing.load_full();\n"
+replacement = "        let routing = self.inner.routing.load();\n"
+if text.count(subject) != 2:
+    raise SystemExit("request-entry routing snapshot anchors drifted")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'the dynamic request entry losing its owned routing snapshot' mut_request_entry_routing_snapshot_borrowed \
+    'dynamic and monomorphic request entries must each capture one routing snapshot'
+
+mut_pipeline_routing_reload_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "        let config = self.inner.config.load_full();\n"
+replacement = "        let _torn_routing = self.inner.routing.load_full();\n" + subject
+if text.count(subject) != 1:
+    raise SystemExit("shared request configuration snapshot anchor drifted")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a later pipeline stage reloading the routing snapshot' mut_pipeline_routing_reload_added
 
 mut_aliased_second_config_load() {
     python3 - <<'PYEOF'

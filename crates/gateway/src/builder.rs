@@ -64,6 +64,7 @@ use crate::ext::{
     PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
 };
 use crate::posture::{SecurityPosture, log_startup_posture};
+use crate::routing::RoutingSnapshot;
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
 use crate::{MonomorphicOperationSet, MonomorphicService};
@@ -579,7 +580,7 @@ impl ServiceBuilder {
     /// a refused registration or route, an empty registry, a missing authorizer, a missing
     /// authenticator, an [`OpLayer`] on an operation nobody registered, or an operation the router
     /// knows and this crate has no codec for. Nothing here degrades to a warning.
-    pub fn build(mut self) -> Result<S3Service, AssemblyError> {
+    pub fn build(self) -> Result<S3Service, AssemblyError> {
         if self.pending.is_empty() {
             return Err(AssemblyError::EmptyRegistry {
                 rule: RuleRef::EMPTY_REGISTRY,
@@ -606,46 +607,7 @@ impl ServiceBuilder {
             }
         }
 
-        // Before the erasure, so the refusal names the operation the deployment asked for rather
-        // than whatever the erasure happens to reach first.
-        if let Some((operation, _)) = self
-            .op_layers
-            .iter()
-            .find(|(operation, _)| !self.pending.contains_key(*operation))
-        {
-            return Err(AssemblyError::UnattachedOpLayer {
-                operation,
-                rule: RuleRef::OP_LAYER_UNATTACHED,
-            });
-        }
-
-        let mut dispatch = DispatchTable::default();
-        for (name, finalise) in core::mem::take(&mut self.pending) {
-            let layers = self.op_layers.remove(name).unwrap_or_default();
-            // `pending` is a map, so the name is unique by construction and the insert cannot
-            // report a duplicate. Checked anyway rather than discarded: a silently dropped
-            // registration is a request that routes and reaches nothing.
-            if !dispatch.insert(name, finalise(layers)?) {
-                return Err(AssemblyError::MissingCodec {
-                    operation: name,
-                    rule: RuleRef::MISSING_CODEC,
-                });
-            }
-        }
-
-        let router = self.router.build()?;
-
-        // The two tables are populated by the same call and can only disagree through a defect
-        // here. Checked anyway, because the failure mode is a request that routes and then reaches
-        // nothing able to read it, which looks like a codec bug rather than an assembly one.
-        for name in router.registry().names() {
-            if !dispatch.contains(name) {
-                return Err(AssemblyError::MissingCodec {
-                    operation: name,
-                    rule: RuleRef::MISSING_CODEC,
-                });
-            }
-        }
+        let routing = assemble_routing(self.router, self.pending, self.op_layers)?;
 
         if self.dangerous_allow_all_authorizer {
             eprintln!("WARN: dangerous allow-all authorizer disables authorization for every request");
@@ -670,7 +632,7 @@ impl ServiceBuilder {
             dangerously_replaced_signature_verifier,
         );
         log_startup_posture(
-            dispatch.floors(),
+            routing.dispatch.floors(),
             &self.floor,
             custom_signature_verifier,
             dangerously_replaced_signature_verifier,
@@ -681,8 +643,7 @@ impl ServiceBuilder {
         };
 
         Ok(S3Service::from_inner(Inner {
-            router,
-            dispatch,
+            routing: Arc::new(arc_swap::ArcSwap::from_pointee(routing)),
             filters: Arc::from(self.filters),
             floor: self.floor,
             limits: self.limits,
@@ -710,6 +671,11 @@ impl ServiceBuilder {
             response_body_corrections: std::sync::atomic::AtomicU64::new(0),
             temporary_redirect_targets: Arc::from(self.temporary_redirect_targets),
         }))
+    }
+
+    /// Consumes only the inputs that define a replaceable routing generation.
+    pub(crate) fn into_routing(self) -> Result<RoutingSnapshot, AssemblyError> {
+        assemble_routing(self.router, self.pending, self.op_layers)
     }
 
     /// Builds a service that selects operation codecs and one concrete backend statically.
@@ -753,4 +719,53 @@ impl ServiceBuilder {
             operations: core::marker::PhantomData,
         })
     }
+}
+
+fn assemble_routing(
+    router: RouterBuilder,
+    pending: BTreeMap<&'static str, PendingRegistration>,
+    mut op_layers: BTreeMap<&'static str, Vec<ErasedOpLayer>>,
+) -> Result<RoutingSnapshot, AssemblyError> {
+    if pending.is_empty() {
+        return Err(AssemblyError::EmptyRegistry {
+            rule: RuleRef::EMPTY_REGISTRY,
+        });
+    }
+
+    // Before the erasure, so the refusal names the operation the deployment asked for rather
+    // than whatever the erasure happens to reach first.
+    if let Some((operation, _)) = op_layers.iter().find(|(operation, _)| !pending.contains_key(*operation)) {
+        return Err(AssemblyError::UnattachedOpLayer {
+            operation,
+            rule: RuleRef::OP_LAYER_UNATTACHED,
+        });
+    }
+
+    let mut dispatch = DispatchTable::default();
+    for (name, finalise) in pending {
+        let layers = op_layers.remove(name).unwrap_or_default();
+        // `pending` is a map, so the name is unique by construction and the insert cannot report
+        // a duplicate. Checked anyway rather than discarded: a silently dropped registration is
+        // a request that routes and reaches nothing.
+        if !dispatch.insert(name, finalise(layers)?) {
+            return Err(AssemblyError::MissingCodec {
+                operation: name,
+                rule: RuleRef::MISSING_CODEC,
+            });
+        }
+    }
+
+    let router = router.build()?;
+    // The two tables are populated by the same call and can only disagree through a defect here.
+    // Checked anyway, because a mismatch would route a request to no codec.
+    for name in router.registry().names() {
+        if !dispatch.contains(name) {
+            return Err(AssemblyError::MissingCodec {
+                operation: name,
+                rule: RuleRef::MISSING_CODEC,
+            });
+        }
+    }
+
+    Ok(RoutingSnapshot { router, dispatch })
 }
