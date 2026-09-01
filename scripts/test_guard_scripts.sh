@@ -14955,10 +14955,17 @@ expect_fail check_ci_test_split.sh \
     'the workspace test job running only one package' mut_ci_workspace_command_weakened
 
 mut_ci_second_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test --package rustfs-gateway-conformance --package rustfs-gateway' 'scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the second workspace shard running the wrong package' mut_ci_second_workspace_command_weakened
+
+mut_ci_second_workspace_gateway_prebuild_dropped() {
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test --package rustfs-gateway-conformance --package rustfs-gateway'
+}
+expect_fail check_ci_test_split.sh \
+    'the facade fixture losing its same-profile gateway prebuild' \
+    mut_ci_second_workspace_gateway_prebuild_dropped
 
 mut_ci_third_workspace_command_weakened() {
     replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test -p xtask'
@@ -14982,10 +14989,10 @@ expect_fail check_ci_test_split.sh \
     mut_ci_handlers_facade_fixture_removed
 
 mut_ci_handlers_facade_fixture_moved_before_gateway_prebuild() {
-    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test --package rustfs-gateway-conformance --package rustfs-gateway
+    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'\''
           scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh' \
         '          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
-          scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test --package rustfs-gateway-conformance --package rustfs-gateway'
+          scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'\'''
 }
 expect_fail check_ci_test_split.sh \
     'the facade-only fixture moving ahead of its authoritative gateway prebuild' \

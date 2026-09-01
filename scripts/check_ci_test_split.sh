@@ -230,7 +230,7 @@ require_equal(error_status_steps.last.keys, ["name", "run"],
 workspace_runs = [<<~'RUN', <<~'RUN', <<~'RUN']
   scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types
 RUN
-  scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test --package rustfs-gateway-conformance --package rustfs-gateway
+  scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c 'cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'
   scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 RUN
   scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s

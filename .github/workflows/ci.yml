@@ -308,7 +308,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Workspace tests 2/3 (maximum 8 minutes after setup)
         run: |
-          scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test --package rustfs-gateway-conformance --package rustfs-gateway
+          scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c 'cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'
           scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 
   workspace-tests-3:
