@@ -22,6 +22,8 @@ use core::fmt;
 
 use rustfs_gateway_xml::{XmlError, XmlLimits, XmlNode, XmlWriter, parse_with_limits};
 
+use crate::ext::{CodecPolicy, ExtError, Extensions, PersistedXml, UnknownElementPolicy};
+
 /// A persisted bucket CORS configuration.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PersistedCorsConfiguration {
@@ -169,6 +171,68 @@ pub fn parse_cors(input: &[u8]) -> Result<PersistedCorsConfiguration, CorsTaggin
     Ok(PersistedCorsConfiguration { cors_rules })
 }
 
+/// Decodes persisted CORS bytes with one borrowed unknown-element policy.
+///
+/// The returned document is deliberately read-only. The production runtime needs to keep serving
+/// a configuration containing future fields, but typed CORS replacement remains disabled until
+/// its persistence migration has independent four-way evidence. Exact source bytes are therefore
+/// retained and [`PersistedXml::replacement`] always refuses.
+#[must_use]
+pub fn parse_cors_with_policy(input: &[u8], policy: &CodecPolicy) -> PersistedXml<PersistedCorsConfiguration> {
+    PersistedXml::decode_read_only(input.to_vec(), |source| parse_policy_cors(source, policy))
+}
+
+/// Decodes persisted CORS for runtime matching with the family-required lenient policy.
+///
+/// CORS is persisted configuration and the historical metadata loader treats a parse failure as
+/// an absent configuration. Rejecting a bounded future element would therefore silently disable
+/// cross-origin access, visible first in browsers while the server emits only a warning. The
+/// runtime read is lenient for that reason; it remains read-only through
+/// [`parse_cors_with_policy`].
+#[must_use]
+pub fn parse_runtime_cors(input: &[u8]) -> PersistedXml<PersistedCorsConfiguration> {
+    let policy = CodecPolicy::new(UnknownElementPolicy::Lenient);
+    parse_cors_with_policy(input, &policy)
+}
+
+fn parse_policy_cors(input: &[u8], policy: &CodecPolicy) -> Result<PersistedCorsConfiguration, ExtError> {
+    let root = parse_root(input, "CORSConfiguration").map_err(|_| ExtError::ParentCodec)?;
+    let mut root_extensions = Extensions::default();
+    for child in root.children.iter().filter(|child| child.name != "CORSRule") {
+        policy.decode_unknown("CORSConfiguration", child, &mut root_extensions)?;
+    }
+
+    let mut cors_rules = Vec::new();
+    for rule in root.children_named("CORSRule") {
+        let mut static_rule = rule.clone();
+        static_rule
+            .children
+            .retain(|child| STATIC_CORS_RULE_CHILDREN.contains(&child.name.as_str()));
+        let mut rule_extensions = Extensions::default();
+        for child in rule
+            .children
+            .iter()
+            .filter(|child| !STATIC_CORS_RULE_CHILDREN.contains(&child.name.as_str()))
+        {
+            policy.decode_unknown("CORSRule", child, &mut rule_extensions)?;
+        }
+        cors_rules.push(parse_cors_rule(&static_rule).map_err(|_| ExtError::ParentCodec)?);
+    }
+    if cors_rules.is_empty() {
+        return Err(ExtError::ParentCodec);
+    }
+    Ok(PersistedCorsConfiguration { cors_rules })
+}
+
+const STATIC_CORS_RULE_CHILDREN: &[&str] = &[
+    "AllowedHeader",
+    "AllowedMethod",
+    "AllowedOrigin",
+    "ExposeHeader",
+    "ID",
+    "MaxAgeSeconds",
+];
+
 fn parse_cors_rule(rule: &XmlNode) -> Result<PersistedCorsRule, CorsTaggingCodecError> {
     const FIELDS: &[&str] = &[
         "AllowedHeader",
@@ -290,4 +354,76 @@ pub fn serialize_tagging(value: &PersistedTagging) -> Vec<u8> {
     writer.close();
     writer.close();
     writer.finish().into_bytes()
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::{parse_cors_with_policy, parse_runtime_cors};
+    use crate::ext::{CodecPolicy, ExtError, UnknownElementPolicy};
+
+    const MINIMAL_WITH_FUTURE_FIELDS: &[u8] = br#"
+        <CORSConfiguration>
+          <FutureRoot>preserve compatibility</FutureRoot>
+          <CORSRule>
+            <AllowedMethod>GET</AllowedMethod>
+            <FutureRule>preserve compatibility</FutureRule>
+            <AllowedOrigin>https://example.test</AllowedOrigin>
+          </CORSRule>
+        </CORSConfiguration>
+    "#;
+
+    const MINIMAL_WITH_FUTURE_RULE_FIELD: &[u8] = br#"
+        <CORSConfiguration>
+          <CORSRule>
+            <AllowedMethod>GET</AllowedMethod>
+            <FutureRule>preserve compatibility</FutureRule>
+            <AllowedOrigin>https://example.test</AllowedOrigin>
+          </CORSRule>
+        </CORSConfiguration>
+    "#;
+
+    #[test]
+    fn n_a_runtime_cors_policy_is_explicitly_lenient_at_both_unknown_child_levels() {
+        let document = parse_runtime_cors(MINIMAL_WITH_FUTURE_FIELDS);
+        let configuration = document.value().expect("the runtime CORS policy skips bounded future fields");
+
+        assert_eq!(configuration.cors_rules.len(), 1);
+        assert_eq!(configuration.cors_rules[0].allowed_methods, ["GET"]);
+        assert_eq!(configuration.cors_rules[0].allowed_origins, ["https://example.test"]);
+        assert_eq!(document.original_bytes(), MINIMAL_WITH_FUTURE_FIELDS);
+        assert_eq!(document.replacement(Vec::new()), Err(ExtError::PersistedRewriteBlocked));
+    }
+
+    #[test]
+    fn n_a_security_policy_refuses_the_same_unknown_fields_and_blocks_rewrite() {
+        let policy = CodecPolicy::security_relevant();
+        let document = parse_cors_with_policy(MINIMAL_WITH_FUTURE_FIELDS, &policy);
+
+        assert_eq!(policy.unknown_elements(), UnknownElementPolicy::AllowRegistered);
+        assert!(matches!(document.value(), Err(ExtError::UnknownElement(name)) if name == "FutureRoot"));
+        assert_eq!(document.original_bytes(), MINIMAL_WITH_FUTURE_FIELDS);
+        assert_eq!(
+            document.replacement(b"<CORSConfiguration></CORSConfiguration>".to_vec()),
+            Err(ExtError::PersistedRewriteBlocked)
+        );
+    }
+
+    #[test]
+    fn n_a_security_policy_reaches_unknown_rule_children_independently() {
+        let document = parse_cors_with_policy(MINIMAL_WITH_FUTURE_RULE_FIELD, &CodecPolicy::security_relevant());
+
+        assert!(matches!(document.value(), Err(ExtError::UnknownElement(name)) if name == "FutureRule"));
+        assert_eq!(document.original_bytes(), MINIMAL_WITH_FUTURE_RULE_FIELD);
+        assert_eq!(document.replacement(Vec::new()), Err(ExtError::PersistedRewriteBlocked));
+    }
+
+    #[test]
+    fn c_cors_policy_0001_known_document_decodes_under_the_security_control() {
+        let input = br#"<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>"#;
+        let document = parse_cors_with_policy(input, &CodecPolicy::security_relevant());
+
+        let configuration = document.value().expect("known CORS fields do not need leniency");
+        assert_eq!(configuration.cors_rules[0].allowed_methods, ["PUT"]);
+        assert_eq!(configuration.cors_rules[0].allowed_origins, ["*"]);
+    }
 }
