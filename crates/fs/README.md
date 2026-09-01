@@ -51,12 +51,15 @@ expiration sweep preflights every bucket before applying enabled day/date rules 
 The optional lifecycle scheduler repeats that same fail-closed sweep with a joined shutdown handle
 and reports successful, failed, and object-expiration counts. The debug interval maps both one
 lifecycle day and one sweep cadence to a short duration for conformance; tag-filtered rules match
-the persisted object-version tags, and transition actions remain out of scope.
+the persisted object-version tags. A separate one-shot transition sweep applies enabled
+day/date actions to current objects, honors the persisted minimum-size mode, and atomically records
+the selected storage class without changing bytes, identity, tags, or modification time. GET, HEAD,
+and both object and version listing views project that durable class after restart.
 
 The backend is intentionally not production storage. It does not promise crash consistency,
 multi-process coordination, hostile concurrent filesystem mutation resistance, or lifecycle
-transition processing. Bucket names never become raw path components and object keys never become
-paths; symbolic-link roots and storage components are refused.
+transition scheduling or physical storage tiers. Bucket names never become raw path components and
+object keys never become paths; symbolic-link roots and storage components are refused.
 
 The remaining capabilities belong to later slices of rustfs/backlog#1741 rather than this core
 reference-backend slice.

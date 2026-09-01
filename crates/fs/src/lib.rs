@@ -15,8 +15,8 @@
 //! Filesystem-backed reference handlers for `rustfs-gateway`.
 //!
 //! Responsible for: a small, inspectable persistence backend used to exercise real S3 handlers,
-//! including atomically published multipart uploads, persistent object versions and tags, and lifecycle expiration.
-//! NOT responsible for: production durability, lifecycle transitions, or cross-process coordination.
+//! including atomically published multipart uploads, persistent object versions and tags, and lifecycle actions.
+//! NOT responsible for: production durability, physical storage tiers, or cross-process coordination.
 //! Upstream: `rustfs-gateway`. Downstream: examples and backend contract tests.
 
 #![doc = include_str!("../README.md")]
@@ -143,6 +143,7 @@ mod lifecycle;
 mod lifecycle_scheduler;
 mod listing;
 mod tagging;
+mod transitions;
 mod uploads;
 mod versioning;
 
