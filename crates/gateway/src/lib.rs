@@ -170,6 +170,9 @@ pub use rustfs_gateway_server::{RunningServer, Server, ServerConfig};
 /// types each, and a facade that listed them would be a list to keep in sync with a generator.
 pub use rustfs_gateway_types::dto;
 
+/// Historical persisted-configuration codecs and representations for facade-only backends.
+pub use rustfs_gateway_types::persistence;
+
 // The kernel surface a backend and a test harness have to name. Re-exported rather than reached
 // for directly, because `scripts/check_layer_dependencies.sh` allows the conformance suite to
 // depend on this crate and on nothing else internal.

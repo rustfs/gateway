@@ -28,14 +28,14 @@ use rustfs_gateway::dto::{
     PutBucketLifecycleConfiguration, PutBucketLifecycleConfigurationOutput, Status, StorageClass, Tag, Transition,
     TransitionDefaultMinimumObjectSize,
 };
-use rustfs_gateway::{
-    ErrorCode, Handler, HandlerError, HandlerResult, Req, Resp, Timestamp, TimestampFormat, validate_lifecycle,
-};
-use rustfs_gateway_types::persistence::{
+use rustfs_gateway::persistence::{
     PersistedAbortIncompleteMultipartUpload, PersistedLifecycleAnd, PersistedLifecycleConfiguration,
     PersistedLifecycleExpiration, PersistedLifecycleFilter, PersistedLifecycleRule, PersistedLifecycleTag,
     PersistedNoncurrentVersionExpiration, PersistedNoncurrentVersionTransition, PersistedTransition, parse_lifecycle,
     serialize_lifecycle,
+};
+use rustfs_gateway::{
+    ErrorCode, Handler, HandlerError, HandlerResult, Req, Resp, Timestamp, TimestampFormat, validate_lifecycle,
 };
 
 use super::{FsBackend, storage_error};
