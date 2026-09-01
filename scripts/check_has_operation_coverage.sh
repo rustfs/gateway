@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Standard operation/Input names come from codegen; their reverse mapping stays beside the
-# hand-written Operation impl. This guard makes the two authorities agree without adding a
-# forbidden rustfs-gateway-types -> rustfs-gateway-core dependency.
+# Standard operation/Input names come from codegen or a reviewed manual-operation overlay; their
+# reverse mapping stays beside the hand-written Operation impl. This guard makes the authorities
+# agree without adding a forbidden rustfs-gateway-types -> rustfs-gateway-core dependency.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
@@ -21,11 +21,14 @@ import sys
 root = Path(sys.argv[1])
 ops_dir = root / "crates/core/src/ops"
 spec_dir = root / "spec/operations"
+overlay_ops_dir = root / "model/overlays/ops"
 
 if not ops_dir.is_dir():
     raise SystemExit("check_has_operation_coverage: required operation directory is missing")
 if not spec_dir.is_dir():
     raise SystemExit("check_has_operation_coverage: required spec directory is missing")
+if not overlay_ops_dir.is_dir():
+    raise SystemExit("check_has_operation_coverage: required operation overlay directory is missing")
 
 
 # Compiled once, then matched with an offset. Cutting a fresh `source[index:]` slice copies
@@ -177,6 +180,36 @@ for path in sorted(spec_dir.glob("*.toml")):
     if match is None:
         raise SystemExit(f"check_has_operation_coverage: {path.relative_to(root)} lacks an operation name")
     spec_names.add(match.group(1))
+
+for path in sorted(overlay_ops_dir.glob("*.toml")):
+    source = path.read_text()
+    if "[[manual]]" not in source:
+        continue
+    declarations = re.findall(
+        r'\[\[manual\]\](.*?)(?=\n\[\[|\n\[[^[]|\Z)', source, re.DOTALL
+    )
+    if len(declarations) != 1:
+        raise SystemExit(
+            f"check_has_operation_coverage: {path.relative_to(root)} must contain one manual declaration"
+        )
+    operations_match = re.search(r'^operations\s*=\s*\[(.*?)\]\s*$', declarations[0], re.MULTILINE | re.DOTALL)
+    if operations_match is None:
+        raise SystemExit(
+            f"check_has_operation_coverage: {path.relative_to(root)} manual declaration lacks operations"
+        )
+    manual_names = re.findall(r'"([A-Za-z_][A-Za-z0-9_]*)"', operations_match.group(1))
+    if not manual_names:
+        raise SystemExit(
+            f"check_has_operation_coverage: {path.relative_to(root)} manual declaration is empty"
+        )
+    for name in manual_names:
+        if re.search(rf'^\[op\.{re.escape(name)}\]\s*$', source, re.MULTILINE) is None:
+            raise SystemExit(
+                f"check_has_operation_coverage: manual operation {name} lacks an overlay row"
+            )
+        if name in spec_names:
+            raise SystemExit(f"check_has_operation_coverage: duplicate operation authority {name}")
+        spec_names.add(name)
 
 mapping_names = set(mappings)
 if mapping_names != spec_names:

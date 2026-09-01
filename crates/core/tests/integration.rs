@@ -89,6 +89,9 @@ mod operation_spec_semver;
 #[path = "params_and_dispatch.rs"]
 mod params_and_dispatch;
 
+#[path = "post_object.rs"]
+mod post_object;
+
 #[path = "precondition_range.rs"]
 mod precondition_range;
 

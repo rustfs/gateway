@@ -162,7 +162,12 @@ fn verify_operation(name: &str, json: bool) -> ExitCode {
         Ok(operations) => operations,
         Err(error) => return diagnostic("operation catalog could not be loaded", "model and overlays", &error),
     };
-    if !operations.iter().any(|operation| operation.operation == name) {
+    let manual_operations = match catalog::manual_operations() {
+        Ok(operations) => operations,
+        Err(error) => return diagnostic("manual operation catalog could not be loaded", "model and overlays", &error),
+    };
+    let manual = manual_operations.iter().any(|operation| operation == name);
+    if !manual && !operations.iter().any(|operation| operation.operation == name) {
         match catalog::scaffold_entry(name) {
             Ok(Some(entry)) => return verify_scaffold(&entry, json),
             Ok(None) => {}
@@ -172,9 +177,16 @@ fn verify_operation(name: &str, json: bool) -> ExitCode {
         eprintln!("unknown operation `{name}`; nearest: {suggestion}");
         return ExitCode::from(2);
     }
-    let entry = match catalog::verify_entry(name) {
-        Ok(entry) => entry,
-        Err(error) => return diagnostic("generated verification mapping is unavailable", "xtask/verify-map.toml", &error),
+    let entry = if manual {
+        catalog::VerifyEntry {
+            name: name.to_owned(),
+            cases: Vec::new(),
+        }
+    } else {
+        match catalog::verify_entry(name) {
+            Ok(entry) => entry,
+            Err(error) => return diagnostic("generated verification mapping is unavailable", "xtask/verify-map.toml", &error),
+        }
     };
     if let Err(error) = run_operation_contract(name, &entry.cases) {
         return diagnostic(

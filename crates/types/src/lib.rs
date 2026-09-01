@@ -15,7 +15,8 @@
 //! S3 scalar types, operation inputs/outputs, and their generated codecs.
 //!
 //! Responsible for: `ETag`, `Checksum`, `Timestamp`, names, `Range`, error codes, and the
-//! generated per-operation DTOs plus their XML/header codec impls.
+//! generated per-operation DTOs plus their XML/header codec impls, and the manual browser
+//! `PostObject` surface omitted by the pinned service model.
 //! NOT responsible for: wire framing, signing, routing.
 //! Upstream: `rustfs-gateway-xml`, `rustfs-gateway-stream`. Downstream: `rustfs-gateway-http` and everything above.
 //!
@@ -52,6 +53,7 @@ pub mod cors_tagging;
 pub mod ext;
 pub mod persistence;
 pub mod placeholder;
+mod post_object;
 mod scalar;
 pub mod secret;
 
@@ -68,13 +70,30 @@ pub mod compat;
 #[cfg(test)]
 mod tests;
 
-/// The generated operation dto, one module per operation.
+/// Operation DTOs, one module per operation; `post_object` is maintained manually because the
+/// pinned service model omits browser POST.
 #[path = "../generated/ops/mod.rs"]
-pub mod ops;
+mod generated_ops;
+
+/// Operation DTOs, one module per operation.
+pub mod ops {
+    pub use crate::generated_ops::*;
+
+    /// DTOs for the standard POST Object surface omitted by the Smithy S3 model.
+    pub mod post_object {
+        pub use crate::post_object::{PostObject, PostObjectInput as Input, PostObjectOutput as Output};
+    }
+}
 
 /// Flat aliases for every generated type: `dto::PutObjectInput` is `ops::put_object::Input`.
 #[path = "../generated/flat.rs"]
-pub mod dto;
+mod generated_dto;
+
+/// Flat aliases for every operation DTO.
+pub mod dto {
+    pub use crate::generated_dto::*;
+    pub use crate::post_object::{PostObject, PostObjectInput, PostObjectOutput};
+}
 
 pub use crate::placeholder::{PlaceholderDefault, WirePlaceholder, reject_placeholder};
 pub use crate::scalar::{

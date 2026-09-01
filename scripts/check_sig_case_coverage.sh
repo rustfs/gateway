@@ -1408,13 +1408,17 @@ validate_rust_evidence "$xtask_security_posture" source_order \
     'let presigned = floors' \
     'floor.presigned.then_some(name.as_str())' \
     'check_sig_case_coverage: dry-run no longer derives the presigned operation list'
+validate_rust_evidence "$xtask_security_posture" source_order \
+    'let anonymous = floors' \
+    'floor.anonymous.then_some(name.as_str())' \
+    'check_sig_case_coverage: dry-run no longer derives the anonymous operation list'
 validate_rust_evidence "$xtask_security_posture" string_match_arm \
     '"builtin_presigned"' \
     'true' \
     'check_sig_case_coverage: dry-run no longer recognizes the presigned floor constructor'
 validate_rust_evidence "$xtask_security_posture" format_literal_exact \
     'SECURITY_POSTURE' \
-    '"SECURITY_POSTURE anonymous_reachable_ops=[] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"' \
+    '"SECURITY_POSTURE anonymous_reachable_ops=[{anonymous}] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"' \
     'check_sig_case_coverage: dry-run output lost a required startup-posture field'
 
 python3 - "$ROOT/crates/gateway/Cargo.toml" <<'PYEOF'

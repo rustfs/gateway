@@ -27,17 +27,37 @@ use crate::toml_lite::Toml;
 use super::{Origins, Overlay, array_of_tables, claim};
 
 pub(super) fn read(doc: &Toml, file: &str, operations: &mut BTreeMap<String, String>, origins: &mut Origins) -> Result<()> {
-    for group in array_of_tables(doc, "route_only") {
+    read_category(doc, file, "route_only", "route-only", operations, origins)
+}
+
+pub(super) fn read_manual(
+    doc: &Toml,
+    file: &str,
+    operations: &mut BTreeMap<String, String>,
+    origins: &mut Origins,
+) -> Result<()> {
+    read_category(doc, file, "manual", "manual standard", operations, origins)
+}
+
+fn read_category(
+    doc: &Toml,
+    file: &str,
+    key: &str,
+    claim_kind: &str,
+    operations: &mut BTreeMap<String, String>,
+    origins: &mut Origins,
+) -> Result<()> {
+    for group in array_of_tables(doc, key) {
         let reason = group
             .get("reason")
             .and_then(Toml::as_str)
-            .ok_or_else(|| Error::Overlay(format!("{file}: every [[route_only]] group needs a `reason`")))?;
+            .ok_or_else(|| Error::Overlay(format!("{file}: every [[{key}]] group needs a `reason`")))?;
         let names = group
             .get("operations")
-            .ok_or_else(|| Error::Overlay(format!("{file}: every [[route_only]] group needs `operations`")))?
-            .string_array("route_only.operations")?;
+            .ok_or_else(|| Error::Overlay(format!("{file}: every [[{key}]] group needs `operations`")))?
+            .string_array(&format!("{key}.operations"))?;
         for name in names {
-            claim(origins, &name, file, "route-only")?;
+            claim(origins, &name, file, claim_kind)?;
             operations.insert(name, reason.to_owned());
         }
     }
@@ -49,6 +69,7 @@ pub(super) fn check_categories(
     include_origins: &Origins,
     route_only_origins: &Origins,
     deferred_origins: &Origins,
+    manual_origins: &Origins,
 ) -> Result<()> {
     for operation in &overlay.include {
         if overlay.route_only.contains_key(operation) {
@@ -71,6 +92,9 @@ pub(super) fn check_categories(
                 "which of the two it is",
             );
         }
+        if overlay.manual.contains_key(operation) {
+            return collision(operation, "included", include_origins, "manual", manual_origins, "which surface it emits");
+        }
     }
     for operation in overlay.route_only.keys() {
         if overlay.deferred.contains_key(operation) {
@@ -82,6 +106,21 @@ pub(super) fn check_categories(
                 deferred_origins,
                 "which surface it emits",
             );
+        }
+        if overlay.manual.contains_key(operation) {
+            return collision(
+                operation,
+                "route-only",
+                route_only_origins,
+                "manual",
+                manual_origins,
+                "whether it has a handler surface",
+            );
+        }
+    }
+    for operation in overlay.manual.keys() {
+        if overlay.deferred.contains_key(operation) {
+            return collision(operation, "manual", manual_origins, "deferred", deferred_origins, "whether it is served");
         }
     }
     Ok(())

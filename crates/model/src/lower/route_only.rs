@@ -33,25 +33,39 @@ pub struct RouteOnly {
     pub operation: String,
     /// The model- and overlay-derived selector facts needed by the router.
     pub http: Http,
+    /// Whether this hand-authored standard operation has a DTO, codec and handler surface.
+    pub handler_registration: bool,
 }
 
 pub(super) fn lower_http(model: &Model, overlay: &Overlay, name: &str) -> Result<Http> {
     let empty = OpOverlay::default();
-    let op = model
-        .shape_local(name)
-        .ok_or_else(|| Error::Model(format!("no operation shape `{name}`")))?;
     let ov = overlay.ops.get(name).unwrap_or(&empty);
-    let http_trait =
-        trait_of(op, "smithy.api#http").ok_or_else(|| Error::ir(name, "the operation carries no smithy.api#http trait"))?;
-    let method_text = http_trait
-        .get("method")
-        .and_then(Value::as_str)
-        .ok_or_else(|| Error::ir(name, "smithy.api#http has no method"))?;
+    let op = model.shape_local(name);
+    let http_trait = op.and_then(|shape| trait_of(shape, "smithy.api#http"));
+    let method_text = match (&ov.method, http_trait) {
+        (Some(method), None) if overlay.manual.contains_key(name) => method.as_str(),
+        (_, Some(http)) => http
+            .get("method")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::ir(name, "smithy.api#http has no method"))?,
+        _ => {
+            return Err(Error::ir(
+                name,
+                "manual operation needs `method`; modeled operation needs smithy.api#http",
+            ));
+        }
+    };
     let method = Method::parse(method_text).ok_or_else(|| Error::ir(name, format!("unknown method `{method_text}`")))?;
-    let uri = http_trait
-        .get("uri")
-        .and_then(Value::as_str)
-        .ok_or_else(|| Error::ir(name, "smithy.api#http has no uri"))?;
+    let uri = match http_trait {
+        Some(http) => http
+            .get("uri")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::ir(name, "smithy.api#http has no uri"))?,
+        None => ov
+            .path_shape
+            .as_deref()
+            .ok_or_else(|| Error::ir(name, "manual operation needs `path_shape`"))?,
+    };
     let route = Uri::parse(uri);
     let target = match &ov.target {
         Some(t) => TargetKind::parse(t).ok_or_else(|| Error::ir(name, format!("unknown target `{t}`")))?,
@@ -81,6 +95,12 @@ pub(super) fn lower_http(model: &Model, overlay: &Overlay, name: &str) -> Result
             .map(|header| Predicate::HeaderPresent { header, negated: false }),
     );
     predicates.extend(
+        ov.header_prefix
+            .iter()
+            .cloned()
+            .map(|(header, prefix)| Predicate::HeaderPrefix { header, prefix }),
+    );
+    predicates.extend(
         ov.header_absent
             .iter()
             .cloned()
@@ -96,10 +116,11 @@ pub(super) fn lower_http(model: &Model, overlay: &Overlay, name: &str) -> Result
     }
     let success_status = ov.success_status.unwrap_or_else(|| {
         http_trait
-            .get("code")
-            .and_then(|code| match code {
-                Value::Int(value) => u16::try_from(*value).ok(),
-                _ => None,
+            .and_then(|http| {
+                http.get("code").and_then(|code| match code {
+                    Value::Int(value) => u16::try_from(*value).ok(),
+                    _ => None,
+                })
             })
             .unwrap_or(200)
     });

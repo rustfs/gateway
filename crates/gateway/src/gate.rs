@@ -152,7 +152,7 @@ impl BodyCeilings {
 
     pub(crate) const fn for_mode(mode: RequestBodyMode, operation: &str, buffered: u64) -> Self {
         match mode {
-            RequestBodyMode::Streaming => Self::streaming(declared_body_cap(operation)),
+            RequestBodyMode::Streaming | RequestBodyMode::PostObject => Self::streaming(declared_body_cap(operation)),
             RequestBodyMode::None | RequestBodyMode::Full | RequestBodyMode::Deferred => Self::of(operation, buffered),
         }
     }
@@ -176,6 +176,16 @@ where
     /// Seals a body that the transport handed over, with whatever length the head announced.
     pub(crate) const fn seal(body: Option<B>, declared_length: Option<u64>) -> Self {
         Self { body, declared_length }
+    }
+
+    /// Reads only POST Object's bounded text prelude, leaving the file part unopened.
+    pub(crate) async fn post_object_prelude(
+        self,
+        content_type: &str,
+        limits: rustfs_gateway_http::FormLimits,
+        timeouts: BodyTimeouts,
+    ) -> Result<crate::post_object::PostObjectPrelude<B>, S3Error> {
+        crate::post_object::PostObjectPrelude::read(self.body, content_type, limits, timeouts).await
     }
 
     /// Reads the body, bounded twice, and only for a caller holding an [`Authenticated`].
@@ -332,6 +342,11 @@ where
                 let (stream, monitor) = opened.into_parts();
                 Ok((RequestBody::Stream(stream), Some(monitor)))
             }
+            RequestBodyMode::PostObject => Err(from_handler(
+                HandlerError::internal_error("PostObject must be prepared by the multipart form pipeline"),
+                ResponseKind::Other,
+                crate::close::ConnectionIntent::MayKeepAlive,
+            )),
             RequestBodyMode::None => {
                 self.read(proof, ceilings, timeouts, ingest, digest, integrity).await?;
                 Ok((RequestBody::None, None))

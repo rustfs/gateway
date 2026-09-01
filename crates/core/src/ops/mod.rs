@@ -18,7 +18,7 @@
 //! one [`crate::op::Operation`] implementation, and no other module declares it.
 //! NOT responsible for: handlers — a backend implements [`crate::handler::Handler`] in its own
 //! crate — or the dto, which is generated into `rustfs-gateway-types`.
-//! Upstream: `rustfs-gateway-types`' generated operation types, `rustfs-gateway-sig`'s
+//! Upstream: `rustfs-gateway-types`' generated and manual operation types, `rustfs-gateway-sig`'s
 //! `OperationFloor`. Downstream: `crate::registry`, and every backend that registers one.
 //!
 //! # Why one operation per file
@@ -103,6 +103,7 @@ pub mod list_object_versions;
 pub mod list_objects;
 pub mod list_objects_v2;
 pub mod list_parts;
+pub mod post_object;
 pub mod put_bucket_accelerate_configuration;
 pub mod put_bucket_acl;
 pub mod put_bucket_cors;

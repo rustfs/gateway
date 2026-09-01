@@ -15,7 +15,7 @@
 //! What a decoder is allowed to read, and the one place a path is decoded.
 //!
 //! Responsible for: [`MetaView`] — the head of an accepted request, with the URI labels already
-//! split and percent-decoded exactly once — and [`RequestBody`], the three shapes a body can
+//! split and percent-decoded exactly once — and [`RequestBody`], the four shapes a body can
 //! arrive in.
 //! NOT responsible for: reading a body byte, accepting a request (`rustfs-gateway-http`), or
 //! deciding which operation a request names (`crate::route`).
@@ -46,6 +46,7 @@ use bytes::Bytes;
 use http::Method;
 use rustfs_gateway_http::{HeaderView, QueryView, WireRequest};
 use rustfs_gateway_stream::ByteStream;
+use rustfs_gateway_types::dto::PostObjectInput;
 use rustfs_gateway_types::{BucketName, NamePolicy, NameRejection, ObjectKey};
 
 use crate::codec::error::CodecError;
@@ -345,7 +346,7 @@ fn decode_component(raw: &str) -> Cow<'_, str> {
     percent_encoding::percent_decode_str(raw).decode_utf8_lossy()
 }
 
-/// The three shapes a request body reaches a decoder in.
+/// The four shapes a request body reaches a decoder in.
 ///
 /// Which one an operation gets is the IR's `payload.request.buffering`, not a decoder's choice: an
 /// operation whose body is `Streaming` never sees `Buffered`, so no generated decoder can
@@ -360,6 +361,8 @@ pub enum RequestBody {
     Buffered(Bytes),
     /// A live producer, handed straight to the handler.
     Stream(ByteStream),
+    /// An authenticated browser form whose live file part is ready for the POST Object handler.
+    PostObject(Box<PostObjectInput>),
 }
 
 /// How much of a request body must exist before its decoder runs.
@@ -376,6 +379,8 @@ pub enum RequestBodyMode {
     Full,
     /// The decoder receives a live producer before the body is complete.
     Streaming,
+    /// A multipart form whose bounded text prelude is authenticated before its file is opened.
+    PostObject,
     /// The response head is committed before the request-side outcome is known.
     Deferred,
 }
@@ -391,7 +396,7 @@ impl RequestBody {
         match self {
             Self::Buffered(bytes) => Ok(bytes),
             Self::None => Ok(Bytes::new()),
-            Self::Stream(_) => Err(CodecError::internal(
+            Self::Stream(_) | Self::PostObject(_) => Err(CodecError::internal(
                 "this operation declares a buffered request body and was handed a stream",
             )),
         }
@@ -421,6 +426,18 @@ impl RequestBody {
             Self::Buffered(_) => Err(CodecError::internal(
                 "this operation requires a streaming request body and was handed buffered bytes",
             )),
+            Self::PostObject(_) => Err(CodecError::internal(
+                "this operation requires a streaming request body and was handed a POST form",
+            )),
+        }
+    }
+
+    /// The prepared POST Object input, or an internal error when the assembly handed this codec
+    /// another body shape.
+    pub fn into_post_object(self) -> Result<PostObjectInput, CodecError> {
+        match self {
+            Self::PostObject(input) => Ok(*input),
+            _ => Err(CodecError::internal("PostObject requires an authenticated multipart form body")),
         }
     }
 }

@@ -14,8 +14,8 @@
 
 //! Route-only generation boundaries.
 //!
-//! Responsible for: proving a protocol-known selector can reach the route table without minting
-//! a DTO, codec, operation spec or handler-macro registration.
+//! Responsible for: proving selector-only rows stay refusal-only while manual rows join the
+//! handler-registration surface without minting generated DTOs or codecs.
 //! NOT responsible for: runtime route resolution and dispatch, which core integration tests own.
 //! Upstream: the pinned model and reviewed overlays. Downstream: generated runtime data.
 
@@ -47,6 +47,36 @@ fn create_session_emits_only_route_level_artifacts() {
                 .iter()
                 .all(|(path, _)| !path.to_string_lossy().ends_with(suffix)),
             "route-only generation must not emit {suffix}"
+        );
+    }
+}
+
+#[test]
+fn post_object_joins_the_manual_handler_surface_without_generated_dtos() {
+    let artifacts = artifacts();
+    let routes = body(&artifacts, "generated/routes.rs");
+    let operations = body(&artifacts, "generated/OPERATIONS.json");
+    let macro_names = body(&artifacts, "crates/macros/src/op_names.rs");
+    let operations_md = body(&artifacts, "OPERATIONS.md");
+
+    assert!(routes.contains("operation: \"PostObject\",\n        handler_registration: true,"));
+    assert!(operations_md.contains("| PostObject | `POST /{Bucket}` |"));
+    assert!(operations_md.contains("manually implemented operation"));
+    assert!(!operations.contains("PostObject"));
+    assert!(macro_names.contains("\"PostObject\""));
+
+    for suffix in [
+        "spec/operations/PostObject.toml",
+        "generated/ir/PostObject.json",
+        "generated/dto/ops/post_object.rs",
+        "generated/codec/ops/post_object.rs",
+    ] {
+        assert!(
+            artifacts
+                .files
+                .iter()
+                .all(|(path, _)| !path.to_string_lossy().ends_with(suffix)),
+            "manual operation generation must not emit {suffix}"
         );
     }
 }

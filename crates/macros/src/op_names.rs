@@ -86,6 +86,7 @@ pub(crate) static OPERATION_NAMES: &[&str] = &[
     "ListObjects",
     "ListObjectsV2",
     "ListParts",
+    "PostObject",
     "PutBucketAccelerateConfiguration",
     "PutBucketAcl",
     "PutBucketCors",

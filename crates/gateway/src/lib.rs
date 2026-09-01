@@ -97,6 +97,7 @@ mod invariants;
 mod monomorphic;
 mod operation_mode;
 mod payload_header;
+mod post_object;
 mod posture;
 mod probe;
 mod render;
