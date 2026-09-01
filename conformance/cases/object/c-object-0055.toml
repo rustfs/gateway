@@ -1,0 +1,99 @@
+# c-object-0055 — a client disconnect cannot publish a PutObject prefix.
+
+[case]
+id = "c-object-0055"
+schema_version = 1
+title = "A disconnected PutObject remains unreadable"
+rationale = """
+Closing the client socket mid-body removes any opportunity to observe an error response on that
+connection, so the durability property is measured from a fresh connection: the bytes received
+before disconnect must not be readable under the final key. A complete write and readback provide
+the other-direction control, proving the observer is not stuck on absence."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["wire-bytes", "error-shape", "streaming"]
+timeout_ms = 20000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "PutObject stores the request payload as the named object only after a successful upload."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9112#section-6.3"
+summary = "A sender that closes before the declared Content-Length is complete has sent an incomplete message."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = false
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "send-a-prefix-then-disconnect"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/disconnected-object"
+headers = { "content-length" = "1048576" }
+sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }
+
+[[exchanges.request.chunks]]
+raw_utf8 = "received but never committed"
+
+[[exchanges.request.chunks]]
+action = "close"
+delay_ms = 50
+
+[exchanges.expect]
+kind = "connection_reset"
+connection_after = "closed"
+
+[[exchanges]]
+name = "the-aborted-object-is-not-readable"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/disconnected-object"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true
+
+[[exchanges]]
+name = "a-complete-write-still-succeeds"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/complete-object"
+body = { utf8 = "complete object" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+name = "the-complete-object-is-readable"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/complete-object"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+exact_utf8 = "complete object"

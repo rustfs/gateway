@@ -88,7 +88,7 @@ requirements=(
     'c-obj-0054|negative|bound|conformance/cases/object/c-object-0022.toml::/expect/body/exact_utf8~<Deleted><Key>batch/one</Key></Deleted>'
     'c-obj-0055|negative|bound|conformance/cases/object/c-object-0022.toml::/request/body/utf8~<Delete xmlns="http://s3.amazonaws.com/doc/2006-03-01/">;conformance/cases/object/c-object-0022.toml::/expect/status=200'
     'c-obj-0056|negative|bound|conformance/cases/object/c-object-0023.toml::/expect/body/not_contains_utf8/0=<Deleted>'
-    'c-obj-0057|negative|blocked|rustfs/backlog#1680::blocked behind c-obj-0043 — a mid-stream close on a write needs the socket transport and a PutObject staging the harness does not have'
+    'c-obj-0057|negative|bound|conformance/cases/object/c-object-0055.toml::/exchanges/0/request/headers/content-length=1048576;conformance/cases/object/c-object-0055.toml::/exchanges/0/request/chunks/0/raw_utf8~received but never committed;conformance/cases/object/c-object-0055.toml::/exchanges/0/request/chunks/1/action=close;conformance/cases/object/c-object-0055.toml::/exchanges/0/expect/kind=connection_reset;conformance/cases/object/c-object-0055.toml::/exchanges/1/expect/status=404;conformance/cases/object/c-object-0055.toml::/exchanges/1/expect/error/code=NoSuchKey;conformance/cases/object/c-object-0055.toml::/exchanges/2/expect/status=200;conformance/cases/object/c-object-0055.toml::/exchanges/3/expect/status=200;conformance/cases/object/c-object-0055.toml::/exchanges/3/expect/body/exact_utf8=complete object'
     # Repointed by the rustfs/backlog#1701 §4.4 slice. The rule is unchanged; the assertion it
     # named was not one. `headers_absent/0=x-injected` could not fail for any reachable
     # defect — a response header named by the caller is unconstructible under
@@ -161,6 +161,7 @@ case_polarity=(
     'conformance/cases/object/c-object-0052.toml|negative'
     'conformance/cases/object/c-object-0053.toml|negative'
     'conformance/cases/object/c-object-0054.toml|negative'
+    'conformance/cases/object/c-object-0055.toml|negative'
     'conformance/cases/tagging/c-tagging-0019.toml|positive'
 )
 
