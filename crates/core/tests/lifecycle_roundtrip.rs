@@ -28,8 +28,9 @@
 //! the expiration mutex, the midnight rule, the id caps — which
 //! `ops::shared::lifecycle::validate_lifecycle` owns and the `lifecycle/` conformance cases pin
 //! end to end; the bytes of any one fixed document, which the `lifecycle/` goldens pin; and the
-//! dialect members this codec does not carry, which `c-lifecycle-0018` pins as this release's
-//! honest lossy behaviour until ADR-0007's vtables reach production.
+//! dialect members this codec does not carry when no dialect is selected, which
+//! `c-lifecycle-0018` pins as the selection-negative control; the selected persisted path lives
+//! in `rustfs-gateway-dialect-minio` and preserves its registered field without making it global.
 //! Upstream: the generated codecs for `GetBucketLifecycleConfiguration` and
 //! `PutBucketLifecycleConfiguration`, and `ops::shared::lifecycle`. Downstream: nothing.
 //!
@@ -782,16 +783,14 @@ fn n_an_absent_prefix_does_not_come_back_as_an_empty_one() {
     );
 }
 
-/// The lossy edge this release owns, asserted rather than described.
+/// The unselected-dialect edge, asserted rather than described.
 ///
-/// `c-lifecycle-0018` pins the same fact over the wire; it is repeated here at the codec seam
-/// because this is the layer where the loss actually happens and the layer a future ADR-0007
-/// wiring would change. A member the decoder skips is a member the *re-encode* drops, and RustFS
-/// persists by re-encoding — so leniency, which is the right answer for reading, is by itself the
-/// wrong answer for storing. When the dialect vtables reach production this test is the one that
-/// must be inverted, and until then it stops the loss from being rediscovered as a surprise.
+/// `c-lifecycle-0018` pins the same fact over the generic HTTP codec. Production vtables now exist,
+/// but they are selected explicitly at the persisted metadata seam: the default codec must not
+/// start carrying one vendor's field merely because that vendor crate is linked. The paired
+/// positive and fail-closed persistence matrix lives in `rustfs-gateway-dialect-minio`.
 #[test]
-fn n_an_element_this_codec_does_not_know_is_gone_after_a_re_encode() {
+fn n_an_unselected_dialect_element_is_not_made_global_after_a_re_encode() {
     let stored = "<LifecycleConfiguration><Rule><Expiration><Days>7</Days></Expiration><ID>dialect</ID>\
                   <Filter><Prefix>del/</Prefix></Filter><Status>Enabled</Status>\
                   <DelMarkerExpiration><Days>7</Days></DelMarkerExpiration></Rule></LifecycleConfiguration>";
@@ -804,8 +803,8 @@ fn n_an_element_this_codec_does_not_know_is_gone_after_a_re_encode() {
     let re_encoded = encode_read(decoded.rules);
     assert!(
         !re_encoded.contains("DelMarkerExpiration"),
-        "the dialect member survived a re-encode, which means the codec grew a way to carry it; \
-         invert this test and flip c-lifecycle-0018's read-back assertion in the same change: \
+        "the unselected codec carried a vendor field globally instead of requiring the persisted \
+         MinIO policy; c-lifecycle-0018 must remain the same negative control: \
          {re_encoded}"
     );
 }
