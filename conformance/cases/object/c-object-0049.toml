@@ -1,0 +1,53 @@
+# c-object-0049 — an unavailable owner source is not permission.
+
+[case]
+id = "c-object-0049"
+schema_version = 1
+title = "An unavailable bucket owner source fails closed"
+rationale = """
+The framework cannot validate the caller's assertion when the owner source is unavailable. Letting
+the request continue would turn a metadata outage into an authorization bypass, so the failure is
+indistinguishable from a mismatch and the object handler must not run."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["security", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The expected owner assertion is satisfied only when it matches the bucket's actual owner; an unavailable actual owner cannot establish that match."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object-owner-gate"
+
+[[setup.objects]]
+bucket = "conf-object-owner-gate"
+key = "unavailable/read.txt"
+content_type = "text/plain"
+body = { utf8 = "must not be returned" }
+
+[request]
+method = "GET"
+target = "/conf-object-owner-gate/unavailable/read.txt"
+headers = { "x-amz-expected-bucket-owner" = "123456789012" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "AccessDenied"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>AccessDenied</Code>"]
+not_contains_utf8 = ["must not be returned"]

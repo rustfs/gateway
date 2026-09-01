@@ -1,0 +1,49 @@
+# c-object-0047 — the actual destination owner satisfies the assertion.
+
+[case]
+id = "c-object-0047"
+schema_version = 1
+title = "A matching expected bucket owner permits an object read"
+rationale = """
+The mismatch refusal is only meaningful beside its opposite. A gate stuck on deny would protect
+the mismatched case while making the header unusable, so this request names the fixture's actual
+account id and must reach the object handler unchanged."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "The expected bucket owner header is an assertion against the bucket's actual account owner, so an exact match does not refuse the request."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object-owner-gate"
+
+[[setup.objects]]
+bucket = "conf-object-owner-gate"
+key = "allowed/read.txt"
+content_type = "text/plain"
+body = { utf8 = "owner matched" }
+
+[request]
+method = "GET"
+target = "/conf-object-owner-gate/allowed/read.txt"
+headers = { "x-amz-expected-bucket-owner" = "123456789012" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "text/plain"
+
+[expect.body]
+exact_utf8 = "owner matched"

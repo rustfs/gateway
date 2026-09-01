@@ -82,7 +82,7 @@ requirements=(
     'c-obj-0048|negative|blocked|rustfs/backlog#1680::hiding existence behind s3:ListBucket needs a per-key policy decision the fixture does not take, and a case that cannot flip the permission proves neither arm'
     'c-obj-0049|negative|bound|conformance/cases/object/c-object-0036.toml::/exchanges/1/expect/error/code=MethodNotAllowed;conformance/cases/object/c-object-0038.toml::/exchanges/1/expect/status=405'
     'c-obj-0050|negative|bound|conformance/cases/object/c-object-0037.toml::/exchanges/1/expect/error/code=NoSuchKey;conformance/cases/object/c-object-0037.toml::/exchanges/1/expect/headers_present/x-amz-delete-marker=true'
-    'c-obj-0051|negative|blocked|rustfs/backlog#1680::x-amz-expected-bucket-owner is not evaluated anywhere in this repository, so a case asserting the 403 would be asserting a rule with no implementation'
+    'c-obj-0051|negative|bound|conformance/cases/object/c-object-0046.toml::/expect/error/code=AccessDenied;conformance/cases/object/c-object-0051.toml::/expect/request_progress/body_fully_sent=False'
     'c-obj-0052|negative|bound|conformance/cases/object/c-object-0015.toml::/expect/request_progress/body_fully_sent=False'
     'c-obj-0053|negative|bound|conformance/cases/object/c-object-0021.toml::/expect/error/code=MalformedXML'
     'c-obj-0054|negative|bound|conformance/cases/object/c-object-0022.toml::/expect/body/exact_utf8~<Deleted><Key>batch/one</Key></Deleted>'
@@ -155,6 +155,8 @@ case_polarity=(
     'conformance/cases/object/c-object-0043.toml|negative'
     'conformance/cases/object/c-object-0044.toml|negative'
     'conformance/cases/object/c-object-0045.toml|positive'
+    'conformance/cases/object/c-object-0046.toml|negative'
+    'conformance/cases/object/c-object-0051.toml|negative'
     'conformance/cases/tagging/c-tagging-0019.toml|positive'
 )
 

@@ -106,12 +106,10 @@
 //! so a client that sent a malformed request would see a reset instead of the `400` that tells it
 //! what to fix.
 
-use std::future::poll_fn;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::task::Poll;
 
 use bytes::Bytes;
 use http::{Method, Request, Response, StatusCode};
@@ -121,9 +119,9 @@ use rustfs_gateway_core::cors::{
     preflight_bypasses_pipeline, preflight_refusal_for, preflight_uses_resolved_target,
 };
 use rustfs_gateway_core::{
-    BoxFuture, Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel,
-    RequestBodyMode, ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, Router, SseConfig, StaticDispatchError,
-    StaticDispatchOutcome, TargetKind, TransportSecurity,
+    Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel, RequestBodyMode,
+    ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, Router, SseConfig, StaticDispatchError, StaticDispatchOutcome,
+    TargetKind, TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
     resolve,
 };
@@ -142,13 +140,15 @@ use crate::config::ConfigStore;
 use crate::dispatch::target_of;
 use crate::ext::{
     AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
-    AuthzRequest, AuthzStage, CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, Governor, GovernorRequest, HostQuery,
-    HostResolver, InputAuthzRequest, Observer, PolicySnapshot, PolicySource, PolicyTimeout, RequestContext, RequestEvent,
-    ResolvedHost, ResponseView, RoutedView, ServerExtensions, SigV2Authentication, StageFilter, WireHead, emit_safely,
+    AuthzRequest, AuthzStage, BucketOwnerSource, CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, Governor,
+    GovernorRequest, HostQuery, HostResolver, InputAuthzRequest, Observer, PolicySnapshot, PolicySource, PolicyTimeout,
+    RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions, SigV2Authentication, StageFilter,
+    WireHead, emit_safely,
 };
 use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedBody};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
+use crate::panic_boundary::catch_boxed_future;
 use crate::payload_header::{payload_mode, presigned_body_obligation};
 use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
@@ -186,6 +186,7 @@ pub(crate) struct Inner {
     pub(crate) policy_timeout: PolicyTimeout,
     pub(crate) authz_audit: Arc<dyn AuthzAuditSink>,
     pub(crate) authz_clock: Arc<dyn MonotonicClock>,
+    pub(crate) bucket_owner_source: Arc<dyn BucketOwnerSource>,
     pub(crate) host_resolver: Arc<dyn HostResolver>,
     pub(crate) governor: Arc<dyn Governor>,
     pub(crate) observer: Arc<dyn Observer>,
@@ -930,7 +931,7 @@ impl S3Service {
             let policy = Arc::new(policy);
             let authz_context = RequestContext::from_request(now, policy.as_ref(), auth_scheme, route_server_extensions);
             let route_started = route_service.inner.authz_clock.monotonic();
-            let route_decision =
+            let mut route_decision =
                 match catch_boxed_future(|| route_service.inner.authorizer.authorize_route(&authz_context, &route_request)).await
                 {
                     Ok(decision) => decision,
@@ -942,6 +943,18 @@ impl S3Service {
                         ));
                     }
                 };
+            if route_decision == Decision::Allow && route_headers.contains_key("x-amz-expected-bucket-owner") {
+                route_decision = match (route_meta.header("x-amz-expected-bucket-owner"), route_meta.bucket()) {
+                    (Some(expected_owner), Some(bucket)) => {
+                        match catch_boxed_future(|| route_service.inner.bucket_owner_source.owner(bucket)).await {
+                            Ok(Ok(actual_owner)) if actual_owner.as_ref() == expected_owner.as_ref() => Decision::Allow,
+                            Ok(Ok(_)) => Decision::Deny,
+                            Ok(Err(_)) | Err(()) => Decision::Indeterminate,
+                        }
+                    }
+                    (None, _) | (_, None) => Decision::Indeterminate,
+                };
+            }
             let settled = route_decision.settle();
             emit_safely(
                 route_service.inner.authz_audit.as_ref(),
@@ -1314,23 +1327,6 @@ impl S3Service {
             vary_origin: true,
         })
     }
-}
-
-async fn catch_boxed_future<'a, T, F>(build: F) -> Result<T, ()>
-where
-    F: FnOnce() -> BoxFuture<'a, T>,
-{
-    let Ok(mut future) = std::panic::catch_unwind(AssertUnwindSafe(build)) else {
-        return Err(());
-    };
-    poll_fn(
-        move |context| match std::panic::catch_unwind(AssertUnwindSafe(|| future.as_mut().poll(context))) {
-            Ok(Poll::Ready(value)) => Poll::Ready(Ok(value)),
-            Ok(Poll::Pending) => Poll::Pending,
-            Err(_) => Poll::Ready(Err(())),
-        },
-    )
-    .await
 }
 
 /// The bucket a preflight addresses, from the host when the host named one and from the path

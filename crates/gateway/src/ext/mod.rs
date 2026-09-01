@@ -36,6 +36,7 @@
 //! | --- | --- | --- |
 //! | [`Authorizer`] | none — [`crate::ServiceBuilder::build`] refuses | there is no safe default: allow-all is a hole, deny-all is a service nobody can use |
 //! | [`Authenticator`] | none — `build` refuses | the same asymmetry, one stage earlier |
+//! | [`BucketOwnerSource`] | [`NoBucketOwner`] | a presented expected-owner assertion fails closed; requests without one do no lookup |
 //! | [`HostResolver`] | [`PathStyleOnly`] | a virtual-hosted request is routed by its path, so `Host: bucket.example.com` addressing `/key` is not understood; install [`VirtualHostStyle`] to understand it |
 //! | [`Governor`] | [`DefaultGovernor`] | aggregate, per-client, and three pre-authentication class ceilings are in force at [`GovernorRates::default`]; no per-identity quota, because this hook has no identity |
 //! | [`Observer`] | [`NoObserver`] | nothing is recorded; a rejection leaves no trace outside the response |
@@ -65,6 +66,7 @@
 mod authenticator;
 mod authorizer;
 mod authz_audit;
+mod bucket_owner;
 mod cors;
 mod credential_guard;
 mod credentials;
@@ -88,6 +90,7 @@ pub use self::authorizer::{
 };
 pub(crate) use self::authz_audit::emit_safely;
 pub use self::authz_audit::{AuthzAuditEvent, AuthzAuditSink, AuthzStage, NoAuthzAudit};
+pub use self::bucket_owner::{BucketOwnerError, BucketOwnerSource, NoBucketOwner};
 pub use self::cors::{CORS_PREFLIGHT, CachedCorsSource, CorsCacheConfig, CorsSource, CorsSourceError, NoCors};
 pub use self::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider, ProviderMetrics};
 pub use self::credentials::{
