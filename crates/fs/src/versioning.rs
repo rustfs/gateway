@@ -15,9 +15,9 @@
 //! Persistent bucket versioning and version-aware object handlers.
 //!
 //! Responsible for: publishing ordinary and multipart object bytes into opaque/null versions,
-//! storing delete markers, selecting current or explicit versions, and enumerating a deterministic
-//! version census.
-//! NOT responsible for: multipart part validation, lifecycle, copy, tags, or ordinary listing.
+//! storing delete markers, selecting current or explicit versions, exposing the selected metadata
+//! directory to object subresources, and enumerating a deterministic version census.
+//! NOT responsible for: multipart part validation, lifecycle, copy, tag-document persistence, or ordinary listing.
 //! Upstream: the filesystem safety primitives and validated multipart assembly. Downstream:
 //! production object, multipart-completion, and version-listing handlers.
 
@@ -37,7 +37,7 @@ use rustfs_gateway::{
 };
 use sha2::{Digest as _, Sha256};
 
-use super::{FsBackend, drain, etag, last_modified, storage_error};
+use super::{FsBackend, drain, etag, last_modified, no_such_key, storage_error};
 
 pub(super) const STATUS_FILE: &str = "versioning-status";
 pub(super) const SEQUENCE_FILE: &str = "version-sequence";
@@ -77,6 +77,12 @@ pub(super) struct CurrentObjectRecord {
     pub(super) modified: i64,
     pub(super) e_tag: String,
     pub(super) size: i64,
+    pub(super) tags: Vec<(String, String)>,
+}
+
+pub(super) struct ObjectTagTarget {
+    pub(super) directory: PathBuf,
+    pub(super) version_id: Option<String>,
 }
 
 pub(super) struct PublishedObject {
@@ -131,18 +137,50 @@ impl FsBackend {
                 }
             }
         }
-        Ok(current
+        let mut objects = Vec::new();
+        for record in current
             .into_values()
             .filter(|record| matches!(record.kind, RecordKind::Object))
-            .map(|record| CurrentObjectRecord {
+        {
+            let tags = super::tagging::read_persisted_tags(&record.path).await?;
+            objects.push(CurrentObjectRecord {
                 key: record.key,
                 version_id: record.version_id,
                 sequence: record.sequence,
                 modified: record.modified,
                 e_tag: record.e_tag,
                 size: record.size,
-            })
-            .collect())
+                tags,
+            });
+        }
+        Ok(objects)
+    }
+
+    pub(super) async fn object_tag_target(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+    ) -> Result<ObjectTagTarget, HandlerError> {
+        let state = self.versioning_state(bucket).await?;
+        let records = self.version_records(bucket).await?;
+        let selected = version_id
+            .and_then(|id| explicit_for_key(&records, key, id))
+            .or_else(|| version_id.is_none().then(|| newest_for_key(&records, key)).flatten());
+        let Some(record) = selected else {
+            return Err(if version_id.is_some_and(|id| id != "null") {
+                missing_version(key)
+            } else {
+                no_such_key(key)
+            });
+        };
+        if matches!(record.kind, RecordKind::DeleteMarker) {
+            return Err(delete_marker_error(record, key, version_id.is_some()));
+        }
+        Ok(ObjectTagTarget {
+            directory: record.path.clone(),
+            version_id: (!matches!(state, VersioningState::Never)).then(|| record.version_id.clone()),
+        })
     }
 
     pub(super) async fn expire_current_if_unchanged(

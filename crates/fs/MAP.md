@@ -8,6 +8,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/lib.rs` | Filesystem paths, capability authority, bucket CRUD, and five multipart handlers. | Changing shared storage behavior or the registered operation set. |
 | `src/lifecycle.rs` | Durable lifecycle documents, filter evaluation, and one-shot current-object expiration. | Changing lifecycle configuration or expiration semantics. |
 | `src/listing.rs` | Object/upload filtering, delimiter rollup, V1/paired markers, and scoped V2 cursors. | Changing object or upload listing pagination semantics. |
+| `src/tagging.rs` | Durable per-version object tag replacement, reads, deletion, and storage safety. | Changing object-tagging operations or lifecycle tag inputs. |
 | `src/uploads.rs` | Multipart record decoding, path validation, and active-upload enumeration. | Changing upload capability persistence or upload listing authority. |
 | `src/versioning.rs` | Persistent version states, shared object publication, delete markers, and version census handlers. | Changing PUT/multipart publication, version selection, retention, or listing semantics. |
 | `tests/crud.rs` | Signed production-service CRUD, multipart, and storage-boundary evidence. | Changing a handler, path rule, or public assembly API. |
@@ -17,6 +18,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/multipart_listing.rs` | Restarted upload pages, paired markers, rollup, retirement, and path refusals. | Changing upload listing or its persisted authority. |
 | `tests/crud/multipart_sizing.rs` | Multipart minimum-part rejection, retryability, and boundary evidence. | Changing completion part-size validation. |
 | `tests/crud/multipart_versioning.rs` | Multipart publication into enabled, suspended, and null version lineages. | Changing completion/version integration or its failure boundaries. |
+| `tests/crud/object_tagging.rs` | Restarted current/version tag operations and lifecycle filter consumption. | Changing object tags or tag-selected lifecycle expiration. |
 | `tests/crud/versioning.rs` | Enabled, suspended, restart, corruption, and symlink versioning evidence. | Changing versioned object behavior or persistence. |
 
 ## Verify

@@ -8,11 +8,12 @@ This bounded implementation supports bucket and version-aware object CRUD plus `
 `ListObjectsV2`, `ListMultipartUploads`,
 `GetBucketVersioning`, `PutBucketVersioning`, `ListObjectVersions`, `CreateMultipartUpload`,
 `UploadPart`, `ListParts`, `CompleteMultipartUpload`, `AbortMultipartUpload`, and lifecycle
-configuration PUT/GET/DELETE.
+configuration PUT/GET/DELETE plus object tagging GET/PUT/DELETE.
 `FsBackend::supported_operations`, `FsBackend::register_crud`, and
 `FsBackend::register_multipart`, `FsBackend::register_versioning`, and
-`FsBackend::register_listing`, and `FsBackend::register_lifecycle` consume one crate-local operation
-list so the advertised set and the production registry cannot drift independently.
+`FsBackend::register_listing`, `FsBackend::register_lifecycle`, and `FsBackend::register_tagging`
+consume one crate-local operation list so the advertised set and the production registry cannot
+drift independently.
 
 Both object listings derive their current-object view from the persisted version records, order keys
 by their exact UTF-8 bytes, and roll delimiter groups into page-counted common prefixes. V1 markers
@@ -33,6 +34,10 @@ authority, so composite multipart entity tags and version identities remain stab
 Persisted status, counters, records, and bodies fail closed when malformed or replaced by symbolic
 links.
 
+Object tags are atomically replaced beside the selected version record. Current and explicit-version
+reads, idempotent deletion, and restart recovery all use that authority without minting a new version
+or changing object bytes. The same validated tag pairs drive lifecycle `Tag` and `And` filters.
+
 Multipart state remains separate from published objects. Completion validates a strictly ordered,
 duplicate-free part list, retires the upload capability, and publishes the assembled bytes through
 the version authority. Abort retires the capability before removing its parts.
@@ -42,13 +47,12 @@ persistence XML codec. Complete standard rules, the transition minimum-size head
 restart recovery share that authority; malformed or symbolic-link records fail closed. A one-shot
 expiration sweep preflights every bucket before applying enabled day/date rules to current objects.
 The debug interval maps one lifecycle day to a short duration for conformance; tag-filtered rules
-remain inert until object-tag persistence exists, and transition actions remain out of scope.
+match the persisted object-version tags, and transition actions remain out of scope.
 
 The backend is intentionally not production storage. It does not promise crash consistency,
-multi-process coordination, hostile concurrent filesystem mutation resistance, S3 minimum-part
-size enforcement, multipart checksum negotiation, or lifecycle transition processing. Bucket names never
-become raw path components and object keys never become paths; symbolic-link roots and storage
-components are refused.
+multi-process coordination, hostile concurrent filesystem mutation resistance, multipart checksum
+negotiation, or lifecycle transition processing. Bucket names never become raw path components and
+object keys never become paths; symbolic-link roots and storage components are refused.
 
 The remaining capabilities belong to later slices of rustfs/backlog#1741 rather than this core
 reference-backend slice.

@@ -131,10 +131,10 @@ impl FsBackend {
 
     /// Runs one lifecycle-expiration sweep and returns the number of current objects expired.
     ///
-    /// Every bucket policy and current-object record is validated before the first deletion. Rules
-    /// requiring object tags remain inert until the reference backend persists observable tags.
-    /// Version-enabled buckets receive a delete marker, while never-versioned and suspended
-    /// buckets apply their existing current-object deletion semantics.
+    /// Every bucket policy, current-object record, and persisted tag set is validated before the
+    /// first deletion. Tag selectors consume the same per-version authority as object-tagging
+    /// handlers. Version-enabled buckets receive a delete marker, while never-versioned and
+    /// suspended buckets apply their existing current-object deletion semantics.
     ///
     /// # Errors
     ///
@@ -193,7 +193,10 @@ fn rule_selects(rule: &LifecycleRule, object: &CurrentObjectRecord) -> bool {
     let Some(filter) = rule.filter.as_ref() else {
         return true;
     };
-    if filter.tag.is_some()
+    if filter
+        .tag
+        .as_ref()
+        .is_some_and(|required| !tag_matches(&object.tags, required.key.as_str(), &required.value))
         || filter.prefix.as_deref().is_some_and(|prefix| !object.key.starts_with(prefix))
         || filter.object_size_greater_than.is_some_and(|minimum| object.size <= minimum)
         || filter.object_size_less_than.is_some_and(|maximum| object.size >= maximum)
@@ -203,10 +206,17 @@ fn rule_selects(rule: &LifecycleRule, object: &CurrentObjectRecord) -> bool {
     let Some(and) = filter.and.as_ref() else {
         return true;
     };
-    and.tags.is_empty()
+    and.tags
+        .iter()
+        .all(|required| tag_matches(&object.tags, required.key.as_str(), &required.value))
         && and.prefix.as_deref().is_none_or(|prefix| object.key.starts_with(prefix))
         && and.object_size_greater_than.is_none_or(|minimum| object.size > minimum)
         && and.object_size_less_than.is_none_or(|maximum| object.size < maximum)
+}
+
+fn tag_matches(tags: &[(String, String)], key: &str, value: &str) -> bool {
+    tags.iter()
+        .any(|(held_key, held_value)| held_key == key && held_value == value)
 }
 
 impl Handler<GetBucketLifecycleConfiguration> for FsBackend {

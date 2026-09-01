@@ -15,7 +15,7 @@
 //! Filesystem-backed reference handlers for `rustfs-gateway`.
 //!
 //! Responsible for: a small, inspectable persistence backend used to exercise real S3 handlers,
-//! including atomically published multipart uploads, persistent object versions, and lifecycle expiration.
+//! including atomically published multipart uploads, persistent object versions and tags, and lifecycle expiration.
 //! NOT responsible for: production durability, lifecycle transitions, or cross-process coordination.
 //! Upstream: `rustfs-gateway`. Downstream: examples and backend contract tests.
 
@@ -60,9 +60,11 @@ macro_rules! reference_operations {
             crud DeleteBucket => "DeleteBucket",
             lifecycle DeleteBucketLifecycle => "DeleteBucketLifecycle",
             crud DeleteObject => "DeleteObject",
+            tagging DeleteObjectTagging => "DeleteObjectTagging",
             lifecycle GetBucketLifecycleConfiguration => "GetBucketLifecycleConfiguration",
             versioning GetBucketVersioning => "GetBucketVersioning",
             crud GetObject => "GetObject",
+            tagging GetObjectTagging => "GetObjectTagging",
             crud HeadBucket => "HeadBucket",
             crud HeadObject => "HeadObject",
             listing ListMultipartUploads => "ListMultipartUploads",
@@ -73,6 +75,7 @@ macro_rules! reference_operations {
             lifecycle PutBucketLifecycleConfiguration => "PutBucketLifecycleConfiguration",
             versioning PutBucketVersioning => "PutBucketVersioning",
             crud PutObject => "PutObject",
+            tagging PutObjectTagging => "PutObjectTagging",
             multipart UploadPart => "UploadPart",
         }
     };
@@ -91,16 +94,7 @@ macro_rules! register_crud_entries {
     ($backend:expr, $builder:expr; crud $operation:ty => $name:literal, $($rest:tt)*) => {
         register_crud_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
     };
-    ($backend:expr, $builder:expr; multipart $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_crud_entries!($backend, $builder; $($rest)*)
-    };
-    ($backend:expr, $builder:expr; versioning $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_crud_entries!($backend, $builder; $($rest)*)
-    };
-    ($backend:expr, $builder:expr; listing $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_crud_entries!($backend, $builder; $($rest)*)
-    };
-    ($backend:expr, $builder:expr; lifecycle $operation:ty => $name:literal, $($rest:tt)*) => {
+    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
         register_crud_entries!($backend, $builder; $($rest)*)
     };
 }
@@ -110,16 +104,7 @@ macro_rules! register_multipart_entries {
     ($backend:expr, $builder:expr; multipart $operation:ty => $name:literal, $($rest:tt)*) => {
         register_multipart_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
     };
-    ($backend:expr, $builder:expr; crud $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_multipart_entries!($backend, $builder; $($rest)*)
-    };
-    ($backend:expr, $builder:expr; versioning $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_multipart_entries!($backend, $builder; $($rest)*)
-    };
-    ($backend:expr, $builder:expr; listing $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_multipart_entries!($backend, $builder; $($rest)*)
-    };
-    ($backend:expr, $builder:expr; lifecycle $operation:ty => $name:literal, $($rest:tt)*) => {
+    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
         register_multipart_entries!($backend, $builder; $($rest)*)
     };
 }
@@ -156,6 +141,7 @@ macro_rules! register_lifecycle_entries {
 
 mod lifecycle;
 mod listing;
+mod tagging;
 mod uploads;
 mod versioning;
 
@@ -278,7 +264,7 @@ impl FsBackend {
         reference_operations!(register)
     }
 
-    /// Registers persistent bucket lifecycle configuration operations.
+    /// Registers persistent bucket lifecycle configuration operations and one-shot expiration support.
     #[must_use]
     pub fn register_lifecycle(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
         macro_rules! register {

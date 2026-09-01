@@ -14,9 +14,9 @@
 
 //! Production-registry contract for the filesystem reference backend.
 //!
-//! Responsible for: proving bucket, object, multipart, versioning, listing, and lifecycle CRUD through signed
-//! requests to a real `S3Service`, including storage-boundary refusals and not-found behavior.
-//! NOT responsible for: lifecycle action execution, expanded example binaries, or production durability.
+//! Responsible for: proving bucket, object, multipart, versioning, listing, tagging, and lifecycle CRUD through
+//! signed requests to a real `S3Service`, including storage-boundary refusals and not-found behavior.
+//! NOT responsible for: expanded example binaries or production durability.
 //! Upstream: `rustfs-gateway-fs` and the public gateway facade. Downstream: the crate verification gate.
 
 #[path = "crud/versioning.rs"]
@@ -39,6 +39,9 @@ mod lifecycle;
 
 #[path = "crud/lifecycle_expiration.rs"]
 mod lifecycle_expiration;
+
+#[path = "crud/object_tagging.rs"]
+mod object_tagging;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -112,7 +115,10 @@ fn service_with_backend(backend: Arc<FsBackend>) -> (Arc<FsBackend>, S3Service) 
             ),
     );
     let service = backend
-        .register_lifecycle(backend.register_listing(backend.register_versioning(backend.register_multipart(builder))))
+        .register_tagging(
+            backend
+                .register_lifecycle(backend.register_listing(backend.register_versioning(backend.register_multipart(builder)))),
+        )
         .build()
         .expect("the reference registry is a complete assembly");
     (backend, service)
@@ -247,9 +253,11 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "DeleteBucket",
             "DeleteBucketLifecycle",
             "DeleteObject",
+            "DeleteObjectTagging",
             "GetBucketLifecycleConfiguration",
             "GetBucketVersioning",
             "GetObject",
+            "GetObjectTagging",
             "HeadBucket",
             "HeadObject",
             "ListMultipartUploads",
@@ -260,6 +268,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "PutBucketLifecycleConfiguration",
             "PutBucketVersioning",
             "PutObject",
+            "PutObjectTagging",
             "UploadPart"
         ]
     );

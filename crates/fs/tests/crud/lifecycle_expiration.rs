@@ -40,12 +40,12 @@ const DISABLED: &str = concat!(
     "</Rule></LifecycleConfiguration>"
 );
 const DISABLED_MD5: &str = "16u1mDbNZoXJvYcnJcm/Cg==";
-const TAG_FILTER: &str = concat!(
+pub(super) const TAG_FILTER: &str = concat!(
     "<LifecycleConfiguration><Rule><Expiration><Days>1</Days></Expiration>",
     "<ID>tagged</ID><Filter><Tag><Key>class</Key><Value>cold</Value></Tag></Filter>",
     "<Status>Enabled</Status></Rule></LifecycleConfiguration>"
 );
-const TAG_FILTER_MD5: &str = "jl1qkZQCtXbDvMqI6nKFmQ==";
+pub(super) const TAG_FILTER_MD5: &str = "jl1qkZQCtXbDvMqI6nKFmQ==";
 const ABSOLUTE_DATE: &str = concat!(
     "<LifecycleConfiguration><Rule><Expiration><Date>2026-01-03T00:00:00Z</Date></Expiration>",
     "<ID>absolute</ID><Filter><Prefix></Prefix></Filter><Status>Enabled</Status>",
@@ -60,7 +60,7 @@ const SIZE_RANGE: &str = concat!(
 );
 const SIZE_RANGE_MD5: &str = "Xx+floLOQ0bsQ+8iTfI+Zg==";
 
-fn expiring_service(root: &TestRoot, now: i64) -> (Arc<FsBackend>, S3Service) {
+pub(super) fn expiring_service(root: &TestRoot, now: i64) -> (Arc<FsBackend>, S3Service) {
     let backend = FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(now)))
         .expect("a usable test root")
         .with_lifecycle_debug_interval(Duration::from_secs(1))
@@ -68,7 +68,7 @@ fn expiring_service(root: &TestRoot, now: i64) -> (Arc<FsBackend>, S3Service) {
     service_with_backend(Arc::new(backend))
 }
 
-async fn put_policy(service: &S3Service, bucket: &str, document: &'static str, checksum: &'static str) {
+pub(super) async fn put_policy(service: &S3Service, bucket: &str, document: &'static str, checksum: &'static str) {
     let mut headers = http::HeaderMap::new();
     headers.insert("content-md5", http::HeaderValue::from_static(checksum));
     let response = exchange(
@@ -84,11 +84,11 @@ async fn put_policy(service: &S3Service, bucket: &str, document: &'static str, c
     assert_eq!(response.status(), 200, "{}", String::from_utf8_lossy(response.body()));
 }
 
-async fn put(service: &S3Service, bucket: &str, key: &str, body: &'static [u8]) -> rustfs_gateway::WireResponse {
+pub(super) async fn put(service: &S3Service, bucket: &str, key: &str, body: &'static [u8]) -> rustfs_gateway::WireResponse {
     exchange(service, signed(http::Method::PUT, &format!("/{bucket}/{key}"), Bytes::from_static(body))).await
 }
 
-async fn get(service: &S3Service, bucket: &str, key: &str) -> rustfs_gateway::WireResponse {
+pub(super) async fn get(service: &S3Service, bucket: &str, key: &str) -> rustfs_gateway::WireResponse {
     exchange(service, signed(http::Method::GET, &format!("/{bucket}/{key}"), Bytes::new())).await
 }
 
@@ -198,9 +198,9 @@ async fn n_disabled_rule_remains_inert() {
     assert_eq!(get(&reopened, "lc-disabled", "key").await.status(), 200);
 }
 
-/// Negative — tag-filtered rules fail closed until object-tag persistence is implemented.
+/// Negative — an untagged object never satisfies a tag-filtered rule.
 #[tokio::test]
-async fn n_unobservable_tag_filter_never_matches() {
+async fn n_untagged_object_never_matches_a_tag_filter() {
     let root = TestRoot::new();
     let (_, initial) = service(&root);
     create_bucket(&initial, "lc-tagged").await;
