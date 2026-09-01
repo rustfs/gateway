@@ -252,6 +252,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
         with:
           toolchain: 1.97.1
+          components: rustfmt, clippy, rust-src, rust-analyzer
       # No cargo cache: the five-minute measurement includes compiling xtask itself.
       - name: Bootstrap from a cold checkout (maximum 5 minutes)
         run: |
@@ -294,7 +295,6 @@ jobs:
       - name: Workspace tests 1/2 (maximum 8 minutes after setup)
         run: |
           scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway
-          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 
   workspace-tests-2:
     name: Workspace tests 2
@@ -309,6 +309,7 @@ jobs:
       - name: Workspace tests 2/2 (maximum 8 minutes after setup)
         run: |
           scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance --package rustfs-gateway
+          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 
   transport-parity:
     name: Production transport parity

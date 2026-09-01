@@ -6276,6 +6276,26 @@ PY
 expect_fail check_rust_toolchain_msrv.sh \
     'the MSRV CI job installing a moving compiler' mut_rust_toolchain_ci_version_drift
 
+mut_rust_toolchain_ci_bootstrap_components_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".github/workflows/ci.yml")
+text = path.read_text()
+start = text.index("  bootstrap:")
+end = text.index("\n  feedback-loop:", start)
+block = text[start:end]
+old = "          components: rustfmt, clippy, rust-src, rust-analyzer\n"
+if block.count(old) != 1:
+    raise SystemExit("the bootstrap component materialization is missing or ambiguous")
+block = block.replace(old, "", 1)
+path.write_text(text[:start] + block + text[end:])
+PY
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'the cold bootstrap charging development-component downloads to its measured command' \
+    mut_rust_toolchain_ci_bootstrap_components_removed
+
 # This is the exact shape main carried on 2026-08-20: no `with:`, so
 # dtolnay/rust-toolchain installs its own `stable` default and makes it the rustup
 # default, whatever stable happens to be that day. It must not read green again.
@@ -14941,6 +14961,16 @@ mut_ci_handlers_facade_fixture_removed() {
 expect_fail check_ci_test_split.sh \
     'the workspace test job dropping the facade-only downstream fixture' \
     mut_ci_handlers_facade_fixture_removed
+
+mut_ci_handlers_facade_fixture_moved_before_gateway_prebuild() {
+    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance --package rustfs-gateway
+          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh' \
+        '          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
+          scripts/ci_budget.sh 480 "workspace tests 2/2" cargo test --package rustfs-gateway-conformance --package rustfs-gateway'
+}
+expect_fail check_ci_test_split.sh \
+    'the facade-only fixture moving ahead of its authoritative gateway prebuild' \
+    mut_ci_handlers_facade_fixture_moved_before_gateway_prebuild
 
 mut_ci_workspace_failure_swallowed() {
     replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/2" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway' \
