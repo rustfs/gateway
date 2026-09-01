@@ -19,11 +19,13 @@
 //! Upstream: sibling persistence codecs. Downstream: RustFS metadata consumers using generated DTOs.
 
 mod cors_object_lock;
+mod lifecycle;
 mod logging_website;
 mod notification;
 mod replication;
 
 pub use cors_object_lock::{parse_cors_dto, parse_object_lock_dto, serialize_cors_dto, serialize_object_lock_dto};
+pub use lifecycle::{parse_lifecycle_dto, serialize_lifecycle_dto};
 pub use logging_website::{parse_bucket_logging_dto, parse_website_dto, serialize_bucket_logging_dto, serialize_website_dto};
 pub use notification::{parse_notification_dto, serialize_notification_dto};
 pub use replication::{parse_replication_dto, serialize_replication_dto};
