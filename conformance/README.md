@@ -11,7 +11,9 @@ looks like on the wire. It contains no Rust code. The runner that executes these
 ## The schema is frozen
 
 `case.schema.json` was frozen on **2026-08-05** at `schema_version = 1`, before the first line of
-protocol code was written. That order is deliberate. A case file is not a test that can be rewritten
+protocol code was written. Schema version 2 adds `connection.concurrent`; the runner continues to
+accept version 1 cases, while a case using the new dimension must opt into version 2. That order is
+deliberate. A case file is not a test that can be rewritten
 cheaply — it is a record of a behavioural fact, and every case written against a schema is invalidated
 by a change to that schema. Freezing after thirty cases exist means rewriting thirty cases; freezing
 after three hundred means the schema never changes again and the suite stops being able to express
@@ -47,6 +49,15 @@ by the procedure below, rather than accidentally by whoever writes case thirty-o
    `schema_version` it does not recognise with an explicit "update the runner" error. It must never
    skip such a case, and must never ignore fields it does not understand.
 5. Two reviewers, one of whom must not have written the case that motivated the change.
+
+### Version 1 to version 2 migration
+
+Existing version 1 cases need no edit. A case that needs independent clients in flight together
+changes `case.schema_version` to `2`, replaces the single-connection `pipeline` declaration with
+`connection.concurrent = true`, and keeps each exchange at `repeat = 1` with no inter-exchange
+delay. The runner opens one fresh socket per exchange, dispatches every request before awaiting a
+response, and returns observations in declaration order. `concurrent` cannot be combined with
+`pipeline`, `reuse`, TLS, backpressure, or idle-time controls.
 
 ## Why the schema looks like this
 

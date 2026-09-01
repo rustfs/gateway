@@ -27,7 +27,7 @@
 use crate::corpus::{Case, Corpus, Exchange};
 use crate::diagnostic::Diagnostic;
 use crate::interpolate;
-use crate::schema::SCHEMA_VERSION;
+use crate::schema::{MIN_SCHEMA_VERSION, SCHEMA_VERSION};
 use crate::value::Value;
 use std::collections::BTreeSet;
 
@@ -180,7 +180,7 @@ fn check_identity(case: &Case, out: &mut Vec<Diagnostic>) {
         ));
     }
     match meta.read("caseMeta.schema_version").and_then(Value::as_integer) {
-        Some(version) if version == SCHEMA_VERSION => {}
+        Some(version) if (MIN_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&version) => {}
         Some(version) => out.push(Diagnostic::deny(
             "lint/schema-version",
             "/case/schema_version",

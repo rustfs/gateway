@@ -29,11 +29,15 @@ use crate::value::Value;
 use core::fmt;
 use std::collections::BTreeMap;
 
-/// The schema version this runner understands.
+/// The newest schema version this runner understands.
 ///
-/// A case whose `schema_version` is not this value is refused with an explicit "update the
-/// runner" error. It is never skipped and its unknown fields are never ignored.
-pub const SCHEMA_VERSION: i64 = 1;
+/// Version 1 remains readable; version 2 adds concurrent exchange batches. A case newer than this
+/// value is refused with an explicit "update the runner" error. It is never skipped and its
+/// unknown fields are never ignored.
+pub const SCHEMA_VERSION: i64 = 2;
+
+/// The oldest schema version this runner still accepts.
+pub const MIN_SCHEMA_VERSION: i64 = 1;
 
 /// The schema file could not be compiled.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -635,6 +639,67 @@ mod tests {
         let subject = schema(r#"{"properties":{"schema_version":{"const":1}}}"#);
         let violations = subject.validate(&toml::parse("schema_version = 2\n").expect("valid TOML"));
         assert!(violations[0].message.contains("update the runner"), "{violations:?}");
+    }
+
+    const CONCURRENT_CASE: &str = r#"
+[case]
+id = "c-test-0001"
+schema_version = 2
+title = "Two requests are dispatched together"
+rationale = "This synthetic case proves the frozen concurrency dimension is versioned and mutually exclusive."
+polarity = "negative"
+quirks = []
+evidence = [{ url = "https://example.com/evidence", summary = "A self-written summary long enough for the frozen evidence shape." }]
+
+[connection]
+concurrent = true
+
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/bucket/key"
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/bucket/key"
+[exchanges.expect]
+kind = "response"
+status = 200
+"#;
+
+    fn repository_schema() -> Schema {
+        Schema::compile(include_str!("../../../conformance/case.schema.json")).expect("the repository schema compiles")
+    }
+
+    /// Positive — version 2 owns the new concurrency dimension.
+    #[test]
+    fn schema_version_two_accepts_a_concurrent_batch() {
+        let violations = repository_schema().validate(&toml::parse(CONCURRENT_CASE).expect("valid TOML"));
+        assert!(violations.is_empty(), "{violations:?}");
+    }
+
+    /// Negative — a version 1 case cannot silently acquire version 2 semantics.
+    #[test]
+    fn schema_version_one_cannot_claim_concurrent_dispatch() {
+        let source = CONCURRENT_CASE.replace("schema_version = 2", "schema_version = 1");
+        let violations = repository_schema().validate(&toml::parse(&source).expect("valid TOML"));
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation.pointer.ends_with("schema_version"))
+        );
+    }
+
+    /// Negative — one connection cannot be both pipelined and a multi-connection batch.
+    #[test]
+    fn concurrent_and_pipeline_are_mutually_exclusive() {
+        let source = CONCURRENT_CASE.replace("concurrent = true", "concurrent = true\npipeline = true");
+        let violations = repository_schema().validate(&toml::parse(&source).expect("valid TOML"));
+        assert!(violations.iter().any(|violation| violation.pointer.ends_with("connection")));
     }
 
     #[test]
