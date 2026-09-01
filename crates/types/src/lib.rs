@@ -53,6 +53,7 @@ pub mod ext;
 pub mod persistence;
 pub mod placeholder;
 mod scalar;
+pub mod secret;
 
 /// Temporary, feature-gated adapters to the pinned s3s persistence oracle.
 ///
@@ -84,3 +85,4 @@ pub use crate::scalar::{
     floor_check_key, is_xml_representable, parse_request_checksum, resolve_upload, rules, validate_bucket_name,
     validate_object_key,
 };
+pub use crate::secret::SseCustomerKey;
