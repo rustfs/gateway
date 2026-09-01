@@ -289,6 +289,7 @@ impl fmt::Debug for Extensions {
 pub struct PersistedXml<T> {
     original: Vec<u8>,
     decoded: Result<T, ExtError>,
+    rewrite_allowed: bool,
 }
 
 impl<T> PersistedXml<T> {
@@ -296,7 +297,28 @@ impl<T> PersistedXml<T> {
     #[must_use]
     pub fn decode(original: Vec<u8>, decode: impl FnOnce(&[u8]) -> Result<T, ExtError>) -> Self {
         let decoded = decode(&original);
-        Self { original, decoded }
+        let rewrite_allowed = decoded.is_ok();
+        Self {
+            original,
+            decoded,
+            rewrite_allowed,
+        }
+    }
+
+    /// Decodes a persisted document for runtime decisions without enabling typed replacement.
+    ///
+    /// This is the bridge for a family whose read path is production-ready before its migration
+    /// writer is. A successful decode remains observable through [`Self::value`], while
+    /// [`Self::replacement`] stays fail-closed until the family's independently verified writer
+    /// is installed.
+    #[must_use]
+    pub fn decode_read_only(original: Vec<u8>, decode: impl FnOnce(&[u8]) -> Result<T, ExtError>) -> Self {
+        let decoded = decode(&original);
+        Self {
+            original,
+            decoded,
+            rewrite_allowed: false,
+        }
     }
 
     /// Returns the exact persisted bytes supplied to [`Self::decode`].
@@ -317,9 +339,10 @@ impl<T> PersistedXml<T> {
 
     /// Accepts replacement bytes only after a complete decode.
     pub fn replacement(&self, encoded: Vec<u8>) -> Result<Vec<u8>, ExtError> {
-        self.decoded
-            .as_ref()
-            .map(|_| encoded)
-            .map_err(|_| ExtError::PersistedRewriteBlocked)
+        if self.decoded.is_ok() && self.rewrite_allowed {
+            Ok(encoded)
+        } else {
+            Err(ExtError::PersistedRewriteBlocked)
+        }
     }
 }
