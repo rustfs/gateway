@@ -31,6 +31,9 @@ mod multipart_listing;
 #[path = "crud/multipart_sizing.rs"]
 mod multipart_sizing;
 
+#[path = "crud/multipart_checksums.rs"]
+mod multipart_checksums;
+
 #[path = "crud/multipart_versioning.rs"]
 mod multipart_versioning;
 
