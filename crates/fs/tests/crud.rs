@@ -46,6 +46,9 @@ mod lifecycle_expiration;
 #[path = "crud/lifecycle_scheduler.rs"]
 mod lifecycle_scheduler;
 
+#[path = "crud/lifecycle_transitions.rs"]
+mod lifecycle_transitions;
+
 #[path = "crud/object_tagging.rs"]
 mod object_tagging;
 

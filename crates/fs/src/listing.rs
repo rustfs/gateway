@@ -26,7 +26,7 @@ use std::collections::BTreeSet;
 
 use rustfs_gateway::dto::{
     CommonPrefix, ListMultipartUploads, ListMultipartUploadsOutput, ListObjects, ListObjectsOutput, ListObjectsV2,
-    ListObjectsV2Output, MultipartUpload, Object, StorageClass,
+    ListObjectsV2Output, MultipartUpload, Object,
 };
 use rustfs_gateway::{
     CursorSpec, ETag, ErrorCode, Handler, HandlerError, HandlerResult, ObjectKey, Req, Resp, Timestamp, key_count,
@@ -153,7 +153,7 @@ fn page_entries(page: &[Candidate]) -> Result<(Vec<Object>, Vec<CommonPrefix>), 
                 last_modified: Timestamp::from_secs(record.modified),
                 e_tag: ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?,
                 size: record.size,
-                storage_class: StorageClass::STANDARD,
+                storage_class: record.storage_class.clone(),
                 ..Object::default()
             }),
             Candidate::CommonPrefix(prefix) => common_prefixes.push(CommonPrefix { prefix: prefix.clone() }),
