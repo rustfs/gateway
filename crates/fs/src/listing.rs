@@ -14,16 +14,18 @@
 
 //! Persistent current-object listing for the filesystem reference backend.
 //!
-//! Responsible for: ListObjectsV2 filtering, delimiter rollup, page sizing, and opaque cursor
-//! minting/resumption over the version store's one current-object snapshot.
-//! NOT responsible for: version selection, ListObjects V1, upload listing, or lifecycle.
+//! Responsible for: ListObjects V1/V2 filtering, delimiter rollup, page sizing, marker resumption,
+//! and opaque V2 cursor minting over the version store's one current-object snapshot.
+//! NOT responsible for: version selection, upload listing, multipart completion, or lifecycle.
 //! Upstream: `versioning::current_object_records` and the shared pagination contract. Downstream:
-//! the production ListObjectsV2 handler registered by [`super::FsBackend::register_listing`].
+//! the production listing handlers registered by [`super::FsBackend::register_listing`].
 
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-use rustfs_gateway::dto::{CommonPrefix, ListObjectsV2, ListObjectsV2Output, Object, StorageClass};
+use rustfs_gateway::dto::{
+    CommonPrefix, ListObjects, ListObjectsOutput, ListObjectsV2, ListObjectsV2Output, Object, StorageClass,
+};
 use rustfs_gateway::{
     CursorSpec, ETag, ErrorCode, Handler, HandlerError, HandlerResult, ObjectKey, Req, Resp, Timestamp, key_count,
 };
@@ -131,6 +133,70 @@ fn start_index(
     Ok(candidates.partition_point(|candidate| candidate.name().as_bytes() <= start_after.as_bytes()))
 }
 
+fn marker_index(candidates: &[Candidate], marker: &str) -> usize {
+    candidates.partition_point(|candidate| candidate.name().as_bytes() <= marker.as_bytes())
+}
+
+fn page_entries(page: &[Candidate]) -> Result<(Vec<Object>, Vec<CommonPrefix>), HandlerError> {
+    let mut contents = Vec::new();
+    let mut common_prefixes = Vec::new();
+    for candidate in page {
+        match candidate {
+            Candidate::Object(record) => contents.push(Object {
+                key: ObjectKey::new(record.key.clone()).map_err(|_| storage_error())?,
+                last_modified: Timestamp::from_secs(record.modified),
+                e_tag: ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?,
+                size: record.size,
+                storage_class: StorageClass::STANDARD,
+                ..Object::default()
+            }),
+            Candidate::CommonPrefix(prefix) => common_prefixes.push(CommonPrefix { prefix: prefix.clone() }),
+        }
+    }
+    Ok((contents, common_prefixes))
+}
+
+fn page_size(value: i32) -> Result<usize, HandlerError> {
+    usize::try_from(value).map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "max-keys must be a non-negative integer"))
+}
+
+impl Handler<ListObjects> for FsBackend {
+    async fn call(&self, request: Req<ListObjects>) -> HandlerResult<ListObjects> {
+        let input = request.into_input();
+        let bucket = input.bucket;
+        let prefix = input.prefix.unwrap_or_default();
+        let delimiter = input.delimiter;
+        let marker = input.marker.unwrap_or_default();
+        let max_keys_value = input.max_keys.unwrap_or(1000);
+        let max_keys = page_size(max_keys_value)?;
+        let records = self.current_object_records(bucket.as_str()).await?;
+        let candidates = build_candidates(records, &prefix, delimiter.as_deref());
+        let start = marker_index(&candidates, &marker);
+        let available = candidates.len().saturating_sub(start);
+        let page_len = available.min(max_keys);
+        let is_truncated = max_keys > 0 && available > page_len;
+        let page = &candidates[start..start + page_len];
+        let next_marker = is_truncated
+            .then(|| page.last().map(|candidate| candidate.name().to_owned()))
+            .flatten();
+        let (contents, common_prefixes) = page_entries(page)?;
+
+        Ok(Resp::new(ListObjectsOutput {
+            is_truncated,
+            marker,
+            next_marker,
+            contents,
+            name: bucket,
+            prefix,
+            delimiter,
+            max_keys: max_keys_value,
+            common_prefixes,
+            encoding_type: input.encoding_type,
+            ..ListObjectsOutput::default()
+        }))
+    }
+}
+
 impl Handler<ListObjectsV2> for FsBackend {
     async fn call(&self, request: Req<ListObjectsV2>) -> HandlerResult<ListObjectsV2> {
         let input = request.into_input();
@@ -138,8 +204,7 @@ impl Handler<ListObjectsV2> for FsBackend {
         let prefix = input.prefix.unwrap_or_default();
         let delimiter = input.delimiter;
         let max_keys_value = input.max_keys.unwrap_or(1000);
-        let max_keys = usize::try_from(max_keys_value)
-            .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "max-keys must be a non-negative integer"))?;
+        let max_keys = page_size(max_keys_value)?;
         let records = self.current_object_records(bucket.as_str()).await?;
         let candidates = build_candidates(records, &prefix, delimiter.as_deref());
         let continuation = input.continuation_token.as_ref().map(|token| token.as_str());
@@ -163,21 +228,7 @@ impl Handler<ListObjectsV2> for FsBackend {
             .flatten()
             .map(Into::into);
 
-        let mut contents = Vec::new();
-        let mut common_prefixes = Vec::new();
-        for candidate in page {
-            match candidate {
-                Candidate::Object(record) => contents.push(Object {
-                    key: ObjectKey::new(record.key.clone()).map_err(|_| storage_error())?,
-                    last_modified: Timestamp::from_secs(record.modified),
-                    e_tag: ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?,
-                    size: record.size,
-                    storage_class: StorageClass::STANDARD,
-                    ..Object::default()
-                }),
-                Candidate::CommonPrefix(prefix) => common_prefixes.push(CommonPrefix { prefix: prefix.clone() }),
-            }
-        }
+        let (contents, common_prefixes) = page_entries(page)?;
         let returned_count = key_count(contents.len(), common_prefixes.len());
 
         Ok(Resp::new(ListObjectsV2Output {

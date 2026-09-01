@@ -44,6 +44,124 @@ async fn put(service: &S3Service, bucket: &str, key: &str, bytes: &'static [u8])
     assert_eq!(response.status(), 200, "{}", String::from_utf8_lossy(response.body()));
 }
 
+/// Positive — the V1 marker resumes after either an object or rolled-up prefix after restart.
+#[tokio::test]
+async fn list_objects_v1_pages_with_a_delimiter_marker_after_restart() {
+    let root = TestRoot::new();
+    let (_, running) = service(&root);
+    create_bucket(&running, "v1-pages").await;
+    put(&running, "v1-pages", "photos/z.txt", b"z").await;
+    put(&running, "v1-pages", "photos/sub/item.txt", b"nested").await;
+    put(&running, "v1-pages", "photos/a%20b.txt", b"a").await;
+
+    let first = exchange(
+        &running,
+        signed(
+            http::Method::GET,
+            "/v1-pages?prefix=photos%2F&delimiter=%2F&encoding-type=url&max-keys=2",
+            Bytes::new(),
+        ),
+    )
+    .await;
+    assert_eq!(first.status(), 200, "{}", String::from_utf8_lossy(first.body()));
+    assert_eq!(elements(first.body(), "Key"), ["photos%2Fa%20b.txt"]);
+    assert_eq!(elements(first.body(), "Prefix").last().map(String::as_str), Some("photos%2Fsub%2F"));
+    assert_eq!(element(first.body(), "MaxKeys").as_deref(), Some("2"));
+    assert_eq!(element(first.body(), "IsTruncated").as_deref(), Some("true"));
+    let marker = element(first.body(), "NextMarker").expect("a truncated delimited page carries a marker");
+    assert_eq!(marker, "photos%2Fsub%2F");
+
+    let (_, restarted) = service(&root);
+    let second = exchange(
+        &restarted,
+        signed(
+            http::Method::GET,
+            &format!("/v1-pages?prefix=photos%2F&delimiter=%2F&encoding-type=url&max-keys=2&marker={marker}"),
+            Bytes::new(),
+        ),
+    )
+    .await;
+    assert_eq!(second.status(), 200, "{}", String::from_utf8_lossy(second.body()));
+    assert_eq!(elements(second.body(), "Key"), ["photos%2Fz.txt"]);
+    assert!(elements(second.body(), "CommonPrefixes").is_empty());
+    assert_eq!(element(second.body(), "Marker").as_deref(), Some(marker.as_str()));
+    assert_eq!(element(second.body(), "MaxKeys").as_deref(), Some("2"));
+    assert_eq!(element(second.body(), "IsTruncated").as_deref(), Some("false"));
+    assert!(element(second.body(), "NextMarker").is_none());
+}
+
+/// Negative — V1 also distinguishes an empty bucket from a missing bucket.
+#[tokio::test]
+async fn n_v1_empty_and_missing_buckets_are_not_the_same_listing() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "v1-empty").await;
+    let empty = exchange(&service, signed(http::Method::GET, "/v1-empty", Bytes::new())).await;
+    assert_eq!(empty.status(), 200, "{}", String::from_utf8_lossy(empty.body()));
+    assert!(elements(empty.body(), "Key").is_empty());
+    assert_eq!(element(empty.body(), "Marker").as_deref(), Some(""));
+    assert_eq!(element(empty.body(), "IsTruncated").as_deref(), Some("false"));
+
+    let missing = exchange(&service, signed(http::Method::GET, "/v1-missing", Bytes::new())).await;
+    assert_eq!(missing.status(), 404, "{}", String::from_utf8_lossy(missing.body()));
+    assert!(String::from_utf8_lossy(missing.body()).contains("<Code>NoSuchBucket</Code>"));
+}
+
+/// Negative — V1 reads the same current-object selection and hides a current delete marker.
+#[tokio::test]
+async fn n_v1_does_not_list_a_current_delete_marker() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "v1-hidden").await;
+    let mut headers = http::HeaderMap::new();
+    headers.insert(
+        http::HeaderName::from_static("x-amz-checksum-sha256"),
+        http::HeaderValue::from_static("3W9vIcyGgMxcMrupjUKX43VSJ51+Mmo134R+0nE/LWo="),
+    );
+    assert_eq!(
+        exchange(
+            &service,
+            signed_with_headers(
+                http::Method::PUT,
+                "/v1-hidden?versioning",
+                Bytes::from_static(b"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"),
+                headers,
+            ),
+        )
+        .await
+        .status(),
+        200
+    );
+    put(&service, "v1-hidden", "gone", b"old").await;
+    assert_eq!(
+        exchange(&service, signed(http::Method::DELETE, "/v1-hidden/gone", Bytes::new()))
+            .await
+            .status(),
+        204
+    );
+    let listed = exchange(&service, signed(http::Method::GET, "/v1-hidden", Bytes::new())).await;
+    assert_eq!(listed.status(), 200, "{}", String::from_utf8_lossy(listed.body()));
+    assert!(elements(listed.body(), "Key").is_empty());
+}
+
+/// Negative — V1 never follows a symbolic link that replaces its persisted source.
+#[cfg(unix)]
+#[tokio::test]
+async fn n_v1_symlinked_listing_storage_is_refused() {
+    use std::os::unix::fs::symlink;
+
+    let root = TestRoot::new();
+    let outside = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "v1-link").await;
+    let versions = root.0.join(format!("b-{}/versions", hex::encode("v1-link")));
+    std::fs::remove_dir(&versions).expect("an empty versions directory");
+    symlink(&outside.0, versions).expect("a test symlink");
+    let response = exchange(&service, signed(http::Method::GET, "/v1-link", Bytes::new())).await;
+    assert_eq!(response.status(), 400, "{}", String::from_utf8_lossy(response.body()));
+    assert!(String::from_utf8_lossy(response.body()).contains("<Code>InvalidRequest</Code>"));
+}
+
 /// Positive — the opaque cursor resumes the byte-ordered current view after reopening storage.
 #[tokio::test]
 async fn list_objects_v2_pages_without_duplicates_after_restart() {
