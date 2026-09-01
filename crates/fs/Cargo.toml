@@ -21,6 +21,7 @@ workspace = true
 
 [dependencies]
 rustfs-gateway = { workspace = true }
+rustfs-gateway-types = { workspace = true }
 bytes = { workspace = true }
 hex = { workspace = true }
 http = { workspace = true }

@@ -1809,6 +1809,7 @@ dependencies = [
  "http",
  "md-5",
  "rustfs-gateway",
+ "rustfs-gateway-types",
  "sha2",
  "tokio",
 ]
