@@ -64,7 +64,7 @@ mod layout;
 use std::fmt::Write as _;
 
 use rustfs_gateway_model::UnknownElementPolicyValue;
-use rustfs_gateway_model::ir::{AttributeSource, Binding, Field, OperationIr, Shape, Type};
+use rustfs_gateway_model::ir::{AttributeSource, Binding, Field, OperationIr, Shape, ShapeKind, Type};
 
 use super::{CodecRules, attribute_name, bounds, carried_as_attribute, expr, media, tolerance};
 use crate::emit::dto::naming;
@@ -117,7 +117,22 @@ const BUFFER_BODY: &str = concat!(
 pub fn body(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<String, String> {
     let mut out = String::new();
     let controlled_body = crate::emit::dto::controlled_required_body(&ir.input);
-    if controlled_body.is_none() {
+    let explicit_input = ir.input.iter().any(crate::emit::dto::requires_explicit_input_construction);
+    if explicit_input {
+        // ADR-0016: a required structural union has no honest Default. Decode into field-local
+        // state and construct Input only after the union selected a real variant.
+        for field in &ir.input {
+            let name = naming::field_name(&field.name);
+            if initializes_directly(field) {
+                continue;
+            }
+            if field.required && !crate::emit::dto::registry::Registry::is_container(&field.ty) {
+                let _ = writeln!(out, "        let {name};");
+            } else {
+                let _ = writeln!(out, "        let mut {name} = Default::default();");
+            }
+        }
+    } else if controlled_body.is_none() {
         // Functional-update syntax rather than `Input::default()`: the fields are filled in one at
         // a time from bindings that may or may not fire, and `clippy::field_reassign_with_default`
         // refuses the plain form. It is also the construction ADR-0004 P1 asks callers to use.
@@ -147,10 +162,28 @@ pub fn body(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<S
         if controlled_body.is_some_and(|body| body.name == field.name) {
             continue;
         }
-        out.push_str(&one_field(ir, field, first_body_member == Some(index), rules, codes)?);
+        let name = naming::field_name(&field.name);
+        let target = if explicit_input {
+            if initializes_directly(field) {
+                format!("let {name}")
+            } else {
+                name
+            }
+        } else {
+            format!("input.{name}")
+        };
+        out.push_str(&one_field(ir, field, &target, first_body_member == Some(index), rules, codes)?);
     }
     if !ir.input.iter().any(uses_body) {
         out.push_str("        let _ = body;\n");
+    }
+    if explicit_input {
+        out.push_str("        let input = Input {\n");
+        for field in &ir.input {
+            let name = naming::field_name(&field.name);
+            let _ = writeln!(out, "            {name},");
+        }
+        out.push_str("        };\n");
     }
     out.push_str("        value::exit(input.check_required())?;\n        Ok(input)\n");
     Ok(out)
@@ -160,6 +193,16 @@ fn uses_body(field: &Field) -> bool {
     matches!(field.binding, Binding::Payload | Binding::BodyXml | Binding::FormField)
 }
 
+/// Whether a required field is decoded on one unconditional straight-line binding.
+///
+/// Such fields can be declared at their assignment site. Conditional head bindings still need
+/// field-local state before their `if`/`else`, while containers need mutable accumulation.
+fn initializes_directly(field: &Field) -> bool {
+    field.required
+        && !crate::emit::dto::registry::Registry::is_container(&field.ty)
+        && matches!(field.binding, Binding::UriLabel { .. } | Binding::Payload)
+}
+
 /// Renders the lines that read one input field.
 ///
 /// `open_document` is true for the first operation-level [`Binding::BodyXml`] member, which is
@@ -167,13 +210,13 @@ fn uses_body(field: &Field) -> bool {
 fn one_field(
     ir: &OperationIr,
     field: &Field,
+    target: &str,
     open_document: bool,
     rules: &CodecRules,
     codes: &Constants,
 ) -> Result<String, String> {
     let op = &ir.operation;
     let member = &field.name;
-    let target = format!("input.{}", naming::field_name(member));
     let wire = field.wire_name.clone().unwrap_or_default();
     let mut out = String::new();
 
@@ -183,7 +226,7 @@ fn one_field(
             // bucket. Both were split and decoded once, at `MetaView::of`.
             let accessor = if *greedy { "require_key" } else { "require_bucket" };
             let _ = writeln!(out, "        // {member} — URI label, decoded once by `MetaView::of`.");
-            out.push_str(&assign(8, &target, &format!("request.{accessor}()?")));
+            out.push_str(&assign(8, target, &format!("request.{accessor}()?")));
         }
         Binding::Header => {
             // A tolerated binding produces the stored `Option` itself, so it is emitted instead of
@@ -219,8 +262,8 @@ fn one_field(
             }
             let _ = writeln!(out, "        if let Some(raw) = request.header(\"{wire}\") {{");
             let _ = writeln!(out, "            let raw = raw.as_ref();");
-            out.push_str(&assign(12, &target, &assignment));
-            out.push_str(&otherwise(field, &target, codes)?);
+            out.push_str(&assign(12, target, &assignment));
+            out.push_str(&otherwise(field, target, codes)?);
         }
         Binding::Query => {
             let conversion = expr::from_wire(
@@ -235,17 +278,17 @@ fn one_field(
             let _ = writeln!(out, "        // {member} — query `{wire}`, percent-decoded once.");
             let _ = writeln!(out, "        if let Some(raw) = request.query(\"{wire}\") {{");
             let _ = writeln!(out, "            let raw = raw.as_ref();");
-            out.push_str(&assign(12, &target, &wrap(field, &conversion)));
-            out.push_str(&otherwise(field, &target, codes)?);
+            out.push_str(&assign(12, target, &wrap(field, &conversion)));
+            out.push_str(&otherwise(field, target, codes)?);
         }
         Binding::PrefixHeaders => match &field.ty {
             Type::Map { .. } => {
                 let _ = writeln!(out, "        // {member} — every header under `{wire}`.");
-                out.push_str(&assign(8, &target, &format!("value::metadata_map(request, \"{wire}\", \"{member}\")?")));
+                out.push_str(&assign(8, target, &format!("value::metadata_map(request, \"{wire}\", \"{member}\")?")));
             }
             Type::ChecksumSpec => {
                 let _ = writeln!(out, "        // {member} — the one checksum header under `{wire}`.");
-                out.push_str(&assign(8, &target, &format!("value::checksum_spec(request, \"{wire}\", \"{member}\")?")));
+                out.push_str(&assign(8, target, &format!("value::checksum_spec(request, \"{wire}\", \"{member}\")?")));
             }
             _ => {
                 return Err(expr::unsupported(
@@ -258,14 +301,14 @@ fn one_field(
         Binding::Payload => match &field.ty {
             Type::Blob { streaming: true } => {
                 let _ = writeln!(out, "        // {member} — the streaming request body, never aggregated.");
-                out.push_str(&assign(8, &target, "body.into_stream()"));
+                out.push_str(&assign(8, target, "body.into_stream()"));
             }
             Type::Blob { streaming: false } => {
                 let _ = writeln!(out, "        // {member} — the buffered request body.");
                 out.push_str(BUFFER_BODY);
-                out.push_str(&assign(8, &target, &wrap(field, "raw_body")));
+                out.push_str(&assign(8, target, &wrap(field, "raw_body")));
             }
-            Type::Structure(shape) => {
+            Type::Structure(shape) | Type::Union(shape) => {
                 let root = if ir.xml.request_root.as_deref().unwrap_or("").is_empty() {
                     shape.clone()
                 } else {
@@ -316,7 +359,7 @@ fn one_field(
                 let _ = writeln!(out, "{indent}}}");
                 let indent_len = indent.len();
                 let read = super::name_policy::shape_reader_call(ir, shape, &reader, "&root", Some("request.names()"))?;
-                out.push_str(&assign(indent_len, &target, &wrap(field, &read)));
+                out.push_str(&assign(indent_len, target, &wrap(field, &read)));
                 out.push_str(close);
             }
             // A text payload is the body verbatim, once it is text at all. The decoder's whole
@@ -333,13 +376,13 @@ fn one_field(
                     Type::OpaqueString => format!("value::opaque(&{read})"),
                     _ => read,
                 };
-                out.push_str(&assign(8, &target, &wrap(field, &read)));
+                out.push_str(&assign(8, target, &wrap(field, &read)));
             }
             _ => {
                 return Err(expr::unsupported(
                     op,
                     member,
-                    "a payload binding carries a blob, a text document or an XML structure",
+                    "a payload binding carries a blob, a text document, an XML structure or a structural union",
                 ));
             }
         },
@@ -347,7 +390,7 @@ fn one_field(
             if open_document {
                 out.push_str(&open_request_document(ir, super::unknown_element_policy(ir, rules)?)?);
             }
-            out.push_str(&xml_member(ir, field, &target, rules, "root", Some("request.names()"), 8)?);
+            out.push_str(&xml_member(ir, field, target, rules, "root", Some("request.names()"), 8)?);
         }
         Binding::StatusCode => {
             return Err(expr::unsupported(op, member, "a status code is a response member"));
@@ -667,6 +710,9 @@ pub fn shape_reader(
     rules: &CodecRules,
     unknown_elements: UnknownElementPolicyValue,
 ) -> Result<String, String> {
+    if shape.kind == ShapeKind::Union {
+        return union_reader(ir, name, shape, rules);
+    }
     let type_name = naming::type_name(name);
     let mut out = String::new();
     let _ = writeln!(
@@ -719,6 +765,76 @@ pub fn shape_reader(
         out.push_str(&xml_member(ir, field, &target, rules, "node", needs_names.then_some("names"), 4)?);
     }
     out.push_str("    value::exit(shape.check_required())?;\n    Ok(shape)\n}\n");
+    Ok(out)
+}
+
+/// Renders a request-side structural union reader.
+///
+/// A union is not a structure with optional fields: exactly one modeled child selects its enum
+/// variant. Refusing zero, two or unknown children here prevents a required union from reaching
+/// the handler as a fabricated default or an ambiguous projection.
+fn union_reader(ir: &OperationIr, name: &str, shape: &Shape, rules: &CodecRules) -> Result<String, String> {
+    let type_name = naming::type_name(name);
+    let (signature, needs_names) = super::name_policy::shape_reader_signature(ir, name, "node", &type_name, MAX_WIDTH);
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "/// Reads exactly one modeled `{name}` variant and refuses absent, ambiguous or unknown children."
+    );
+    out.push_str(&signature);
+    let _ = writeln!(out, "    let mut selected: Option<dto::{type_name}> = None;");
+    out.push_str("    for child in &node.children {\n");
+    out.push_str("        let value = match child.name.as_str() {\n");
+    for field in &shape.fields {
+        let member = &field.name;
+        let wire = field.wire_name.clone().unwrap_or_else(|| member.clone());
+        let variant = naming::type_name(member);
+        match &field.ty {
+            Type::Structure(inner) | Type::Union(inner) => {
+                let reader = format!("read_{}", naming::module_name(inner));
+                let _ = writeln!(out, "            \"{wire}\" => {{");
+                out.push_str(&super::all_unknown::guard(ir, field, rules, inner, "child", 16)?);
+                let read = super::name_policy::shape_reader_call(ir, inner, &reader, "child", needs_names.then_some("names"))?;
+                let _ = writeln!(out, "                let value = {read};");
+                let _ = writeln!(out, "                dto::{type_name}::{variant}(value)");
+                out.push_str("            }\n");
+            }
+            Type::List { .. } | Type::Map { .. } | Type::Blob { .. } | Type::Checksum(_) | Type::ChecksumSpec => {
+                return Err(expr::unsupported(
+                    &ir.operation,
+                    member,
+                    "a request structural-union variant must carry a scalar or nested shape",
+                ));
+            }
+            scalar => {
+                let conversion = expr::from_wire(
+                    scalar,
+                    member,
+                    &ir.operation,
+                    true,
+                    bounds::of(field, rules, &ir.operation)?,
+                    super::boolean::of(ir, field, rules)?,
+                    "names",
+                )?;
+                let _ = writeln!(out, "            \"{wire}\" => {{");
+                out.push_str("                let raw = child.text.as_str();\n");
+                let _ = writeln!(out, "                dto::{type_name}::{variant}({conversion})");
+                out.push_str("            }\n");
+            }
+        }
+    }
+    out.push_str(
+        "            _ => {\n\
+         \x20               return Err(CodecError::malformed_xml(\"the structural union contains an unknown variant\"));\n\
+         \x20           }\n\
+         \x20       };\n\
+         \x20       if selected.replace(value).is_some() {\n\
+         \x20           return Err(CodecError::malformed_xml(\"the structural union selects more than one variant\"));\n\
+         \x20       }\n\
+         \x20   }\n\
+         \x20   selected.ok_or_else(|| CodecError::malformed_xml(\"the structural union selects no modeled variant\"))\n\
+         }\n",
+    );
     Ok(out)
 }
 

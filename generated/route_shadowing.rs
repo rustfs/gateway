@@ -6932,4 +6932,85 @@ pub const SHADOWING: &[ShadowingDecl] = &[
             "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html — ListBuckets is an account-level GET on the ordinary S3 endpoint and returns the general bucket namespace.",
         ],
     },
+    ShadowingDecl {
+        winner: "UploadPartCopy",
+        shadowed: "UpdateObjectEncryption",
+        reason: "Two writable object subresource selectors in one request ask for incompatible mutations of the same key. AWS documents no combined operation, so the existing precedence bands decide one operation fail-closed instead of merging their bodies or falling through to the object replacement path.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html — a part copy is a part upload whose bytes come from a source object named by a header rather than from the body.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateObjectEncryption.html — UpdateObjectEncryption is a PUT to an existing object carrying the encryption query subresource and a required ObjectEncryption XML body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UploadPart",
+        shadowed: "UpdateObjectEncryption",
+        reason: "Two writable object subresource selectors in one request ask for incompatible mutations of the same key. AWS documents no combined operation, so the existing precedence bands decide one operation fail-closed instead of merging their bodies or falling through to the object replacement path.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPart.html — a part upload is a PUT to the object key carrying the part number and the upload id as query parameters.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateObjectEncryption.html — UpdateObjectEncryption is a PUT to an existing object carrying the encryption query subresource and a required ObjectEncryption XML body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutObjectTagging",
+        shadowed: "UpdateObjectEncryption",
+        reason: "Two writable object subresource selectors in one request ask for incompatible mutations of the same key. AWS documents no combined operation, so the existing precedence bands decide one operation fail-closed instead of merging their bodies or falling through to the object replacement path.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectTagging.html — a tag-set write is a PUT to the object key carrying the ?tagging subresource, and its body is a tagging document rather than object data.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateObjectEncryption.html — UpdateObjectEncryption is a PUT to an existing object carrying the encryption query subresource and a required ObjectEncryption XML body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutObjectRetention",
+        shadowed: "UpdateObjectEncryption",
+        reason: "Two writable object subresource selectors in one request ask for incompatible mutations of the same key. AWS documents no combined operation, so the existing precedence bands decide one operation fail-closed instead of merging their bodies or falling through to the object replacement path.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectRetention.html — a retention write is a PUT to the object key carrying the ?retention subresource, and its body is a Retention document rather than object data.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateObjectEncryption.html — UpdateObjectEncryption is a PUT to an existing object carrying the encryption query subresource and a required ObjectEncryption XML body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutObjectLegalHold",
+        shadowed: "UpdateObjectEncryption",
+        reason: "Two writable object subresource selectors in one request ask for incompatible mutations of the same key. AWS documents no combined operation, so the existing precedence bands decide one operation fail-closed instead of merging their bodies or falling through to the object replacement path.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html — a legal-hold write is a PUT to the object key carrying the ?legal-hold subresource, and its body is a LegalHold document rather than object data.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateObjectEncryption.html — UpdateObjectEncryption is a PUT to an existing object carrying the encryption query subresource and a required ObjectEncryption XML body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "PutObjectAcl",
+        shadowed: "UpdateObjectEncryption",
+        reason: "Two writable object subresource selectors in one request ask for incompatible mutations of the same key. AWS documents no combined operation, so the existing precedence bands decide one operation fail-closed instead of merging their bodies or falling through to the object replacement path.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAcl.html — an ACL write is a PUT to the object key carrying the ?acl subresource, and its body is an AccessControlPolicy rather than object data.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateObjectEncryption.html — UpdateObjectEncryption is a PUT to an existing object carrying the encryption query subresource and a required ObjectEncryption XML body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateObjectEncryption",
+        shadowed: "RenameObject",
+        reason: "Two writable object subresource selectors in one request ask for incompatible mutations of the same key. AWS documents no combined operation, so the existing precedence bands decide one operation fail-closed instead of merging their bodies or falling through to the object replacement path.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateObjectEncryption.html — UpdateObjectEncryption is a PUT to an existing object carrying the encryption query subresource and a required ObjectEncryption XML body.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RenameObject.html — RenameObject is a PUT to a directory-bucket object key carrying the renameObject subresource and a required source header, with no request body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateObjectEncryption",
+        shadowed: "CopyObject",
+        reason: "A request carrying both ?encryption and x-amz-copy-source satisfies both operations. The encryption update wins at 596 before CopyObject at 790, so an unsupported update is refused instead of replacing the destination from the source and discarding its required encryption document.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateObjectEncryption.html — UpdateObjectEncryption is a PUT to an existing object carrying the encryption query subresource and a required ObjectEncryption XML body.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html — a copy is a PUT to the destination key whose source is named by a header, and which carries no request body.",
+        ],
+    },
+    ShadowingDecl {
+        winner: "UpdateObjectEncryption",
+        shadowed: "PutObject",
+        reason: "Every encryption update is also accepted by PutObject, whose selector pins only PUT and an object target. UpdateObjectEncryption wins at 596 before PutObject at 800; the reverse order stores the ObjectEncryption document as the object body and destroys the bytes the caller meant to re-encrypt.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UpdateObjectEncryption.html — UpdateObjectEncryption is a PUT to an existing object carrying the encryption query subresource and a required ObjectEncryption XML body.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html — a plain object write is the same method and path with neither of those parameters.",
+        ],
+    },
 ];

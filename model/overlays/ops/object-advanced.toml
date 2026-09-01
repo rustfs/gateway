@@ -25,7 +25,7 @@
 # a request *means*, only whether it can be served — so the selector lands here now and the handler
 # lands with the rest of the family.
 
-include = ["GetObjectAttributes", "GetObjectTorrent"]
+include = ["GetObjectAttributes", "GetObjectTorrent", "UpdateObjectEncryption"]
 
 # =============================================================================================
 # GetObjectAttributes
@@ -68,6 +68,33 @@ error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "InvalidRequest"]
 url_encoded_fields = []
 input_hot = ["Key"]
 output_hot = ["Body"]
+
+# =============================================================================================
+# UpdateObjectEncryption
+#
+# A PUT to an existing object selected by `?encryption`. Its required XML payload is a structural
+# union: the root selects exactly one modeled encryption update, rather than carrying a structure
+# whose optional fields may all be absent. The operation sits ahead of the PutObject fallback so
+# an unhandled update is refused without consuming or replacing the object body.
+# =============================================================================================
+[op.UpdateObjectEncryption]
+precedence = 596
+query_absent = ["annotation"]
+auth_action = "s3:UpdateObjectEncryption"
+request_max_bytes = 65536
+request_root = "ObjectEncryption"
+error_codes = [
+  "NoSuchBucket",
+  "NoSuchKey",
+  "AccessDenied",
+  "InvalidRequest",
+  "MalformedXML",
+  "InvalidArgument",
+  "BadDigest",
+]
+url_encoded_fields = []
+input_hot = ["Key", "ObjectEncryption", "VersionId"]
+output_hot = []
 
 # `x-amz-object-attributes` is a comma-delimited list in a header position, the same shape
 # `ListObjectsV2.OptionalObjectAttributes` has. The frozen IR can only describe a list through the
@@ -148,10 +175,4 @@ element_order = [
   "ChecksumXXHASH64",
   "ChecksumXXHASH3",
   "ChecksumXXHASH128",
-]
-
-[[deferred]]
-reason = "P5 advanced object family; each member carries a body shape or a framing the data plane does not have."
-operations = [
-  "UpdateObjectEncryption",
 ]

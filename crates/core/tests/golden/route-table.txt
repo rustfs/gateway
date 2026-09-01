@@ -77,6 +77,7 @@
   592  ListObjectAnnotations                    /{Bucket}/{Key+}     Method(GET) ∧ Target(Object) ∧ QueryPresent("annotation") ∧ QueryAbsent("acl") ∧ QueryAbsent("annotationName") ∧ QueryAbsent("attributes") ∧ QueryAbsent("legal-hold") ∧ QueryAbsent("retention") ∧ QueryAbsent("tagging") ∧ QueryAbsent("uploadId")
   593  PutObjectAnnotation                      /{Bucket}/{Key+}     Method(PUT) ∧ Target(Object) ∧ QueryPresent("annotation") ∧ QueryAbsent("acl") ∧ QueryAbsent("attributes") ∧ QueryAbsent("legal-hold") ∧ QueryAbsent("renameObject") ∧ QueryAbsent("retention") ∧ QueryAbsent("tagging") ∧ QueryAbsent("uploadId") ∧ HeaderAbsent("x-amz-copy-source")
   595  GetObjectTorrent                         /{Bucket}/{Key+}     Method(GET) ∧ Target(Object) ∧ QueryPresent("torrent") ∧ QueryAbsent("acl") ∧ QueryAbsent("annotation") ∧ QueryAbsent("attributes") ∧ QueryAbsent("legal-hold") ∧ QueryAbsent("retention") ∧ QueryAbsent("tagging") ∧ QueryAbsent("uploadId")
+  596  UpdateObjectEncryption                   /{Bucket}/{Key+}     Method(PUT) ∧ Target(Object) ∧ QueryPresent("encryption") ∧ QueryAbsent("annotation")
   600  ListObjectsV2                            /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryEquals("list-type", "2")
   610  ListObjectVersions                       /{Bucket}            Method(GET) ∧ Target(Bucket) ∧ QueryPresent("versions")
   650  DeleteObjects                            /{Bucket}            Method(POST) ∧ Target(Bucket) ∧ QueryPresent("delete")

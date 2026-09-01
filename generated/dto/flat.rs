@@ -46,16 +46,16 @@ pub use crate::ops::shapes::{
     LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
     LoggingEnabled, MetadataConfigurationResult, MetadataEntry, MetadataTableConfigurationResult, Metrics, MetricsAndOperator,
     MetricsConfiguration, MetricsFilter, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
-    NotificationConfiguration, NotificationConfigurationFilter, Object, ObjectIdentifier, ObjectLockConfiguration,
-    ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, OutputLocation, OutputSerialization,
-    Owner, OwnershipControls, OwnershipControlsRule, ParquetInput, Part, PartitionedPrefix, PolicyStatus,
+    NotificationConfiguration, NotificationConfigurationFilter, Object, ObjectEncryption, ObjectIdentifier,
+    ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, OutputLocation,
+    OutputSerialization, Owner, OwnershipControls, OwnershipControlsRule, ParquetInput, Part, PartitionedPrefix, PolicyStatus,
     PublicAccessBlockConfiguration, QueueConfiguration, RecordExpiration, Redirect, RedirectAllRequestsTo, ReplicaModifications,
     ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationTime,
     ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest, RestoreStatus, RoutingRule, S3KeyFilter,
     S3Location, S3TablesDestinationResult, ScanRange, SelectParameters, ServerSideEncryptionByDefault,
     ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects,
-    Ssekms, Sses3, StorageClassAnalysis, StorageClassAnalysisDataExport, Tag, Tagging, TargetGrant, TargetObjectKeyFormat,
-    Tiering, TopicConfiguration, Transition, VersioningConfiguration, WebsiteConfiguration,
+    Ssekms, SsekmsEncryption, Sses3, StorageClassAnalysis, StorageClassAnalysisDataExport, Tag, Tagging, TargetGrant,
+    TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition, VersioningConfiguration, WebsiteConfiguration,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -391,6 +391,10 @@ pub use crate::ops::restore_object::{
 pub use crate::ops::select_object_content::{
     Input as SelectObjectContentInput, InputBuilder as SelectObjectContentInputBuilder, Output as SelectObjectContentOutput,
     SelectObjectContent,
+};
+pub use crate::ops::update_object_encryption::{
+    Input as UpdateObjectEncryptionInput, InputBuilder as UpdateObjectEncryptionInputBuilder,
+    Output as UpdateObjectEncryptionOutput, UpdateObjectEncryption,
 };
 pub use crate::ops::upload_part::{
     Input as UploadPartInput, InputBuilder as UploadPartInputBuilder, Output as UploadPartOutput, UploadPart,

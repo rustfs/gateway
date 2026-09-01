@@ -301,6 +301,7 @@ SimplePrefix 0
 SourceSelectionCriteria 2
 SseKmsEncryptedObjects 1
 Ssekms 1
+SsekmsEncryption 2
 Sses3 0
 StorageClassAnalysis 1
 StorageClassAnalysisDataExport 2
@@ -311,6 +312,8 @@ TargetObjectKeyFormat 2
 Tiering 2
 TopicConfiguration 4
 Transition 3
+UpdateObjectEncryptionInput 8
+UpdateObjectEncryptionOutput 1
 UploadPartCopyInput 19
 UploadPartCopyOutput 9
 UploadPartInput 14

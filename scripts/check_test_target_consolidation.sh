@@ -224,6 +224,7 @@ core_modules = (
     "tagging_contract",
     "tagging_roundtrip",
     "tolerant_conditions",
+    "update_object_encryption_roundtrip",
     "upload_capability",
     "website_roundtrip",
     "xml_character_range",

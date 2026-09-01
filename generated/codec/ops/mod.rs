@@ -110,5 +110,6 @@ mod put_public_access_block;
 mod rename_object;
 mod restore_object;
 mod select_object_content;
+mod update_object_encryption;
 mod upload_part;
 mod upload_part_copy;

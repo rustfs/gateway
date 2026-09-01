@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Response XML generation for structural unions.
+//! Request and response XML generation for structural unions.
 //!
-//! Responsible for: proving that a union field preserves its wrapper, writes exactly the selected
-//! modeled child, delegates nested structures, and fails closed on a future variant.
-//! NOT responsible for: request-side union parsing or the Analytics route table.
-//! Upstream: lowered union shapes. Downstream: generated response codecs.
+//! Responsible for: proving that a union field preserves its wrapper, selects exactly one modeled
+//! child, delegates nested structures, and fails closed on absent, ambiguous or future variants.
+//! NOT responsible for: operation routing or encryption semantics after decoding.
+//! Upstream: lowered union shapes. Downstream: generated request and response codecs.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
 use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Shape, ShapeKind, ShapeXml, Type};
 
 use super::codegen_tests::artifacts;
-use crate::emit::codec::encode;
+use crate::emit::codec::{decode, encode};
+use crate::emit::dto::{DtoReport, registry::Registry, render};
 
 fn operation(name: &str) -> OperationIr {
     artifacts()
@@ -80,6 +81,119 @@ fn synthetic_filter_ir() -> OperationIr {
         },
     );
     ir
+}
+
+fn synthetic_request_union_ir() -> OperationIr {
+    let mut ir = operation("PutBucketTagging");
+    let tag = operation("GetBucketTagging")
+        .shapes
+        .get("Tag")
+        .cloned()
+        .expect("GetBucketTagging carries the Tag shape");
+    let payload = ir
+        .input
+        .iter_mut()
+        .find(|field| field.binding == Binding::Payload)
+        .expect("PutBucketTagging carries an XML payload");
+    payload.ty = Type::Union("ObjectEncryption".to_owned());
+    payload.required = true;
+    ir.xml.request_root = Some("ObjectEncryption".to_owned());
+    ir.shapes.insert("Tag".to_owned(), tag);
+    ir.shapes.insert(
+        "ObjectEncryption".to_owned(),
+        Shape {
+            kind: ShapeKind::Union,
+            fields: vec![
+                variant("SSEKMS", Type::Structure("Tag".to_owned())),
+                variant("BucketKeyOnly", Type::Boolean),
+            ],
+            xml: ShapeXml {
+                element_order: vec!["SSEKMS".to_owned(), "BucketKeyOnly".to_owned()],
+                empty_value_policy: Vec::new(),
+                attributes: Vec::new(),
+            },
+        },
+    );
+    ir
+}
+
+#[test]
+fn a_required_union_payload_delegates_to_its_union_reader_without_fabricating_a_default() {
+    let ir = synthetic_request_union_ir();
+    let artifacts = artifacts();
+    let body =
+        decode::body(&ir, &artifacts.codec_rules, &artifacts.error_codes).expect("a required request union has an XML form");
+
+    assert!(body.contains("read_object_encryption(&root"), "{body}");
+    assert!(
+        !body.contains("ObjectEncryption::default"),
+        "a required union payload is never fabricated: {body}"
+    );
+}
+
+#[test]
+fn a_request_union_reader_requires_exactly_one_known_variant() {
+    let ir = synthetic_request_union_ir();
+    let shape = ir.shapes.get("ObjectEncryption").expect("the synthetic request union exists");
+    let artifacts = artifacts();
+    let reader = decode::shape_reader(
+        &ir,
+        "ObjectEncryption",
+        shape,
+        &artifacts.codec_rules,
+        rustfs_gateway_model::UnknownElementPolicyValue::Reject,
+    )
+    .expect("the request union reader is generated");
+
+    assert!(reader.contains("dto::ObjectEncryption::"), "{reader}");
+    assert!(reader.contains("read_tag("), "{reader}");
+    assert!(reader.contains("the structural union selects more than one variant"), "{reader}");
+    assert!(reader.contains("the structural union selects no modeled variant"), "{reader}");
+    assert!(reader.contains("the structural union contains an unknown variant"), "{reader}");
+    assert!(
+        !reader.contains("Default::default"),
+        "a request union is selected, never defaulted: {reader}"
+    );
+}
+
+#[test]
+fn update_object_encryption_keeps_its_required_union_payload_and_exact_variant_set() {
+    let ir = operation("UpdateObjectEncryption");
+    let payload = ir
+        .input
+        .iter()
+        .find(|field| field.binding == Binding::Payload)
+        .expect("UpdateObjectEncryption carries its XML payload");
+    assert!(payload.required, "the operation cannot run without an encryption selection");
+    assert_eq!(payload.ty, Type::Union("ObjectEncryption".to_owned()));
+    assert_eq!(ir.xml.request_root.as_deref(), Some("ObjectEncryption"));
+    assert_eq!(ir.auth.action, "s3:UpdateObjectEncryption");
+
+    let union = ir.shapes.get("ObjectEncryption").expect("the payload union is retained");
+    assert_eq!(union.kind, ShapeKind::Union);
+    assert_eq!(union.fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(), ["SSEKMS"]);
+}
+
+#[test]
+fn a_required_union_input_requires_the_real_variant_at_builder_construction() {
+    let ir = operation("UpdateObjectEncryption");
+    let registry = Registry::collect(&[&ir]).expect("the operation has one coherent vocabulary");
+    let mut report = DtoReport::default();
+    let source = render::operation(&ir, &registry, &mut report);
+
+    assert!(
+        source.contains("pub fn builder(object_encryption: crate::ops::shapes::ObjectEncryption) -> InputBuilder"),
+        "{source}"
+    );
+    assert!(
+        !source.contains("impl Default for Input"),
+        "the Input cannot fabricate a union variant: {source}"
+    );
+    assert!(
+        !source.contains("InputBuilder::default()"),
+        "the builder cannot omit the required union: {source}"
+    );
+    assert!(source.contains("pub object_encryption: crate::ops::shapes::ObjectEncryption"), "{source}");
 }
 
 #[test]
