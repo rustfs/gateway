@@ -1,0 +1,44 @@
+# c-naming-0027 — folding separators does not clean a traversal
+#
+[case]
+id = "c-naming-0027"
+schema_version = 1
+title = "The MinIO profile refuses a traversal that follows a folded slash run"
+rationale = """
+The compatibility policy folds only separators. It must leave the `..` segment for the naming
+floor to reject rather than resolving it like a filesystem path. The doubled slash makes this a
+profile-path control instead of another copy of the default traversal case."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["naming", "routing", "security"]
+timeout_ms = 10000
+quirks = []
+applies_to = { profiles = ["minio"] }
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-8r6f-hmq2-28rg"
+summary = "A traversal-shaped object key reached filesystem mapping and escaped the bucket boundary."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[request]
+method = "GET"
+target = "/conf-naming/a//../secret.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+
+[expect.error]
+code = "InvalidArgument"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["secret.txt", "../"]

@@ -1,0 +1,53 @@
+# c-naming-0025 — the MinIO profile folds an empty path segment before object dispatch
+#
+[case]
+id = "c-naming-0025"
+schema_version = 1
+title = "The MinIO profile stores PUT /bucket//key under key"
+rationale = """
+The selected compatibility profile is part of the target claim, not report decoration. This pair
+writes through a doubled slash and reads through the single-slash spelling, so it can pass only if
+the profile selected the collapse policy before authorization, codec decode, and backend dispatch.
+The AWS-preserving direction remains pinned independently by c-naming-0001."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["naming", "routing", "security"]
+timeout_ms = 10000
+quirks = []
+applies_to = { profiles = ["minio"] }
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/569"
+summary = "Upstream observed that MinIO folds an empty path segment while AWS preserves it in an object key."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[exchanges]]
+[exchanges.request]
+method = "PUT"
+target = "/conf-naming//collapsed.txt"
+headers = { content-length = "25" }
+body = { utf8 = "stored in the folded slot" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+[exchanges.request]
+method = "GET"
+target = "/conf-naming/collapsed.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+exact_utf8 = "stored in the folded slot"

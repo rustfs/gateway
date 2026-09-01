@@ -14,6 +14,7 @@ ADRs; this map only selects files.
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
 | `src/expect/events.rs` | Event-stream count and byte-exact payload matching. | An event payload expectation is ignored or misjudged. |
 | `src/inprocess.rs` | In-process facade transport. | Hyper-independent execution differs from the socket path. |
+| `src/inprocess/profile.rs` | Maps a claimed compatibility profile onto the measured facade policy. | A profile appears in reports but does not change target behavior. |
 | `src/inprocess/security.rs` | Fixed authorization and bucket-owner sources for security cases. | A security case needs a deterministic allow, deny, or metadata-source outcome. |
 | `src/observation.rs` | Response and event-stream observations, including frame validation. | An event-stream case is classified incorrectly. |
 | `src/parity.rs` | Per-case verdict, phase, failure and skip-reason comparison. | Production transport results disagree or a case is missing. |
@@ -22,6 +23,7 @@ ADRs; this map only selects files.
 | `src/socket.rs` | Real socket transport and connection observations. | A wire-level close/reuse fact is wrong. |
 | `src/socket/response.rs` | Fixed-length and chunked HTTP/1.1 response decoding. | A raw response body is truncated or framed incorrectly. |
 | `src/conn/` | Connection state and reusable transport helpers. | A multi-exchange case loses connection state. |
+| `src/conn/server.rs` | Lazily assembles test and production listeners with the case clock and profile. | The socket transports assemble a different policy from in-process execution. |
 | `src/sign.rs` | Request signing for corpus inputs. | A signed case sends the wrong request. |
 | `src/fixture.rs` | Deterministic fixture backend used by local runs. | Setup state or a fixture operation behaves wrongly. |
 | `src/fixture/committed.rs` | Late-failure work and frozen response heads for committed fixture operations. | Copy or multipart completion loses its pre-commit metadata. |

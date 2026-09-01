@@ -75,7 +75,7 @@ impl Conn {
                 return Err(SutError::Environment("concurrent batches currently require HTTP/1.1 requests".to_owned()));
             }
             let head = self.head(&wire, &request_time)?;
-            let addr = self.addr(fixed.unix_seconds, skew_ms)?;
+            let addr = self.addr(fixed.unix_seconds, skew_ms, plan.profile)?;
             let connection = Connection::open(addr)?;
             let local_endpoint = connection.local_addr()?;
             if !local_endpoints.insert(local_endpoint) {
@@ -88,10 +88,12 @@ impl Conn {
             if let Some(production) = &self.production {
                 production.enqueue_pacer(&pacer);
             } else {
-                self.listener(fixed.unix_seconds, skew_ms)?.enqueue_pacer(&pacer);
+                self.listener(fixed.unix_seconds, skew_ms, plan.profile)?
+                    .enqueue_pacer(&pacer);
             }
             #[cfg(not(feature = "production-transports"))]
-            self.listener(fixed.unix_seconds, skew_ms)?.enqueue_pacer(&pacer);
+            self.listener(fixed.unix_seconds, skew_ms, plan.profile)?
+                .enqueue_pacer(&pacer);
             prepared.push(ConcurrentSocketExchange {
                 connection,
                 pacer,

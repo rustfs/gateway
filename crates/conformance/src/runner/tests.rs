@@ -62,10 +62,22 @@ fn with_no_target_every_runnable_case_is_skipped_and_says_why() {
     let report = run(corpus, &mut sut, &RunOptions::default());
     let skipped: Vec<&CaseOutcome> = report.outcomes.iter().filter(|o| o.verdict == Verdict::Skipped).collect();
     assert_eq!(skipped.len(), report.outcomes.len(), "no case may pass without a target");
+    let profile_gated: Vec<&str> = skipped
+        .iter()
+        .filter(|outcome| {
+            outcome
+                .skip_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("applies_to.profiles"))
+        })
+        .map(|outcome| outcome.id.as_str())
+        .collect();
+    assert_eq!(profile_gated, ["c-naming-0025", "c-naming-0026", "c-naming-0027"]);
     assert!(
         skipped
             .iter()
-            .all(|o| o.skip_reason.as_deref().is_some_and(|r| r.contains("facade")))
+            .filter(|outcome| !profile_gated.contains(&outcome.id.as_str()))
+            .all(|outcome| { outcome.skip_reason.as_deref().is_some_and(|reason| reason.contains("facade")) })
     );
 }
 

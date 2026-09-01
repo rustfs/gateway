@@ -192,7 +192,9 @@ fn the_control_policy_never_closes() {
 /// A listener over a service assembled from the facade, on a port the kernel chose.
 fn listener(policy: ClosePolicy, announce: Announce) -> Listener {
     let target = crate::inprocess::InProcess::new(std::path::PathBuf::from("."));
-    let service = target.assemble(0, 0).expect("the service assembles");
+    let service = target
+        .assemble(0, 0, crate::sut::Profile::Aws)
+        .expect("the service assembles");
     Listener::start(service, policy, announce).expect("a loopback listener binds")
 }
 

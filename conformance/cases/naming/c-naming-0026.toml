@@ -1,0 +1,45 @@
+# c-naming-0026 — MinIO slash compatibility does not decode a residual escape
+#
+[case]
+id = "c-naming-0026"
+schema_version = 1
+title = "The MinIO profile refuses a residual encoded separator beside a folded slash"
+rationale = """
+Slash compatibility is one rewrite, not permission to decode until stable. The doubled slash must
+select the MinIO branch while `%252F` still receives exactly one percent-decode and is refused as
+the dangerous `%2F` residue. A profile implementation that normalised the whole target through a
+generic URL or filesystem cleaner would cross this boundary."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["naming", "routing", "security", "encoding"]
+timeout_ms = 10000
+quirks = []
+applies_to = { profiles = ["minio"] }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc3986#section-2.1"
+summary = "Percent-encoding carries one octet per triplet, so a second decode interprets bytes the sender did not encode at that layer."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[request]
+method = "GET"
+target = "/conf-naming//%252Fescape.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+
+[expect.error]
+code = "InvalidArgument"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["%252Fescape.txt", "%2Fescape.txt"]

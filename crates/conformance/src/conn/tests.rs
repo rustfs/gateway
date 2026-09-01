@@ -246,7 +246,9 @@ fn an_unperformed_control_action_is_refused_rather_than_dropped() {
     assert_eq!(wire.control_actions().collect::<Vec<_>>(), vec!["stop_reading"]);
 
     let listener = Listener::start(
-        conn.inner.assemble(0, 0).expect("the service assembles"),
+        conn.inner
+            .assemble(0, 0, crate::sut::Profile::Aws)
+            .expect("the service assembles"),
         honour_the_services_intent(),
         Announce::Matching,
     )
@@ -513,7 +515,9 @@ fn a_wedged_exchange_is_reported_as_unmeasured_rather_than_as_a_count() {
     let conn = target();
     let wire = conn.inner.read_wire(&request).expect("the request is read");
     let listener = Listener::start(
-        conn.inner.assemble(0, 0).expect("the service assembles"),
+        conn.inner
+            .assemble(0, 0, crate::sut::Profile::Aws)
+            .expect("the service assembles"),
         honour_the_services_intent(),
         Announce::Matching,
     )
