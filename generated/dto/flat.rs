@@ -44,18 +44,18 @@ pub use crate::ops::shapes::{
     InventoryConfiguration, InventoryDestination, InventoryEncryption, InventoryFilter, InventoryS3BucketDestination,
     InventorySchedule, InventoryTableConfigurationResult, JournalTableConfigurationResult, JsonInput, JsonOutput,
     LambdaFunctionConfiguration, LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
-    LoggingEnabled, MetadataConfigurationResult, MetadataEntry, MetadataTableConfigurationResult, Metrics, MultipartUpload,
-    NoncurrentVersionExpiration, NoncurrentVersionTransition, NotificationConfiguration, NotificationConfigurationFilter, Object,
-    ObjectIdentifier, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart,
-    ObjectVersion, OutputLocation, OutputSerialization, Owner, OwnershipControls, OwnershipControlsRule, ParquetInput, Part,
-    PartitionedPrefix, PolicyStatus, PublicAccessBlockConfiguration, QueueConfiguration, RecordExpiration, Redirect,
-    RedirectAllRequestsTo, ReplicaModifications, ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator,
-    ReplicationRuleFilter, ReplicationTime, ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest,
-    RestoreStatus, RoutingRule, S3KeyFilter, S3Location, S3TablesDestinationResult, ScanRange, SelectParameters,
-    ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix,
-    SourceSelectionCriteria, SseKmsEncryptedObjects, Ssekms, Sses3, StorageClassAnalysis, StorageClassAnalysisDataExport, Tag,
-    Tagging, TargetGrant, TargetObjectKeyFormat, Tiering, TopicConfiguration, Transition, VersioningConfiguration,
-    WebsiteConfiguration,
+    LoggingEnabled, MetadataConfigurationResult, MetadataEntry, MetadataTableConfigurationResult, Metrics, MetricsAndOperator,
+    MetricsConfiguration, MetricsFilter, MultipartUpload, NoncurrentVersionExpiration, NoncurrentVersionTransition,
+    NotificationConfiguration, NotificationConfigurationFilter, Object, ObjectIdentifier, ObjectLockConfiguration,
+    ObjectLockLegalHold, ObjectLockRetention, ObjectLockRule, ObjectPart, ObjectVersion, OutputLocation, OutputSerialization,
+    Owner, OwnershipControls, OwnershipControlsRule, ParquetInput, Part, PartitionedPrefix, PolicyStatus,
+    PublicAccessBlockConfiguration, QueueConfiguration, RecordExpiration, Redirect, RedirectAllRequestsTo, ReplicaModifications,
+    ReplicationConfiguration, ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationTime,
+    ReplicationTimeValue, RequestPaymentConfiguration, RequestProgress, RestoreRequest, RestoreStatus, RoutingRule, S3KeyFilter,
+    S3Location, S3TablesDestinationResult, ScanRange, SelectParameters, ServerSideEncryptionByDefault,
+    ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix, SourceSelectionCriteria, SseKmsEncryptedObjects,
+    Ssekms, Sses3, StorageClassAnalysis, StorageClassAnalysisDataExport, Tag, Tagging, TargetGrant, TargetObjectKeyFormat,
+    Tiering, TopicConfiguration, Transition, VersioningConfiguration, WebsiteConfiguration,
 };
 
 pub use crate::ops::abort_multipart_upload::{
@@ -175,6 +175,10 @@ pub use crate::ops::get_bucket_metadata_table_configuration::{
     GetBucketMetadataTableConfiguration, Input as GetBucketMetadataTableConfigurationInput,
     InputBuilder as GetBucketMetadataTableConfigurationInputBuilder, Output as GetBucketMetadataTableConfigurationOutput,
 };
+pub use crate::ops::get_bucket_metrics_configuration::{
+    GetBucketMetricsConfiguration, Input as GetBucketMetricsConfigurationInput,
+    InputBuilder as GetBucketMetricsConfigurationInputBuilder, Output as GetBucketMetricsConfigurationOutput,
+};
 pub use crate::ops::get_bucket_notification_configuration::{
     GetBucketNotificationConfiguration, Input as GetBucketNotificationConfigurationInput,
     InputBuilder as GetBucketNotificationConfigurationInputBuilder, Output as GetBucketNotificationConfigurationOutput,
@@ -266,6 +270,10 @@ pub use crate::ops::list_bucket_intelligent_tiering_configurations::{
 pub use crate::ops::list_bucket_inventory_configurations::{
     Input as ListBucketInventoryConfigurationsInput, InputBuilder as ListBucketInventoryConfigurationsInputBuilder,
     ListBucketInventoryConfigurations, Output as ListBucketInventoryConfigurationsOutput,
+};
+pub use crate::ops::list_bucket_metrics_configurations::{
+    Input as ListBucketMetricsConfigurationsInput, InputBuilder as ListBucketMetricsConfigurationsInputBuilder,
+    ListBucketMetricsConfigurations, Output as ListBucketMetricsConfigurationsOutput,
 };
 pub use crate::ops::list_buckets::{
     Input as ListBucketsInput, InputBuilder as ListBucketsInputBuilder, ListBuckets, Output as ListBucketsOutput,

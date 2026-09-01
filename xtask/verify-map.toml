@@ -125,6 +125,10 @@ name = "GetBucketMetadataTableConfiguration"
 cases = ""
 
 [[operation]]
+name = "GetBucketMetricsConfiguration"
+cases = ""
+
+[[operation]]
 name = "GetBucketNotificationConfiguration"
 cases = "c-bucketconfig-0011,c-bucketconfig-0024"
 
@@ -218,6 +222,10 @@ cases = ""
 
 [[operation]]
 name = "ListBucketInventoryConfigurations"
+cases = ""
+
+[[operation]]
+name = "ListBucketMetricsConfigurations"
 cases = ""
 
 [[operation]]

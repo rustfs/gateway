@@ -1,12 +1,12 @@
 # path limit issue-url reason
 crates/conformance/src/fixture.rs 6100 https://github.com/rustfs/backlog/issues/1742 Existing fixture corpus; split in a dedicated behavior-reviewed task.
-crates/core/tests/route_table.rs 2692 https://github.com/rustfs/backlog/issues/2118 Analytics and Metadata read routing add exact positive, neighbour-negative, and authorization contracts; split only in a dedicated behavior-reviewed task.
+crates/core/tests/route_table.rs 2736 https://github.com/rustfs/backlog/issues/2120 Analytics, Metadata, and Metrics read routing add exact positive, neighbour-negative, and authorization contracts; split only in a dedicated behavior-reviewed task.
 crates/conformance/src/socket.rs 1250 https://github.com/rustfs/backlog/issues/1742 Existing socket harness; its tests are split out into socket/tests.rs, the production half still wants splitting.
 crates/conformance/src/inprocess.rs 1700 https://github.com/rustfs/backlog/issues/1742 Existing in-process harness; split in a dedicated behavior-reviewed task.
-crates/core/tests/params_and_dispatch.rs 1550 https://github.com/rustfs/backlog/issues/2118 Analytics and Metadata read refusals share the full router and prove object-listing isolation; split only in a dedicated behavior-reviewed task.
+crates/core/tests/params_and_dispatch.rs 1575 https://github.com/rustfs/backlog/issues/2120 Analytics, Metadata, and Metrics read refusals share the full router and prove object-listing isolation; split only in a dedicated behavior-reviewed task.
 crates/gateway/src/service.rs 1425 https://github.com/rustfs/backlog/issues/1742 Existing pipeline assembly; split in a dedicated behavior-reviewed task.
 crates/core/tests/dialect.rs 900 https://github.com/rustfs/backlog/issues/1742 Existing dialect matrix; split in a dedicated behavior-reviewed task.
-crates/core/tests/registration.rs 866 https://github.com/rustfs/backlog/issues/2118 Analytics and Metadata add four exact standard-operation census rows; split only in a dedicated behavior-reviewed task.
+crates/core/tests/registration.rs 868 https://github.com/rustfs/backlog/issues/2120 Analytics, Metadata, and Metrics add six exact standard-operation census rows; split only in a dedicated behavior-reviewed task.
 crates/gateway/tests/authz_contract.rs 850 https://github.com/rustfs/backlog/issues/1742 Existing authorization matrix; split in a dedicated behavior-reviewed task.
 crates/core/tests/lifecycle_roundtrip.rs 900 https://github.com/rustfs/backlog/issues/1742 Property, its generators and its boundary tests in one file; split the boundaries out in a dedicated behavior-reviewed task.
 crates/core/tests/replication_roundtrip.rs 900 https://github.com/rustfs/backlog/issues/1742 Property, its generators and its boundary tests in one file, as in the lifecycle sibling; split the boundaries out in a dedicated behavior-reviewed task.

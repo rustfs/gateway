@@ -131,3 +131,21 @@ fn analytics_filter_emits_every_modeled_variant_without_a_default_payload() {
     assert!(writer.contains("write_analytics_and_operator(writer, v)?;"), "{writer}");
     assert!(!writer.contains("Default::default"), "a required payload is never fabricated: {writer}");
 }
+
+#[test]
+fn metrics_filter_emits_every_modeled_variant_without_a_default_payload() {
+    let ir = operation("GetBucketMetricsConfiguration");
+    let shape = ir
+        .shapes
+        .get("MetricsFilter")
+        .expect("the pinned Metrics operation carries its filter union");
+    let writer = encode::shape_writer(&ir, "MetricsFilter", shape).expect("the real response union writer is generated");
+
+    assert!(writer.contains("dto::MetricsFilter::Prefix(v)"), "{writer}");
+    assert!(writer.contains("dto::MetricsFilter::Tag(v)"), "{writer}");
+    assert!(writer.contains("dto::MetricsFilter::AccessPointArn(v)"), "{writer}");
+    assert!(writer.contains("dto::MetricsFilter::And(v)"), "{writer}");
+    assert!(writer.contains("write_tag(writer, v)?;"), "{writer}");
+    assert!(writer.contains("write_metrics_and_operator(writer, v)?;"), "{writer}");
+    assert!(!writer.contains("Default::default"), "a required payload is never fabricated: {writer}");
+}

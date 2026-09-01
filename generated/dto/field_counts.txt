@@ -102,6 +102,8 @@ GetBucketMetadataConfigurationResult 1
 GetBucketMetadataTableConfigurationInput 2
 GetBucketMetadataTableConfigurationOutput 1
 GetBucketMetadataTableConfigurationResult 3
+GetBucketMetricsConfigurationInput 3
+GetBucketMetricsConfigurationOutput 1
 GetBucketNotificationConfigurationInput 2
 GetBucketNotificationConfigurationOutput 4
 GetBucketOwnershipControlsInput 2
@@ -175,6 +177,8 @@ ListBucketIntelligentTieringConfigurationsInput 3
 ListBucketIntelligentTieringConfigurationsOutput 4
 ListBucketInventoryConfigurationsInput 3
 ListBucketInventoryConfigurationsOutput 4
+ListBucketMetricsConfigurationsInput 3
+ListBucketMetricsConfigurationsOutput 4
 ListBucketsInput 4
 ListBucketsOutput 4
 ListDirectoryBucketsInput 2
@@ -196,6 +200,8 @@ MetadataConfigurationResult 4
 MetadataEntry 2
 MetadataTableConfigurationResult 1
 Metrics 2
+MetricsAndOperator 3
+MetricsConfiguration 2
 MultipartUpload 8
 NoncurrentVersionExpiration 2
 NoncurrentVersionTransition 3
