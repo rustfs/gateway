@@ -253,6 +253,8 @@ PutBucketWebsiteInput 5
 PutBucketWebsiteOutput 0
 PutObjectAclInput 14
 PutObjectAclOutput 1
+PutObjectAnnotationInput 20
+PutObjectAnnotationOutput 17
 PutObjectInput 37
 PutObjectLegalHoldInput 8
 PutObjectLegalHoldOutput 1

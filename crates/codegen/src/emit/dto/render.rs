@@ -28,7 +28,10 @@ use std::fmt::Write as _;
 use rustfs_gateway_model::ir::{Field, OperationIr};
 
 use super::registry::Registry;
-use super::{DtoReport, LICENSE, check_required_impl, debug_impl, derives, field_decl, name_list, naming, registry, use_group};
+use super::{
+    DtoReport, LICENSE, check_required_impl, controlled_required_body, debug_impl, derives, field_decl, name_list, naming,
+    registry, use_group,
+};
 
 /// Renders one operation's module.
 pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) -> String {
@@ -90,6 +93,7 @@ pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) 
         ),
     );
 
+    let controlled_body = controlled_required_body(&ir.input);
     out.push_str(&data_struct(
         "Input",
         &format!("The `{op}` request."),
@@ -97,6 +101,7 @@ pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) 
         registry,
         report,
         &format!("{marker}Input"),
+        controlled_body,
     ));
     out.push_str(&data_struct(
         "Output",
@@ -105,8 +110,9 @@ pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) 
         registry,
         report,
         &format!("{marker}Output"),
+        None,
     ));
-    out.push_str(&builder(&ir.input, registry));
+    out.push_str(&builder(&ir.input, registry, controlled_body));
     report.builders += 1;
     out
 }
@@ -119,29 +125,48 @@ fn data_struct(
     registry: &Registry,
     report: &mut DtoReport,
     baseline_name: &str,
+    controlled_body: Option<&Field>,
 ) -> String {
     let clonable = fields.iter().all(|f| registry.is_clonable(&f.ty));
     let has_secret = fields.iter().any(registry::is_redacted);
     let mut out = String::new();
 
-    let _ = write!(
-        out,
-        "/// {summary}\n\
-         ///\n\
-         /// Public fields plus `Default`, and never `#[non_exhaustive]` — ADR-0004 P1. Construct it\n\
-         /// with functional update syntax (`{name} {{ .. }}` with `..Default::default()`) or with the\n\
-         /// builder; a member added upstream stays a minor version bump either way. Do not\n\
-         /// destructure it exhaustively (P3): that is the one usage a new member breaks.\n\
-         ///\n\
-         /// A required member is a bare type and an optional one is `Option<T>`, so requiredness is\n\
-         /// read off the type instead of unwrapped. `Default` fills a required member with a\n\
-         /// wire-invalid placeholder (P10), and [`{name}::check_required`] is what keeps one from\n\
-         /// leaving the decode path.\n"
-    );
+    if controlled_body.is_some() {
+        let _ = write!(
+            out,
+            "/// {summary}\n\
+             ///\n\
+             /// Public fields and never `#[non_exhaustive]` — ADR-0004 P1. This input deliberately\n\
+             /// has no `Default`: its required streaming body is a live producer, so construction\n\
+             /// starts with [`Input::from_required_body`] or [`Input::builder`] and consumes the real\n\
+             /// request body instead of fabricating a placeholder. Do not destructure it\n\
+             /// exhaustively (P3): that is the one usage a new member breaks.\n\
+             ///\n\
+             /// A required member is a bare type and an optional one is `Option<T>`, so requiredness is\n\
+             /// read off the type instead of unwrapped. Placeholder defaults on ordinary required\n\
+             /// members are refused by [`{name}::check_required`] before the value leaves the decode\n\
+             /// path.\n"
+        );
+    } else {
+        let _ = write!(
+            out,
+            "/// {summary}\n\
+             ///\n\
+             /// Public fields plus `Default`, and never `#[non_exhaustive]` — ADR-0004 P1. Construct it\n\
+             /// with functional update syntax (`{name} {{ .. }}` with `..Default::default()`) or with the\n\
+             /// builder; a member added upstream stays a minor version bump either way. Do not\n\
+             /// destructure it exhaustively (P3): that is the one usage a new member breaks.\n\
+             ///\n\
+             /// A required member is a bare type and an optional one is `Option<T>`, so requiredness is\n\
+             /// read off the type instead of unwrapped. `Default` fills a required member with a\n\
+             /// wire-invalid placeholder (P10), and [`{name}::check_required`] is what keeps one from\n\
+             /// leaving the decode path.\n"
+        );
+    }
     if !clonable {
         out.push_str("///\n/// Not `Clone`: it owns a streaming body.\n");
     }
-    out.push_str(&derives(clonable, has_secret));
+    out.push_str(&derives(clonable, has_secret, controlled_body.is_none()));
     if fields.is_empty() {
         // An operation whose output is `smithy.api#Unit` has no members at all, and rustfmt
         // spells the empty struct `{}` on one line. Emitting anything else would make the first
@@ -154,7 +179,7 @@ fn data_struct(
         }
         out.push_str("}\n\n");
     }
-    out.push_str(&check_required_impl(name, baseline_name, fields));
+    out.push_str(&check_required_impl(name, baseline_name, fields, controlled_body));
     out.push('\n');
     if has_secret {
         out.push_str(&debug_impl(name, fields));
@@ -171,21 +196,57 @@ fn data_struct(
 const MAX_WIDTH: usize = 130;
 
 /// Renders the input builder. ADR-0004 P7: recommended, never the only path.
-fn builder(fields: &[Field], registry: &Registry) -> String {
+fn builder(fields: &[Field], registry: &Registry, controlled_body: Option<&Field>) -> String {
     let mut out = String::new();
-    out.push_str(
+    let builder_derive = if controlled_body.is_some() {
+        ""
+    } else {
+        "#[derive(Default)]\n"
+    };
+    let _ = write!(
+        out,
         "/// A builder for [`Input`].\n\
          ///\n\
          /// The recommended construction path, not the only one — the public fields stay public\n\
          /// (ADR-0004 P7), so a caller that prefers a struct literal keeps it.\n\
-         #[derive(Default)]\n\
-         pub struct InputBuilder {\n    input: Input,\n}\n\n\
-         impl Input {\n    \
-             /// Starts a builder.\n    \
-             #[must_use]\n    \
-             pub fn builder() -> InputBuilder {\n        InputBuilder::default()\n    }\n}\n\n\
-         impl InputBuilder {\n",
+         {builder_derive}\
+         pub struct InputBuilder {{\n    input: Input,\n}}\n\n\
+         impl Input {{\n",
     );
+    if let Some(body) = controlled_body {
+        let name = naming::field_name(&body.name);
+        let ty = Registry::type_with_enums(&body.ty, &body.name);
+        let _ = write!(
+            out,
+            "    /// Constructs this input from its required request body.\n    \
+             #[must_use]\n    \
+             pub fn from_required_body({name}: {ty}) -> Self {{\n        \
+                 Self {{\n"
+        );
+        for field in fields {
+            let field_name = naming::field_name(&field.name);
+            if field.name == body.name {
+                let _ = writeln!(out, "            {field_name},");
+            } else {
+                let _ = writeln!(out, "            {field_name}: Default::default(),");
+            }
+        }
+        let _ = write!(
+            out,
+            "        }}\n    }}\n\n    \
+             /// Starts a builder with the required request body.\n    \
+             #[must_use]\n    \
+             pub fn builder({name}: {ty}) -> InputBuilder {{\n        \
+                 InputBuilder {{\n            input: Self::from_required_body({name}),\n        }}\n    }}\n}}\n\n"
+        );
+    } else {
+        out.push_str(
+            "    /// Starts a builder.\n    \
+             #[must_use]\n    \
+             pub fn builder() -> InputBuilder {\n        InputBuilder::default()\n    }\n}\n\n",
+        );
+    }
+    out.push_str("impl InputBuilder {\n");
     for field in fields {
         let name = naming::field_name(&field.name);
         let inner = Registry::type_with_enums(&field.ty, &field.name);

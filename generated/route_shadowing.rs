@@ -3612,6 +3612,15 @@ pub const SHADOWING: &[ShadowingDecl] = &[
         ],
     },
     ShadowingDecl {
+        winner: "PutObjectAnnotation",
+        shadowed: "PutObject",
+        reason: "An annotation write is a PUT to the object key plus ?annotation, and PutObject accepts every such request. PutObjectAnnotation is tried first (593 before 800); the opposite order would store the annotation payload as the parent object's bytes.",
+        evidence: &[
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectAnnotation.html — PutObjectAnnotation stores one named payload through PUT on an object key carrying ?annotation, and the required annotationName query parameter identifies the annotation rather than the parent object.",
+            "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html — a plain object write is the same method and path with neither of those parameters.",
+        ],
+    },
+    ShadowingDecl {
         winner: "GetObjectTorrent",
         shadowed: "GetObject",
         reason: "A torrent read is a GET to the object key plus ?torrent, and GetObject accepts every such request. GetObjectTorrent is tried first (595 before 900); the opposite order would return the object's bytes instead of the binary torrent descriptor.",

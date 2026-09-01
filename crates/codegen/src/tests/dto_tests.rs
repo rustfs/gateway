@@ -303,6 +303,69 @@ fn c_dto_0009_a_required_member_is_generated_bare() {
 }
 
 #[test]
+fn c_dto_0010_a_required_streaming_payload_has_a_controlled_constructor() {
+    // A required streaming payload cannot be fabricated through `Default` and cannot be wrapped in
+    // `Option` without making the public input type lie. The generated input must instead accept the
+    // real request body through a constructor used by the decoder.
+    let files = dto_files();
+    let annotation = files
+        .get("ops/put_object_annotation.rs")
+        .expect("PutObjectAnnotation is generated once required request bodies are supported");
+
+    assert!(
+        annotation.contains("pub struct Input {") && annotation.contains("rustfs_gateway_stream::ByteStream"),
+        "PutObjectAnnotation must expose its streaming request payload as a bare input member"
+    );
+    assert!(
+        !annotation.contains("#[derive(Debug, Default)]\npub struct Input {")
+            && !annotation.contains("#[derive(Clone, Debug, Default)]\npub struct Input {"),
+        "a required streaming request body must not acquire a fabricated `Default`"
+    );
+    assert!(
+        annotation.contains("impl Input {\n    /// Constructs this input from its required request body."),
+        "the decoder needs an explicit constructor that consumes the real request body"
+    );
+    assert!(
+        !annotation.contains("pub fn builder() -> InputBuilder") && !annotation.contains("InputBuilder::default()"),
+        "a zero-argument builder would have to fabricate the required live body"
+    );
+    assert!(
+        annotation.contains("pub fn builder(annotation_payload: rustfs_gateway_stream::ByteStream) -> InputBuilder"),
+        "the public builder must require the same live body as the decoder"
+    );
+    assert!(
+        !annotation.contains("annotation_payload: Default::default()"),
+        "the controlled constructor must never fabricate the required stream"
+    );
+}
+
+#[test]
+fn c_dto_n035_only_a_controlled_required_body_removes_input_default() {
+    for (name, body) in rust_bodies() {
+        let Some(module) = name.strip_prefix("ops/") else {
+            continue;
+        };
+        if module.contains('/') || name.ends_with("mod.rs") {
+            continue;
+        }
+        let input = body.find("pub struct Input").expect("every operation module declares Input");
+        let derive = body[..input]
+            .lines()
+            .rev()
+            .find(|line| line.starts_with("#[derive("))
+            .expect("Input has an explicit derive policy");
+        if name == "ops/put_object_annotation.rs" {
+            assert!(!derive.contains("Default"), "the live request body has no truthful default");
+        } else {
+            assert!(
+                derive.contains("Default"),
+                "{name} lost `Input: Default` without a controlled required body"
+            );
+        }
+    }
+}
+
+#[test]
 fn c_dto_n019_an_optional_scalar_member_is_never_generated_bare() {
     // The other half of P1. An optional scalar has to be `Option`: a bare one would have no way to
     // say "the client sent nothing", because the placeholder default means "never filled in",

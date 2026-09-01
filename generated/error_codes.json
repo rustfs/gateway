@@ -11,6 +11,12 @@
                                                "status": 400,
                                                "server_fault": false
                                              },
+             "AnnotationLimitExceeded": {
+                                          "constant": "ANNOTATION_LIMIT_EXCEEDED",
+                                          "status": 400,
+                                          "server_fault": false
+                                        },
+             "AnnotationNameTooLong": { "constant": "ANNOTATION_NAME_TOO_LONG", "status": 400, "server_fault": false },
              "AuthorizationHeaderMalformed": {
                                                "constant": "AUTHORIZATION_HEADER_MALFORMED",
                                                "status": 400,
@@ -69,6 +75,7 @@
              "InlineDataTooLarge": { "constant": "INLINE_DATA_TOO_LARGE", "status": 400, "server_fault": false },
              "InternalError": { "constant": "INTERNAL_ERROR", "status": 500, "server_fault": true },
              "InvalidAccessKeyId": { "constant": "INVALID_ACCESS_KEY_ID", "status": 403, "server_fault": false },
+             "InvalidAnnotationName": { "constant": "INVALID_ANNOTATION_NAME", "status": 400, "server_fault": false },
              "InvalidArgument": { "constant": "INVALID_ARGUMENT", "status": 400, "server_fault": false },
              "InvalidBucketName": { "constant": "INVALID_BUCKET_NAME", "status": 400, "server_fault": false },
              "InvalidBucketState": { "constant": "INVALID_BUCKET_STATE", "status": 409, "server_fault": false },
@@ -235,6 +242,7 @@
                                                   "server_fault": false
                                                 },
              "UnsupportedFunction": { "constant": "UNSUPPORTED_FUNCTION", "status": 400, "server_fault": false },
+             "UnsupportedMediaType": { "constant": "UNSUPPORTED_MEDIA_TYPE", "status": 415, "server_fault": false },
              "UserKeyMustBeSpecified": {
                                          "constant": "USER_KEY_MUST_BE_SPECIFIED",
                                          "status": 400,
@@ -257,6 +265,8 @@
                    "ACCOUNT_PROBLEM": ["AccountProblem"],
                    "ALL_ACCESS_DISABLED": ["AllAccessDisabled"],
                    "AMBIGUOUS_GRANT_BY_EMAIL_ADDRESS": ["AmbiguousGrantByEmailAddress"],
+                   "ANNOTATION_LIMIT_EXCEEDED": ["AnnotationLimitExceeded"],
+                   "ANNOTATION_NAME_TOO_LONG": ["AnnotationNameTooLong"],
                    "AUTHORIZATION_HEADER_MALFORMED": ["AuthorizationHeaderMalformed"],
                    "AUTHORIZATION_QUERY_PARAMETERS_ERROR": ["AuthorizationQueryParametersError"],
                    "BAD_DIGEST": ["BadDigest"],
@@ -279,6 +289,7 @@
                    "INLINE_DATA_TOO_LARGE": ["InlineDataTooLarge"],
                    "INTERNAL_ERROR": ["InternalError"],
                    "INVALID_ACCESS_KEY_ID": ["InvalidAccessKeyId"],
+                   "INVALID_ANNOTATION_NAME": ["InvalidAnnotationName"],
                    "INVALID_ARGUMENT": ["InvalidArgument"],
                    "INVALID_BUCKET_NAME": ["InvalidBucketName"],
                    "INVALID_BUCKET_STATE": ["InvalidBucketState"],
@@ -365,6 +376,7 @@
                    "UNEXPECTED_CONTENT": ["UnexpectedContent"],
                    "UNRESOLVABLE_GRANT_BY_EMAIL_ADDRESS": ["UnresolvableGrantByEmailAddress"],
                    "UNSUPPORTED_FUNCTION": ["UnsupportedFunction"],
+                   "UNSUPPORTED_MEDIA_TYPE": ["UnsupportedMediaType"],
                    "USER_KEY_MUST_BE_SPECIFIED": ["UserKeyMustBeSpecified"],
                    "X_AMZ_CONTENT_CHECKSUM_MISMATCH": ["XAmzContentChecksumMismatch"],
                    "X_AMZ_CONTENT_SHA256_MISMATCH": ["XAmzContentSHA256Mismatch"]
@@ -375,6 +387,8 @@
                  "307": ["TemporaryRedirect"],
                  "400": [
                           "AmbiguousGrantByEmailAddress",
+                          "AnnotationLimitExceeded",
+                          "AnnotationNameTooLong",
                           "AuthorizationHeaderMalformed",
                           "AuthorizationQueryParametersError",
                           "BadDigest",
@@ -390,6 +404,7 @@
                           "IncompleteBody",
                           "IncorrectNumberOfFilesInPostRequest",
                           "InlineDataTooLarge",
+                          "InvalidAnnotationName",
                           "InvalidArgument",
                           "InvalidBucketName",
                           "InvalidChunkSizeError",
@@ -489,6 +504,7 @@
                         ],
                  "411": ["MissingContentLength"],
                  "412": ["PreconditionFailed"],
+                 "415": ["UnsupportedMediaType"],
                  "416": ["InvalidRange"],
                  "500": ["InternalError"],
                  "501": ["NotImplemented"],
@@ -501,6 +517,8 @@
                                   "AccountProblem",
                                   "AllAccessDisabled",
                                   "AmbiguousGrantByEmailAddress",
+                                  "AnnotationLimitExceeded",
+                                  "AnnotationNameTooLong",
                                   "AuthorizationHeaderMalformed",
                                   "AuthorizationQueryParametersError",
                                   "BadDigest",
@@ -522,6 +540,7 @@
                                   "IncorrectNumberOfFilesInPostRequest",
                                   "InlineDataTooLarge",
                                   "InvalidAccessKeyId",
+                                  "InvalidAnnotationName",
                                   "InvalidArgument",
                                   "InvalidBucketName",
                                   "InvalidBucketState",
@@ -605,6 +624,7 @@
                                   "UnexpectedContent",
                                   "UnresolvableGrantByEmailAddress",
                                   "UnsupportedFunction",
+                                  "UnsupportedMediaType",
                                   "UserKeyMustBeSpecified",
                                   "XAmzContentChecksumMismatch",
                                   "XAmzContentSHA256Mismatch"

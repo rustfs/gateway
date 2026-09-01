@@ -360,6 +360,7 @@ fn standard_handler_deadline_class(name: &str) -> Option<HandlerDeadlineClass> {
         | "PutBucketWebsite"
         | "PutObject"
         | "PutObjectAcl"
+        | "PutObjectAnnotation"
         | "PutObjectLegalHold"
         | "PutObjectLockConfiguration"
         | "PutObjectRetention"

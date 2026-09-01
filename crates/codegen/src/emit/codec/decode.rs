@@ -59,6 +59,8 @@
 //! and AWS's user guide contradicts by documenting the empty tag set as *deleting* the existing
 //! one. This gateway wrote those bytes itself (`q-tag-object-unconfigured-0090`) and refused them.
 
+mod layout;
+
 use std::fmt::Write as _;
 
 use rustfs_gateway_model::UnknownElementPolicyValue;
@@ -67,6 +69,8 @@ use rustfs_gateway_model::ir::{AttributeSource, Binding, Field, OperationIr, Sha
 use super::{CodecRules, attribute_name, bounds, carried_as_attribute, expr, media, tolerance};
 use crate::emit::dto::naming;
 use crate::emit::error_status::Constants;
+
+use self::layout::{MAX_WIDTH, assign, for_header, push_stmt};
 
 /// The default code for a required member the request did not carry.
 const DEFAULT_MISSING_CODE: &str = "InvalidArgument";
@@ -96,28 +100,6 @@ fn list_source(flattened: bool, wrapper_name: Option<&str>, wire: &str) -> Vec<S
     }
 }
 
-/// The `for item in <chain> {` header, laid out the way rustfmt would lay it out.
-///
-/// rustfmt keeps a chain on one line while the links after the receiver fit `chain_width` and the
-/// whole line fits `max_width`; past either it puts every link on its own line and the opening
-/// brace on a line of its own. The wrapped `AccessControlList` list inside a restore's
-/// `OutputLocation` is what first crossed it.
-fn for_header(indent: usize, receiver: &str, links: &[String]) -> String {
-    let pad = " ".repeat(indent);
-    let chain: String = links.iter().map(|link| format!(".{link}")).collect();
-    let single = format!("{pad}for item in {receiver}{chain} {{\n");
-    if single.len().saturating_sub(1) <= MAX_WIDTH && chain.len() <= CHAIN_WIDTH {
-        return single;
-    }
-    let continuation = " ".repeat(indent.saturating_add(4));
-    let mut out = format!("{pad}for item in {receiver}\n");
-    for link in links {
-        out.push_str(&format!("{continuation}.{link}\n"));
-    }
-    out.push_str(&format!("{pad}{{\n"));
-    out
-}
-
 /// Buffering the request body, and the one place a `Content-MD5` over it is settled.
 ///
 /// The two lines are emitted together and never apart. A decoder that buffered a body without
@@ -131,54 +113,16 @@ const BUFFER_BODY: &str = concat!(
     "        value::verify_body_digest(request, raw_body.as_ref())?;\n"
 );
 
-/// rustfmt's `max_width` for this repository.
-const MAX_WIDTH: usize = 130;
-
-/// One assignment, laid out the way rustfmt would lay it out.
-///
-/// `cargo fmt` follows `#[path]` into `generated/`, so an emitter that wrote a line past
-/// `max_width` would make `cargo xtask spec verify` fail the moment somebody formatted the tree.
-fn assign(indent: usize, target: &str, expression: &str) -> String {
-    let pad = " ".repeat(indent);
-    let single = format!("{pad}{target} = {expression};\n");
-    if single.len().saturating_sub(1) <= MAX_WIDTH {
-        return single;
-    }
-    let continuation = " ".repeat(indent.saturating_add(4));
-    format!("{pad}{target} =\n{continuation}{expression};\n")
-}
-
-/// rustfmt's default `chain_width`: sixty per cent of `max_width`, the budget a method chain has
-/// before every link goes onto its own line.
-const CHAIN_WIDTH: usize = MAX_WIDTH * 6 / 10;
-
-/// One `target.push(expression)` inside a list loop, laid out the way rustfmt would lay it out.
-///
-/// The target is a field access on `shape` or `input`, so the statement is a two-link chain, and
-/// rustfmt's rule for chains is `chain_width`, not `max_width`: the links past the receiver must
-/// fit the chain budget or each goes onto its own line. A lifecycle rule's
-/// `noncurrent_version_transitions` list is what made the budget observable.
-fn push_stmt(indent: usize, target: &str, expression: &str) -> String {
-    let pad = " ".repeat(indent);
-    let single = format!("{pad}{target}.push({expression});\n");
-    let receiver_len = target.split('.').next().map_or(0, str::len);
-    let chain_len = target.len().saturating_sub(receiver_len) + ".push()".len() + expression.len();
-    if single.len().saturating_sub(1) <= MAX_WIDTH && chain_len <= CHAIN_WIDTH {
-        return single;
-    }
-    let continuation = " ".repeat(indent.saturating_add(4));
-    let (receiver, links) = target.split_once('.').unwrap_or((target, ""));
-    format!("{pad}{receiver}\n{continuation}.{links}\n{continuation}.push({expression});\n")
-}
-
 /// Renders the body of one operation's `decode`.
 pub fn body(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<String, String> {
     let mut out = String::new();
-    // Functional-update syntax rather than `Input::default()`: the fields are filled in one at a
-    // time from bindings that may or may not fire, and `clippy::field_reassign_with_default`
-    // refuses the plain form. It is also the construction ADR-0004 P1 asks callers to use.
-    out.push_str("        let mut input = Input { ..Default::default() };\n");
-
+    let controlled_body = crate::emit::dto::controlled_required_body(&ir.input);
+    if controlled_body.is_none() {
+        // Functional-update syntax rather than `Input::default()`: the fields are filled in one at
+        // a time from bindings that may or may not fire, and `clippy::field_reassign_with_default`
+        // refuses the plain form. It is also the construction ADR-0004 P1 asks callers to use.
+        out.push_str("        let mut input = Input { ..Default::default() };\n");
+    }
     // `checksum.http_checksum_required`, and nothing else, decides this. It is the first statement
     // of the decoder because the operations that carry it are the ones whose body must not be read
     // on an unverifiable request: `DeleteObjects` is a list of keys to destroy, so buffering it and
@@ -188,12 +132,21 @@ pub fn body(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<S
         out.push_str("        value::require_integrity(request)?;\n");
     }
 
+    if controlled_body.is_some() {
+        // A live producer has no truthful `Default`. The DTO constructor takes ownership of the
+        // actual request body, so the required member is present before any other binding is read.
+        out.push_str("        let mut input = Input::from_required_body(body.into_required_stream()?);\n");
+    }
+
     // Where the XML document is opened, for an operation whose body members sit at operation
     // level rather than inside a payload structure. It is opened at the *first* such member and
     // not before, so a head binding declared ahead of it is still read ahead of it: an operation
     // that refuses on its head must not have buffered a body first.
     let first_body_member = ir.input.iter().position(|field| field.binding == Binding::BodyXml);
     for (index, field) in ir.input.iter().enumerate() {
+        if controlled_body.is_some_and(|body| body.name == field.name) {
+            continue;
+        }
         out.push_str(&one_field(ir, field, first_body_member == Some(index), rules, codes)?);
     }
     if !ir.input.iter().any(uses_body) {

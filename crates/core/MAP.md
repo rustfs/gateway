@@ -13,6 +13,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/ops/*.rs` | Exactly one `impl Operation` per AWS operation. | Change one operation's static contract. |
 | `src/ops/delete_object_annotation.rs` | Reserves annotation deletion independently of destructive object deletion. | An annotation DELETE routes to DeleteObject or declares the wrong authorization floor. |
 | `src/ops/get_object_annotation.rs` | Reserves a named annotation read independently of the parent object body. | A named annotation GET routes to GetObject or declares the wrong authorization floor. |
+| `src/ops/put_object_annotation.rs` | Reserves annotation payload writes independently of parent object replacement. | An annotation PUT routes to PutObject or loses its required streaming body. |
 | `src/ops/get_object_torrent.rs` | Reserves a torrent descriptor read independently of the parent object body. | A torrent GET routes to GetObject or declares the wrong authorization floor. |
 | `src/ops/get_bucket_ownership_controls.rs` | Reserves an ownership-controls read independently of bucket object listing. | An ownership-controls GET routes to ListObjects or declares the wrong authorization floor. |
 | `src/ops/get_bucket_abac.rs` | Reserves an ABAC status read independently of bucket object listing. | An ABAC GET routes to ListObjects or declares the wrong authorization floor. |

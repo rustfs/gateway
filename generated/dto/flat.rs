@@ -358,6 +358,10 @@ pub use crate::ops::put_object::{
 pub use crate::ops::put_object_acl::{
     Input as PutObjectAclInput, InputBuilder as PutObjectAclInputBuilder, Output as PutObjectAclOutput, PutObjectAcl,
 };
+pub use crate::ops::put_object_annotation::{
+    Input as PutObjectAnnotationInput, InputBuilder as PutObjectAnnotationInputBuilder, Output as PutObjectAnnotationOutput,
+    PutObjectAnnotation,
+};
 pub use crate::ops::put_object_legal_hold::{
     Input as PutObjectLegalHoldInput, InputBuilder as PutObjectLegalHoldInputBuilder, Output as PutObjectLegalHoldOutput,
     PutObjectLegalHold,

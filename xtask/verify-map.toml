@@ -321,6 +321,10 @@ name = "PutObjectAcl"
 cases = "c-acl-0003,c-acl-0010,c-acl-0016,c-acl-0018,c-acl-0032,c-acl-0036"
 
 [[operation]]
+name = "PutObjectAnnotation"
+cases = ""
+
+[[operation]]
 name = "PutObjectLegalHold"
 cases = "c-lock-0006,c-lock-0007,c-lock-0022,c-lock-0026"
 

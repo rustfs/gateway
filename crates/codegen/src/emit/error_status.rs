@@ -136,6 +136,7 @@ fn status_constant(status: u16) -> Result<&'static str, String> {
         411 => "LENGTH_REQUIRED",
         412 => "PRECONDITION_FAILED",
         413 => "PAYLOAD_TOO_LARGE",
+        415 => "UNSUPPORTED_MEDIA_TYPE",
         416 => "RANGE_NOT_SATISFIABLE",
         429 => "TOO_MANY_REQUESTS",
         500 => "INTERNAL_SERVER_ERROR",
