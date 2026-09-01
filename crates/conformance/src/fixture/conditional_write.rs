@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Owns optimistic conditional-write commit and the deterministic fixture rendezvous that makes
-//! overlapping checks executable. It does not evaluate preconditions or select concurrent cases.
-//! Object handlers and the socket batch are upstream; fixture storage and the existing 409 error
-//! renderer are downstream.
+//! Responsible for: optimistic conditional-write commit and the deterministic fixture rendezvous
+//! that makes overlapping checks executable.
+//! Not responsible for: evaluating preconditions or selecting concurrent cases.
+//! Upstream: object handlers and the socket batch.
+//! Downstream: fixture storage and the existing 409 error renderer.
 
 use std::sync::Condvar;
 use std::time::Duration;
