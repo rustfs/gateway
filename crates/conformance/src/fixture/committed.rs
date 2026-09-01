@@ -80,7 +80,8 @@ const COMMITTED_FAULT_MESSAGE: &str = "The operation failed after its response h
 impl Fixture {
     pub(super) fn put_object_with_version(&mut self, bucket: &str, key: &str, object: StoredObject, version: String) {
         let last_modified = object.last_modified;
-        let versions = self.objects.entry((bucket.to_owned(), key.to_owned())).or_default();
+        let identity = (bucket.to_owned(), key.to_owned());
+        let versions = self.objects.entry(identity.clone()).or_default();
         if version == UNVERSIONED {
             versions.clear();
         }
@@ -89,6 +90,7 @@ impl Fixture {
             object: Some(object),
             last_modified,
         });
+        *self.object_generations.entry(identity).or_default() += 1;
     }
 
     /// Arms a reported failure after `operation` commits its response head.

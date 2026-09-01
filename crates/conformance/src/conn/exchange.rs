@@ -102,29 +102,57 @@ impl Conn {
             });
         }
 
-        // Release every complete request onto its own socket before awaiting even one response.
-        // The server can therefore dispatch all handlers concurrently; declaration order is used
-        // only when the observations are returned to the runner for judgement.
-        for exchange in &mut prepared {
-            exchange.dispatched = Some(dispatch_socket_exchange(
-                &mut exchange.connection,
-                &exchange.pacer,
-                &exchange.wire,
-                &exchange.head,
-                exchange.budget,
-            )?);
+        let coordinate_conditional_race = is_conditional_write_race(&prepared);
+        if coordinate_conditional_race {
+            self.inner.begin_conditional_race(prepared.len())?;
         }
+        let result = (|| {
+            // Release every complete request onto its own socket before awaiting even one response.
+            // The server can therefore dispatch all handlers concurrently; declaration order is
+            // used only when observations return to the runner for judgement.
+            let last = prepared.len().saturating_sub(1);
+            for (index, exchange) in prepared.iter_mut().enumerate() {
+                exchange.dispatched = Some(dispatch_socket_exchange(
+                    &mut exchange.connection,
+                    &exchange.pacer,
+                    &exchange.wire,
+                    &exchange.head,
+                    exchange.budget,
+                )?);
+                if coordinate_conditional_race && index < last {
+                    self.inner.wait_for_conditional_checks(index + 1, exchange.budget)?;
+                }
+            }
 
-        prepared
-            .into_iter()
-            .map(|mut exchange| {
-                let dispatched = exchange.dispatched.take().ok_or_else(|| {
-                    SutError::Environment("a concurrent request was not dispatched before observation".to_owned())
-                })?;
-                Ok(observe_socket_exchange(&mut exchange.connection, &exchange.wire, &exchange.head, dispatched).observation)
-            })
-            .collect()
+            prepared
+                .into_iter()
+                .map(|mut exchange| {
+                    let dispatched = exchange.dispatched.take().ok_or_else(|| {
+                        SutError::Environment("a concurrent request was not dispatched before observation".to_owned())
+                    })?;
+                    Ok(observe_socket_exchange(&mut exchange.connection, &exchange.wire, &exchange.head, dispatched).observation)
+                })
+                .collect()
+        })();
+        if coordinate_conditional_race {
+            self.inner.end_conditional_race();
+        }
+        result
     }
+}
+
+fn is_conditional_write_race(exchanges: &[ConcurrentSocketExchange]) -> bool {
+    let Some(first) = exchanges.first() else { return false };
+    exchanges.len() >= 2
+        && exchanges.iter().all(|exchange| {
+            exchange.wire.method == "PUT"
+                && exchange.wire.target == first.wire.target
+                && exchange
+                    .wire
+                    .headers
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case("if-match") || name.eq_ignore_ascii_case("if-none-match"))
+        })
 }
 
 pub(super) fn read_concurrent_connection(connection: Option<&Value>) -> Result<(), SutError> {

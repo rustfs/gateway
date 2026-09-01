@@ -1,20 +1,20 @@
 # c-cond-0013 — two conditional creates in flight at once.
 #
-# Schema dimensions exercised: connection.pipeline, so the second request is on the wire before the
-# first response is read; two exchanges over one connection; the distinct conflict code.
+# Schema dimensions exercised: connection.concurrent, so both requests use distinct sockets and
+# are dispatched before either response is observed; the distinct conflict code.
 
 [case]
 id = "c-cond-0013"
-schema_version = 1
+schema_version = 2
 title = "Racing conditional creates leave one winner and tell the loser to retry, not to give up"
 rationale = """
 The whole value of a conditional create is that exactly one caller wins, and the interesting part \
 is what the loser is told. A precondition failure means "your condition was false" and clients \
 stop; the conflict code means "your condition held and somebody else got there first" and clients \
 retry. An implementation that collapses the two turns a recoverable race into a permanent failure \
-for whichever caller was unlucky. Pipelining is how a data-file case reaches the race at all: both \
-writes are written before either response is read, so the second cannot have been ordered behind \
-the first by the client."""
+for whichever caller was unlucky. Concurrent dispatch is how a data-file case reaches the race at \
+all: both writes use distinct connections and are dispatched before either response is observed, \
+so neither condition can be evaluated only after the other response reaches the client."""
 polarity = "negative"
 operation = "PutObject"
 tags = ["conditional", "preconditions", "connection", "error-shape"]
@@ -33,8 +33,7 @@ summary = "Upstream tracking report for conditional writes, which did not distin
 fixed = "2026-01-02T03:04:05Z"
 
 [connection]
-reuse = true
-pipeline = true
+concurrent = true
 
 [[setup.buckets]]
 name = "conf-cond"

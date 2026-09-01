@@ -17,9 +17,9 @@
 //! Responsible for: holding what `[setup]` established — buckets, objects, multipart uploads and
 //! their parts — and answering each registered operation out of that state, so a case measures the
 //! *protocol* between the wire and the handler rather than a storage engine's behaviour.
-//! NOT responsible for: durability, concurrency, versioning, lifecycle, replication, encryption,
-//! or any other S3 semantic a case does not assert. Every one of those is a reason this file would
-//! stop being a fixture and start being an implementation.
+//! NOT responsible for: production durability or scheduling, lifecycle, replication, encryption,
+//! or any other S3 semantic a case does not assert. Its test-only conditional-write rendezvous
+//! makes an optimistic storage race deterministic; it does not model a production scheduler.
 //! Upstream: `rustfs-gateway`, `crate::md5`. Downstream: `crate::inprocess`.
 //!
 //! # The line this stub does not cross
@@ -131,6 +131,7 @@ use rustfs_gateway::{
 };
 
 mod committed;
+mod conditional_write;
 mod handlers_bucket;
 mod handlers_object;
 #[cfg(test)]
@@ -140,6 +141,7 @@ mod pagination_properties;
 
 use committed::{ArmedFault, COMPLETE_MULTIPART_UPLOAD, COPY_OBJECT, CommittedFault, head as committed_head};
 pub use committed::{COMMITTED_OPERATIONS, UnreportableFault};
+use conditional_write::{ConditionalRaceCoordinator, put_object};
 
 /// The canonical user id every listing reports as the owner.
 ///
@@ -497,6 +499,10 @@ pub const HOME_REGION: &str = "us-east-1";
 pub struct Fixture {
     buckets: BTreeMap<String, BucketState>,
     objects: BTreeMap<(String, String), Vec<StoredVersion>>,
+    /// Monotonic per-key storage generations used by conditional-write compare-and-swap.
+    object_generations: BTreeMap<(String, String), u64>,
+    /// Test-only rendezvous shared by the socket transport and object handlers.
+    conditional_races: Arc<ConditionalRaceCoordinator>,
     uploads: BTreeMap<String, StoredUpload>,
     next_upload: u32,
     next_version: u32,
@@ -928,7 +934,9 @@ impl Fixture {
     pub fn remove_object(&mut self, bucket: &str, key: &str) -> Option<String> {
         let identity = (bucket.to_owned(), key.to_owned());
         if !self.is_versioned(bucket) {
-            self.objects.remove(&identity);
+            if self.objects.remove(&identity).is_some() {
+                *self.object_generations.entry(identity).or_default() += 1;
+            }
             return None;
         }
         let versions = self.objects.get(&identity)?;
@@ -943,6 +951,7 @@ impl Fixture {
             object: None,
             last_modified,
         });
+        *self.object_generations.entry(identity).or_default() += 1;
         Some(version_id)
     }
 
@@ -2564,55 +2573,6 @@ async fn drain(body: Option<ByteStream>) -> Result<Vec<u8>, HandlerError> {
         .await
         .map_err(|_| HandlerError::new(ErrorCode::INCOMPLETE_BODY, "the request body did not arrive as it was framed"))?;
     Ok(collected.body().to_vec())
-}
-
-async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> HandlerResult<dto::PutObject> {
-    let bytes = drain(input.body).await?;
-    let mut fixture = state
-        .lock()
-        .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
-    require_bucket(&fixture, &input.bucket)?;
-    require_content_md5(input.content_md5.as_deref(), &bytes)?;
-    let now = fixture.now;
-    let existing = fixture.object(input.bucket.as_str(), input.key.as_str()).cloned();
-    let guard_before_mutation = conditional_write_guards_before_mutation();
-    if guard_before_mutation {
-        guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
-    }
-    let mut object = StoredObject::new(bytes, input.content_type.clone(), now);
-    if let Some(checksum) = input.checksum_spec {
-        object.checksum = Some(checksum);
-    }
-    object.cache_control = input.cache_control.clone();
-    object.content_disposition = input.content_disposition.clone();
-    object.content_encoding = input.content_encoding.clone();
-    object.content_language = input.content_language.clone();
-    object.expires = input.expires.as_ref().map(|value| value.as_str().to_owned());
-    object.metadata = input.metadata.clone();
-    // The inline tag set, which is a different thing from the `?tagging` subresource: this header
-    // is how a single-request write labels the object it is writing. Parsed before the write so a
-    // malformed header is a refusal rather than an object stored with no tags and a 200.
-    object.tags = read_tagging_header(input.tagging.as_deref())?;
-    if let Some(class) = input.storage_class.as_ref() {
-        object.storage_class = class.to_string();
-    }
-    let size = object.body.len() as i64;
-    let etag = object.etag.clone();
-    let written = fixture.put_object(input.bucket.as_str(), input.key.as_str(), object);
-    if !guard_before_mutation {
-        guard_write(existing.as_ref(), input.if_match.as_deref(), input.if_none_match.as_deref(), now)?;
-    }
-    Ok(Resp::new(dto::PutObjectOutput {
-        size: Some(size),
-        checksum_spec: input.checksum_spec,
-        checksum_type: input.checksum_spec.and_then(reported_checksum_type),
-        // `ETag` is a *required* member of this output, so leaving it at its default did not omit
-        // the header — it emitted an empty one, which is worse than omitting it: a client that
-        // stores the value it was handed records `""` as the digest of the object it just wrote.
-        e_tag: entity_tag(&etag)?,
-        version_id: (written != UNVERSIONED).then_some(written),
-        ..dto::PutObjectOutput::default()
-    }))
 }
 
 async fn upload_part(state: &Arc<Mutex<Fixture>>, input: dto::UploadPartInput) -> HandlerResult<dto::UploadPart> {

@@ -292,8 +292,9 @@ fn the_conditional_family_runs_green_with_one_case_a_target_cannot_execute() {
 ///
 /// This is the assertion that keeps the skip honest. A skip carrying no reason reads exactly like a
 /// case nobody wrote; a skip whose reason is "not implemented" reads like a defect. `c-cond-0013`
-/// needs two writes that genuinely race, and the reason has to keep naming that, because the day
-/// somebody makes the case pass by removing the race is the day the case stops meaning anything.
+/// needs a concurrent exchange batch, and the reason has to keep naming that capability, because
+/// the day the in-process target approximates it serially is the day the case stops meaning
+/// anything.
 #[test]
 fn the_racing_conditional_create_states_the_capability_it_is_waiting_for() {
     let report = run("c-cond-0013");
@@ -302,11 +303,11 @@ fn the_racing_conditional_create_states_the_capability_it_is_waiting_for() {
     assert_eq!(outcome.verdict, Verdict::Skipped, "c-cond-0013 no longer skips");
     let reason = outcome.skip_reason.as_deref().unwrap_or_default();
     assert!(
-        reason.contains("connection.pipeline"),
+        reason.contains("concurrent"),
         "the skip does not name the capability it needs: {reason:?}"
     );
     assert!(
-        reason.contains("race") || reason.contains("cannot race"),
-        "the skip does not say the race is what is missing: {reason:?}"
+        reason.contains("exchange batch"),
+        "the skip does not say the batch is what the target cannot execute: {reason:?}"
     );
 }

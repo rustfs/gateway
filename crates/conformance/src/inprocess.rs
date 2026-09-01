@@ -564,6 +564,38 @@ impl InProcess {
         }
     }
 
+    /// Arms the fixture rendezvous for one batch of conditional writes to the same resource.
+    pub(crate) fn begin_conditional_race(&self, participants: usize) -> Result<(), SutError> {
+        let coordinator = self
+            .state
+            .lock()
+            .map_err(|_| SutError::Environment("the fixture state was left poisoned".to_owned()))?
+            .conditional_race_coordinator();
+        coordinator
+            .begin(participants)
+            .map_err(|reason| SutError::Environment(reason.to_owned()))
+    }
+
+    /// Waits until the named prefix of a concurrent batch has reached its conditional check.
+    pub(crate) fn wait_for_conditional_checks(&self, minimum: usize, timeout: std::time::Duration) -> Result<(), SutError> {
+        let coordinator = self
+            .state
+            .lock()
+            .map_err(|_| SutError::Environment("the fixture state was left poisoned".to_owned()))?
+            .conditional_race_coordinator();
+        coordinator
+            .wait_until_checked(minimum, timeout)
+            .map_err(|reason| SutError::Environment(reason.to_owned()))
+    }
+
+    /// Disarms the fixture rendezvous after every concurrent response has been observed.
+    pub(crate) fn end_conditional_race(&self) {
+        let coordinator = self.state.lock().ok().map(|fixture| fixture.conditional_race_coordinator());
+        if let Some(coordinator) = coordinator {
+            coordinator.end();
+        }
+    }
+
     /// Reads a `payload` block into bytes.
     fn payload(&self, payload: &Value) -> Result<Vec<u8>, SutError> {
         // Every source is read before any of them is chosen. Returning from the first branch that
