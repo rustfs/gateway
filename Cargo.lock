@@ -1792,6 +1792,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustfs-gateway-dialect-minio"
+version = "0.1.0"
+dependencies = [
+ "rustfs-gateway-types",
+ "rustfs-gateway-xml",
+]
+
+[[package]]
 name = "rustfs-gateway-goldens"
 version = "0.1.0"
 dependencies = [
@@ -1889,7 +1897,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-types"
-version = "0.17.0+aws.2026-08-04"
+version = "0.18.0+aws.2026-08-04"
 dependencies = [
  "bytes",
  "crc-fast",

@@ -12641,6 +12641,14 @@ mut_port_provenance_comment() {
 expect_fail check_no_minio_source.sh \
     'a comment giving the contents a MinIO-server origin' mut_port_provenance_comment
 
+mut_dialect_minio_copied_provenance() {
+    printf '\nThis implementation was c\x6fpied from MinIO server source.\n' \
+        >>crates/dialect-minio/MAP.md
+}
+expect_fail check_no_minio_source.sh \
+    'a copied-source claim beside the narrow clean-room policy sentence' \
+    mut_dialect_minio_copied_provenance
+
 mut_vendored_server_tree() {
     mkdir -p vendor/github.com/minio/minio/cmd
     printf 'package cmd\n' >vendor/github.com/minio/minio/cmd/api-router.go
