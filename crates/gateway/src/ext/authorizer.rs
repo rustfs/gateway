@@ -185,11 +185,23 @@ impl AuthzRequest<'_> {
 pub struct InputAuthzRequest<'a> {
     route: &'a AuthzRequest<'a>,
     resources: &'a [AuthzRequest<'a>],
+    visibility: Option<AuthzRequest<'a>>,
 }
 
 impl<'a> InputAuthzRequest<'a> {
-    pub(crate) const fn new(route: &'a AuthzRequest<'a>, resources: &'a [AuthzRequest<'a>]) -> Self {
-        Self { route, resources }
+    pub(crate) fn new(route: &'a AuthzRequest<'a>, resources: &'a [AuthzRequest<'a>]) -> Self {
+        let visibility = (route.operation == "GetObject").then_some(AuthzRequest {
+            action: "s3:ListBucket",
+            resource: ResourceShape::Bucket,
+            copy_source_identity: None,
+            version_id: None,
+            ..*route
+        });
+        Self {
+            route,
+            resources,
+            visibility,
+        }
     }
 
     /// The route-level destination already admitted by the first stage.
@@ -204,15 +216,25 @@ impl<'a> InputAuthzRequest<'a> {
         self.resources
     }
 
+    /// The non-gating bucket-list capability that controls missing-object disclosure, when this
+    /// operation can report an absent object.
+    #[must_use]
+    pub const fn visibility(&self) -> Option<&AuthzRequest<'a>> {
+        self.visibility.as_ref()
+    }
+
     /// Visits every derived resource and builds a complete decision batch.
     #[must_use]
     pub fn decide_all<F>(&self, stage: Decision, mut decide: F) -> InputDecisions
     where
         F: FnMut(&AuthzRequest<'_>) -> Decision,
     {
+        let decisions = self.resources.iter().map(&mut decide).collect();
+        let visibility = self.visibility.as_ref().map(&mut decide);
         InputDecisions {
             stage,
-            decisions: self.resources.iter().map(&mut decide).collect(),
+            decisions,
+            visibility,
         }
     }
 }
@@ -225,6 +247,7 @@ impl<'a> InputAuthzRequest<'a> {
 pub struct InputDecisions {
     stage: Decision,
     decisions: Vec<Decision>,
+    visibility: Option<Decision>,
 }
 
 impl InputDecisions {
@@ -234,6 +257,10 @@ impl InputDecisions {
 
     pub(crate) fn as_slice(&self) -> &[Decision] {
         &self.decisions
+    }
+
+    pub(crate) const fn visibility(&self) -> Option<Decision> {
+        self.visibility
     }
 }
 
@@ -458,6 +485,47 @@ mod tests {
         let decisions = authorizer.authorize_input(&context, &input).await;
         assert_eq!(decisions.stage(), Decision::Allow);
         assert_eq!(decisions.as_slice(), [Decision::Allow, Decision::Allow]);
+        assert_eq!(decisions.visibility(), Some(Decision::Allow));
+    }
+
+    /// Negative — the disclosure check is a separate, non-gating ListBucket decision and retains
+    /// the addressed key so a prefix-scoped policy can decide the exact read target.
+    #[tokio::test]
+    async fn n_get_object_asks_for_its_missing_key_visibility_without_gating_the_read() {
+        let bucket = BucketName::new("example-bucket").expect("a valid bucket name");
+        let key = ObjectKey::new("private/report.txt").expect("a valid object key");
+        let route = AuthzRequest {
+            bucket: Some(&bucket),
+            key: Some(&key),
+            route_bucket: Some(&bucket),
+            route_key: Some(&key),
+            ..request("GetObject", None)
+        };
+        let input = InputAuthzRequest::new(&route, &[]);
+        let visibility = input.visibility().expect("GetObject asks the auxiliary question");
+        assert_eq!(visibility.action, "s3:ListBucket");
+        assert_eq!(visibility.resource, ResourceShape::Bucket);
+        assert_eq!(visibility.key.map(ObjectKey::as_str), Some("private/report.txt"));
+        assert_eq!(visibility.route_action, "s3:GetObject");
+
+        let decisions = input.decide_all(Decision::Allow, |request| {
+            if request.action == "s3:ListBucket" {
+                Decision::Deny
+            } else {
+                Decision::Allow
+            }
+        });
+        assert_eq!(decisions.stage(), Decision::Allow);
+        assert!(decisions.as_slice().is_empty());
+        assert_eq!(decisions.visibility(), Some(Decision::Deny));
+    }
+
+    /// Negative — an operation that happens to reuse the GetObject IAM action does not silently
+    /// inherit this operation-specific error transition without its own end-to-end contract.
+    #[test]
+    fn n_a_sibling_operation_does_not_inherit_get_objects_visibility_transition() {
+        let route = request("GetObjectAttributes", None);
+        assert!(InputAuthzRequest::new(&route, &[]).visibility().is_none());
     }
 
     #[cfg(feature = "dangerous-allow-all-authorizer")]

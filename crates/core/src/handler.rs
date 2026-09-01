@@ -522,6 +522,20 @@ impl HandlerError {
         &self.details
     }
 
+    /// Restricts a contextual missing-object refusal so it discloses no object identity.
+    ///
+    /// This transition is monotonic: it can turn a visible missing key, version, or current delete
+    /// marker into `AccessDenied`, but it cannot make a hidden object visible and leaves every
+    /// unrelated error unchanged. The gateway uses it when the authorization result does not prove
+    /// `s3:ListBucket`; a backend therefore cannot accidentally leak the key it looked up.
+    #[must_use]
+    pub fn hide_missing_object(mut self) -> Self {
+        match self.context.take() {
+            Some(context) => Self::from(context.hide_missing_object()),
+            None => self,
+        }
+    }
+
     /// The error code.
     #[must_use]
     pub const fn code(&self) -> &ErrorCode {

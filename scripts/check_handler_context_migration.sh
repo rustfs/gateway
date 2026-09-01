@@ -41,7 +41,7 @@ expected = {
     "crates/gateway/tests/cors_runtime.rs": 2,
     "crates/gateway/tests/credential_runtime.rs": 1,
     "crates/gateway/tests/handler_panic.rs": 1,
-    "crates/gateway/tests/monomorphic.rs": 5,
+    "crates/gateway/tests/monomorphic.rs": 6,
     "crates/gateway/tests/naming_policy.rs": 1,
     "crates/gateway/tests/patch_layer_landings.rs": 1,
     "crates/gateway/tests/precondition_contract.rs": 2,
@@ -309,7 +309,7 @@ for relative, wanted in expected.items():
             fail(f"{relative} Handler impl {ordinal} drops or bypasses the migration context source")
     total += len(implementations)
 
-if total != 123:
-    fail(f"reviewed migration census is {total}, expected 123")
-print("check_handler_context_migration: 123 reviewed Handler impls preserve their context migration mode")
+if total != 124:
+    fail(f"reviewed migration census is {total}, expected 124")
+print("check_handler_context_migration: 124 reviewed Handler impls preserve their context migration mode")
 PY

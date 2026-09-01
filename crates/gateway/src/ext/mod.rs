@@ -88,8 +88,8 @@ pub use self::authorizer::{
     AuthSchemeRef, Authorizer, AuthzRequest, Decision, Denial, DenyAllAuthorizer, InputAuthzRequest, InputDecisions,
     RequestContext, ServerExtensions, allow_when, decide_with,
 };
-pub(crate) use self::authz_audit::emit_safely;
 pub use self::authz_audit::{AuthzAuditEvent, AuthzAuditSink, AuthzStage, NoAuthzAudit};
+pub(crate) use self::authz_audit::{emit_input_safely, emit_safely};
 pub use self::bucket_owner::{BucketOwnerError, BucketOwnerSource, NoBucketOwner};
 pub use self::cors::{CORS_PREFLIGHT, CachedCorsSource, CorsCacheConfig, CorsSource, CorsSourceError, NoCors};
 pub use self::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider, ProviderMetrics};

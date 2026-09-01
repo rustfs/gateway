@@ -470,6 +470,7 @@ allowed_items = {
     "pubfncurrent_delete_marker(visibility:ResourceVisibility,key:Option<ObjectKey>,last_modified:i64,)->Result<Self,InvalidErrorContext>",
     "pubfnnot_modified(etag:ETag)->Self",
     "pub(crate)fninto_error_context(self)->ErrorContext",
+    "pub(crate)fnhide_missing_object(self)->Self",
 }
 if len(public_items) != len(allowed_items) or set(public_items) != allowed_items:
     fail("HandlerErrorContext must expose only the exact named legal associated items")

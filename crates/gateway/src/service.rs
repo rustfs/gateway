@@ -1117,6 +1117,7 @@ impl S3Service {
                     }
                 };
             let decisions = input_decisions.as_slice().to_vec();
+            let visibility = input_decisions.visibility();
             let stage = input_decisions.stage();
             let input_decision = if stage != Decision::Allow {
                 stage
@@ -1130,7 +1131,7 @@ impl S3Service {
             let mut audited_resources = Vec::with_capacity(input_resources.len().saturating_add(1));
             audited_resources.push(route_request);
             audited_resources.extend(input_resources.iter().copied());
-            emit_safely(
+            crate::ext::emit_input_safely(
                 input_service.inner.authz_audit.as_ref(),
                 &AuthzAuditEvent {
                     request_id,
@@ -1148,6 +1149,7 @@ impl S3Service {
                     decision: input_decision,
                     elapsed: elapsed_since(input_service.inner.authz_clock.as_ref(), input_started),
                 },
+                input_request.visibility().zip(visibility),
             );
             if let Err(denial) = stage.settle() {
                 hold_failure_floor(
@@ -1158,7 +1160,7 @@ impl S3Service {
                 .await;
                 return Err(from_denial(denial, response_kind));
             }
-            let config = config.authorized();
+            let config = config.with_missing_object_visibility(visibility).authorized();
             let map = |error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive);
             let sse = config.sse().cloned().map_err(map)?;
             Ok((decisions, config, sse))

@@ -3234,6 +3234,14 @@ mut_handler_context_generic_factory() {
 expect_fail check_error_resolution_surface.sh \
     'HandlerErrorContext gaining a generic ErrorContext factory' mut_handler_context_generic_factory
 
+mut_handler_context_missing_visibility_widened() {
+    perl -0pi -e 's/pub\(crate\) fn hide_missing_object/pub fn hide_missing_object/' \
+        crates/core/src/error_resolution.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'HandlerErrorContext exposing its missing-object narrowing seam publicly' \
+    mut_handler_context_missing_visibility_widened
+
 mut_handler_context_async_factory() {
     perl -0pi -e 's/impl HandlerErrorContext \{/impl HandlerErrorContext {\n    pub async fn new(context: ErrorContext) -> Self { Self(context) }/' \
         crates/core/src/error_resolution.rs
@@ -5913,6 +5921,24 @@ PY
 }
 expect_fail check_pipeline_stage_shape.sh \
     'the production service skipping host targeting' mut_pipeline_service_skips_targeted
+
+mut_pipeline_service_drops_missing_visibility() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+text = text.replace(
+    "let config = config.with_missing_object_visibility(visibility).authorized();",
+    "let config = config.authorized();",
+    1,
+)
+path.write_text(text)
+PY
+}
+expect_fail check_pipeline_stage_shape.sh \
+    'the production service dropping its missing-object visibility transition' \
+    mut_pipeline_service_drops_missing_visibility
 
 mut_pipeline_dynamic_decode_moves_after_authorization() {
     python3 - <<'PY'

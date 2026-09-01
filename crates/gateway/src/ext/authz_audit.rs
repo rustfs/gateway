@@ -151,6 +151,35 @@ pub(crate) fn emit_safely(sink: &dyn AuthzAuditSink, event: &AuthzAuditEvent<'_>
     }
 }
 
+pub(crate) fn emit_input_safely(
+    sink: &dyn AuthzAuditSink,
+    event: &AuthzAuditEvent<'_>,
+    visibility: Option<(&AuthzRequest<'_>, Decision)>,
+) {
+    emit_safely(sink, event);
+    if let Some((request, decision)) = visibility {
+        emit_safely(
+            sink,
+            &AuthzAuditEvent {
+                request_id: event.request_id,
+                stage: AuthzStage::Input,
+                operation: event.operation,
+                action: request.action,
+                resource: request.resource,
+                bucket: request.bucket,
+                key: request.key,
+                resources: std::slice::from_ref(request),
+                auth_scheme: event.auth_scheme,
+                identity: event.identity,
+                target_origin: event.target_origin,
+                policy_snapshot: event.policy_snapshot,
+                decision,
+                elapsed: event.elapsed,
+            },
+        );
+    }
+}
+
 impl<T: AuthzAuditSink + ?Sized> AuthzAuditSink for std::sync::Arc<T> {
     fn on_decision(&self, event: &AuthzAuditEvent<'_>) {
         (**self).on_decision(event);
@@ -243,5 +272,55 @@ mod tests {
         let rendered = format!("{:?}", event_with(Decision::Deny, Some(snapshot.id()), trace.request_id()));
         assert!(!rendered.contains("Allow s3:*"), "{rendered}");
         assert!(rendered.contains(&snapshot.id().to_string()), "{rendered}");
+    }
+
+    /// Negative — the auxiliary visibility verdict is audited as its own ListBucket decision, not
+    /// hidden inside the admitted GetObject event or omitted because it does not gate the handler.
+    #[test]
+    fn n_a_missing_object_visibility_decision_is_a_separate_audit_event() {
+        #[derive(Default)]
+        struct Seen(Mutex<Vec<(String, Decision, Option<String>)>>);
+        impl AuthzAuditSink for Seen {
+            fn on_decision(&self, event: &AuthzAuditEvent<'_>) {
+                self.0.lock().expect("not poisoned").push((
+                    event.action.to_owned(),
+                    event.decision,
+                    event.key.map(|key| key.as_str().to_owned()),
+                ));
+            }
+        }
+
+        let trace = MintedTraces::new().mint();
+        let snapshot = PolicySnapshot::empty();
+        let bucket = crate::BucketName::new("example-bucket").expect("a valid bucket name");
+        let key = crate::ObjectKey::new("private/report.txt").expect("a valid object key");
+        let request = AuthzRequest {
+            operation: "GetObject",
+            action: "s3:ListBucket",
+            resource: ResourceShape::Bucket,
+            bucket: Some(&bucket),
+            key: Some(&key),
+            copy_source_identity: None,
+            version_id: None,
+            route_action: "s3:GetObject",
+            route_bucket: Some(&bucket),
+            route_key: Some(&key),
+            identity: None,
+            target_origin: TargetOrigin::Path,
+        };
+        let mut event = event_with(Decision::Allow, Some(snapshot.id()), trace.request_id());
+        event.stage = AuthzStage::Input;
+        event.operation = "GetObject";
+        event.action = "s3:GetObject";
+
+        let sink = Seen::default();
+        emit_input_safely(&sink, &event, Some((&request, Decision::Deny)));
+        assert_eq!(
+            sink.0.lock().expect("not poisoned").as_slice(),
+            [
+                ("s3:GetObject".to_owned(), Decision::Allow, None),
+                ("s3:ListBucket".to_owned(), Decision::Deny, Some("private/report.txt".to_owned())),
+            ]
+        );
     }
 }

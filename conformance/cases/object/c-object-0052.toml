@@ -1,0 +1,168 @@
+# c-object-0052 — a missing key is hidden from a caller that cannot list the bucket.
+
+[case]
+id = "c-object-0052"
+schema_version = 1
+title = "A caller without ListBucket cannot distinguish a missing key"
+rationale = """
+GetObject permission allows the read attempt but does not grant knowledge of which other keys the
+bucket contains. Returning NoSuchKey to a caller who lacks ListBucket turns the status and error
+document into an existence oracle, so the miss must be collapsed to AccessDenied without echoing
+the key or returning object metadata.
+"""
+polarity = "negative"
+operation = "GetObject"
+tags = ["security", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html"
+summary = "A GetObject miss returns 404 only when the caller also has ListBucket; otherwise S3 returns 403 AccessDenied."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object-visibility"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-object-visibility"
+key = "hidden/missing.txt"
+absent = true
+
+[[setup.objects]]
+bucket = "conf-object-visibility"
+key = "uncertain/missing.txt"
+absent = true
+
+[[setup.objects]]
+bucket = "conf-object-visibility"
+key = "visible/missing.txt"
+absent = true
+
+[[setup.objects]]
+bucket = "conf-object-visibility"
+key = "hidden/versioned.txt"
+body = { utf8 = "current version" }
+
+[[setup.objects]]
+bucket = "conf-object-visibility"
+key = "hidden/existing.txt"
+content_type = "text/plain"
+body = { utf8 = "readable despite list denial" }
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "deny-hides-missing-key"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object-visibility/hidden/missing.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = ["etag", "last-modified", "x-amz-version-id", "accept-ranges"]
+
+[exchanges.expect.error]
+code = "AccessDenied"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>AccessDenied</Code>"]
+not_contains_utf8 = ["hidden/missing.txt", "NoSuchKey"]
+
+[[exchanges]]
+name = "indeterminate-also-hides-missing-key"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object-visibility/uncertain/missing.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = ["etag", "last-modified", "x-amz-version-id", "accept-ranges"]
+
+[exchanges.expect.error]
+code = "AccessDenied"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>AccessDenied</Code>"]
+not_contains_utf8 = ["uncertain/missing.txt", "NoSuchKey"]
+
+[[exchanges]]
+name = "deny-hides-missing-version"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object-visibility/hidden/versioned.txt?versionId=not-a-version"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+connection_after = "open"
+headers_absent = ["etag", "last-modified", "x-amz-version-id", "accept-ranges"]
+
+[exchanges.expect.error]
+code = "AccessDenied"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>AccessDenied</Code>"]
+not_contains_utf8 = ["hidden/versioned.txt", "NoSuchVersion", "not-a-version"]
+
+[[exchanges]]
+name = "allow-reveals-missing-key"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object-visibility/visible/missing.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["etag", "last-modified", "x-amz-version-id", "accept-ranges"]
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>NoSuchKey</Code>", "<Key>visible/missing.txt</Key>"]
+
+[[exchanges]]
+name = "denied-list-does-not-gate-an-existing-object"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object-visibility/hidden/existing.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "text/plain"
+
+[exchanges.expect.body]
+exact_utf8 = "readable despite list denial"
