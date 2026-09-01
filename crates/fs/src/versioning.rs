@@ -43,7 +43,6 @@ pub(super) const STATUS_FILE: &str = "versioning-status";
 pub(super) const SEQUENCE_FILE: &str = "version-sequence";
 const RECORD_FILE: &str = "record";
 const BODY_FILE: &str = "body";
-
 #[derive(Clone, Copy)]
 enum VersioningState {
     Never,
@@ -67,6 +66,7 @@ struct VersionRecord {
     modified: i64,
     e_tag: String,
     size: i64,
+    storage_class: StorageClass,
 }
 
 #[derive(Clone)]
@@ -77,6 +77,7 @@ pub(super) struct CurrentObjectRecord {
     pub(super) modified: i64,
     pub(super) e_tag: String,
     pub(super) size: i64,
+    pub(super) storage_class: StorageClass,
     pub(super) tags: Vec<(String, String)>,
 }
 
@@ -150,6 +151,7 @@ impl FsBackend {
                 modified: record.modified,
                 e_tag: record.e_tag,
                 size: record.size,
+                storage_class: record.storage_class,
                 tags,
             });
         }
@@ -198,6 +200,32 @@ impl FsBackend {
             return Ok(false);
         }
         self.delete_current_locked(bucket, key, state, records).await?;
+        Ok(true)
+    }
+
+    pub(super) async fn transition_current_if_unchanged(
+        &self,
+        bucket: &str,
+        key: &str,
+        observed_sequence: u64,
+        storage_class: &StorageClass,
+    ) -> Result<bool, HandlerError> {
+        let _guard = self.version_lock.lock().await;
+        let records = self.version_records(bucket).await?;
+        let Some(record) = newest_for_key(&records, key) else {
+            return Ok(false);
+        };
+        if record.sequence != observed_sequence || !matches!(record.kind, RecordKind::Object) {
+            return Ok(false);
+        }
+        if record.storage_class.as_str() == storage_class.as_str() {
+            return Ok(false);
+        }
+        let mut updated = record.clone();
+        updated.storage_class = storage_class.clone();
+        let encoded = encode_version_record(&updated);
+        self.write_atomic(&updated.path, &updated.path.join(RECORD_FILE), encoded.as_bytes())
+            .await?;
         Ok(true)
     }
 
@@ -315,6 +343,12 @@ impl FsBackend {
             .next()
             .and_then(|value| value.parse::<i64>().ok())
             .ok_or_else(storage_error)?;
+        let storage_class = match lines.next() {
+            None => StorageClass::STANDARD,
+            Some(value) => decode_record_text(Some(value))
+                .and_then(super::transitions::persisted_storage_class)
+                .ok_or_else(storage_error)?,
+        };
         if lines.next().is_some() || version_id.is_empty() {
             return Err(storage_error());
         }
@@ -340,6 +374,7 @@ impl FsBackend {
             modified,
             e_tag,
             size,
+            storage_class,
         })
     }
 
@@ -372,18 +407,28 @@ impl FsBackend {
             _ => return Err(storage_error()),
         };
         let result = async {
-            let (kind, tag, size) = match (body, object_metadata) {
+            let (tag, size) = match (body, object_metadata) {
                 (Some(bytes), Some((tag, size))) => {
                     tokio::fs::write(temporary.join(BODY_FILE), bytes).await?;
-                    ("object", tag, size)
+                    (tag, size)
                 }
-                _ => ("delete", String::new(), 0),
+                _ => (String::new(), 0),
             };
-            let record = format!(
-                "{sequence}\n{}\n{}\n{kind}\n{modified}\n{tag}\n{size}\n",
-                hex::encode(key),
-                hex::encode(&version_id)
-            );
+            let record = encode_version_record(&VersionRecord {
+                path: destination.clone(),
+                sequence,
+                key: key.to_owned(),
+                version_id: version_id.clone(),
+                kind: if body.is_some() {
+                    RecordKind::Object
+                } else {
+                    RecordKind::DeleteMarker
+                },
+                modified,
+                e_tag: tag,
+                size,
+                storage_class: StorageClass::STANDARD,
+            });
             tokio::fs::write(temporary.join(RECORD_FILE), record).await?;
             tokio::fs::rename(&temporary, &destination).await
         }
@@ -449,6 +494,23 @@ impl FsBackend {
             Err(_) => Err(storage_error()),
         }
     }
+}
+
+fn encode_version_record(record: &VersionRecord) -> String {
+    let kind = match record.kind {
+        RecordKind::Object => "object",
+        RecordKind::DeleteMarker => "delete",
+    };
+    format!(
+        "{}\n{}\n{}\n{kind}\n{}\n{}\n{}\n{}\n",
+        record.sequence,
+        hex::encode(&record.key),
+        hex::encode(&record.version_id),
+        record.modified,
+        record.e_tag,
+        record.size,
+        hex::encode(record.storage_class.as_str())
+    )
 }
 
 fn decode_record_text(value: Option<&str>) -> Option<String> {
@@ -566,6 +628,7 @@ impl Handler<GetObject> for FsBackend {
                 content_length: Some(record.size),
                 e_tag: Some(rustfs_gateway::ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?),
                 last_modified: Some(Timestamp::from_secs(record.modified)),
+                storage_class: Some(record.storage_class.clone()),
                 version_id: (record.version_id != "null").then(|| record.version_id.clone()),
                 body: Some(ByteStream::from_bytes(Bytes::from(bytes))),
                 ..GetObjectOutput::default()
@@ -610,6 +673,7 @@ impl Handler<HeadObject> for FsBackend {
                 content_length: Some(record.size),
                 e_tag: Some(rustfs_gateway::ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?),
                 last_modified: Some(Timestamp::from_secs(record.modified)),
+                storage_class: Some(record.storage_class.clone()),
                 version_id: (record.version_id != "null").then(|| record.version_id.clone()),
                 ..HeadObjectOutput::default()
             }));
@@ -703,7 +767,7 @@ impl Handler<ListObjectVersions> for FsBackend {
                     last_modified: Timestamp::from_secs(record.modified),
                     e_tag: rustfs_gateway::ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?,
                     size: record.size,
-                    storage_class: StorageClass::custom("STANDARD"),
+                    storage_class: record.storage_class.clone(),
                     ..ObjectVersion::default()
                 }),
                 RecordKind::DeleteMarker => delete_markers.push(DeleteMarkerEntry {

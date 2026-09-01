@@ -15,8 +15,8 @@
 //! Filesystem-backed reference handlers for `rustfs-gateway`.
 //!
 //! Responsible for: a small, inspectable persistence backend used to exercise real S3 handlers,
-//! including atomically published multipart uploads, persistent object versions and tags, and lifecycle expiration.
-//! NOT responsible for: production durability, lifecycle transitions, or cross-process coordination.
+//! including atomically published multipart uploads, persistent object versions and tags, and lifecycle actions.
+//! NOT responsible for: production durability, physical storage tiers, or cross-process coordination.
 //! Upstream: `rustfs-gateway`. Downstream: examples and backend contract tests.
 
 #![doc = include_str!("../README.md")]
@@ -25,7 +25,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use md5::{Digest as _, Md5};
@@ -140,12 +140,16 @@ macro_rules! register_lifecycle_entries {
 }
 
 mod lifecycle;
+mod lifecycle_scheduler;
 mod listing;
 mod tagging;
+mod transitions;
 mod uploads;
 mod versioning;
 
 use uploads::UploadRecord;
+
+pub use lifecycle_scheduler::{LifecycleScheduler, LifecycleSchedulerReport};
 
 /// A deliberately small filesystem reference backend.
 ///
@@ -159,6 +163,8 @@ pub struct FsBackend {
     version_lock: tokio::sync::Mutex<()>,
     clock: Arc<dyn Clock>,
     lifecycle_day_seconds: i64,
+    lifecycle_scheduler_running: AtomicBool,
+    lifecycle_sweep_interval: Duration,
 }
 
 impl FsBackend {
@@ -195,13 +201,16 @@ impl FsBackend {
             version_lock: tokio::sync::Mutex::new(()),
             clock,
             lifecycle_day_seconds: 24 * 60 * 60,
+            lifecycle_scheduler_running: AtomicBool::new(false),
+            lifecycle_sweep_interval: Duration::from_secs(24 * 60 * 60),
         })
     }
 
-    /// Uses `interval` as one lifecycle day for the reference backend's debug mode.
+    /// Uses `interval` as one lifecycle day and one automatic sweep cadence in debug mode.
     ///
     /// This hook lets conformance suites observe day-based expiration without waiting for wall-clock
-    /// days. Production-like callers should leave the default 24-hour day unchanged.
+    /// days. A scheduler started with [`Self::start_lifecycle_scheduler`] waits this same interval
+    /// between sweeps. Production-like callers should leave the default 24-hour cadence unchanged.
     ///
     /// # Errors
     ///
@@ -212,6 +221,7 @@ impl FsBackend {
             .filter(|seconds| *seconds > 0)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the lifecycle debug interval must be non-zero"))?;
         self.lifecycle_day_seconds = seconds;
+        self.lifecycle_sweep_interval = interval;
         Ok(self)
     }
 

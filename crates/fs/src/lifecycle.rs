@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Persistent bucket lifecycle configuration and expiration execution.
+//! Persistent bucket lifecycle configuration and action selection.
 //!
 //! Responsible for: validating one complete lifecycle document, atomically replacing its durable
-//! record, serving or deleting it after restart, and expiring selected current objects.
-//! NOT responsible for: transition actions, tag persistence, or scheduling repeated sweeps.
-//! Upstream: generated lifecycle DTOs and the historical persistence codec. Downstream: production handlers.
+//! record, serving or deleting it after restart, and selecting objects for lifecycle actions.
+//! NOT responsible for: mutating transition state, tag persistence, or scheduling repeated sweeps.
+//! Upstream: generated lifecycle DTOs and the historical persistence codec. Downstream: production handlers,
+//! transition execution, and the lifecycle scheduler.
 
 use std::io;
 
@@ -44,9 +45,9 @@ use crate::versioning::CurrentObjectRecord;
 pub(super) const RECORD_FILE: &str = "lifecycle";
 const RECORD_MAGIC: &[u8] = b"FSLC1\n";
 
-struct LifecycleRecord {
-    configuration: BucketLifecycleConfiguration,
-    minimum_object_size: Option<TransitionDefaultMinimumObjectSize>,
+pub(super) struct LifecycleRecord {
+    pub(super) configuration: BucketLifecycleConfiguration,
+    pub(super) minimum_object_size: Option<TransitionDefaultMinimumObjectSize>,
 }
 
 impl FsBackend {
@@ -96,7 +97,7 @@ impl FsBackend {
         }
     }
 
-    async fn lifecycle_buckets(&self) -> Result<Vec<String>, HandlerError> {
+    pub(super) async fn lifecycle_buckets(&self) -> Result<Vec<String>, HandlerError> {
         let mut entries = tokio::fs::read_dir(&self.root).await.map_err(|_| storage_error())?;
         let mut buckets = Vec::new();
         while let Some(entry) = entries.next_entry().await.map_err(|_| storage_error())? {
@@ -117,7 +118,7 @@ impl FsBackend {
         Ok(buckets)
     }
 
-    async fn optional_lifecycle(&self, bucket: &str) -> Result<Option<LifecycleRecord>, HandlerError> {
+    pub(super) async fn optional_lifecycle(&self, bucket: &str) -> Result<Option<LifecycleRecord>, HandlerError> {
         let path = self.lifecycle_path(bucket);
         match tokio::fs::symlink_metadata(path).await {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -186,7 +187,7 @@ fn rule_expires(rule: &LifecycleRule, object: &CurrentObjectRecord, now: i64, li
     date_elapsed || days_elapsed
 }
 
-fn rule_selects(rule: &LifecycleRule, object: &CurrentObjectRecord) -> bool {
+pub(super) fn rule_selects(rule: &LifecycleRule, object: &CurrentObjectRecord) -> bool {
     if rule.prefix.as_deref().is_some_and(|prefix| !object.key.starts_with(prefix)) {
         return false;
     }
