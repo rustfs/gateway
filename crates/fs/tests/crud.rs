@@ -22,6 +22,9 @@
 #[path = "crud/versioning.rs"]
 mod versioning;
 
+#[path = "crud/listing.rs"]
+mod listing;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -76,7 +79,7 @@ fn service(root: &TestRoot) -> (Arc<FsBackend>, S3Service) {
             ),
     );
     let service = backend
-        .register_versioning(backend.register_multipart(builder))
+        .register_listing(backend.register_versioning(backend.register_multipart(builder)))
         .build()
         .expect("the reference registry is a complete assembly");
     (backend, service)
@@ -215,6 +218,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "HeadBucket",
             "HeadObject",
             "ListObjectVersions",
+            "ListObjectsV2",
             "ListParts",
             "PutBucketVersioning",
             "PutObject",

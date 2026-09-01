@@ -67,7 +67,42 @@ struct VersionRecord {
     size: i64,
 }
 
+#[derive(Clone)]
+pub(super) struct CurrentObjectRecord {
+    pub(super) key: String,
+    pub(super) version_id: String,
+    pub(super) sequence: u64,
+    pub(super) modified: i64,
+    pub(super) e_tag: String,
+    pub(super) size: i64,
+}
+
 impl FsBackend {
+    pub(super) async fn current_object_records(&self, bucket: &str) -> Result<Vec<CurrentObjectRecord>, HandlerError> {
+        let records = self.version_records(bucket).await?;
+        let mut current = BTreeMap::<String, VersionRecord>::new();
+        for record in records {
+            match current.get(&record.key) {
+                Some(held) if held.sequence >= record.sequence => {}
+                _ => {
+                    current.insert(record.key.clone(), record);
+                }
+            }
+        }
+        Ok(current
+            .into_values()
+            .filter(|record| matches!(record.kind, RecordKind::Object))
+            .map(|record| CurrentObjectRecord {
+                key: record.key,
+                version_id: record.version_id,
+                sequence: record.sequence,
+                modified: record.modified,
+                e_tag: record.e_tag,
+                size: record.size,
+            })
+            .collect())
+    }
+
     async fn versioning_state(&self, bucket: &str) -> Result<VersioningState, HandlerError> {
         self.require_bucket(bucket).await?;
         let path = self.bucket_path(bucket).join(STATUS_FILE);

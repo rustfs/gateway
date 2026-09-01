@@ -32,8 +32,8 @@ use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
     AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CreateBucket,
     CreateBucketOutput, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketOutput, DeleteObject,
-    GetBucketVersioning, GetObject, HeadBucket, HeadBucketOutput, HeadObject, ListObjectVersions, ListParts, ListPartsOutput,
-    Part, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
+    GetBucketVersioning, GetObject, HeadBucket, HeadBucketOutput, HeadObject, ListObjectVersions, ListObjectsV2, ListParts,
+    ListPartsOutput, Part, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
@@ -63,6 +63,7 @@ macro_rules! reference_operations {
             crud HeadBucket => "HeadBucket",
             crud HeadObject => "HeadObject",
             versioning ListObjectVersions => "ListObjectVersions",
+            listing ListObjectsV2 => "ListObjectsV2",
             multipart ListParts => "ListParts",
             versioning PutBucketVersioning => "PutBucketVersioning",
             crud PutObject => "PutObject",
@@ -90,6 +91,9 @@ macro_rules! register_crud_entries {
     ($backend:expr, $builder:expr; versioning $operation:ty => $name:literal, $($rest:tt)*) => {
         register_crud_entries!($backend, $builder; $($rest)*)
     };
+    ($backend:expr, $builder:expr; listing $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_crud_entries!($backend, $builder; $($rest)*)
+    };
 }
 
 macro_rules! register_multipart_entries {
@@ -101,6 +105,9 @@ macro_rules! register_multipart_entries {
         register_multipart_entries!($backend, $builder; $($rest)*)
     };
     ($backend:expr, $builder:expr; versioning $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_multipart_entries!($backend, $builder; $($rest)*)
+    };
+    ($backend:expr, $builder:expr; listing $operation:ty => $name:literal, $($rest:tt)*) => {
         register_multipart_entries!($backend, $builder; $($rest)*)
     };
 }
@@ -115,6 +122,17 @@ macro_rules! register_versioning_entries {
     };
 }
 
+macro_rules! register_listing_entries {
+    ($backend:expr, $builder:expr;) => { $builder };
+    ($backend:expr, $builder:expr; listing $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_listing_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
+    };
+    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_listing_entries!($backend, $builder; $($rest)*)
+    };
+}
+
+mod listing;
 mod versioning;
 
 #[derive(Clone)]
@@ -215,6 +233,17 @@ impl FsBackend {
         macro_rules! register {
             ($($operations:tt)*) => {
                 register_versioning_entries!(self, builder; $($operations)*)
+            };
+        }
+        reference_operations!(register)
+    }
+
+    /// Registers the bounded object listing operation family.
+    #[must_use]
+    pub fn register_listing(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
+        macro_rules! register {
+            ($($operations:tt)*) => {
+                register_listing_entries!(self, builder; $($operations)*)
             };
         }
         reference_operations!(register)
