@@ -10,6 +10,7 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `src/persistence/dto_bridge.rs` | Lossless bridges between generated HTTP DTOs and historical persistence shapes. | Connecting a generated configuration DTO to persisted XML without duplicating a codec. |
 | `src/persistence/dto_bridge/cors_object_lock.rs` | Generated DTO bridges for the CORS and Object Lock persistence families. | Connecting either family to persisted XML or auditing lossless field mapping. |
 | `src/persistence/dto_bridge/logging_website.rs` | Generated DTO bridges for Bucket Logging and Website persistence. | Connecting either family to persisted XML or auditing nested-field loss. |
+| `src/persistence/dto_bridge/notification.rs` | Generated DTO bridge for Notification persistence. | Connecting notification metadata to generated DTOs or auditing destination/filter loss. |
 | `src/persistence/dto_bridge/replication.rs` | Generated DTO bridge for Replication persistence. | Connecting Replication metadata to generated DTOs or auditing nested-field loss. |
 | `src/persistence/accelerate_payment.rs` | Production Accelerate and Request Payment persistence codecs and runtime decisions. | Changing those two metadata families or their historical XML compatibility. |
 | `src/persistence/lifecycle.rs` | Full Lifecycle persistence structure, parser, timestamp normalization, and old-order writer. | Changing Lifecycle metadata compatibility or action semantics. |
