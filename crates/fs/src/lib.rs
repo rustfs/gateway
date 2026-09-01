@@ -48,6 +48,7 @@ const UPLOADS_DIR: &str = "uploads";
 const VERSIONS_DIR: &str = "versions";
 const PARTS_DIR: &str = "parts";
 const UPLOAD_RECORD: &str = "record";
+const MIN_MULTIPART_PART_BYTES: usize = 5 * 1024 * 1024;
 
 macro_rules! reference_operations {
     ($visitor:ident) => {
@@ -697,7 +698,8 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
         let upload = self.upload_path(input.bucket.as_str(), &upload_id);
         let mut completed_bytes = Vec::new();
         let mut part_digests = Vec::with_capacity(requested.len());
-        for (number, expected) in &requested {
+        let final_part = requested.len().saturating_sub(1);
+        for (index, (number, expected)) in requested.iter().enumerate() {
             let path = Self::part_path(&upload, *number);
             let metadata = tokio::fs::symlink_metadata(&path).await.map_err(|error| match error.kind() {
                 io::ErrorKind::NotFound => HandlerError::new(ErrorCode::INVALID_PART, "a completed part was not uploaded"),
@@ -710,6 +712,12 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
                 ));
             }
             let bytes = tokio::fs::read(path).await.map_err(|_| storage_error())?;
+            if index != final_part && bytes.len() < MIN_MULTIPART_PART_BYTES {
+                return Err(HandlerError::new(
+                    ErrorCode::ENTITY_TOO_SMALL,
+                    "the proposed multipart upload contains an undersized non-final part",
+                ));
+            }
             let actual = etag(&bytes)?;
             if actual != *expected {
                 return Err(HandlerError::new(

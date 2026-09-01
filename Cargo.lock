@@ -1807,6 +1807,7 @@ dependencies = [
  "bytes",
  "hex",
  "http",
+ "http-body",
  "md-5",
  "rustfs-gateway",
  "sha2",
