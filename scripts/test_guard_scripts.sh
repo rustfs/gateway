@@ -21530,6 +21530,42 @@ expect_fail check_corpus_provenance.sh \
     mut_corpus_allowlist_emptied \
     'parsed as empty'
 
+mut_corpus_unknown_system_under_test() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["sut"] = "somebody-elses-cluster"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'an entry naming a system under test outside the closed vocabulary' \
+    mut_corpus_unknown_system_under_test \
+    'closed vocabulary'
+
+mut_corpus_undeclared_production_recording() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["sut"] = "rustfs-server"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'an entry claiming a production recording the manifest does not declare' \
+    mut_corpus_undeclared_production_recording \
+    'entries_from_production_server'
+
 mut_corpus_over_hard_ceiling() {
     python3 - <<'PYEOF'
 from pathlib import Path

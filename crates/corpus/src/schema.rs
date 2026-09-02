@@ -61,6 +61,28 @@ struct RawChunk {
     duration_ms: Option<u64>,
 }
 
+/// What the client was actually talking to when the entry was recorded.
+///
+/// A closed vocabulary, and the deserializer is what closes it: an unrecognised spelling is
+/// a load error rather than a value nobody checked. It is a separate axis from `src`, which
+/// says which suite drove the traffic, because the same suite pointed at two different
+/// endpoints produces two different things — and rustfs/gateway#624 measured that this
+/// repository has no runnable production server binary at all, so "a real client spoke S3"
+/// and "a real client spoke to the production server" are not the same claim and must not
+/// be readable as one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Sut {
+    /// The `rustfs-gateway-fs` reference backend behind a real listener: real sockets, real
+    /// SigV4, real wire bytes — and none of the production storage stack behind it.
+    GatewayFsReference,
+    /// The production RustFS server. No entry carries this yet; rustfs/gateway#624 records
+    /// that no such binary exists to point a client at.
+    RustfsServer,
+    /// No server was involved: the entry was hand-authored as input bytes.
+    None,
+}
+
 /// One unit of request body, aligned field for field with the conformance case schema's
 /// `[[request.chunks]]` entry so that conversion loses nothing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +183,8 @@ pub struct Entry {
     pub recorded: String,
     /// How much of the request head the recorder saw.
     pub capture: Capture,
+    /// What the client was talking to. See [`Sut`]: this is not implied by `src`.
+    pub sut: Sut,
     /// Request method, verbatim.
     pub method: String,
     /// Raw request target, verbatim, including the query string.

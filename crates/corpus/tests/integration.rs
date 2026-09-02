@@ -27,7 +27,7 @@ use rustfs_gateway_corpus::base64;
 use rustfs_gateway_corpus::case;
 use rustfs_gateway_corpus::dedup;
 use rustfs_gateway_corpus::redact;
-use rustfs_gateway_corpus::schema::{self, Capture, Chunk, Entry, LoadError, Response};
+use rustfs_gateway_corpus::schema::{self, Capture, Chunk, Entry, LoadError, Response, Sut};
 use rustfs_gateway_corpus::store;
 
 // A well-known AWS documentation example secret. It is 40 characters, mixed case, with a
@@ -41,6 +41,7 @@ fn base_entry() -> Entry {
         src: "client-matrix:boto3@1.42.96".to_owned(),
         recorded: "2026-09-02".to_owned(),
         capture: Capture::HeadFull,
+        sut: Sut::GatewayFsReference,
         method: "PUT".to_owned(),
         target: "/bucket/key".to_owned(),
         headers: vec![
@@ -234,7 +235,7 @@ fn a_redaction_claim_does_not_launder_a_live_value() {
 
 #[test]
 fn a_newer_schema_version_is_refused_by_name() {
-    let line = r#"{"v":2,"op":"PutObject","src":"handwritten:s3s-issues","recorded":"2026-09-02","capture":"head_full","method":"PUT","target":"/b/k"}"#;
+    let line = r#"{"v":2,"op":"PutObject","src":"handwritten:s3s-issues","recorded":"2026-09-02","capture":"head_full","sut":"none","method":"PUT","target":"/b/k"}"#;
     match schema::load_jsonl(line) {
         Err(LoadError::UnsupportedVersion { line, found, supported }) => {
             assert_eq!((line, found, supported), (1, 2, schema::CORPUS_SCHEMA_VERSION));
@@ -245,20 +246,29 @@ fn a_newer_schema_version_is_refused_by_name() {
 
 #[test]
 fn an_unknown_entry_field_is_refused() {
-    let line = r#"{"v":1,"op":"PutObject","src":"handwritten:s3s-issues","recorded":"2026-09-02","capture":"head_full","method":"PUT","target":"/b/k","surprise":1}"#;
+    let line = r#"{"v":1,"op":"PutObject","src":"handwritten:s3s-issues","recorded":"2026-09-02","capture":"head_full","sut":"none","method":"PUT","target":"/b/k","surprise":1}"#;
     assert!(matches!(schema::load_jsonl(line), Err(LoadError::Malformed { .. })));
 }
 
 #[test]
 fn an_unknown_chunk_field_is_refused() {
-    let line = r#"{"v":1,"op":"PutObject","src":"handwritten:s3s-issues","recorded":"2026-09-02","capture":"head_full","method":"PUT","target":"/b/k","chunks":[{"bytes_b64":"","surprise":1}]}"#;
+    let line = r#"{"v":1,"op":"PutObject","src":"handwritten:s3s-issues","recorded":"2026-09-02","capture":"head_full","sut":"none","method":"PUT","target":"/b/k","chunks":[{"bytes_b64":"","surprise":1}]}"#;
     assert!(matches!(schema::load_jsonl(line), Err(LoadError::Malformed { .. })));
 }
 
 #[test]
 fn a_chunk_that_is_both_data_and_control_is_refused() {
-    let line = r#"{"v":1,"op":"PutObject","src":"handwritten:s3s-issues","recorded":"2026-09-02","capture":"head_full","method":"PUT","target":"/b/k","chunks":[{"bytes_b64":"","action":"close"}]}"#;
+    let line = r#"{"v":1,"op":"PutObject","src":"handwritten:s3s-issues","recorded":"2026-09-02","capture":"head_full","sut":"none","method":"PUT","target":"/b/k","chunks":[{"bytes_b64":"","action":"close"}]}"#;
     assert!(matches!(schema::load_jsonl(line), Err(LoadError::Malformed { .. })));
+}
+
+#[test]
+fn an_unknown_system_under_test_is_refused() {
+    let line = r#"{"v":1,"op":"PutObject","src":"handwritten:gateway","recorded":"2026-09-02","capture":"head_full","sut":"somebody-elses-cluster","method":"PUT","target":"/b/k"}"#;
+    assert!(
+        matches!(schema::load_jsonl(line), Err(LoadError::Malformed { .. })),
+        "the system under test is a closed vocabulary; an unrecognised spelling must not load"
+    );
 }
 
 #[test]
@@ -548,6 +558,14 @@ fn the_checked_in_corpus_verifies_and_carries_chunk_framing() {
          framing at all has not closed it"
     );
     assert!(report.bytes < store::SOFT_SIZE_LIMIT_BYTES);
+
+    // rustfs/gateway#624: this repository has no runnable production server binary, so no
+    // entry can honestly claim one. The manifest says so in a field rather than in prose.
+    let manifest = std::fs::read_to_string(root.join(store::MANIFEST_FILE)).unwrap();
+    assert!(manifest.contains("entries_from_production_server = 0"), "{manifest}");
+    for entry in store::load_all(&root).unwrap() {
+        assert_ne!(entry.sut, Sut::RustfsServer, "{} claims a production recording", entry.op);
+    }
 
     // Every entry must survive a round trip into whatever conversion it is eligible for:
     // a full capture into a case draft, a partial one into an explicit refusal. A silent

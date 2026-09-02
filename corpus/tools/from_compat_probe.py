@@ -169,6 +169,11 @@ def entry_of(record: dict[str, Any], src: str, recorded: str) -> dict[str, Any]:
         "src": src,
         "recorded": recorded,
         "capture": "head_partial",
+        # The matrix points its clients at `compat-sut`: the rustfs-gateway-fs reference
+        # backend behind a real listener. Real sockets, real SigV4, real wire bytes — and
+        # not the production RustFS server, which rustfs/gateway#624 records does not
+        # exist as a runnable binary in this repository at all.
+        "sut": "gateway-fs-reference",
         "method": record.get("method", "GET"),
         "target": target,
         "headers": headers_of(record),

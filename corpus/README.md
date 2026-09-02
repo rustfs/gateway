@@ -18,10 +18,29 @@ The rule is enforced, not merely stated. Every entry's `src` must name a source 
 allowlist in `crates/corpus/src/store.rs`, and `scripts/check_corpus_provenance.sh`
 refuses anything else — `production` included — in CI and in pre-commit.
 
+### And every entry says what it was actually talking to
+
+`src` says which suite drove the traffic. The separate `sut` field says what answered, from
+a closed vocabulary the deserializer enforces:
+
+| `sut` | Meaning |
+|---|---|
+| `gateway-fs-reference` | the `rustfs-gateway-fs` reference backend behind a real listener — real sockets, real SigV4, real wire bytes, none of the production storage stack |
+| `rustfs-server` | the production RustFS server |
+| `none` | hand-authored input bytes; no server was involved |
+
+Today **every** captured entry is `gateway-fs-reference` and `MANIFEST.toml` records
+`entries_from_production_server = 0`. That is not a placeholder: rustfs/gateway#624
+measured that this repository ships no runnable production server binary, so there is
+nothing to point a client at yet. "A real client spoke S3" and "a real client spoke to the
+production server" are different claims, and without this field the corpus would be read
+as the stronger one. `scripts/check_corpus_provenance.sh` checks the count against the
+entries, so the claim cannot rot.
+
 ## What is in here today
 
-49 entries in 18 buckets, 25 KB. 43 of them are **real captured traffic** from the
-four-client compatibility matrix (rustfs/backlog#1765), deduplicated down from 350 probe
+49 entries in 18 buckets, 26 KB. 43 of them are **real captured traffic** from the
+four-client compatibility matrix (rustfs/backlog#1765), deduplicated down from 340 probe
 records; 6 are hand-authored inputs carrying chunk framing and abnormal termination.
 
 | Source | Entries |

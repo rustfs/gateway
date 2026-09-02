@@ -34,7 +34,7 @@ use sha2::Sha256;
 use crate::base64;
 use crate::dedup::Bucket;
 use crate::redact;
-use crate::schema::{self, Entry};
+use crate::schema::{self, Entry, Sut};
 
 /// The manifest file name, relative to the corpus root.
 pub const MANIFEST_FILE: &str = "MANIFEST.toml";
@@ -97,7 +97,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// The manifest is the corpus's version record: schema version, per-bucket counts with a
 /// content hash, and the provenance census. It is generated, never hand-edited.
 pub fn render_manifest(buckets: &[Bucket]) -> String {
-    let mut sources: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut sources: BTreeMap<(&str, &'static str), usize> = BTreeMap::new();
     let mut total_entries = 0usize;
     let mut total_bytes = 0usize;
     let mut rows = String::new();
@@ -110,7 +110,7 @@ pub fn render_manifest(buckets: &[Bucket]) -> String {
         total_entries += bucket.entries.len();
         total_bytes += body.len();
         for entry in &bucket.entries {
-            *sources.entry(entry.src.as_str()).or_default() += 1;
+            *sources.entry((entry.src.as_str(), sut_name(entry.sut))).or_default() += 1;
         }
         rows.push_str(&format!(
             "\n[[bucket]]\npath = \"{}\"\nop = \"{}\"\nfamily = \"{}\"\nentries = {}\nchunked = {}\ntrailers = {}\nbytes = {}\nsha256 = \"{}\"\n",
@@ -137,11 +137,31 @@ pub fn render_manifest(buckets: &[Bucket]) -> String {
         "chunk_framed_entries = {}\n",
         ordered.iter().map(|bucket| bucket.chunked()).sum::<usize>()
     ));
+    out.push_str(&format!(
+        "entries_from_production_server = {}\n",
+        ordered
+            .iter()
+            .flat_map(|bucket| bucket.entries.iter())
+            .filter(|entry| entry.sut == Sut::RustfsServer)
+            .count()
+    ));
     out.push_str(&rows);
-    for (src, count) in sources {
-        out.push_str(&format!("\n[[source]]\nid = \"{src}\"\nentries = {count}\n"));
+    for ((src, sut), count) in sources {
+        out.push_str(&format!("\n[[source]]\nid = \"{src}\"\nsut = \"{sut}\"\nentries = {count}\n"));
     }
     out
+}
+
+/// The manifest spelling of a system under test.
+///
+/// Kept beside the enum it renders so the two cannot drift, and so
+/// `scripts/check_corpus_provenance.sh` has one vocabulary to read out of the source.
+pub fn sut_name(sut: Sut) -> &'static str {
+    match sut {
+        Sut::GatewayFsReference => "gateway-fs-reference",
+        Sut::RustfsServer => "rustfs-server",
+        Sut::None => "none",
+    }
 }
 
 /// Write every non-empty bucket plus the manifest under `root`, replacing what is there.
@@ -211,7 +231,7 @@ pub fn verify(root: &Path) -> Result<VerifyReport, Vec<String>> {
         Err(error) => return Err(vec![format!("cannot enumerate {}: {error}", root.display())]),
     };
 
-    let mut sources: BTreeMap<String, usize> = BTreeMap::new();
+    let mut sources: BTreeMap<(String, &'static str), usize> = BTreeMap::new();
     for path in &files {
         let display = path.strip_prefix(root).unwrap_or(path).display().to_string();
         report.buckets += 1;
@@ -247,7 +267,7 @@ pub fn verify(root: &Path) -> Result<VerifyReport, Vec<String>> {
                     violations.push(format!("{display}:{line}: {finding}"));
                 }
             }
-            *sources.entry(entry.src.clone()).or_default() += 1;
+            *sources.entry((entry.src.clone(), sut_name(entry.sut))).or_default() += 1;
             if entry.has_chunk_framing() {
                 report.chunk_framed += 1;
             }

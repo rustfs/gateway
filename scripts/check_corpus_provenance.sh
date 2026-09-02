@@ -8,7 +8,10 @@ set -euo pipefail
 #   Every `src` in a `corpus/**/*.jsonl` entry and every `[[source]] id` in
 #   `corpus/MANIFEST.toml` names a source on the allowlist, and the allowlist it checks
 #   against is read out of `crates/corpus/src/store.rs` rather than written down twice.
-#   A `client-matrix:` source must also carry a pinned revision after `@`.
+#   A `client-matrix:` source must also carry a pinned revision after `@`. Every entry
+#   also names a `sut` from the closed vocabulary in `crates/corpus/src/store.rs`, the
+#   manifest's `[[source]]` census reproduces the `(id, sut)` pairs the entries carry, and
+#   its `entries_from_production_server` count matches the entries themselves.
 #
 # WHY
 #   rustfs/backlog#1763 makes "zero production traffic" a hard constraint, not a
@@ -18,6 +21,13 @@ set -euo pipefail
 #   constraint into something a machine can decide. The pinned revision is the second
 #   half: when a differential result changes, "which client version produced this entry"
 #   has to be answerable from the corpus alone.
+#
+#   `sut` is the third half, and it is separate from `src` on purpose. rustfs/gateway#624
+#   measured that this repository has no runnable production server binary, so every
+#   recorded entry today came from a reference backend behind a real listener. "A real
+#   client spoke S3" and "a real client spoke to the production server" are different
+#   claims, and a corpus that cannot tell them apart will be read as the stronger one.
+#   Prose in a README does not survive; a field a script checks does.
 #
 # HOW TO EXEMPT
 #   There is no exemption for production traffic. A new synthetic suite is added by
@@ -57,6 +67,13 @@ if not allowlist:
     print("check_corpus_provenance: SOURCE_ALLOWLIST parsed as empty; the guard would pass on anything", file=sys.stderr)
     raise SystemExit(1)
 
+# The system-under-test vocabulary, read out of the same file rather than restated here.
+suts = set(re.findall(r'Sut::[A-Za-z]+ => "([a-z-]+)",', store))
+if not suts:
+    print("check_corpus_provenance: the sut vocabulary parsed as empty; the guard would pass on anything", file=sys.stderr)
+    raise SystemExit(1)
+production_suts = set(re.findall(r'Sut::RustfsServer => "([a-z-]+)",', store))
+
 
 def refusal(src: str) -> str | None:
     for prefix, needs_revision in allowlist:
@@ -70,7 +87,8 @@ def refusal(src: str) -> str | None:
 
 
 violations = []
-sources = set()
+sources: set[tuple[str, str]] = set()
+from_production = 0
 
 for path in sorted((root / "corpus").rglob("*.jsonl")):
     relative = path.relative_to(root).as_posix()
@@ -86,14 +104,23 @@ for path in sorted((root / "corpus").rglob("*.jsonl")):
         if not isinstance(src, str) or not src:
             violations.append(f"{relative}:{index}: entry has no `src`")
             continue
-        sources.add(src)
+        sut = entry.get("sut")
+        if not isinstance(sut, str) or sut not in suts:
+            violations.append(
+                f"{relative}:{index}: entry names no system under test from the closed vocabulary "
+                f"{sorted(suts)}: {sut!r}"
+            )
+            continue
+        if sut in production_suts:
+            from_production += 1
+        sources.add((src, sut))
         reason = refusal(src)
         if reason:
             violations.append(f"{relative}:{index}: {reason}")
 
 manifest = (root / "corpus/MANIFEST.toml").read_text()
-declared = set(re.findall(r'(?m)^id = "([^"]+)"$', manifest))
-for src in sorted(declared):
+declared = set(re.findall(r'(?m)^id = "([^"]+)"\nsut = "([^"]+)"$', manifest))
+for src, _ in sorted(declared):
     reason = refusal(src)
     if reason:
         violations.append(f"corpus/MANIFEST.toml: {reason}")
@@ -103,9 +130,21 @@ if declared != sources:
         f"only in manifest={sorted(declared - sources)}, only in entries={sorted(sources - declared)}"
     )
 
+recorded = re.search(r"(?m)^entries_from_production_server = ([0-9]+)$", manifest)
+if recorded is None:
+    violations.append("corpus/MANIFEST.toml does not record entries_from_production_server")
+elif int(recorded.group(1)) != from_production:
+    violations.append(
+        f"corpus/MANIFEST.toml records entries_from_production_server = {recorded.group(1)}, "
+        f"but {from_production} entry/entries name a production system under test"
+    )
+
 for violation in violations:
     print(f"check_corpus_provenance: {violation}", file=sys.stderr)
 if violations:
     raise SystemExit(1)
-print(f"OK: {len(sources)}/{len(sources)} sources in allowlist")
+print(
+    f"OK: {len(sources)}/{len(sources)} sources in allowlist, "
+    f"{from_production} entry/entries recorded against a production server"
+)
 PYEOF
