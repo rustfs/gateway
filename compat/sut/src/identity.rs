@@ -285,6 +285,12 @@ mod tests {
     }
 
     /// Negative — half a second credential pair cannot sign, so it is refused rather than guessed.
+    ///
+    /// The assertion is on the **distinctive** half of the diagnosis rather than on a flag name.
+    /// An omitted flag and a flag supplied as the empty string are different mistakes with
+    /// different fixes, and both are refused; asserting only on the flag name made the omission
+    /// check unfalsifiable — deleting it left the empty-value refusal answering in its place, and
+    /// the test stayed green. Measured, with the mutation named in the pull request.
     #[test]
     fn n_a_half_supplied_second_identity_is_refused() {
         let secondary = AccountArgs {
@@ -292,14 +298,23 @@ mod tests {
             ..AccountArgs::default()
         };
         let error = Accounts::build(AccountArgs::default(), secondary).expect_err("half a pair");
-        assert!(error.to_string().contains("--alt-secret-key"), "{error}");
+        assert!(error.to_string().contains("needs both --alt-access-key and --alt-secret-key"), "{error}");
 
         let secondary = AccountArgs {
             owner_id: Some("s3gate-alt".to_owned()),
             ..AccountArgs::default()
         };
         let error = Accounts::build(AccountArgs::default(), secondary).expect_err("an owner id alone");
-        assert!(error.to_string().contains("--alt-access-key"), "{error}");
+        assert!(error.to_string().contains("needs both --alt-access-key and --alt-secret-key"), "{error}");
+
+        // The other mistake, and the other diagnosis: the flag was given, and given as nothing.
+        let secondary = AccountArgs {
+            access_key: Some("ALT".to_owned()),
+            secret_key: Some(String::new()),
+            ..AccountArgs::default()
+        };
+        let error = Accounts::build(AccountArgs::default(), secondary).expect_err("an empty secret");
+        assert!(error.to_string().contains("--alt-secret-key must not be empty"), "{error}");
     }
 
     /// Negative — an empty value is not a value; it is a credential nothing can present.
