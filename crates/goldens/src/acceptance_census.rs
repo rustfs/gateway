@@ -404,7 +404,7 @@ fn production_registry() -> Vec<CaseDeclaration> {
             RuntimeProbe::Variant(Tagging, LargeValue),
             "crates/goldens/src/tagging.rs::corpus_evidence",
         ),
-        CaseDeclaration::blocked("g-d2-001", "https://github.com/rustfs/backlog/issues/2103"),
+        CaseDeclaration::passed("g-d2-001", RuntimeProbe::AllFamilies, "crates/goldens/src/four_way.rs::run_four_way_all"),
         CaseDeclaration::passed(
             "g-d2-002",
             RuntimeProbe::Variant(Tagging, EmptyElement),
@@ -445,7 +445,7 @@ fn production_registry() -> Vec<CaseDeclaration> {
             "crates/ecstore/src/store/mod.rs::ENABLED_OBJECT_LOCK_CONFIG",
             "ac3966d7b1da55987199602ffbe66d5d506b874dbfd2c041627e9ebfedf407b8",
         ),
-        CaseDeclaration::blocked("g-d3-001", "https://github.com/rustfs/backlog/issues/2103"),
+        CaseDeclaration::passed("g-d3-001", RuntimeProbe::AllFamilies, "crates/goldens/src/four_way.rs::run_four_way_all"),
         CaseDeclaration::passed(
             "g-d3-002",
             RuntimeProbe::Family(Lifecycle),
@@ -615,7 +615,6 @@ fn validate_registry(
 fn required_blocker(id: &str) -> Option<&'static str> {
     match id {
         "g-d1-003" => Some("https://github.com/rustfs/backlog/issues/2104"),
-        "g-d2-001" | "g-d3-001" => Some("https://github.com/rustfs/backlog/issues/2103"),
         "g-d4-001" | "g-d5-001" => Some("https://github.com/rustfs/backlog/issues/2096"),
         _ => None,
     }
@@ -653,132 +652,4 @@ const fn variant_report_name(variant: CorpusVariant) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::OnceLock;
-
-    use super::*;
-
-    fn observations() -> &'static RuntimeObservations {
-        static OBSERVATIONS: OnceLock<RuntimeObservations> = OnceLock::new();
-        OBSERVATIONS.get_or_init(|| RuntimeObservations::collect().expect("real corpus and D1-D5 observations pass"))
-    }
-
-    #[test]
-    fn production_registry_is_the_exact_runtime_linked_39_case_set() {
-        let report =
-            validate_registry(&production_registry(), observations()).expect("the exact 39 acceptance cases must be registered");
-        assert_eq!(report.cases().len(), 39);
-        assert_eq!(report.passed_count(), 34);
-        assert_eq!(report.blocked_count(), 5);
-        assert_eq!(
-            require_acceptance_closure(),
-            Err(AcceptanceCensusError::ClosureBlocked(vec![
-                "g-d1-003", "g-d2-001", "g-d3-001", "g-d4-001", "g-d5-001",
-            ]))
-        );
-    }
-
-    #[test]
-    fn missing_case_mutation_fails_closed() {
-        let mut rows = production_registry();
-        rows.retain(|row| row.id != "g-d1-001");
-        assert_eq!(
-            validate_registry(&rows, observations()),
-            Err(AcceptanceCensusError::MissingCase("g-d1-001"))
-        );
-    }
-
-    #[test]
-    fn duplicate_case_mutation_fails_closed() {
-        let mut rows = production_registry();
-        rows.push(rows[0]);
-        assert_eq!(
-            validate_registry(&rows, observations()),
-            Err(AcceptanceCensusError::DuplicateCase("g-d1-001"))
-        );
-    }
-
-    #[test]
-    fn extra_case_mutation_fails_closed() {
-        let mut rows = production_registry();
-        rows[0].id = "g-d6-001";
-        assert_eq!(
-            validate_registry(&rows, observations()),
-            Err(AcceptanceCensusError::ExtraCase("g-d6-001"))
-        );
-    }
-
-    #[test]
-    fn unknown_status_mutation_fails_closed() {
-        let mut rows = production_registry();
-        rows[0].status = "deferred";
-        assert_eq!(
-            validate_registry(&rows, observations()),
-            Err(AcceptanceCensusError::UnknownStatus {
-                id: "g-d1-001",
-                status: "deferred",
-            })
-        );
-    }
-
-    #[test]
-    fn blocked_as_pass_mutation_fails_closed() {
-        let mut rows = production_registry();
-        let blocked = rows
-            .iter_mut()
-            .find(|row| row.id == "g-d1-003")
-            .expect("the specification blocker is registered");
-        blocked.status = "passed";
-        blocked.probe = Some(RuntimeProbe::AllFamilies);
-        blocked.issue = None;
-        assert_eq!(
-            validate_registry(&rows, observations()),
-            Err(AcceptanceCensusError::BlockedCasePassed("g-d1-003"))
-        );
-    }
-
-    #[test]
-    fn runtime_probe_mutation_fails_closed() {
-        let mut rows = production_registry();
-        rows[0].probe = Some(RuntimeProbe::Variant(ConfigKind::Accelerate, CorpusVariant::TimestampPrecision));
-        assert_eq!(
-            validate_registry(&rows, observations()),
-            Err(AcceptanceCensusError::ProbeFailed {
-                id: "g-d1-001",
-                reason: "accelerate variant timestamp-precision was not observed through corpus plus D1-D5".to_owned(),
-            })
-        );
-    }
-
-    #[test]
-    fn vacuous_callback_mutation_fails_closed() {
-        let mut rows = production_registry();
-        let row = rows
-            .iter_mut()
-            .find(|row| row.id == "g-d1-002")
-            .expect("the replication unknown-top-level case is registered");
-        row.probe = Some(RuntimeProbe::AllFamilies);
-        assert_eq!(
-            validate_registry(&rows, observations()),
-            Err(AcceptanceCensusError::WrongBinding("g-d1-002"))
-        );
-    }
-
-    #[test]
-    fn wrong_external_binding_mutation_fails_closed() {
-        let mut rows = production_registry();
-        let row = rows
-            .iter_mut()
-            .find(|row| row.id == "g-key-001")
-            .expect("the persisted metadata key case is registered");
-        row.probe = Some(RuntimeProbe::External {
-            repository: "rustfs/rustfs",
-            revision: RUSTFS_REVISION,
-            sha256: "0000000000000000000000000000000000000000000000000000000000000000",
-        });
-        assert_eq!(
-            validate_registry(&rows, observations()),
-            Err(AcceptanceCensusError::WrongBinding("g-key-001"))
-        );
-    }
-}
+mod tests;
