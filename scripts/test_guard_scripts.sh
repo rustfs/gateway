@@ -20920,6 +20920,191 @@ expect_fail check_compat_table.sh \
     mut_compat_readme_table_edited \
     'does not match compat/matrix.json'
 
+
+mut_corpus_live_authorization_header() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["headers"].append(["authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/x, Signature=live"])
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'a live authorization header reaching a stored corpus bucket' \
+    mut_corpus_live_authorization_header \
+    'a live `authorization` header'
+
+mut_corpus_secret_in_a_decoded_payload() {
+    python3 - <<'PYEOF'
+import base64
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+planted = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+entry["chunks"] = [{"bytes_b64": base64.b64encode(planted.encode()).decode()}]
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'an AWS secret access key hidden inside a base64 payload' \
+    mut_corpus_secret_in_a_decoded_payload \
+    'an AWS secret access key'
+
+mut_corpus_private_key_in_prose() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("corpus/README.md")
+path.write_text(path.read_text() + "\n-----BEGIN RSA PRIVATE KEY-----\nMIIEow==\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'a PEM private key pasted into corpus prose' \
+    mut_corpus_private_key_in_prose \
+    'a PEM private key'
+
+mut_corpus_tree_removed() {
+    rm -rf corpus
+}
+expect_fail check_corpus_no_secrets.sh \
+    'the corpus tree being absent, which must fail rather than skip' \
+    mut_corpus_tree_removed \
+    'required input is missing'
+
+mut_corpus_production_source() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["src"] = "production"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'a corpus entry recorded from production traffic' \
+    mut_corpus_production_source \
+    'not on the allowlist'
+
+mut_corpus_unpinned_client_source() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["src"] = "client-matrix:boto3"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'a client-matrix source with no pinned revision' \
+    mut_corpus_unpinned_client_source \
+    'no pinned revision'
+
+mut_corpus_allowlist_emptied() {
+    python3 - <<'PYEOF'
+import re
+from pathlib import Path
+
+path = Path("crates/corpus/src/store.rs")
+text = path.read_text()
+replaced, count = re.subn(
+    r"pub const SOURCE_ALLOWLIST: &\[\(&str, bool\)\] = &\[.*?\n\];",
+    "pub const SOURCE_ALLOWLIST: &[(&str, bool)] = &[\n];",
+    text,
+    flags=re.S,
+)
+if count != 1:
+    raise SystemExit("source allowlist mutation subject is not unique")
+path.write_text(replaced)
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'the provenance allowlist being emptied, which would let the guard pass on anything' \
+    mut_corpus_allowlist_emptied \
+    'parsed as empty'
+
+mut_corpus_unknown_system_under_test() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["sut"] = "somebody-elses-cluster"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'an entry naming a system under test outside the closed vocabulary' \
+    mut_corpus_unknown_system_under_test \
+    'closed vocabulary'
+
+mut_corpus_undeclared_production_recording() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["sut"] = "rustfs-server"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'an entry claiming a production recording the manifest does not declare' \
+    mut_corpus_undeclared_production_recording \
+    'entries_from_production_server'
+
+mut_corpus_over_hard_ceiling() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+with Path("corpus/object/oversized.bin").open("wb") as handle:
+    handle.truncate(51 * 1024 * 1024)
+PYEOF
+}
+expect_fail check_corpus_size.sh \
+    'the corpus growing past its hard ceiling' \
+    mut_corpus_over_hard_ceiling \
+    'hard ceiling'
+
+mut_corpus_size_limits_unreadable() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus/src/store.rs")
+text = path.read_text()
+old = "pub const HARD_SIZE_LIMIT_BYTES: u64 = 50 * 1024 * 1024;"
+if text.count(old) != 1:
+    raise SystemExit("hard size limit mutation subject is not unique")
+path.write_text(text.replace(old, "pub const HARD_SIZE_LIMIT_BYTES: u64 = u64::MAX;", 1))
+PYEOF
+}
+expect_fail check_corpus_size.sh \
+    'the hard ceiling becoming unreadable, which must fail rather than default' \
+    mut_corpus_size_limits_unreadable \
+    'cannot read HARD_SIZE_LIMIT_BYTES'
+
 fi
 
 if [[ "$ERROR_STATUS_ONLY" == 1 ]]; then
@@ -21411,190 +21596,6 @@ expect_fail check_caps_have_impl.sh \
     'the advertised sendfile backend losing its platform call' \
     mut_caps_platform_call_removed \
     'a Linux or Apple sendfile implementation is missing'
-
-mut_corpus_live_authorization_header() {
-    python3 - <<'PYEOF'
-import json
-from pathlib import Path
-
-path = Path("corpus/object/PutObject.jsonl")
-lines = path.read_text().splitlines()
-entry = json.loads(lines[0])
-entry["headers"].append(["authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/x, Signature=live"])
-lines[0] = json.dumps(entry, separators=(",", ":"))
-path.write_text("\n".join(lines) + "\n")
-PYEOF
-}
-expect_fail check_corpus_no_secrets.sh \
-    'a live authorization header reaching a stored corpus bucket' \
-    mut_corpus_live_authorization_header \
-    'a live `authorization` header'
-
-mut_corpus_secret_in_a_decoded_payload() {
-    python3 - <<'PYEOF'
-import base64
-import json
-from pathlib import Path
-
-path = Path("corpus/object/PutObject.jsonl")
-lines = path.read_text().splitlines()
-entry = json.loads(lines[0])
-planted = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-entry["chunks"] = [{"bytes_b64": base64.b64encode(planted.encode()).decode()}]
-lines[0] = json.dumps(entry, separators=(",", ":"))
-path.write_text("\n".join(lines) + "\n")
-PYEOF
-}
-expect_fail check_corpus_no_secrets.sh \
-    'an AWS secret access key hidden inside a base64 payload' \
-    mut_corpus_secret_in_a_decoded_payload \
-    'an AWS secret access key'
-
-mut_corpus_private_key_in_prose() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("corpus/README.md")
-path.write_text(path.read_text() + "\n-----BEGIN RSA PRIVATE KEY-----\nMIIEow==\n")
-PYEOF
-}
-expect_fail check_corpus_no_secrets.sh \
-    'a PEM private key pasted into corpus prose' \
-    mut_corpus_private_key_in_prose \
-    'a PEM private key'
-
-mut_corpus_tree_removed() {
-    rm -rf corpus
-}
-expect_fail check_corpus_no_secrets.sh \
-    'the corpus tree being absent, which must fail rather than skip' \
-    mut_corpus_tree_removed \
-    'required input is missing'
-
-mut_corpus_production_source() {
-    python3 - <<'PYEOF'
-import json
-from pathlib import Path
-
-path = Path("corpus/object/PutObject.jsonl")
-lines = path.read_text().splitlines()
-entry = json.loads(lines[0])
-entry["src"] = "production"
-lines[0] = json.dumps(entry, separators=(",", ":"))
-path.write_text("\n".join(lines) + "\n")
-PYEOF
-}
-expect_fail check_corpus_provenance.sh \
-    'a corpus entry recorded from production traffic' \
-    mut_corpus_production_source \
-    'not on the allowlist'
-
-mut_corpus_unpinned_client_source() {
-    python3 - <<'PYEOF'
-import json
-from pathlib import Path
-
-path = Path("corpus/object/PutObject.jsonl")
-lines = path.read_text().splitlines()
-entry = json.loads(lines[0])
-entry["src"] = "client-matrix:boto3"
-lines[0] = json.dumps(entry, separators=(",", ":"))
-path.write_text("\n".join(lines) + "\n")
-PYEOF
-}
-expect_fail check_corpus_provenance.sh \
-    'a client-matrix source with no pinned revision' \
-    mut_corpus_unpinned_client_source \
-    'no pinned revision'
-
-mut_corpus_allowlist_emptied() {
-    python3 - <<'PYEOF'
-import re
-from pathlib import Path
-
-path = Path("crates/corpus/src/store.rs")
-text = path.read_text()
-replaced, count = re.subn(
-    r"pub const SOURCE_ALLOWLIST: &\[\(&str, bool\)\] = &\[.*?\n\];",
-    "pub const SOURCE_ALLOWLIST: &[(&str, bool)] = &[\n];",
-    text,
-    flags=re.S,
-)
-if count != 1:
-    raise SystemExit("source allowlist mutation subject is not unique")
-path.write_text(replaced)
-PYEOF
-}
-expect_fail check_corpus_provenance.sh \
-    'the provenance allowlist being emptied, which would let the guard pass on anything' \
-    mut_corpus_allowlist_emptied \
-    'parsed as empty'
-
-mut_corpus_unknown_system_under_test() {
-    python3 - <<'PYEOF'
-import json
-from pathlib import Path
-
-path = Path("corpus/object/PutObject.jsonl")
-lines = path.read_text().splitlines()
-entry = json.loads(lines[0])
-entry["sut"] = "somebody-elses-cluster"
-lines[0] = json.dumps(entry, separators=(",", ":"))
-path.write_text("\n".join(lines) + "\n")
-PYEOF
-}
-expect_fail check_corpus_provenance.sh \
-    'an entry naming a system under test outside the closed vocabulary' \
-    mut_corpus_unknown_system_under_test \
-    'closed vocabulary'
-
-mut_corpus_undeclared_production_recording() {
-    python3 - <<'PYEOF'
-import json
-from pathlib import Path
-
-path = Path("corpus/object/PutObject.jsonl")
-lines = path.read_text().splitlines()
-entry = json.loads(lines[0])
-entry["sut"] = "rustfs-server"
-lines[0] = json.dumps(entry, separators=(",", ":"))
-path.write_text("\n".join(lines) + "\n")
-PYEOF
-}
-expect_fail check_corpus_provenance.sh \
-    'an entry claiming a production recording the manifest does not declare' \
-    mut_corpus_undeclared_production_recording \
-    'entries_from_production_server'
-
-mut_corpus_over_hard_ceiling() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-with Path("corpus/object/oversized.bin").open("wb") as handle:
-    handle.truncate(51 * 1024 * 1024)
-PYEOF
-}
-expect_fail check_corpus_size.sh \
-    'the corpus growing past its hard ceiling' \
-    mut_corpus_over_hard_ceiling \
-    'hard ceiling'
-
-mut_corpus_size_limits_unreadable() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("crates/corpus/src/store.rs")
-text = path.read_text()
-old = "pub const HARD_SIZE_LIMIT_BYTES: u64 = 50 * 1024 * 1024;"
-if text.count(old) != 1:
-    raise SystemExit("hard size limit mutation subject is not unique")
-path.write_text(text.replace(old, "pub const HARD_SIZE_LIMIT_BYTES: u64 = u64::MAX;", 1))
-PYEOF
-}
-expect_fail check_corpus_size.sh \
-    'the hard ceiling becoming unreadable, which must fail rather than default' \
-    mut_corpus_size_limits_unreadable \
-    'cannot read HARD_SIZE_LIMIT_BYTES'
 
 fi
 
