@@ -1,0 +1,41 @@
+[package]
+name = "rustfs-gateway-corpus"
+description = "Recorded-request corpus schema, fail-closed redaction gate, dedup and versioned storage"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+autotests = false
+
+[package.metadata.gateway]
+ring = 0
+# Ring 0: no internal edges at all. This crate reads JSONL and writes JSONL; it must never
+# gain a dependency on the protocol kernel, because the corpus has to stay loadable by a
+# tool that does not build the gateway. Enforced by check_ring_boundaries.sh.
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Three dependencies, none of them internal. `sha2` is the fingerprint; `serde`/`serde_json`
+# are the JSONL codec. Base64 and the manifest renderer are hand-written here rather than
+# pulled in, because both are a few dozen lines and every extra edge is an edge a corpus
+# consumer inherits.
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[[bin]]
+name = "corpus"
+path = "src/bin/corpus.rs"
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
