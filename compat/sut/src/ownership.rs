@@ -36,7 +36,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use rustfs_gateway::{AuthzRequest, BoxFuture, BucketName, BucketOwnerError, BucketOwnerSource, Decision};
+use rustfs_gateway::{AuthzRequest, BoxFuture, BucketName, BucketOwnerError, BucketOwnerSource, Decision, Operation, dto};
 
 use crate::identity::Accounts;
 
@@ -80,7 +80,11 @@ impl BucketOwnerSource for BucketOwners {
 }
 
 /// The operation that mints a bucket, and therefore the only one that may claim one.
-const CREATE_BUCKET: &str = "CreateBucket";
+///
+/// Taken from the operation itself rather than written out as a literal: `AuthzRequest::operation`
+/// carries `Operation::NAME`, and a second spelling of that string here would compare unequal
+/// forever without anything saying so.
+const CREATE_BUCKET: &str = <dto::CreateBucket as Operation>::NAME;
 
 /// Decides one already-authenticated request against the registered operation set and the
 /// bucket-owner registry.
