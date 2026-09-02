@@ -5,6 +5,7 @@ set -euo pipefail
 # WHAT THIS CHECKS
 #   The conformance runner keeps a raw TCP request path, writes the declared
 #   byte slice directly, and does not acquire an HTTP or S3 client dependency.
+#   A TLS record layer is not such a client: it carries the same bytes.
 #
 # WHY
 #   P8-01 cases include malformed framing. A client library would normalise the
@@ -42,7 +43,10 @@ except (OSError, tomllib.TOMLDecodeError) as error:
     print(f"check_runner_raw_bytes: {error}", file=sys.stderr)
     raise SystemExit(1)
 
-allowed_dependencies = {"rustfs-gateway", "bytes", "http", "http-body", "tokio"}
+# `rustls` and `webpki-roots` are the TLS record layer and its public trust anchors. They carry the
+# authored bytes opaquely and parse no HTTP, so they cannot normalise the malformed framing a
+# negative case exists to send; every other addition still has to be argued for here.
+allowed_dependencies = {"rustfs-gateway", "bytes", "http", "http-body", "tokio", "rustls", "webpki-roots"}
 dependencies = manifest.get("dependencies", {})
 if not isinstance(dependencies, dict):
     print("check_runner_raw_bytes: [dependencies] must be a table", file=sys.stderr)

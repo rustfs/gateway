@@ -92,6 +92,7 @@
 //! progress.
 
 mod response;
+mod stream;
 
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
@@ -101,11 +102,12 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use rustfs_gateway::{ConnectionIntent, S3Service, collect, connection_intent_of};
+use rustls::ClientConfig;
 use rustls::pki_types::ServerName;
-use rustls::{ClientConfig, ClientConnection, StreamOwned};
 
 use crate::exec::ServiceRuntime;
 use crate::observation::ConnectionState;
+use crate::socket::stream::ConnectionStream;
 use crate::sut::SutError;
 
 /// A listener safety net strictly beyond the maximum exchange budget, so case timing decides first.
@@ -1019,45 +1021,6 @@ pub struct Connection {
     torn_down: bool,
 }
 
-enum ConnectionStream {
-    Plain(TcpStream),
-    Tls(Box<StreamOwned<ClientConnection, TcpStream>>),
-}
-
-impl ConnectionStream {
-    fn tcp(&self) -> &TcpStream {
-        match self {
-            Self::Plain(stream) => stream,
-            Self::Tls(stream) => &stream.sock,
-        }
-    }
-}
-
-impl Read for ConnectionStream {
-    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            Self::Plain(stream) => stream.read(bytes),
-            Self::Tls(stream) => stream.read(bytes),
-        }
-    }
-}
-
-impl Write for ConnectionStream {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        match self {
-            Self::Plain(stream) => stream.write(bytes),
-            Self::Tls(stream) => stream.write(bytes),
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        match self {
-            Self::Plain(stream) => stream.flush(),
-            Self::Tls(stream) => stream.flush(),
-        }
-    }
-}
-
 impl Connection {
     /// Opens a connection to a listener.
     ///
@@ -1086,10 +1049,10 @@ impl Connection {
         config: Arc<ClientConfig>,
     ) -> Result<Connection, SutError> {
         let socket = TcpStream::connect(addr).map_err(|error| SutError::Environment(format!("cannot connect: {error}")))?;
-        let client = ClientConnection::new(config, server_name)
+        let stream = ConnectionStream::tls(socket, server_name, config)
             .map_err(|error| SutError::Environment(format!("cannot configure TLS connection: {error}")))?;
         Ok(Connection {
-            stream: ConnectionStream::Tls(Box::new(StreamOwned::new(client, socket))),
+            stream,
             body_written: 0,
             torn_down: false,
         })
