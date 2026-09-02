@@ -205,6 +205,45 @@ fn aws_secret_in_a_metadata_header_is_refused() {
 }
 
 #[test]
+fn a_secret_parked_in_a_control_chunk_action_is_refused() {
+    let mut entry = base_entry();
+    entry.chunks = Some(vec![Chunk::Control {
+        action: format!("close aws_secret_access_key={EXAMPLE_SECRET}"),
+        delay_ms: None,
+        duration_ms: None,
+    }]);
+    let refusal = redact::admit(&entry).unwrap_err();
+    assert_eq!(
+        refusal.findings,
+        vec![redact::Finding {
+            site: redact::Site::ControlAction(0),
+            reason: redact::Reason::CredentialAssignment
+        }],
+        "a control chunk's action is free text and must be scanned like any other field"
+    );
+}
+
+#[test]
+fn a_secret_parked_in_an_entry_metadata_field_is_refused() {
+    // `recorded`, `op` and `method` are as writable as any header, and nothing else in the
+    // pipeline looks at their contents: `op` is only compared with the file name and
+    // `recorded` is never parsed at all.
+    for (field, mutate) in [
+        (
+            "recorded",
+            (|entry: &mut Entry| entry.recorded = format!("2026-09-02 {EXAMPLE_SECRET}")) as fn(&mut Entry),
+        ),
+        ("op", |entry: &mut Entry| entry.op = format!("PutObject {EXAMPLE_SECRET}")),
+        ("method", |entry: &mut Entry| entry.method = format!("PUT {EXAMPLE_SECRET}")),
+    ] {
+        let mut entry = base_entry();
+        mutate(&mut entry);
+        let found = reasons(&entry);
+        assert!(found.contains(&redact::Reason::AwsSecretAccessKey), "{field} was not scanned: {found:?}");
+    }
+}
+
+#[test]
 fn a_redaction_claim_the_entry_does_not_support_is_refused() {
     let mut entry = base_entry();
     entry.redacted = vec!["authorization".to_owned()];

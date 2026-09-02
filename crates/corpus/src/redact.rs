@@ -71,6 +71,10 @@ pub enum Site {
     ResponseBody,
     /// A name listed in the entry's own `redacted` record.
     RedactionRecord(String),
+    /// A free-text scalar on the entry itself, by field name.
+    Metadata(&'static str),
+    /// The `action` of a request body control chunk, by index.
+    ControlAction(usize),
 }
 
 impl std::fmt::Display for Site {
@@ -83,6 +87,8 @@ impl std::fmt::Display for Site {
             Self::RequestChunk(index) => write!(f, "request body chunk {index}"),
             Self::ResponseBody => write!(f, "response body"),
             Self::RedactionRecord(name) => write!(f, "the `redacted` record for `{name}`"),
+            Self::Metadata(field) => write!(f, "the `{field}` field"),
+            Self::ControlAction(index) => write!(f, "the action of control chunk {index}"),
         }
     }
 }
@@ -362,10 +368,28 @@ pub fn scan(entry: &Entry) -> Vec<Finding> {
     }
     scan_text(&Site::Target, &entry.target, &mut findings);
 
+    // Every free-text scalar on the entry, not only the ones a credential is *expected* in.
+    // A field nobody scans is a field a secret can be parked in, and `op`, `method` and
+    // `recorded` are as writable as any header. Whitelisting the scan surface is how the
+    // first version of this function let a control chunk's `action` through.
+    for (field, value) in [
+        ("op", &entry.op),
+        ("method", &entry.method),
+        ("recorded", &entry.recorded),
+        ("src", &entry.src),
+    ] {
+        scan_text(&Site::Metadata(field), value, &mut findings);
+    }
+
     if let Some(chunks) = &entry.chunks {
         for (index, chunk) in chunks.iter().enumerate() {
-            if let Chunk::Data { bytes_b64, .. } = chunk {
-                scan_text(&Site::RequestChunk(index), &payload_text(bytes_b64), &mut findings);
+            match chunk {
+                Chunk::Data { bytes_b64, .. } => {
+                    scan_text(&Site::RequestChunk(index), &payload_text(bytes_b64), &mut findings);
+                }
+                Chunk::Control { action, .. } => {
+                    scan_text(&Site::ControlAction(index), action, &mut findings);
+                }
             }
         }
     }

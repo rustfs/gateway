@@ -93,9 +93,20 @@ def scan_entry(entry: dict) -> list[str]:
         if name.lower() in SENSITIVE_QUERY_PARAMS and value != PLACEHOLDER:
             hits.append(f"a live `{name.lower()}` query parameter")
     hits.extend(text_hits(target))
+    # Every free-text scalar, not only the fields a secret is expected in. `op`, `method`,
+    # `recorded`, `src` and a control chunk's `action` are all writable and none of them is
+    # parsed for meaning anywhere else, so an unscanned one is somewhere to park a secret.
+    for field in ("op", "method", "recorded", "src"):
+        value = entry.get(field)
+        if isinstance(value, str):
+            hits.extend(text_hits(value))
     for chunk in entry.get("chunks") or []:
-        if isinstance(chunk, dict) and "bytes_b64" in chunk:
+        if not isinstance(chunk, dict):
+            continue
+        if "bytes_b64" in chunk:
             hits.extend(text_hits(decoded(chunk["bytes_b64"])))
+        if isinstance(chunk.get("action"), str):
+            hits.extend(text_hits(chunk["action"]))
     response = entry.get("resp") or {}
     for pair in response.get("headers") or []:
         if isinstance(pair, list) and len(pair) == 2:
