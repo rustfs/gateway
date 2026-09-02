@@ -23,6 +23,7 @@ ADRs; this map only selects files.
 | `src/socket.rs` | Real socket transport and connection observations. | A wire-level close/reuse fact is wrong. |
 | `src/socket/response.rs` | Fixed-length and chunked HTTP/1.1 response decoding. | A raw response body is truncated or framed incorrectly. |
 | `src/conn/` | Connection state and reusable transport helpers. | A multi-exchange case loses connection state. |
+| `src/conn/external.rs` | Strict endpoint parsing and authored-only exchange against an external cleartext server. | `--endpoint` resolves, connects, paces, or reports unavailable observations incorrectly. |
 | `src/conn/server.rs` | Lazily assembles test and production listeners with the case clock and profile. | The socket transports assemble a different policy from in-process execution. |
 | `src/sign.rs` | Request signing for corpus inputs. | A signed case sends the wrong request. |
 | `src/fixture.rs` | Deterministic fixture backend used by local runs. | Setup state or a fixture operation behaves wrongly. |
