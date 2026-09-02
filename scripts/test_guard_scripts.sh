@@ -12423,6 +12423,323 @@ mut_baseline_deleted() {
 expect_fail check_baseline_ratchet.sh \
     "the guard's baseline input deleted, which must fail rather than skip" mut_baseline_deleted
 
+# ---------------------------------------------------------------------------
+# External acceptance suites (P8-05). The same ratchet argument as the baseline
+# above, one layer out: the suite is external, so the tolerated set, the marker
+# filter, the pin and the report tool are each a way to make a weekly run look
+# clean without the implementation improving.
+# ---------------------------------------------------------------------------
+
+append_xfail_entry() {
+    python3 - "$1" <<'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path("ci/s3tests/xfail.txt")
+path.write_text(path.read_text() + sys.argv[1] + "\n")
+PYEOF
+}
+
+set_xfail_generation() {
+    python3 - "$1" <<'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path("ci/s3tests/xfail.txt")
+text = path.read_text()
+if "# generation:" not in text:
+    raise SystemExit("xfail generation mutation subject is missing")
+path.write_text(text.replace("# generation: 1", f"# generation: {sys.argv[1]}", 1))
+PYEOF
+}
+
+# The cheapest way to turn a red external suite green is to paste its failures into the
+# tolerated set. This is the mutation that has to stay red for the ratchet to mean anything.
+mut_xfail_entry_added_without_generation() {
+    append_xfail_entry "s3tests_boto3.functional.test_s3::test_multipart_upload_small"
+}
+expect_fail check_xfail_ratchet.sh \
+    'a tolerated failure appended without raising the generation' mut_xfail_entry_added_without_generation
+
+# The escape has to work, or the ratchet cannot record a first baseline at all and somebody
+# deletes it. Proving it works is also what stops this guard becoming stuck on one answer.
+mut_xfail_entry_added_with_generation() {
+    append_xfail_entry "s3tests_boto3.functional.test_s3::test_multipart_upload_small"
+    set_xfail_generation 2
+}
+expect_guard_pass check_xfail_ratchet.sh \
+    'a tolerated failure added in the same change that raises the generation' \
+    mut_xfail_entry_added_with_generation
+
+mut_xfail_generation_jumped() {
+    append_xfail_entry "s3tests_boto3.functional.test_s3::test_multipart_upload_small"
+    set_xfail_generation 9
+}
+expect_fail check_xfail_ratchet.sh \
+    'a generation jumped several steps at once, banking room for later additions' \
+    mut_xfail_generation_jumped
+
+mut_xfail_generation_backwards() {
+    set_xfail_generation 0
+}
+expect_fail check_xfail_ratchet.sh \
+    'a generation moved backwards' mut_xfail_generation_backwards
+
+mut_xfail_header_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/xfail.txt")
+lines = [line for line in path.read_text().splitlines() if not line.startswith("# generation:")]
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_xfail_ratchet.sh \
+    'the generation header removed, which would leave nothing to ratchet against' \
+    mut_xfail_header_removed
+
+mut_xfail_deleted() {
+    rm -f ci/s3tests/xfail.txt
+}
+expect_fail check_xfail_ratchet.sh \
+    "the guard's xfail input deleted, which must fail rather than skip" mut_xfail_deleted
+
+# An excluded case is an absent case: it leaves no failure to tolerate, no entry to shrink
+# and nothing in the report to grep for. That makes widening the filter strictly cheaper
+# than widening the xfail list, and strictly less visible.
+mut_filter_adds_an_exclusion() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/filter.txt")
+path.write_text(path.read_text() + "and not test_bucket_policy\n")
+PYEOF
+}
+expect_fail check_s3tests_filter.sh \
+    'a marker exclusion added to the s3-tests filter' mut_filter_adds_an_exclusion
+
+# The 39 fails_on_rgw cases are the ones Ceph's own gateway does not pass, which usually
+# means they encode the correct AWS behaviour. Excluding them reads as consistency with the
+# other fails_on_* markers and is instead the most valuable subset of the suite deleted.
+mut_filter_excludes_fails_on_rgw() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/filter.txt")
+path.write_text(path.read_text() + "and not fails_on_rgw\n")
+PYEOF
+}
+expect_fail check_s3tests_filter.sh \
+    'fails_on_rgw excluded, deleting the cases that encode correct AWS behaviour' \
+    mut_filter_excludes_fails_on_rgw
+
+mut_filter_stops_excluding_fails_on_aws() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/filter.txt")
+lines = [line for line in path.read_text().splitlines() if "fails_on_aws" not in line or line.startswith("#")]
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_s3tests_filter.sh \
+    'fails_on_aws no longer excluded, admitting RGW-specific behaviour as a target' \
+    mut_filter_stops_excluding_fails_on_aws
+
+mut_filter_emptied() {
+    python3 - <<'PYEOF'
+import pathlib
+
+pathlib.Path("ci/s3tests/filter.txt").write_text("# every clause removed\n")
+PYEOF
+}
+expect_fail check_s3tests_filter.sh \
+    'every clause removed, leaving a marker expression that selects everything' mut_filter_emptied
+
+mut_pin_becomes_a_branch() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/pins.env")
+text = path.read_text()
+head, _, tail = text.partition("S3TESTS_SHA=")
+path.write_text(head + "S3TESTS_SHA=master\n" + tail.split("\n", 1)[1])
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'the s3-tests pin replaced by a branch name, making two runs incomparable' \
+    mut_pin_becomes_a_branch
+
+mut_suite_workflow_enters_the_pull_request_gate() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/e2e-s3tests.yml")
+text = path.read_text()
+path.write_text(text.replace("on:\n  schedule:", "on:\n  pull_request:\n  schedule:", 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'a 30-90 minute external suite added to the ten-minute pull-request gate' \
+    mut_suite_workflow_enters_the_pull_request_gate
+
+mut_suite_image_pulled_by_a_moving_tag() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/e2e-s3tests.yml")
+path.write_text(path.read_text() + "\n        run: docker run minio/mint:latest\n")
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'a container image pulled by a moving tag rather than by digest' \
+    mut_suite_image_pulled_by_a_moving_tag
+
+mut_vendored_suite_tree() {
+    mkdir -p tests/s3-tests
+    printf 'from setuptools import setup\nsetup(name="s3tests")\n' >tests/s3-tests/setup.py
+}
+expect_fail check_no_vendored_suites.sh \
+    'a copy of the external suite tree committed to this repository' mut_vendored_suite_tree
+
+mut_vendored_suite_by_content() {
+    mkdir -p tests/support
+    printf 'import s3tests_boto3.functional as functional\n\nprint(functional)\n' >tests/support/helpers.py
+}
+expect_fail check_no_vendored_suites.sh \
+    'a renamed file that is still the external suite by its imports' mut_vendored_suite_by_content
+
+mut_third_party_licence_dropped() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("THIRD-PARTY-NOTICES.md")
+text = path.read_text()
+at = text.index("### Ceph s3-tests")
+end = text.index("### MinIO mint")
+path.write_text(text[:at] + text[at:end].replace("**MIT**", "permissive") + text[end:])
+PYEOF
+}
+expect_fail check_third_party_doc.sh \
+    'a suite licence recorded as prose instead of an SPDX identifier' mut_third_party_licence_dropped
+
+# A conclusion nobody can re-derive is re-derived from scratch by everyone who needs it, and
+# mint is the row people get wrong: it is Apache-2.0 while the server beside it is not.
+mut_third_party_verification_dropped() {
+    python3 - <<'PYEOF'
+import pathlib
+import re
+
+path = pathlib.Path("THIRD-PARTY-NOTICES.md")
+text = path.read_text()
+at = text.index("### MinIO mint")
+end = text.index("### MinIO server")
+section = re.sub(r"`gh api[^`]*`", "the upstream repository", text[at:end])
+path.write_text(text[:at] + section + text[end:])
+PYEOF
+}
+expect_fail check_third_party_doc.sh \
+    'a licence review that states its conclusion without the command that verified it' \
+    mut_third_party_verification_dropped
+
+mut_third_party_pin_drifts_from_the_runner() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/pins.env")
+text = path.read_text()
+needle = "S3TESTS_SHA=5522d1c351f75bc00ae0f64f742f3f095f5939d9"
+if needle not in text:
+    raise SystemExit("third-party pin mutation subject is missing")
+path.write_text(text.replace(needle, "S3TESTS_SHA=0123456789abcdef0123456789abcdef01234567", 1))
+PYEOF
+}
+expect_fail check_third_party_doc.sh \
+    'the reviewed commit and the commit the runner clones drifting apart' \
+    mut_third_party_pin_drifts_from_the_runner
+
+# The seven checks in AGENTS.md "Measurement" were all this shape: a judgement that stopped
+# judging and read exactly like a judgement that passed. These three are the same shape one
+# level out, and the weekly job's entire value rests on them staying red.
+mut_report_never_sees_a_failure() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/report.py")
+text = path.read_text()
+needle = '        elif element.find("failure") is not None:\n            outcome = "failed"\n'
+if needle not in text:
+    raise SystemExit("report failure-parsing mutation subject is missing")
+path.write_text(text.replace(needle, "", 1))
+PYEOF
+}
+expect_fail check_s3tests_report.sh \
+    'the report no longer reading a failure element, so every red run looks clean' \
+    mut_report_never_sees_a_failure
+
+mut_report_tolerates_every_failure() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/report.py")
+text = path.read_text()
+needle = "            (known if case.id in tolerated else regression).append(case.id)"
+if needle not in text:
+    raise SystemExit("report tolerance mutation subject is missing")
+path.write_text(text.replace(needle, "            known.append(case.id)", 1))
+PYEOF
+}
+expect_fail check_s3tests_report.sh \
+    'every failure treated as tolerated, so no regression can ever fail the job' \
+    mut_report_tolerates_every_failure
+
+mut_report_records_a_dead_service_as_failures() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/report.py")
+text = path.read_text()
+needle = "    if errored == len(cases):"
+if needle not in text:
+    raise SystemExit("report environment-detection mutation subject is missing")
+path.write_text(text.replace(needle, "    if False:", 1))
+PYEOF
+}
+expect_fail check_s3tests_report.sh \
+    'a run where nothing was reachable recorded as ~980 regressions instead of an environment failure' \
+    mut_report_records_a_dead_service_as_failures
+
+mut_sut_is_always_ready() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/lib/sut.sh")
+text = path.read_text()
+needle = 'sut_wait_ready() {\n    local host="$1" port="$2" deadline="$3" pid="${4:-}"\n'
+if needle not in text:
+    raise SystemExit("sut readiness mutation subject is missing")
+path.write_text(text.replace(needle, needle + "    return 0\n", 1))
+PYEOF
+}
+expect_fail check_sut_launcher.sh \
+    'a readiness probe that reports ready without a socket ever being bound' mut_sut_is_always_ready
+
+mut_sut_renders_a_blank_credential() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/lib/sut.sh")
+text = path.read_text()
+needle = "if missing:\n"
+if needle not in text:
+    raise SystemExit("sut render-refusal mutation subject is missing")
+path.write_text(text.replace(needle, "if False:\n", 1))
+PYEOF
+}
+expect_fail check_sut_launcher.sh \
+    'a configuration rendered with a blank credential, which reads as a signing defect' \
+    mut_sut_renders_a_blank_credential
+
 mut_runner_sdk_dependency() {
     add_conformance_dependency 'aws-sdk-s3 = "1"'
 }

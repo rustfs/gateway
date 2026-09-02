@@ -1,0 +1,24 @@
+# Ceph s3-tests cases this implementation is known to fail.
+#
+# WHAT THIS FILE IS
+#   The tolerated set. `ci/s3tests/report.py` treats a failing case listed here as KNOWN and
+#   a failing case that is absent as a REGRESSION that fails the weekly job. A listed case
+#   that now passes is reported as FIXED so the list shrinks.
+#
+# THE RATCHET
+#   The list may shrink in any pull request. It may only grow in a pull request that also
+#   raises the generation below by one, and `scripts/check_xfail_ratchet.sh` refuses every
+#   other addition. That is deliberate friction: a tolerated failure is a promise nobody
+#   made, and the cheapest way to turn this job green is to paste the failures into it.
+#
+# HOW TO PROPOSE A NEW BASELINE
+#   Run the workflow with `mode: record`. It writes a proposed list as a run artifact,
+#   grouped by capability domain, with the generation already raised. Review it, annotate
+#   each group with the implementation issue expected to close the gap, and land it.
+#
+# THIS FILE IS EMPTY ON PURPOSE
+#   Nothing has been measured yet: there is no runnable system under test in this repository
+#   (rustfs/gateway#624), so no case has been observed to fail and none may be listed here.
+#   An entry written from a guess is a guarantee quietly withdrawn.
+#
+# generation: 1

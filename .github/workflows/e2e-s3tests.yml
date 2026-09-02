@@ -1,0 +1,194 @@
+name: e2e-s3tests
+
+# ---------------------------------------------------------------------------
+# WHAT THIS JOB DOES
+#
+#   Runs the Ceph s3-tests suite — the de facto external standard for "is this
+#   really S3?" — against a system under test, and judges the result against
+#   ci/s3tests/xfail.txt. A failure the list does not name fails the job and
+#   files one issue. A listed case that now passes is reported so the list can
+#   shrink. The whole ratchet lives in ci/s3tests/report.py.
+#
+# WHY IT IS ON CRON AND NOT IN THE PULL-REQUEST GATE
+#
+#   One run is 30-90 minutes. The pull-request gate has a hard ten-minute
+#   budget (AGENTS.md "CI budget", .github/workflows/ci.yml). Putting this
+#   suite in front of every pull request would not make the gate stronger, it
+#   would make people stop running the gate. `scripts/check_suites_pinned.sh`
+#   asserts this workflow never grows a `pull_request` trigger.
+#
+# WHY THE SUITE IS NOT VENDORED
+#
+#   It is cloned at run time at a pinned commit (ci/s3tests/pins.env) into a
+#   scratch directory. ceph/s3-tests is MIT and has never published a tag, so a
+#   commit is the only pin available; docs/third-party.md records how that was
+#   verified. `scripts/check_no_vendored_suites.sh` asserts no part of it is
+#   ever committed to this repository.
+#
+# WHO READS A RED RUN
+#
+#   The regression path files an issue against this repository, one per run,
+#   naming the regressed cases by capability domain. An external suite that
+#   nobody is paged for becomes a job somebody disables; the issue is the
+#   mechanism that stops that. See the Handoff on rustfs/backlog#1764.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    # Mondays, 04:00 UTC — an hour after model-drift, so the two never contend.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: >-
+          `ratchet` judges the run against ci/s3tests/xfail.txt and fails on a
+          regression. `record` writes a proposed xfail list as an artifact and
+          never fails on a regression — that is how a new baseline is produced
+          for review. It commits nothing.
+        type: choice
+        default: ratchet
+        options:
+          - ratchet
+          - record
+      endpoint:
+        description: >-
+          An already-running `http://host:port` S3 service to measure instead of
+          starting one. Leave empty to use the in-repository system under test.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # A second run must never race the first into filing the same issue.
+  group: e2e-s3tests
+  cancel-in-progress: false
+
+jobs:
+  s3tests:
+    name: Ceph s3-tests
+    runs-on: ubuntu-latest
+    # Generous, because the point of the wrapper below is to report the margin,
+    # not to have the runner kill the job at an arbitrary line with no diagnosis.
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Read the pinned suite revision
+        id: pin
+        run: |
+          set -euo pipefail
+          # shellcheck source=ci/s3tests/pins.env
+          source ci/s3tests/pins.env
+          echo "sha=$S3TESTS_SHA" >>"$GITHUB_OUTPUT"
+          echo "python=$S3TESTS_PYTHON" >>"$GITHUB_OUTPUT"
+          echo "ceph/s3-tests pinned at $S3TESTS_SHA (python $S3TESTS_PYTHON)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ steps.pin.outputs.python }}
+
+      # The suite's own dependency set is ~5 minutes of every run. Keyed on the
+      # pinned commit, so a pin bump invalidates it rather than silently reusing
+      # the previous revision's wheels.
+      - name: Cache the suite's tox environment
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cache/pip
+            ${{ runner.temp }}/s3tests-work/s3-tests/.tox
+          key: s3tests-tox-${{ runner.os }}-py${{ steps.pin.outputs.python }}-${{ steps.pin.outputs.sha }}
+
+      - name: Install tox
+        run: python3 -m pip install --disable-pip-version-check tox
+
+      - name: Run the suite
+        id: suite
+        env:
+          GATEWAY_SUT_ENDPOINT: ${{ inputs.endpoint }}
+          # Every configuration value the suite is given, and its default, is in
+          # ci/s3tests/run.sh — one place to read rather than two that drift. The
+          # four below are the only ones that could ever be real credentials, and
+          # they exist for a dispatch against a service that is not the throwaway
+          # loopback one. Unset, they render empty and the runner uses its own
+          # defaults; it refuses to continue if main and alt collapse into one
+          # identity, because the cross-account cases would then pass for the
+          # wrong reason.
+          S3TESTS_MAIN_ACCESS_KEY: ${{ secrets.S3TESTS_MAIN_ACCESS_KEY }}
+          S3TESTS_MAIN_SECRET_KEY: ${{ secrets.S3TESTS_MAIN_SECRET_KEY }}
+          S3TESTS_ALT_ACCESS_KEY: ${{ secrets.S3TESTS_ALT_ACCESS_KEY }}
+          S3TESTS_ALT_SECRET_KEY: ${{ secrets.S3TESTS_ALT_SECRET_KEY }}
+        run: |
+          set -uo pipefail
+          mode="${{ inputs.mode || 'ratchet' }}"
+          work="${RUNNER_TEMP}/s3tests-work"
+          out="${RUNNER_TEMP}/s3tests-out"
+          mkdir -p "$work" "$out"
+          # 90 minutes, the top of the suite's measured range. The wrapper reports
+          # the margin on every run, so the cliff announces itself before it is hit.
+          scripts/ci_budget.sh 5400 "ceph s3-tests" \
+            ci/s3tests/run.sh --mode "$mode" --work "$work" --out "$out"
+          status=$?
+          echo "status=$status" >>"$GITHUB_OUTPUT"
+          echo "out=$out" >>"$GITHUB_OUTPUT"
+          if [ -f "$out/summary.md" ]; then
+            cat "$out/summary.md" >>"$GITHUB_STEP_SUMMARY"
+          fi
+          case "$status" in
+            0) echo "no regression against ci/s3tests/xfail.txt" ;;
+            1) echo "::error title=s3-tests regression::A failing case is not listed in ci/s3tests/xfail.txt. See the job summary." ;;
+            3)
+              {
+                echo "## Ceph s3-tests did not run"
+                echo
+                echo "The system under test was unreachable, so this run measured nothing and"
+                echo "asserts nothing about the implementation. It is NOT a regression."
+              } >>"$GITHUB_STEP_SUMMARY"
+              echo "::error title=s3-tests environment failure::The suite never ran. This is not an implementation result."
+              ;;
+            *) echo "::error title=s3-tests runner failure::The runner exited $status." ;;
+          esac
+          exit "$status"
+
+      - name: Upload the run artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: s3tests-${{ github.run_id }}
+          path: ${{ runner.temp }}/s3tests-out
+          if-no-files-found: warn
+          retention-days: 30
+
+      # A regression that only exists in a job log is a regression nobody acts on.
+      # An environment failure deliberately does NOT file one: nothing was measured.
+      - name: File a regression issue
+        if: failure() && steps.suite.outputs.status == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="ci(s3tests): regression against the pinned suite (run ${{ github.run_id }})"
+          body="${RUNNER_TEMP}/issue.md"
+          {
+            echo "The weekly Ceph s3-tests run found at least one failing case that"
+            echo "\`ci/s3tests/xfail.txt\` does not list."
+            echo
+            echo "- Run: $RUN_URL"
+            echo "- Pinned suite commit: \`${{ steps.pin.outputs.sha }}\`"
+            echo
+            head -c 55000 "${{ steps.suite.outputs.out }}/summary.md"
+            echo
+            echo "---"
+            echo
+            echo "Fix the implementation. Widening \`ci/s3tests/xfail.txt\` needs a pull request"
+            echo "that argues each addition and raises the file's generation;"
+            echo "\`scripts/check_xfail_ratchet.sh\` refuses every other addition."
+            echo
+            echo "_Filed automatically by \`.github/workflows/e2e-s3tests.yml\`._"
+          } >"$body"
+          gh issue create --title "$title" --body-file "$body" >/dev/null
+          echo "filed a regression issue"
