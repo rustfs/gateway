@@ -404,7 +404,7 @@ fn production_registry() -> Vec<CaseDeclaration> {
             RuntimeProbe::Variant(Tagging, LargeValue),
             "crates/goldens/src/tagging.rs::corpus_evidence",
         ),
-        CaseDeclaration::blocked("g-d2-001", "https://github.com/rustfs/backlog/issues/2103"),
+        CaseDeclaration::passed("g-d2-001", RuntimeProbe::AllFamilies, "crates/goldens/src/four_way.rs::run_four_way_all"),
         CaseDeclaration::passed(
             "g-d2-002",
             RuntimeProbe::Variant(Tagging, EmptyElement),
@@ -445,7 +445,7 @@ fn production_registry() -> Vec<CaseDeclaration> {
             "crates/ecstore/src/store/mod.rs::ENABLED_OBJECT_LOCK_CONFIG",
             "ac3966d7b1da55987199602ffbe66d5d506b874dbfd2c041627e9ebfedf407b8",
         ),
-        CaseDeclaration::blocked("g-d3-001", "https://github.com/rustfs/backlog/issues/2103"),
+        CaseDeclaration::passed("g-d3-001", RuntimeProbe::AllFamilies, "crates/goldens/src/four_way.rs::run_four_way_all"),
         CaseDeclaration::passed(
             "g-d3-002",
             RuntimeProbe::Family(Lifecycle),
@@ -615,7 +615,6 @@ fn validate_registry(
 fn required_blocker(id: &str) -> Option<&'static str> {
     match id {
         "g-d1-003" => Some("https://github.com/rustfs/backlog/issues/2104"),
-        "g-d2-001" | "g-d3-001" => Some("https://github.com/rustfs/backlog/issues/2103"),
         "g-d4-001" | "g-d5-001" => Some("https://github.com/rustfs/backlog/issues/2096"),
         _ => None,
     }
@@ -668,14 +667,42 @@ mod tests {
         let report =
             validate_registry(&production_registry(), observations()).expect("the exact 39 acceptance cases must be registered");
         assert_eq!(report.cases().len(), 39);
-        assert_eq!(report.passed_count(), 34);
-        assert_eq!(report.blocked_count(), 5);
+        assert_eq!(report.passed_count(), 36);
+        assert_eq!(report.blocked_count(), 3);
         assert_eq!(
             require_acceptance_closure(),
-            Err(AcceptanceCensusError::ClosureBlocked(vec![
-                "g-d1-003", "g-d2-001", "g-d3-001", "g-d4-001", "g-d5-001",
-            ]))
+            Err(AcceptanceCensusError::ClosureBlocked(vec!["g-d1-003", "g-d4-001", "g-d5-001"]))
         );
+    }
+
+    /// The `g-d2-001` and `g-d3-001` rows claim every persisted family, so their probe has to go
+    /// red the moment one family stops executing D1-D5. Without this the two rows would read like
+    /// the blocked rows they replaced: a status with nothing behind it.
+    #[test]
+    fn all_family_rows_fail_closed_when_one_family_stops_executing() {
+        let full = observations();
+        let truncated = RuntimeObservations {
+            corpus: full.corpus.clone(),
+            families: full
+                .families
+                .iter()
+                .copied()
+                .filter(|kind| *kind != ConfigKind::Replication)
+                .collect(),
+        };
+        for id in ["g-d2-001", "g-d3-001"] {
+            let row = production_registry()
+                .into_iter()
+                .find(|row| row.id == id)
+                .expect("the all-family byte-write and rollback rows are registered");
+            assert_eq!(row.status, "passed");
+            assert_eq!(row.probe, Some(RuntimeProbe::AllFamilies));
+            assert!(
+                truncated.evaluate(RuntimeProbe::AllFamilies, row.source_ref).is_err(),
+                "{id} must go red when one persisted family stops executing D1-D5"
+            );
+            assert!(full.evaluate(RuntimeProbe::AllFamilies, row.source_ref).is_ok());
+        }
     }
 
     #[test]
