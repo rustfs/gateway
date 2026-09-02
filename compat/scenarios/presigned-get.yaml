@@ -1,0 +1,5 @@
+id: presigned-get
+description: >-
+  The client signs a URL and something else redeems it. Generation is the client's job and
+  verification is the server's, so this is where cross-implementation disagreement shows up.
+requires_operations: [CreateBucket, PutObject, GetObject, DeleteObject, DeleteBucket]

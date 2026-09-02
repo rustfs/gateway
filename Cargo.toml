@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "spikes/ext-field", "xtask", "xtask-launcher"]
+members = ["compat/sut", "crates/*", "spikes/ext-field", "xtask", "xtask-launcher"]
 default-members = ["crates/*", "xtask", "xtask-launcher"]
 
 [workspace.package]

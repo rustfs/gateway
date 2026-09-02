@@ -1,0 +1,6 @@
+id: delete-batch
+description: >-
+  Delete many keys in one request. Clients build the XML body themselves, so the request shape
+  differs; skipped while the system under test registers no DeleteObjects.
+requires_operations: [CreateBucket, PutObject, DeleteObjects, DeleteBucket]
+object_count: 10

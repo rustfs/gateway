@@ -1,0 +1,5 @@
+id: presigned-put
+description: >-
+  The write half of the presigned pair. Kept separate from presigned-get because a server may
+  admit one and refuse the other, and a combined scenario would hide which.
+requires_operations: [CreateBucket, PutObject, GetObject, DeleteObject, DeleteBucket]

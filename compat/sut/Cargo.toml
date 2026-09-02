@@ -1,0 +1,33 @@
+[package]
+name = "rustfs-gateway-compat-sut"
+description = "Client-matrix system under test: the filesystem backend behind a real listener"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "compat-sut"
+path = "src/main.rs"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+rustfs-gateway = { workspace = true }
+# Path-only: the reference backend is not a workspace dependency of anything else, and this
+# launcher is repository tooling rather than a ring member, so it does not open a new shared edge.
+rustfs-gateway-fs = { path = "../../crates/fs" }
+rustfs-gateway-server = { workspace = true }
+bytes = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tower = { workspace = true }

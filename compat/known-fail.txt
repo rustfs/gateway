@@ -1,0 +1,39 @@
+# Known failures in the client compatibility matrix.
+#
+# Format, one per line:   <client>/<scenario>   <issue>   <reason>
+#
+# The issue reference is a required field, not decoration. It is copied into `compat/matrix.json`
+# beside the cell, so a reader of the manifest can tell an excused gap from a new regression — and
+# find who owns it — without reading a pull request. An entry with no issue is refused by
+# `scripts/check_compat_matrix.sh`, because an excused failure nobody owns is a permanent one.
+#
+# This list only ever shrinks. The same guard compares it with the committed version and refuses a
+# line that was not already there, so a regression cannot be silenced in the change that introduced
+# it. Removing a line is always allowed and is what fixing a gap looks like.
+#
+# Every entry below is a gap in THIS repository — the reference backend does not register an
+# operation the client needs, or admits it too narrowly. None of them is a client sending something
+# S3 does not define. The two dispositions are completely different, so the distinction is recorded
+# rather than left to be re-derived.
+
+# The reference backend registers no GetBucketLocation, and minio-go asks a server for a bucket's
+# region before it touches an object unless one is configured. mc has no region setting, so all
+# five of its runnable scenarios stop at that one refusal.
+mc/bucket-lifecycle          rustfs/gateway#627  GetBucketLocation is not registered
+mc/small-object-roundtrip    rustfs/gateway#627  GetBucketLocation is not registered
+mc/streaming-chunked-upload  rustfs/gateway#627  GetBucketLocation is not registered
+mc/list-pagination           rustfs/gateway#627  GetBucketLocation is not registered
+mc/sync-directory            rustfs/gateway#627  GetBucketLocation is not registered
+
+# GetObject ignores Range: it answers 200 with the whole object where 206 and the requested slice
+# are due. restic reads its packs by range, so this one gap fails a whole backup workflow.
+boto3/range-download         rustfs/gateway#626  GetObject ignores the Range header
+rclone/range-download        rustfs/gateway#626  GetObject ignores the Range header
+restic/backup-restore        rustfs/gateway#626  GetObject ignores the Range header
+
+# Only GetObject is reachable through a presigned URL, so a presigned PUT is refused 403.
+boto3/presigned-put          rustfs/gateway#628  presigned PUT is not an admitted operation
+
+# rclone stamps a modification time by copying an object onto itself, and CopyObject is not
+# registered. The first mirror succeeds; every rerun fails and rclone then stops converging.
+rclone/sync-directory        rustfs/gateway#629  CopyObject is not registered

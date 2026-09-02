@@ -1,0 +1,8 @@
+id: large-multipart-upload
+description: >-
+  Upload past the client's own multipart threshold so the client, not the scenario, decides how
+  many parts to send. Asserts the assembled object reads back byte-identical.
+requires_operations:
+  [CreateBucket, CreateMultipartUpload, UploadPart, CompleteMultipartUpload, GetObject,
+   DeleteObject, DeleteBucket]
+object_size_bytes: 12582912

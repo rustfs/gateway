@@ -1,0 +1,9 @@
+id: backup-restore
+description: >-
+  A backup tool's own object layout: many small writes, an index, and a read-back that must
+  reproduce the source bytes exactly. Expressible only by clients that are backup tools; every
+  other client records it as unsupported rather than as a failure.
+requires_operations:
+  [CreateBucket, HeadBucket, PutObject, GetObject, HeadObject, ListObjectsV2, DeleteObject,
+   DeleteBucket]
+object_size_bytes: 20971520

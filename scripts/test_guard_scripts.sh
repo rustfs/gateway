@@ -20706,6 +20706,220 @@ expect_fail check_no_response_header_unwrap.sh \
     mut_response_header_authority_removed \
     'required input is missing'
 
+# -- check_compat_matrix.sh / check_client_versions_pinned.sh / check_compat_table.sh ------------
+
+mut_compat_known_fail_grew() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/known-fail.txt")
+text = path.read_text()
+old = "boto3/range-download         rustfs/gateway#626  GetObject ignores the Range header\n"
+if text.count(old) != 1:
+    raise SystemExit("known-fail ratchet mutation subject is not unique")
+path.write_text(text.replace(old, old + "boto3/list-pagination        rustfs/gateway#626  newly excused\n", 1))
+PYEOF
+}
+# The whole point of the ratchet: a regression must not be silenceable by the change that caused it.
+expect_fail check_compat_matrix.sh \
+    'a new entry appended to the compatibility known-failure list' \
+    mut_compat_known_fail_grew \
+    'the list may only shrink'
+
+mut_compat_known_fail_unowned() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/known-fail.txt")
+text = path.read_text()
+old = "boto3/presigned-put          rustfs/gateway#628  presigned PUT is not an admitted operation"
+if text.count(old) != 1:
+    raise SystemExit("known-fail owner mutation subject is not unique")
+path.write_text(text.replace(old, "boto3/presigned-put          later  presigned PUT is not an admitted operation", 1))
+PYEOF
+}
+expect_fail check_compat_matrix.sh \
+    'an excused compatibility failure with no owning issue' \
+    mut_compat_known_fail_unowned \
+    'without an <owner>/<repo>#<number> issue'
+
+mut_compat_matrix_hand_edited() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("compat/matrix.json")
+matrix = json.loads(path.read_text())
+for client in matrix["clients"]:
+    for row in client["scenarios"]:
+        if row["status"] == "fail":
+            row["status"] = "pass"
+            row["verdict"] = None
+            row["issue"] = None
+            path.write_text(json.dumps(matrix, indent=2) + "\n")
+            raise SystemExit(0)
+raise SystemExit("no failing cell to promote")
+PYEOF
+}
+# matrix.json is a generated artefact and a published promise. A hand edit that promotes a failure
+# to a pass must not survive, and the counts are the part a hand edit gets wrong.
+expect_fail check_compat_matrix.sh \
+    'a failing compatibility cell hand-edited into a pass' \
+    mut_compat_matrix_hand_edited \
+    'its own cells say'
+
+mut_compat_unsupported_without_reason() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("compat/matrix.json")
+matrix = json.loads(path.read_text())
+for client in matrix["clients"]:
+    for row in client["scenarios"]:
+        if row["status"] == "unsupported":
+            row["detail"] = None
+            path.write_text(json.dumps(matrix, indent=2) + "\n")
+            raise SystemExit(0)
+raise SystemExit("no unsupported cell to strip")
+PYEOF
+}
+# A skip with no reason reads exactly like a pass to anything that looks only at the status.
+expect_fail check_compat_matrix.sh \
+    'an unsupported compatibility cell that records no reason' \
+    mut_compat_unsupported_without_reason \
+    'unsupported with no reason'
+
+mut_compat_matrix_unnamed_sut() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("compat/matrix.json")
+matrix = json.loads(path.read_text())
+del matrix["sut"]["binary"]
+path.write_text(json.dumps(matrix, indent=2) + "\n")
+PYEOF
+}
+# A compatibility row whose system under test is unnamed cannot be re-measured, and the whole table
+# then claims something about a server nobody can identify.
+expect_fail check_compat_matrix.sh \
+    'the compatibility manifest losing the identity of what answered it' \
+    mut_compat_matrix_unnamed_sut \
+    'sut block has no binary'
+
+mut_compat_matrix_silent_provisional() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("compat/matrix.json")
+matrix = json.loads(path.read_text())
+matrix["sut"]["provisional_reason"] = ""
+path.write_text(json.dumps(matrix, indent=2) + "\n")
+PYEOF
+}
+# A provisional identity that stops saying why is indistinguishable from a settled one.
+expect_fail check_compat_matrix.sh \
+    'a provisional system under test that no longer records why' \
+    mut_compat_matrix_silent_provisional \
+    'provisional with no reason'
+
+mut_compat_matrix_in_the_pr_gate() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path(".github/workflows/client-matrix.yml")
+text = path.read_text()
+old = "on:\n  schedule:"
+if text.count(old) != 1:
+    raise SystemExit("client-matrix trigger mutation subject is not unique")
+path.write_text(text.replace(old, "on:\n  pull_request:\n  schedule:", 1))
+PYEOF
+}
+# A 30-90 minute job attached to the gate is how the ten-minute budget dies.
+expect_fail check_compat_matrix.sh \
+    'the client matrix attached to the pull-request gate' \
+    mut_compat_matrix_in_the_pr_gate \
+    'cron and manual dispatch only'
+
+mut_compat_driver_removed() {
+    rm -f compat/drivers/restic/run.sh
+}
+expect_fail check_compat_matrix.sh \
+    'a declared client losing the driver that runs it' \
+    mut_compat_driver_removed \
+    'has no driver'
+
+mut_compat_client_version_floating() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/versions.toml")
+text = path.read_text()
+old = 'version = "v0.19.1"'
+if text.count(old) != 1:
+    raise SystemExit("client version mutation subject is not unique")
+path.write_text(text.replace(old, 'version = "latest"', 1))
+PYEOF
+}
+expect_fail check_client_versions_pinned.sh \
+    'a compatibility client left on a floating version' \
+    mut_compat_client_version_floating \
+    'floating version'
+
+mut_compat_client_version_range() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/versions.toml")
+text = path.read_text()
+old = 'version = "1.42.96"'
+if text.count(old) != 1:
+    raise SystemExit("client version range mutation subject is not unique")
+path.write_text(text.replace(old, 'version = "^1.42"', 1))
+PYEOF
+}
+expect_fail check_client_versions_pinned.sh \
+    'a compatibility client pinned to a range rather than a version' \
+    mut_compat_client_version_range \
+    'version range'
+
+mut_compat_second_version_pin() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/drivers/restic/run.sh")
+text = path.read_text()
+old = 'scenario="${1:?scenario id required}"'
+if text.count(old) != 1:
+    raise SystemExit("second-pin mutation subject is not unique")
+path.write_text(text.replace(old, old + "\ngo install github.com/restic/restic/cmd/restic@v0.19.0", 1))
+PYEOF
+}
+# Two places naming a version is how the client that ran and the client that was reported drift.
+expect_fail check_client_versions_pinned.sh \
+    'a driver pinning a client version outside compat/versions.toml' \
+    mut_compat_second_version_pin \
+    'pins a client version outside compat/versions.toml'
+
+mut_compat_readme_table_edited() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("README.md")
+text = path.read_text()
+old = "| `range-download` |"
+if text.count(old) != 1:
+    raise SystemExit("compatibility table mutation subject is not unique")
+path.write_text(text.replace(old, "| `range-download-and-then-some` |", 1))
+PYEOF
+}
+expect_fail check_compat_table.sh \
+    'the README compatibility table edited away from the manifest' \
+    mut_compat_readme_table_edited \
+    'does not match compat/matrix.json'
+
 fi
 
 if [[ "$ERROR_STATUS_ONLY" == 1 ]]; then

@@ -1,0 +1,5 @@
+id: bucket-lifecycle
+description: >-
+  Create a bucket, confirm it exists, then remove it. The cheapest scenario that fails
+  loudly when signing, addressing style or region negotiation is wrong for a client.
+requires_operations: [CreateBucket, HeadBucket, DeleteBucket]

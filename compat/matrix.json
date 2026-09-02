@@ -1,0 +1,626 @@
+{
+  "generated_at": "2026-09-02T16:46:25Z",
+  "sut": {
+    "name": "rustfs-gateway-fs",
+    "version": "0.1.3",
+    "commit": "a574fcbe",
+    "generation": 1,
+    "binary": "compat-sut",
+    "package": "rustfs-gateway-compat-sut",
+    "assembly": "rustfs-gateway-fs behind rustfs-gateway-server, SigV4 verified, plaintext",
+    "provisional": true,
+    "provisional_reason": "measured against the matrix's own launcher; the general-purpose server binary is tracked in rustfs/gateway#624 and these rows are re-measured when it lands",
+    "capabilities": [
+      "AbortMultipartUpload",
+      "CompleteMultipartUpload",
+      "CreateBucket",
+      "CreateMultipartUpload",
+      "DeleteBucket",
+      "DeleteBucketLifecycle",
+      "DeleteObject",
+      "DeleteObjectTagging",
+      "GetBucketLifecycleConfiguration",
+      "GetBucketVersioning",
+      "GetObject",
+      "GetObjectTagging",
+      "HeadBucket",
+      "HeadObject",
+      "ListMultipartUploads",
+      "ListObjectVersions",
+      "ListObjects",
+      "ListObjectsV2",
+      "ListParts",
+      "PutBucketLifecycleConfiguration",
+      "PutBucketVersioning",
+      "PutObject",
+      "PutObjectTagging",
+      "UploadPart"
+    ]
+  },
+  "clients": [
+    {
+      "name": "boto3",
+      "version": "1.42.96",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "boto3 is a client library, not a backup tool; it has no repository format to restore",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "deleted_bucket_status": 404
+          }
+        },
+        {
+          "id": "copy-object",
+          "status": "unsupported",
+          "detail": "the system under test registers no CopyObject",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "unsupported",
+          "detail": "the system under test registers no DeleteObjects",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "etag": "\"f97b795e0d244bcbaf438021fa0e1adc-3\""
+          }
+        },
+        {
+          "id": "list-pagination",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "pages": 4,
+            "keys": 25
+          }
+        },
+        {
+          "id": "presigned-get",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "status": 200
+          }
+        },
+        {
+          "id": "presigned-put",
+          "status": "fail",
+          "detail": "a presigned PUT was answered 403",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#628",
+          "evidence": {
+            "status": 403,
+            "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>the request is not allowed</Message><RequestId>27F994632327E853</RequestId><HostId>F5CA63AFECFBD61FA9C53EF49030F11A</Hos"
+          }
+        },
+        {
+          "id": "range-download",
+          "status": "fail",
+          "detail": "a bytes=1000-5000 request answered 200 with 1048576 bytes, expected 206 with 4001",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#626",
+          "evidence": {
+            "status": 200,
+            "returned_bytes": 1048576,
+            "expected_bytes": 4001
+          }
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "etag": "\"4ebf071e4900e33e11be2b7c650d7930\""
+          }
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "unsupported",
+          "detail": "botocore signs the whole payload over a plaintext endpoint and offers no switch that selects aws-chunked framing",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "unsupported",
+          "detail": "boto3 offers no directory mirroring primitive; rclone and mc are the sync clients",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "unsupported",
+          "detail": "botocore emits a checksum header rather than a trailer unless the payload is unsigned, which it only is over TLS",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "versions": 2,
+            "current": "97c7d6d2c2f64e9723aaf2e3c5c644eaaee53c4054fe3bd564aa18f9d72e3cc2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mc",
+      "version": "v0.0.0-20250416181326-b00526b153a3",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "mc exposes no command that isolates this operation",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "fail",
+          "detail": "mc rb failed: mc: <ERROR> Unable to validate target `sut/cm-mc-bucket-lifecycle`. This operation is defined by S3 but is not handled by this backend.",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#627",
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "unsupported",
+          "detail": "the system under test registers no CopyObject",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "unsupported",
+          "detail": "the system under test registers no DeleteObjects",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "unsupported",
+          "detail": "mc exposes no command that isolates this operation",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "fail",
+          "detail": "mc cp failed while seeding the listing: mc: <ERROR> Failed to copy `/private/tmp/claude-501/-Users-overtrue-www-gateway--claude-worktrees-dreamy-grothendieck-3f162e/0bb92716-86ba-4a02-bf4d-d1d8d200edb5/scratchpad/matrix-run/work/mc/list-pagination/entry.txt`. This operation is defined by S3 but is not handled by this backend.",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#627",
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "unsupported",
+          "detail": "mc share generates a URL but redeems it with the same client, which would not test cross-implementation presigning",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "unsupported",
+          "detail": "mc share generates a URL but redeems it with the same client, which would not test cross-implementation presigning",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "unsupported",
+          "detail": "mc exposes no command that isolates this operation",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "fail",
+          "detail": "mc cp up failed: mc: <ERROR> Failed to copy `/private/tmp/claude-501/-Users-overtrue-www-gateway--claude-worktrees-dreamy-grothendieck-3f162e/0bb92716-86ba-4a02-bf4d-d1d8d200edb5/scratchpad/matrix-run/work/mc/small-object-roundtrip/payload.bin`. This operation is defined by S3 but is not handled by this backend.",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#627",
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "fail",
+          "detail": "mc cp up failed: mc: <ERROR> Failed to copy `/private/tmp/claude-501/-Users-overtrue-www-gateway--claude-worktrees-dreamy-grothendieck-3f162e/0bb92716-86ba-4a02-bf4d-d1d8d200edb5/scratchpad/matrix-run/work/mc/streaming-chunked-upload/payload.bin`. This operation is defined by S3 but is not handled by this backend.",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#627",
+          "evidence": {
+            "wire": {
+              "requests": 4,
+              "payload_modes": [
+                "UNSIGNED-PAYLOAD",
+                "sha256-hex"
+              ],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "fail",
+          "detail": "mc ls after mirror failed: mc: <ERROR> Unable to list folder. This operation is defined by S3 but is not handled by this backend.",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#627",
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "unsupported",
+          "detail": "mc does not expose a trailing-checksum upload; minio-go signs the chunks instead",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "unsupported",
+          "detail": "mc version enable requires the bucket-versioning admin surface this matrix does not target",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
+    },
+    {
+      "name": "rclone",
+      "version": "v1.74.0",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "rclone exposes no command that isolates this operation",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "unsupported",
+          "detail": "the system under test registers no CopyObject",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "unsupported",
+          "detail": "the system under test registers no DeleteObjects",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "unsupported",
+          "detail": "rclone link produces a URL only for backends it can sign for interactively, not as a scenario step",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "unsupported",
+          "detail": "rclone link produces a URL only for backends it can sign for interactively, not as a scenario step",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "fail",
+          "detail": "the returned range differs from the same slice of the source object",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#626",
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "unsupported",
+          "detail": "aws-sdk-go-v2 declares UNSIGNED-PAYLOAD for object uploads and offers no signed aws-chunked mode",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "fail",
+          "detail": "rclone sync rerun failed: 2026/09/03 00:46:13 NOTICE: Failed to sync with 12 errors: last error was: not deleting files as there were IO errors",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#629",
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "unsupported",
+          "detail": "rclone offers no trailing-checksum upload switch; it declares UNSIGNED-PAYLOAD instead",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "unsupported",
+          "detail": "rclone exposes no command that isolates this operation",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
+    },
+    {
+      "name": "restic",
+      "version": "v0.19.1",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "fail",
+          "detail": "restic restore failed: Fatal: There were 12 errors",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#626",
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "unsupported",
+          "detail": "restic creates its repository bucket on init but has no command that removes a bucket",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "unsupported",
+          "detail": "the system under test registers no CopyObject",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "unsupported",
+          "detail": "the system under test registers no DeleteObjects",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "unsupported",
+          "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "unsupported",
+          "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "unsupported",
+          "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "unsupported",
+          "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "unsupported",
+          "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "unsupported",
+          "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 22,
+              "payload_modes": [
+                "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
+                "UNSIGNED-PAYLOAD",
+                "sha256-hex"
+              ],
+              "max_signed_chunks": 181,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "unsupported",
+          "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "unsupported",
+          "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "unsupported",
+          "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pass": 11,
+    "fail": 10,
+    "unsupported": 35,
+    "known": 10,
+    "regression": 0,
+    "fixed": 0,
+    "stale": 0
+  },
+  "streaming_signed_clients": [
+    "restic"
+  ]
+}
