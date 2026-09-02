@@ -1,0 +1,5 @@
+id: copy-object
+description: >-
+  Server-side copy of an existing key. Listed because x-amz-copy-source parsing is a known
+  cross-implementation divergence; skipped while the system under test registers no CopyObject.
+requires_operations: [CreateBucket, PutObject, CopyObject, GetObject, DeleteObject, DeleteBucket]

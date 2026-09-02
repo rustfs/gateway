@@ -1,0 +1,7 @@
+id: versioned-object
+description: >-
+  Enable versioning, overwrite a key, and confirm both versions are enumerated. Clients differ
+  in whether they send the version id as a query parameter or drop it.
+requires_operations:
+  [CreateBucket, PutBucketVersioning, GetBucketVersioning, PutObject, ListObjectVersions,
+   DeleteObject, DeleteBucket]

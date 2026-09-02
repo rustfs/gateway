@@ -1,0 +1,7 @@
+id: range-download
+description: >-
+  Read a byte range out of the middle of an object and compare it with the same slice of the
+  source. A server that ignores Range answers 200 with the whole object, which every client
+  reports differently and some do not report at all.
+requires_operations: [CreateBucket, PutObject, GetObject, DeleteObject, DeleteBucket]
+object_size_bytes: 1048576

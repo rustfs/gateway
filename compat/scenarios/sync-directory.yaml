@@ -1,0 +1,6 @@
+id: sync-directory
+description: >-
+  Mirror a local directory and mirror it again with one file changed. Sync clients emit a
+  high-concurrency list-then-copy pattern that no single-object scenario produces.
+requires_operations: [CreateBucket, PutObject, GetObject, ListObjectsV2, DeleteObject, DeleteBucket]
+object_count: 12

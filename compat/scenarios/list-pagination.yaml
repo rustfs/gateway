@@ -1,0 +1,7 @@
+id: list-pagination
+description: >-
+  Write more keys than one page holds and walk every page. Continuation-token handling differs
+  between SDKs more than any other listing behaviour.
+requires_operations: [CreateBucket, PutObject, ListObjectsV2, DeleteObject, DeleteBucket]
+object_count: 25
+page_size: 7

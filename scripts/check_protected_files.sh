@@ -97,6 +97,7 @@ expected_rows = [
     "`spec/quirks/**`",
     "`spec/contracts/**`",
     "`spec/third-party/aws-signing-test-suite.lock`",
+    "`compat/matrix.json`",
 ]
 if actual_rows != expected_rows:
     fail(f"AGENTS.md protected path table drifted: expected={expected_rows!r}, found={actual_rows!r}")
@@ -167,6 +168,7 @@ exact = {
     "generated/error_codes.json",
     "crates/core/tests/golden/route-table.txt",
     "spec/third-party/aws-signing-test-suite.lock",
+    "compat/matrix.json",
 }
 violations: set[tuple[str, str]] = set()
 for status, old, path in changes:

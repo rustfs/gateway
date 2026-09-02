@@ -1,0 +1,12 @@
+id: streaming-chunked-upload
+description: >-
+  Upload an object large enough that the client chooses aws-chunked signed framing on its own.
+  The point of this scenario is the wire assertion, not the exit code: a client that quietly
+  degrades to a whole-payload upload must fail here, because the chunk-signature state machine
+  is then untested. Only a real SDK decides how many chunks to send.
+requires_operations: [CreateBucket, PutObject, GetObject, DeleteObject, DeleteBucket]
+object_size_bytes: 9437184
+wire_assertions:
+  - payload_mode_matches: '^STREAMING-AWS4-HMAC-SHA256-PAYLOAD(-TRAILER)?$'
+  - signed_chunks_gte: 2
+  - status_observed: 200

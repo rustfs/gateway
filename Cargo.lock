@@ -1774,6 +1774,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustfs-gateway-compat-sut"
+version = "0.1.3"
+dependencies = [
+ "bytes",
+ "http",
+ "http-body",
+ "rustfs-gateway",
+ "rustfs-gateway-fs",
+ "rustfs-gateway-server",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "rustfs-gateway-conformance"
 version = "0.10.1"
 dependencies = [

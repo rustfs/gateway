@@ -1,0 +1,51 @@
+# Pinned client versions for the compatibility matrix.
+#
+# This file is the ONLY place a client version is written down. A floating version makes a red
+# matrix unattributable: nobody can tell whether the client changed or the gateway did. `latest`,
+# `*`, `main`, `HEAD`, `devel` and an absent version are all refused by
+# `scripts/check_client_versions_pinned.sh`; a version bump is its own reviewed pull request.
+#
+# Integrity, and why there is no hand-copied sha256 here. Every binary client is installed with
+# `go install <module>@<version>`, so the Go module checksum database verifies the source before it
+# is built, and `go version -m <binary>` reads the module version back out of the artefact that was
+# actually installed. `ci/compat/run_matrix.sh` compares that read-back with the pin below and
+# refuses to run on a mismatch, which is what makes a-cm-0007 and a-cm-0013 falsifiable: a
+# distribution build (Homebrew reports `(devel)` for rclone and a `+dirty` suffix for mc) fails the
+# comparison rather than being recorded as the pinned version. A hand-copied release-asset digest
+# would be a weaker pin, because a wrong digest is indistinguishable from a right one until the
+# day it fires.
+#
+# `boto3` has no such database. Its identity is checked the other way: pip installs the exact
+# `==` version and the runner compares `boto3.__version__` with the pin.
+
+[clients.boto3]
+install = "pip"
+package = "boto3"
+version = "1.42.96"
+# botocore carries the signing, checksum and aws-chunked behaviour; boto3 is a thin layer over it,
+# so it is pinned separately rather than left to boto3's own dependency range.
+requirements = ["boto3==1.42.96", "botocore==1.42.96"]
+
+[clients.restic]
+install = "go"
+module = "github.com/restic/restic/cmd/restic"
+# The module version `go version -m` must report. It is the module path, not the command path.
+module_version_path = "github.com/restic/restic"
+version = "v0.19.1"
+binary = "restic"
+
+[clients.mc]
+install = "go"
+module = "github.com/minio/mc"
+module_version_path = "github.com/minio/mc"
+# mc tags releases as `RELEASE.<timestamp>`, which is not a semantic version, so the module proxy
+# addresses it by the pseudo-version of the same commit. This is `RELEASE.2025-04-16T18-13-26Z`.
+version = "v0.0.0-20250416181326-b00526b153a3"
+binary = "mc"
+
+[clients.rclone]
+install = "go"
+module = "github.com/rclone/rclone"
+module_version_path = "github.com/rclone/rclone"
+version = "v1.74.0"
+binary = "rclone"

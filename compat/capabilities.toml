@@ -1,0 +1,41 @@
+# The system under test's declared capability boundary.
+#
+# This is the list of operations `rustfs-gateway-fs` registers with the production service, and it
+# is what decides whether a scenario runs at all. A scenario naming an operation absent from this
+# list is recorded as `unsupported` with that operation named — never as a pass, and never as a
+# failure: a scenario that could not run has told us nothing about the server, and recording it
+# either way would be reporting an intention as an observation.
+#
+# It is not maintained by hand in the sense that matters. `ci/compat/run_matrix.sh` asks the
+# launcher for the registry it actually built (`compat-sut --print-capabilities`) and refuses to
+# run when the two disagree, so a backend that gains or loses an operation cannot leave this file
+# quietly describing a service that no longer exists.
+
+sut = "rustfs-gateway-fs"
+
+operations = [
+    "AbortMultipartUpload",
+    "CompleteMultipartUpload",
+    "CreateBucket",
+    "CreateMultipartUpload",
+    "DeleteBucket",
+    "DeleteBucketLifecycle",
+    "DeleteObject",
+    "DeleteObjectTagging",
+    "GetBucketLifecycleConfiguration",
+    "GetBucketVersioning",
+    "GetObject",
+    "GetObjectTagging",
+    "HeadBucket",
+    "HeadObject",
+    "ListMultipartUploads",
+    "ListObjectVersions",
+    "ListObjects",
+    "ListObjectsV2",
+    "ListParts",
+    "PutBucketLifecycleConfiguration",
+    "PutBucketVersioning",
+    "PutObject",
+    "PutObjectTagging",
+    "UploadPart",
+]

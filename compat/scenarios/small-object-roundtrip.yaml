@@ -1,0 +1,6 @@
+id: small-object-roundtrip
+description: >-
+  Write a small object, read it back, and compare the bytes. Whole-object payload signing,
+  entity tags and the delete path in one pass.
+requires_operations: [CreateBucket, PutObject, GetObject, HeadObject, DeleteObject, DeleteBucket]
+object_size_bytes: 4096
