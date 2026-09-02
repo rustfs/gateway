@@ -1,0 +1,35 @@
+# The pytest marker expression the weekly run selects with, one clause per line.
+# Blank lines and `#` comments are ignored; the remaining lines are joined with a single
+# space and passed to `pytest -m`.
+#
+# THIS FILE IS A RATCHET SURFACE, NOT A KNOB
+#   Every exclusion here removes cases from the measured set. Adding one is the cheapest
+#   possible way to turn this job green while the implementation gets worse, and it leaves
+#   no trace in the report — the excluded cases are not failures, they are absences.
+#   `scripts/check_s3tests_filter.sh` therefore refuses any new exclusion, and refuses in
+#   particular to let `fails_on_rgw` be excluded. Known gaps belong in ci/s3tests/xfail.txt,
+#   where they are counted, grouped by domain, and pushed to shrink.
+#
+# WHY EACH EXCLUSION IS HERE
+#   fails_on_aws            Cases real AWS S3 does NOT pass. They encode Ceph RGW-specific
+#                           behaviour, and this project is measured against AWS fidelity,
+#                           so passing them would be the defect.
+#   s3select                A Ceph extension, not S3.
+#   bucket_logging          A Ceph extension that additionally requires an SDK model
+#   bucket_logging_cleanup  overlay to be installed into ~/.aws/models.
+#   cloud_transition        Needs an `[s3 cloud]` section and a second storage tier.
+#   cloud_restore
+#   webidentity_test        Needs a running Keycloak.
+#   test_of_sts             STS is out of scope for this ring; it arrives with P10-03.
+#
+# WHAT IS DELIBERATELY NOT EXCLUDED
+#   fails_on_rgw. Those cases are ones Ceph's own gateway does not pass, which usually
+#   means they encode the correct AWS behaviour. They are the target, not noise.
+not fails_on_aws
+and not s3select
+and not bucket_logging
+and not bucket_logging_cleanup
+and not cloud_transition
+and not cloud_restore
+and not webidentity_test
+and not test_of_sts

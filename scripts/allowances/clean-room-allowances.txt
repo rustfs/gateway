@@ -13,3 +13,5 @@ docs/adr/0001-licensing-and-provenance-boundary.md    # the ADR that draws the b
 docs/dialects.md                                      # the clean-room policy itself
 scripts/README.md                                     # the guard index, which describes this guard
 CONTRIBUTING.md                                       # the contributor clause
+THIRD-PARTY-NOTICES.md                                # the external-suite licence review, which has to name what the server is licensed under to say it is never used
+scripts/check_third_party_doc.sh                      # asserts that review names the licence, so it holds the string

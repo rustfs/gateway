@@ -169,6 +169,13 @@ fixed now so that the same check does not get written twice under two names.
 | `check_evidence_shape.sh` | Every case has compact HTTPS/URN-plus-summary evidence and cannot carry pasted upstream prose | P8-01 |
 | `check_baseline_ratchet.sh` | The conformance baseline failure set only shrinks | P8-01 |
 | `check_runner_raw_bytes.sh` | Case requests retain a raw TCP byte path and acquire no normalizing client dependency | P8-01 |
+| `check_xfail_ratchet.sh` | The Ceph s3-tests tolerated set only shrinks, unless the same change raises the file's generation by exactly one | P8-05 |
+| `check_s3tests_filter.sh` | The s3-tests marker filter never grows an exclusion, never excludes `fails_on_rgw`, and always excludes `fails_on_aws` | P8-05 |
+| `check_suites_pinned.sh` | External suites are reached at an exact commit or image digest, never a branch or a moving tag, and every suite workflow is cron-only | P8-05 |
+| `check_no_vendored_suites.sh` | No external suite's source is committed here, detected by both path and content fingerprint | P8-05 |
+| `check_third_party_doc.sh` | Every external suite's licence review records the upstream, the SPDX id, the vendoring decision, a re-runnable verification command, and the pin the runner actually uses | P8-05 |
+| `check_s3tests_report.sh` | Not a policy guard: proves the baseline-aware report fails on an unlisted failure, tolerates a listed one, reports fixed and stale entries, and refuses a run that measured nothing | P8-05 |
+| `check_sut_launcher.sh` | Not a policy guard: proves `ci/lib/sut.sh` reports ready only when a port is really bound and exits 3 with a diagnosis on every other path | P8-05 |
 | `check_guard_sandbox_archive.sh` | Guard sandboxes use a temporary archive file; archive creation and extraction fail closed and clean partial state | P0 |
 | `check_sig_case_coverage.sh` | All 163 P2-01 through P2-05 signature cases map to named executable evidence | P2-01 through P2-05 |
 | `check_test_target_consolidation.sh` | Core, gateway and conformance integration sources each remain one explicit Cargo target, with gateway compile-fail fixtures sharing one trybuild batch | P0-04 |

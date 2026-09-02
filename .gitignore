@@ -19,3 +19,7 @@
 # the mutant, which is junk the moment the mutation is reverted. Delete it; do not commit it.
 *.proptest-regressions
 !crates/*/tests/*.proptest-regressions
+
+# Python bytecode caches, written by the report tool and its guard.
+__pycache__/
+*.pyc

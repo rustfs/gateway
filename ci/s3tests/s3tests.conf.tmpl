@@ -1,0 +1,96 @@
+# Ceph s3-tests configuration template.
+#
+# `ci/lib/sut.sh` renders this by replacing every at-sign-delimited upper-case placeholder
+# with the value of the environment variable of the same name, and refuses to render if one
+# is unset. The result is passed to the suite as S3TEST_CONF. Placeholders inside a comment
+# line, like this one — @EXAMPLE_PLACEHOLDER@ — are left alone.
+#
+# THE SECTION SET IS NOT DECORATIVE
+#   The suite reads its configuration at *collection* time. A missing option does not skip
+#   the cases that need it; it raises `configparser.NoOptionError` while importing the
+#   module, and every case in that module disappears from the run. Measured: without
+#   `tenant` in `[s3 tenant]`, `test_s3.py` and `test_iam.py` both failed to import and
+#   collection fell from ~900 cases to 55. That is why ci/s3tests/run.sh refuses to judge a
+#   run whose collection came back short.
+#
+# Placeholders, not defaults, on purpose: a template that ships working credentials is a
+# template somebody eventually points at something that is not a throwaway.
+#
+# THE TWO SETS OF CREDENTIALS ARE NOT OPTIONAL
+#   The cross-account, ACL and grant cases authenticate as `s3 alt` while `s3 main` owns
+#   the bucket. Pointing both sections at one identity does not make those cases fail — it
+#   makes them pass for the wrong reason, which is worse than a red suite.
+#
+#   `user_id` and `display_name` must equal what the service reports as the bucket owner.
+#   They are compared verbatim in owner and grantee assertions, so a mismatch turns a large
+#   and apparently unrelated part of the suite red.
+#
+# ConfigParser reads this file, so `%` is interpolation syntax and is deliberately absent.
+
+[DEFAULT]
+host = @S3TESTS_HOST@
+port = @S3TESTS_PORT@
+is_secure = @S3TESTS_IS_SECURE@
+ssl_verify = @S3TESTS_SSL_VERIFY@
+
+[fixtures]
+# Every bucket the suite creates carries this prefix, so a failed run leaves an
+# identifiable, sweepable set behind rather than anonymous rubble.
+bucket prefix = @S3TESTS_BUCKET_PREFIX@
+iam name prefix = s3gate-iam-
+iam path prefix = /s3gate/
+
+[s3 main]
+# The identity that owns almost every fixture bucket.
+access_key = @S3TESTS_MAIN_ACCESS_KEY@
+secret_key = @S3TESTS_MAIN_SECRET_KEY@
+display_name = @S3TESTS_MAIN_DISPLAY_NAME@
+user_id = @S3TESTS_MAIN_USER_ID@
+email = @S3TESTS_MAIN_EMAIL@
+api_name = @S3TESTS_REGION@
+# How many seconds the service treats as one lifecycle day. The lifecycle cases assume the
+# server can be driven on a short cycle; without a matching hook on the service side they do
+# not fail, they wait for a real day and then time out. `FsBackend::with_lifecycle_debug_interval`
+# is the hook, and rustfs/gateway#624 is what makes it reachable from a command line.
+lc_debug_interval = @S3TESTS_LC_DEBUG_INTERVAL@
+
+[s3 alt]
+# A second, genuinely separate identity. Cross-account authorization is measured by the
+# difference between this one and `s3 main`.
+access_key = @S3TESTS_ALT_ACCESS_KEY@
+secret_key = @S3TESTS_ALT_SECRET_KEY@
+display_name = @S3TESTS_ALT_DISPLAY_NAME@
+user_id = @S3TESTS_ALT_USER_ID@
+email = @S3TESTS_ALT_EMAIL@
+
+[s3 tenant]
+# Used by the tenanted-bucket cases. Kept distinct from both identities above.
+access_key = @S3TESTS_TENANT_ACCESS_KEY@
+secret_key = @S3TESTS_TENANT_SECRET_KEY@
+display_name = @S3TESTS_TENANT_DISPLAY_NAME@
+user_id = @S3TESTS_TENANT_USER_ID@
+email = @S3TESTS_TENANT_EMAIL@
+tenant = @S3TESTS_TENANT_NAME@
+
+[iam]
+# The IAM and STS cases are excluded by the marker filter, but these sections are read while
+# the modules are imported. Absent, collection loses far more than the cases they belong to.
+access_key = @S3TESTS_MAIN_ACCESS_KEY@
+secret_key = @S3TESTS_MAIN_SECRET_KEY@
+display_name = @S3TESTS_MAIN_DISPLAY_NAME@
+user_id = @S3TESTS_MAIN_USER_ID@
+email = @S3TESTS_MAIN_EMAIL@
+
+[iam root]
+access_key = @S3TESTS_IAM_ROOT_ACCESS_KEY@
+secret_key = @S3TESTS_IAM_ROOT_SECRET_KEY@
+account_id = @S3TESTS_IAM_ROOT_ACCOUNT_ID@
+user_id = @S3TESTS_IAM_ROOT_ACCOUNT_ID@
+email = iam-root@s3gate.invalid
+
+[iam alt root]
+access_key = @S3TESTS_IAM_ALT_ROOT_ACCESS_KEY@
+secret_key = @S3TESTS_IAM_ALT_ROOT_SECRET_KEY@
+account_id = @S3TESTS_IAM_ALT_ROOT_ACCOUNT_ID@
+user_id = @S3TESTS_IAM_ALT_ROOT_ACCOUNT_ID@
+email = iam-alt-root@s3gate.invalid
