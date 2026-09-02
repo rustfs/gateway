@@ -92,6 +92,7 @@
 //! progress.
 
 mod response;
+mod stream;
 
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
@@ -101,9 +102,12 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use rustfs_gateway::{ConnectionIntent, S3Service, collect, connection_intent_of};
+use rustls::ClientConfig;
+use rustls::pki_types::ServerName;
 
 use crate::exec::ServiceRuntime;
 use crate::observation::ConnectionState;
+use crate::socket::stream::ConnectionStream;
 use crate::sut::SutError;
 
 /// A listener safety net strictly beyond the maximum exchange budget, so case timing decides first.
@@ -1012,7 +1016,7 @@ fn observe_connection_pending(stream: &TcpStream) -> (ConnectionState, bool) {
 /// Raw on purpose: an SDK normalises away the malformed framing a negative case exists to send, so
 /// there is no HTTP client here beyond what reading a response requires.
 pub struct Connection {
-    stream: TcpStream,
+    stream: ConnectionStream,
     body_written: u64,
     torn_down: bool,
 }
@@ -1026,10 +1030,36 @@ impl Connection {
     pub fn open(addr: SocketAddr) -> Result<Connection, SutError> {
         let stream = TcpStream::connect(addr).map_err(|error| SutError::Environment(format!("cannot connect: {error}")))?;
         Ok(Connection {
+            stream: ConnectionStream::Plain(stream),
+            body_written: 0,
+            torn_down: false,
+        })
+    }
+
+    /// Opens a certificate-verified TLS connection to a listener.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SutError::Environment`] when TCP setup or TLS client construction fails. The
+    /// handshake is driven by the first read or write, and any failure remains an environment
+    /// error rather than a conformance finding.
+    pub fn open_tls(
+        addr: SocketAddr,
+        server_name: ServerName<'static>,
+        config: Arc<ClientConfig>,
+    ) -> Result<Connection, SutError> {
+        let socket = TcpStream::connect(addr).map_err(|error| SutError::Environment(format!("cannot connect: {error}")))?;
+        let stream = ConnectionStream::tls(socket, server_name, config)
+            .map_err(|error| SutError::Environment(format!("cannot configure TLS connection: {error}")))?;
+        Ok(Connection {
             stream,
             body_written: 0,
             torn_down: false,
         })
+    }
+
+    pub(crate) fn set_read_timeout(&self, timeout: Duration) {
+        let _ = self.stream.tcp().set_read_timeout(Some(timeout));
     }
 
     /// Returns the local endpoint the operating system assigned this client socket.
@@ -1038,6 +1068,7 @@ impl Connection {
     /// connection rather than trusting the construction that was intended to open two.
     pub fn local_addr(&self) -> Result<SocketAddr, SutError> {
         self.stream
+            .tcp()
             .local_addr()
             .map_err(|error| SutError::Environment(format!("cannot observe the local socket endpoint: {error}")))
     }
@@ -1099,6 +1130,7 @@ impl Connection {
     pub fn close(&mut self) -> Result<(), SutError> {
         self.torn_down = true;
         self.stream
+            .tcp()
             .shutdown(Shutdown::Both)
             .map_err(|error| SutError::Environment(format!("cannot close: {error}")))
     }
@@ -1113,6 +1145,7 @@ impl Connection {
     /// Returns [`SutError::Environment`] when the shutdown fails.
     pub fn half_close(&mut self) -> Result<(), SutError> {
         self.stream
+            .tcp()
             .shutdown(Shutdown::Write)
             .map_err(|error| SutError::Environment(format!("cannot half-close: {error}")))
     }
@@ -1136,11 +1169,11 @@ impl Connection {
     /// What state the socket is in, asked of the socket.
     #[must_use]
     pub fn observe(&self) -> ConnectionState {
-        observe_connection(&self.stream)
+        observe_connection(self.stream.tcp())
     }
 
     pub(crate) fn observe_pending(&self) -> (ConnectionState, bool) {
-        observe_connection_pending(&self.stream)
+        observe_connection_pending(self.stream.tcp())
     }
 }
 

@@ -41,7 +41,7 @@ impl Connection {
     ///
     /// Returns the classification, which the caller turns into an [`crate::observation::Outcome`].
     pub fn read_response_classified(&mut self, method: &str, timeout: Duration) -> Result<RawResponse, ReadFailure> {
-        let _ = self.stream.set_read_timeout(Some(timeout));
+        self.set_read_timeout(timeout);
         let mut buffer = Vec::new();
         let head_end = loop {
             if let Some(end) = find_head_end(&buffer) {

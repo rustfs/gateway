@@ -72,7 +72,8 @@ options:
   --profile <aws|minio|strict>
                             the profile the target claims (default aws)
   --root <dir>              corpus directory holding case.schema.json
-  --endpoint <http-url>     cleartext external target (raw TCP; no remote setup yet)
+  --endpoint <http(s)-url>  external target (raw HTTP/1.1; no remote setup yet)
+  --ca-cert <pem-path>      additional CA certificates for an HTTPS endpoint
   --baseline <file>         tolerate the failures this file records; fail only on a regression
   --json <file>             write the machine-readable report
   --junit <file>            write a JUnit document
@@ -119,7 +120,7 @@ pub fn main(args: &[String]) -> ExitCode {
             eprintln!("conformance: `--endpoint` is only meaningful for run and baseline commands");
             return ExitCode::from(exit::USAGE);
         }
-        let mut target = match Conn::external(root, endpoint) {
+        let mut target = match Conn::external_with_ca(root, endpoint, options.ca_cert.as_deref()) {
             Ok(target) => target,
             Err(error) => {
                 eprintln!("conformance: {error}");
@@ -333,6 +334,8 @@ pub struct Options {
     pub root: Option<PathBuf>,
     /// Target endpoint, when one is given.
     pub endpoint: Option<String>,
+    /// Additional PEM-encoded roots for an HTTPS endpoint.
+    pub ca_cert: Option<PathBuf>,
     /// Baseline document.
     pub baseline: Option<PathBuf>,
     /// Where to write the JSON report.
@@ -359,6 +362,7 @@ impl Options {
             profile: Profile::Aws,
             root: None,
             endpoint: None,
+            ca_cert: None,
             baseline: None,
             json: None,
             junit: None,
@@ -386,6 +390,7 @@ impl Options {
                 "--filter" => options.filter = Some(value()?),
                 "--root" => options.root = Some(PathBuf::from(value()?)),
                 "--endpoint" => options.endpoint = Some(value()?),
+                "--ca-cert" => options.ca_cert = Some(PathBuf::from(value()?)),
                 "--baseline" => options.baseline = Some(PathBuf::from(value()?)),
                 "--json" => options.json = Some(PathBuf::from(value()?)),
                 "--junit" => options.junit = Some(PathBuf::from(value()?)),
@@ -408,6 +413,13 @@ impl Options {
                 );
             }
             options.transport = Transport::Conn;
+        }
+        if let Some(endpoint) = options.endpoint.as_deref() {
+            if options.ca_cert.is_some() && !endpoint.starts_with("https://") {
+                return Err("`--ca-cert` requires an `https://` endpoint".to_owned());
+            }
+        } else if options.ca_cert.is_some() {
+            return Err("`--ca-cert` requires `--endpoint`".to_owned());
         }
         Ok(Some(options))
     }
@@ -485,6 +497,7 @@ mod tests {
             profile: Profile::Aws,
             root: None,
             endpoint: None,
+            ca_cert: None,
             baseline: None,
             json: None,
             junit: None,
@@ -601,6 +614,25 @@ mod tests {
             .expect_err("endpoint transport is fixed");
 
         assert!(error.contains("--transport"));
+    }
+
+    #[test]
+    fn https_endpoint_accepts_an_explicit_ca_certificate() {
+        let options = Options::parse(&args(&["run", "--endpoint", "https://127.0.0.1:9000", "--ca-cert", "test-ca.pem"]))
+            .expect("valid HTTPS options")
+            .expect("not help");
+
+        assert_eq!(options.ca_cert, Some(PathBuf::from("test-ca.pem")));
+    }
+
+    #[test]
+    fn ca_certificate_without_https_is_a_usage_error() {
+        let without_endpoint = Options::parse(&args(&["run", "--ca-cert", "test-ca.pem"])).expect_err("CA needs an endpoint");
+        let cleartext = Options::parse(&args(&["run", "--endpoint", "http://127.0.0.1:9000", "--ca-cert", "test-ca.pem"]))
+            .expect_err("CA cannot apply to cleartext");
+
+        assert!(without_endpoint.contains("--endpoint"));
+        assert!(cleartext.contains("https://"));
     }
 
     #[test]
