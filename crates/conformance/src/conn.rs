@@ -79,10 +79,12 @@ use crate::value::Value;
 
 mod exchange;
 mod external;
+mod external_endpoint;
+mod external_tls;
 mod server;
 #[cfg(test)]
 use exchange::read_concurrent_connection;
-use external::ExternalEndpoint;
+use external_endpoint::ExternalEndpoint;
 
 /// How long the client waits on a silent server before calling the exchange wedged.
 ///
@@ -324,7 +326,7 @@ struct BodyProgress {
 impl Sut for Conn {
     fn describe(&self) -> String {
         if let Some(endpoint) = &self.external {
-            return format!("external HTTP/1.1 endpoint at {} over raw TCP", endpoint.authority());
+            return endpoint.description();
         }
         #[cfg(feature = "production-transports")]
         match self.driver {

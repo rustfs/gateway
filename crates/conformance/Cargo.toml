@@ -50,9 +50,12 @@ dhat = { workspace = true }
 # The pagination property test's generator. Same reasoning: dev-only, and the properties it states
 # are about the reference backend rather than about the corpus.
 proptest = { workspace = true }
+rcgen = { workspace = true }
 
 [dependencies]
 rustfs-gateway.workspace = true
+rustls.workspace = true
+webpki-roots.workspace = true
 
 # The two crates whose types appear in the signature of the facade's own entry point:
 # `S3Service::call_bytes(http::Request<bytes::Bytes>)`. A caller cannot name that call without

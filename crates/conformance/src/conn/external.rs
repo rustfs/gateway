@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! External cleartext endpoint parsing and authored-only socket exchange.
+//! External endpoint exchange over caller-selected HTTP or HTTPS.
 //!
-//! Responsible for: validating an operator-supplied HTTP authority, resolving it, and driving
-//! unpaced request steps without the loopback server's private demand observer. NOT responsible for:
-//! TLS, HTTP/2, paced or controlled bodies, remote fixture setup, request interpretation, or response
-//! judgement. Upstream: `super`; downstream: `crate::cli` through [`super::Conn`].
+//! Responsible for: driving unpaced request steps without the loopback server's private demand
+//! observer. NOT responsible for: endpoint parsing, TLS setup, HTTP/2, paced or controlled bodies,
+//! remote fixture setup, request interpretation, or response judgement. Upstream: `super`;
+//! downstream: `crate::cli` through [`super::Conn`].
 
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
+use super::external_endpoint::ExternalEndpoint;
 use super::{BodyProgress, Conn, DispatchedExchange, Head, budget_of, observe_socket_exchange, read_connection};
 use crate::inprocess::{ChunkStep, InProcess};
 use crate::observation::{ConnectionState, Observation};
@@ -30,87 +31,17 @@ use crate::sut::SutError;
 use crate::sut::{ExchangePlan, Sut};
 use crate::value::Value;
 
-/// A resolved cleartext endpoint and the authority that must appear in `Host`.
-#[derive(Clone, Debug)]
-pub(super) struct ExternalEndpoint {
-    authority: String,
-    address: SocketAddr,
-}
-
-impl ExternalEndpoint {
-    /// Parses and resolves one absolute HTTP endpoint.
-    pub(super) fn parse(text: &str) -> Result<ExternalEndpoint, SutError> {
-        if text.starts_with("https://") {
-            return Err(SutError::Environment(
-                "external endpoint TLS is not implemented; refusing to send cleartext to an https URL".to_owned(),
-            ));
-        }
-        let authority = text
-            .strip_prefix("http://")
-            .ok_or_else(|| SutError::Environment("external endpoint must be an absolute `http://` URL".to_owned()))?;
-        let authority = authority.strip_suffix('/').unwrap_or(authority);
-        if authority.is_empty() {
-            return Err(SutError::Environment("external endpoint has no authority".to_owned()));
-        }
-        if authority.contains(['/', '?', '#']) {
-            return Err(SutError::Environment(
-                "external endpoint must not contain a path, query, or fragment".to_owned(),
-            ));
-        }
-        if authority.contains('@') {
-            return Err(SutError::Environment("external endpoint must not contain user information".to_owned()));
-        }
-
-        let socket_authority = socket_authority(authority)?;
-        let address = socket_authority
-            .to_socket_addrs()
-            .map_err(|error| SutError::Environment(format!("external endpoint `{authority}` could not be resolved: {error}")))?
-            .next()
-            .ok_or_else(|| SutError::Environment(format!("external endpoint `{authority}` resolved to no addresses")))?;
-        Ok(ExternalEndpoint {
-            authority: authority.to_owned(),
-            address,
-        })
-    }
-
-    pub(super) fn authority(&self) -> &str {
-        &self.authority
-    }
-
-    pub(super) fn address(&self) -> SocketAddr {
-        self.address
-    }
-}
-
-fn socket_authority(authority: &str) -> Result<String, SutError> {
-    if let Some(rest) = authority.strip_prefix('[') {
-        let close = rest
-            .find(']')
-            .ok_or_else(|| SutError::Environment("external endpoint has an unterminated IPv6 address".to_owned()))?;
-        let suffix = &rest[close + 1..];
-        return match suffix {
-            "" => Ok(format!("{authority}:80")),
-            suffix if suffix.starts_with(':') && suffix.len() > 1 => Ok(authority.to_owned()),
-            _ => Err(SutError::Environment(
-                "external endpoint has invalid text after its IPv6 address".to_owned(),
-            )),
-        };
-    }
-    match authority.matches(':').count() {
-        0 => Ok(format!("{authority}:80")),
-        1 => Ok(authority.to_owned()),
-        _ => Err(SutError::Environment(
-            "an IPv6 external endpoint must enclose its address in brackets".to_owned(),
-        )),
-    }
-}
-
 impl Conn {
-    /// Builds a target that writes corpus requests to a caller-supplied cleartext endpoint.
+    /// Builds a target that writes corpus requests to a caller-supplied HTTP(S) endpoint.
     pub fn external(root: std::path::PathBuf, endpoint: &str) -> Result<Conn, SutError> {
+        Self::external_with_ca(root, endpoint, None)
+    }
+
+    /// Builds an HTTP(S) target, optionally trusting additional PEM-encoded CA certificates.
+    pub fn external_with_ca(root: std::path::PathBuf, endpoint: &str, ca_path: Option<&Path>) -> Result<Conn, SutError> {
         Ok(Conn {
             inner: InProcess::new(root),
-            external: Some(ExternalEndpoint::parse(endpoint)?),
+            external: Some(ExternalEndpoint::parse_with_ca(endpoint, ca_path)?),
             listener: None,
             connection: None,
             #[cfg(feature = "production-transports")]
@@ -161,14 +92,14 @@ impl Conn {
         }
         let fresh = !reuse || existing.is_none_or(|(state, _)| state != ConnectionState::Open);
         if fresh {
-            self.connection = Some(Connection::open(endpoint.address())?);
+            self.connection = Some(endpoint.open()?);
         }
         let connection = self
             .connection
             .as_mut()
             .ok_or_else(|| SutError::Environment("external endpoint connection was not opened".to_owned()))?;
         let result = execute_socket_exchange(connection, &wire, &head, budget_of(plan.timeout_ms))?;
-        if result.torn_down {
+        if result.torn_down || endpoint.is_tls() {
             self.connection = None;
         }
         Ok(result.observation)
@@ -493,28 +424,6 @@ status = {status}
         ]
         .into_iter()
         .collect()
-    }
-
-    #[test]
-    fn parses_cleartext_authority_and_preserves_host() {
-        let endpoint = ExternalEndpoint::parse("http://127.0.0.1:9000").expect("valid endpoint");
-
-        assert_eq!(endpoint.authority(), "127.0.0.1:9000");
-        assert_eq!(endpoint.address().port(), 9000);
-    }
-
-    #[test]
-    fn rejects_tls_instead_of_sending_cleartext() {
-        let error = ExternalEndpoint::parse("https://s3.example.test").expect_err("TLS is unsupported");
-
-        assert!(error.to_string().contains("TLS"));
-    }
-
-    #[test]
-    fn rejects_endpoint_paths_instead_of_discarding_them() {
-        let error = ExternalEndpoint::parse("http://s3.example.test/prefix").expect_err("paths are unsupported");
-
-        assert!(error.to_string().contains("path"));
     }
 
     #[test]
