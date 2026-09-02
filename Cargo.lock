@@ -1827,6 +1827,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustfs-gateway-corpus"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "rustfs-gateway-dialect-minio"
 version = "0.2.0"
 dependencies = [

@@ -35,6 +35,7 @@ from typing import Any, Iterator
 root = Path(sys.argv[1])
 mode = sys.argv[2]
 layers = [
+    ("rustfs-gateway-corpus", set()),
     ("rustfs-gateway-macros", set()),
     ("rustfs-gateway-model", set()),
     ("rustfs-gateway-stream", set()),
