@@ -12,22 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The client-matrix system under test: the filesystem reference backend behind a real listener.
+//! The external-suite system under test: the filesystem reference backend behind a real listener.
 //!
-//! Responsible for: assembling `rustfs-gateway-fs` into a signed, plaintext S3 endpoint that any
-//! third-party SDK can be pointed at, publishing the operation set that endpoint really registers,
-//! and recording one wire-evidence line per served request.
+//! Responsible for: parsing the command line, assembling `rustfs-gateway-fs` into a signed,
+//! plaintext S3 endpoint that any third-party SDK or external suite can be pointed at, publishing
+//! the operation set that endpoint really registers, and recording one wire-evidence line per
+//! served request.
 //! NOT responsible for: production durability, TLS, deciding whether a scenario passed, or fixing
 //! any gap a client finds — a matrix failure is fixed in the issue that owns the operation.
-//! Upstream: `ci/compat/run_matrix.sh`, which starts it before any driver runs.
-//! Downstream: the drivers under `compat/drivers/**` and `ci/compat/report.py`.
+//! Upstream: `ci/compat/run_matrix.sh` and `ci/lib/sut.sh`, which start it before any driver or
+//! suite runs.
+//! Downstream: the drivers under `compat/drivers/**`, `ci/compat/report.py`, and the Ceph s3-tests
+//! runner in `ci/s3tests/run.sh`.
 //!
 //! ```text
 //! compat-sut --data <dir> --port 9100 --probe-log <path>
+//! compat-sut --data <dir> --access-key MAIN --secret-key ... --owner-id s3gate-main \
+//!            --alt-access-key ALT --alt-secret-key ... --alt-owner-id s3gate-alt \
+//!            --lc-debug-interval 10
 //! compat-sut --print-capabilities
 //! ```
 
+mod identity;
+mod ownership;
 mod probe;
+mod service;
 
 use std::env;
 use std::io;
@@ -36,35 +45,29 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rustfs_gateway::{Credentials, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, allow_when};
 use rustfs_gateway_fs::FsBackend;
 use rustfs_gateway_server::{Server, ServerConfig};
 
+use crate::identity::{AccountArgs, Accounts};
+use crate::ownership::BucketOwners;
 use crate::probe::{ProbeLog, ProbeService};
+use crate::service::{build_service, capability_names};
 
-/// Everything the launcher accepts. There are no defaults for the credential pair on purpose: a
-/// matrix run whose driver and whose server disagree about the secret fails as `SignatureDoesNotMatch`
-/// for every scenario at once, and a shared default is the easiest way to arrive there.
-struct Options {
-    data: PathBuf,
-    address: SocketAddr,
-    access_key: String,
-    secret_key: String,
-    region: String,
-    probe_log: Option<PathBuf>,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            data: PathBuf::from("."),
-            address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9100),
-            access_key: "AKIDEXAMPLE".to_owned(),
-            secret_key: "secret".to_owned(),
-            region: "us-east-1".to_owned(),
-            probe_log: None,
-        }
-    }
+/// Everything the launcher accepts. There are no defaults for the **second** credential pair on
+/// purpose: a matrix run whose driver and whose server disagree about the secret fails as
+/// `SignatureDoesNotMatch` for every scenario at once, and a shared default is the easiest way to
+/// arrive there — while a second identity that exists by default would let a cross-account case
+/// pass without anybody having configured the distinction it measures.
+pub(crate) struct Options {
+    pub(crate) data: PathBuf,
+    pub(crate) address: SocketAddr,
+    pub(crate) accounts: Accounts,
+    pub(crate) region: String,
+    pub(crate) probe_log: Option<PathBuf>,
+    /// How long one lifecycle day and one automatic sweep last. `None` leaves the reference
+    /// backend's 24-hour cadence alone and starts no sweeper, which is what a matrix run wants and
+    /// what a lifecycle suite cannot use.
+    pub(crate) lifecycle_debug_interval: Option<Duration>,
 }
 
 fn parse_options<I, S>(arguments: I) -> Result<Options, io::Error>
@@ -72,10 +75,15 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let mut options = Options::default();
-    let mut arguments = arguments.into_iter();
+    let mut data = PathBuf::from(".");
+    let mut region = "us-east-1".to_owned();
+    let mut probe_log = None;
     let mut host = IpAddr::V4(Ipv4Addr::LOCALHOST);
-    let mut port = options.address.port();
+    let mut port = 9100_u16;
+    let mut primary = AccountArgs::default();
+    let mut secondary = AccountArgs::default();
+    let mut lifecycle_debug_interval = None;
+    let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         let mut value = || -> Result<String, io::Error> {
             arguments
@@ -84,7 +92,7 @@ where
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "an option is missing its value"))
         };
         match argument.as_ref() {
-            "--data" => options.data = PathBuf::from(value()?),
+            "--data" => data = PathBuf::from(value()?),
             "--host" => {
                 host = value()?
                     .parse()
@@ -95,50 +103,61 @@ where
                     .parse()
                     .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "--port requires a number"))?;
             }
-            "--access-key" => options.access_key = value()?,
-            "--secret-key" => options.secret_key = value()?,
-            "--region" => options.region = value()?,
-            "--probe-log" => options.probe_log = Some(PathBuf::from(value()?)),
+            "--access-key" => primary.access_key = Some(value()?),
+            "--secret-key" => primary.secret_key = Some(value()?),
+            "--owner-id" => primary.owner_id = Some(value()?),
+            "--display-name" => primary.display_name = Some(value()?),
+            "--alt-access-key" => secondary.access_key = Some(value()?),
+            "--alt-secret-key" => secondary.secret_key = Some(value()?),
+            "--alt-owner-id" => secondary.owner_id = Some(value()?),
+            "--alt-display-name" => secondary.display_name = Some(value()?),
+            "--lc-debug-interval" => {
+                let seconds: u64 = value()?.parse().map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "--lc-debug-interval requires a number of seconds")
+                })?;
+                if seconds == 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "--lc-debug-interval must be at least one second; a zero-length day would make every \
+                         object immediately eligible and every lifecycle assertion unfalsifiable",
+                    ));
+                }
+                lifecycle_debug_interval = Some(Duration::from_secs(seconds));
+            }
+            "--region" => region = value()?,
+            "--probe-log" => probe_log = Some(PathBuf::from(value()?)),
             unknown => {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unknown argument: {unknown}")));
             }
         }
     }
-    options.address = SocketAddr::new(host, port);
-    Ok(options)
+    Ok(Options {
+        data,
+        address: SocketAddr::new(host, port),
+        accounts: Accounts::build(primary, secondary)?,
+        region,
+        probe_log,
+        lifecycle_debug_interval,
+    })
 }
 
-/// The operation names the assembled service really registers.
+/// The identity banner, one line per configured identity.
 ///
-/// This is the capability boundary the matrix consults: a scenario needing an operation absent
-/// from this list is recorded as `unsupported` with that operation named, never as a pass and
-/// never as a failure. It is read from the backend rather than written down twice, so the
-/// declared boundary cannot drift away from the registry.
-fn capability_names(backend: &FsBackend) -> Vec<&'static str> {
-    let mut names: Vec<&'static str> = backend.supported_operations().collect();
-    names.sort_unstable();
-    names
-}
-
-fn build_service(options: &Options, backend: &Arc<FsBackend>) -> Result<S3Service, Box<dyn std::error::Error>> {
-    let credentials =
-        Arc::new(StaticCredentials::new().with(Credentials::new(&options.access_key, options.secret_key.as_bytes())?));
-    let supported = capability_names(backend);
-    let builder = backend.register_crud(
-        ServiceBuilder::new()
-            .authenticator(SigV4Authenticator::new(credentials, RegionSet::new([options.region.clone()])?))
-            // Not an allow-all: the matrix must see a refusal for anything outside the reference
-            // backend's registered set, so that "the client asked for something we do not have"
-            // is distinguishable from "the client asked correctly and we answered wrongly".
-            .authorizer(allow_when(move |request| supported.contains(&request.operation))),
-    );
-    let service = backend
-        .register_tagging(
-            backend
-                .register_lifecycle(backend.register_listing(backend.register_versioning(backend.register_multipart(builder)))),
-        )
-        .build()?;
-    Ok(service)
+/// This is what an operator or a configuration generator reads to fill the `user_id` and
+/// `display_name` of a suite configuration such as `ci/s3tests/s3tests.conf.tmpl`, which compares
+/// both values verbatim. **No secret appears here**, and none ever may: this launcher's output is
+/// captured to a file by `ci/lib/sut.sh` and attached to a CI run as an artifact.
+fn identity_lines(accounts: &Accounts) -> Vec<String> {
+    accounts
+        .all()
+        .zip(["main", "alt"])
+        .map(|(account, role)| {
+            format!(
+                "compat-sut identity {role} access-key {} owner-id {} display-name {}",
+                account.access_key, account.owner_id, account.display_name
+            )
+        })
+        .collect()
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -156,8 +175,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let options = parse_options(raw)?;
     std::fs::create_dir_all(&options.data)?;
-    let backend = Arc::new(FsBackend::open(&options.data)?);
-    let service = build_service(&options, &backend)?;
+    let backend = Arc::new(service::open_backend(&options)?);
+    let owners = Arc::new(BucketOwners::default());
+    let service = build_service(&options, &backend, &owners)?;
+    // Started only when a debug cadence was configured: at the production 24-hour interval the
+    // sweeper would do nothing a suite could observe, and starting it anyway would make the flag
+    // look load-bearing when it was not.
+    let scheduler = match options.lifecycle_debug_interval {
+        Some(_) => Some(backend.start_lifecycle_scheduler()?),
+        None => None,
+    };
 
     let log = match options.probe_log.as_deref() {
         Some(path) => Some(Arc::new(ProbeLog::create(path)?)),
@@ -178,10 +205,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The banner is the readiness signal `ci/compat/run_matrix.sh` waits for. It names the port
     // that was actually bound, so `--port 0` is usable for a local run.
     println!("compat-sut listening on http://{}", running.local_addr);
-    println!("compat-sut region {} access-key {}", options.region, options.access_key);
+    println!("compat-sut region {}", options.region);
+    for line in identity_lines(&options.accounts) {
+        println!("{line}");
+    }
+    if let Some(interval) = options.lifecycle_debug_interval {
+        println!("compat-sut lifecycle debug interval {}s", interval.as_secs());
+    }
 
     tokio::signal::ctrl_c().await?;
     let report = running.shutdown.trigger(Duration::from_secs(30)).await;
+    if let Some(scheduler) = scheduler {
+        let sweeps = scheduler.shutdown().await?;
+        println!(
+            "compat-sut lifecycle sweeps={} expired={} failed={}",
+            sweeps.sweeps, sweeps.expired_objects, sweeps.failed_sweeps
+        );
+    }
     if let Some(log) = log.as_ref() {
         println!("compat-sut recorded {} probe record(s)", log.records());
     }
@@ -198,13 +238,16 @@ fn tempdir_for_capability_probe() -> io::Result<PathBuf> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
-    use super::parse_options;
+    use super::{identity_lines, parse_options};
 
     #[test]
     fn an_option_without_its_value_is_refused() {
         assert!(parse_options(["--port"]).is_err());
         assert!(parse_options(["--data"]).is_err());
+        assert!(parse_options(["--alt-access-key"]).is_err());
+        assert!(parse_options(["--lc-debug-interval"]).is_err());
     }
 
     #[test]
@@ -222,5 +265,148 @@ mod tests {
         let options = parse_options(["--host", "127.0.0.1", "--port", "0"]).expect("a valid option pair");
         assert_eq!(options.address.port(), 0);
         assert!(options.address.ip().is_loopback());
+    }
+
+    /// Positive — the full two-identity command line reaches the served identity set.
+    #[test]
+    fn both_identities_reach_the_served_set() {
+        let options = parse_options([
+            "--access-key",
+            "MAIN",
+            "--secret-key",
+            "main-secret",
+            "--owner-id",
+            "s3gate-main",
+            "--display-name",
+            "s3gate-main",
+            "--alt-access-key",
+            "ALT",
+            "--alt-secret-key",
+            "alt-secret",
+            "--alt-owner-id",
+            "s3gate-alt",
+            "--alt-display-name",
+            "s3gate-alt",
+        ])
+        .expect("two distinct identities");
+        assert_eq!(options.accounts.owner_of("MAIN"), Some("s3gate-main"));
+        assert_eq!(options.accounts.owner_of("ALT"), Some("s3gate-alt"));
+        assert_eq!(options.accounts.all().count(), 2);
+    }
+
+    /// Negative — two identities that collapse into one principal are refused at the command line,
+    /// before anything can be measured against them.
+    #[test]
+    fn n_a_collapsed_second_identity_is_refused_at_the_command_line() {
+        assert!(
+            parse_options([
+                "--access-key",
+                "SAME",
+                "--secret-key",
+                "main-secret",
+                "--alt-access-key",
+                "SAME",
+                "--alt-secret-key",
+                "alt-secret",
+            ])
+            .is_err()
+        );
+        assert!(
+            parse_options([
+                "--access-key",
+                "MAIN",
+                "--secret-key",
+                "main-secret",
+                "--owner-id",
+                "one-account",
+                "--alt-access-key",
+                "ALT",
+                "--alt-secret-key",
+                "alt-secret",
+                "--alt-owner-id",
+                "one-account",
+            ])
+            .is_err()
+        );
+    }
+
+    /// Negative — a zero-second lifecycle day is refused; every object would be born expired.
+    #[test]
+    fn n_a_zero_lifecycle_debug_interval_is_refused() {
+        assert!(parse_options(["--lc-debug-interval", "0"]).is_err());
+        assert!(parse_options(["--lc-debug-interval", "a-while"]).is_err());
+    }
+
+    /// Positive — the flag is off unless it is given, and on with the seconds that were given.
+    #[test]
+    fn the_lifecycle_debug_interval_is_absent_until_it_is_given() {
+        assert!(
+            parse_options(["--data", "."])
+                .expect("a valid line")
+                .lifecycle_debug_interval
+                .is_none()
+        );
+        assert_eq!(
+            parse_options(["--lc-debug-interval", "10"])
+                .expect("a valid line")
+                .lifecycle_debug_interval
+                .map(|interval| interval.as_secs()),
+            Some(10)
+        );
+    }
+
+    /// Positive — the banner names each identity's owner id and display name, per identity.
+    #[test]
+    fn the_banner_names_each_identitys_owner_and_display_name() {
+        let options = parse_options([
+            "--access-key",
+            "MAIN",
+            "--secret-key",
+            "main-secret",
+            "--owner-id",
+            "s3gate-main",
+            "--display-name",
+            "Main Fixture Owner",
+            "--alt-access-key",
+            "ALT",
+            "--alt-secret-key",
+            "alt-secret",
+            "--alt-owner-id",
+            "s3gate-alt",
+            "--alt-display-name",
+            "Alt Fixture Owner",
+        ])
+        .expect("two distinct identities");
+        let lines = identity_lines(&options.accounts);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(
+            lines[0],
+            "compat-sut identity main access-key MAIN owner-id s3gate-main display-name Main Fixture Owner"
+        );
+        assert_eq!(
+            lines[1],
+            "compat-sut identity alt access-key ALT owner-id s3gate-alt display-name Alt Fixture Owner"
+        );
+    }
+
+    /// Negative — no banner line may carry a signing secret. This launcher's stdout is captured to
+    /// a file and attached to a CI run as an artifact.
+    #[test]
+    fn n_no_banner_line_carries_a_secret() {
+        let options = parse_options([
+            "--access-key",
+            "MAIN",
+            "--secret-key",
+            "main-secret-value",
+            "--alt-access-key",
+            "ALT",
+            "--alt-secret-key",
+            "alt-secret-value",
+        ])
+        .expect("two distinct identities");
+        for line in identity_lines(&options.accounts) {
+            assert!(!line.contains("main-secret-value"), "{line}");
+            assert!(!line.contains("alt-secret-value"), "{line}");
+        }
     }
 }

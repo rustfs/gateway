@@ -164,14 +164,18 @@ sut_start() {
     fi
 
     if [[ -z "${GATEWAY_SUT_COMMAND:-}" ]]; then
-        # This repository has no runnable S3 server binary yet: rustfs-gateway-fs is a
-        # library crate, and nothing in the workspace assembles it behind a listener.
-        # Saying so is the whole point — a launcher that quietly produced no endpoint
-        # would hand the suite a connection-refused for every case and call it a result.
+        # There IS a runnable server in this repository now — compat/sut, the `compat-sut`
+        # binary — but this library still refuses to guess a command line. Saying so is the
+        # whole point: a launcher that quietly produced no endpoint would hand the suite a
+        # connection-refused for every case and call it a result, and one that guessed a
+        # command would hand it a service configured with credentials the suite does not
+        # hold. The caller names the command, and names it once.
         sut_die "no system under test. Set GATEWAY_SUT_ENDPOINT to an already-running S3
   service, or GATEWAY_SUT_COMMAND to a command that starts one and listens on
-  GATEWAY_SUT_HOST:GATEWAY_SUT_PORT. This repository cannot start one itself: rustfs-gateway-fs
-  is a library and the workspace ships no server binary that assembles it (rustfs/gateway#624)."
+  GATEWAY_SUT_HOST:GATEWAY_SUT_PORT. This repository ships one: build it with
+  \`cargo build --release -p rustfs-gateway-compat-sut\` and launch \`target/release/compat-sut\`
+  with --data, --host, --port and the credential flags the suite is configured with
+  (\`compat-sut --print-capabilities\` lists what it registers)."
     fi
 
     SUT_HOST="${GATEWAY_SUT_HOST:-127.0.0.1}"

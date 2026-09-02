@@ -31,3 +31,8 @@ http = { workspace = true }
 http-body = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { workspace = true }
+
+[dev-dependencies]
+# The launcher's own tests drive signed requests through the very service `main` serves, so they
+# need the signer any SDK would use and the digest it puts in `x-amz-content-sha256`.
+sha2 = { workspace = true }
