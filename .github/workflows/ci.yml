@@ -243,10 +243,17 @@ jobs:
             bash scripts/run_minimal_listener_smoke.sh
           '
 
+  # The five-minute promise lives in xtask/src/bootstrap.rs, which times itself and returns
+  # FAILURE naming the seconds it took. The old wrapper here was `timeout 300s`, the same number,
+  # so on every run that crossed the line the kill arrived first and the job printed exit 124
+  # with nothing naming the clock — measured 282s green once and 318-326s at 124 five times in
+  # nine runs of main. The wrapper is now a strictly larger ci_budget.sh budget, so the
+  # five-minute contract is the thing that speaks and its verdict carries the measurement.
+  # Raising this number does not relax that contract; only bootstrap.rs can.
   bootstrap:
     name: Cold bootstrap
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
@@ -256,10 +263,7 @@ jobs:
       # No cargo cache: the five-minute measurement includes compiling xtask itself.
       - name: Bootstrap from a cold checkout (maximum 5 minutes)
         run: |
-          started="$(date +%s)"
-          timeout 300s cargo xtask bootstrap
-          elapsed="$(( $(date +%s) - started ))"
-          echo "cold bootstrap completed in ${elapsed}s"
+          scripts/ci_budget.sh 420 "cold bootstrap" cargo xtask bootstrap
 
   feedback-loop:
     name: Operation feedback loop
@@ -278,10 +282,17 @@ jobs:
           cargo build -p xtask --no-default-features --features operation
       - name: Three operation samples (maximum 30 seconds each)
         run: |
-          timeout 30s cargo xtask verify --op GetObject
-          timeout 30s cargo xtask verify --op PutObject
-          timeout 30s cargo xtask verify --op ListObjectsV2
+          scripts/ci_budget.sh 30 "verify --op GetObject" cargo xtask verify --op GetObject
+          scripts/ci_budget.sh 30 "verify --op PutObject" cargo xtask verify --op PutObject
+          scripts/ci_budget.sh 30 "verify --op ListObjectsV2" cargo xtask verify --op ListObjectsV2
 
+  # The three workspace shards are balanced by measurement, not by package count. Nine runs of
+  # main on 2026-09-01/02 read 237-295s, 266-480s and 15-23s of the same 480s budget: shard 2 was
+  # over the line twice at exit 124 while shard 3 was never above 4% of its clock. The imbalance,
+  # not the total, was the merge blocker, so `cargo test --package rustfs-gateway` moved from
+  # shard 2 to shard 3 rather than the budget moving anywhere. Shard 2 keeps the conformance
+  # corpus and the `cargo check` that the facade fixture reads; shard 3 pays the gateway build it
+  # did not have. Re-measure before moving another package: the numbers, not the shape, decide.
   workspace-tests:
     name: Workspace tests 1
     runs-on: ubuntu-latest
@@ -308,8 +319,8 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Workspace tests 2/3 (maximum 8 minutes after setup)
         run: |
-          scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c 'cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'
-          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
+          scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c 'cargo test --package rustfs-gateway-conformance && cargo check --package rustfs-gateway'
+          scripts/ci_budget.sh 60 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 
   workspace-tests-3:
     name: Workspace tests 3
@@ -323,7 +334,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Workspace tests 3/3 (maximum 8 minutes after setup)
         run: |
-          scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s
+          scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c 'cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway'
 
   transport-parity:
     name: Production transport parity
@@ -367,10 +378,13 @@ jobs:
           scripts/ci_budget.sh 105 "four-way persistence goldens" \
             cargo run --quiet --package rustfs-gateway-goldens --bin four-way -- --all
 
+  # The runner build is 31-41s on a cache hit and once took the whole 90s budget at exit 124 on a
+  # cache miss (run 33668574761). A budget sized for the hit turns every cache miss into a red
+  # required check, so this one is sized for the miss.
   signing-suite:
     name: Official signing suite
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
@@ -379,7 +393,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Pinned smithy-rs signing suite
         run: |
-          scripts/ci_budget.sh 90 "signing suite build" cargo build --package xtask --bin xtask
+          scripts/ci_budget.sh 180 "signing suite build" cargo build --package xtask --bin xtask
           scripts/ci_budget.sh 60 "signing suite fetch" target/debug/xtask sigsuite fetch
           scripts/ci_budget.sh 60 "signing suite run" target/debug/xtask sigsuite run
 
@@ -484,49 +498,60 @@ jobs:
           scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh
           scripts/ci_budget.sh 45 "test target coverage self-test" bash scripts/test_test_target_coverage.sh
 
+  # Read scripts/test_guard_scripts.sh before changing any budget below. The suite stops itself
+  # at `budget - 30`, a FLAT reserve, not a fraction: at the 60s these three shards used to carry
+  # it had 30s of working time and spent 22-31s of it, so two of the three stopped themselves on
+  # 33641327259 and 33646920592 with every case still printing ok. Adding a fourth shard could not
+  # have fixed that — the reserve is absolute, so a 60s budget buys 30s of work no matter how thin
+  # the shards are sliced. 150s buys 120s. The suite now refuses a budget whose reserve is more
+  # than a quarter of it, so this trap cannot be re-set by writing a smaller number here.
+  #
+  # These three, the DTO-compiler job and the error-status job also now hand the suite the budget
+  # CI enforces. Before this they did not: the suite defended its 480s default while ci_budget.sh
+  # enforced 60s or 90s, so an overrun would have been killed at 124 with no diagnosis at all.
   quirk-ledger-self-test:
     name: Quirk ledger self-test 1
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Quirk ledger mutations 1/3 (maximum 1 minute after setup)
+      - name: Quirk ledger mutations 1/3 (maximum 2.5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 60 "quirk ledger mutations 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=60 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 150 "quirk ledger mutations 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
 
   quirk-ledger-self-test-2:
     name: Quirk ledger self-test 2
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Quirk ledger mutations 2/3 (maximum 1 minute after setup)
+      - name: Quirk ledger mutations 2/3 (maximum 2.5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 60 "quirk ledger mutations 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=60 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 150 "quirk ledger mutations 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
 
   quirk-ledger-self-test-3:
     name: Quirk ledger self-test 3
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Quirk ledger mutations 3/3 (maximum 1 minute after setup)
+      - name: Quirk ledger mutations 3/3 (maximum 2.5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 60 "quirk ledger mutations 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=60 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 150 "quirk ledger mutations 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
 
   dto-compiler-self-test:
     name: DTO compiler self-test
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: DTO compiler mutations (maximum 1 minute after setup)
+      - name: DTO compiler mutations (maximum 2.5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 150 "DTO compiler self-test" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
 
   build-guard-self-test:
     name: Build guard self-test 1
@@ -601,12 +626,12 @@ jobs:
   error-status-self-test:
     name: Error status self-test
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Error status mutations (maximum 1 minute after setup)
+      - name: Error status mutations (maximum 2.5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 60 "error status self-test" env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 150 "error status self-test" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
 
   # Branch protection requires this exact check name. It aggregates all twenty-three parallel jobs and must
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.

@@ -79,9 +79,9 @@ guard_groups.each_with_index do |job, index|
   require_equal(job.keys, worker_keys,
                 "#{guard_group_ids[index]} changed its parallel six-minute contract")
 end
-require_equal(signing_suite.keys, worker_keys, "signing-suite changed its parallel four-minute contract")
+require_equal(signing_suite.keys, worker_keys, "signing-suite changed its parallel six-minute contract")
 require_equal(signing_suite.values_at("name", "runs-on", "timeout-minutes"),
-              ["Official signing suite", "ubuntu-latest", 4], "signing-suite identity or budget changed")
+              ["Official signing suite", "ubuntu-latest", 6], "signing-suite identity or budget changed")
 require_equal(persistence_goldens.keys, worker_keys,
               "persistence-goldens changed its parallel four-minute contract")
 require_equal(persistence_goldens.values_at("name", "runs-on", "timeout-minutes"),
@@ -102,15 +102,15 @@ require_equal(target.values_at("name", "runs-on", "timeout-minutes"),
               "target-consolidation-self-test identity or budget changed")
 quirk_ledgers.each_with_index do |job, index|
   require_equal(job.keys, worker_keys,
-                "#{quirk_ledger_ids[index]} changed its parallel two-minute contract")
+                "#{quirk_ledger_ids[index]} changed its parallel three-minute contract")
   require_equal(job.values_at("name", "runs-on", "timeout-minutes"),
-                ["Quirk ledger self-test #{index + 1}", "ubuntu-latest", 2],
+                ["Quirk ledger self-test #{index + 1}", "ubuntu-latest", 3],
                 "#{quirk_ledger_ids[index]} identity or budget changed")
 end
 require_equal(dto_compiler.keys, worker_keys,
-              "dto-compiler-self-test changed its parallel two-minute contract")
+              "dto-compiler-self-test changed its parallel three-minute contract")
 require_equal(dto_compiler.values_at("name", "runs-on", "timeout-minutes"),
-              ["DTO compiler self-test", "ubuntu-latest", 2],
+              ["DTO compiler self-test", "ubuntu-latest", 3],
               "dto-compiler-self-test identity or budget changed")
 build_guards.each_with_index do |job, index|
   require_equal(job.keys, worker_keys,
@@ -120,9 +120,9 @@ build_guards.each_with_index do |job, index|
                 "#{build_guard_ids[index]} identity or budget changed")
 end
 require_equal(error_status.keys, worker_keys,
-              "error-status-self-test changed its parallel two-minute contract")
+              "error-status-self-test changed its parallel three-minute contract")
 require_equal(error_status.values_at("name", "runs-on", "timeout-minutes"),
-              ["Error status self-test", "ubuntu-latest", 2],
+              ["Error status self-test", "ubuntu-latest", 3],
               "error-status-self-test identity or budget changed")
 
 (workspaces + guard_groups).each do |job|
@@ -230,13 +230,13 @@ require_equal(error_status_steps.last.keys, ["name", "run"],
 workspace_runs = [<<~'RUN', <<~'RUN', <<~'RUN']
   scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types
 RUN
-  scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c 'cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'
-  scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
+  scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c 'cargo test --package rustfs-gateway-conformance && cargo check --package rustfs-gateway'
+  scripts/ci_budget.sh 60 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 RUN
-  scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s
+  scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c 'cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway'
 RUN
 signing_suite_run = <<~'RUN'
-  scripts/ci_budget.sh 90 "signing suite build" cargo build --package xtask --bin xtask
+  scripts/ci_budget.sh 180 "signing suite build" cargo build --package xtask --bin xtask
   scripts/ci_budget.sh 60 "signing suite fetch" target/debug/xtask sigsuite fetch
   scripts/ci_budget.sh 60 "signing suite run" target/debug/xtask sigsuite run
 RUN
@@ -273,11 +273,11 @@ target_run = <<~'RUN'
 RUN
 quirk_ledger_runs = (0...3).map do |group|
   <<~RUN
-    scripts/ci_budget.sh 60 "quirk ledger mutations #{group + 1}/3" env GATEWAY_GUARD_BUDGET_SECONDS=60 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
+    scripts/ci_budget.sh 150 "quirk ledger mutations #{group + 1}/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
   RUN
 end
 dto_compiler_run = <<~'RUN'
-  scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
+  scripts/ci_budget.sh 150 "DTO compiler self-test" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
 RUN
 build_guard_runs = (0...5).map do |group|
   <<~RUN
@@ -312,7 +312,7 @@ require_equal(quirk_ledger_runs.uniq.length, 3,
 require_equal(dto_compiler.fetch("steps").last.fetch("run"), dto_compiler_run,
               "dto-compiler-self-test command changed or can hide a failure")
 error_status_run = <<~'RUN'
-  scripts/ci_budget.sh 60 "error status self-test" env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
+  scripts/ci_budget.sh 150 "error status self-test" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
 RUN
 build_guards.each_with_index do |job, index|
   require_equal(job.fetch("steps").last.fetch("run"), build_guard_runs.fetch(index),
@@ -521,16 +521,21 @@ if len(build_shards) != 5:
     raise SystemExit(
         f"ERROR: expected five build-backed guard shard invocations in CI, found {len(build_shards)}"
     )
-for seconds, env in regular_shards + quirk_ledger_shards + build_shards:
+# Every invocation, not only the sharded ones. The DTO-compiler and error-status jobs used to be
+# outside this loop because they carry no GATEWAY_GUARD_SHARD_GROUP, and both ran the suite with
+# no declared budget at all: it defended its 480s default while ci_budget.sh enforced 90s and 60s.
+# Their logs said "16s elapsed of the 480s CI budget" under a 90s timeout — a self-stop that could
+# never fire, which is the exact failure the self-stop exists to prevent.
+for seconds, env in ((int(raw), env) for raw, env in invocations):
     declared = re.search(r"GATEWAY_GUARD_BUDGET_SECONDS=([0-9]+)", env)
     if declared is None:
         raise SystemExit(
-            "ERROR: a guard shard runs without declaring the budget it must stop inside, so an "
+            "ERROR: a guard-suite job runs without declaring the budget it must stop inside, so an "
             "overrun would be killed at exit 124 before the suite could say it ran out of time"
         )
     if int(declared.group(1)) != seconds:
         raise SystemExit(
-            f"ERROR: a guard shard defends {declared.group(1)}s but CI enforces {seconds}s; "
+            f"ERROR: a guard-suite job defends {declared.group(1)}s but CI enforces {seconds}s; "
             "an overrun would be killed at exit 124 before the suite could diagnose itself"
         )
 regular_groups = sorted(

@@ -167,6 +167,27 @@ jobs.each do |job_id, job|
   end
 end
 
+# A bare `timeout` is silent right up until the moment it is fatal: it prints exit 124 after every
+# step has said ok, names nothing, and gets attributed to whichever branch was next through the
+# gate. scripts/check_ci_test_split.sh has forbidden it inside the Test aggregate since
+# rustfs/gateway#217; the same argument holds everywhere in this workflow, and the two jobs it did
+# not cover were the two that produced an undiagnosed 124. `Cold bootstrap` wrapped
+# `cargo xtask bootstrap` in `timeout 300s` -- the same number the command defends internally -- so
+# the kill always beat the command's own five-minute verdict to the log.
+jobs.each do |job_id, job|
+  job.fetch("steps").each do |step|
+    run = step["run"]
+    next if run.nil?
+    run.each_line do |line|
+      command = line.strip
+      next if command.empty?
+      next unless command.match?(/(\A|\s)timeout\s+[0-9]+s?\s/)
+      abort("ERROR: #{job_id} runs a bare `timeout`, so an overrun reads as an opaque exit 124 " \
+            "instead of naming the budget it exhausted. Wrap it in scripts/ci_budget.sh: #{command}")
+    end
+  end
+end
+
 timeouts = {}
 dependencies = {}
 jobs.each do |job_id, job|

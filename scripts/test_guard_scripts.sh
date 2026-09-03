@@ -30,7 +30,8 @@ set -euo pipefail
 #   GATEWAY_GUARD_SHARD_GROUP=<i>       which of them this run is (0-based)
 #   GATEWAY_GUARD_BUDGET_SECONDS=<n>    wall-clock budget; the suite stops itself with
 #                                       a diagnosis 30s before it, rather than being
-#                                       killed by the CI `timeout` wrapper
+#                                       killed by the CI `timeout` wrapper. The reserve
+#                                       is flat, so anything under 120s is refused
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -68,7 +69,10 @@ fi
 #
 # CI runs each guard shard under `timeout 300s` and hands it the same number in
 # GATEWAY_GUARD_BUDGET_SECONDS (.github/workflows/ci.yml, pinned by
-# scripts/check_ci_test_split.sh, which also fails if the two ever disagree). The
+# scripts/check_ci_test_split.sh, which also fails if the two ever disagree, and now
+# fails for every mode rather than only the sharded ones: the DTO-compiler and
+# error-status jobs escaped that check for months and ran with no declared budget at
+# all, defending 480s while CI enforced 90s and 60s). The
 # 300s and the jobs' `timeout-minutes: 6` sit inside the ten-minute whole-gate
 # budget in AGENTS.md: a guard runner plus the one-minute Test aggregate is the
 # longest path at seven minutes, and the runner keeps the rest for checkout and
@@ -88,8 +92,23 @@ if [[ ! "$GUARD_BUDGET_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
 fi
 # Stop with thirty seconds to spare: enough for the case in flight to finish and
 # for the diagnosis to reach the log before `timeout` sends its signal.
-GUARD_BUDGET_STOP=$((GUARD_BUDGET_SECONDS - 30))
-((GUARD_BUDGET_STOP > 0)) || GUARD_BUDGET_STOP=1
+GUARD_BUDGET_RESERVE_SECONDS=30
+# The reserve is a flat number of seconds, not a fraction of the budget, so a small budget spends
+# most of its clock on it: at the 60s the quirk-ledger shards used to be given, the suite had 30s
+# of working time and stopped itself in runs 33641327259 and 33646920592 with every case still
+# printing ok. Sharding cannot fix that — the reserve does not shrink when the shards do — so a
+# budget that small is refused here instead of being quietly halved. Four times the reserve is the
+# floor: below it the diagnosis costs more than a quarter of what the job was given.
+GUARD_BUDGET_FLOOR=$((GUARD_BUDGET_RESERVE_SECONDS * 4))
+if ((GUARD_BUDGET_SECONDS < GUARD_BUDGET_FLOOR)); then
+    printf 'test_guard_scripts: a %ss budget keeps only %ss of working time, because the stop\n' \
+        "$GUARD_BUDGET_SECONDS" "$((GUARD_BUDGET_SECONDS - GUARD_BUDGET_RESERVE_SECONDS))" >&2
+    printf '  reserve is a flat %ss. Give it at least %ss, or the suite spends more than a quarter\n' \
+        "$GUARD_BUDGET_RESERVE_SECONDS" "$GUARD_BUDGET_FLOOR" >&2
+    printf '  of its clock on the reserve and stops itself while every case is still printing ok.\n' >&2
+    exit 1
+fi
+GUARD_BUDGET_STOP=$((GUARD_BUDGET_SECONDS - GUARD_BUDGET_RESERVE_SECONDS))
 # Say so out loud well before that, so an overrun is visible one pull request
 # early rather than on the pull request that crosses the line.
 GUARD_BUDGET_WARN=$((GUARD_BUDGET_SECONDS * 4 / 5))
@@ -15523,33 +15542,43 @@ expect_fail check_ci_test_split.sh \
     'the workspace test job running only one package' mut_ci_workspace_command_weakened
 
 mut_ci_second_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance && cargo check --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the second workspace shard running the wrong package' mut_ci_second_workspace_command_weakened
 
 mut_ci_second_workspace_gateway_prebuild_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test --package rustfs-gateway-conformance --package rustfs-gateway'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance && cargo check --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test --package rustfs-gateway-conformance'
 }
 expect_fail check_ci_test_split.sh \
     'the facade fixture losing its same-profile gateway prebuild' \
     mut_ci_second_workspace_gateway_prebuild_dropped
 
 mut_ci_third_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the third workspace shard running the wrong package' mut_ci_third_workspace_command_weakened
 
 mut_ci_third_workspace_compat_feature_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types'
 }
+
+# The move of `rustfs-gateway` out of the shard that ran out of time and into the shard that was
+# never above 4% of its clock is the whole point of the rebalance. A shard 3 that quietly drops it
+# again would leave the gateway package tested nowhere while all three jobs stayed green.
+mut_ci_third_workspace_gateway_package_dropped() {
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s'
+}
+expect_fail check_ci_test_split.sh \
+    'the third workspace shard dropping the gateway package the second one handed it' \
+    mut_ci_third_workspace_gateway_package_dropped
 expect_fail check_ci_test_split.sh \
     'the types tests losing the workspace compat-s3s feature graph' \
     mut_ci_third_workspace_compat_feature_dropped
 
 mut_ci_handlers_facade_fixture_removed() {
-    replace_ci_text '          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
+    replace_ci_text '          scripts/ci_budget.sh 60 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 ' ''
 }
 expect_fail check_ci_test_split.sh \
@@ -15557,10 +15586,10 @@ expect_fail check_ci_test_split.sh \
     mut_ci_handlers_facade_fixture_removed
 
 mut_ci_handlers_facade_fixture_moved_before_gateway_prebuild() {
-    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'\''
-          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh' \
-        '          scripts/ci_budget.sh 30 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
-          scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance --package rustfs-gateway && cargo check --package rustfs-gateway'\'''
+    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance && cargo check --package rustfs-gateway'\''
+          scripts/ci_budget.sh 60 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh' \
+        '          scripts/ci_budget.sh 60 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
+          scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance && cargo check --package rustfs-gateway'\'''
 }
 expect_fail check_ci_test_split.sh \
     'the facade-only fixture moving ahead of its authoritative gateway prebuild' \
@@ -15586,7 +15615,7 @@ expect_fail check_ci_test_split.sh \
     'the official signing suite fetch being replaced with a no-op' mut_ci_signing_suite_fetch_dropped
 
 mut_ci_signing_suite_build_dropped() {
-    replace_ci_text '          scripts/ci_budget.sh 90 "signing suite build" cargo build --package xtask --bin xtask' '          scripts/ci_budget.sh 90 "signing suite build" true'
+    replace_ci_text '          scripts/ci_budget.sh 180 "signing suite build" cargo build --package xtask --bin xtask' '          scripts/ci_budget.sh 180 "signing suite build" true'
 }
 expect_fail check_ci_test_split.sh \
     'the official signing suite runner build being replaced with a no-op' mut_ci_signing_suite_build_dropped
@@ -15850,15 +15879,15 @@ expect_fail check_ci_test_split.sh \
     'the quirk-ledger-self-test job being renamed away' mut_ci_quirk_ledger_job_missing
 
 mut_ci_quirk_ledger_command_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 60 "quirk ledger mutations 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=60 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
+    replace_ci_text 'scripts/ci_budget.sh 150 "quirk ledger mutations 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
         'scripts/ci_budget.sh 60 "quirk ledger mutations 1/3" true'
 }
 expect_fail check_ci_test_split.sh \
     'the quirk-ledger mutation suite being replaced with a no-op' mut_ci_quirk_ledger_command_dropped
 
 mut_ci_quirk_ledger_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 60 "quirk ledger mutations 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=60 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
-        '          scripts/ci_budget.sh 60 "quirk ledger mutations 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=60 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 150 "quirk ledger mutations 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 150 "quirk ledger mutations 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the quirk-ledger job swallowing a failure or timeout' mut_ci_quirk_ledger_failure_swallowed
@@ -15867,13 +15896,13 @@ mut_ci_quirk_ledger_budget_widened() {
     replace_ci_text '  quirk-ledger-self-test:
     name: Quirk ledger self-test 1
     runs-on: ubuntu-latest
-    timeout-minutes: 2' '  quirk-ledger-self-test:
+    timeout-minutes: 3' '  quirk-ledger-self-test:
     name: Quirk ledger self-test 1
     runs-on: ubuntu-latest
-    timeout-minutes: 3'
+    timeout-minutes: 4'
 }
 expect_fail check_ci_test_split.sh \
-    'the quirk-ledger job widening its two-minute budget' mut_ci_quirk_ledger_budget_widened
+    'the quirk-ledger job widening its three-minute budget' mut_ci_quirk_ledger_budget_widened
 
 mut_ci_quirk_ledger_setup_action_replaced() {
     python3 - <<'PYEOF'
@@ -15908,15 +15937,15 @@ expect_fail check_ci_test_split.sh \
     'the third quirk-ledger shard being renamed away' mut_ci_third_quirk_ledger_job_missing
 
 mut_ci_dto_compiler_command_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh' \
+    replace_ci_text 'scripts/ci_budget.sh 150 "DTO compiler self-test" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh' \
         'scripts/ci_budget.sh 90 "DTO compiler self-test" true'
 }
 expect_fail check_ci_test_split.sh \
     'the DTO compiler mutation suite being replaced with a no-op' mut_ci_dto_compiler_command_dropped
 
 mut_ci_dto_compiler_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        '          scripts/ci_budget.sh 90 "DTO compiler self-test" env GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh || true'
+    replace_ci_text '          scripts/ci_budget.sh 150 "DTO compiler self-test" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        '          scripts/ci_budget.sh 150 "DTO compiler self-test" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh || true'
 }
 expect_fail check_ci_test_split.sh \
     'the DTO compiler job swallowing a failure or timeout' mut_ci_dto_compiler_failure_swallowed
@@ -16156,8 +16185,8 @@ expect_fail check_ci_test_split.sh \
     'the aggregate check never comparing the error-status result' mut_ci_error_status_comparison_dropped
 
 mut_ci_error_status_suite_is_a_no_op() {
-    replace_ci_text 'scripts/ci_budget.sh 60 "error status self-test" env GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh' \
-        'scripts/ci_budget.sh 60 "error status self-test" true'
+    replace_ci_text 'scripts/ci_budget.sh 150 "error status self-test" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh' \
+        'scripts/ci_budget.sh 150 "error status self-test" true'
 }
 expect_fail check_ci_test_split.sh \
     'the error-status mutation suite being replaced with a no-op' \
@@ -16167,14 +16196,87 @@ mut_ci_error_status_job_widens_budget() {
     replace_ci_text '  error-status-self-test:
     name: Error status self-test
     runs-on: ubuntu-latest
-    timeout-minutes: 2' '  error-status-self-test:
+    timeout-minutes: 3' '  error-status-self-test:
     name: Error status self-test
     runs-on: ubuntu-latest
     timeout-minutes: 9'
 }
 expect_fail check_ci_test_split.sh \
-    'the error-status job widening its two-minute budget' \
+    'the error-status job widening its three-minute budget' \
     mut_ci_error_status_job_widens_budget
+
+# The DTO-compiler and error-status jobs ran the suite with no GATEWAY_GUARD_BUDGET_SECONDS at all
+# until this change: the suite defended its 480s default while ci_budget.sh enforced 90s and 60s,
+# so the self-stop could never fire and an overrun would have been an unexplained 124. The check
+# that would have caught it only looked at invocations carrying a shard group, which those two do
+# not, so both of these cases exist: one for the missing declaration, one for a wrong one.
+# Both cases add a NEW guard-suite invocation rather than editing an existing one. Every job named
+# above is pinned to its exact `run:` text, so editing one is caught by the pin, and the case would
+# then read green off a diagnostic that has nothing to do with budgets. A job the pinned lists have
+# never heard of is exactly the shape that escaped the old check, which only inspected invocations
+# carrying a shard group -- which is how the DTO-compiler and error-status jobs came to run the
+# suite with no declared budget at all.
+# ci_extra_guard_job <env-assignments>
+# The YAML for one added job, with the budget declaration the caller wants in front of the mode
+# flag. Written once: the two cases differ by that prefix alone, and two near-identical ten-line
+# heredocs are how a mutation subject silently stops matching what CI actually runs.
+ci_extra_guard_job() {
+    printf '%s' '  dto-compiler-self-test-2:
+    name: DTO compiler self-test 2
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: DTO compiler mutations 2 of 2
+        run: |
+          scripts/ci_budget.sh 150 "DTO compiler self-test 2" env '"$1"'GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
+
+  error-status-self-test:'
+}
+
+mut_ci_new_guard_job_without_a_budget() {
+    replace_ci_text '  error-status-self-test:' "$(ci_extra_guard_job '')"
+}
+expect_fail check_ci_test_split.sh \
+    'a new guard-suite job running without declaring the budget it must stop inside' \
+    mut_ci_new_guard_job_without_a_budget \
+    'without declaring the budget it must stop inside'
+
+mut_ci_new_guard_job_defends_the_wrong_budget() {
+    replace_ci_text '  error-status-self-test:' \
+        "$(ci_extra_guard_job 'GATEWAY_GUARD_BUDGET_SECONDS=480 ')"
+}
+expect_fail check_ci_test_split.sh \
+    'a new guard-suite job defending a budget CI does not enforce' \
+    mut_ci_new_guard_job_defends_the_wrong_budget \
+    'defends 480s but CI enforces 150s'
+
+# rustfs/gateway#217 twice over: `Cold bootstrap` wrapped a command that defends its own
+# five-minute budget in `timeout 300s`, the same number, so the kill always beat the verdict and
+# the job printed exit 124 with nothing naming the clock.
+mut_ci_bootstrap_bare_timeout_restored() {
+    replace_ci_text '          scripts/ci_budget.sh 420 "cold bootstrap" cargo xtask bootstrap' \
+        '          timeout 300s cargo xtask bootstrap'
+}
+expect_fail check_ci_time_gate.sh \
+    'the cold bootstrap going back to a bare timeout that outruns its own diagnosis' \
+    mut_ci_bootstrap_bare_timeout_restored
+
+mut_ci_feedback_loop_bare_timeout_restored() {
+    replace_ci_text '          scripts/ci_budget.sh 30 "verify --op GetObject" cargo xtask verify --op GetObject' \
+        '          timeout 30s cargo xtask verify --op GetObject'
+}
+expect_fail check_ci_time_gate.sh \
+    'an operation sample going back to a bare timeout that reports no margin' \
+    mut_ci_feedback_loop_bare_timeout_restored
+
+mut_ci_bootstrap_measurement_unwrapped() {
+    replace_ci_text '          scripts/ci_budget.sh 420 "cold bootstrap" cargo xtask bootstrap' \
+        '          cargo xtask bootstrap'
+}
+expect_fail check_rust_toolchain_msrv.sh \
+    'the cold bootstrap measuring itself with no wall-clock budget at all' \
+    mut_ci_bootstrap_measurement_unwrapped
 
 mut_ci_aggregate_skips_on_failure() {
     replace_ci_text 'if: always()' 'if: success()'
@@ -20244,6 +20346,37 @@ shard_case 'the budget verdict warns once four fifths of the budget is spent' \
     budget_verdict_is warn 384 450 384
 shard_case 'the budget verdict stops the suite before timeout can kill it' \
     budget_verdict_is stop 450 450 384
+
+# The stop reserve is a flat thirty seconds, so a small budget hands most of its clock to it. The
+# quirk-ledger shards ran at 60s for months, which is 30s of working time, and stopped themselves
+# on runs 33641327259 and 33646920592 with every case still printing ok. A budget below four times
+# the reserve is now refused outright, before any case runs, rather than being quietly halved.
+#
+# Driven as a subprocess because the refusal is an `exit 1` at load time; both directions are
+# asserted, since a floor that rejects everything reads exactly like one that rejects nothing.
+#
+# Both runs are stopped one check later by a deliberately out-of-range shard group, so neither
+# executes a case and both exit 1. The rc alone therefore proves nothing — a floor that rejects
+# every budget reads exactly like one that rejects none — so each case asserts which of the two
+# refusals spoke.
+guard_budget_floor_case() {
+    local budget="$1" expected="$2" forbidden="$3" desc="$4" output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    output="$(env GATEWAY_GUARD_BUDGET_SECONDS="$budget" GATEWAY_GUARD_SHARD_GROUPS=2 \
+        GATEWAY_GUARD_SHARD_GROUP=9 bash "$GUARD_SELF" 2>&1)" || rc=$?
+    if [[ "$rc" -eq 1 && "$output" == *"$expected"* && "$output" != *"$forbidden"* ]]; then
+        pass_msg "$desc"
+    else
+        fail_msg "$desc — rc ${rc}: ${output}"
+    fi
+}
+# 119s keeps 89s of working time, one second under the quarter the reserve may cost; 120s is the
+# floor itself and must be accepted, or this would be a ban rather than a floor.
+guard_budget_floor_case 119 'keeps only 89s of working time' 'GATEWAY_GUARD_SHARD_GROUP must be' \
+    'the suite refuses a budget the flat stop reserve would eat a quarter of'
+guard_budget_floor_case 120 'GATEWAY_GUARD_SHARD_GROUP must be' 'working time' \
+    'the suite accepts a budget four times its stop reserve'
 
 shard_plan_is() {
     local expected="$1"
