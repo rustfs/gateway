@@ -25,6 +25,12 @@ mod versioning;
 #[path = "crud/listing.rs"]
 mod listing;
 
+#[path = "crud/range_reads.rs"]
+mod range_reads;
+
+#[path = "crud/bucket_location.rs"]
+mod bucket_location;
+
 #[path = "crud/multipart_listing.rs"]
 mod multipart_listing;
 
@@ -107,6 +113,21 @@ fn service(root: &TestRoot) -> (Arc<FsBackend>, S3Service) {
     let backend = Arc::new(
         FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
             .expect("a usable test root"),
+    );
+    service_with_backend(backend)
+}
+
+/// The same fixture assembled for a deployment that serves `region` rather than us-east-1.
+///
+/// The signer still serves us-east-1 so that the shared `signed` helper keeps working; what this
+/// varies is the backend's own answer to "where is this bucket", which is what `GetBucketLocation`
+/// and `HeadBucket` report.
+fn service_in_region(root: &TestRoot, region: &str) -> (Arc<FsBackend>, S3Service) {
+    let backend = Arc::new(
+        FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
+            .expect("a usable test root")
+            .with_region(region)
+            .expect("a region the model names"),
     );
     service_with_backend(backend)
 }
@@ -264,6 +285,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "DeleteObject",
             "DeleteObjectTagging",
             "GetBucketLifecycleConfiguration",
+            "GetBucketLocation",
             "GetBucketVersioning",
             "GetObject",
             "GetObjectTagging",

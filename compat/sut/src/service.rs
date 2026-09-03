@@ -38,8 +38,12 @@ use crate::ownership::{BucketOwners, decide};
 /// # Errors
 ///
 /// Any I/O error from opening the data root, and an invalid-input error for an unusable interval.
+/// The configured region is handed to the backend as well as to the authenticator: it is what
+/// `HeadBucket` and `GetBucketLocation` report, and a deployment whose signer and whose backend
+/// disagreed about where its buckets are would answer a client two different regions depending on
+/// which it asked first.
 pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
-    let backend = FsBackend::open(&options.data)?;
+    let backend = FsBackend::open(&options.data)?.with_region(&options.region)?;
     match options.lifecycle_debug_interval {
         Some(interval) => backend.with_lifecycle_debug_interval(interval),
         None => Ok(backend),

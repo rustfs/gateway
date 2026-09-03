@@ -31,14 +31,15 @@ use std::time::{Duration, UNIX_EPOCH};
 use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
     AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CreateBucket,
-    CreateBucketOutput, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketLifecycle,
-    DeleteBucketOutput, DeleteObject, GetBucketLifecycleConfiguration, GetBucketVersioning, GetObject, HeadBucket,
-    HeadBucketOutput, HeadObject, ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts,
-    ListPartsOutput, Part, PutBucketLifecycleConfiguration, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
+    CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketLifecycle, DeleteObject,
+    GetBucketLifecycleConfiguration, GetBucketLocation, GetBucketVersioning, GetObject, HeadBucket, HeadObject,
+    ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, ListPartsOutput, Part,
+    PutBucketLifecycleConfiguration, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
-    ObjectKey, Req, ResourceVisibility, Resp, ServiceBuilder, Timestamp, UploadIdClaim, collect, resolve_upload, system_clock,
+    ObjectKey, RegionSet, Req, ResourceVisibility, Resp, ServiceBuilder, Timestamp, UploadIdClaim, collect,
+    normalize_location_constraint, resolve_upload, system_clock,
 };
 use sha2::Sha256;
 use tokio::io::AsyncWriteExt as _;
@@ -62,6 +63,7 @@ macro_rules! reference_operations {
             crud DeleteObject => "DeleteObject",
             tagging DeleteObjectTagging => "DeleteObjectTagging",
             lifecycle GetBucketLifecycleConfiguration => "GetBucketLifecycleConfiguration",
+            crud GetBucketLocation => "GetBucketLocation",
             versioning GetBucketVersioning => "GetBucketVersioning",
             crud GetObject => "GetObject",
             tagging GetObjectTagging => "GetObjectTagging",
@@ -139,9 +141,11 @@ macro_rules! register_lifecycle_entries {
     };
 }
 
+mod buckets;
 mod lifecycle;
 mod lifecycle_scheduler;
 mod listing;
+mod reads;
 mod tagging;
 mod transitions;
 mod uploads;
@@ -159,6 +163,8 @@ pub use lifecycle_scheduler::{LifecycleScheduler, LifecycleSchedulerReport};
 /// crash-consistent or hostile-concurrent-filesystem durability.
 pub struct FsBackend {
     root: PathBuf,
+    region: String,
+    regions: RegionSet,
     temporary_id: AtomicU64,
     version_lock: tokio::sync::Mutex<()>,
     clock: Arc<dyn Clock>,
@@ -195,8 +201,12 @@ impl FsBackend {
         if !metadata.is_dir() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "the backend root must be a directory"));
         }
+        let regions = RegionSet::new([buckets::US_EAST_1])
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "us-east-1 is not a usable region name"))?;
         Ok(Self {
             root: std::fs::canonicalize(root.as_ref())?,
+            region: buckets::US_EAST_1.to_owned(),
+            regions,
             temporary_id: AtomicU64::new(0),
             version_lock: tokio::sync::Mutex::new(()),
             clock,
@@ -223,6 +233,45 @@ impl FsBackend {
         self.lifecycle_day_seconds = seconds;
         self.lifecycle_sweep_interval = interval;
         Ok(self)
+    }
+
+    /// Serves `region` instead of `us-east-1`.
+    ///
+    /// One value answers three questions: the `x-amz-bucket-region` a `HeadBucket` reports, the
+    /// `LocationConstraint` a `GetBucketLocation` answers, and the only constraint a `CreateBucket`
+    /// may name. A deployment that could set them separately could hold a bucket it cannot report
+    /// the region of, which is what `GetBucketLocation` exists to answer.
+    ///
+    /// `EU` is accepted and stored as `eu-west-1`: the alias denotes that region rather than being
+    /// a second one (`q-region-0003`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-input error for a region the `LocationConstraint` enumeration cannot
+    /// name. It is refused here, when the backend is assembled, rather than when a client asks —
+    /// the alternative is a `GetBucketLocation` that must either fail or report the wrong region,
+    /// and by then the buckets already exist.
+    pub fn with_region(mut self, region: &str) -> io::Result<Self> {
+        let invalid = || io::Error::new(io::ErrorKind::InvalidInput, "the served region is not a location the model names");
+        let normalized = normalize_location_constraint(Some(region)).ok_or_else(invalid)?;
+        if normalized != buckets::US_EAST_1 && !rustfs_gateway::dto::LocationConstraint::VALUES.contains(&normalized) {
+            return Err(invalid());
+        }
+        self.regions = RegionSet::new([normalized]).map_err(|_| invalid())?;
+        self.region = normalized.to_owned();
+        Ok(self)
+    }
+
+    /// The one region this backend serves.
+    #[must_use]
+    pub fn region(&self) -> &str {
+        &self.region
+    }
+
+    /// The served region as the set `CreateBucket` matches a presented constraint against.
+    #[must_use]
+    pub const fn regions(&self) -> &RegionSet {
+        &self.regions
     }
 
     /// The exact operations this bounded reference backend registers.
@@ -460,91 +509,6 @@ async fn drain(body: Option<ByteStream>) -> Result<Vec<u8>, HandlerError> {
         .await
         .map_err(|_| HandlerError::new(ErrorCode::INCOMPLETE_BODY, "the request body did not arrive as it was framed"))?;
     Ok(collected.body().to_vec())
-}
-
-impl Handler<CreateBucket> for FsBackend {
-    async fn call(&self, request: Req<CreateBucket>) -> HandlerResult<CreateBucket> {
-        let bucket = request.input().bucket.as_str();
-        let path = self.bucket_path(bucket);
-        match tokio::fs::create_dir(&path).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                self.require_bucket(bucket).await?;
-                return Ok(Resp::new(CreateBucketOutput {
-                    location: Some(format!("/{bucket}")),
-                }));
-            }
-            Err(_) => return Err(storage_error()),
-        }
-        if tokio::fs::create_dir(path.join(OBJECTS_DIR)).await.is_err() {
-            let _ = tokio::fs::remove_dir(&path).await;
-            return Err(storage_error());
-        }
-        if tokio::fs::create_dir(path.join(UPLOADS_DIR)).await.is_err() {
-            let _ = tokio::fs::remove_dir(path.join(OBJECTS_DIR)).await;
-            let _ = tokio::fs::remove_dir(&path).await;
-            return Err(storage_error());
-        }
-        if tokio::fs::create_dir(path.join(VERSIONS_DIR)).await.is_err() {
-            let _ = tokio::fs::remove_dir(path.join(UPLOADS_DIR)).await;
-            let _ = tokio::fs::remove_dir(path.join(OBJECTS_DIR)).await;
-            let _ = tokio::fs::remove_dir(&path).await;
-            return Err(storage_error());
-        }
-        Ok(Resp::new(CreateBucketOutput {
-            location: Some(format!("/{bucket}")),
-        }))
-    }
-}
-
-impl Handler<HeadBucket> for FsBackend {
-    async fn call(&self, request: Req<HeadBucket>) -> HandlerResult<HeadBucket> {
-        self.require_bucket(request.input().bucket.as_str()).await?;
-        Ok(Resp::new(HeadBucketOutput {
-            bucket_region: "us-east-1".to_owned(),
-        }))
-    }
-}
-
-impl Handler<DeleteBucket> for FsBackend {
-    async fn call(&self, request: Req<DeleteBucket>) -> HandlerResult<DeleteBucket> {
-        let bucket = request.input().bucket.as_str();
-        self.require_bucket(bucket).await?;
-        let objects = self.objects_path(bucket);
-        let uploads = self.uploads_path(bucket);
-        let versions = self.versions_path(bucket);
-        if !self.directory_is_empty(&objects).await?
-            || !self.directory_is_empty(&uploads).await?
-            || !self.directory_is_empty(&versions).await?
-        {
-            return Err(HandlerError::new(
-                ErrorCode::BUCKET_NOT_EMPTY,
-                "The bucket you tried to delete is not empty",
-            ));
-        }
-        tokio::fs::remove_dir(&objects).await.map_err(|_| storage_error())?;
-        tokio::fs::remove_dir(&uploads).await.map_err(|_| storage_error())?;
-        tokio::fs::remove_dir(&versions).await.map_err(|_| storage_error())?;
-        match tokio::fs::remove_file(self.bucket_path(bucket).join(versioning::STATUS_FILE)).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => return Err(storage_error()),
-        }
-        match tokio::fs::remove_file(self.bucket_path(bucket).join(versioning::SEQUENCE_FILE)).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => return Err(storage_error()),
-        }
-        match tokio::fs::remove_file(self.bucket_path(bucket).join(lifecycle::RECORD_FILE)).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => return Err(storage_error()),
-        }
-        tokio::fs::remove_dir(self.bucket_path(bucket))
-            .await
-            .map_err(|_| storage_error())?;
-        Ok(Resp::new(DeleteBucketOutput::default()))
-    }
 }
 
 impl Handler<CreateMultipartUpload> for FsBackend {

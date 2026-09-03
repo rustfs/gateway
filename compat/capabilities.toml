@@ -23,6 +23,7 @@ operations = [
     "DeleteObject",
     "DeleteObjectTagging",
     "GetBucketLifecycleConfiguration",
+    "GetBucketLocation",
     "GetBucketVersioning",
     "GetObject",
     "GetObjectTagging",
