@@ -119,8 +119,12 @@ begin
   bootstrap_toolchain_index = bootstrap_steps.index do |step|
     step.is_a?(Hash) && step.fetch("uses", "").match?(%r{\Adtolnay/rust-toolchain@})
   end
+  # The wrapper is scripts/ci_budget.sh, not a bare `timeout`: `cargo xtask bootstrap` defends the
+  # five-minute promise itself and reports the seconds it took, and a `timeout 300s` around a 300s
+  # contract kills the command before that verdict can reach the log.
   bootstrap_command_index = bootstrap_steps.index do |step|
-    step.is_a?(Hash) && step.fetch("run", "").include?("timeout 300s cargo xtask bootstrap")
+    step.is_a?(Hash) &&
+      step.fetch("run", "").match?(%r{^\s*scripts/ci_budget\.sh \d+ "[^"]+" cargo xtask bootstrap\s*$})
   end
   unless bootstrap_toolchain_index && bootstrap_command_index &&
          bootstrap_toolchain_index < bootstrap_command_index
