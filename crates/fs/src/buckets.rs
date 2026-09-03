@@ -39,15 +39,10 @@ use rustfs_gateway::dto::{
     HeadBucketOutput, LocationConstraint,
 };
 use rustfs_gateway::{
-    ErrorCode, Handler, HandlerError, HandlerResult, REGION_MATCH_POLICY, Req, Resp, resolve_location_constraint,
+    ErrorCode, Handler, HandlerError, HandlerResult, REGION_MATCH_POLICY, Req, Resp, US_EAST_1, resolve_location_constraint,
 };
 
 use super::{FsBackend, OBJECTS_DIR, UPLOADS_DIR, VERSIONS_DIR, lifecycle, storage_error, versioning};
-
-/// The one region whose location constraint is the empty element rather than its own name.
-///
-/// Re-stated from [`rustfs_gateway::US_EAST_1`] only as a `use`; the value is the contract's.
-pub(super) use rustfs_gateway::US_EAST_1;
 
 impl Handler<CreateBucket> for FsBackend {
     async fn call(&self, request: Req<CreateBucket>) -> HandlerResult<CreateBucket> {
@@ -60,7 +55,7 @@ impl Handler<CreateBucket> for FsBackend {
                 .as_ref()
                 .and_then(|configuration| configuration.location_constraint.as_ref())
                 .map(LocationConstraint::as_str),
-            self.regions(),
+            &self.regions,
             REGION_MATCH_POLICY,
         )?;
         let bucket = input.bucket.as_str();

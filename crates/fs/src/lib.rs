@@ -38,7 +38,7 @@ use rustfs_gateway::dto::{
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
-    ObjectKey, RegionSet, Req, ResourceVisibility, Resp, ServiceBuilder, Timestamp, UploadIdClaim, collect,
+    ObjectKey, RegionSet, Req, ResourceVisibility, Resp, ServiceBuilder, Timestamp, US_EAST_1, UploadIdClaim, collect,
     normalize_location_constraint, resolve_upload, system_clock,
 };
 use sha2::Sha256;
@@ -201,11 +201,11 @@ impl FsBackend {
         if !metadata.is_dir() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "the backend root must be a directory"));
         }
-        let regions = RegionSet::new([buckets::US_EAST_1])
+        let regions = RegionSet::new([US_EAST_1])
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "us-east-1 is not a usable region name"))?;
         Ok(Self {
             root: std::fs::canonicalize(root.as_ref())?,
-            region: buckets::US_EAST_1.to_owned(),
+            region: US_EAST_1.to_owned(),
             regions,
             temporary_id: AtomicU64::new(0),
             version_lock: tokio::sync::Mutex::new(()),
@@ -254,7 +254,7 @@ impl FsBackend {
     pub fn with_region(mut self, region: &str) -> io::Result<Self> {
         let invalid = || io::Error::new(io::ErrorKind::InvalidInput, "the served region is not a location the model names");
         let normalized = normalize_location_constraint(Some(region)).ok_or_else(invalid)?;
-        if normalized != buckets::US_EAST_1 && !rustfs_gateway::dto::LocationConstraint::VALUES.contains(&normalized) {
+        if normalized != US_EAST_1 && !rustfs_gateway::dto::LocationConstraint::VALUES.contains(&normalized) {
             return Err(invalid());
         }
         self.regions = RegionSet::new([normalized]).map_err(|_| invalid())?;
@@ -266,12 +266,6 @@ impl FsBackend {
     #[must_use]
     pub fn region(&self) -> &str {
         &self.region
-    }
-
-    /// The served region as the set `CreateBucket` matches a presented constraint against.
-    #[must_use]
-    pub const fn regions(&self) -> &RegionSet {
-        &self.regions
     }
 
     /// The exact operations this bounded reference backend registers.
