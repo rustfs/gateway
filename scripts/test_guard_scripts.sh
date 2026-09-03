@@ -18786,6 +18786,353 @@ expect_guard_pass check_operation_spec_builder.sh \
 
 fi
 
+# The error-status block is deliberately not the last block in this file, and
+# check_guard_suite_tail_reachable.sh keeps it that way. Every other mode skips it, so while it was
+# last, a case written at the end of the suite ran only in the `error status self-test` job and
+# never in the default run: nine such cases had collected in it, none of them about an error
+# status, and they are re-homed at the end of the default block below.
+#
+# Moving it costs no ordinal anywhere. A case ordinal is assigned by `guard_case_owned` from the
+# running count of case sites the run has reached, so it depends on the order of the sites a *mode*
+# executes and on nothing else. A block that mode skips contributes no site wherever it sits, and
+# the error-status mode enters no other block in this file, so every mode sees the same sites in
+# the same order after the move as before it. The per-group coverage proof is a statement about one
+# run against itself, so it neither notices nor could have noticed.
+if [[ "$ERROR_STATUS_ONLY" == 1 ]]; then
+
+# -----------------------------------------------------------------------------
+# check_error_status_total.sh — rustfs/backlog#1694
+#
+# The guard replaces a fallback that could not fail: a code with no row used to take a silent 400.
+# Each rule is mutated separately, because one case would leave five of them as prose.
+#
+# Its own parallel runner, like the quirk-ledger, DTO-compiler and build-backed splits: the shared
+# mutation suite is already at its eight-minute ceiling on `main` before these cases exist, and a
+# case that is killed by a neighbour's budget produces no evidence at all. None of these mutations
+# runs codegen or Cargo, so the split costs one runner and about a minute.
+# -----------------------------------------------------------------------------
+
+printf 'Positive control (check_error_status_total.sh must pass on the current tree)\n'
+# The ordinal gate is what the group's coverage proof counts, so it is owed here exactly as it is
+# owed by `expect_fail`. A mode-scoped run is single-process, so it always owns the case — but a
+# site that skipped the gate would be indistinguishable from a duplicate to the proof.
+error_status_positive_control() {
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    if "${SCRIPT_DIR}/check_error_status_total.sh" >/dev/null 2>&1; then
+        pass_msg 'check_error_status_total.sh'
+    else
+        fail_msg 'check_error_status_total.sh fails on the current tree'
+    fi
+}
+error_status_positive_control
+
+printf '\nNegative cases (the error-status guard must fail)\n'
+
+mut_error_status_declared_code_has_no_row() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("generated/error_codes.rs")
+text = path.read_text()
+old = 'pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[\n'
+if old not in text:
+    raise SystemExit("error-code index mutation subject is missing")
+path.write_text(text.replace(old, old + '    ("CodeNobodyGaveAStatus", &["GetObject"]),\n', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'an operation declaring a code the status authority does not map' \
+    mut_error_status_declared_code_has_no_row \
+    'CodeNobodyGaveAStatus'
+
+mut_error_status_missing_error_has_no_row() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("spec/operations/PutObject.toml")
+text = path.read_text()
+old = 'missing_error = "MissingContentLength"'
+if old not in text:
+    raise SystemExit("missing_error mutation subject is missing")
+path.write_text(text.replace(old, 'missing_error = "CodecCodeWithNoStatus"', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'a codec raising a missing-member code with no status row' \
+    mut_error_status_missing_error_has_no_row \
+    'CodecCodeWithNoStatus'
+
+mut_error_status_unflagged_5xx() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/error-status.toml")
+text = path.read_text()
+old = 'name = "InvalidArgument"\nconstant = "INVALID_ARGUMENT"\nstatus = 400'
+if old not in text:
+    raise SystemExit("5xx allowlist mutation subject is missing")
+path.write_text(text.replace(old, 'name = "InvalidArgument"\nconstant = "INVALID_ARGUMENT"\nstatus = 500', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'a client error typed into the 5xx band without joining the allowlist' \
+    mut_error_status_unflagged_5xx \
+    'server_fault'
+
+mut_error_status_server_fault_on_a_client_error() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("model/overlays/error-status.toml")
+text = path.read_text()
+old = 'name = "InvalidArgument"\nconstant = "INVALID_ARGUMENT"\nstatus = 400'
+if old not in text:
+    raise SystemExit("server_fault mutation subject is missing")
+path.write_text(text.replace(old, old + '\nserver_fault = true', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'a server-fault flag outliving the 5xx status it described' \
+    mut_error_status_server_fault_on_a_client_error \
+    'server_fault'
+
+mut_error_status_generated_table_edited() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("generated/error_status.rs")
+text = path.read_text()
+old = '    ("NoSuchKey", StatusCode::NOT_FOUND),'
+if old not in text:
+    raise SystemExit("generated status mutation subject is missing")
+path.write_text(text.replace(old, '    ("NoSuchKey", StatusCode::FORBIDDEN),', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'the generated table answering a status the authority does not hold' \
+    mut_error_status_generated_table_edited \
+    'disagree about `NoSuchKey`'
+
+mut_error_status_custom_loses_its_status() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/types/src/scalar/error_code.rs")
+text = path.read_text()
+old = 'pub fn custom(code: impl Into<Cow<\'static, str>>, status: StatusCode) -> Self {'
+if old not in text:
+    raise SystemExit("custom-signature mutation subject is missing")
+path.write_text(text.replace(old, 'pub fn custom(code: impl Into<Cow<\'static, str>>) -> Self {', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'ErrorCode::custom going back to inventing a status for its caller' \
+    mut_error_status_custom_loses_its_status \
+    'name a status'
+
+mut_error_status_second_hand_written_table() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/types/src/scalar/error_code.rs")
+text = path.read_text()
+old = 'use http::StatusCode;'
+if old not in text:
+    raise SystemExit("hand-written table mutation subject is missing")
+new = old + '\n\nconst SECOND_OPINION: StatusCode = StatusCode::BAD_REQUEST;'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'a second hand-written status growing back beside the generated table' \
+    mut_error_status_second_hand_written_table \
+    'second hand-written answer'
+
+mut_error_status_include_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/types/src/scalar/error_code.rs")
+text = path.read_text()
+old = 'include!("../../../../generated/error_status.rs");'
+if old not in text:
+    raise SystemExit("include mutation subject is missing")
+path.write_text(text.replace(old, '// ' + old, 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'the types crate no longer reading the generated table at all' \
+    mut_error_status_include_removed \
+    'no longer includes the generated table'
+
+mut_error_status_auth_code_undeclared() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("crates/sig/src/verdict.rs")
+text = path.read_text()
+old = 'Self::RequestTimeTooSkewed => "RequestTimeTooSkewed",'
+if old not in text:
+    raise SystemExit("auth-code mutation subject is missing")
+path.write_text(text.replace(old, 'Self::RequestTimeTooSkewed => "ClockIsWrongSomehow",', 1))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'an authentication refusal answering a code with no status row' \
+    mut_error_status_auth_code_undeclared \
+    'ClockIsWrongSomehow'
+
+mut_error_status_stale_allowance() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("allowances/error-status-unreferenced.txt")
+text = path.read_text()
+path.write_text(text + "NoSuchKey|a row the tree reaches every day\n")
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'the dead-code ledger excusing a row that is reached' \
+    mut_error_status_stale_allowance \
+    'still excuses'
+
+mut_error_status_unlisted_dead_row() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("allowances/error-status-unreferenced.txt")
+text = path.read_text()
+old = "InvalidSOAPRequest|"
+if old not in text:
+    raise SystemExit("dead-row ledger mutation subject is missing")
+kept = [line for line in text.splitlines(keepends=True) if not line.startswith(old)]
+path.write_text("".join(kept))
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'a row nothing reaches dropping off the dead-code ledger' \
+    mut_error_status_unlisted_dead_row \
+    'InvalidSOAPRequest'
+
+mut_error_status_authority_removed() {
+    python3 - <<'PYEOF'
+import pathlib
+
+pathlib.Path("model/overlays/error-status.toml").unlink()
+PYEOF
+}
+expect_fail check_error_status_total.sh \
+    'the authority file disappearing, which must fail rather than skip' \
+    mut_error_status_authority_removed \
+    'required input is missing'
+
+# -- check_error_contract_ledger.sh ---------------------------------------------------------------
+#
+# The ledger maps the 24 acceptance ids of rustfs/backlog#1694 §7 to real assertions. It owes one
+# death per mutation class its header names, plus one for each of the two evidence kinds it added
+# over the object ledger: a Rust literal and a guard mutation. Written out rather than looped
+# because each has to fail for its own diagnostic — a roll-call failure and an arithmetic failure
+# read identically in a green summary, and the point of the split is that they are different
+# mistakes.
+
+mut_error_ledger_row_id_duplicated() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_error_contract_ledger.sh")
+text = path.read_text()
+old = "    'c-err-1013|negative|bound|"
+new = "    'c-err-1011|negative|bound|"
+if text.count(old) != 1:
+    raise SystemExit("error ledger row mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+# Mutation 1: one mapping stops existing. The polarity arithmetic is deliberately left intact by
+# renaming rather than deleting, so this can only be caught by the roll call.
+expect_fail_self_mutation check_error_contract_ledger.sh \
+    'a §7 acceptance id losing its mapping while the polarity totals still add up' \
+    mut_error_ledger_row_id_duplicated
+
+mut_error_ledger_row_polarity_flipped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_error_contract_ledger.sh")
+text = path.read_text()
+old = "    'c-err-1013|negative|bound|"
+new = "    'c-err-1013|positive|bound|"
+if text.count(old) != 1:
+    raise SystemExit("error ledger polarity mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+# Mutation 3: a refusal relabelled as a proof that something works.
+expect_fail_self_mutation check_error_contract_ledger.sh \
+    'a §7 refusal relabelled positive, moving the 9/15 split' \
+    mut_error_ledger_row_polarity_flipped
+
+mut_error_ledger_exact_message_weakened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/cases/object/c-object-0007.toml")
+text = path.read_text()
+old = "<Message>The specified key does not exist.</Message>"
+new = "<Message>The key was not found.</Message>"
+if text.count(old) != 1:
+    raise SystemExit("NoSuchKey message mutation subject is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+# The rustfs/gateway#189 regression net itself: the exact AWS bytes are what caught the reworded
+# not-found message, and until this ledger nothing named them.
+expect_fail check_error_contract_ledger.sh \
+    'the exact NoSuchKey message bytes reworded out of the case that pins them' \
+    mut_error_ledger_exact_message_weakened \
+    'does not contain'
+
+mut_error_ledger_compile_fail_fixture_gutted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/core/tests/compile_fail/c_err_1010_custom_code_without_a_status.rs")
+text = path.read_text()
+old = 'ErrorCode::custom("Foo")'
+if text.count(old) != 1:
+    raise SystemExit("custom-arity fixture mutation subject is not unique")
+path.write_text(text.replace(old, 'ErrorCode::custom("Foo", StatusCode::BAD_REQUEST)', 1))
+PYEOF
+}
+# A compile-fail fixture that compiles is a fixture that proves nothing, and trybuild would say so
+# only when the harness runs. The ledger says so from the evidence side.
+expect_fail check_error_contract_ledger.sh \
+    'the one-argument call disappearing from the fixture that must not compile' \
+    mut_error_ledger_compile_fail_fixture_gutted \
+    'no longer contains'
+
+mut_error_ledger_mutation_never_replayed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+old = "    mut_error_status_unflagged_5xx \\\n"
+if text.count(old) != 1:
+    raise SystemExit("5xx mutation replay subject is not unique")
+path.write_text(text.replace(old, "    mut_error_status_server_fault_on_a_client_error \\\n", 1))
+PYEOF
+}
+# The control on the control: a mutation function that no `expect_fail` line runs is a negative
+# case that never executes, which reads exactly like one that passed.
+expect_fail check_error_contract_ledger.sh \
+    'a 5xx-allowlist mutation left defined but no longer replayed by any expect_fail line' \
+    mut_error_ledger_mutation_never_replayed \
+    'no expect_fail line runs it'
+
+fi
+
 if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
 
 mut_handler_context_entry_removed() {
@@ -21238,340 +21585,15 @@ expect_fail check_corpus_size.sh \
     mut_corpus_size_limits_unreadable \
     'cannot read HARD_SIZE_LIMIT_BYTES'
 
-fi
-
-if [[ "$ERROR_STATUS_ONLY" == 1 ]]; then
-
-# -----------------------------------------------------------------------------
-# check_error_status_total.sh — rustfs/backlog#1694
+# -- re-homed from the error-status block --------------------------------------------------------
 #
-# The guard replaces a fallback that could not fail: a code with no row used to take a silent 400.
-# Each rule is mutated separately, because one case would leave five of them as prose.
-#
-# Its own parallel runner, like the quirk-ledger, DTO-compiler and build-backed splits: the shared
-# mutation suite is already at its eight-minute ceiling on `main` before these cases exist, and a
-# case that is killed by a neighbour's budget produces no evidence at all. None of these mutations
-# runs codegen or Cargo, so the split costs one runner and about a minute.
-# -----------------------------------------------------------------------------
-
-printf 'Positive control (check_error_status_total.sh must pass on the current tree)\n'
-# The ordinal gate is what the group's coverage proof counts, so it is owed here exactly as it is
-# owed by `expect_fail`. A mode-scoped run is single-process, so it always owns the case — but a
-# site that skipped the gate would be indistinguishable from a duplicate to the proof.
-error_status_positive_control() {
-    cases=$((cases + 1))
-    guard_case_owned "$cases" || return 0
-    if "${SCRIPT_DIR}/check_error_status_total.sh" >/dev/null 2>&1; then
-        pass_msg 'check_error_status_total.sh'
-    else
-        fail_msg 'check_error_status_total.sh fails on the current tree'
-    fi
-}
-error_status_positive_control
-
-printf '\nNegative cases (the error-status guard must fail)\n'
-
-mut_error_status_declared_code_has_no_row() {
-    python3 - <<'PYEOF'
-import pathlib
-
-path = pathlib.Path("generated/error_codes.rs")
-text = path.read_text()
-old = 'pub static ERROR_CODE_OPERATIONS: &[(&str, &[&str])] = &[\n'
-if old not in text:
-    raise SystemExit("error-code index mutation subject is missing")
-path.write_text(text.replace(old, old + '    ("CodeNobodyGaveAStatus", &["GetObject"]),\n', 1))
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'an operation declaring a code the status authority does not map' \
-    mut_error_status_declared_code_has_no_row \
-    'CodeNobodyGaveAStatus'
-
-mut_error_status_missing_error_has_no_row() {
-    python3 - <<'PYEOF'
-import pathlib
-
-path = pathlib.Path("spec/operations/PutObject.toml")
-text = path.read_text()
-old = 'missing_error = "MissingContentLength"'
-if old not in text:
-    raise SystemExit("missing_error mutation subject is missing")
-path.write_text(text.replace(old, 'missing_error = "CodecCodeWithNoStatus"', 1))
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'a codec raising a missing-member code with no status row' \
-    mut_error_status_missing_error_has_no_row \
-    'CodecCodeWithNoStatus'
-
-mut_error_status_unflagged_5xx() {
-    python3 - <<'PYEOF'
-import pathlib
-
-path = pathlib.Path("model/overlays/error-status.toml")
-text = path.read_text()
-old = 'name = "InvalidArgument"\nconstant = "INVALID_ARGUMENT"\nstatus = 400'
-if old not in text:
-    raise SystemExit("5xx allowlist mutation subject is missing")
-path.write_text(text.replace(old, 'name = "InvalidArgument"\nconstant = "INVALID_ARGUMENT"\nstatus = 500', 1))
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'a client error typed into the 5xx band without joining the allowlist' \
-    mut_error_status_unflagged_5xx \
-    'server_fault'
-
-mut_error_status_server_fault_on_a_client_error() {
-    python3 - <<'PYEOF'
-import pathlib
-
-path = pathlib.Path("model/overlays/error-status.toml")
-text = path.read_text()
-old = 'name = "InvalidArgument"\nconstant = "INVALID_ARGUMENT"\nstatus = 400'
-if old not in text:
-    raise SystemExit("server_fault mutation subject is missing")
-path.write_text(text.replace(old, old + '\nserver_fault = true', 1))
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'a server-fault flag outliving the 5xx status it described' \
-    mut_error_status_server_fault_on_a_client_error \
-    'server_fault'
-
-mut_error_status_generated_table_edited() {
-    python3 - <<'PYEOF'
-import pathlib
-
-path = pathlib.Path("generated/error_status.rs")
-text = path.read_text()
-old = '    ("NoSuchKey", StatusCode::NOT_FOUND),'
-if old not in text:
-    raise SystemExit("generated status mutation subject is missing")
-path.write_text(text.replace(old, '    ("NoSuchKey", StatusCode::FORBIDDEN),', 1))
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'the generated table answering a status the authority does not hold' \
-    mut_error_status_generated_table_edited \
-    'disagree about `NoSuchKey`'
-
-mut_error_status_custom_loses_its_status() {
-    python3 - <<'PYEOF'
-import pathlib
-
-path = pathlib.Path("crates/types/src/scalar/error_code.rs")
-text = path.read_text()
-old = 'pub fn custom(code: impl Into<Cow<\'static, str>>, status: StatusCode) -> Self {'
-if old not in text:
-    raise SystemExit("custom-signature mutation subject is missing")
-path.write_text(text.replace(old, 'pub fn custom(code: impl Into<Cow<\'static, str>>) -> Self {', 1))
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'ErrorCode::custom going back to inventing a status for its caller' \
-    mut_error_status_custom_loses_its_status \
-    'name a status'
-
-mut_error_status_second_hand_written_table() {
-    python3 - <<'PYEOF'
-import pathlib
-
-path = pathlib.Path("crates/types/src/scalar/error_code.rs")
-text = path.read_text()
-old = 'use http::StatusCode;'
-if old not in text:
-    raise SystemExit("hand-written table mutation subject is missing")
-new = old + '\n\nconst SECOND_OPINION: StatusCode = StatusCode::BAD_REQUEST;'
-path.write_text(text.replace(old, new, 1))
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'a second hand-written status growing back beside the generated table' \
-    mut_error_status_second_hand_written_table \
-    'second hand-written answer'
-
-mut_error_status_include_removed() {
-    python3 - <<'PYEOF'
-import pathlib
-
-path = pathlib.Path("crates/types/src/scalar/error_code.rs")
-text = path.read_text()
-old = 'include!("../../../../generated/error_status.rs");'
-if old not in text:
-    raise SystemExit("include mutation subject is missing")
-path.write_text(text.replace(old, '// ' + old, 1))
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'the types crate no longer reading the generated table at all' \
-    mut_error_status_include_removed \
-    'no longer includes the generated table'
-
-mut_error_status_auth_code_undeclared() {
-    python3 - <<'PYEOF'
-import pathlib
-
-path = pathlib.Path("crates/sig/src/verdict.rs")
-text = path.read_text()
-old = 'Self::RequestTimeTooSkewed => "RequestTimeTooSkewed",'
-if old not in text:
-    raise SystemExit("auth-code mutation subject is missing")
-path.write_text(text.replace(old, 'Self::RequestTimeTooSkewed => "ClockIsWrongSomehow",', 1))
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'an authentication refusal answering a code with no status row' \
-    mut_error_status_auth_code_undeclared \
-    'ClockIsWrongSomehow'
-
-mut_error_status_stale_allowance() {
-    python3 - <<'PYEOF'
-import pathlib
-
-path = pathlib.Path("allowances/error-status-unreferenced.txt")
-text = path.read_text()
-path.write_text(text + "NoSuchKey|a row the tree reaches every day\n")
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'the dead-code ledger excusing a row that is reached' \
-    mut_error_status_stale_allowance \
-    'still excuses'
-
-mut_error_status_unlisted_dead_row() {
-    python3 - <<'PYEOF'
-import pathlib
-
-path = pathlib.Path("allowances/error-status-unreferenced.txt")
-text = path.read_text()
-old = "InvalidSOAPRequest|"
-if old not in text:
-    raise SystemExit("dead-row ledger mutation subject is missing")
-kept = [line for line in text.splitlines(keepends=True) if not line.startswith(old)]
-path.write_text("".join(kept))
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'a row nothing reaches dropping off the dead-code ledger' \
-    mut_error_status_unlisted_dead_row \
-    'InvalidSOAPRequest'
-
-mut_error_status_authority_removed() {
-    python3 - <<'PYEOF'
-import pathlib
-
-pathlib.Path("model/overlays/error-status.toml").unlink()
-PYEOF
-}
-expect_fail check_error_status_total.sh \
-    'the authority file disappearing, which must fail rather than skip' \
-    mut_error_status_authority_removed \
-    'required input is missing'
-
-# -- check_error_contract_ledger.sh ---------------------------------------------------------------
-#
-# The ledger maps the 24 acceptance ids of rustfs/backlog#1694 §7 to real assertions. It owes one
-# death per mutation class its header names, plus one for each of the two evidence kinds it added
-# over the object ledger: a Rust literal and a guard mutation. Written out rather than looped
-# because each has to fail for its own diagnostic — a roll-call failure and an arithmetic failure
-# read identically in a green summary, and the point of the split is that they are different
-# mistakes.
-
-mut_error_ledger_row_id_duplicated() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("scripts/check_error_contract_ledger.sh")
-text = path.read_text()
-old = "    'c-err-1013|negative|bound|"
-new = "    'c-err-1011|negative|bound|"
-if text.count(old) != 1:
-    raise SystemExit("error ledger row mutation subject is not unique")
-path.write_text(text.replace(old, new, 1))
-PYEOF
-}
-# Mutation 1: one mapping stops existing. The polarity arithmetic is deliberately left intact by
-# renaming rather than deleting, so this can only be caught by the roll call.
-expect_fail_self_mutation check_error_contract_ledger.sh \
-    'a §7 acceptance id losing its mapping while the polarity totals still add up' \
-    mut_error_ledger_row_id_duplicated
-
-mut_error_ledger_row_polarity_flipped() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("scripts/check_error_contract_ledger.sh")
-text = path.read_text()
-old = "    'c-err-1013|negative|bound|"
-new = "    'c-err-1013|positive|bound|"
-if text.count(old) != 1:
-    raise SystemExit("error ledger polarity mutation subject is not unique")
-path.write_text(text.replace(old, new, 1))
-PYEOF
-}
-# Mutation 3: a refusal relabelled as a proof that something works.
-expect_fail_self_mutation check_error_contract_ledger.sh \
-    'a §7 refusal relabelled positive, moving the 9/15 split' \
-    mut_error_ledger_row_polarity_flipped
-
-mut_error_ledger_exact_message_weakened() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("conformance/cases/object/c-object-0007.toml")
-text = path.read_text()
-old = "<Message>The specified key does not exist.</Message>"
-new = "<Message>The key was not found.</Message>"
-if text.count(old) != 1:
-    raise SystemExit("NoSuchKey message mutation subject is not unique")
-path.write_text(text.replace(old, new, 1))
-PYEOF
-}
-# The rustfs/gateway#189 regression net itself: the exact AWS bytes are what caught the reworded
-# not-found message, and until this ledger nothing named them.
-expect_fail check_error_contract_ledger.sh \
-    'the exact NoSuchKey message bytes reworded out of the case that pins them' \
-    mut_error_ledger_exact_message_weakened \
-    'does not contain'
-
-mut_error_ledger_compile_fail_fixture_gutted() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("crates/core/tests/compile_fail/c_err_1010_custom_code_without_a_status.rs")
-text = path.read_text()
-old = 'ErrorCode::custom("Foo")'
-if text.count(old) != 1:
-    raise SystemExit("custom-arity fixture mutation subject is not unique")
-path.write_text(text.replace(old, 'ErrorCode::custom("Foo", StatusCode::BAD_REQUEST)', 1))
-PYEOF
-}
-# A compile-fail fixture that compiles is a fixture that proves nothing, and trybuild would say so
-# only when the harness runs. The ledger says so from the evidence side.
-expect_fail check_error_contract_ledger.sh \
-    'the one-argument call disappearing from the fixture that must not compile' \
-    mut_error_ledger_compile_fail_fixture_gutted \
-    'no longer contains'
-
-mut_error_ledger_mutation_never_replayed() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("scripts/test_guard_scripts.sh")
-text = path.read_text()
-old = "    mut_error_status_unflagged_5xx \\\n"
-if text.count(old) != 1:
-    raise SystemExit("5xx mutation replay subject is not unique")
-path.write_text(text.replace(old, "    mut_error_status_server_fault_on_a_client_error \\\n", 1))
-PYEOF
-}
-# The control on the control: a mutation function that no `expect_fail` line runs is a negative
-# case that never executes, which reads exactly like one that passed.
-expect_fail check_error_contract_ledger.sh \
-    'a 5xx-allowlist mutation left defined but no longer replayed by any expect_fail line' \
-    mut_error_ledger_mutation_never_replayed \
-    'no expect_fail line runs it'
+# These nine cases were written at the end of the file while the last block in it was
+# `if [[ "$ERROR_STATUS_ONLY" == 1 ]]`, so they landed inside it. They mutate two conformance
+# cases, the conformance SUT seam and the response body planner, and not one of them is an error
+# status: they ran only in the `error status self-test` job, billed to a budget and named after a
+# subject belonging to something else, and never in the suite the four-command gate runs. They
+# pass, and they passed there before this move — what was wrong was where they sat, not what they
+# assert. check_guard_suite_tail_reachable.sh now refuses the file shape that collected them.
 
 mut_sigv2_conformance_mode_removed() {
     python3 - <<'PYEOF'
@@ -21729,6 +21751,121 @@ expect_fail check_caps_have_impl.sh \
     'the advertised sendfile backend losing its platform call' \
     mut_caps_platform_call_removed \
     'a Linux or Apple sendfile implementation is missing'
+
+# -- check_guard_suite_tail_reachable.sh ---------------------------------------------------------
+#
+# The guard says which block the end of this file belongs to, so no number of new cases can
+# satisfy it. That is the point: a case count cannot tell a case that runs in the default suite
+# from one that only ever runs in a mode-scoped shard, because the count rises either way — which
+# is why rustfs/gateway#633 and #634 both record their authors finding out by grepping the run log
+# for their own case descriptions, after the fact.
+#
+# Every refusal below exits 1, so the exit code proves nothing on its own — a guard that refused
+# every suite handed to it would satisfy all five at once. Each case therefore names both the
+# refusal it expects and the refusal it must not get, which is the shape gateway#640's budget-floor
+# pair settled on. The accepting case is the other half: without it this would be a ban on mode
+# gates rather than a rule about where the last one may sit.
+#
+# Each mutation writes its shell through a heredoc, which is also what the guard has to see
+# through: heredoc bodies sit at column zero, so a guard reading column-zero `if`/`fi` as block
+# structure would read these very fixtures as blocks of the suite itself.
+guard_tail_reachable_case() {
+    local expected="$1" forbidden="$2" desc="$3" mutate="$4"
+    local sandbox output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null)
+    stage_sandbox_changes "$sandbox" >/dev/null 2>&1
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" \
+        "${SCRIPT_DIR}/check_guard_suite_tail_reachable.sh" 2>&1)" || rc=$?
+    if [[ "$rc" -eq 1 && "$output" == *"$expected"* && "$output" != *"$forbidden"* ]]; then
+        pass_msg "check_guard_suite_tail_reachable.sh catches: ${desc}"
+    else
+        fail_msg "check_guard_suite_tail_reachable.sh did NOT catch: ${desc} — rc ${rc}: ${output}"
+    fi
+}
+
+mut_guard_suite_tail_is_mode_gated() {
+    cat >>scripts/test_guard_scripts.sh <<'SUITE'
+
+if [[ "$ERROR_STATUS_ONLY" == 1 ]]; then
+:
+fi
+SUITE
+}
+guard_tail_reachable_case 'a gate the default run does not enter' 'declares no mode gate' \
+    'a mode-gated block written as the last block in the suite' \
+    mut_guard_suite_tail_is_mode_gated
+
+mut_guard_suite_mode_switches_renamed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/test_guard_scripts.sh")
+text = path.read_text()
+old = '_ONLY"'
+if old not in text:
+    raise SystemExit("the suite names no mode switch to rename")
+path.write_text(text.replace(old, '_MODE"'))
+PYEOF
+}
+guard_tail_reachable_case 'declares no mode gate' 'a gate the default run does not enter' \
+    'a suite with no mode gate left to read, which must fail rather than pass vacuously' \
+    mut_guard_suite_mode_switches_renamed
+
+# The other half of the same fail-closed rule: a gate that is still there but spelled in a way the
+# guard cannot evaluate must be refused, not skipped over in favour of the previous gate — which
+# would silently report on the wrong block and let a mode-gated tail through.
+mut_guard_suite_tail_gate_unreadable() {
+    cat >>scripts/test_guard_scripts.sh <<'SUITE'
+
+if [[ "$ERROR_STATUS_ONLY" == 1 ]] ||
+    [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then
+:
+fi
+SUITE
+}
+guard_tail_reachable_case 'in a spelling this guard cannot read' 'declares no mode gate' \
+    'a last mode gate spelled over two lines, which the guard must refuse rather than skip' \
+    mut_guard_suite_tail_gate_unreadable
+
+mut_guard_suite_blocks_unbalanced() {
+    cat >>scripts/test_guard_scripts.sh <<'SUITE'
+
+fi
+SUITE
+}
+guard_tail_reachable_case 'do not nest cleanly' 'declares no mode gate' \
+    'a suite whose top-level blocks no longer balance, leaving the tail undecidable' \
+    mut_guard_suite_blocks_unbalanced
+
+mut_guard_suite_tail_gate_nested() {
+    cat >>scripts/test_guard_scripts.sh <<'SUITE'
+
+if true; then
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
+:
+fi
+fi
+SUITE
+}
+guard_tail_reachable_case 'is nested inside another block' 'a gate the default run does not enter' \
+    'a default-reachable last gate buried inside a block whose own condition is unread' \
+    mut_guard_suite_tail_gate_nested
+
+mut_guard_suite_tail_is_default_gated() {
+    cat >>scripts/test_guard_scripts.sh <<'SUITE'
+
+if [[ "$QUIRK_LEDGER_ONLY" == 0 && "$DTO_COMPILER_ONLY" == 0 && "$BUILD_GUARDS_ONLY" == 0 && "$ERROR_STATUS_ONLY" == 0 ]]; then
+:
+fi
+SUITE
+}
+expect_guard_pass check_guard_suite_tail_reachable.sh \
+    'a default-reachable block written as the last block in the suite' \
+    mut_guard_suite_tail_is_default_gated
 
 fi
 
