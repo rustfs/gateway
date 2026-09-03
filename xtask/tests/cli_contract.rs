@@ -154,3 +154,40 @@ fn help_output_matches_its_golden() {
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), include_str!("golden/help.txt"));
 }
+
+/// A deadline kill and a measured overrun are two different verdicts, and only one of them has a
+/// number behind it. This run's deadline has already passed when the budget is first consulted, so
+/// no command is ever started: whatever the diagnostic prints as an observation is the deadline
+/// reflected back, not the cost of any work.
+#[test]
+fn a_run_killed_at_its_deadline_reports_a_kill_rather_than_a_measurement() {
+    let output = xtask_started_seconds_ago(&["verify", "--crate", "rustfs-gateway-xml"], 30);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("what: verification was killed at its feedback budget\n"),
+        "the kill verdict did not speak: {stderr}"
+    );
+    assert!(
+        !stderr.contains("verification exceeded its feedback budget"),
+        "the measured-overrun verdict spoke for a run that was never measured: {stderr}"
+    );
+    assert!(!stderr.contains("observed"), "a killed run reported an observation: {stderr}");
+    assert!(
+        stderr.contains("killed at the 30s deadline, so what the work costs was never measured"),
+        "{stderr}"
+    );
+}
+
+fn xtask_started_seconds_ago(args: &[&str], seconds: u64) -> Output {
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("test clock must be after the Unix epoch")
+        .saturating_sub(std::time::Duration::from_secs(seconds));
+    Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .args(args)
+        .env("RUSTFS_GATEWAY_XTASK_STARTED_UNIX_NANOS", started.as_nanos().to_string())
+        .output()
+        .unwrap_or_else(|error| panic!("xtask must start: {error}"))
+}

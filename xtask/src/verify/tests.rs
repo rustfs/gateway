@@ -338,3 +338,113 @@ fn facade_case_does_not_start_a_nested_cargo_process() {
         ]
     );
 }
+
+fn killed_step(compiled_crates: usize) -> KilledStep {
+    KilledStep {
+        step: "crate rustfs-gateway-fs step 1".to_owned(),
+        command: "cargo test -p rustfs-gateway-fs".to_owned(),
+        compiled_crates,
+    }
+}
+
+/// A run that finished was timed, so its number is evidence and must survive.
+#[test]
+fn a_measured_overrun_keeps_the_time_the_work_actually_took() {
+    let failure = BudgetFailure::Overran {
+        elapsed: Duration::from_secs_f64(32.88),
+    };
+
+    assert_eq!(failure.what(), "verification exceeded its feedback budget");
+    assert_eq!(
+        failure.rule("a crate verification loop must finish within 30 seconds"),
+        "a crate verification loop must finish within 30 seconds; observed 32.88s"
+    );
+    assert!(failure.notes().is_empty(), "{:?}", failure.notes());
+}
+
+/// A run killed at `started + budget` was never timed. Reporting `started.elapsed()` there prints
+/// the deadline back as an observation, which is why eighteen issues all quoted 30.00s.
+#[test]
+fn a_run_killed_at_the_deadline_reports_no_observation_at_all() {
+    let killed = [killed_step(0)];
+
+    let failure = BudgetFailure::KilledAtDeadline {
+        budget: Duration::from_secs(30),
+        killed: &killed,
+    };
+
+    assert_eq!(failure.what(), "verification was killed at its feedback budget");
+    assert_ne!(
+        failure.what(),
+        BudgetFailure::Overran {
+            elapsed: Duration::from_secs(30)
+        }
+        .what(),
+        "the kill and the measurement must not share one verdict"
+    );
+    let rule = failure.rule("a crate verification loop must finish within 30 seconds");
+    assert_eq!(
+        rule,
+        "a crate verification loop must finish within 30 seconds; killed at the 30s deadline, so what the work costs was never measured"
+    );
+    assert!(!rule.contains("observed"), "{rule}");
+    assert_eq!(
+        failure.notes(),
+        vec![
+            "crate rustfs-gateway-fs step 1 was still running at the deadline; measure its real cost with: cargo test -p rustfs-gateway-fs"
+        ]
+    );
+}
+
+/// The dominant cost inside a busted crate budget is a cold build the gate did not produce. A
+/// killed step that compiled crates says so; the case above proves one that compiled none does not.
+#[test]
+fn a_build_inside_the_budget_is_reported_as_a_build_rather_than_as_the_work() {
+    let killed = [killed_step(63)];
+
+    let failure = BudgetFailure::KilledAtDeadline {
+        budget: Duration::from_secs(30),
+        killed: &killed,
+    };
+
+    assert_eq!(
+        failure.what(),
+        "verification was killed at its feedback budget after a build ran inside it"
+    );
+    assert_eq!(
+        failure.rule("a crate verification loop must finish within 30 seconds"),
+        "a crate verification loop must finish within 30 seconds; killed at the 30s deadline after 63 crate compilations inside it, so what the work costs was never measured"
+    );
+    assert!(
+        failure
+            .notes()
+            .iter()
+            .any(|note| note.contains("compiled 63 crates inside the budget")),
+        "{:?}",
+        failure.notes()
+    );
+}
+
+/// The rerun command is the one thing a killed run can honestly offer: run it with no deadline over
+/// it and the cost becomes knowable.
+#[test]
+fn a_killed_step_is_named_with_the_command_that_would_measure_it() {
+    let commands = vec![(
+        env!("CARGO").to_owned(),
+        vec!["test".to_owned(), "-p".to_owned(), "rustfs-gateway-fs".to_owned()],
+        "crate rustfs-gateway-fs step 1".to_owned(),
+    )];
+
+    let killed = killed_steps(
+        &commands,
+        &[CancelledStep {
+            index: 0,
+            compiled_crates: 63,
+        }],
+    );
+
+    assert_eq!(killed.len(), 1);
+    assert_eq!(killed[0].step, "crate rustfs-gateway-fs step 1");
+    assert_eq!(killed[0].command, "cargo test -p rustfs-gateway-fs");
+    assert_eq!(killed[0].compiled_crates, 63);
+}
