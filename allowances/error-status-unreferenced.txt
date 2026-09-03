@@ -30,7 +30,6 @@ InvalidTargetBucketForLogging|bucket-logging family; same owner as CrossLocation
 InvalidToken|session-credential path; same owner as CredentialsNotSupported
 MalformedACLError|ACL grant parsing; the ACL body validator does not raise it yet
 MaxPostPreDataLengthExceededError|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
-MetadataTooLarge|user-metadata size cap; the cap is not enforced in this layer yet
 MissingRequestBodyError|empty-body refusal; the codec answers MalformedXML instead today
 MissingSecurityElement|browser POST policy document; same owner as MalformedPOSTRequest
 MissingSecurityHeader|browser POST policy document; same owner as MissingSecurityElement

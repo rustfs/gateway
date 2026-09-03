@@ -22,13 +22,13 @@
 use super::*;
 use std::time::Duration;
 
-const DUE: &str = concat!(
+pub(super) const DUE: &str = concat!(
     "<LifecycleConfiguration><Rule><ID>transition</ID>",
     "<Filter><ObjectSizeGreaterThan>0</ObjectSizeGreaterThan></Filter><Status>Enabled</Status>",
     "<Transition><Days>1</Days><StorageClass>STANDARD_IA</StorageClass></Transition>",
     "</Rule></LifecycleConfiguration>"
 );
-const DUE_MD5: &str = "sp/PIPFyK5jT4pPI0eh1BA==";
+pub(super) const DUE_MD5: &str = "sp/PIPFyK5jT4pPI0eh1BA==";
 const ABSOLUTE_DATE: &str = concat!(
     "<LifecycleConfiguration><Rule><ID>transition-date</ID>",
     "<Filter><ObjectSizeGreaterThan>0</ObjectSizeGreaterThan></Filter><Status>Enabled</Status>",
@@ -70,7 +70,7 @@ const UNKNOWN_CLASS: &str = concat!(
 );
 const UNKNOWN_CLASS_MD5: &str = "dTS9dzMSNgQ5lRbmD6Dgcg==";
 
-fn transitioning_service(root: &TestRoot, now: i64) -> (Arc<FsBackend>, S3Service) {
+pub(super) fn transitioning_service(root: &TestRoot, now: i64) -> (Arc<FsBackend>, S3Service) {
     let backend = FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(now)))
         .expect("a usable test root")
         .with_lifecycle_debug_interval(Duration::from_secs(1))
@@ -78,7 +78,7 @@ fn transitioning_service(root: &TestRoot, now: i64) -> (Arc<FsBackend>, S3Servic
     service_with_backend(Arc::new(backend))
 }
 
-async fn put_policy(
+pub(super) async fn put_policy(
     service: &S3Service,
     bucket: &str,
     document: &'static str,
