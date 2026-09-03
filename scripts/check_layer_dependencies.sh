@@ -43,7 +43,7 @@ layers = [
     ("rustfs-gateway-codegen", {"rustfs-gateway-model"}),
     ("rustfs-gateway-types", {"rustfs-gateway-xml", "rustfs-gateway-stream"}),
     ("rustfs-gateway-dialect-minio", {"rustfs-gateway-types", "rustfs-gateway-xml"}),
-    ("rustfs-gateway-goldens", {"rustfs-gateway-types"}),
+    ("rustfs-gateway-goldens", {"rustfs-gateway-types", "rustfs-gateway-corpus"}),
     ("rustfs-gateway-http", {"rustfs-gateway-types", "rustfs-gateway-stream"}),
     ("rustfs-gateway-sig", {"rustfs-gateway-http", "rustfs-gateway-types", "rustfs-gateway-stream"}),
     (

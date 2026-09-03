@@ -22,9 +22,18 @@
 use core::fmt;
 use std::collections::BTreeSet;
 
-use crate::{ConfigKind, CorpusVariant, build_persistence_corpus_report, run_four_way_all};
+use crate::{
+    ConfigKind, CorpusVariant, PersistenceSource, PersistenceSourceError, PersistenceSourceReport,
+    build_persistence_corpus_report, require_persistence_sources, run_four_way_all,
+};
 
 const RUSTFS_REVISION: &str = "bb3784136204a632b5b9b9cbef49d58f03df8bb6";
+const ISSUE_2104: &str = "https://github.com/rustfs/backlog/issues/2104";
+const ISSUE_2096: &str = "https://github.com/rustfs/backlog/issues/2096";
+
+/// The acceptance cases whose Given is the full corpus, and which therefore cannot be claimed
+/// while an approved source of that corpus is missing. rustfs/backlog#1733 §7.4 and §7.5.
+const SOURCE_DEPENDENT_CASES: [&str; 2] = ["g-d4-001", "g-d5-001"];
 const EXPECTED_CASE_IDS: [&str; 39] = [
     "g-d1-001",
     "g-d1-002",
@@ -166,6 +175,7 @@ pub enum AcceptanceCaseStatus {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AcceptanceCensusReport {
     cases: Vec<AcceptanceCaseReport>,
+    absent_source: Option<&'static str>,
 }
 
 impl AcceptanceCensusReport {
@@ -209,6 +219,9 @@ impl AcceptanceCensusReport {
                 }
             }
         }
+        if let Some(source) = self.absent_source {
+            output.push_str(&format!("approved persisted-metadata source absent: {source}\n"));
+        }
         output
     }
 }
@@ -244,6 +257,19 @@ pub enum AcceptanceCensusError {
     },
     /// The census itself is valid, but final closure is blocked by these cases.
     ClosureBlocked(Vec<&'static str>),
+    /// An approved persisted-metadata source is absent, so the full-corpus cases cannot be
+    /// claimed. Named rather than folded into [`Self::ClosureBlocked`]: "we have not collected
+    /// this source yet" and "these cases are still specification-blocked" are different states
+    /// and must not read the same.
+    ApprovedSourceAbsent {
+        /// Slug of the absent source.
+        source: &'static str,
+        /// Acceptance cases whose Given is the full corpus.
+        cases: Vec<&'static str>,
+    },
+    /// A registered persisted-metadata source has invalid writer provenance or an unbacked
+    /// witness digest. This is never a blocker; it is a broken registration.
+    SourceProvenance(String),
     /// Aggregate corpus or D1-D5 execution failed before row evaluation.
     Observation(String),
 }
@@ -260,18 +286,37 @@ impl std::error::Error for AcceptanceCensusError {}
 struct RuntimeObservations {
     corpus: String,
     families: Vec<ConfigKind>,
+    sources: Result<PersistenceSourceReport, PersistenceSourceError>,
 }
 
 impl RuntimeObservations {
     fn collect() -> Result<Self, AcceptanceCensusError> {
-        let corpus = build_persistence_corpus_report()
-            .map_err(|error| AcceptanceCensusError::Observation(error.to_string()))?
-            .render();
+        let corpus_report =
+            build_persistence_corpus_report().map_err(|error| AcceptanceCensusError::Observation(error.to_string()))?;
+        let corpus = corpus_report.render();
+        let sources = require_persistence_sources(&corpus_report);
+        // An absent source is a state this census reports on. Any other provenance failure is a
+        // broken registration, and reporting it as a blocker would hide it behind a row that
+        // already reads as "known incomplete".
+        if let Err(error) = &sources
+            && !error.is_source_absent()
+        {
+            return Err(AcceptanceCensusError::SourceProvenance(error.to_string()));
+        }
         let four_way = run_four_way_all().map_err(|error| AcceptanceCensusError::Observation(error.to_string()))?;
         Ok(Self {
             corpus,
             families: four_way.families.into_iter().map(|family| family.kind).collect(),
+            sources,
         })
+    }
+
+    /// The approved source the corpus is missing, when that is why closure is held.
+    const fn absent_source(&self) -> Option<PersistenceSource> {
+        match &self.sources {
+            Err(PersistenceSourceError::SourceAbsent(source)) => Some(*source),
+            _ => None,
+        }
     }
 
     fn evaluate(&self, probe: RuntimeProbe, source_ref: &str) -> Result<(), String> {
@@ -337,18 +382,31 @@ impl RuntimeObservations {
 ///
 /// Returns the first registry, runtime observation, or external binding failure.
 pub fn build_acceptance_census() -> Result<AcceptanceCensusReport, AcceptanceCensusError> {
+    Ok(census_with_observations()?.0)
+}
+
+fn census_with_observations() -> Result<(AcceptanceCensusReport, RuntimeObservations), AcceptanceCensusError> {
     let observations = RuntimeObservations::collect()?;
-    validate_registry(&production_registry(), &observations)
+    let report = validate_registry(&production_registry(), &observations)?;
+    Ok((report, observations))
 }
 
 /// Requires every registered case to have passed direct evidence.
 ///
 /// # Errors
 ///
-/// Returns [`AcceptanceCensusError::ClosureBlocked`] while any specification blocker remains, or
-/// the same fail-closed validation errors as [`build_acceptance_census`].
+/// Returns [`AcceptanceCensusError::ApprovedSourceAbsent`] while an approved persisted-metadata
+/// source has not been collected, [`AcceptanceCensusError::ClosureBlocked`] while any
+/// specification blocker remains, or the same fail-closed validation errors as
+/// [`build_acceptance_census`].
 pub fn require_acceptance_closure() -> Result<AcceptanceCensusReport, AcceptanceCensusError> {
-    let report = build_acceptance_census()?;
+    let (report, observations) = census_with_observations()?;
+    if let Some(source) = observations.absent_source() {
+        return Err(AcceptanceCensusError::ApprovedSourceAbsent {
+            source: source.slug(),
+            cases: SOURCE_DEPENDENT_CASES.to_vec(),
+        });
+    }
     let blocked = report
         .cases
         .iter()
@@ -378,7 +436,7 @@ fn production_registry() -> Vec<CaseDeclaration> {
             RuntimeProbe::Variant(Replication, UnknownTopLevel),
             "crates/goldens/src/replication.rs::UNKNOWN_TOP_LEVEL",
         ),
-        CaseDeclaration::blocked("g-d1-003", "https://github.com/rustfs/backlog/issues/2104"),
+        CaseDeclaration::blocked("g-d1-003", ISSUE_2104),
         CaseDeclaration::passed(
             "g-d1-004",
             RuntimeProbe::Family(Lifecycle),
@@ -466,7 +524,7 @@ fn production_registry() -> Vec<CaseDeclaration> {
             "rustfs/src/admin/handlers/bucket_meta.rs::g_d3_005_new_writer_backup_payloads_pass_old_import_validators",
             "db41d64e021753e2efd4743de471674b451ef6e92ee3883695abb73603462eb8",
         ),
-        CaseDeclaration::blocked("g-d4-001", "https://github.com/rustfs/backlog/issues/2096"),
+        CaseDeclaration::blocked("g-d4-001", ISSUE_2096),
         CaseDeclaration::passed(
             "g-d4-002",
             RuntimeProbe::Variant(Replication, UnknownAttribute),
@@ -487,7 +545,7 @@ fn production_registry() -> Vec<CaseDeclaration> {
             RuntimeProbe::Variant(Replication, UnknownScalar),
             "crates/goldens/src/replication.rs::replication_corpus_evidence",
         ),
-        CaseDeclaration::blocked("g-d5-001", "https://github.com/rustfs/backlog/issues/2096"),
+        CaseDeclaration::blocked("g-d5-001", ISSUE_2096),
         CaseDeclaration::passed(
             "g-d5-002",
             RuntimeProbe::Variant(Versioning, Extension),
@@ -569,7 +627,7 @@ fn validate_registry(
     let canonical = production_registry();
     let mut reports = Vec::with_capacity(rows.len());
     for row in rows {
-        let required_blocker = required_blocker(row.id);
+        let required_blocker = required_blocker(row.id, observations);
         let status = match row.status {
             "passed" => {
                 if required_blocker.is_some() {
@@ -609,13 +667,22 @@ fn validate_registry(
         });
     }
     reports.sort_by_key(|report| EXPECTED_CASE_IDS.iter().position(|candidate| *candidate == report.id));
-    Ok(AcceptanceCensusReport { cases: reports })
+    Ok(AcceptanceCensusReport {
+        cases: reports,
+        absent_source: observations.absent_source().map(PersistenceSource::slug),
+    })
 }
 
-fn required_blocker(id: &str) -> Option<&'static str> {
+/// The issue a row may legitimately be blocked on, given what was actually observed.
+///
+/// `g-d4-001` and `g-d5-001` are blocked on rustfs/backlog#2096 only while an approved corpus
+/// source is genuinely absent. The moment the historical writer matrix lands, this returns
+/// `None` for them and a still-blocked row becomes [`AcceptanceCensusError::InvalidBlocker`] —
+/// which is what stops "source absent" and "source present" from producing the same verdict.
+fn required_blocker(id: &str, observations: &RuntimeObservations) -> Option<&'static str> {
     match id {
-        "g-d1-003" => Some("https://github.com/rustfs/backlog/issues/2104"),
-        "g-d4-001" | "g-d5-001" => Some("https://github.com/rustfs/backlog/issues/2096"),
+        "g-d1-003" => Some(ISSUE_2104),
+        id if SOURCE_DEPENDENT_CASES.contains(&id) => observations.absent_source().map(|_| ISSUE_2096),
         _ => None,
     }
 }

@@ -1863,6 +1863,7 @@ name = "rustfs-gateway-goldens"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "rustfs-gateway-corpus",
  "rustfs-gateway-types",
  "sha2",
  "zip",

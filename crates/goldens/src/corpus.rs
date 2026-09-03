@@ -233,10 +233,28 @@ struct CoverageRow {
     variants: Vec<CorpusVariant>,
 }
 
+/// The traceable writer identity one validated corpus sample carries.
+///
+/// Exposed separately from the coverage rows because source admission is a different question
+/// from family coverage: a family can be fully covered by samples that share one writer, and a
+/// report that only counts samples cannot say so.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CorpusSampleProvenance {
+    /// Persisted XML family the sample belongs to.
+    pub kind: ConfigKind,
+    /// Lowercase SHA-256 of the unmodified sample bytes.
+    pub sha256: String,
+    /// Client, server, or fixture generator recorded on the sample.
+    pub producer: String,
+    /// Producer version, commit, or fixture revision recorded on the sample.
+    pub version: String,
+}
+
 /// Validated coverage derived only from concrete family-owned cases.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CorpusReport {
     rows: Vec<CoverageRow>,
+    samples: Vec<CorpusSampleProvenance>,
     requested_families: usize,
 }
 
@@ -245,6 +263,12 @@ impl CorpusReport {
     #[must_use]
     pub fn total_size_bytes(&self) -> usize {
         self.rows.iter().map(|row| row.bytes).sum()
+    }
+
+    /// Every validated sample's digest and recorded writer identity, in report order.
+    #[must_use]
+    pub fn samples(&self) -> &[CorpusSampleProvenance] {
+        &self.samples
     }
 
     /// Renders deterministic accepted, rejected, and variant coverage for the requested families.
@@ -400,6 +424,7 @@ pub fn build_corpus_report(
     }
 
     let mut rows = Vec::with_capacity(requested.len());
+    let mut samples = Vec::new();
     for kind in requested {
         let family = families
             .iter()
@@ -427,6 +452,12 @@ pub fn build_corpus_report(
                 CorpusDisposition::Rejected => rejected += 1,
             }
             bytes += case.bytes.len();
+            samples.push(CorpusSampleProvenance {
+                kind: *kind,
+                sha256: case.origin.sha256.clone(),
+                producer: case.origin.producer.clone(),
+                version: case.origin.version.clone(),
+            });
             for variant in &case.variants {
                 if !variants.contains(variant) {
                     variants.push(*variant);
@@ -465,6 +496,7 @@ pub fn build_corpus_report(
     }
     Ok(CorpusReport {
         rows,
+        samples,
         requested_families: requested.len(),
     })
 }

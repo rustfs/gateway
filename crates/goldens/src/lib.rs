@@ -39,6 +39,7 @@ mod logging;
 mod minio_migration;
 mod notification;
 mod object_lock;
+mod provenance;
 mod public_access_block;
 mod replication;
 mod source_a_boundary;
@@ -62,8 +63,8 @@ pub use acceptance_census::{
 };
 pub use bucket_encryption::assert_bucket_encryption_four_way;
 pub use corpus::{
-    CorpusCaseEvidence, CorpusCoverageError, CorpusReport, CorpusVariant, FamilyCorpusEvidence, RejectedGoldenSample,
-    build_corpus_report,
+    CorpusCaseEvidence, CorpusCoverageError, CorpusReport, CorpusSampleProvenance, CorpusVariant, FamilyCorpusEvidence,
+    RejectedGoldenSample, build_corpus_report,
 };
 pub use cors::assert_cors_four_way;
 pub use four_way::{FourWayFamilyReport, FourWayRunError, FourWayRunReport, run_four_way_all, run_four_way_core_shard};
@@ -71,6 +72,9 @@ pub use lifecycle::assert_lifecycle_four_way;
 pub use logging::assert_bucket_logging_four_way;
 pub use notification::assert_notification_four_way;
 pub use object_lock::assert_object_lock_four_way;
+pub use provenance::{
+    PersistenceSource, PersistenceSourceError, PersistenceSourceReport, SourceReport, require_persistence_sources,
+};
 pub use public_access_block::assert_public_access_block_four_way;
 pub use replication::assert_replication_four_way;
 pub use tagging::assert_tagging_four_way;

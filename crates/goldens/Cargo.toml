@@ -21,6 +21,10 @@ workspace = true
 
 [dependencies]
 rustfs-gateway-types = { path = "../types", features = ["compat-s3s"] }
+# The persisted-metadata corpus and the recorded-request corpus share one provenance
+# vocabulary on purpose: two allowlists of "what produced these bytes" would drift, and the
+# one that drifted would be the one nobody read. See crates/corpus/src/store.rs.
+rustfs-gateway-corpus = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
 

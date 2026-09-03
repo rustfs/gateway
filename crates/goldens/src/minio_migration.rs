@@ -38,14 +38,14 @@ use crate::{
 
 const SOURCE: &str = "https://github.com/rustfs/rustfs/blob/7df0920c801998d4f5e65776767d746f362a2975/crates/ecstore/tests/fixtures/minio/bucket_metadata.blob.hex";
 const PRODUCER: &str = "MinIO";
-const VERSION: &str = "RELEASE.2025-07-23T15-54-02Z";
-const LIFECYCLE_SHA256: &str = "18887b7a076a3429d80f1a04fed3c772d296ec968d478d382f78cba01704d0fb";
-const OBJECT_LOCK_SHA256: &str = "77ddad84d9aaa703c0f621f916484c7d8833fbb4f77fbeca2c4fc16a9b07522f";
-const REPLICATION_SHA256: &str = "43f149b5afcdeac67f52059b4f15b604912b1627f2c0503e85aecef5a752ccad";
-const VERSIONING_SHA256: &str = "482d4e510b5cdcf0bbf3a044e82832dc711f4f28757a6c06eb21758282a73ef7";
-const BUCKET_ENCRYPTION_SHA256: &str = "df4e3e6cf7a0b4af67ba58f41eaa596d54579eea2ed2f993da09600f59413711";
-const TAGGING_SHA256: &str = "606b9240d3b90605a36076e93411ceb7245be8908aec6872117e2dc1276cd782";
-const NOTIFICATION_SHA256: &str = "aa87052048dba6dada6359f577d9ae583398303c1384c38408fa17a730c0fb6e";
+pub(crate) const VERSION: &str = "RELEASE.2025-07-23T15-54-02Z";
+pub(crate) const LIFECYCLE_SHA256: &str = "18887b7a076a3429d80f1a04fed3c772d296ec968d478d382f78cba01704d0fb";
+pub(crate) const OBJECT_LOCK_SHA256: &str = "77ddad84d9aaa703c0f621f916484c7d8833fbb4f77fbeca2c4fc16a9b07522f";
+pub(crate) const REPLICATION_SHA256: &str = "43f149b5afcdeac67f52059b4f15b604912b1627f2c0503e85aecef5a752ccad";
+pub(crate) const VERSIONING_SHA256: &str = "482d4e510b5cdcf0bbf3a044e82832dc711f4f28757a6c06eb21758282a73ef7";
+pub(crate) const BUCKET_ENCRYPTION_SHA256: &str = "df4e3e6cf7a0b4af67ba58f41eaa596d54579eea2ed2f993da09600f59413711";
+pub(crate) const TAGGING_SHA256: &str = "606b9240d3b90605a36076e93411ceb7245be8908aec6872117e2dc1276cd782";
+pub(crate) const NOTIFICATION_SHA256: &str = "aa87052048dba6dada6359f577d9ae583398303c1384c38408fa17a730c0fb6e";
 const LIFECYCLE: &[u8] = b"<LifecycleConfiguration><Rule><ID>d96i4g89k8h26a95st60</ID><Status>Enabled</Status><Filter><Prefix></Prefix></Filter><Expiration><Days>30</Days></Expiration><NoncurrentVersionExpiration><NoncurrentDays>7</NoncurrentDays></NoncurrentVersionExpiration></Rule><ExpiryUpdatedAt>2026-07-07T15:58:57.337315Z</ExpiryUpdatedAt></LifecycleConfiguration>";
 const OBJECT_LOCK: &[u8] = b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>7</Days></DefaultRetention></Rule></ObjectLockConfiguration>";
 const REPLICATION: &[u8] = b"<ReplicationConfiguration><Rule><ID>d96i4m09k8h2vldifkag</ID><Status>Enabled</Status><Priority>1</Priority><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication><DeleteReplication><Status>Enabled</Status></DeleteReplication><Destination><Bucket>arn:minio:replication::ef5859af-120a-4218-94b5-be23470f3c60:interop-dr</Bucket></Destination><SourceSelectionCriteria><ReplicaModifications><Status>Enabled</Status></ReplicaModifications></SourceSelectionCriteria><Filter><Prefix></Prefix></Filter><ExistingObjectReplication><Status>Enabled</Status></ExistingObjectReplication></Rule><Role></Role></ReplicationConfiguration>";

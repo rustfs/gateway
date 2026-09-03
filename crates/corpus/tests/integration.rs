@@ -324,6 +324,55 @@ fn a_client_matrix_source_without_a_pinned_revision_is_refused() {
     assert!(store::check_source("client-matrix:boto3@1.42.96").is_ok());
 }
 
+/// The second provenance axis. rustfs/backlog#2096 replaced "real-customer cluster export"
+/// with a matrix of writers this project runs itself, on the measurement that structural shape
+/// is a function of the writer rather than of the customer. A writer nobody here can run is
+/// therefore not a smaller sample — it is inadmissible.
+#[test]
+fn a_writer_outside_the_allowlist_is_refused() {
+    let error = store::check_writer("customer-cluster", "1.2.3").unwrap_err();
+    assert!(error.contains("never a customer cluster"), "{error}");
+    assert!(store::check_writer("MinIO", "1.2.3").is_err(), "the allowlist spelling is exact");
+    assert!(store::check_writer("", "1.2.3").is_err());
+    assert!(store::check_writer("minio", "1.2.3").is_ok());
+    assert!(store::check_writer("rustfs", "1.2.3").is_ok());
+}
+
+/// `latest`, `unknown` and a bare series number all read like a version and pin no build, so a
+/// sample carrying one cannot be re-run and cannot be attributed to a structural change.
+#[test]
+fn a_writer_version_that_pins_nothing_is_refused() {
+    for inexact in [
+        "latest",
+        "unknown",
+        "various",
+        "n/a",
+        "1",
+        "v1",
+        "",
+        "RELEASE.",
+        "RELEASE.stable",
+        "1 .2",
+        "1.x",
+    ] {
+        let error = store::check_writer("rustfs", inexact).unwrap_err();
+        assert!(error.contains("not an exact version"), "`{inexact}`: {error}");
+    }
+}
+
+#[test]
+fn the_three_exact_writer_version_spellings_are_admitted() {
+    for exact in [
+        "RELEASE.2025-07-23T15-54-02Z",
+        "1.2.3",
+        "0.1.0",
+        "v2.0.0-rc.1",
+        "c876df53f5097618b1817568a471cbb8b4f26ee8",
+    ] {
+        assert!(store::check_writer("minio", exact).is_ok(), "`{exact}` names one build");
+    }
+}
+
 #[test]
 fn a_partial_capture_cannot_become_a_case() {
     let mut entry = base_entry();
