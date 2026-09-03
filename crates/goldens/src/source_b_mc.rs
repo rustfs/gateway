@@ -32,7 +32,7 @@ const CORS_XML: &[u8] = b"<CORSConfiguration><CORSRule><AllowedHeader>x-amz-chec
 const LIFECYCLE_XML: &[u8] = b"<LifecycleConfiguration><ExpiryUpdatedAt>2026-08-31T05:01:50.823Z</ExpiryUpdatedAt><Rule><Expiration><Days>61</Days></Expiration><Filter><Prefix>mc-generated/</Prefix></Filter><ID>daaglfmir7fvdkrslbmg</ID><NoncurrentVersionExpiration><NoncurrentDays>23</NoncurrentDays></NoncurrentVersionExpiration><Status>Enabled</Status></Rule></LifecycleConfiguration>";
 #[cfg(test)]
 const VERSIONING_XML: &[u8] = b"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
-const CORS_SHA256: &str = "5ced5e2fb39bc38f489e8fe7771c2b044eb4f882c47969678443359292e42418";
+pub(crate) const CORS_SHA256: &str = "5ced5e2fb39bc38f489e8fe7771c2b044eb4f882c47969678443359292e42418";
 const LIFECYCLE_SHA256: &str = "52b71f5cdd541aab280f1ceaf1c6452e7c9f27c1f0dff5ebb94ed07e63a2e3e4";
 const VERSIONING_SHA256: &str = "dd6f6f21cc8680cc5c32bba98d4297e37552279d7e326a35df847ed2713f2d6a";
 const CORS_METADATA_SHA256: &str = "94eb87880232b5bd5d7c38ec7b176e80c128d71593f453d53528e0c6ddc289b7";

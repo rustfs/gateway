@@ -11,7 +11,7 @@ module docs before changing anything there.
 | `src/schema.rs` | The versioned entry shape, its JSONL codec, and the refusal of an unknown schema version. | A field is accepted or rejected wrongly, or the schema version changes. |
 | `src/redact.rs` | What counts as credential material, and the refusal when it is present. | Adding a detector, a sensitive field, or a sanitizable carrier. |
 | `src/dedup.rs` | The value-free fingerprint, per-operation bucketing, and the retention rule. | Deduplication collapses too much or too little, or the cap evicts the wrong entry. |
-| `src/store.rs` | On-disk layout, generated `MANIFEST.toml`, provenance allowlist, size ceilings, whole-corpus verification. | A corpus file, the manifest, or a recording source is judged wrongly. |
+| `src/store.rs` | On-disk layout, generated `MANIFEST.toml`, the source and writer provenance allowlists, size ceilings, whole-corpus verification. | A corpus file, the manifest, a recording source, or a persisted-metadata writer is judged wrongly. |
 | `src/case.rs` | Conformance case **drafts** and the lossless round-trip assertion. | Chunk timing or termination stops surviving the conversion. |
 | `src/bin/corpus.rs` | The `ingest` / `verify` / `to-case` CLI and its exit classes. | The command line accepts or reports something incorrectly. |
 | `tests/integration.rs` | Every refusal, the fingerprint contract, the retention rule, and the checked-in corpus. | Changing any behaviour above. |

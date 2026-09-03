@@ -65,6 +65,84 @@ pub const SOURCE_ALLOWLIST: &[(&str, bool)] = &[
     ("s3-tests@", false),
 ];
 
+/// Writers whose own binaries this project may run to produce persisted metadata bytes.
+///
+/// This is the second provenance axis, and it exists for the same reason as
+/// [`SOURCE_ALLOWLIST`]: a corpus that cannot say what produced a byte will be read as
+/// though it could. rustfs/backlog#2096 removed "real-customer cluster export" from the
+/// persisted-metadata corpus after measuring that the evidence a customer export carries is
+/// *structural shape* — element names, whitespace, element order — and that structural shape
+/// is a function of the writer, not of the customer. The same writer version writes the same
+/// shape in any cluster, so a writer version we lack is obtained by running that writer
+/// ourselves; a customer export buys sample volume and a permanent consent, de-identification
+/// and retention burden, and no new structural coverage.
+///
+/// There is deliberately no wildcard row. A writer this project cannot run and name is not
+/// admissible evidence, which is what makes "no customer data" a decision a machine can make
+/// rather than a promise in a README.
+pub const WRITER_ALLOWLIST: &[&str] = &["minio", "rustfs"];
+
+/// Whether `writer` is an approved persisted-metadata writer named at an exact version.
+///
+/// Both halves are required. A writer name with no traceable version cannot be re-run, so the
+/// bytes it produced cannot be reproduced or attributed to a structural change — which is the
+/// only thing the sample was collected to show.
+pub fn check_writer(writer: &str, version: &str) -> Result<(), String> {
+    if !WRITER_ALLOWLIST.contains(&writer) {
+        return Err(format!(
+            "writer `{writer}` is not in the allowlist {WRITER_ALLOWLIST:?}; the persisted-metadata corpus \
+             admits only writers this project runs itself, never a customer cluster"
+        ));
+    }
+    if !is_exact_version(version) {
+        return Err(format!(
+            "writer `{writer}` names version `{version}`, which is not an exact version; use a `RELEASE.*` tag, \
+             a dotted release such as `1.2.3`, or a 40-character lowercase commit"
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `version` pins one reproducible build of a writer.
+///
+/// Three spellings are accepted because three are in use: MinIO's `RELEASE.<timestamp>` tags,
+/// dotted releases, and git commits. Everything else is refused, which is the point — `latest`,
+/// `unknown` and `various` all read like a version and pin nothing.
+fn is_exact_version(version: &str) -> bool {
+    is_minio_release(version) || is_dotted_release(version) || is_commit(version)
+}
+
+fn is_version_char(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-' || byte == b'_' || byte == b'+'
+}
+
+fn is_minio_release(version: &str) -> bool {
+    let Some(rest) = version.strip_prefix("RELEASE.") else {
+        return false;
+    };
+    !rest.is_empty() && rest.bytes().all(is_version_char) && rest.bytes().any(|byte| byte.is_ascii_digit())
+}
+
+fn is_dotted_release(version: &str) -> bool {
+    let core = version.strip_prefix('v').unwrap_or(version);
+    if !core.bytes().all(is_version_char) {
+        return false;
+    }
+    // Two numeric components are the floor: `1` names a series, not a build.
+    let mut numeric_components = core.split('.');
+    let leading = [numeric_components.next(), numeric_components.next()];
+    leading
+        .iter()
+        .all(|component| component.is_some_and(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())))
+}
+
+fn is_commit(version: &str) -> bool {
+    version.len() == 40
+        && version
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 /// Whether `src` names an allowed synthetic recording source.
 pub fn check_source(src: &str) -> Result<(), String> {
     for (prefix, needs_revision) in SOURCE_ALLOWLIST {

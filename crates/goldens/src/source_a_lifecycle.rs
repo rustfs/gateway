@@ -26,7 +26,7 @@ use crate::source_a_census::SourceARow;
 use crate::{AcceptedCorpusCase, ConfigKind, CorpusVariant, GoldenSample, SampleOrigin};
 
 const LIFECYCLE_XML: &[u8] = b"<LifecycleConfiguration><Rule><ID>rule1</ID><Status>Enabled</Status><Expiration><Days>30</Days></Expiration></Rule></LifecycleConfiguration>";
-const LIFECYCLE_SHA256: &str = "d02252be7653043d28995e397c4953a0a405f287426d914ade100a3c7d1ea1b5";
+pub(crate) const LIFECYCLE_SHA256: &str = "d02252be7653043d28995e397c4953a0a405f287426d914ade100a3c7d1ea1b5";
 const RUSTFS_VERSION: &str = "rustfs@c876df53f5097618b1817568a471cbb8b4f26ee8";
 const UPDATE_CONFIG_REF: &str =
     "crates/ecstore/src/bucket/metadata.rs::lifecycle_update_config_clears_parsed_config_on_delete::lifecycle_xml";
