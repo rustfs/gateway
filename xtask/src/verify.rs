@@ -18,6 +18,7 @@
 //! budget. NOT responsible for: defining crate-local tests.
 //! Upstream: the `verify` command. Downstream: Cargo and the operation catalog.
 
+mod budget;
 mod launcher;
 mod process;
 mod selection;
@@ -30,7 +31,9 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
+use budget::{BudgetFailure, KilledStep};
 use launcher::launcher_started;
+use process::CancelledStep;
 use selection::crate_steps;
 
 #[cfg(feature = "operation")]
@@ -499,11 +502,8 @@ fn run_step_batches(
             return diagnostic("verification interrupted", subject, rule);
         }
         if batch.timed_out {
-            return diagnostic(
-                "verification exceeded its feedback budget",
-                subject,
-                &format!("{rule}; observed {:.2}s", started.elapsed().as_secs_f64()),
-            );
+            let killed = killed_steps(&commands, &batch.cancelled);
+            return budget_diagnostic(BudgetFailure::KilledAtDeadline { budget, killed: &killed }, subject, rule);
         }
         for (_, output) in batch.results {
             match output {
@@ -523,14 +523,40 @@ fn run_step_batches(
     }
     let elapsed = started.elapsed();
     if elapsed > budget {
-        return diagnostic(
-            "verification exceeded its feedback budget",
-            subject,
-            &format!("{rule}; observed {:.2}s", elapsed.as_secs_f64()),
-        );
+        return budget_diagnostic(BudgetFailure::Overran { elapsed }, subject, rule);
     }
     print_success(subject, elapsed, json, operation_cases);
     ExitCode::SUCCESS
+}
+
+/// Pairs each killed command with the label and rerun command a reader needs to measure it.
+fn killed_steps(commands: &[GateCommand], cancelled: &[CancelledStep]) -> Vec<KilledStep> {
+    cancelled
+        .iter()
+        .filter_map(|cancelled| {
+            commands.get(cancelled.index).map(|(program, args, step)| KilledStep {
+                step: step.clone(),
+                command: rerun_command(program, args),
+                compiled_crates: cancelled.compiled_crates,
+            })
+        })
+        .collect()
+}
+
+/// Renders a supervised command as the line a reader can paste to run it with no deadline over it.
+fn rerun_command(program: &str, args: &[String]) -> String {
+    let program = if program == env!("CARGO") { "cargo" } else { program };
+    std::iter::once(program.to_owned())
+        .chain(args.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn budget_diagnostic(failure: BudgetFailure<'_>, subject: &str, rule: &str) -> ExitCode {
+    for note in failure.notes() {
+        eprintln!("verify: {note}");
+    }
+    diagnostic(failure.what(), subject, &failure.rule(rule))
 }
 
 struct RunOptions<'a> {
@@ -591,10 +617,10 @@ fn run_all(json: bool) -> ExitCode {
     }
     let elapsed = started.elapsed();
     if elapsed > Duration::from_secs(600) {
-        return diagnostic(
-            "verification exceeded its feedback budget",
+        return budget_diagnostic(
+            BudgetFailure::Overran { elapsed },
             "workspace tests and build guards",
-            &format!("the full gate must finish within 10 minutes; observed {:.2}s", elapsed.as_secs_f64()),
+            "the full gate must finish within 10 minutes",
         );
     }
     print_success("workspace tests and build guards", elapsed, json, None);
@@ -645,11 +671,7 @@ fn run(args: &[&str], budget: Duration, subject: &str, rule: &str, json: bool) -
             )
         }
         Err(error) => diagnostic("cargo could not be started", subject, &format!("{rule}; {error}")),
-        Ok(_) if elapsed > budget => diagnostic(
-            "verification exceeded its feedback budget",
-            subject,
-            &format!("{rule}; observed {:.2}s", elapsed.as_secs_f64()),
-        ),
+        Ok(_) if elapsed > budget => budget_diagnostic(BudgetFailure::Overran { elapsed }, subject, rule),
         Ok(_) => {
             print_success(subject, elapsed, json, None);
             ExitCode::SUCCESS

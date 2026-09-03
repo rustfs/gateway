@@ -43,6 +43,19 @@ pub(super) struct Batch {
     pub(super) results: Vec<GateResult>,
     pub(super) timed_out: bool,
     pub(super) interrupted: bool,
+    /// The commands the deadline killed while they were still running. Empty unless `timed_out`.
+    pub(super) cancelled: Vec<CancelledStep>,
+}
+
+/// A command the deadline killed, and what its output showed it had done first.
+///
+/// A killed command has no cost to report, so this carries the two facts that were actually
+/// observed: which command it was, and how many crates cargo said it compiled before the kill.
+pub(super) struct CancelledStep {
+    /// Index into the command slice the batch was given.
+    pub(super) index: usize,
+    /// Lines of the form `Compiling <crate>` counted in the command's captured stderr.
+    pub(super) compiled_crates: usize,
 }
 
 struct SupervisedChild {
@@ -95,6 +108,7 @@ pub(super) fn run(commands: &[GateCommand], current_dir: &Path, deadline: Option
             results: Vec::new(),
             timed_out: false,
             interrupted: false,
+            cancelled: Vec::new(),
         };
     }
     run_supervised(commands, current_dir, deadline)
@@ -113,6 +127,7 @@ fn run_supervised(commands: &[GateCommand], current_dir: &Path, deadline: Option
                 results: Vec::new(),
                 timed_out: true,
                 interrupted: false,
+                cancelled: Vec::new(),
             };
         }
         Err(error) => {
@@ -134,6 +149,7 @@ fn run_supervised(commands: &[GateCommand], current_dir: &Path, deadline: Option
                     results: Vec::new(),
                     timed_out: true,
                     interrupted: false,
+                    cancelled: Vec::new(),
                 });
             }
             Err(error) => return failed_to_start(step, error),
@@ -148,6 +164,7 @@ fn failed_to_start(step: &str, error: io::Error) -> Batch {
         results: vec![(step.to_owned(), Err(error))],
         timed_out: false,
         interrupted: false,
+        cancelled: Vec::new(),
     }
 }
 
@@ -234,6 +251,7 @@ impl Supervisor {
                     results: self.results(),
                     timed_out: false,
                     interrupted: true,
+                    cancelled: Vec::new(),
                 };
             }
             if failed {
@@ -242,6 +260,7 @@ impl Supervisor {
                     results: self.results(),
                     timed_out: false,
                     interrupted: false,
+                    cancelled: Vec::new(),
                 };
             }
             if complete {
@@ -249,11 +268,13 @@ impl Supervisor {
                     results: self.results(),
                     timed_out: false,
                     interrupted: false,
+                    cancelled: Vec::new(),
                 };
             }
             if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 self.cancel_running();
                 return Batch {
+                    cancelled: self.cancelled_steps(),
                     results: self.results(),
                     timed_out: true,
                     interrupted: false,
@@ -310,6 +331,21 @@ impl Supervisor {
             .collect::<Vec<_>>();
         results.sort_by_key(|(index, _, _)| *index);
         results.into_iter().map(|(_, step, result)| (step, result)).collect()
+    }
+
+    /// The steps that were still running when the deadline arrived, with what they had compiled.
+    ///
+    /// Call after `cancel_running`, which is what marks a child cancelled and reaps it: the
+    /// captured output is only complete once the process group is gone.
+    fn cancelled_steps(&self) -> Vec<CancelledStep> {
+        self.children
+            .iter()
+            .filter(|child| child.cancelled)
+            .map(|child| CancelledStep {
+                index: child.index,
+                compiled_crates: compiled_crates(&child.stderr),
+            })
+            .collect()
     }
 
     fn cleanup(&mut self) {
@@ -413,6 +449,22 @@ impl Drop for Supervisor {
             let _ = low_level::emulate_default_handler(signal);
         }
     }
+}
+
+/// Counts the `Compiling <crate>` lines cargo wrote to a step's captured stderr before the kill.
+///
+/// This is an observation of what the child printed, not an estimate: a killed step that compiled
+/// nothing reports nothing. Unreadable capture files count as zero, which understates a build and
+/// never invents one.
+fn compiled_crates(capture: &Path) -> usize {
+    fs::read_to_string(capture)
+        .map(|captured| {
+            captured
+                .lines()
+                .filter(|line| line.trim_start().starts_with("Compiling "))
+                .count()
+        })
+        .unwrap_or(0)
 }
 
 fn read_output(status: ExitStatus, stdout: &Path, stderr: &Path) -> io::Result<Output> {

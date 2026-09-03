@@ -259,6 +259,77 @@ fn deadline_is_enforced_while_children_are_running() {
     assert!(started.elapsed() < Duration::from_secs(1), "the deadline was checked after completion");
 }
 
+/// A killed command leaves no result behind, so unless the deadline reports which command it was
+/// holding, the diagnostic upstream has nothing left to name but the deadline itself.
+#[test]
+fn a_deadline_kill_names_the_step_it_was_still_holding() {
+    let root = test_root("deadline-kill");
+    let marker = root.join("running");
+    let mut supervisor = test_supervisor(capture_root().expect("capture directory must be creatable"));
+    let args = vec!["-c".to_owned(), format!("touch '{}'; exec sleep 30", marker.display())];
+    supervisor
+        .spawn(0, "sh", &args, "slow", Path::new("."))
+        .expect("child must start");
+    wait_for_file(&marker);
+
+    let batch = supervisor.wait(Some(Instant::now() + Duration::from_millis(50)));
+
+    drop(supervisor);
+    fs::remove_dir_all(root).expect("test directory must be removable");
+    assert!(batch.timed_out, "a running child was not killed at its deadline");
+    assert_eq!(batch.cancelled.len(), 1, "the killed step was not reported");
+    assert_eq!(batch.cancelled[0].index, 0);
+    assert_eq!(
+        batch.cancelled[0].compiled_crates, 0,
+        "a step that compiled nothing must not be credited with a build"
+    );
+}
+
+/// The other direction of the same signal: a step that had been compiling when the deadline arrived
+/// reports what it compiled, which is how a cold build inside the budget becomes legible instead of
+/// being read as the crate's own cost.
+#[test]
+fn a_step_killed_after_compiling_reports_the_crates_it_compiled() {
+    let root = test_root("deadline-build");
+    let marker = root.join("compiled");
+    let mut supervisor = test_supervisor(capture_root().expect("capture directory must be creatable"));
+    let args = vec![
+        "-c".to_owned(),
+        format!(
+            "( printf '   Compiling proc-macro2 v1.0.95\\n   Compiling syn v2.0.0\\n' >&2 ); touch '{}'; exec sleep 30",
+            marker.display()
+        ),
+    ];
+    supervisor
+        .spawn(0, "sh", &args, "cold", Path::new("."))
+        .expect("child must start");
+    wait_for_file(&marker);
+
+    let batch = supervisor.wait(Some(Instant::now() + Duration::from_millis(50)));
+
+    drop(supervisor);
+    fs::remove_dir_all(root).expect("test directory must be removable");
+    assert!(batch.timed_out, "a running child was not killed at its deadline");
+    assert_eq!(batch.cancelled.len(), 1, "the killed step was not reported");
+    assert_eq!(batch.cancelled[0].compiled_crates, 2);
+}
+
+/// A batch that finishes inside its deadline has no killed step, and reporting one anyway would
+/// hang a build note on a run nothing interrupted.
+#[test]
+fn a_batch_that_finishes_reports_no_killed_step() {
+    let mut supervisor = test_supervisor(capture_root().expect("capture directory must be creatable"));
+    let args = vec!["-c".to_owned(), "printf '   Compiling proc-macro2 v1.0.95\\n' >&2".to_owned()];
+    supervisor
+        .spawn(0, "sh", &args, "quick", Path::new("."))
+        .expect("child must start");
+
+    let batch = supervisor.wait(Some(Instant::now() + Duration::from_secs(30)));
+
+    assert!(!batch.timed_out, "a completed batch was reported as a timeout");
+    assert!(batch.cancelled.is_empty(), "a completed batch reported a killed step");
+}
+
 #[test]
 fn deadline_expires_while_waiting_for_supervisor_lock_without_starting_command() {
     let root = test_root("lock-deadline");
