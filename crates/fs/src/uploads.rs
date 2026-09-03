@@ -15,11 +15,22 @@
 //! Persistent multipart-upload record authority for the filesystem reference backend.
 //!
 //! Responsible for: decoding one upload record, validating its filesystem components, persisting
-//! multipart checksum negotiation, and enumerating active uploads without following symbolic links.
+//! multipart checksum negotiation and the user metadata the initiating request carried, and
+//! enumerating active uploads without following symbolic links.
 //! NOT responsible for: pagination, delimiter rollup, object publication, or lifecycle.
-//! Upstream: upload initiation and retirement handlers. Downstream: upload capability resolution
-//! and `ListMultipartUploads`.
+//! Upstream: upload initiation and retirement handlers. Downstream: upload capability resolution,
+//! completion-time object publication, and `ListMultipartUploads`.
+//!
+//! # Why the metadata lives here and not on the completion
+//!
+//! S3 carries user metadata, content type, storage class and the encryption settings on
+//! `CreateMultipartUpload` alone; a part upload and the completion carry none of them
+//! (`q-mpu-metadata-0039`, evidenced in this repository against the AWS `CreateMultipartUpload`
+//! reference). Losing them at initiation therefore loses them permanently, which is why the
+//! initiating map is persisted into the upload record and read back at completion rather than
+//! being taken from the request that finishes the upload.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
@@ -27,6 +38,7 @@ use rustfs_gateway::dto::{self, CompletedPart};
 use rustfs_gateway::{ChecksumAlgorithm, ChecksumSpec, ChecksumType, ErrorCode, HandlerError, RecordedUpload};
 use tokio::io::AsyncWriteExt as _;
 
+use super::records::{decode_metadata_section, encode_metadata_section, validate_user_metadata};
 use super::{FsBackend, PARTS_DIR, UPLOAD_RECORD, storage_error};
 
 #[derive(Clone, Copy)]
@@ -184,6 +196,8 @@ pub(super) struct UploadRecord {
     pub(super) upload_id: Option<String>,
     pub(super) initiated: Option<i64>,
     pub(super) checksum: Option<UploadChecksum>,
+    /// The user metadata the initiating `CreateMultipartUpload` carried.
+    pub(super) metadata: BTreeMap<String, String>,
 }
 
 impl RecordedUpload for UploadRecord {
@@ -238,24 +252,32 @@ impl FsBackend {
             (Some(algorithm), Some(kind)) => Some(UploadChecksum::decode(algorithm, kind)?),
             _ => return Err(storage_error()),
         };
-        if lines.next().is_some() {
-            return Err(storage_error());
-        }
+        let metadata = decode_metadata_section(&mut lines)?;
         Ok(UploadRecord {
             bucket,
             key,
             upload_id,
             initiated,
             checksum,
+            metadata,
         })
     }
 
+    /// Records one upload's capability, its negotiated checksum, and its initiating metadata.
+    ///
+    /// # Errors
+    ///
+    /// The metadata refusals of [`validate_user_metadata`], applied before the directory exists so
+    /// that an upload whose metadata could never be published is never initiated, and
+    /// [`storage_error`] for a filesystem failure.
     pub(super) async fn create_upload(
         &self,
         bucket: &rustfs_gateway::BucketName,
         key: &rustfs_gateway::ObjectKey,
         checksum: Option<UploadChecksum>,
+        metadata: &BTreeMap<String, String>,
     ) -> Result<String, HandlerError> {
+        validate_user_metadata(metadata)?;
         self.require_bucket(bucket.as_str()).await?;
         let uploads = self.uploads_path(bucket.as_str());
         let upload_id = format!("fs-{:x}-{:x}", std::process::id(), self.temporary_id.fetch_add(1, Ordering::Relaxed));
@@ -274,11 +296,12 @@ impl FsBackend {
             let (algorithm, kind) =
                 checksum.map_or(("-", "-"), |checksum| (checksum.algorithm.wire_name(), checksum.kind.wire_name()));
             let record = format!(
-                "{}\n{}\n{}\n{}\n{algorithm}\n{kind}\n",
+                "{}\n{}\n{}\n{}\n{algorithm}\n{kind}\n{}",
                 hex::encode(bucket.as_str()),
                 hex::encode(key.as_str()),
                 hex::encode(&upload_id),
-                self.clock.now().unix_seconds()
+                self.clock.now().unix_seconds(),
+                encode_metadata_section(metadata),
             );
             let mut file = tokio::fs::OpenOptions::new()
                 .write(true)

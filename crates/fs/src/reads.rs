@@ -39,8 +39,9 @@ use rustfs_gateway::{
     Timestamp, evaluate_range,
 };
 
+use super::records::RecordKind;
 use super::storage_error;
-use super::versioning::{RecordKind, delete_marker_error, explicit_for_key, missing_version, newest_for_key};
+use super::versioning::{delete_marker_error, explicit_for_key, missing_version, newest_for_key};
 
 /// The representation a read describes, before any range is applied.
 struct Representation {
@@ -49,6 +50,13 @@ struct Representation {
     last_modified: Timestamp,
     storage_class: Option<rustfs_gateway::dto::StorageClass>,
     version_id: Option<String>,
+    /// The user metadata stored with this version, keyed by the lowercase `x-amz-meta-` suffix.
+    ///
+    /// This is the map the DTO already declares — `BTreeMap<String, String>` on both
+    /// `GetObjectOutput` and `HeadObjectOutput` — carried through unchanged. The response encoder
+    /// re-applies RFC 2047 on the way out, so what is stored and what is returned are the same
+    /// Unicode value rather than two encodings of it.
+    metadata: std::collections::BTreeMap<String, String>,
 }
 
 /// The window a read serves, and the answer's status.
@@ -156,18 +164,22 @@ impl super::FsBackend {
                 last_modified: Timestamp::from_secs(record.modified),
                 storage_class: Some(record.storage_class.clone()),
                 version_id: (record.version_id != "null").then(|| record.version_id.clone()),
+                metadata: record.metadata.clone(),
             });
         }
         if version_id.is_some_and(|id| id != "null") {
             return Err(missing_version(key));
         }
-        let (bytes, metadata) = self.read_object(bucket, key).await?;
+        let (bytes, file_metadata) = self.read_object(bucket, key).await?;
         Ok(Representation {
             e_tag: super::etag(&bytes)?,
-            last_modified: super::last_modified(&metadata),
+            last_modified: super::last_modified(&file_metadata),
             bytes,
             storage_class: None,
             version_id: None,
+            // A plain object file predates the version records entirely and carries no metadata
+            // section, so the honest answer is the empty map rather than a guess.
+            metadata: std::collections::BTreeMap::new(),
         })
     }
 }
@@ -205,6 +217,7 @@ impl Handler<GetObject> for super::FsBackend {
                 last_modified: Some(representation.last_modified),
                 storage_class: representation.storage_class,
                 version_id: representation.version_id,
+                metadata: representation.metadata,
                 body: Some(ByteStream::from_bytes(Bytes::from(body))),
                 ..GetObjectOutput::default()
             },
@@ -232,6 +245,7 @@ impl Handler<HeadObject> for super::FsBackend {
                 last_modified: Some(representation.last_modified),
                 storage_class: representation.storage_class,
                 version_id: representation.version_id,
+                metadata: representation.metadata,
                 ..HeadObjectOutput::default()
             },
             window.status,

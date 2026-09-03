@@ -36,6 +36,7 @@ use rustfs_gateway::{
 };
 use sha2::{Digest as _, Sha256};
 
+use super::records::{RecordKind, VersionRecord, decode_version_record, encode_version_record, validate_user_metadata};
 use super::{FsBackend, drain, etag, no_such_key, storage_error};
 
 pub(super) const STATUS_FILE: &str = "versioning-status";
@@ -47,25 +48,6 @@ enum VersioningState {
     Never,
     Enabled,
     Suspended,
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum RecordKind {
-    Object,
-    DeleteMarker,
-}
-
-#[derive(Clone)]
-pub(super) struct VersionRecord {
-    path: PathBuf,
-    sequence: u64,
-    key: String,
-    pub(super) version_id: String,
-    pub(super) kind: RecordKind,
-    pub(super) modified: i64,
-    pub(super) e_tag: String,
-    pub(super) size: i64,
-    pub(super) storage_class: StorageClass,
 }
 
 #[derive(Clone)]
@@ -91,13 +73,20 @@ pub(super) struct PublishedObject {
 }
 
 impl FsBackend {
+    /// Publishes one object's bytes and the user metadata that must outlive them.
+    ///
+    /// The metadata is validated **before** the version lock is taken and before any byte is
+    /// written: a pair this backend could not hand back on a later `GET` must fail the request,
+    /// not become an object whose metadata quietly disappears.
     pub(super) async fn publish_object(
         &self,
         bucket: &str,
         key: &str,
         bytes: &[u8],
         e_tag: &ETag,
+        metadata: &BTreeMap<String, String>,
     ) -> Result<PublishedObject, HandlerError> {
+        validate_user_metadata(metadata)?;
         let _guard = self.version_lock.lock().await;
         let state = self.versioning_state(bucket).await?;
         let existing = self.version_records(bucket).await?;
@@ -107,7 +96,7 @@ impl FsBackend {
             Some("null")
         };
         let record = self
-            .publish_version(bucket, key, version_id, Some(bytes), Some(e_tag))
+            .publish_version(bucket, key, version_id, Some(bytes), Some(e_tag), metadata)
             .await?;
         if version_id.is_some() {
             self.remove_null_versions(
@@ -241,9 +230,14 @@ impl FsBackend {
                 self.remove_legacy_object(bucket, key).await?;
                 Ok(None)
             }
-            VersioningState::Enabled => self.publish_version(bucket, key, None, None, None).await.map(Some),
+            VersioningState::Enabled => self
+                .publish_version(bucket, key, None, None, None, &BTreeMap::new())
+                .await
+                .map(Some),
             VersioningState::Suspended => {
-                let marker = self.publish_version(bucket, key, Some("null"), None, None).await?;
+                let marker = self
+                    .publish_version(bucket, key, Some("null"), None, None, &BTreeMap::new())
+                    .await?;
                 self.remove_null_versions(
                     &records
                         .into_iter()
@@ -330,38 +324,9 @@ impl FsBackend {
             ));
         }
         let encoded = tokio::fs::read_to_string(record_path).await.map_err(|_| storage_error())?;
-        let mut lines = encoded.lines();
-        let sequence = lines
-            .next()
-            .and_then(|value| value.parse::<u64>().ok())
-            .ok_or_else(storage_error)?;
-        let key = decode_record_text(lines.next()).ok_or_else(storage_error)?;
-        let version_id = decode_record_text(lines.next()).ok_or_else(storage_error)?;
-        let kind = match lines.next() {
-            Some("object") => RecordKind::Object,
-            Some("delete") => RecordKind::DeleteMarker,
-            _ => return Err(storage_error()),
-        };
-        let modified = lines
-            .next()
-            .and_then(|value| value.parse::<i64>().ok())
-            .ok_or_else(storage_error)?;
-        let e_tag = lines.next().map(ToOwned::to_owned).ok_or_else(storage_error)?;
-        let size = lines
-            .next()
-            .and_then(|value| value.parse::<i64>().ok())
-            .ok_or_else(storage_error)?;
-        let storage_class = match lines.next() {
-            None => StorageClass::STANDARD,
-            Some(value) => decode_record_text(Some(value))
-                .and_then(super::transitions::persisted_storage_class)
-                .ok_or_else(storage_error)?,
-        };
-        if lines.next().is_some() || version_id.is_empty() {
-            return Err(storage_error());
-        }
-        if matches!(kind, RecordKind::Object) {
-            let body = path.join(BODY_FILE);
+        let record = decode_version_record(path, &encoded)?;
+        if matches!(record.kind, RecordKind::Object) {
+            let body = record.path.join(BODY_FILE);
             let body_metadata = tokio::fs::symlink_metadata(body).await.map_err(|_| storage_error())?;
             if !body_metadata.is_file() || body_metadata.file_type().is_symlink() {
                 return Err(HandlerError::new(
@@ -369,21 +334,11 @@ impl FsBackend {
                     "the version body is not a safe regular file",
                 ));
             }
-            if i64::try_from(body_metadata.len()).ok() != Some(size) {
+            if i64::try_from(body_metadata.len()).ok() != Some(record.size) {
                 return Err(storage_error());
             }
         }
-        Ok(VersionRecord {
-            path,
-            sequence,
-            key,
-            version_id,
-            kind,
-            modified,
-            e_tag,
-            size,
-            storage_class,
-        })
+        Ok(record)
     }
 
     async fn publish_version(
@@ -393,6 +348,7 @@ impl FsBackend {
         version_id: Option<&str>,
         body: Option<&[u8]>,
         e_tag: Option<&ETag>,
+        metadata: &BTreeMap<String, String>,
     ) -> Result<VersionRecord, HandlerError> {
         let held = self.version_records(bucket).await?;
         let sequence = self.next_version_sequence(bucket, &held).await?;
@@ -436,6 +392,7 @@ impl FsBackend {
                 e_tag: tag,
                 size,
                 storage_class: StorageClass::STANDARD,
+                metadata: metadata.clone(),
             });
             tokio::fs::write(temporary.join(RECORD_FILE), record).await?;
             tokio::fs::rename(&temporary, &destination).await
@@ -502,27 +459,6 @@ impl FsBackend {
             Err(_) => Err(storage_error()),
         }
     }
-}
-
-fn encode_version_record(record: &VersionRecord) -> String {
-    let kind = match record.kind {
-        RecordKind::Object => "object",
-        RecordKind::DeleteMarker => "delete",
-    };
-    format!(
-        "{}\n{}\n{}\n{kind}\n{}\n{}\n{}\n{}\n",
-        record.sequence,
-        hex::encode(&record.key),
-        hex::encode(&record.version_id),
-        record.modified,
-        record.e_tag,
-        record.size,
-        hex::encode(record.storage_class.as_str())
-    )
-}
-
-fn decode_record_text(value: Option<&str>) -> Option<String> {
-    String::from_utf8(hex::decode(value?).ok()?).ok()
 }
 
 fn opaque_version_id(bucket: &str, key: &str, sequence: u64) -> String {
@@ -599,7 +535,7 @@ impl Handler<PutObject> for FsBackend {
         let bytes = drain(input.body).await?;
         let e_tag = etag(&bytes)?;
         let published = self
-            .publish_object(input.bucket.as_str(), input.key.as_str(), &bytes, &e_tag)
+            .publish_object(input.bucket.as_str(), input.key.as_str(), &bytes, &e_tag, &input.metadata)
             .await?;
         Ok(Resp::new(PutObjectOutput {
             size: Some(published.size),

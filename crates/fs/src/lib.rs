@@ -146,6 +146,7 @@ mod lifecycle;
 mod lifecycle_scheduler;
 mod listing;
 mod reads;
+mod records;
 mod tagging;
 mod transitions;
 mod uploads;
@@ -510,7 +511,11 @@ impl Handler<CreateMultipartUpload> for FsBackend {
         let input = request.into_input();
         let checksum = uploads::UploadChecksum::negotiate(input.checksum_algorithm.as_ref(), input.checksum_type.as_ref())?;
         let checksum_type = checksum.map(uploads::UploadChecksum::dto_type);
-        let upload_id = self.create_upload(&input.bucket, &input.key, checksum).await?;
+        // S3 carries user metadata on the initiating request and on neither the parts nor the
+        // completion, so this is the only call in the multipart family that has it to persist.
+        let upload_id = self
+            .create_upload(&input.bucket, &input.key, checksum, &input.metadata)
+            .await?;
         Ok(Resp::new(CreateMultipartUploadOutput {
             bucket: input.bucket,
             key: input.key,
@@ -700,7 +705,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
         ));
         tokio::fs::rename(&upload, &tombstone).await.map_err(|_| no_such_upload())?;
         let published = match self
-            .publish_object(input.bucket.as_str(), input.key.as_str(), &completed_bytes, &composite)
+            .publish_object(input.bucket.as_str(), input.key.as_str(), &completed_bytes, &composite, &record.metadata)
             .await
         {
             Ok(published) => published,

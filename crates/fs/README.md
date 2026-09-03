@@ -34,6 +34,23 @@ authority, so composite multipart entity tags and version identities remain stab
 Persisted status, counters, records, and bodies fail closed when malformed or replaced by symbolic
 links.
 
+User metadata is persisted in the version record itself. A record is the same eight newline-terminated
+lines earlier builds wrote, and an object carrying `x-amz-meta-*` adds a named, versioned trailing
+section — `meta/1 <count>` followed by one hex-encoded key/value line per entry. An object with no
+metadata is therefore written in the exact pre-section form and stays readable by a build that
+predates the section, while a record that does carry metadata is refused by that older reader rather
+than silently read as an object with none. In the other direction this build reads a pre-section
+record and answers it with no metadata; a section it does not recognise, one that declares more
+entries than it holds, one whose entry could not be returned as a header, and one that repeats a key
+are each refused with their own diagnosis instead of quietly reading as metadata-less. `GET` and
+`HEAD` answer the stored map on both the current and an explicit version, and a lifecycle transition
+rewrites the record without dropping it. Multipart takes the metadata from `CreateMultipartUpload`,
+where S3 defines it, persists it in the upload record, and publishes it at completion; the
+completion's own headers change nothing. Keys are stored in the lowercase form the codec already
+produced and refused rather than normalised a second time, values are stored RFC 2047-decoded and
+re-encoded on the way out, and the combined key and value size is capped at 2 KB — the figure AWS
+documents for user metadata — measured against the stored form.
+
 Object tags are atomically replaced beside the selected version record. Current and explicit-version
 reads, idempotent deletion, and restart recovery all use that authority without minting a new version
 or changing object bytes. The same validated tag pairs drive lifecycle `Tag` and `And` filters.

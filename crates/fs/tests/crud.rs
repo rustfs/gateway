@@ -55,6 +55,9 @@ mod lifecycle_scheduler;
 #[path = "crud/lifecycle_transitions.rs"]
 mod lifecycle_transitions;
 
+#[path = "crud/object_metadata.rs"]
+mod object_metadata;
+
 #[path = "crud/object_tagging.rs"]
 mod object_tagging;
 
