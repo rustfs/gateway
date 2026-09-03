@@ -5,7 +5,7 @@ to prove that the public `Handler` and `ServiceBuilder` APIs are sufficient to a
 service without a private adapter.
 
 This bounded implementation supports bucket and version-aware object CRUD plus `ListObjects` and
-`ListObjectsV2`, `ListMultipartUploads`,
+`ListObjectsV2`, `ListMultipartUploads`, `GetBucketLocation`,
 `GetBucketVersioning`, `PutBucketVersioning`, `ListObjectVersions`, `CreateMultipartUpload`,
 `UploadPart`, `ListParts`, `CompleteMultipartUpload`, `AbortMultipartUpload`, and lifecycle
 configuration PUT/GET/DELETE plus object tagging GET/PUT/DELETE.
@@ -55,6 +55,16 @@ the persisted object-version tags. A separate one-shot transition sweep applies 
 day/date actions to current objects, honors the persisted minimum-size mode, and atomically records
 the selected storage class without changing bytes, identity, tags, or modification time. GET, HEAD,
 and both object and version listing views project that durable class after restart.
+
+The backend serves one region, `us-east-1` unless `FsBackend::with_region` names another. That one
+value is the `x-amz-bucket-region` a `HeadBucket` reports, the `LocationConstraint` a
+`GetBucketLocation` answers — the empty element for `us-east-1`, whose constraint AWS defines as
+null — and the only constraint a `CreateBucket` may name. A region the `LocationConstraint`
+enumeration cannot name is refused by `with_region` rather than at request time.
+
+Ranged reads resolve through the exported `evaluate_range` contract, so a suffix range, a window
+that runs past the end, an unsatisfiable range, a multi-range header and `If-Range` all behave as
+they do everywhere else in this workspace rather than being re-derived here.
 
 The backend is intentionally not production storage. It does not promise crash consistency,
 multi-process coordination, hostile concurrent filesystem mutation resistance, or lifecycle

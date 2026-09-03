@@ -5,16 +5,20 @@ Agent entry point. File → responsibility → when you need to open it.
 | File | Responsibility | Read it when |
 |---|---|---|
 | `README.md` | Scope fence and supported-operation summary. | Deciding whether this reference backend fits a use case. |
-| `src/lib.rs` | Filesystem paths, capability authority, bucket CRUD, and five multipart handlers. | Changing shared storage behavior or the registered operation set. |
+| `src/lib.rs` | Filesystem paths, capability authority, the served region, and five multipart handlers. | Changing shared storage behavior or the registered operation set. |
+| `src/buckets.rs` | Bucket creation and removal, the `LocationConstraint` a creation may name, and the region `HeadBucket`/`GetBucketLocation` report. | Changing bucket lifetime or the region this backend serves. |
 | `src/lifecycle.rs` | Durable lifecycle documents, filter evaluation, and one-shot current-object expiration. | Changing lifecycle configuration or expiration semantics. |
 | `src/lifecycle_scheduler.rs` | Repeated lifecycle cadence, failure accounting, and bounded shutdown. | Changing automatic expiration scheduling or worker lifetime. |
 | `src/listing.rs` | Object/upload filtering, delimiter rollup, V1/paired markers, and scoped V2 cursors. | Changing object or upload listing pagination semantics. |
+| `src/reads.rs` | Representation selection for `GetObject`/`HeadObject` and the `Range` window `evaluate_range` decides. | Changing ranged or version-selected reads. |
 | `src/tagging.rs` | Durable per-version object tag replacement, reads, deletion, and storage safety. | Changing object-tagging operations or lifecycle tag inputs. |
 | `src/transitions.rs` | One-shot current-object transition selection and storage-class mutation. | Changing lifecycle transition eligibility or class persistence. |
 | `src/uploads.rs` | Multipart record/checksum decoding, path validation, and active-upload enumeration. | Changing upload capability persistence, checksum negotiation, or upload listing authority. |
 | `src/versioning.rs` | Persistent version states, shared object publication, delete markers, and version census handlers. | Changing PUT/multipart publication, version selection, retention, or listing semantics. |
 | `tests/crud.rs` | Signed production-service CRUD, multipart, and storage-boundary evidence. | Changing a handler, path rule, or public assembly API. |
+| `tests/crud/bucket_location.rs` | Null and named location answers as exact bytes, the `EU` alias, constraint refusals, and region agreement with `HeadBucket`. | Changing `GetBucketLocation` or the served region. |
 | `tests/crud/listing.rs` | Restarted V1/V2 pages, prefix/delimiter, URL encoding, and cursor/path refusals. | Changing ordinary listing behavior or its persisted source. |
+| `tests/crud/range_reads.rs` | Ranged `GET`/`HEAD` boundaries: suffix, clamp, single byte, `416`, multi-range, `If-Range`, `partNumber` conflict. | Changing ranged reads or their wire headers. |
 | `tests/crud/lifecycle.rs` | Full-rule lifecycle replacement, restart, validation, deletion, and storage-boundary evidence. | Changing lifecycle configuration behavior or its durable authority. |
 | `tests/crud/lifecycle_expiration.rs` | Debug-day, version-aware expiration, selection, and preflight evidence. | Changing lifecycle execution or its fail-closed boundaries. |
 | `tests/crud/lifecycle_scheduler.rs` | Automatic cadence and scheduler shutdown evidence. | Changing lifecycle worker startup, recovery, or shutdown. |

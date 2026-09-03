@@ -25,19 +25,18 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
 
-use bytes::Bytes;
 use rustfs_gateway::dto::{
-    DeleteMarkerEntry, DeleteObject, DeleteObjectOutput, GetBucketVersioning, GetBucketVersioningOutput, GetObject,
-    GetObjectOutput, HeadObject, HeadObjectOutput, ListObjectVersions, ListObjectVersionsOutput, ObjectVersion,
-    PutBucketVersioning, PutBucketVersioningOutput, PutObject, PutObjectOutput, Status, StorageClass,
+    DeleteMarkerEntry, DeleteObject, DeleteObjectOutput, GetBucketVersioning, GetBucketVersioningOutput, ListObjectVersions,
+    ListObjectVersionsOutput, ObjectVersion, PutBucketVersioning, PutBucketVersioningOutput, PutObject, PutObjectOutput, Status,
+    StorageClass,
 };
 use rustfs_gateway::{
-    ByteStream, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Req,
+    ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Req,
     ResourceVisibility, Resp, Timestamp, validate_versioning,
 };
 use sha2::{Digest as _, Sha256};
 
-use super::{FsBackend, drain, etag, last_modified, no_such_key, storage_error};
+use super::{FsBackend, drain, etag, no_such_key, storage_error};
 
 pub(super) const STATUS_FILE: &str = "versioning-status";
 pub(super) const SEQUENCE_FILE: &str = "version-sequence";
@@ -51,22 +50,22 @@ enum VersioningState {
 }
 
 #[derive(Clone, Copy)]
-enum RecordKind {
+pub(super) enum RecordKind {
     Object,
     DeleteMarker,
 }
 
 #[derive(Clone)]
-struct VersionRecord {
+pub(super) struct VersionRecord {
     path: PathBuf,
     sequence: u64,
     key: String,
-    version_id: String,
-    kind: RecordKind,
-    modified: i64,
-    e_tag: String,
-    size: i64,
-    storage_class: StorageClass,
+    pub(super) version_id: String,
+    pub(super) kind: RecordKind,
+    pub(super) modified: i64,
+    pub(super) e_tag: String,
+    pub(super) size: i64,
+    pub(super) storage_class: StorageClass,
 }
 
 #[derive(Clone)]
@@ -289,7 +288,16 @@ impl FsBackend {
             .await
     }
 
-    async fn version_records(&self, bucket: &str) -> Result<Vec<VersionRecord>, HandlerError> {
+    /// Fails a read closed when the bucket's versioning state cannot be read.
+    ///
+    /// The state itself decides nothing about a read — which version a `GET` selects is the record
+    /// set's answer — but a status file this backend cannot decode means the bucket's lineage is
+    /// unknown, and answering the current object anyway would report a guess as a fact.
+    pub(super) async fn require_readable_versioning(&self, bucket: &str) -> Result<(), HandlerError> {
+        self.versioning_state(bucket).await.map(|_state| ())
+    }
+
+    pub(super) async fn version_records(&self, bucket: &str) -> Result<Vec<VersionRecord>, HandlerError> {
         self.require_bucket(bucket).await?;
         let versions = self.versions_path(bucket);
         let mut entries = tokio::fs::read_dir(&versions).await.map_err(|_| storage_error())?;
@@ -464,7 +472,7 @@ impl FsBackend {
         Ok(next)
     }
 
-    async fn read_version_body(&self, record: &VersionRecord) -> Result<Vec<u8>, HandlerError> {
+    pub(super) async fn read_version_body(&self, record: &VersionRecord) -> Result<Vec<u8>, HandlerError> {
         tokio::fs::read(record.path.join(BODY_FILE))
             .await
             .map_err(|_| storage_error())
@@ -521,14 +529,14 @@ fn opaque_version_id(bucket: &str, key: &str, sequence: u64) -> String {
     hex::encode(Sha256::digest(format!("{bucket}\0{key}\0{sequence}").as_bytes()))
 }
 
-fn missing_version(key: &str) -> HandlerError {
+pub(super) fn missing_version(key: &str) -> HandlerError {
     match ObjectKey::new(key.to_owned()) {
         Ok(key) => HandlerErrorContext::missing_object_for(key, MissingObject::Version, ResourceVisibility::Visible).into(),
         Err(_) => storage_error(),
     }
 }
 
-fn delete_marker_error(record: &VersionRecord, key: &str, explicit: bool) -> HandlerError {
+pub(super) fn delete_marker_error(record: &VersionRecord, key: &str, explicit: bool) -> HandlerError {
     if explicit {
         return HandlerErrorContext::versioned_delete_marker(&record.version_id, record.modified)
             .map(Into::into)
@@ -540,14 +548,14 @@ fn delete_marker_error(record: &VersionRecord, key: &str, explicit: bool) -> Han
         .unwrap_or_else(|_| storage_error())
 }
 
-fn newest_for_key<'a>(records: &'a [VersionRecord], key: &str) -> Option<&'a VersionRecord> {
+pub(super) fn newest_for_key<'a>(records: &'a [VersionRecord], key: &str) -> Option<&'a VersionRecord> {
     records
         .iter()
         .filter(|record| record.key == key)
         .max_by_key(|record| record.sequence)
 }
 
-fn explicit_for_key<'a>(records: &'a [VersionRecord], key: &str, version_id: &str) -> Option<&'a VersionRecord> {
+pub(super) fn explicit_for_key<'a>(records: &'a [VersionRecord], key: &str, version_id: &str) -> Option<&'a VersionRecord> {
     records
         .iter()
         .find(|record| record.key == key && record.version_id == version_id)
@@ -598,95 +606,6 @@ impl Handler<PutObject> for FsBackend {
             e_tag,
             version_id: published.version_id,
             ..PutObjectOutput::default()
-        }))
-    }
-}
-
-impl Handler<GetObject> for FsBackend {
-    async fn call(&self, request: Req<GetObject>) -> HandlerResult<GetObject> {
-        let input = request.input();
-        let _guard = self.version_lock.lock().await;
-        let _state = self.versioning_state(input.bucket.as_str()).await?;
-        let records = self.version_records(input.bucket.as_str()).await?;
-        let selected = input
-            .version_id
-            .as_ref()
-            .and_then(|id| explicit_for_key(&records, input.key.as_str(), id.as_str()))
-            .or_else(|| {
-                input
-                    .version_id
-                    .is_none()
-                    .then(|| newest_for_key(&records, input.key.as_str()))
-                    .flatten()
-            });
-        if let Some(record) = selected {
-            if matches!(record.kind, RecordKind::DeleteMarker) {
-                return Err(delete_marker_error(record, input.key.as_str(), input.version_id.is_some()));
-            }
-            let bytes = self.read_version_body(record).await?;
-            return Ok(Resp::new(GetObjectOutput {
-                content_length: Some(record.size),
-                e_tag: Some(rustfs_gateway::ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?),
-                last_modified: Some(Timestamp::from_secs(record.modified)),
-                storage_class: Some(record.storage_class.clone()),
-                version_id: (record.version_id != "null").then(|| record.version_id.clone()),
-                body: Some(ByteStream::from_bytes(Bytes::from(bytes))),
-                ..GetObjectOutput::default()
-            }));
-        }
-        if input.version_id.as_ref().is_some_and(|id| id.as_str() != "null") {
-            return Err(missing_version(input.key.as_str()));
-        }
-        let (bytes, metadata) = self.read_object(input.bucket.as_str(), input.key.as_str()).await?;
-        Ok(Resp::new(GetObjectOutput {
-            content_length: i64::try_from(bytes.len()).ok(),
-            e_tag: Some(etag(&bytes)?),
-            last_modified: Some(last_modified(&metadata)),
-            body: Some(ByteStream::from_bytes(Bytes::from(bytes))),
-            ..GetObjectOutput::default()
-        }))
-    }
-}
-
-impl Handler<HeadObject> for FsBackend {
-    async fn call(&self, request: Req<HeadObject>) -> HandlerResult<HeadObject> {
-        let input = request.input();
-        let _guard = self.version_lock.lock().await;
-        let _state = self.versioning_state(input.bucket.as_str()).await?;
-        let records = self.version_records(input.bucket.as_str()).await?;
-        let selected = input
-            .version_id
-            .as_ref()
-            .and_then(|id| explicit_for_key(&records, input.key.as_str(), id.as_str()))
-            .or_else(|| {
-                input
-                    .version_id
-                    .is_none()
-                    .then(|| newest_for_key(&records, input.key.as_str()))
-                    .flatten()
-            });
-        if let Some(record) = selected {
-            if matches!(record.kind, RecordKind::DeleteMarker) {
-                return Err(delete_marker_error(record, input.key.as_str(), input.version_id.is_some()));
-            }
-            return Ok(Resp::new(HeadObjectOutput {
-                content_length: Some(record.size),
-                e_tag: Some(rustfs_gateway::ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?),
-                last_modified: Some(Timestamp::from_secs(record.modified)),
-                storage_class: Some(record.storage_class.clone()),
-                version_id: (record.version_id != "null").then(|| record.version_id.clone()),
-                ..HeadObjectOutput::default()
-            }));
-        }
-        if input.version_id.as_ref().is_some_and(|id| id.as_str() != "null") {
-            return Err(missing_version(input.key.as_str()));
-        }
-        let (bytes, metadata) = self.read_object(input.bucket.as_str(), input.key.as_str()).await?;
-        Ok(Resp::new(HeadObjectOutput {
-            content_length: i64::try_from(bytes.len()).ok(),
-            e_tag: Some(etag(&bytes)?),
-            last_modified: Some(last_modified(&metadata)),
-            ..HeadObjectOutput::default()
         }))
     }
 }
