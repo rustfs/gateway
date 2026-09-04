@@ -15,8 +15,8 @@
 //! Authored timing for cleartext external HTTP/1.1 request bodies.
 //!
 //! Responsible for: enforcing each data chunk's not-before delay, observing response bytes during
-//! that wait, and stopping the unfinished request when an early response exists. NOT responsible
-//! for: TLS record interpretation, control chunks, response decoding, or endpoint setup. Upstream:
+//! that wait, and stopping the unfinished request when an early response exists. Not responsible for:
+//! TLS record interpretation, control chunks, response decoding, or endpoint setup. Upstream:
 //! `super::external`; downstream: `crate::socket::Connection`.
 
 use std::time::{Duration, Instant};
