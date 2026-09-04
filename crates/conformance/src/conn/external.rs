@@ -14,17 +14,21 @@
 
 //! External endpoint exchange over caller-selected HTTP or HTTPS.
 //!
-//! Responsible for: driving unpaced request steps without the loopback server's private demand
-//! observer. NOT responsible for: endpoint parsing, TLS setup, HTTP/2, paced or controlled bodies,
-//! remote fixture setup, request interpretation, or response judgement. Upstream: `super`;
-//! downstream: `crate::cli` through [`super::Conn`].
+//! Responsible for: driving authored request steps without the loopback server's private demand
+//! observer, including cleartext delays that stop on observed response bytes. NOT responsible for:
+//! endpoint parsing, TLS setup, HTTP/2, controlled bodies, remote fixture setup, request
+//! interpretation, or response judgement. Upstream: `super`; downstream: `crate::cli` through
+//! [`super::Conn`].
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use super::external_endpoint::ExternalEndpoint;
-use super::{BodyProgress, Conn, DispatchedExchange, Head, budget_of, observe_socket_exchange, read_connection};
-use crate::inprocess::{ChunkStep, InProcess};
+use super::external_pacing::{validate_authored_steps, write_authored_body};
+use super::{Conn, DispatchedExchange, Head, budget_of, observe_socket_exchange, read_connection};
+#[cfg(test)]
+use crate::inprocess::ChunkStep;
+use crate::inprocess::InProcess;
 use crate::observation::{ConnectionState, Observation};
 use crate::socket::{Connection, ReadFailure};
 use crate::sut::SutError;
@@ -81,7 +85,9 @@ impl Conn {
                 "external endpoint HTTP/2 framing is not implemented; this target writes HTTP/1.1 bytes".to_owned(),
             ));
         }
-        validate_authored_steps(&wire)?;
+        let budget = budget_of(plan.timeout_ms);
+        let cleartext = !endpoint.is_tls();
+        validate_authored_steps(&wire, cleartext, budget)?;
         let head = self.head(&wire, &request_time)?;
         let existing = self.connection.as_ref().map(Connection::observe_pending);
         if reuse && existing.is_some_and(|(_, pending)| pending) {
@@ -98,7 +104,7 @@ impl Conn {
             .connection
             .as_mut()
             .ok_or_else(|| SutError::Environment("external endpoint connection was not opened".to_owned()))?;
-        let result = execute_socket_exchange(connection, &wire, &head, budget_of(plan.timeout_ms))?;
+        let result = execute_socket_exchange(connection, &wire, &head, budget, cleartext)?;
         if result.torn_down || endpoint.is_tls() {
             self.connection = None;
         }
@@ -111,13 +117,15 @@ fn execute_socket_exchange(
     wire: &crate::inprocess::Wire,
     head: &Head,
     budget: Duration,
+    cleartext: bool,
 ) -> Result<super::exchange::SocketExchangeResult, SutError> {
-    validate_authored_steps(wire)?;
+    validate_authored_steps(wire, cleartext, budget)?;
     connection.start_exchange();
     let started = Instant::now();
     let deadline = started + budget;
     connection.write(&head.bytes)?;
-    let progress = write_authored_body(connection, wire, head.declared_length)?;
+    let progress = write_authored_body(connection, wire, head.declared_length, deadline)?;
+    let discard_unfinished_request = progress.measured_at_response && !progress.fully_sent;
     let mut result = observe_socket_exchange(
         connection,
         wire,
@@ -128,6 +136,13 @@ fn execute_socket_exchange(
             deadline,
         },
     );
+    if discard_unfinished_request {
+        result.torn_down = true;
+        result
+            .observation
+            .notes
+            .push("the client discarded the connection after an early response interrupted the request body".to_owned());
+    }
     validate_external_response(&result, wire)?;
     result.observation.ttfb_ms = None;
     result
@@ -146,25 +161,6 @@ fn execute_socket_exchange(
         result.torn_down = true;
     }
     Ok(result)
-}
-
-fn validate_authored_steps(wire: &crate::inprocess::Wire) -> Result<(), SutError> {
-    for (index, step) in wire.steps.iter().enumerate() {
-        match step {
-            ChunkStep::Data(_, 0) => {}
-            ChunkStep::Data(_, delay_ms) => {
-                return Err(SutError::Environment(format!(
-                    "external endpoint data step {index} declares a {delay_ms}ms delay, but this target cannot observe an early response concurrently; refusing to turn the delay into TTFB"
-                )));
-            }
-            ChunkStep::Control { action, .. } => {
-                return Err(SutError::Environment(format!(
-                    "external endpoint `{action}` control is not implemented with concurrent response observation"
-                )));
-            }
-        }
-    }
-    Ok(())
 }
 
 fn validate_external_response(
@@ -212,38 +208,6 @@ fn validate_external_response(
 fn connection_closes(headers: &[(String, String)]) -> bool {
     headers.iter().any(|(name, value)| {
         name.eq_ignore_ascii_case("connection") && value.split(',').any(|token| token.trim().eq_ignore_ascii_case("close"))
-    })
-}
-
-fn write_authored_body(
-    connection: &mut Connection,
-    wire: &crate::inprocess::Wire,
-    declared_length: u64,
-) -> Result<BodyProgress, SutError> {
-    let notes = vec![
-        "external endpoints expose no server-side demand observer; request body bytes sent when the response existed are unavailable"
-            .to_owned(),
-    ];
-    for step in &wire.steps {
-        match step {
-            ChunkStep::Data(bytes, 0) => connection.write_body(bytes)?,
-            ChunkStep::Data(_, _) | ChunkStep::Control { .. } => {
-                return Err(SutError::Environment(
-                    "an unsupported external request step passed preflight validation".to_owned(),
-                ));
-            }
-        }
-        if connection.torn_down() {
-            break;
-        }
-    }
-    let sent = connection.body_written();
-    Ok(BodyProgress {
-        sent_at_response: sent,
-        measured_at_response: false,
-        fully_sent: sent >= declared_length,
-        torn_down: connection.torn_down(),
-        notes,
     })
 }
 
@@ -340,7 +304,7 @@ mod tests {
             bytes: format!("GET / HTTP/1.1\r\nHost: {}\r\n\r\n", endpoint.authority()).into_bytes(),
             declared_length: 0,
         };
-        let result = execute_socket_exchange(&mut connection, &wire, &head, Duration::from_secs(2));
+        let result = execute_socket_exchange(&mut connection, &wire, &head, Duration::from_secs(2), true);
         let _ = server.join().expect("server exits");
         result
     }
@@ -466,6 +430,7 @@ status = {status}
                 declared_length: 0,
             },
             Duration::from_secs(2),
+            true,
         )
         .expect("external exchange");
         server.join().expect("server exits");
@@ -608,7 +573,7 @@ status = {status}
             bytes: b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n".to_vec(),
             declared_length: 0,
         };
-        let error = execute_socket_exchange(&mut connection, &wire, &head, Duration::from_secs(2))
+        let error = execute_socket_exchange(&mut connection, &wire, &head, Duration::from_secs(2), true)
             .err()
             .expect("segmented surplus byte must not be discarded");
         server.join().expect("server exits");
@@ -640,10 +605,12 @@ status = {status}
     }
 
     #[test]
-    fn delayed_and_controlled_bodies_fail_before_opening_an_exchange() {
+    fn cleartext_delays_are_accepted_but_tls_delays_and_controls_fail_closed() {
         let mut delayed = empty_wire();
         delayed.steps.push(ChunkStep::Data(b"late".to_vec(), 1));
-        let delayed_error = validate_authored_steps(&delayed).expect_err("delay needs concurrent response observation");
+        validate_authored_steps(&delayed, true, Duration::from_secs(1)).expect("cleartext can observe response bytes");
+        let tls_error = validate_authored_steps(&delayed, false, Duration::from_secs(1))
+            .expect_err("TLS record readiness is not an HTTP response observation");
 
         let mut controlled = empty_wire();
         controlled.steps.push(ChunkStep::Control {
@@ -651,22 +618,102 @@ status = {status}
             delay_ms: 0,
             duration_ms: 1,
         });
-        let control_error = validate_authored_steps(&controlled).expect_err("control needs concurrent response observation");
+        let control_error = validate_authored_steps(&controlled, true, Duration::from_secs(1))
+            .expect_err("control needs concurrent response observation");
 
-        assert!(
-            delayed_error
-                .to_string()
-                .contains("cannot observe an early response concurrently")
-        );
+        assert!(tls_error.to_string().contains("encrypted socket readiness"));
         assert!(control_error.to_string().contains("concurrent response observation"));
     }
 
     #[test]
-    fn delayed_body_is_rejected_before_connecting_to_the_external_endpoint() {
+    fn early_response_during_declared_delay_stops_the_request_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
+        listener.set_nonblocking(true).expect("bounded accept wait");
+        let address = listener.local_addr().expect("listener address");
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_millis(500);
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(accepted) => break accepted,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Vec::new(),
+                    Err(error) => panic!("accept client before deadline: {error}"),
+                }
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("set head deadline");
+            let mut request = Vec::new();
+            let head_end = loop {
+                let mut block = [0_u8; 1024];
+                let read = stream.read(&mut block).expect("read request head");
+                assert_ne!(read, 0, "request ended before its head completed");
+                request.extend_from_slice(&block[..read]);
+                if let Some(end) = request
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .map(|index| index + 4)
+                {
+                    break end;
+                }
+            };
+            stream
+                .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                .expect("write early response");
+            stream
+                .set_read_timeout(Some(Duration::from_millis(300)))
+                .expect("set body observation window");
+            let mut body = request.split_off(head_end);
+            loop {
+                let mut block = [0_u8; 64];
+                match stream.read(&mut block) {
+                    Ok(0) => break,
+                    Ok(read) => body.extend_from_slice(&block[..read]),
+                    Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                        break;
+                    }
+                    Err(error) => panic!("observe body bytes: {error}"),
+                }
+            }
+            body
+        });
+        let mut target = Conn::external(std::path::PathBuf::from("."), &format!("http://{address}")).expect("external target");
+        target.prepare("c-external-paced-0001", None).expect("empty setup");
+        let request = crate::toml::parse(
+            "method = \"PUT\"\ntarget = \"/bucket/key\"\nheaders = { content-length = \"4\" }\n\
+             [[chunks]]\nraw_utf8 = \"late\"\ndelay_ms = 200\n",
+        )
+        .expect("delayed request block");
+        let plan = ExchangePlan {
+            case_id: "c-external-paced-0001",
+            index: 0,
+            request,
+            clock: None,
+            connection: None,
+            timeout_ms: Some(2_000),
+            transport: Transport::Conn,
+            profile: Profile::Aws,
+        };
+
+        let result = target.exchange(&plan);
+        let body = server.join().expect("server exits");
+        let observation = result.expect("early response is observable during the delay");
+
+        assert_eq!(observation.status, Some(403));
+        assert_eq!(observation.request_body_bytes_sent_at_response, Some(0));
+        assert_eq!(observation.request_body_fully_sent, Some(false));
+        assert!(body.is_empty(), "body transmission stopped after the response");
+        assert!(target.connection.is_none(), "an unfinished request connection is not reusable");
+    }
+
+    #[test]
+    fn delayed_https_body_is_rejected_before_connecting_to_the_external_endpoint() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
         listener.set_nonblocking(true).expect("nonblocking listener");
         let address = listener.local_addr().expect("listener address");
-        let mut target = Conn::external(std::path::PathBuf::from("."), &format!("http://{address}")).expect("external target");
+        let mut target = Conn::external(std::path::PathBuf::from("."), &format!("https://{address}")).expect("external target");
         target.prepare("c-external-direct-n001", None).expect("empty setup");
         let request =
             crate::toml::parse("method = \"PUT\"\ntarget = \"/bucket/key\"\n[[chunks]]\nraw_utf8 = \"late\"\ndelay_ms = 1\n")
@@ -682,13 +729,44 @@ status = {status}
             profile: Profile::Aws,
         };
 
-        let error = target.exchange(&plan).expect_err("paced body is unsupported");
+        let error = target.exchange(&plan).expect_err("paced HTTPS body is unsupported");
 
-        assert!(error.to_string().contains("cannot observe an early response concurrently"));
+        assert!(error.to_string().contains("encrypted socket readiness"));
         match listener.accept() {
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
             Err(error) => panic!("unexpected accept error: {error}"),
             Ok(_) => panic!("external target connected before rejecting the paced body"),
+        }
+    }
+
+    #[test]
+    fn body_delay_beyond_the_exchange_budget_fails_before_connecting() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
+        listener.set_nonblocking(true).expect("nonblocking listener");
+        let address = listener.local_addr().expect("listener address");
+        let mut target = Conn::external(std::path::PathBuf::from("."), &format!("http://{address}")).expect("external target");
+        target.prepare("c-external-direct-n002", None).expect("empty setup");
+        let request =
+            crate::toml::parse("method = \"PUT\"\ntarget = \"/bucket/key\"\n[[chunks]]\nraw_utf8 = \"late\"\ndelay_ms = 2\n")
+                .expect("delayed request block");
+        let plan = ExchangePlan {
+            case_id: "c-external-direct-n002",
+            index: 0,
+            request,
+            clock: None,
+            connection: None,
+            timeout_ms: Some(1),
+            transport: Transport::Conn,
+            profile: Profile::Aws,
+        };
+
+        let error = target.exchange(&plan).expect_err("delay exceeds the exchange budget");
+
+        assert!(error.to_string().contains("exceeds the exchange timeout"));
+        match listener.accept() {
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => panic!("unexpected accept error: {error}"),
+            Ok(_) => panic!("external target connected before rejecting the over-budget delay"),
         }
     }
 

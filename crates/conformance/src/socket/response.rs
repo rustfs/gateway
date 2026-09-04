@@ -14,16 +14,55 @@
 
 //! HTTP/1.1 response framing for the raw socket observer.
 //!
-//! Responsible for: decoding fixed-length and chunked response bodies without normalizing request
-//! bytes. NOT responsible for: opening sockets or judging observations. Upstream: `super::Connection`.
-//! Downstream: `crate::conn`.
+//! Responsible for: decoding fixed-length and chunked response bodies, plus non-consuming
+//! cleartext readiness used to stop a paced request. NOT responsible for: opening sockets,
+//! interpreting TLS records, or judging observations. Upstream: `super::Connection`; downstream:
+//! `crate::conn`.
 
+use std::io::ErrorKind;
 use std::time::Duration;
 
 use super::{Connection, RawResponse, ReadFailure, carries_a_body, find_head_end, parse_response_head};
 use crate::sut::SutError;
 
+/// What a non-consuming wait observed on a cleartext response socket.
+pub(crate) enum PeerInput {
+    /// At least one response byte is ready to read.
+    Ready,
+    /// The peer ended or reset the stream without a readable byte.
+    Closed,
+    /// No byte or close arrived before the authored send instant.
+    TimedOut,
+}
+
 impl Connection {
+    /// Waits for cleartext peer activity without consuming response bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SutError::Environment`] when the socket cannot be observed. Callers must not use
+    /// this on TLS: a ready encrypted record does not prove that an HTTP response exists.
+    pub(crate) fn wait_for_cleartext_response(&self, timeout: Duration) -> Result<PeerInput, SutError> {
+        let socket = self.stream.tcp();
+        socket
+            .set_read_timeout(Some(timeout))
+            .map_err(|error| SutError::Environment(format!("cannot set the response observation timeout: {error}")))?;
+        let mut probe = [0_u8; 1];
+        let observed = match socket.peek(&mut probe) {
+            Ok(0) => Ok(PeerInput::Closed),
+            Ok(_) => Ok(PeerInput::Ready),
+            Err(error) => match error.kind() {
+                ErrorKind::WouldBlock | ErrorKind::TimedOut => Ok(PeerInput::TimedOut),
+                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted => Ok(PeerInput::Closed),
+                _ => Err(SutError::Environment(format!("cannot observe the response socket: {error}"))),
+            },
+        };
+        socket
+            .set_read_timeout(None)
+            .map_err(|error| SutError::Environment(format!("cannot restore the response socket timeout: {error}")))?;
+        observed
+    }
+
     /// Reads one HTTP/1.1 response: head, then its fixed or chunked body.
     ///
     /// # Errors
