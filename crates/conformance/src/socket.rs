@@ -91,6 +91,7 @@
 //! driver. Blocking inside `poll_frame` is sound because the thread has no other connection to
 //! progress.
 
+mod connect;
 mod response;
 mod stream;
 pub(crate) use response::PeerInput;
@@ -102,14 +103,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use rustfs_gateway::{ConnectionIntent, S3Service, collect, connection_intent_of};
-use rustls::ClientConfig;
-use rustls::pki_types::ServerName;
-
 use crate::exec::ServiceRuntime;
 use crate::observation::ConnectionState;
 use crate::socket::stream::ConnectionStream;
 use crate::sut::SutError;
+use rustfs_gateway::{ConnectionIntent, S3Service, collect, connection_intent_of};
 
 /// A listener safety net strictly beyond the maximum exchange budget, so case timing decides first.
 /// It only stops a wedged connection from holding a thread for the life of the process.
@@ -1032,28 +1030,6 @@ impl Connection {
         let stream = TcpStream::connect(addr).map_err(|error| SutError::Environment(format!("cannot connect: {error}")))?;
         Ok(Connection {
             stream: ConnectionStream::Plain(stream),
-            body_written: 0,
-            torn_down: false,
-        })
-    }
-
-    /// Opens a certificate-verified TLS connection to a listener.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SutError::Environment`] when TCP setup or TLS client construction fails. The
-    /// handshake is driven by the first read or write, and any failure remains an environment
-    /// error rather than a conformance finding.
-    pub fn open_tls(
-        addr: SocketAddr,
-        server_name: ServerName<'static>,
-        config: Arc<ClientConfig>,
-    ) -> Result<Connection, SutError> {
-        let socket = TcpStream::connect(addr).map_err(|error| SutError::Environment(format!("cannot connect: {error}")))?;
-        let stream = ConnectionStream::tls(socket, server_name, config)
-            .map_err(|error| SutError::Environment(format!("cannot configure TLS connection: {error}")))?;
-        Ok(Connection {
-            stream,
             body_written: 0,
             torn_down: false,
         })

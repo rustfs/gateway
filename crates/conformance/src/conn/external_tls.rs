@@ -21,6 +21,7 @@
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
@@ -74,10 +75,12 @@ impl ExternalTransport {
         })
     }
 
-    pub(super) fn open(&self, address: std::net::SocketAddr) -> Result<Connection, SutError> {
+    pub(super) fn open(&self, address: std::net::SocketAddr, deadline: Instant) -> Result<Connection, SutError> {
         match self {
-            Self::Cleartext => Connection::open(address),
-            Self::Tls { server_name, config } => Connection::open_tls(address, server_name.clone(), Arc::clone(config)),
+            Self::Cleartext => Connection::open_before(address, deadline),
+            Self::Tls { server_name, config } => {
+                Connection::open_tls_before(address, server_name.clone(), Arc::clone(config), deadline)
+            }
         }
     }
 
@@ -128,7 +131,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
     use rustls::{ServerConfig, ServerConnection, StreamOwned};
@@ -208,7 +211,9 @@ mod tests {
         let (url, certificate, server) = tls_server();
         let ca = TempPem::new(&certificate);
         let endpoint = ExternalEndpoint::parse_with_ca(&url, Some(&ca.0)).expect("trusted endpoint");
-        let mut connection = endpoint.open().expect("open TLS connection");
+        let mut connection = endpoint
+            .open(Instant::now() + Duration::from_secs(2))
+            .expect("open TLS connection");
         let authored = format!("GET /bucket/key?versionId=7 HTTP/1.1\r\nHost: {}\r\n\r\n", endpoint.authority());
 
         connection.write(authored.as_bytes()).expect("write authored request");
@@ -224,11 +229,10 @@ mod tests {
     fn untrusted_certificate_is_an_environment_error() {
         let (url, _certificate, server) = tls_server();
         let endpoint = ExternalEndpoint::parse(&url).expect("endpoint syntax and public roots are valid");
-        let mut connection = endpoint.open().expect("TCP opens before TLS verification");
-
-        let error = connection
-            .write(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
-            .expect_err("self-signed endpoint must not be trusted implicitly");
+        let error = match endpoint.open(Instant::now() + Duration::from_secs(2)) {
+            Ok(_) => panic!("self-signed endpoint must not be trusted implicitly"),
+            Err(error) => error,
+        };
         server.join().expect("TLS server exits");
 
         assert!(error.to_string().contains("certificate") || error.to_string().contains("TLS"));
@@ -252,5 +256,55 @@ mod tests {
             ExternalEndpoint::parse_with_ca("http://127.0.0.1:80", Some(&ca.0)).expect_err("CA must not be accepted and ignored");
 
         assert!(error.to_string().contains("https://"));
+    }
+
+    #[test]
+    fn a_silent_tls_peer_does_not_escape_the_setup_budget() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind silent TLS peer");
+        let address = listener.local_addr().expect("silent peer address");
+        let server = thread::spawn(move || {
+            let (_socket, _) = listener.accept().expect("accept TLS client");
+            thread::sleep(Duration::from_millis(250));
+        });
+        let endpoint = ExternalEndpoint::parse(&format!("https://{address}")).expect("valid TLS endpoint");
+        let started = Instant::now();
+
+        let opened = endpoint.open(started + Duration::from_millis(50));
+        let elapsed = started.elapsed();
+        server.join().expect("silent TLS peer exits");
+
+        assert!(opened.is_err(), "setup must complete the TLS handshake before returning a connection");
+        assert!(
+            elapsed < Duration::from_millis(150),
+            "TLS setup exceeded its bounded deadline: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn a_trickling_incomplete_tls_record_cannot_restart_the_absolute_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind trickling TLS peer");
+        let address = listener.local_addr().expect("trickling peer address");
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept TLS client");
+            let record_prefix = [0x16_u8, 0x03, 0x03, 0x04, 0x00];
+            for byte in record_prefix.into_iter().chain(std::iter::repeat_n(0_u8, 10)) {
+                if socket.write_all(&[byte]).is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+        });
+        let endpoint = ExternalEndpoint::parse(&format!("https://{address}")).expect("valid TLS endpoint");
+        let started = Instant::now();
+
+        let opened = endpoint.open(started + Duration::from_millis(50));
+        let elapsed = started.elapsed();
+        server.join().expect("trickling TLS peer exits");
+
+        assert!(opened.is_err(), "an incomplete TLS record cannot establish a connection");
+        assert!(
+            elapsed < Duration::from_millis(120),
+            "relative socket timeouts restarted past the absolute TLS deadline: {elapsed:?}"
+        );
     }
 }
