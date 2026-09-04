@@ -13131,8 +13131,25 @@ expect_fail check_cors_credentials_exclusive.sh \
 #
 # Lifecycle deliberately has two controls: the selected persisted MinIO policy preserves its
 # registered field, while the unselected generic HTTP codec keeps skipping vendor elements. These
-# mutations attack both directions and the protected record joining them.
+# mutations attack both directions and the protected record joining them. CORS separately selects
+# Lenient at its persisted-runtime entry point; its mutation proves the guard watches that
+# production choice rather than only Lifecycle's dialect path.
 # -----------------------------------------------------------------------------
+
+mut_codec_policy_runtime_cors_made_strict() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/types/src/cors_tagging.rs")
+text = path.read_text()
+old = "    let policy = CodecPolicy::new(UnknownElementPolicy::Lenient);\n"
+if text.count(old) != 1:
+    raise SystemExit("runtime CORS policy mutation anchor is not unique")
+path.write_text(text.replace(old, "    let policy = CodecPolicy::security_relevant();\n", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the persisted runtime CORS reader becoming strict' \
+    mut_codec_policy_runtime_cors_made_strict
 
 mut_codec_policy_registration_removed() {
     python3 - <<'PYEOF'
