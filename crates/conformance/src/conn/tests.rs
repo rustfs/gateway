@@ -23,6 +23,7 @@
 use super::*;
 use crate::socket::SERVER_READ_TIMEOUT;
 use crate::toml;
+use std::cell::Cell;
 use std::io::Read;
 use std::net::TcpListener as RawTcpListener;
 use std::sync::mpsc;
@@ -34,6 +35,68 @@ fn block(source: &str) -> Value {
 
 fn target() -> Conn {
     Conn::new(std::path::PathBuf::from("."))
+}
+
+// -- Fresh-connection pacer binding -------------------------------------------------------------
+
+/// Positive — the rendezvous is visible to the server before the connection can be accepted.
+///
+/// Reversing these two actions lets a fast accept bind a detached pacer. The client then waits on
+/// a different object from the one the server signals and turns an executed case into a timeout
+/// skip under load.
+#[test]
+fn a_fresh_connection_queues_its_pacer_before_connecting() {
+    let pacer = Arc::new(Pacer::new());
+    let queued = Cell::new(false);
+    let connected = bind::connect_after_queueing(
+        &pacer,
+        |_| {
+            queued.set(true);
+            Ok(())
+        },
+        || {
+            assert!(queued.get(), "the connection attempt raced ahead of pacer binding");
+            Ok("connected")
+        },
+    )
+    .expect("both ordered actions succeed");
+    assert_eq!(connected, "connected");
+}
+
+/// Negative — a failed queue operation must not open an unpaced connection.
+#[test]
+fn a_fresh_connection_is_not_opened_when_pacer_queueing_fails() {
+    let pacer = Arc::new(Pacer::new());
+    let attempted = Cell::new(false);
+    let error = bind::connect_after_queueing(
+        &pacer,
+        |_| Err(SutError::Environment("queue failed".to_owned())),
+        || {
+            attempted.set(true);
+            Ok(())
+        },
+    )
+    .expect_err("queue failure stops the connection attempt");
+    assert!(!attempted.get());
+    assert!(format!("{error}").contains("queue failed"), "{error}");
+}
+
+/// Negative — a connection failure after successful binding is still reported to the caller.
+#[test]
+fn a_fresh_connection_reports_the_connection_error_after_queueing() {
+    let pacer = Arc::new(Pacer::new());
+    let queued = Cell::new(false);
+    let error = bind::connect_after_queueing::<()>(
+        &pacer,
+        |_| {
+            queued.set(true);
+            Ok(())
+        },
+        || Err(SutError::Environment("connect failed".to_owned())),
+    )
+    .expect_err("connection failure is preserved");
+    assert!(queued.get());
+    assert!(format!("{error}").contains("connect failed"), "{error}");
 }
 
 // -- What `[connection]` asks for ---------------------------------------------------------------

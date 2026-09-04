@@ -13,7 +13,6 @@
 // limitations under the License.
 
 //! The connection target: the same service, reached by writing bytes on a socket.
-//!
 //! Responsible for: turning one `[request]` block into wire bytes, writing them on a real TCP
 //! connection after both peer demand and the case's not-before delay, reading the response back,
 //! and asking the socket what state it was left in.
@@ -76,6 +75,7 @@ use crate::socket::{Announce, honour_the_services_intent};
 use crate::socket::{Connection, Demand, Listener, Pacer, ReadFailure, parse_head};
 use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::value::Value;
+mod bind;
 mod exchange;
 mod external;
 mod external_endpoint;
@@ -381,10 +381,7 @@ impl Sut for Conn {
         let budget = budget_of(plan.timeout_ms);
 
         let addr = self.addr(fixed.unix_seconds, skew_ms, plan.profile)?;
-        // A connection that the previous exchange left closed is replaced rather than written to.
-        // `connection_after` has already recorded the state it was in, so nothing is hidden by
-        // opening another one; writing into a dead socket would turn a measured close into an
-        // environment error two exchanges later.
+        // Replace a connection already observed closed rather than hiding that fact behind a later write error.
         let fresh = !reuse
             || self
                 .connection
@@ -393,8 +390,19 @@ impl Sut for Conn {
         if fresh {
             self.connection = None;
             let pacer = Arc::new(Pacer::new());
+            #[cfg(feature = "production-transports")]
+            if let Some(production) = &self.production {
+                self.connection = Some(bind::connect(production, addr, &pacer)?);
+            } else {
+                let listener = self.listener(fixed.unix_seconds, skew_ms, plan.profile)?;
+                self.connection = Some(bind::connect(listener, addr, &pacer)?);
+            }
+            #[cfg(not(feature = "production-transports"))]
+            {
+                let listener = self.listener(fixed.unix_seconds, skew_ms, plan.profile)?;
+                self.connection = Some(bind::connect(listener, addr, &pacer)?);
+            }
             self.pacer = pacer;
-            self.connection = Some(Connection::open(addr)?);
         } else {
             // Safe only here: the server cannot have signalled anything about a request whose first
             // byte has not been written yet.
@@ -402,16 +410,8 @@ impl Sut for Conn {
         }
         let pacer = Arc::clone(&self.pacer);
         #[cfg(feature = "production-transports")]
-        if let Some(production) = &self.production {
+        if !fresh && let Some(production) = &self.production {
             production.enqueue_pacer(&pacer);
-        } else if fresh {
-            self.listener(fixed.unix_seconds, skew_ms, plan.profile)?
-                .enqueue_pacer(&pacer);
-        }
-        #[cfg(not(feature = "production-transports"))]
-        if fresh {
-            self.listener(fixed.unix_seconds, skew_ms, plan.profile)?
-                .enqueue_pacer(&pacer);
         }
         let connection = self
             .connection
