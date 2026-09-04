@@ -14,19 +14,31 @@
 
 //! Maps the runner's claimed compatibility profile onto facade assembly policy.
 //!
-//! Responsible for: selecting the naming policy the measured service actually runs.
-//! NOT responsible for: profile gating, report labels, or the naming rules themselves. Upstream:
-//! `crate::runner`. Downstream: `super::InProcess::assemble` and both production transports.
+//! Responsible for: selecting the naming and deadline policies the measured service actually runs.
+//! NOT responsible for: profile gating, report labels, or enforcing those policies. Upstream:
+//! `crate::runner`. Downstream: `super::InProcess::assemble`.
 
-use rustfs_gateway::{NamePolicy, SlashPolicy};
+use std::time::Duration;
 
-use crate::sut::Profile;
+use rustfs_gateway::{
+    DEFAULT_MAX_BUFFERED_BODY_BYTES, HandlerDeadlineConfig, NamePolicy, RequestBodyDeadlineConfig, ServiceConfig, SlashPolicy,
+};
+
+use crate::sut::{Profile, SutError};
 
 pub(super) fn name_policy(profile: Profile) -> NamePolicy {
     match profile {
         Profile::Minio => NamePolicy::default().with_slash_policy(SlashPolicy::Collapse),
         Profile::Aws | Profile::Strict => NamePolicy::default(),
     }
+}
+
+pub(super) fn service_config(handler_deadlines: HandlerDeadlineConfig) -> Result<ServiceConfig, SutError> {
+    let request_body_deadlines = RequestBodyDeadlineConfig::new(Duration::from_secs(2), Duration::from_secs(1))
+        .ok_or_else(|| SutError::Environment("the conformance body deadlines must be non-zero".to_owned()))?;
+    Ok(ServiceConfig::new(DEFAULT_MAX_BUFFERED_BODY_BYTES)
+        .with_handler_deadlines(handler_deadlines)
+        .with_request_body_deadlines(request_body_deadlines))
 }
 
 #[cfg(test)]

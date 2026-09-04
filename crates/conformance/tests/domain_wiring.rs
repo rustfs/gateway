@@ -130,10 +130,13 @@ const GATES: &[(&str, Wiring)] = &[
     // dedicated profile command and are the deliberate profile-gated skips here.
     ("naming", Wiring::Runs(&["c-naming-0025", "c-naming-0026", "c-naming-0027"])),
     // `c-object-0030` writes a raw request head, `c-object-0054` half-closes a declared-length
-    // body, and `c-object-0055` closes it outright. Only a transport that puts bytes on a socket can
-    // express them; the in-process target is handed a parsed `http::Request`. `tests/object.rs`
-    // reads the skips from the other side.
-    ("object", Wiring::Runs(&["c-object-0030", "c-object-0054", "c-object-0055"])),
+    // body, `c-object-0055` closes it outright, and `c-object-0056` stalls between body frames.
+    // Only a transport that puts bytes on a socket can express them; the in-process target is
+    // handed a parsed `http::Request`. `tests/object.rs` reads the skips from the other side.
+    (
+        "object",
+        Wiring::Runs(&["c-object-0030", "c-object-0054", "c-object-0055", "c-object-0056"]),
+    ),
     ("range", Wiring::Runs(&[])),
     ("replication", Wiring::Runs(&[])),
     ("select-restore", Wiring::Runs(&[])),

@@ -296,7 +296,7 @@ async fn c_ing_0062_one_byte_per_second_is_closed_for_body_throughput() {
     feeder.abort();
     let _ = feeder.await;
     let text = String::from_utf8(response).expect("an HTTP/1.1 response");
-    assert!(text.starts_with("HTTP/1.1 408"), "{text}");
+    assert!(text.starts_with("HTTP/1.1 400"), "{text}");
     assert!(text.to_ascii_lowercase().contains("connection: close"), "{text}");
     assert!(text.contains("the request body remained below the minimum throughput"), "{text}");
     assert_eq!(

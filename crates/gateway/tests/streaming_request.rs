@@ -354,7 +354,7 @@ pub(super) fn resident_ballast(bytes: usize) -> Vec<u8> {
 }
 
 /// `c-ing-0061`. Negative — a handler that stops polling is cancelled for body idleness, and the
-/// live HTTP/1 connection observes the corresponding closing `408` response.
+/// live HTTP/1 connection observes the corresponding closing `400` response.
 #[tokio::test]
 async fn c_ing_0061_body_idle_cancels_a_live_handler_and_closes_the_socket() {
     let backend = Arc::new(IdleBackend::new());
@@ -370,7 +370,7 @@ async fn c_ing_0061_body_idle_cancels_a_live_handler_and_closes_the_socket() {
         .expect("the body-idle deadline retires the request")
         .expect("the response reads");
     let text = String::from_utf8(response).expect("an HTTP/1.1 response");
-    assert!(text.starts_with("HTTP/1.1 408"), "{text}");
+    assert!(text.starts_with("HTTP/1.1 400"), "{text}");
     assert!(text.to_ascii_lowercase().contains("connection: close"), "{text}");
     assert_eq!(*backend.cancellation.lock().expect("not poisoned"), Some(HandlerCancellation::BodyIdle));
     stop(running).await;

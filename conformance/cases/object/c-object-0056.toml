@@ -1,0 +1,129 @@
+# c-object-0056 — a stalled PutObject times out without publishing its prefix.
+
+[case]
+id = "c-object-0056"
+schema_version = 1
+title = "A stalled PutObject is refused and remains unreadable"
+rationale = """
+A request body that stops making progress must not hold the connection forever, and returning the
+right timeout code is only half of the guarantee: bytes received before the stall must not cross
+the object commit boundary. The first exchange therefore waits past the configured between-read
+interval, while a fresh connection proves that the prefix was not published. A normally paced
+write and byte-exact readback prove the opposite direction so an observer stuck on timeout or
+absence cannot satisfy the case."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["wire-bytes", "streaming", "timing", "error-shape"]
+timeout_ms = 45000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "Amazon S3 documents RequestTimeout for clients that do not produce a request within the server timeout period."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9112#section-6.3"
+summary = "An incomplete request body cannot be treated as a complete HTTP message."
+kind = "rfc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[exchanges]]
+name = "stall-between-body-reads"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/stalled-object"
+headers = { "content-length" = "57" }
+sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }
+
+[[exchanges.request.chunks]]
+raw_utf8 = "received but not committed"
+
+[[exchanges.request.chunks]]
+action = "stall"
+duration_ms = 1500
+
+[[exchanges.request.chunks]]
+raw_utf8 = "arrives after the read interval"
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "closed"
+headers_absent = ["etag"]
+
+[exchanges.expect.error]
+code = "RequestTimeout"
+request_id_present = true
+
+[exchanges.expect.request_progress]
+body_bytes_sent_at_response = 26
+body_fully_sent = false
+
+[exchanges.expect.timing]
+terminate_within_ms = 5000
+
+[exchanges.expect.body]
+contains_utf8 = ["<Message>the request body stopped making progress</Message>"]
+
+[[exchanges]]
+name = "the-stalled-object-is-not-readable"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/stalled-object"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true
+
+[[exchanges]]
+name = "a-paced-complete-write-still-succeeds"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/complete-paced-object"
+sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }
+
+[[exchanges.request.chunks]]
+raw_utf8 = "complete "
+
+[[exchanges.request.chunks]]
+raw_utf8 = "paced object"
+delay_ms = 10
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.headers_present]
+etag = "*"
+
+[[exchanges]]
+name = "the-complete-paced-object-is-readable"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/complete-paced-object"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+exact_utf8 = "complete paced object"

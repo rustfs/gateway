@@ -512,7 +512,7 @@ async fn c_wire_0062_c_lim_0033_closes_a_socket_when_the_first_body_byte_never_a
     let timeouts = BodyTimeouts::new(Duration::from_millis(20), Duration::from_millis(500)).expect("non-zero timeouts");
     let (response, reached) = timeout_response(b"", timeouts).await;
     let text = String::from_utf8(response).expect("HTTP response is text");
-    assert!(text.starts_with("HTTP/1.1 408"), "{text}");
+    assert!(text.starts_with("HTTP/1.1 400"), "{text}");
     assert!(text.contains("<Code>RequestTimeout</Code>"), "{text}");
     assert!(text.to_ascii_lowercase().contains("connection: close"), "{text}");
     assert_eq!(reached.fetch_add(0, Ordering::SeqCst), 0, "the timed-out request reached the handler");
@@ -524,7 +524,7 @@ async fn c_lim_0034_closes_a_socket_when_the_body_stalls_between_bytes() {
     let timeouts = BodyTimeouts::new(Duration::from_millis(500), Duration::from_millis(20)).expect("non-zero timeouts");
     let (response, reached) = timeout_response(b"x", timeouts).await;
     let text = String::from_utf8(response).expect("HTTP response is text");
-    assert!(text.starts_with("HTTP/1.1 408"), "{text}");
+    assert!(text.starts_with("HTTP/1.1 400"), "{text}");
     assert!(text.to_ascii_lowercase().contains("connection: close"), "{text}");
     assert_eq!(reached.fetch_add(0, Ordering::SeqCst), 0, "the stalled request reached the handler");
 }
@@ -642,7 +642,7 @@ fn a_body_of_payload_free_frames_is_refused_rather_than_spun_on() {
         };
         let error = read_off_thread(body, None).expect_err("a body that never carries payload is not a body");
         assert_eq!(error.code(), Some(&ErrorCode::REQUEST_TIMEOUT), "{shape:?}");
-        assert_eq!(error.status(), StatusCode::REQUEST_TIMEOUT, "{shape:?}");
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST, "{shape:?}");
         assert_eq!(
             polls.fetch_add(0, Ordering::SeqCst),
             crate::wire_read::MAX_PAYLOAD_FREE_FRAME_RUN as usize + 1,

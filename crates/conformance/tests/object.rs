@@ -206,3 +206,18 @@ fn the_disconnected_write_is_selected_and_skipped_for_its_socket_reason() {
     let reason = outcome.skip_reason.as_deref().unwrap_or_default();
     assert!(reason.contains("fresh connection"), "{reason}");
 }
+
+/// Negative — the stalled write stays selected while the socketless target refuses to fabricate
+/// the wall-clock pause which is the subject of the case.
+#[test]
+fn the_stalled_write_is_selected_and_skipped_for_its_socket_reason() {
+    let report = run_object_domain();
+    let outcome = report
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.id == "c-object-0056")
+        .expect("c-object-0056 is in the object domain");
+    assert_eq!(outcome.verdict, Verdict::Skipped);
+    let reason = outcome.skip_reason.as_deref().unwrap_or_default();
+    assert!(reason.contains("stall"), "{reason}");
+}
