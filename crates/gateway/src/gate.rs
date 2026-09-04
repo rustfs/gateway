@@ -449,7 +449,7 @@ pub(crate) fn incomplete() -> S3Error {
 pub(crate) fn body_idle_timeout(proof: Option<RequestBodyUnfinished>) -> S3Error {
     let mut refusal = from_transport_limit(
         HandlerError::new(ErrorCode::REQUEST_TIMEOUT, "the request body stopped making progress"),
-        StatusCode::REQUEST_TIMEOUT,
+        StatusCode::BAD_REQUEST,
         crate::close::ConnectionIntent::Close,
     );
     refusal.body_unfinished = proof;
@@ -460,7 +460,7 @@ pub(crate) fn body_idle_timeout(proof: Option<RequestBodyUnfinished>) -> S3Error
 pub(crate) fn body_throughput_timeout(proof: Option<RequestBodyUnfinished>) -> S3Error {
     let mut refusal = from_transport_limit(
         HandlerError::new(ErrorCode::REQUEST_TIMEOUT, "the request body remained below the minimum throughput"),
-        StatusCode::REQUEST_TIMEOUT,
+        StatusCode::BAD_REQUEST,
         crate::close::ConnectionIntent::Close,
     );
     refusal.body_unfinished = proof;

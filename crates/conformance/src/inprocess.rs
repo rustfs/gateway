@@ -84,8 +84,9 @@ use rustfs_gateway::{
     CredentialLookup, CredentialProvider, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, Decision, ErrorCode, FixedClock,
     Governor, GovernorRequest, GuardedCredentialProvider, HandlerDeadlineConfig, HandlerResult, InputAuthzRequest,
     InputDecisions, Lease, Limits, Next, ObservedBody, PolicyError, PolicySnapshot, ProviderError, RegionSet, Req,
-    RequestContext, S3Service, ServiceBuilder, ServiceConfig, SessionBinding, SigV4Authenticator, SnapshotId, StaticCredentials,
-    VirtualHostStyle, WireRequest, allow_when, collect, decide_with, dto, fn_credential_provider, op_layer, policy_from,
+    RequestBodyDeadlineConfig, RequestContext, S3Service, ServiceBuilder, ServiceConfig, SessionBinding, SigV4Authenticator,
+    SnapshotId, StaticCredentials, VirtualHostStyle, WireRequest, allow_when, collect, decide_with, dto, fn_credential_provider,
+    op_layer, policy_from,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -546,7 +547,14 @@ impl InProcess {
                 rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
             )
             .limits(self.limits)
-            .config(ServiceConfig::new(DEFAULT_MAX_BUFFERED_BODY_BYTES).with_handler_deadlines(deadlines))
+            .config(
+                ServiceConfig::new(DEFAULT_MAX_BUFFERED_BODY_BYTES)
+                    .with_handler_deadlines(deadlines)
+                    .with_request_body_deadlines(
+                        RequestBodyDeadlineConfig::new(std::time::Duration::from_secs(2), std::time::Duration::from_secs(1))
+                            .ok_or_else(|| SutError::Environment("the conformance body deadlines must be non-zero".to_owned()))?,
+                    ),
+            )
             .0
             .build()
             .map_err(|error| SutError::Environment(format!("the service could not be assembled: {error}")))
