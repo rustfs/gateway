@@ -93,6 +93,7 @@
 
 mod response;
 mod stream;
+pub(crate) use response::PeerInput;
 
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};

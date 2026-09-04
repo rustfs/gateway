@@ -76,10 +76,10 @@ use crate::socket::{Announce, honour_the_services_intent};
 use crate::socket::{Connection, Demand, Listener, Pacer, ReadFailure, parse_head};
 use crate::sut::{ExchangePlan, Sut, SutError};
 use crate::value::Value;
-
 mod exchange;
 mod external;
 mod external_endpoint;
+mod external_pacing;
 mod external_tls;
 mod server;
 #[cfg(test)]
@@ -311,9 +311,9 @@ fn declared_content_length(headers: &[(String, String)]) -> Option<u64> {
 /// How the body writing ended.
 #[derive(Debug)]
 struct BodyProgress {
-    /// Payload bytes released before the response existed.
+    /// Payload bytes released before a response observer fired.
     sent_at_response: u64,
-    /// Whether that byte count came from the peer-demand observer.
+    /// Whether that byte count came from peer demand or response-byte observation.
     measured_at_response: bool,
     /// Whether everything the framing declared was written.
     fully_sent: bool,
