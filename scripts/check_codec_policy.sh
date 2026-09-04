@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Proves that Lifecycle keeps two deliberately different XML policies:
+# Proves that CORS selects its deliberately lenient persisted-runtime policy and that Lifecycle
+# keeps two deliberately different XML policies:
 # the generic HTTP codec is lenient when no dialect is selected, while the
 # persisted MinIO dialect accepts only its registered field and blocks a
 # lossy rewrite on every other unknown. Runtime tests prove the behavior; this
@@ -49,6 +50,15 @@ require(
     r"pub fn security_relevant\(\) -> Self \{\s*Self::new\(UnknownElementPolicy::AllowRegistered\)\s*\}",
     ext,
     "security-relevant persisted XML no longer defaults to AllowRegistered",
+)
+
+cors = source("crates/types/src/cors_tagging.rs")
+require(
+    r"pub fn parse_runtime_cors\(input: &\[u8\]\) -> PersistedXml<PersistedCorsConfiguration> \{\s*"
+    r"let policy = CodecPolicy::new\(UnknownElementPolicy::Lenient\);\s*"
+    r"parse_cors_with_policy\(input, &policy\)\s*\}",
+    cors,
+    "the persisted runtime CORS reader no longer selects Lenient explicitly",
 )
 
 dialect = source("crates/dialect-minio/src/lib.rs")
@@ -124,5 +134,5 @@ for name in [
     if name not in tests:
         fail(f"the executable lifecycle policy matrix lost {name}")
 
-print("check_codec_policy: selected and unselected Lifecycle XML policies are bound")
+print("check_codec_policy: CORS leniency and selected/unselected Lifecycle XML policies are bound")
 PY
