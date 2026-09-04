@@ -14,7 +14,7 @@ ADRs; this map only selects files.
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
 | `src/expect/events.rs` | Event-stream count and byte-exact payload matching. | An event payload expectation is ignored or misjudged. |
 | `src/inprocess.rs` | In-process facade transport. | Hyper-independent execution differs from the socket path. |
-| `src/inprocess/profile.rs` | Maps a claimed compatibility profile onto the measured facade policy. | A profile appears in reports but does not change target behavior. |
+| `src/inprocess/profile.rs` | Maps conformance profiles and deadlines onto measured facade policy. | A profile or timeout appears in cases but does not change target behavior. |
 | `src/inprocess/security.rs` | Fixed authorization and bucket-owner sources for security cases. | A security case needs a deterministic allow, deny, or metadata-source outcome. |
 | `src/observation.rs` | Response and event-stream observations, including frame validation. | An event-stream case is classified incorrectly. |
 | `src/parity.rs` | Per-case verdict, phase, failure and skip-reason comparison. | Production transport results disagree or a case is missing. |

@@ -798,16 +798,3 @@ fn body_deadline_defaults_match_the_limits_contract() {
     assert_eq!(BodyTimeouts::S3.first_byte(), Duration::from_secs(20));
     assert_eq!(BodyTimeouts::S3.read_idle(), Duration::from_secs(30));
 }
-
-/// Negative — both ways a live body can time out share the error-status authority and teardown.
-///
-/// A split here would let a client receive 400 or 408 for the same S3 `RequestTimeout` code based
-/// only on which progress clock happened to expire first.
-#[test]
-fn request_timeout_status_and_close_are_identical_for_idle_and_throughput() {
-    for error in [body_idle_timeout(None), body_throughput_timeout(None)] {
-        assert_eq!(error.code(), Some(&ErrorCode::REQUEST_TIMEOUT));
-        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
-        assert!(error.must_close_connection());
-    }
-}
