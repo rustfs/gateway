@@ -565,7 +565,7 @@ impl InProcess {
     }
 
     /// Reads a `payload` block into bytes.
-    fn payload(&self, payload: &Value) -> Result<Vec<u8>, SutError> {
+    pub(crate) fn payload(&self, payload: &Value) -> Result<Vec<u8>, SutError> {
         // Every source is read before any of them is chosen. Returning from the first branch that
         // matched would leave the later fields unread on a corpus that happens not to use them, and
         // `crate::keys` would then be unable to tell "this harness reads `file`" from "no case

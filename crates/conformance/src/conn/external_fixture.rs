@@ -12,23 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Opt-in empty-bucket fixtures for an external conformance endpoint.
+//! Opt-in owned bucket and object fixtures for an external conformance endpoint.
 //!
-//! Responsible for: validating the narrow remote-setup subset, checking bucket absence, owning
-//! only successful creates, refusing authored mutations while ownership is active, and deleting
-//! owned buckets in reverse order. NOT responsible for: object, version, multipart, or fault
-//! fixtures; endpoint resolution; authored exchange pacing; or response judgement. Upstream:
-//! `external`; downstream: the endpoint selected by `crate::cli`.
+//! Responsible for: validating the narrow remote-setup subset, refusing authored mutations while
+//! ownership is active, and holding ownership state for successful unversioned creates. NOT
+//! responsible for: versioned, locked, multipart, or fault fixtures; endpoint resolution; authored
+//! exchange pacing; or response judgement. Upstream: `external`; downstream: the endpoint selected
+//! by `crate::cli`.
 
 use std::collections::BTreeSet;
 
-use super::{Conn, Head, budget_of};
-use crate::inprocess::{ChunkStep, Wire};
-use crate::interpolate::Captures;
-use crate::sut::{Sut, SutError};
+use crate::inprocess::Wire;
+use crate::sut::SutError;
 use crate::value::Value;
 
 mod clock;
+mod lifecycle;
+mod object;
+#[cfg(test)]
+mod object_tests;
 mod region;
 #[cfg(test)]
 mod runner_tests;
@@ -38,6 +40,7 @@ pub(super) struct ExternalFixtures {
     enabled: bool,
     active_case: Option<String>,
     owned_buckets: Vec<OwnedBucket>,
+    owned_objects: Vec<object::OwnedObject>,
 }
 
 #[derive(Debug)]
@@ -45,6 +48,12 @@ struct BucketPlan {
     name: String,
     absent: bool,
     region: region::FixtureRegion,
+}
+
+#[derive(Debug)]
+struct FixturePlan {
+    buckets: Vec<BucketPlan>,
+    objects: Vec<object::ObjectPlan>,
 }
 
 #[derive(Debug)]
@@ -63,22 +72,23 @@ impl ExternalFixtures {
             enabled,
             active_case: None,
             owned_buckets: Vec::new(),
+            owned_objects: Vec::new(),
         }
     }
 
-    fn plan(&self, setup: &Value) -> Result<Vec<BucketPlan>, SutError> {
+    fn plan(&self, setup: &Value, decoder: &crate::inprocess::InProcess) -> Result<FixturePlan, SutError> {
         if !self.enabled {
             return Err(SutError::Environment(
                 "external fixture setup is disabled; explicitly opt in with `--allow-external-fixtures` only for an isolated test target"
                     .to_owned(),
             ));
         }
-        if self.active_case.is_some() || !self.owned_buckets.is_empty() {
+        if self.active_case.is_some() || !self.owned_buckets.is_empty() || !self.owned_objects.is_empty() {
             return Err(SutError::Environment(
                 "external fixture setup cannot start because cleanup from the previous case is incomplete".to_owned(),
             ));
         }
-        only_keys(setup, &["cleanup", "buckets"], "setup")?;
+        only_keys(setup, &["cleanup", "buckets", "objects"], "setup")?;
         if setup
             .read("setup.cleanup")
             .and_then(Value::as_str)
@@ -91,13 +101,13 @@ impl ExternalFixtures {
         }
         let Some(buckets) = setup.read("setup.buckets").and_then(Value::as_array) else {
             return Err(SutError::Environment(
-                "external fixture setup requires an array of empty `setup.buckets` declarations".to_owned(),
+                "external fixture setup requires an array of owned `setup.buckets` declarations".to_owned(),
             ));
         };
         let mut seen = BTreeSet::new();
         let mut plan = Vec::with_capacity(buckets.len());
         for bucket in buckets {
-            only_keys(bucket, &["name", "absent", "region"], "setup.buckets[]")?;
+            only_keys(bucket, &["name", "absent", "region", "versioning", "object_lock"], "setup.buckets[]")?;
             let name = bucket
                 .read("setup.buckets[].name")
                 .and_then(Value::as_str)
@@ -106,6 +116,13 @@ impl ExternalFixtures {
             if !seen.insert(name.to_owned()) {
                 return Err(SutError::Environment(format!(
                     "external fixture bucket `{name}` is declared more than once"
+                )));
+            }
+            if !matches!(bucket.read("setup.buckets[].versioning").and_then(Value::as_str), None | Some("disabled"))
+                || bucket.read("setup.buckets[].object_lock").and_then(Value::as_bool) == Some(true)
+            {
+                return Err(SutError::Environment(format!(
+                    "external bucket state for `{name}` is not supported; object fixtures require an owned, non-absent, unversioned and unlocked bucket"
                 )));
             }
             plan.push(BucketPlan {
@@ -117,7 +134,8 @@ impl ExternalFixtures {
                 region: region::FixtureRegion::parse(bucket.read("setup.buckets[].region").and_then(Value::as_str))?,
             });
         }
-        Ok(plan)
+        let objects = object::plans(setup, &plan, decoder)?;
+        Ok(FixturePlan { buckets: plan, objects })
     }
 
     pub(super) fn ensure_read_only(&self, case_id: &str, wire: &Wire) -> Result<(), SutError> {
@@ -143,153 +161,6 @@ impl ExternalFixtures {
     }
 }
 
-impl Conn {
-    pub(super) fn finish_case(&mut self, case_id: &str) -> Result<(), SutError> {
-        if self.external.is_some() {
-            return self.finish_external(case_id);
-        }
-        self.inner.finish(case_id)
-    }
-
-    pub(super) fn prepare_external(&mut self, case_id: &str, setup: Option<&Value>) -> Result<Captures, SutError> {
-        self.connection = None;
-        let Some(setup) = setup else {
-            if self.external_fixtures.active_case.is_some() || !self.external_fixtures.owned_buckets.is_empty() {
-                return Err(SutError::Environment(
-                    "external fixture cleanup from the previous case is incomplete".to_owned(),
-                ));
-            }
-            return self.inner.prepare(case_id, None);
-        };
-        let plan = self.external_fixtures.plan(setup)?;
-        let captures = self.inner.prepare(case_id, None)?;
-        self.external_fixtures.active_case = Some(case_id.to_owned());
-        for bucket in plan {
-            let status = match self.fixture_control_status("HEAD", &bucket.name, &bucket.region, &[]) {
-                Ok(status) => status,
-                Err(error) => return Err(self.abort_external_prepare(error)),
-            };
-            if status != 404 {
-                let error = if (200..300).contains(&status) {
-                    SutError::Environment(format!(
-                        "external fixture bucket `{}` already exists; refusing to adopt or alter it",
-                        bucket.name
-                    ))
-                } else {
-                    SutError::Environment(format!(
-                        "external fixture could not prove bucket `{}` absent: HEAD returned status {status}",
-                        bucket.name
-                    ))
-                };
-                return Err(self.abort_external_prepare(error));
-            }
-            if bucket.absent {
-                continue;
-            }
-            let status = match self.fixture_control_status("PUT", &bucket.name, &bucket.region, bucket.region.create_body()) {
-                Ok(status) => status,
-                Err(error) => return Err(self.abort_external_prepare(error)),
-            };
-            if status != 200 {
-                return Err(self.abort_external_prepare(SutError::Environment(format!(
-                    "external fixture PUT for bucket `{}` returned status {status}; the failed create is not owned",
-                    bucket.name
-                ))));
-            }
-            self.external_fixtures.owned_buckets.push(OwnedBucket {
-                name: bucket.name,
-                region: bucket.region,
-            });
-        }
-        Ok(captures)
-    }
-
-    pub(super) fn finish_external(&mut self, case_id: &str) -> Result<(), SutError> {
-        self.connection = None;
-        let case_mismatch = self.external_fixtures.active_case.as_deref().and_then(|active| {
-            (active != case_id).then(|| {
-                SutError::Environment(format!("external fixtures owned by `{active}` cannot be finished as `{case_id}`"))
-            })
-        });
-        let cleanup = self.cleanup_owned_external_buckets();
-        let inner = self.inner.finish(case_id);
-        combine_results(case_mismatch.map_or(Ok(()), Err), combine_results(cleanup, inner))
-    }
-
-    fn abort_external_prepare(&mut self, error: SutError) -> SutError {
-        match self.cleanup_owned_external_buckets() {
-            Ok(()) => error,
-            Err(cleanup) => SutError::Environment(format!("{error}; rollback also failed: {cleanup}")),
-        }
-    }
-
-    fn cleanup_owned_external_buckets(&mut self) -> Result<(), SutError> {
-        let mut failed = Vec::new();
-        let mut messages = Vec::new();
-        while let Some(bucket) = self.external_fixtures.owned_buckets.pop() {
-            match self.fixture_control_status("DELETE", &bucket.name, &bucket.region, &[]) {
-                Ok(204) => {}
-                Ok(status) => {
-                    messages.push(format!("DELETE for bucket `{}` returned status {status}", bucket.name));
-                    failed.push(bucket);
-                }
-                Err(error) => {
-                    messages.push(format!("DELETE for bucket `{}` failed: {error}", bucket.name));
-                    failed.push(bucket);
-                }
-            }
-        }
-        failed.reverse();
-        self.external_fixtures.owned_buckets = failed;
-        if messages.is_empty() {
-            self.external_fixtures.active_case = None;
-            return Ok(());
-        }
-        Err(SutError::Environment(format!("external fixture cleanup failed: {}", messages.join("; "))))
-    }
-
-    fn fixture_control_status(
-        &self,
-        method: &str,
-        bucket: &str,
-        region: &region::FixtureRegion,
-        body: &[u8],
-    ) -> Result<u16, SutError> {
-        let endpoint = self
-            .external
-            .clone()
-            .ok_or_else(|| SutError::Environment("external fixture control has no configured endpoint".to_owned()))?;
-        let wire = Wire {
-            method: method.to_owned(),
-            target: format!("/{bucket}"),
-            headers: control_headers(body.len()),
-            raw_head: None,
-            h2_frames: false,
-            http_version: None,
-            body: body.to_vec(),
-            frames: (!body.is_empty()).then(|| body.to_vec()).into_iter().collect(),
-            steps: (!body.is_empty())
-                .then(|| ChunkStep::Data(body.to_vec(), 0))
-                .into_iter()
-                .collect(),
-            sign: Some(region.sign_spec()),
-        };
-        let request_time = clock::current_request_time()?;
-        let head: Head = self.head(&wire, &request_time)?;
-        let started = std::time::Instant::now();
-        let deadline = started
-            .checked_add(budget_of(None))
-            .ok_or_else(|| SutError::Environment("external fixture control deadline cannot be represented".to_owned()))?;
-        let mut connection = endpoint.open(deadline)?;
-        let result =
-            super::external::execute_socket_exchange(&mut connection, &wire, &head, started, deadline, !endpoint.is_tls())?;
-        result
-            .observation
-            .status
-            .ok_or_else(|| SutError::Environment(format!("external fixture {method} returned no status")))
-    }
-}
-
 fn only_keys(value: &Value, allowed: &[&str], context: &str) -> Result<(), SutError> {
     let Value::Table(entries) = value else {
         return Err(SutError::Environment(format!("external fixture `{context}` is not a table")));
@@ -300,7 +171,7 @@ fn only_keys(value: &Value, allowed: &[&str], context: &str) -> Result<(), SutEr
         .find(|key| !allowed.contains(&key.as_str()))
     {
         return Err(SutError::Environment(format!(
-            "`{context}.{key}` is not supported by external empty-bucket fixtures"
+            "`{context}.{key}` is not supported by external owned bucket/object fixtures"
         )));
     }
     Ok(())
@@ -325,24 +196,6 @@ fn validate_bucket_name(name: &str) -> Result<(), SutError> {
     Err(SutError::Environment(format!(
         "external fixture bucket name `{name}` is not safe for an S3 path-style control request"
     )))
-}
-
-fn control_headers(body_len: usize) -> Vec<(String, String)> {
-    let mut headers = vec![
-        ("content-length".to_owned(), body_len.to_string()),
-        ("connection".to_owned(), "close".to_owned()),
-    ];
-    if body_len > 0 {
-        headers.push(("content-type".to_owned(), "application/xml".to_owned()));
-    }
-    headers
-}
-
-fn combine_results(left: Result<(), SutError>, right: Result<(), SutError>) -> Result<(), SutError> {
-    match (left, right) {
-        (Ok(()), result) | (result, Ok(())) => result,
-        (Err(left), Err(right)) => Err(SutError::Environment(format!("{left}; {right}"))),
-    }
 }
 
 #[cfg(test)]
@@ -546,9 +399,9 @@ mod tests {
     }
 
     #[test]
-    fn every_setup_shape_outside_empty_bucket_state_is_rejected_before_mutation() {
+    fn every_setup_shape_outside_owned_bucket_and_object_state_is_rejected_before_mutation() {
         for unsupported in [
-            "objects = []\n",
+            "unknown = true\n",
             "multipart_uploads = []\n",
             "fault = { operation = \"PutObject\", at = \"after_commit\", code = \"InternalError\" }\n",
             "[[buckets]]\nname = \"fixture-one\"\nversioning = \"enabled\"\n",

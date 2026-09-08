@@ -30,8 +30,11 @@ ADRs; this map only selects files.
 | `src/conn/external.rs` | Authored HTTP/1.1 exchange against an external endpoint. | `--endpoint` connects, writes, or reports unavailable observations incorrectly. |
 | `src/conn/external_pacing.rs` | Cleartext external-body delays and early-response observation. | A delayed chunk is sent too early or after a response already exists. |
 | `src/conn/external_endpoint.rs` | Strict HTTP(S) endpoint parsing, resolution, and protocol selection. | An endpoint scheme, authority, host, or default port is handled incorrectly. |
-| `src/conn/external_fixture.rs` | Opt-in external empty-bucket setup, ownership, read-only enforcement, and cleanup. | A remote fixture is created, adopted, used, or deleted incorrectly. |
+| `src/conn/external_fixture.rs` | Opt-in external owned-bucket/object planning and read-only enforcement. | A remote fixture shape or authored mutation is accepted incorrectly. |
 | `src/conn/external_fixture/clock.rs` | Current UTC signing time for external fixture controls. | A control request is rejected as stale or future-dated. |
+| `src/conn/external_fixture/lifecycle.rs` | Applies validated external plans and cleans owned objects before buckets. | A remote create, ownership transition, rollback, or cleanup order is wrong. |
+| `src/conn/external_fixture/object.rs` | Decodes and validates unversioned object fixture payloads, headers, and paths. | An external object fixture loses bytes or sends an unsafe control request. |
+| `src/conn/external_fixture/object_tests.rs` | Real-socket ownership and refusal controls for external object fixtures. | Object fixture planning or cleanup behavior changes. |
 | `src/conn/external_fixture/region.rs` | Fixture region validation, signing scope, and CreateBucketConfiguration XML. | A remote bucket is created or signed for the wrong region. |
 | `src/conn/external_fixture/runner_tests.rs` | Full CLI-to-external-endpoint fixture lifecycle regression coverage. | The runner does not create, exercise, or clean up an opted-in remote fixture. |
 | `src/conn/external_tls.rs` | Verified TLS client setup with public and explicit CA roots. | HTTPS trust, ALPN, or certificate failure classification is wrong. |
