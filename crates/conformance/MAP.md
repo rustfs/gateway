@@ -24,6 +24,7 @@ ADRs; this map only selects files.
 | `src/socket/response.rs` | Fixed-length and chunked HTTP/1.1 response decoding. | A raw response body is truncated or framed incorrectly. |
 | `src/socket/stream.rs` | The client transport under one connection: plain socket or TLS session. | Authored bytes are altered, or the socket underneath a TLS session is unobservable. |
 | `src/conn/` | Connection state and reusable transport helpers. | A multi-exchange case loses connection state. |
+| `src/conn/bind.rs` | Queues a pacing rendezvous before a fresh socket connects. | A socket case skips only under scheduler load. |
 | `src/conn/external.rs` | Authored HTTP/1.1 exchange against an external endpoint. | `--endpoint` connects, writes, or reports unavailable observations incorrectly. |
 | `src/conn/external_pacing.rs` | Cleartext external-body delays and early-response observation. | A delayed chunk is sent too early or after a response already exists. |
 | `src/conn/external_endpoint.rs` | Strict HTTP(S) endpoint parsing, resolution, and protocol selection. | An endpoint scheme, authority, host, or default port is handled incorrectly. |
