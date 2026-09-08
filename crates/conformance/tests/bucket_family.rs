@@ -90,16 +90,13 @@ enum Evidence {
     /// `us-east-1` and one account, so a second region, a second owner, and an authorization
     /// refusal are all outside what a case file can declare.
     Integration(&'static str),
-    /// Nothing proves this row yet, and this is the issue that owns the gap.
-    Deferred(&'static str),
 }
 
 /// rustfs/backlog#1767 §4.5, one row at a time, each bound to what proves it today.
 ///
 /// The wording of the left column is the issue's, not a paraphrase, so the two can be read side by
-/// side. Twelve of the thirteen rows are proved; the thirteenth is the framework-wide
-/// `x-amz-expected-bucket-owner` gate, which this family was explicitly scoped *not* to implement
-/// (§10) and which is checked below to be genuinely absent rather than merely unclaimed.
+/// side. All thirteen rows are proved; the framework-wide `x-amz-expected-bucket-owner` gate is
+/// exercised here after rustfs/gateway#585 made that shared check available to the family.
 const STATUS_MATRIX: &[(&str, Evidence)] = &[
     ("CreateBucket, a new bucket: 200 with a Location header", Evidence::Case("c-bkt-0001")),
     (
@@ -141,25 +138,13 @@ const STATUS_MATRIX: &[(&str, Evidence)] = &[
     ),
     (
         "any of the three with a mismatched x-amz-expected-bucket-owner: 403 AccessDenied",
-        Evidence::Deferred(
-            "rustfs/backlog#1694 and #1696 own the framework-wide owner gate; \
-                            §10 scopes this family out of implementing it",
-        ),
+        Evidence::Integration("n_mismatched_expected_owner_refuses_create_delete_and_head"),
     ),
     (
         "path-style for a bucket in another region: 301 PermanentRedirect with x-amz-bucket-region",
         Evidence::Case("c-bkt-0026"),
     ),
 ];
-
-/// How many matrix rows have no evidence yet.
-///
-/// A number rather than a direction, so that deferring a fourteenth row is a decision somebody has
-/// to come here and write down instead of a line that slips in with a plausible reason attached.
-const DEFERRED_ROWS: usize = 1;
-
-/// The header the deferred row is about, in its wire spelling.
-const OWNER_HEADER: &str = "x-amz-expected-bucket-owner";
 
 /// The six error codes rustfs/backlog#1767 §7 requires this family to be able to express, and the
 /// status each must render as.
@@ -330,7 +315,6 @@ fn every_row_of_the_status_matrix_names_evidence_that_exists_and_is_green() {
                     unproved.push(format!("{row}: cites {INTEGRATION_SOURCE}::{function}, which is not there"));
                 }
             }
-            Evidence::Deferred(_) => {}
         }
     }
     assert!(unproved.is_empty(), "status-matrix rows with no live evidence:\n{}", unproved.join("\n"));
@@ -346,59 +330,19 @@ fn every_row_of_the_status_matrix_names_evidence_that_exists_and_is_green() {
 fn the_status_matrix_cites_each_artefact_exactly_once() {
     let mut cited: Vec<&str> = STATUS_MATRIX
         .iter()
-        .filter_map(|(_, evidence)| match evidence {
-            Evidence::Case(id) => Some(*id),
-            Evidence::Integration(function) => Some(*function),
-            Evidence::Deferred(_) => None,
+        .map(|(_, evidence)| match evidence {
+            Evidence::Case(id) => *id,
+            Evidence::Integration(function) => *function,
         })
         .collect();
     let distinct: BTreeSet<&str> = cited.iter().copied().collect();
     cited.sort_unstable();
     assert_eq!(distinct.len(), cited.len(), "an artefact is cited by two matrix rows: {cited:?}");
     assert_eq!(
-        cited.len() + DEFERRED_ROWS,
+        cited.len(),
         STATUS_MATRIX.len(),
-        "the matrix has {} deferred rows, not {DEFERRED_ROWS}",
+        "the matrix still has {} rows without live evidence",
         STATUS_MATRIX.len() - cited.len()
-    );
-}
-
-/// Negative — the deferred row is deferred because nothing proves it, not because nobody looked.
-///
-/// A deferral is a claim about the tree, and an unverified one rots the moment the gap is closed by
-/// somebody who never read this table. So the claim is measured: no case in the family sends the
-/// header, which is what "this family does not assert the owner gate" means in the corpus. When the
-/// framework-wide gate lands and the first case sends it, this goes red and the row moves from
-/// `Deferred` to `Case` — which is the direction a deferral is supposed to be able to fail in.
-#[test]
-fn the_deferred_row_has_no_evidence_hiding_in_the_corpus() {
-    let ownerless: Vec<&str> = STATUS_MATRIX
-        .iter()
-        .filter_map(|(row, evidence)| match evidence {
-            Evidence::Deferred(reason) if !reason.contains("rustfs/backlog#") => Some(*row),
-            _ => None,
-        })
-        .collect();
-    assert!(
-        ownerless.is_empty(),
-        "a deferred row names no owning issue, which is how a gap outlives the reason for it: {ownerless:?}"
-    );
-
-    let corpus = corpus();
-    let sending: Vec<&str> = family(&corpus)
-        .iter()
-        .filter(|case| {
-            corpus
-                .read_relative(&case.relative)
-                .map(|bytes| String::from_utf8_lossy(&bytes).to_lowercase().contains(OWNER_HEADER))
-                .unwrap_or(false)
-        })
-        .map(|case| case.id.as_str())
-        .collect();
-    assert!(
-        sending.is_empty(),
-        "the matrix defers the {OWNER_HEADER} row, but these cases already exercise it — \
-         move the row from Deferred to Case: {sending:?}"
     );
 }
 

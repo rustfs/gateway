@@ -39,8 +39,8 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
 use rustfs_gateway::{
-    BucketName, Credentials, FixedClock, Limits, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
-    WireRequest, allow_when, collect, dto,
+    BoxFuture, BucketName, BucketOwnerError, BucketOwnerSource, Credentials, FixedClock, Limits, RegionSet, S3Service,
+    ServiceBuilder, SigV4Authenticator, StaticCredentials, WireRequest, allow_when, collect, dto,
 };
 use rustfs_gateway_conformance::exec::block_on;
 use rustfs_gateway_conformance::fixture::{Fixture, StoredObject, Stub};
@@ -49,6 +49,15 @@ use rustfs_gateway_conformance::inprocess::{HOST, VALID_ACCESS_KEY, VALID_SECRET
 /// The instant every fixture below is pinned to, and the stamp its signatures carry.
 const NOW: i64 = 1_767_322_845;
 const NOW_STAMP: &str = "20260102T030405Z";
+const DATA_ROOT_OWNER: &str = "123456789012";
+
+struct DataRootOwner;
+
+impl BucketOwnerSource for DataRootOwner {
+    fn owner<'a>(&'a self, _bucket: &'a BucketName) -> BoxFuture<'a, Result<Arc<str>, BucketOwnerError>> {
+        Box::pin(async { Ok(Arc::from(DATA_ROOT_OWNER)) })
+    }
+}
 
 /// One assembled service over one fixture, and the state behind it.
 struct Harness {
@@ -137,6 +146,7 @@ impl Harness {
             .register::<dto::GetBucketVersioning, _>(Arc::clone(&backend))
             .register::<dto::GetBucketLogging, _>(Arc::clone(&backend))
             .register::<dto::PutObject, _>(Arc::clone(&backend))
+            .bucket_owner_source(DataRootOwner)
             .authenticator(SigV4Authenticator::new(credentials, RegionSet::new([region]).expect("non-empty")))
             .authorizer(allow_when(move |request| {
                 !request.is_anonymous() && request.bucket.map(BucketName::as_str) != denied
@@ -156,11 +166,21 @@ impl Harness {
 
     /// Signs one request and drains what came back.
     fn send(&self, method: &str, target: &str, body: &'static [u8]) -> Answer {
+        self.send_with_expected_owner(method, target, body, None)
+    }
+
+    fn send_with_expected_owner(&self, method: &str, target: &str, body: &'static [u8], expected_owner: Option<&str>) -> Answer {
         let (path, query) = target.split_once('?').map_or((target, ""), |(path, query)| (path, query));
 
         let mut map = http::HeaderMap::new();
         map.append(http::header::HOST, http::HeaderValue::from_static(HOST));
         map.append("content-length", http::HeaderValue::from(body.len()));
+        if let Some(owner) = expected_owner {
+            map.append(
+                "x-amz-expected-bucket-owner",
+                http::HeaderValue::from_str(owner).expect("a valid owner header"),
+            );
+        }
 
         let probe = http::Request::builder()
             .method("GET")
@@ -216,6 +236,36 @@ impl Harness {
     fn has_bucket(&self, name: &str) -> bool {
         self.state.lock().expect("the fixture is not poisoned").has_bucket(name)
     }
+}
+
+/// Negative — the expected-owner gate applies uniformly to all three bucket-lifetime operations.
+///
+/// The matching `HEAD` is the opposite-direction control: a gate stuck on `403` would satisfy all
+/// three refusals while proving no owner comparison happened. The two mutating refusals also pin
+/// that the handler never ran after the mismatch.
+#[test]
+fn n_mismatched_expected_owner_refuses_create_delete_and_head() {
+    let harness = Harness::serving("us-east-1");
+    harness.declare_bucket("conf-bkt-owner-delete");
+    harness.declare_bucket("conf-bkt-owner-head");
+
+    for (method, target) in [
+        ("PUT", "/conf-bkt-owner-create"),
+        ("DELETE", "/conf-bkt-owner-delete"),
+        ("HEAD", "/conf-bkt-owner-head"),
+    ] {
+        let answer = harness.send_with_expected_owner(method, target, b"", Some("999999999999"));
+        assert_eq!(answer.status, 403, "{method} {target}: {}", answer.body);
+        if method != "HEAD" {
+            answer.assert_contains("<Code>AccessDenied</Code>");
+        }
+    }
+
+    assert!(!harness.has_bucket("conf-bkt-owner-create"), "a refused creation reached the handler");
+    assert!(harness.has_bucket("conf-bkt-owner-delete"), "a refused deletion reached the handler");
+
+    let matched = harness.send_with_expected_owner("HEAD", "/conf-bkt-owner-head", b"", Some(DATA_ROOT_OWNER));
+    assert_eq!(matched.status, 200, "{}", matched.body);
 }
 
 /// Positive — a creation outside us-east-1 names the region in its constraint and succeeds with the
