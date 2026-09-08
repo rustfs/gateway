@@ -158,9 +158,8 @@ use crate::render::{
 };
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
-use crate::response::into_response;
-use crate::routing::RoutingStore;
 use crate::trace::{RequestTrace, TraceSource};
+use crate::{response::into_response, routing::RoutingStore};
 
 /// The one sentence a request gets when the authenticator itself could not answer.
 ///
