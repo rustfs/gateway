@@ -285,11 +285,26 @@ fn xml_body(ir: &OperationIr) -> Result<String, String> {
         };
         let source = format!("output.{}", naming::field_name(&field.name));
         let rendered = expr::to_wire(&field.ty, &field.name, &ir.operation)?;
+        let policy = empty_policy(&ir.xml.empty_value_policy, &field.name, field.required);
         let _ = writeln!(out, "        // {} — the unwrapped body: the member is the root.", field.name);
-        let _ = writeln!(out, "        writer.open(\"{root}\", {xmlns});");
-        let _ = writeln!(out, "        if let Some(v) = {source}.as_ref() {{");
-        let _ = writeln!(out, "            writer.text({rendered});");
-        out.push_str("        }\n        writer.close();\n");
+        match policy {
+            EmptyValue::Emit => {
+                let _ = writeln!(out, "        writer.open(\"{root}\", {xmlns});");
+                let _ = writeln!(out, "        if let Some(v) = {source}.as_ref() {{");
+                let _ = writeln!(out, "            writer.text({rendered});");
+                out.push_str("        }\n        writer.close();\n");
+            }
+            EmptyValue::Omit => {
+                let _ = writeln!(out, "        if let Some(v) = {source}.as_ref() {{");
+                let _ = writeln!(out, "            let rendered = {rendered};");
+                out.push_str("            if !rendered.is_empty() {\n");
+                let _ = writeln!(out, "                writer.open(\"{root}\", {xmlns});");
+                out.push_str("                writer.text(rendered);\n");
+                out.push_str("                writer.close();\n");
+                out.push_str("            }\n");
+                out.push_str("        }\n");
+            }
+        }
     } else {
         let _ = writeln!(out, "        writer.open(\"{root}\", {xmlns});");
         for name in ordered_members(ir, &members) {
