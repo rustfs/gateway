@@ -15,8 +15,8 @@
 //! Opt-in owned bucket and object fixtures for an external conformance endpoint.
 //!
 //! Responsible for: validating the narrow remote-setup subset, refusing authored mutations while
-//! ownership is active, and holding ownership state for successful unversioned creates. NOT
-//! responsible for: versioned, locked, multipart, or fault fixtures; endpoint resolution; authored
+//! ownership is active, and holding ownership state for successful unversioned creates.
+//! NOT responsible for: versioned, locked, multipart, or fault fixtures; endpoint resolution; authored
 //! exchange pacing; or response judgement. Upstream: `external`; downstream: the endpoint selected
 //! by `crate::cli`.
 
