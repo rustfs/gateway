@@ -11,6 +11,7 @@ ADRs; this map only selects files.
 | `src/schema.rs` | Frozen schema validation. | A TOML shape is accepted or rejected incorrectly. |
 | `src/toml.rs` | Minimal TOML value parser used by the corpus. | Syntax parsing fails before schema validation. |
 | `src/runner.rs` | Case/exchange execution order and timeout coordination. | A case runs in the wrong order or never reaches a verdict. |
+| `src/runner/lifecycle_tests.rs` | Post-prepare cleanup and failure-classification regression coverage. | A runner early return may bypass fixture cleanup. |
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
 | `src/expect/events.rs` | Event-stream count and byte-exact payload matching. | An event payload expectation is ignored or misjudged. |
 | `src/inprocess.rs` | In-process facade transport. | Hyper-independent execution differs from the socket path. |
@@ -29,6 +30,10 @@ ADRs; this map only selects files.
 | `src/conn/external.rs` | Authored HTTP/1.1 exchange against an external endpoint. | `--endpoint` connects, writes, or reports unavailable observations incorrectly. |
 | `src/conn/external_pacing.rs` | Cleartext external-body delays and early-response observation. | A delayed chunk is sent too early or after a response already exists. |
 | `src/conn/external_endpoint.rs` | Strict HTTP(S) endpoint parsing, resolution, and protocol selection. | An endpoint scheme, authority, host, or default port is handled incorrectly. |
+| `src/conn/external_fixture.rs` | Opt-in external empty-bucket setup, ownership, read-only enforcement, and cleanup. | A remote fixture is created, adopted, used, or deleted incorrectly. |
+| `src/conn/external_fixture/clock.rs` | Current UTC signing time for external fixture controls. | A control request is rejected as stale or future-dated. |
+| `src/conn/external_fixture/region.rs` | Fixture region validation, signing scope, and CreateBucketConfiguration XML. | A remote bucket is created or signed for the wrong region. |
+| `src/conn/external_fixture/runner_tests.rs` | Full CLI-to-external-endpoint fixture lifecycle regression coverage. | The runner does not create, exercise, or clean up an opted-in remote fixture. |
 | `src/conn/external_tls.rs` | Verified TLS client setup with public and explicit CA roots. | HTTPS trust, ALPN, or certificate failure classification is wrong. |
 | `src/conn/server.rs` | Lazily assembles test and production listeners with the case clock and profile. | The socket transports assemble a different policy from in-process execution. |
 | `src/sign.rs` | Request signing for corpus inputs. | A signed case sends the wrong request. |

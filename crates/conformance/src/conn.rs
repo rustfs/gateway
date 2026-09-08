@@ -79,13 +79,13 @@ mod bind;
 mod exchange;
 mod external;
 mod external_endpoint;
+mod external_fixture;
 mod external_pacing;
 mod external_tls;
 mod server;
 #[cfg(test)]
 use exchange::read_concurrent_connection;
 use external_endpoint::ExternalEndpoint;
-
 /// How long the client waits on a silent server before calling the exchange wedged.
 ///
 /// Used only when the case declares no `timeout_ms`. This is a safety net and never the path a
@@ -93,13 +93,11 @@ use external_endpoint::ExternalEndpoint;
 /// and when the timer does fire the exchange is reported as an environment failure rather than as a
 /// byte count nobody measured.
 const DEFAULT_BUDGET: Duration = Duration::from_secs(15);
-
 /// The ceiling on that budget, whatever a case declares.
 ///
 /// `c-mpu-0040` declares two minutes. A run that really waited two minutes for one wedged exchange
 /// would be a run nobody executes, and the case is red on its own terms long before then.
 const MAX_BUDGET: Duration = Duration::from_secs(60);
-
 /// A service behind a loopback listener, plus the fixtures the current case established.
 pub struct Conn {
     /// The in-process target, used for everything that is not the wire: the fixture it prepares,
@@ -107,6 +105,7 @@ pub struct Conn {
     /// Reused rather than copied, so the two transports cannot disagree about what a case says.
     inner: InProcess,
     external: Option<ExternalEndpoint>,
+    external_fixtures: external_fixture::ExternalFixtures,
     listener: Option<Listener>,
     connection: Option<Connection>,
     #[cfg(feature = "production-transports")]
@@ -115,7 +114,6 @@ pub struct Conn {
     driver: Option<ProductionDriver>,
     pacer: Arc<Pacer>,
 }
-
 impl Conn {
     /// Builds a target rooted at a corpus directory.
     #[must_use]
@@ -123,6 +121,7 @@ impl Conn {
         Conn {
             inner: InProcess::new(root),
             external: None,
+            external_fixtures: external_fixture::ExternalFixtures::disabled(),
             listener: None,
             connection: None,
             #[cfg(feature = "production-transports")]
@@ -132,7 +131,6 @@ impl Conn {
             pacer: Arc::new(Pacer::new()),
         }
     }
-
     /// Builds a target backed by one real production connection driver.
     #[cfg(feature = "production-transports")]
     #[must_use]
@@ -140,6 +138,7 @@ impl Conn {
         Conn {
             inner: InProcess::new(root),
             external: None,
+            external_fixtures: external_fixture::ExternalFixtures::disabled(),
             listener: None,
             connection: None,
             production: None,
@@ -148,7 +147,6 @@ impl Conn {
         }
     }
 }
-
 /// Reads `[connection]`, refusing every instruction this transport cannot carry out.
 ///
 /// `reuse` is the one that is honoured rather than refused, in both directions, and it is honoured
@@ -339,7 +337,6 @@ impl Sut for Conn {
         #[cfg(not(feature = "production-transports"))]
         return "rustfs-gateway test socket harness over loopback TCP".to_owned();
     }
-
     fn prepare(&mut self, case_id: &str, setup: Option<&Value>) -> Result<Captures, SutError> {
         if self.external.is_some() {
             return self.prepare_external(case_id, setup);
@@ -431,6 +428,10 @@ impl Sut for Conn {
             ));
         }
         self.exchange_concurrent_sockets(plans)
+    }
+
+    fn finish(&mut self, case_id: &str) -> Result<(), SutError> {
+        self.finish_case(case_id)
     }
 }
 
@@ -795,6 +796,5 @@ fn sleep(millis: u64) {
         std::thread::sleep(Duration::from_millis(millis));
     }
 }
-
 #[cfg(test)]
 mod tests;

@@ -72,7 +72,9 @@ options:
   --profile <aws|minio|strict>
                             the profile the target claims (default aws)
   --root <dir>              corpus directory holding case.schema.json
-  --endpoint <http(s)-url>  external target (raw HTTP/1.1; no remote setup yet)
+  --endpoint <http(s)-url>  external target (raw HTTP/1.1)
+  --allow-external-fixtures
+                            allow isolated empty-bucket setup and automatic cleanup
   --ca-cert <pem-path>      additional CA certificates for an HTTPS endpoint
   --baseline <file>         tolerate the failures this file records; fail only on a regression
   --json <file>             write the machine-readable report
@@ -115,12 +117,12 @@ pub fn main(args: &[String]) -> ExitCode {
             return ExitCode::from(exit::ENVIRONMENT);
         }
     }
-    if let Some(endpoint) = &options.endpoint {
+    if options.endpoint.is_some() {
         if matches!(options.command, Command::Validate | Command::AuditKeys) {
             eprintln!("conformance: `--endpoint` is only meaningful for run and baseline commands");
             return ExitCode::from(exit::USAGE);
         }
-        let mut target = match Conn::external_with_ca(root, endpoint, options.ca_cert.as_deref()) {
+        let mut target = match external_target(&options, root) {
             Ok(target) => target,
             Err(error) => {
                 eprintln!("conformance: {error}");
@@ -133,6 +135,19 @@ pub fn main(args: &[String]) -> ExitCode {
     // selects only the production connection driver, so `diff-transports` can require their
     // per-case observations to agree.
     execute(&options, target(options.transport, root).as_mut())
+}
+
+/// Builds the external target selected by the parsed safety opt-in.
+pub(crate) fn external_target(options: &Options, root: PathBuf) -> Result<Conn, crate::sut::SutError> {
+    let endpoint = options
+        .endpoint
+        .as_deref()
+        .ok_or_else(|| crate::sut::SutError::Environment("external target has no endpoint".to_owned()))?;
+    if options.external_fixtures {
+        Conn::external_with_fixtures(root, endpoint, options.ca_cert.as_deref())
+    } else {
+        Conn::external_with_ca(root, endpoint, options.ca_cert.as_deref())
+    }
 }
 
 fn target(transport: Transport, root: PathBuf) -> Box<dyn Sut> {
@@ -336,6 +351,8 @@ pub struct Options {
     pub endpoint: Option<String>,
     /// Additional PEM-encoded roots for an HTTPS endpoint.
     pub ca_cert: Option<PathBuf>,
+    /// Explicit permission to create and automatically remove external empty-bucket fixtures.
+    pub external_fixtures: bool,
     /// Baseline document.
     pub baseline: Option<PathBuf>,
     /// Where to write the JSON report.
@@ -363,6 +380,7 @@ impl Options {
             root: None,
             endpoint: None,
             ca_cert: None,
+            external_fixtures: false,
             baseline: None,
             json: None,
             junit: None,
@@ -391,6 +409,7 @@ impl Options {
                 "--root" => options.root = Some(PathBuf::from(value()?)),
                 "--endpoint" => options.endpoint = Some(value()?),
                 "--ca-cert" => options.ca_cert = Some(PathBuf::from(value()?)),
+                "--allow-external-fixtures" => options.external_fixtures = true,
                 "--baseline" => options.baseline = Some(PathBuf::from(value()?)),
                 "--json" => options.json = Some(PathBuf::from(value()?)),
                 "--junit" => options.junit = Some(PathBuf::from(value()?)),
@@ -420,6 +439,9 @@ impl Options {
             }
         } else if options.ca_cert.is_some() {
             return Err("`--ca-cert` requires `--endpoint`".to_owned());
+        }
+        if options.external_fixtures && options.endpoint.is_none() {
+            return Err("`--allow-external-fixtures` requires `--endpoint`".to_owned());
         }
         Ok(Some(options))
     }
@@ -498,6 +520,7 @@ mod tests {
             root: None,
             endpoint: None,
             ca_cert: None,
+            external_fixtures: false,
             baseline: None,
             json: None,
             junit: None,

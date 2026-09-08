@@ -16,7 +16,7 @@
 //!
 //! Responsible for: driving authored request steps without the loopback server's private demand
 //! observer, including cleartext delays that stop on observed response bytes. NOT responsible for:
-//! endpoint parsing, TLS setup, HTTP/2, controlled bodies, remote fixture setup, request
+//! endpoint parsing, TLS setup, HTTP/2, controlled bodies, remote fixture lifecycle, request
 //! interpretation, or response judgement. Upstream: `super`; downstream: `crate::cli` through
 //! [`super::Conn`].
 
@@ -31,9 +31,7 @@ use crate::inprocess::ChunkStep;
 use crate::inprocess::InProcess;
 use crate::observation::{ConnectionState, Observation};
 use crate::socket::{Connection, ReadFailure};
-use crate::sut::SutError;
-use crate::sut::{ExchangePlan, Sut};
-use crate::value::Value;
+use crate::sut::{ExchangePlan, SutError};
 
 impl Conn {
     /// Builds a target that writes corpus requests to a caller-supplied HTTP(S) endpoint.
@@ -43,9 +41,24 @@ impl Conn {
 
     /// Builds an HTTP(S) target, optionally trusting additional PEM-encoded CA certificates.
     pub fn external_with_ca(root: std::path::PathBuf, endpoint: &str, ca_path: Option<&Path>) -> Result<Conn, SutError> {
+        Self::external_configured(root, endpoint, ca_path, false)
+    }
+
+    /// Builds an HTTP(S) target whose explicit opt-in permits isolated empty-bucket fixtures.
+    pub fn external_with_fixtures(root: std::path::PathBuf, endpoint: &str, ca_path: Option<&Path>) -> Result<Conn, SutError> {
+        Self::external_configured(root, endpoint, ca_path, true)
+    }
+
+    fn external_configured(
+        root: std::path::PathBuf,
+        endpoint: &str,
+        ca_path: Option<&Path>,
+        external_fixtures: bool,
+    ) -> Result<Conn, SutError> {
         Ok(Conn {
             inner: InProcess::new(root),
             external: Some(ExternalEndpoint::parse_with_ca(endpoint, ca_path)?),
+            external_fixtures: super::external_fixture::ExternalFixtures::new(external_fixtures),
             listener: None,
             connection: None,
             #[cfg(feature = "production-transports")]
@@ -54,21 +67,6 @@ impl Conn {
             driver: None,
             pacer: std::sync::Arc::new(crate::socket::Pacer::new()),
         })
-    }
-
-    pub(super) fn prepare_external(
-        &mut self,
-        case_id: &str,
-        setup: Option<&Value>,
-    ) -> Result<crate::interpolate::Captures, SutError> {
-        self.connection = None;
-        if setup.is_some() {
-            return Err(SutError::Environment(
-                "external endpoint fixture setup is not implemented; refusing to run a case against undeclared remote state"
-                    .to_owned(),
-            ));
-        }
-        self.inner.prepare(case_id, None)
     }
 
     pub(super) fn exchange_external(&mut self, plan: &ExchangePlan<'_>) -> Result<Observation, SutError> {
@@ -80,6 +78,7 @@ impl Conn {
         let reuse = read_connection(plan.connection)?;
         self.inner.set_fixture_now(fixed.unix_seconds);
         let wire = self.inner.read_wire(&plan.request)?;
+        self.external_fixtures.ensure_read_only(plan.case_id, &wire)?;
         if wire.h2_frames || wire.http_version.as_deref() == Some("h2") {
             return Err(SutError::Environment(
                 "external endpoint HTTP/2 framing is not implemented; this target writes HTTP/1.1 bytes".to_owned(),
@@ -116,7 +115,7 @@ impl Conn {
     }
 }
 
-fn execute_socket_exchange(
+pub(super) fn execute_socket_exchange(
     connection: &mut Connection,
     wire: &crate::inprocess::Wire,
     head: &Head,
@@ -230,7 +229,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::cli::{self, exit};
-    use crate::sut::{Profile, Transport};
+    use crate::sut::{Profile, Sut, Transport};
 
     fn responding_server(response: &'static [u8]) -> (String, thread::JoinHandle<Vec<u8>>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
