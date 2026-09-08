@@ -49,12 +49,13 @@
 use bytes::Bytes;
 use http::Request;
 use proptest::prelude::*;
+use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
 use rustfs_gateway_core::codec::{CodecError, MetaView, OperationCodec, RequestBody};
 use rustfs_gateway_core::ops::shared::restore::{RestoreRejection, validate_restore};
 use rustfs_gateway_core::ops::shared::select::{SelectRejection, validate_select};
 use rustfs_gateway_core::route::TargetKind;
 use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_types::dto;
+use rustfs_gateway_types::{BucketName, dto};
 
 fn accepted(target: &str) -> WireRequest<()> {
     let request = Request::builder()
@@ -344,7 +345,9 @@ fn tier_name() -> impl Strategy<Value = &'static str> {
 }
 
 fn bucket_name_text() -> impl Strategy<Value = String> {
-    "[a-z][a-z0-9-]{1,19}[a-z0-9]"
+    "[a-z][a-z0-9-]{1,19}[a-z0-9]".prop_filter("the fixture only emits legal AWS bucket names", |name| {
+        BucketName::new(name.clone()).is_ok()
+    })
 }
 
 fn metadata_pair() -> impl Strategy<Value = MetadataPair> {
@@ -407,6 +410,45 @@ proptest! {
 }
 
 // ── boundaries the property reaches only by luck ────────────────────────────────────────────
+
+/// The Restore fixture must not emit the reserved `xn--` bucket prefix that the decoder correctly
+/// refuses under the current AWS general-purpose bucket naming rules.
+///
+/// The fixed seed is the counterexample from rustfs/gateway#632. Replaying the actual fixture
+/// strategy, rather than only asserting the validator, keeps the generator half of the contract
+/// independently falsifiable when its regular expression changes.
+#[test]
+fn n_restore_bucket_generator_excludes_reserved_xn_prefix() {
+    assert!(BucketName::new("xn--0").is_err(), "xn-- is an AWS-reserved bucket prefix");
+
+    let seed = [
+        0x0e, 0x02, 0x42, 0x59, 0xc7, 0x36, 0x17, 0x0b, 0xee, 0x0f, 0x27, 0xd6, 0x91, 0x93, 0xbe, 0x63, 0x31, 0x44, 0x9c, 0xf9,
+        0xdb, 0x21, 0x9e, 0x05, 0x53, 0x39, 0x59, 0x8f, 0x96, 0x22, 0x8c, 0x6c,
+    ];
+    let mut runner = TestRunner::new_with_rng(
+        Config {
+            failure_persistence: None,
+            ..Config::default()
+        },
+        TestRng::from_seed(RngAlgorithm::ChaCha, &seed),
+    );
+    let strategy = prop_oneof![restore_days_fixture(), restore_select_fixture()];
+    let case = strategy
+        .new_tree(&mut runner)
+        .expect("the fixed fixture seed generates a case");
+    runner
+        .run_one(case, |fixture| {
+            let document = encode_restore_body(&fixture);
+            let request = decode_restore(&document).map_err(|error| {
+                TestCaseError::fail(format!(
+                    "a document this fixture wrote is one the decoder must read: {error:?}: {document}"
+                ))
+            })?;
+            prop_assert_eq!(restore_projection(&request), Some(fixture), "document: {}", document);
+            Ok(())
+        })
+        .expect("the Restore fixture only generates bucket names its decoder accepts");
+}
 
 /// A realistic select-on-restore document decodes and passes both layers of validation — the
 /// generated decoder's syntax and `validate_restore`'s (which calls `validate_select` on the
