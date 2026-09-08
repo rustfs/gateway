@@ -65,6 +65,8 @@ pub mod crc32;
 pub mod diagnostic;
 pub mod exec;
 pub mod expect;
+#[cfg(test)]
+mod external_junit_tests;
 pub mod fixture;
 pub mod inprocess;
 pub mod interpolate;
