@@ -150,14 +150,6 @@ if [[ "$S3TESTS_MAIN_ACCESS_KEY" == "$S3TESTS_ALT_ACCESS_KEY" ]]; then
   those cases fail, it makes them pass for the wrong reason."
 fi
 
-# --- the system under test ---------------------------------------------------------------
-export GATEWAY_SUT_HOST="${GATEWAY_SUT_HOST:-$S3TESTS_HOST}"
-export GATEWAY_SUT_PORT="${GATEWAY_SUT_PORT:-$S3TESTS_PORT}"
-sut_start
-# The suite reaches the service through the rendered configuration, so the two must agree
-# about where it is even when the endpoint was supplied rather than launched.
-S3TESTS_HOST="$SUT_HOST"
-S3TESTS_PORT="$SUT_PORT"
 export S3TESTS_HOST S3TESTS_PORT S3TESTS_IS_SECURE S3TESTS_SSL_VERIFY S3TESTS_REGION
 export S3TESTS_BUCKET_PREFIX S3TESTS_LC_DEBUG_INTERVAL
 export S3TESTS_MAIN_ACCESS_KEY S3TESTS_MAIN_SECRET_KEY S3TESTS_MAIN_DISPLAY_NAME
@@ -168,6 +160,34 @@ export S3TESTS_TENANT_ACCESS_KEY S3TESTS_TENANT_SECRET_KEY S3TESTS_TENANT_DISPLA
 export S3TESTS_TENANT_USER_ID S3TESTS_TENANT_EMAIL S3TESTS_TENANT_NAME
 export S3TESTS_IAM_ROOT_ACCESS_KEY S3TESTS_IAM_ROOT_SECRET_KEY S3TESTS_IAM_ROOT_ACCOUNT_ID
 export S3TESTS_IAM_ALT_ROOT_ACCESS_KEY S3TESTS_IAM_ALT_ROOT_SECRET_KEY S3TESTS_IAM_ALT_ROOT_ACCOUNT_ID
+
+# --- the system under test ---------------------------------------------------------------
+# Keep the configuration names literal in the command: sut_start logs the launch shape, and
+# expanding credential values here would put workflow secrets in that log. bash -c expands the
+# already-exported values only in the child that launches the compatibility SUT.
+: "${GATEWAY_SUT_COMMAND:=${ROOT_DIR}/target/release/compat-sut \
+    --data \"${WORK_DIR}/compat-sut-data\" \
+    --host \"\$S3TESTS_HOST\" \
+    --port \"\$S3TESTS_PORT\" \
+    --region \"\$S3TESTS_REGION\" \
+    --access-key \"\$S3TESTS_MAIN_ACCESS_KEY\" \
+    --secret-key \"\$S3TESTS_MAIN_SECRET_KEY\" \
+    --owner-id \"\$S3TESTS_MAIN_USER_ID\" \
+    --display-name \"\$S3TESTS_MAIN_DISPLAY_NAME\" \
+    --alt-access-key \"\$S3TESTS_ALT_ACCESS_KEY\" \
+    --alt-secret-key \"\$S3TESTS_ALT_SECRET_KEY\" \
+    --alt-owner-id \"\$S3TESTS_ALT_USER_ID\" \
+    --alt-display-name \"\$S3TESTS_ALT_DISPLAY_NAME\" \
+    --lc-debug-interval \"\$S3TESTS_LC_DEBUG_INTERVAL\"}"
+export GATEWAY_SUT_COMMAND
+export GATEWAY_SUT_HOST="${GATEWAY_SUT_HOST:-$S3TESTS_HOST}"
+export GATEWAY_SUT_PORT="${GATEWAY_SUT_PORT:-$S3TESTS_PORT}"
+sut_start
+# The suite reaches the service through the rendered configuration, so the two must agree
+# about where it is even when the endpoint was supplied rather than launched.
+S3TESTS_HOST="$SUT_HOST"
+S3TESTS_PORT="$SUT_PORT"
+export S3TESTS_HOST S3TESTS_PORT
 
 CONF="${WORK_DIR}/s3tests.conf"
 sut_render "${ROOT_DIR}/ci/s3tests/s3tests.conf.tmpl" "$CONF"

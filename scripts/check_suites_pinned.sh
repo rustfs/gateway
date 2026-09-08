@@ -5,7 +5,7 @@ set -euo pipefail
 # check_suites_pinned.sh
 #
 # WHAT THIS CHECKS
-#   Four rules about how this repository reaches an external acceptance suite:
+#   Five rules about how this repository reaches an external acceptance suite:
 #
 #     1. ci/s3tests/pins.env pins ceph/s3-tests to an exact 40-hex commit on
 #        the repository it names. That project has never published a tag, so a
@@ -20,6 +20,9 @@ set -euo pipefail
 #        budget is the reason the gate still gets run.
 #     4. The pull-request workflow does not invoke an external suite runner by
 #        any other route either.
+#     5. The weekly s3-tests workflow builds the local compatibility SUT, and
+#        its runner exports the complete suite configuration before starting an
+#        overridable command with every required identity and endpoint flag.
 #
 # WHY
 #   Two consecutive weekly runs are only comparable if they ran the same cases.
@@ -132,6 +135,124 @@ for path in suite_workflows:
             )
     if not re.search(r"^\s{4}- cron:", text, re.MULTILINE):
         failures.append(f"{relative} declares no cron schedule, so nothing would ever run it")
+
+# --- rule 5: the weekly s3-tests job can launch the repository SUT -----------------------
+s3tests_workflow = workflow_dir / "e2e-s3tests.yml"
+s3tests_runner = root / "ci/s3tests/run.sh"
+sut_library = root / "ci/lib/sut.sh"
+for required in (s3tests_workflow, s3tests_runner, sut_library):
+    if not required.is_file():
+        print(
+            f"check_suites_pinned: required input is missing: {required.relative_to(root)}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+workflow_text = s3tests_workflow.read_text(encoding="utf-8")
+toolchain = re.search(
+    r"^\s*uses:\s*(?:dtolnay/rust-toolchain|actions-rust-lang/setup-rust-toolchain)@"
+    r"[0-9a-f]{40}\s*$",
+    workflow_text,
+    re.MULTILINE,
+)
+release_build = re.search(
+    r"^\s*run:\s*cargo build --release -p rustfs-gateway-compat-sut\s*$",
+    workflow_text,
+    re.MULTILINE,
+)
+suite_run_match = re.search(r"^\s*ci/s3tests/run\.sh\b", workflow_text, re.MULTILINE)
+if toolchain is None:
+    failures.append(
+        ".github/workflows/e2e-s3tests.yml must install Rust through a toolchain action "
+        "pinned to an exact 40-hex revision"
+    )
+if release_build is None:
+    failures.append(
+        ".github/workflows/e2e-s3tests.yml must run "
+        "`cargo build --release -p rustfs-gateway-compat-sut`"
+    )
+if (
+    toolchain is not None
+    and release_build is not None
+    and suite_run_match is not None
+    and not (toolchain.start() < release_build.start() < suite_run_match.start())
+):
+    failures.append(
+        ".github/workflows/e2e-s3tests.yml must install Rust and build the release "
+        "compatibility SUT before invoking ci/s3tests/run.sh"
+    )
+
+runner_text = s3tests_runner.read_text(encoding="utf-8")
+sut_start = runner_text.find("\nsut_start\n")
+if sut_start < 0:
+    failures.append("ci/s3tests/run.sh must invoke sut_start on its own line")
+    before_sut_start = runner_text
+else:
+    before_sut_start = runner_text[:sut_start]
+
+command_default = before_sut_start.find(': "${GATEWAY_SUT_COMMAND:=')
+if command_default < 0:
+    failures.append(
+        "ci/s3tests/run.sh must default GATEWAY_SUT_COMMAND with the overridable `:=` "
+        "form before sut_start"
+    )
+    command_text = ""
+else:
+    command_text = before_sut_start[command_default:]
+
+if "target/release/compat-sut" not in command_text:
+    failures.append(
+        "ci/s3tests/run.sh's default GATEWAY_SUT_COMMAND must launch "
+        "target/release/compat-sut"
+    )
+required_flags = (
+    "--data",
+    "--host",
+    "--port",
+    "--region",
+    "--access-key",
+    "--secret-key",
+    "--owner-id",
+    "--display-name",
+    "--alt-access-key",
+    "--alt-secret-key",
+    "--alt-owner-id",
+    "--alt-display-name",
+    "--lc-debug-interval",
+)
+missing_flags = [flag for flag in required_flags if flag not in command_text]
+if missing_flags:
+    failures.append(
+        "ci/s3tests/run.sh's default GATEWAY_SUT_COMMAND is missing required flags: "
+        + ", ".join(missing_flags)
+    )
+
+configured_names = set(
+    re.findall(r': "\$\{(S3TESTS_[A-Z0-9_]+):=', before_sut_start)
+)
+configured_names.update(
+    re.findall(r"^\s*(S3TESTS_[A-Z0-9_]+)=", before_sut_start, re.MULTILINE)
+)
+exported_names: set[str] = set()
+for export_line in re.findall(r"^\s*export\s+(.+)$", before_sut_start, re.MULTILINE):
+    exported_names.update(
+        name for name in export_line.split() if re.fullmatch(r"S3TESTS_[A-Z0-9_]+", name)
+    )
+missing_exports = sorted(configured_names - exported_names)
+if missing_exports:
+    failures.append(
+        "ci/s3tests/run.sh must export every configured S3TESTS value before sut_start; "
+        "missing: " + ", ".join(missing_exports)
+    )
+
+sut_text = sut_library.read_text(encoding="utf-8")
+endpoint_branch = sut_text.find('if [[ -n "${GATEWAY_SUT_ENDPOINT:-}" ]]')
+command_branch = sut_text.find('if [[ -z "${GATEWAY_SUT_COMMAND:-}" ]]')
+if endpoint_branch < 0 or command_branch < 0 or endpoint_branch >= command_branch:
+    failures.append(
+        "ci/lib/sut.sh must prefer GATEWAY_SUT_ENDPOINT before requiring "
+        "GATEWAY_SUT_COMMAND, so an external endpoint remains authoritative"
+    )
 
 # --- rule 4: the pull-request workflow keeps its distance ---------------------------------
 gate = root / ".github/workflows/ci.yml"

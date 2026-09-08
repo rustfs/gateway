@@ -12614,6 +12614,149 @@ expect_fail check_suites_pinned.sh \
     'a container image pulled by a moving tag rather than by digest' \
     mut_suite_image_pulled_by_a_moving_tag
 
+mut_s3tests_toolchain_pin_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/e2e-s3tests.yml")
+text = path.read_text()
+old = "uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87"
+if old not in text:
+    raise SystemExit("s3-tests Rust toolchain pin fixture is missing")
+path.write_text(text.replace(old, "uses: dtolnay/rust-toolchain@stable", 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'the weekly s3-tests Rust toolchain action changed from an immutable pin to a branch' \
+    mut_s3tests_toolchain_pin_deleted \
+    'must install Rust through a toolchain action pinned to an exact 40-hex revision'
+
+mut_s3tests_release_build_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/e2e-s3tests.yml")
+text = path.read_text()
+old = "run: cargo build --release -p rustfs-gateway-compat-sut"
+if old not in text:
+    raise SystemExit("s3-tests release build fixture is missing")
+path.write_text(text.replace(old, "run: cargo build -p rustfs-gateway-compat-sut", 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'the weekly s3-tests job stops building the release compatibility SUT' \
+    mut_s3tests_release_build_deleted \
+    'must run `cargo build --release -p rustfs-gateway-compat-sut`'
+
+mut_s3tests_release_build_moved_after_suite() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/e2e-s3tests.yml")
+text = path.read_text()
+step = (
+    "      - name: Build the compatibility SUT\n"
+    "        run: cargo build --release -p rustfs-gateway-compat-sut\n\n"
+)
+if step not in text:
+    raise SystemExit("s3-tests release build step fixture is missing")
+path.write_text(text.replace(step, "", 1) + "\n" + step)
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'the compatibility SUT release build moved after the suite invocation' \
+    mut_s3tests_release_build_moved_after_suite \
+    'must install Rust and build the release compatibility SUT before invoking'
+
+mut_s3tests_default_command_stops_being_overridable() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/run.sh")
+text = path.read_text()
+old = ': "${GATEWAY_SUT_COMMAND:='
+if old not in text:
+    raise SystemExit("s3-tests overridable command fixture is missing")
+path.write_text(text.replace(old, ': "${GATEWAY_SUT_COMMAND=', 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'the local compatibility SUT command stops being an overridable default' \
+    mut_s3tests_default_command_stops_being_overridable \
+    'must default GATEWAY_SUT_COMMAND with the overridable `:=` form before sut_start'
+
+mut_s3tests_default_command_binary_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/run.sh")
+text = path.read_text()
+old = "${ROOT_DIR}/target/release/compat-sut"
+if old not in text:
+    raise SystemExit("s3-tests compatibility SUT binary fixture is missing")
+path.write_text(text.replace(old, "/bin/false", 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'the default command stops launching the built compatibility SUT' \
+    mut_s3tests_default_command_binary_deleted \
+    'default GATEWAY_SUT_COMMAND must launch target/release/compat-sut'
+
+mut_s3tests_default_command_flag_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/run.sh")
+text = path.read_text()
+old = "--lc-debug-interval"
+if old not in text:
+    raise SystemExit("s3-tests compatibility SUT flag fixture is missing")
+path.write_text(text.replace(old, "--removed-lc-debug-interval", 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'a required compatibility SUT launch flag is deleted' \
+    mut_s3tests_default_command_flag_deleted \
+    'default GATEWAY_SUT_COMMAND is missing required flags: --lc-debug-interval'
+
+mut_s3tests_exports_moved_after_start() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/run.sh")
+text = path.read_text()
+export_line = "export S3TESTS_BUCKET_PREFIX S3TESTS_LC_DEBUG_INTERVAL\n"
+if text.count(export_line) != 1 or "\nsut_start\n" not in text:
+    raise SystemExit("s3-tests export ordering fixture is missing or ambiguous")
+text = text.replace(export_line, "", 1)
+path.write_text(text.replace("\nsut_start\n", "\nsut_start\n" + export_line, 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'configured s3-tests values move after the SUT launch boundary' \
+    mut_s3tests_exports_moved_after_start \
+    'must export every configured S3TESTS value before sut_start'
+
+mut_s3tests_external_endpoint_loses_precedence() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/lib/sut.sh")
+text = path.read_text()
+endpoint = 'if [[ -n "${GATEWAY_SUT_ENDPOINT:-}" ]]; then'
+command = 'if [[ -z "${GATEWAY_SUT_COMMAND:-}" ]]; then'
+if text.count(endpoint) != 1 or text.count(command) != 1:
+    raise SystemExit("SUT endpoint/command precedence fixture is missing or ambiguous")
+placeholder = "if [[ S3TESTS_SUT_PRECEDENCE_PLACEHOLDER ]]; then"
+text = text.replace(endpoint, placeholder, 1).replace(command, endpoint, 1)
+path.write_text(text.replace(placeholder, command, 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'the external endpoint branch moves behind the local command requirement' \
+    mut_s3tests_external_endpoint_loses_precedence \
+    'must prefer GATEWAY_SUT_ENDPOINT before requiring GATEWAY_SUT_COMMAND'
+
 mut_vendored_suite_tree() {
     mkdir -p tests/s3-tests
     printf 'from setuptools import setup\nsetup(name="s3tests")\n' >tests/s3-tests/setup.py
