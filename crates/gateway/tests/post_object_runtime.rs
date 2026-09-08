@@ -15,8 +15,9 @@
 //! Production POST Object form routing, bounded prelude parsing and live handler dispatch.
 //!
 //! Responsible for: proving that an actual `S3Service` turns an anonymous multipart form into the
-//! typed PostObject handler input, including its resolved key and file bytes.
-//! NOT responsible for: signed-policy vectors or success actions beyond the default status.
+//! typed PostObject handler input, including its resolved key, file bytes, and success-action
+//! response selected from the real storage result.
+//! NOT responsible for: signed-policy vectors or browser execution of returned redirects.
 //! Upstream: the facade public API. Downstream: the POST Object conformance family.
 
 #![allow(clippy::expect_used)]
@@ -28,7 +29,7 @@ use http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use rustfs_gateway::dto::{PostObject, PostObjectOutput};
 use rustfs_gateway::{
-    Credentials, Handler, HandlerError, HandlerResult, Req, Resp, S3Service, ServiceBuilder, StaticCredentials,
+    Credentials, ETag, Handler, HandlerError, HandlerResult, Req, Resp, S3Service, ServiceBuilder, StaticCredentials,
 };
 
 const BOUNDARY: &str = "----RustFSPostRuntime";
@@ -64,14 +65,32 @@ impl Handler<PostObject> for Backend {
             .observed
             .lock()
             .map_err(|_| HandlerError::internal_error("the observation lock failed"))? = Some((key, bytes));
-        Ok(Resp::new(PostObjectOutput::default()))
+        Ok(Resp::new(PostObjectOutput {
+            e_tag: Some(ETag::new("storage-etag").expect("the fixture entity tag is valid")),
+            version_id: Some("stored-version".to_owned()),
+        }))
     }
 }
 
 fn form() -> Bytes {
+    form_with_fields(&[])
+}
+
+fn form_with_fields(fields: &[(&str, &str)]) -> Bytes {
+    form_with_filename_and_fields("report.txt", fields)
+}
+
+fn form_with_filename_and_fields(filename: &str, fields: &[(&str, &str)]) -> Bytes {
+    let mut extra = String::new();
+    for (name, value) in fields {
+        extra.push_str(&format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+        ));
+    }
     Bytes::from(format!(
         "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nuploads/${{filename}}\r\n\
-         --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"report.txt\"\r\n\
+         {extra}\
+         --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n\
          Content-Type: text/plain\r\n\r\nhello from a browser\r\n--{BOUNDARY}--\r\n"
     ))
 }
@@ -117,16 +136,154 @@ async fn an_anonymous_form_reaches_the_real_post_object_handler() {
     let refusal = response.into_body().collect().await.expect("response body").to_bytes();
     let observed = backend.observed.lock().expect("observation lock").clone();
 
-    assert_eq!(
-        status,
-        StatusCode::NO_CONTENT,
-        "{} observed={observed:?}",
-        String::from_utf8_lossy(&refusal)
-    );
+    assert_eq!((status, refusal), (StatusCode::NO_CONTENT, Bytes::new()), "observed={observed:?}");
     assert_eq!(
         observed.as_ref(),
         Some(&("uploads/report.txt".to_owned(), b"hello from a browser".to_vec()))
     );
+}
+
+#[tokio::test]
+async fn success_action_status_204_returns_an_empty_204_response() {
+    let backend = Arc::new(Backend::default());
+    let response = service(Arc::clone(&backend))
+        .call_bytes(request(form_with_fields(&[("success_action_status", "204")])))
+        .await;
+
+    let status = response.status();
+    let body = response.into_body().collect().await.expect("response body").to_bytes();
+    assert_eq!((status, body), (StatusCode::NO_CONTENT, Bytes::new()));
+}
+
+#[tokio::test]
+async fn success_action_status_200_returns_an_empty_200_response() {
+    let backend = Arc::new(Backend::default());
+    let response = service(Arc::clone(&backend))
+        .call_bytes(request(form_with_fields(&[("success_action_status", "200")])))
+        .await;
+
+    let status = response.status();
+    let body = response.into_body().collect().await.expect("response body").to_bytes();
+    assert_eq!((status, body), (StatusCode::OK, Bytes::new()));
+}
+
+#[tokio::test]
+async fn success_action_status_201_returns_the_real_object_result() {
+    let backend = Arc::new(Backend::default());
+    let response = service(Arc::clone(&backend))
+        .call_bytes(request(form_with_filename_and_fields(
+            "report & 1.txt",
+            &[("success_action_status", "201")],
+        )))
+        .await;
+
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let body = response.into_body().collect().await.expect("response body").to_bytes();
+    assert_eq!(
+        (status, content_type, body),
+        (
+            StatusCode::CREATED,
+            Some("application/xml".to_owned()),
+            Bytes::from_static(
+                b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<PostResponse xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Location>http://host.invalid/example-bucket/uploads/report%20%26%201.txt</Location><Bucket>example-bucket</Bucket><Key>uploads/report &amp; 1.txt</Key><ETag>&quot;storage-etag&quot;</ETag></PostResponse>"
+            )
+        )
+    );
+}
+
+#[tokio::test]
+async fn success_action_redirect_returns_a_validated_303_location() {
+    let backend = Arc::new(Backend::default());
+    let response = service(Arc::clone(&backend))
+        .call_bytes(request(form_with_fields(&[(
+            "success_action_redirect",
+            "https://client.example/finished?upload=1#receipt",
+        )])))
+        .await;
+
+    let status = response.status();
+    let location = response
+        .headers()
+        .get("location")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let body = response.into_body().collect().await.expect("response body").to_bytes();
+    assert_eq!(
+        (status, location, body),
+        (
+            StatusCode::SEE_OTHER,
+            Some("https://client.example/finished?upload=1&bucket=example-bucket&key=uploads%2Freport.txt&etag=%22storage-etag%22#receipt".to_owned()),
+            Bytes::new()
+        )
+    );
+}
+
+async fn assert_success_action_is_refused(fields: &[(&str, &str)]) {
+    let backend = Arc::new(Backend::default());
+    let response = service(Arc::clone(&backend))
+        .call_bytes(request(form_with_fields(fields)))
+        .await;
+
+    let observed = backend.observed.lock().expect("observation lock").clone();
+    assert_eq!((response.status(), observed), (StatusCode::BAD_REQUEST, None));
+}
+
+#[tokio::test]
+async fn an_unknown_success_action_status_is_refused_before_the_handler() {
+    assert_success_action_is_refused(&[("success_action_status", "202")]).await;
+}
+
+#[tokio::test]
+async fn an_empty_success_action_status_is_refused_before_the_handler() {
+    assert_success_action_is_refused(&[("success_action_status", "")]).await;
+}
+
+#[tokio::test]
+async fn duplicate_success_action_status_fields_are_refused_before_the_handler() {
+    assert_success_action_is_refused(&[("success_action_status", "200"), ("success_action_status", "200")]).await;
+}
+
+#[tokio::test]
+async fn conflicting_success_actions_are_refused_before_the_handler() {
+    assert_success_action_is_refused(&[
+        ("success_action_status", "201"),
+        ("success_action_redirect", "https://client.example/finished"),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn duplicate_success_action_redirect_fields_are_refused_before_the_handler() {
+    assert_success_action_is_refused(&[
+        ("success_action_redirect", "https://client.example/first"),
+        ("success_action_redirect", "https://client.example/second"),
+    ])
+    .await;
+}
+
+#[tokio::test]
+async fn a_control_character_in_success_action_redirect_is_refused_before_the_handler() {
+    assert_success_action_is_refused(&[("success_action_redirect", "https://client.example/finished\u{1}")]).await;
+}
+
+#[tokio::test]
+async fn an_empty_success_action_redirect_is_refused_before_the_handler() {
+    assert_success_action_is_refused(&[("success_action_redirect", "")]).await;
+}
+
+#[tokio::test]
+async fn a_non_http_success_action_redirect_is_refused_before_the_handler() {
+    assert_success_action_is_refused(&[("success_action_redirect", "ftp://client.example/finished")]).await;
+}
+
+#[tokio::test]
+async fn an_unrenderable_success_action_redirect_is_refused_before_the_handler() {
+    assert_success_action_is_refused(&[("success_action_redirect", "https:///missing-host")]).await;
 }
 
 #[tokio::test]
