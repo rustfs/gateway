@@ -15,7 +15,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/reads.rs` | Representation selection for `GetObject`/`HeadObject` and the `Range` window `evaluate_range` decides. | Changing ranged or version-selected reads. |
 | `src/tagging.rs` | Durable per-version object tag replacement, reads, deletion, and storage safety. | Changing object-tagging operations or lifecycle tag inputs. |
 | `src/transitions.rs` | One-shot current-object transition selection and storage-class mutation. | Changing lifecycle transition eligibility or class persistence. |
-| `src/uploads.rs` | Multipart record/checksum decoding, path validation, and active-upload enumeration. | Changing upload capability persistence, checksum negotiation, or upload listing authority. |
+| `src/uploads.rs` | Durable upload-ID allocation, multipart record/checksum decoding, path validation, and active-upload enumeration. | Changing upload capability persistence, checksum negotiation, or upload listing authority. |
 | `src/versioning.rs` | Persistent version states, shared object publication, delete markers, and owner-bearing version census handlers. | Changing PUT/multipart publication, version selection, retention, or listing semantics. |
 | `tests/crud.rs` | Signed production-service CRUD, multipart, and storage-boundary evidence. | Changing a handler, path rule, or public assembly API. |
 | `tests/crud/bucket_location.rs` | Null and named location answers as exact bytes, the `EU` alias, constraint refusals, and region agreement with `HeadBucket`. | Changing `GetBucketLocation` or the served region. |
@@ -28,6 +28,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/multipart_listing.rs` | Restarted upload pages, paired markers, rollup, retirement, and path refusals. | Changing upload listing or its persisted authority. |
 | `tests/crud/multipart_checksums.rs` | Negotiated part validation, restart, retry, and completion checksum evidence. | Changing multipart checksum persistence or verification. |
 | `tests/crud/multipart_sizing.rs` | Multipart minimum-part rejection, retryability, and boundary evidence. | Changing completion part-size validation. |
+| `tests/crud/multipart_upload_ids.rs` | Restarted upload-ID uniqueness and allocator corruption, exhaustion, and symlink refusals. | Changing multipart capability allocation or its durable counter. |
 | `tests/crud/multipart_versioning.rs` | Multipart publication into enabled, suspended, and null version lineages. | Changing completion/version integration or its failure boundaries. |
 | `tests/crud/object_metadata.rs` | Restarted `x-amz-meta-*` persistence, initiation-time multipart metadata, size and storability refusals, and the pre-section record fixture. | Changing user-metadata persistence or the record's compatibility story. |
 | `tests/crud/object_tagging.rs` | Restarted current/version tag operations and lifecycle filter consumption. | Changing object tags or tag-selected lifecycle expiration. |

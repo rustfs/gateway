@@ -43,6 +43,9 @@ mod multipart_checksums;
 #[path = "crud/multipart_versioning.rs"]
 mod multipart_versioning;
 
+#[path = "crud/multipart_upload_ids.rs"]
+mod multipart_upload_ids;
+
 #[path = "crud/lifecycle.rs"]
 mod lifecycle;
 

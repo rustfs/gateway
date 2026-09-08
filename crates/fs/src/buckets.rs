@@ -141,7 +141,7 @@ impl Handler<DeleteBucket> for FsBackend {
         let uploads = self.uploads_path(bucket);
         let versions = self.versions_path(bucket);
         if !self.directory_is_empty(&objects).await?
-            || !self.directory_is_empty(&uploads).await?
+            || !self.upload_directory_is_empty_for_delete(bucket)?
             || !self.directory_is_empty(&versions).await?
         {
             return Err(HandlerError::new(
@@ -150,6 +150,7 @@ impl Handler<DeleteBucket> for FsBackend {
             ));
         }
         tokio::fs::remove_dir(&objects).await.map_err(|_| storage_error())?;
+        self.remove_upload_id_authority_for_delete(bucket)?;
         tokio::fs::remove_dir(&uploads).await.map_err(|_| storage_error())?;
         tokio::fs::remove_dir(&versions).await.map_err(|_| storage_error())?;
         match tokio::fs::remove_file(self.bucket_path(bucket).join(versioning::STATUS_FILE)).await {
