@@ -158,6 +158,7 @@ use crate::render::{
 };
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
+use crate::response::into_response;
 use crate::routing::RoutingStore;
 use crate::trace::{RequestTrace, TraceSource};
 
@@ -848,6 +849,10 @@ impl S3Service {
             AcceptedBody::Ordinary(_) => meta.key().cloned(),
             AcceptedBody::PostObject(post) => Some(post.key().clone()),
         };
+        let post_response = match &accepted_body {
+            AcceptedBody::Ordinary(_) => None,
+            AcceptedBody::PostObject(post) => Some(post.response_plan()),
+        };
         let config = config.meta_auth();
         outcome.identity = verdict.identity().cloned();
 
@@ -1208,7 +1213,14 @@ impl S3Service {
         };
 
         match dispatched {
-            StaticDispatchOutcome::Settled(encoded) => into_response(encoded),
+            StaticDispatchOutcome::Settled(mut encoded) => {
+                if let Some(response) = post_response
+                    && let Err(error) = response.apply(&mut encoded, connection, wire.host().as_str(), target_origin)
+                {
+                    return outcome.refuse_handler(error);
+                }
+                into_response(encoded)
+            }
             StaticDispatchOutcome::Committed { status, response } => {
                 let host_bucket = resolved.bucket().cloned();
                 let names = self.inner.names.clone();
@@ -1490,19 +1502,6 @@ fn connection_security(extensions: &http::Extensions) -> TransportSecurity {
         .get::<TransportSecurity>()
         .copied()
         .unwrap_or(TransportSecurity::Plaintext)
-}
-
-/// Turns an encoder's output into the response that goes on the wire.
-fn into_response(encoded: EncodedResponse) -> Response<Body> {
-    let body = match encoded.body {
-        ResponseBody::Empty => Body::empty(),
-        ResponseBody::Complete(bytes) => Body::from(bytes),
-        ResponseBody::Stream(stream) => stream.into_body(),
-    };
-    let mut response = Response::new(body);
-    *response.status_mut() = encoded.status;
-    *response.headers_mut() = encoded.headers;
-    response
 }
 
 #[cfg(test)]

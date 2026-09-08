@@ -25,6 +25,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/integrity.rs` | What an `x-amz-checksum-*` header is the digest *of*, per operation, and how an integrity verdict renders | A body digest is compared against the wrong bytes, or not at all |
 | `src/payload_header.rs` | Signed payload and trailer declaration parsing | A request head selects the wrong payload mode |
 | `src/render.rs` | One S3 error renderer | Changing refusal bytes or headers |
+| `src/response.rs` | Encoded success response to HTTP response conversion | Changing the final success body adapter |
 | `src/commit.rs` | 200-then-answer/error response shape | Work continues after the head commits |
 | `src/commit_task.rs` | Detached committed-work task ownership | Work stops after its response body is dropped |
 | `src/invariants.rs` | HEAD/bodyless and SSE-C response rules | A forbidden body or key reaches the wire |

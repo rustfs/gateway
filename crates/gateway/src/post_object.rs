@@ -16,27 +16,184 @@
 //!
 //! Responsible for: reading only bounded text parts before authentication, resolving the already
 //! implemented SigV4/SigV2 POST-policy authority, and exposing the file as a policy-bounded live
-//! stream after authentication. NOT responsible for: signature comparison, authorization,
-//! storage, or success-action rendering. Upstream: `crate::service` after routing and governing.
-//! Downstream: the ordinary core decoder/handler dispatch path.
+//! stream after authentication, and applying the form's success action to a successful storage
+//! result. NOT responsible for: signature comparison, authorization, or storage. Upstream:
+//! `crate::service` after routing and governing. Downstream: the ordinary core decoder/handler
+//! dispatch path.
 
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::fmt;
 
 use bytes::{Bytes, BytesMut};
+use http::{HeaderValue, StatusCode, Uri, header};
 use http_body::{Body, Frame, SizeHint};
+use rustfs_gateway_core::{EncodedResponse, ResponseBody, TransportSecurity};
 use rustfs_gateway_http::{BodyIntegrity, FileReader, FileStep, FormLimits, FormReader, FormReject, FormStep};
-use rustfs_gateway_sig::{PostPolicy, PostPolicyError, PostPolicyLimits, RequestNow, SigV2PostPolicy};
+use rustfs_gateway_sig::{
+    PostPolicy, PostPolicyError, PostPolicyLimits, RequestNow, SigV2PostPolicy, build_success_action_redirect,
+};
 use rustfs_gateway_types::dto::PostObjectInput;
 use rustfs_gateway_types::{BucketName, NamePolicy, ObjectKey};
+use rustfs_gateway_xml::{S3_XMLNS, XmlWriter};
 
 use crate::close::ConnectionIntent;
+use crate::ext::TargetOrigin;
 use crate::gate::{BodyCeilings, BodyDigestObligation, BodyTimeouts, MetadataAdmission};
 use crate::render::{S3Error, from_handler};
 use crate::request_body::{BodyMonitor, StreamingRead};
 use crate::wire_read::{WireFrames, WireProgress};
 use crate::{ErrorCode, HandlerError, RequestBody, ResponseKind};
+
+#[derive(Clone)]
+enum SuccessAction {
+    Ok,
+    Created,
+    NoContent,
+    Redirect(String),
+}
+
+#[derive(Clone)]
+pub(crate) struct PostObjectResponsePlan {
+    action: SuccessAction,
+    bucket: String,
+    key: String,
+}
+
+impl PostObjectResponsePlan {
+    fn parse(fields: &[(&str, &str)], bucket: &BucketName, key: &ObjectKey) -> Result<Self, S3Error> {
+        let status = unique_success_field(fields, "success_action_status")?;
+        let redirect = unique_success_field(fields, "success_action_redirect")?;
+        let action = match (status, redirect) {
+            (Some(_), Some(_)) => return Err(policy_refusal(PostPolicyError::Malformed)),
+            (Some("200"), None) => SuccessAction::Ok,
+            (Some("201"), None) => SuccessAction::Created,
+            (Some("204"), None) | (None, None) => SuccessAction::NoContent,
+            (Some(_), None) => return Err(policy_refusal(PostPolicyError::Malformed)),
+            (None, Some(raw)) => {
+                validate_redirect(raw, bucket.as_str(), key.as_str())?;
+                SuccessAction::Redirect(raw.to_owned())
+            }
+        };
+        Ok(Self {
+            action,
+            bucket: bucket.as_str().to_owned(),
+            key: key.as_str().to_owned(),
+        })
+    }
+
+    pub(crate) fn apply(
+        self,
+        encoded: &mut EncodedResponse,
+        security: TransportSecurity,
+        host: &str,
+        origin: TargetOrigin,
+    ) -> Result<(), HandlerError> {
+        match self.action {
+            SuccessAction::Ok => {
+                encoded.status = StatusCode::OK;
+                encoded.body = ResponseBody::Empty;
+            }
+            SuccessAction::Created => {
+                let e_tag = encoded_etag(encoded)?;
+                let location = object_location(security, host, origin, &self.bucket, &self.key);
+                let mut writer = XmlWriter::document();
+                writer.open("PostResponse", Some(S3_XMLNS));
+                writer.element("Location", &location);
+                writer.element("Bucket", &self.bucket);
+                writer.element("Key", &self.key);
+                writer.element_quoting("ETag", e_tag);
+                encoded.status = StatusCode::CREATED;
+                encoded.set_header("content-type", "application/xml");
+                encoded.body = ResponseBody::Complete(writer.finish().into_bytes());
+            }
+            SuccessAction::NoContent => {
+                encoded.status = StatusCode::NO_CONTENT;
+                encoded.body = ResponseBody::Empty;
+            }
+            SuccessAction::Redirect(raw) => {
+                let e_tag = encoded_etag(encoded)?;
+                let location = build_success_action_redirect(&raw, &self.bucket, &self.key, e_tag, None)
+                    .map_err(|_| HandlerError::internal_error("the accepted POST redirect could not be rendered"))?;
+                let location = HeaderValue::from_str(&location)
+                    .map_err(|_| HandlerError::internal_error("the accepted POST redirect could not become a header"))?;
+                encoded.status = StatusCode::SEE_OTHER;
+                encoded.headers.insert(header::LOCATION, location);
+                encoded.body = ResponseBody::Empty;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn unique_success_field<'a>(fields: &'a [(&str, &str)], wanted: &str) -> Result<Option<&'a str>, S3Error> {
+    let mut found = None;
+    for (name, value) in fields {
+        if *name == wanted && found.replace(*value).is_some() {
+            return Err(policy_refusal(PostPolicyError::Malformed));
+        }
+    }
+    Ok(found)
+}
+
+fn validate_redirect(raw: &str, bucket: &str, key: &str) -> Result<(), S3Error> {
+    let rendered = build_success_action_redirect(raw, bucket, key, "", None).map_err(policy_refusal)?;
+    let without_fragment = rendered.split_once('#').map_or(rendered.as_str(), |(base, _)| base);
+    let uri = without_fragment
+        .parse::<Uri>()
+        .map_err(|_| policy_refusal(PostPolicyError::Malformed))?;
+    if uri.scheme().is_none() || uri.authority().is_none() {
+        return Err(policy_refusal(PostPolicyError::Malformed));
+    }
+    HeaderValue::from_str(&rendered).map_err(|_| policy_refusal(PostPolicyError::Malformed))?;
+    Ok(())
+}
+
+fn encoded_etag(encoded: &EncodedResponse) -> Result<&str, HandlerError> {
+    encoded
+        .headers
+        .get(header::ETAG)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| HandlerError::internal_error("a POST success response did not contain an entity tag"))
+}
+
+fn object_location(security: TransportSecurity, host: &str, origin: TargetOrigin, bucket: &str, key: &str) -> String {
+    let scheme = match security {
+        TransportSecurity::Plaintext => "http",
+        TransportSecurity::Encrypted => "https",
+    };
+    let mut location = String::with_capacity(scheme.len() + host.len() + bucket.len() + key.len() + 5);
+    location.push_str(scheme);
+    location.push_str("://");
+    location.push_str(host);
+    location.push('/');
+    if origin == TargetOrigin::Path {
+        location.push_str(bucket);
+        location.push('/');
+    }
+    push_encoded_object_path(&mut location, key.as_bytes());
+    location
+}
+
+fn push_encoded_object_path(out: &mut String, bytes: &[u8]) {
+    for &byte in bytes {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~' | b'/') {
+            out.push(char::from(byte));
+        } else {
+            out.push('%');
+            out.push(char::from(hex_digit(byte >> 4)));
+            out.push(char::from(hex_digit(byte & 0x0f)));
+        }
+    }
+}
+
+const fn hex_digit(nibble: u8) -> u8 {
+    match nibble {
+        0..=9 => b'0' + nibble,
+        10..=15 => b'A' + nibble - 10,
+        _ => b'?',
+    }
+}
 
 enum AcceptedPolicy {
     SigV4(PostPolicy),
@@ -172,6 +329,7 @@ where
                     .map(|suffix| (suffix.to_owned(), (*value).to_owned()))
             })
             .collect();
+        let response = PostObjectResponsePlan::parse(&fields, &bucket, &key)?;
         let ceiling = policy.read_ceiling(self.limits);
         let file = self.reader.into_file(ceiling).map_err(form_refusal)?;
         Ok(ResolvedPostObject {
@@ -182,6 +340,7 @@ where
             bucket,
             key,
             metadata,
+            response,
             timeouts: self.timeouts,
         })
     }
@@ -196,6 +355,7 @@ pub(crate) struct ResolvedPostObject<B> {
     bucket: BucketName,
     key: ObjectKey,
     metadata: Vec<(String, String)>,
+    response: PostObjectResponsePlan,
     timeouts: BodyTimeouts,
 }
 
@@ -207,6 +367,10 @@ where
 {
     pub(crate) fn key(&self) -> &ObjectKey {
         &self.key
+    }
+
+    pub(crate) fn response_plan(&self) -> PostObjectResponsePlan {
+        self.response.clone()
     }
 
     pub(crate) fn handoff(self, _proof: &MetadataAdmission<'_>) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
