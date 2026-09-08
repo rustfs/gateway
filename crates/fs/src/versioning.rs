@@ -15,8 +15,9 @@
 //! Persistent bucket versioning and version-aware object handlers.
 //!
 //! Responsible for: publishing ordinary and multipart object bytes into opaque/null versions,
-//! storing delete markers, selecting current or explicit versions, exposing the selected metadata
-//! directory to object subresources, and enumerating a deterministic version census.
+//! preflighting legacy cleanup before null publication, storing delete markers, selecting current
+//! or explicit versions, exposing the selected metadata directory to object subresources, and
+//! enumerating a deterministic version census.
 //! NOT responsible for: multipart part validation, lifecycle, copy, tag-document persistence, or ordinary listing.
 //! Upstream: the filesystem safety primitives and validated multipart assembly. Downstream:
 //! production object, multipart-completion, and version-listing handlers.
@@ -96,6 +97,11 @@ impl FsBackend {
         } else {
             Some("null")
         };
+        let legacy_object = if version_id.is_some() {
+            self.preflight_legacy_object(bucket, key).await?
+        } else {
+            None
+        };
         let record = self
             .publish_version(bucket, key, version_id, Some(bytes), Some(e_tag), metadata)
             .await?;
@@ -108,7 +114,9 @@ impl FsBackend {
                 key,
             )
             .await?;
-            self.remove_legacy_object(bucket, key).await?;
+            if let Some(path) = legacy_object {
+                tokio::fs::remove_file(path).await.map_err(|_| storage_error())?;
+            }
         }
         Ok(PublishedObject {
             size: record.size,
@@ -447,19 +455,24 @@ impl FsBackend {
         Ok(())
     }
 
-    async fn remove_legacy_object(&self, bucket: &str, key: &str) -> Result<(), HandlerError> {
+    async fn preflight_legacy_object(&self, bucket: &str, key: &str) -> Result<Option<PathBuf>, HandlerError> {
         let path = self.object_path(bucket, key);
         match tokio::fs::symlink_metadata(&path).await {
-            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
-                tokio::fs::remove_file(path).await.map_err(|_| storage_error())
-            }
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(Some(path)),
             Ok(_) => Err(HandlerError::new(
                 ErrorCode::INVALID_REQUEST,
                 "the object path is not a safe regular file",
             )),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(_) => Err(storage_error()),
         }
+    }
+
+    async fn remove_legacy_object(&self, bucket: &str, key: &str) -> Result<(), HandlerError> {
+        if let Some(path) = self.preflight_legacy_object(bucket, key).await? {
+            tokio::fs::remove_file(path).await.map_err(|_| storage_error())?;
+        }
+        Ok(())
     }
 }
 

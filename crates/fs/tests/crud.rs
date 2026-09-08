@@ -299,6 +299,14 @@ async fn complete(
     .await
 }
 
+fn legacy_object_path(root: &TestRoot, bucket: &str, key: &str) -> PathBuf {
+    let digest = Sha256::digest(key.as_bytes());
+    root.0
+        .join(format!("b-{}", hex::encode(bucket)))
+        .join("objects")
+        .join(format!("o-{}", hex::encode(digest)))
+}
+
 /// Positive — one real signed exchange exercises the complete bounded CRUD path.
 #[tokio::test]
 async fn bucket_and_object_crud_runs_through_the_production_registry() {
