@@ -154,12 +154,6 @@ pub(super) fn execute_socket_exchange(
         .observation
         .notes
         .push("external endpoint TTFB is unavailable because this target does not instrument the first response byte".to_owned());
-    if wire.raw_head.is_some() && wire.sign.is_none() {
-        result.observation.request_body_fully_sent = None;
-        result.observation.notes.push(
-            "external unsigned raw-head framing was preserved but not interpreted, so body completion is unavailable".to_owned(),
-        );
-    }
     if connection_closes(&result.observation.headers)
         || crate::socket::parse_head(&head.bytes).is_some_and(|parsed| connection_closes(&parsed.headers))
     {
@@ -417,7 +411,7 @@ status = {status}
     }
 
     #[test]
-    fn unsigned_raw_head_does_not_claim_that_its_declared_body_was_fully_sent() {
+    fn unsigned_raw_head_preserves_bytes_and_reports_a_truncated_body_as_not_fully_sent() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
         let address = listener.local_addr().expect("listener address");
         let server = thread::spawn(move || {
@@ -431,22 +425,19 @@ status = {status}
         let mut wire = empty_wire();
         wire.raw_head = Some(raw.clone());
         wire.steps.push(ChunkStep::Data(b"part".to_vec(), 0));
+        let target = Conn::new(std::path::PathBuf::from("."));
+        let stamp = crate::time::parse_rfc3339(crate::time::DEFAULT_FIXED).expect("fixed clock");
+        let head = target.head(&wire, &stamp).expect("raw head");
+
+        assert_eq!(head.bytes, raw, "unsigned raw-head bytes stay authored byte for byte");
+        assert_eq!(head.declared_length, 5, "the authored Content-Length frames progress");
+
         let started = Instant::now();
-        let result = execute_socket_exchange(
-            &mut connection,
-            &wire,
-            &Head {
-                bytes: raw,
-                declared_length: 0,
-            },
-            started,
-            started + Duration::from_secs(2),
-            true,
-        )
-        .expect("external exchange");
+        let result = execute_socket_exchange(&mut connection, &wire, &head, started, started + Duration::from_secs(2), true)
+            .expect("external exchange");
         server.join().expect("server exits");
 
-        assert_eq!(result.observation.request_body_fully_sent, None);
+        assert_eq!(result.observation.request_body_fully_sent, Some(false));
     }
 
     #[test]
