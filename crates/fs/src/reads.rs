@@ -21,7 +21,7 @@
 //! [`rustfs_gateway::evaluate_range`]; version publication, delete markers, or the version census,
 //! which belong to `super::versioning`.
 //! Upstream: the persisted version records and the plain object files. Downstream: the production
-//! `GetObject` and `HeadObject` registrations.
+//! `GetObject`, `HeadObject`, and `CopyObject` registrations.
 //!
 //! # Why the decision is not made here
 //!
@@ -44,19 +44,19 @@ use super::storage_error;
 use super::versioning::{delete_marker_error, explicit_for_key, missing_version, newest_for_key};
 
 /// The representation a read describes, before any range is applied.
-struct Representation {
-    bytes: Vec<u8>,
-    e_tag: ETag,
-    last_modified: Timestamp,
+pub(super) struct Representation {
+    pub(super) bytes: Vec<u8>,
+    pub(super) e_tag: ETag,
+    pub(super) last_modified: Timestamp,
     storage_class: Option<rustfs_gateway::dto::StorageClass>,
-    version_id: Option<String>,
+    pub(super) version_id: Option<String>,
     /// The user metadata stored with this version, keyed by the lowercase `x-amz-meta-` suffix.
     ///
     /// This is the map the DTO already declares — `BTreeMap<String, String>` on both
     /// `GetObjectOutput` and `HeadObjectOutput` — carried through unchanged. The response encoder
     /// re-applies RFC 2047 on the way out, so what is stored and what is returned are the same
     /// Unicode value rather than two encodings of it.
-    metadata: std::collections::BTreeMap<String, String>,
+    pub(super) metadata: std::collections::BTreeMap<String, String>,
 }
 
 /// The window a read serves, and the answer's status.
@@ -143,7 +143,12 @@ impl super::FsBackend {
     /// version record. Both must answer the same shape, or a range honoured on one of them is a
     /// range ignored on the other — which is exactly how rustfs/gateway#626 could have been half
     /// fixed.
-    async fn representation(&self, bucket: &str, key: &str, version_id: Option<&str>) -> Result<Representation, HandlerError> {
+    pub(super) async fn representation(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+    ) -> Result<Representation, HandlerError> {
         let _guard = self.version_lock.lock().await;
         self.require_readable_versioning(bucket).await?;
         let records = self.version_records(bucket).await?;

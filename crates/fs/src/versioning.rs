@@ -70,6 +70,7 @@ pub(super) struct ObjectTagTarget {
 pub(super) struct PublishedObject {
     pub(super) size: i64,
     pub(super) version_id: Option<String>,
+    pub(super) last_modified: Timestamp,
 }
 
 impl FsBackend {
@@ -112,6 +113,7 @@ impl FsBackend {
         Ok(PublishedObject {
             size: record.size,
             version_id: (!matches!(state, VersioningState::Never)).then_some(record.version_id),
+            last_modified: Timestamp::from_secs(record.modified),
         })
     }
 

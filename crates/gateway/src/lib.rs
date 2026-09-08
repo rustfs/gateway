@@ -239,6 +239,11 @@ pub use rustfs_gateway_core::ops::shared::upload_id::{
 };
 pub use rustfs_gateway_core::{copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds};
 
+/// The `CopyObject` metadata-directive authority used by backend handlers.
+///
+/// `CopyObject` owns this directive rather than the shared source parser, but a backend needs both
+/// in the same handler. Re-exporting it here keeps out-of-workspace adapters on the public facade.
+pub use rustfs_gateway_core::ops::copy_object::MetadataSource;
 // The copy-source contract. A backend receives `CopySourceResources` through `Req::resources`
 // and can reveal the normalized source only with the proof on that same request. It never needs
 // to parse the raw header again.
