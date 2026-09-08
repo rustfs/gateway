@@ -4,7 +4,7 @@
 to prove that the public `Handler` and `ServiceBuilder` APIs are sufficient to assemble a real S3
 service without a private adapter.
 
-This bounded implementation supports bucket and version-aware object CRUD plus `ListObjects` and
+This bounded implementation supports bucket and version-aware object CRUD, `CopyObject`, plus `ListObjects` and
 `ListObjectsV2`, `ListMultipartUploads`, `GetBucketLocation`,
 `GetBucketVersioning`, `PutBucketVersioning`, `ListObjectVersions`, `CreateMultipartUpload`,
 `UploadPart`, `ListParts`, `CompleteMultipartUpload`, `AbortMultipartUpload`, and lifecycle
@@ -50,6 +50,12 @@ completion's own headers change nothing. Keys are stored in the lowercase form t
 produced and refused rather than normalised a second time, values are stored RFC 2047-decoded and
 re-encoded on the way out, and the combined key and value size is capped at 2 KB — the figure AWS
 documents for user metadata — measured against the stored form.
+
+`CopyObject` resolves its source only through the framework's derived-resource authorization proof.
+It selects current or explicit-version bytes before opening the destination, applies the shared
+copy-source conditional contract before publication, inherits metadata for `COPY`, rebuilds it from
+the request for `REPLACE` (including an empty map), and refuses a self copy that changes nothing.
+The result reports the source and destination version identities independently.
 
 Object tags are atomically replaced beside the selected version record. Current and explicit-version
 reads, idempotent deletion, and restart recovery all use that authority without minting a new version

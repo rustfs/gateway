@@ -58,6 +58,9 @@ mod lifecycle_transitions;
 #[path = "crud/object_metadata.rs"]
 mod object_metadata;
 
+#[path = "crud/copy_object.rs"]
+mod copy_object;
+
 #[path = "crud/object_tagging.rs"]
 mod object_tagging;
 
@@ -281,6 +284,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
         [
             "AbortMultipartUpload",
             "CompleteMultipartUpload",
+            "CopyObject",
             "CreateBucket",
             "CreateMultipartUpload",
             "DeleteBucket",

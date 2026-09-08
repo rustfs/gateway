@@ -30,8 +30,8 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
-    AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CreateBucket,
-    CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketLifecycle, DeleteObject,
+    AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CopyObject,
+    CreateBucket, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketLifecycle, DeleteObject,
     GetBucketLifecycleConfiguration, GetBucketLocation, GetBucketVersioning, GetObject, HeadBucket, HeadObject,
     ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, ListPartsOutput, Part,
     PutBucketLifecycleConfiguration, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
@@ -56,6 +56,7 @@ macro_rules! reference_operations {
         $visitor! {
             multipart AbortMultipartUpload => "AbortMultipartUpload",
             multipart CompleteMultipartUpload => "CompleteMultipartUpload",
+            crud CopyObject => "CopyObject",
             crud CreateBucket => "CreateBucket",
             multipart CreateMultipartUpload => "CreateMultipartUpload",
             crud DeleteBucket => "DeleteBucket",
@@ -142,6 +143,7 @@ macro_rules! register_lifecycle_entries {
 }
 
 mod buckets;
+mod copy;
 mod lifecycle;
 mod lifecycle_scheduler;
 mod listing;

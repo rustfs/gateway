@@ -6,6 +6,7 @@ Agent entry point. File → responsibility → when you need to open it.
 |---|---|---|
 | `README.md` | Scope fence and supported-operation summary. | Deciding whether this reference backend fits a use case. |
 | `src/lib.rs` | Filesystem paths, capability authority, the served region, and five multipart handlers. | Changing shared storage behavior or the registered operation set. |
+| `src/copy.rs` | Authorized source selection, source conditions, metadata directives, self-copy classification, and destination publication. | Changing server-side object-copy behavior. |
 | `src/buckets.rs` | Bucket creation and removal, the `LocationConstraint` a creation may name, and the region `HeadBucket`/`GetBucketLocation` report. | Changing bucket lifetime or the region this backend serves. |
 | `src/lifecycle.rs` | Durable lifecycle documents, filter evaluation, and one-shot current-object expiration. | Changing lifecycle configuration or expiration semantics. |
 | `src/lifecycle_scheduler.rs` | Repeated lifecycle cadence, failure accounting, and bounded shutdown. | Changing automatic expiration scheduling or worker lifetime. |
