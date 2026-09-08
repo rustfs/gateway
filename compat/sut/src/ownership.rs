@@ -14,7 +14,7 @@
 
 //! Which identity owns which bucket, and what the other identity may therefore not do.
 //!
-//! Responsible for: recording the owner of a bucket at the moment its creation is admitted,
+//! Responsible for: recording the fixed data-root owner of a bucket when creation is admitted,
 //! answering `x-amz-expected-bucket-owner` through [`BucketOwnerSource`], and producing the
 //! authorization [`Decision`] that refuses one identity on another identity's bucket.
 //! NOT responsible for: storing objects (`rustfs-gateway-fs`), verifying signatures
@@ -30,8 +30,9 @@
 //! the buckets without breaking every lifecycle sweep. The registry is therefore process-scoped:
 //! a launcher restarted against a **populated** data root has forgotten who owned what, and the
 //! first identity to name such a bucket is allowed. Every suite this launcher exists for starts it
-//! against a fresh data root, where "the creator owns it" is exactly true. Nothing here should be
-//! read as a durable authorization store.
+//! against a fresh, single-tenant data root whose configured primary owner is authoritative; a
+//! secondary identity may request creation as a guest, but does not acquire the bucket. Nothing
+//! here should be read as a durable authorization store.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -47,7 +48,7 @@ pub(crate) struct BucketOwners {
 }
 
 impl BucketOwners {
-    /// Records `owner` as the owner of `bucket` unless somebody already owns it.
+    /// Records `owner` as the owner of `bucket` unless the data root already recorded it.
     ///
     /// Returns the owner that stands afterwards, which is the *existing* one when there was one.
     /// A second identity therefore cannot take a bucket over by asking to create it again: that
@@ -97,7 +98,7 @@ const CREATE_BUCKET: &str = <dto::CreateBucket as Operation>::NAME;
 /// 3. an access key that resolves to no registered account is refused, rather than allowed on the
 ///    grounds that the authenticator ought to have caught it;
 /// 4. a request naming no bucket is a service-level request and is allowed;
-/// 5. `CreateBucket` claims the name for the caller and is allowed;
+/// 5. `CreateBucket` claims the name for the fixed data-root owner and is allowed;
 /// 6. everything else must be the recorded owner, or is refused.
 pub(crate) fn decide(
     owners: &BucketOwners,
@@ -118,7 +119,8 @@ pub(crate) fn decide(
         return Decision::Allow;
     };
     if request.operation == CREATE_BUCKET {
-        return match owners.claim(bucket.as_str(), caller) {
+        let (data_root_owner, _) = accounts.data_root_owner();
+        return match owners.claim(bucket.as_str(), data_root_owner) {
             // A poisoned registry is not an allowance: it is a lookup that could not be made.
             None => Decision::Indeterminate,
             Some(_) => Decision::Allow,
@@ -209,11 +211,10 @@ mod tests {
         );
     }
 
-    /// Negative — the refusal is ownership, not rank: the first identity is refused the same way
-    /// on the second identity's bucket. A rule that only ever refused the second identity would
-    /// satisfy the test above while measuring nothing about ownership.
+    /// Negative — creation by the secondary guest does not transfer ownership away from the
+    /// single-tenant data root: the guest is refused afterwards and the primary owner is allowed.
     #[test]
-    fn n_the_first_identity_is_refused_on_the_second_identitys_bucket() {
+    fn n_the_secondary_creator_is_refused_on_the_data_root_owners_bucket() {
         let owners = BucketOwners::default();
         let accounts = accounts();
         let main = Identity::new("MAIN").expect("a valid access key id");
@@ -223,13 +224,14 @@ mod tests {
             decide(&owners, &accounts, SUPPORTED, &request("CreateBucket", Some(&bucket), Some(&alt))),
             Decision::Allow
         );
+        assert_eq!(owners.owner_of(bucket.as_str()).as_deref(), Some("s3gate-main"));
         assert_eq!(
             decide(&owners, &accounts, SUPPORTED, &request("GetObject", Some(&bucket), Some(&main))),
-            Decision::Deny
+            Decision::Allow
         );
         assert_eq!(
             decide(&owners, &accounts, SUPPORTED, &request("GetObject", Some(&bucket), Some(&alt))),
-            Decision::Allow
+            Decision::Deny
         );
     }
 

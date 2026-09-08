@@ -302,10 +302,10 @@ mod tests {
         assert_eq!(refused.status(), 403, "{}", body_of(&refused));
     }
 
-    /// Negative — the refusal is ownership, not rank. The first identity is refused the same way
-    /// on the second identity's bucket, and the second identity is served on its own.
+    /// Negative — a secondary identity may request bucket creation as a guest, but the bucket
+    /// remains owned by the primary single-tenant data root. The guest is refused afterwards.
     #[tokio::test]
-    async fn n_the_first_identity_is_refused_on_the_second_identitys_bucket() {
+    async fn n_the_secondary_creator_is_refused_on_the_data_root_owners_bucket() {
         let root = TestRoot::new();
         let options = two_identity_options(&root, &[]);
         let (_backend, service) = assembled(&options);
@@ -317,16 +317,66 @@ mod tests {
             200
         );
         assert_eq!(
-            exchange(&service, as_alt(http::Method::PUT, "/alt-bucket/key", Bytes::from_static(b"alt")))
+            exchange(&service, as_main(http::Method::PUT, "/alt-bucket/key", Bytes::from_static(b"main")))
                 .await
                 .status(),
             200
         );
-        let refused = exchange(&service, as_main(http::Method::GET, "/alt-bucket/key", Bytes::new())).await;
+        let refused = exchange(&service, as_alt(http::Method::GET, "/alt-bucket/key", Bytes::new())).await;
         assert_eq!(refused.status(), 403, "{}", body_of(&refused));
-        let allowed = exchange(&service, as_alt(http::Method::GET, "/alt-bucket/key", Bytes::new())).await;
+        let allowed = exchange(&service, as_main(http::Method::GET, "/alt-bucket/key", Bytes::new())).await;
         assert_eq!(allowed.status(), 200, "{}", body_of(&allowed));
-        assert_eq!(allowed.body().as_ref(), b"alt");
+        assert_eq!(allowed.body().as_ref(), b"main");
+    }
+
+    /// Negative and positive control — a secondary identity may create a bucket for the
+    /// single-tenant data root, but it does not become that root's owner. The primary identity
+    /// must own authorization afterwards, the guest must be refused, and the listing wire must
+    /// report the same primary owner rather than the creating identity.
+    #[tokio::test]
+    async fn n_a_secondary_created_bucket_belongs_to_the_data_root_owner() {
+        let root = TestRoot::new();
+        let options = two_identity_options(&root, &[]);
+        let (_backend, service) = assembled(&options);
+
+        assert_eq!(
+            exchange(&service, as_alt(http::Method::PUT, "/guest-created", Bytes::new()))
+                .await
+                .status(),
+            200
+        );
+
+        assert_eq!(
+            exchange(&service, as_main(http::Method::PUT, "/guest-created/key", Bytes::from_static(b"body")),)
+                .await
+                .status(),
+            200
+        );
+
+        let mismatched = signed(
+            MAIN_KEY,
+            MAIN_SECRET,
+            http::Method::GET,
+            "/guest-created?list-type=2&fetch-owner=true",
+            Bytes::new(),
+            &[("x-amz-expected-bucket-owner", ALT_OWNER)],
+        );
+        let refused = exchange(&service, mismatched).await;
+        assert_eq!(refused.status(), 403, "{}", body_of(&refused));
+
+        let listed = signed(
+            MAIN_KEY,
+            MAIN_SECRET,
+            http::Method::GET,
+            "/guest-created?list-type=2&fetch-owner=true",
+            Bytes::new(),
+            &[("x-amz-expected-bucket-owner", MAIN_OWNER)],
+        );
+        let listed = exchange(&service, listed).await;
+        let body = body_of(&listed);
+        assert_eq!(listed.status(), 200, "{body}");
+        assert!(body.contains("<ID>s3gate-main</ID>"), "{body}");
+        assert!(body.contains("<DisplayName>Main &lt;Owner&gt; &amp; \"Friends\"</DisplayName>"), "{body}");
     }
 
     /// Negative — with only one identity configured, no second identity can sign at all. This is
