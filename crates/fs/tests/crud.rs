@@ -141,6 +141,13 @@ fn service_in_region(root: &TestRoot, region: &str) -> (Arc<FsBackend>, S3Servic
 fn service_with_backend(backend: Arc<FsBackend>) -> (Arc<FsBackend>, S3Service) {
     let credentials =
         Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid fixture credentials")));
+    service_with_backend_and_credentials(backend, credentials)
+}
+
+fn service_with_backend_and_credentials(
+    backend: Arc<FsBackend>,
+    credentials: Arc<StaticCredentials>,
+) -> (Arc<FsBackend>, S3Service) {
     let builder = backend.register_crud(
         rustfs_gateway::ServiceBuilder::new()
             .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("one region")))
@@ -164,7 +171,22 @@ fn signed(method: http::Method, target: &str, body: Bytes) -> http::Request<Byte
     signed_with_headers(method, target, body, http::HeaderMap::new())
 }
 
-fn signed_with_headers(method: http::Method, target: &str, body: Bytes, mut headers: http::HeaderMap) -> http::Request<Bytes> {
+fn signed_as(access_key: &str, secret_key: &[u8], method: http::Method, target: &str, body: Bytes) -> http::Request<Bytes> {
+    signed_as_with_headers(access_key, secret_key, method, target, body, http::HeaderMap::new())
+}
+
+fn signed_with_headers(method: http::Method, target: &str, body: Bytes, headers: http::HeaderMap) -> http::Request<Bytes> {
+    signed_as_with_headers("AKIDEXAMPLE", b"secret", method, target, body, headers)
+}
+
+fn signed_as_with_headers(
+    access_key: &str,
+    secret_key: &[u8],
+    method: http::Method,
+    target: &str,
+    body: Bytes,
+    mut headers: http::HeaderMap,
+) -> http::Request<Bytes> {
     let (path, query) = target.split_once('?').map_or((target, ""), |(path, query)| (path, query));
     headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
     let payload = if (method == http::Method::PUT && target.matches('/').count() >= 2) || !body.is_empty() {
@@ -190,7 +212,7 @@ fn signed_with_headers(method: http::Method, target: &str, body: Bytes, mut head
     let accepted = WireRequest::accept(probe, &Limits::default()).expect("an acceptable host");
     let stamp = AmzDate::parse(SIGNED_AT).expect("a valid signing stamp");
     let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a valid signing scope");
-    let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid signing credentials");
+    let credentials = SigningCredentials::new(access_key, secret_key).expect("valid signing credentials");
     let signing = SigningRequest::new(&method, path, query, &headers, accepted.host().raw_for_signing(), payload, stamp)
         .with_wire_content_length(body.len() as u64);
     let mut signer = SigV4Signer::new(credentials, scope);

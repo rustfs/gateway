@@ -85,6 +85,11 @@ value is the `x-amz-bucket-region` a `HeadBucket` reports, the `LocationConstrai
 null — and the only constraint a `CreateBucket` may name. A region the `LocationConstraint`
 enumeration cannot name is refused by `with_region` rather than at request time.
 
+The backend reports no listing owner unless `FsBackend::with_owner` configures the one owner of its
+single-tenant data root. ListObjects V1 and ListObjectVersions then report that owner on every object
+or version entry, including delete markers; ListObjectsV2 reports it only when `fetch-owner=true`.
+The XML response encoder escapes the configured id and display name when it writes them to the wire.
+
 Ranged reads resolve through the exported `evaluate_range` contract, so a suffix range, a window
 that runs past the end, an unsatisfiable range, a multi-range header and `If-Range` all behave as
 they do everywhere else in this workspace rather than being re-derived here.

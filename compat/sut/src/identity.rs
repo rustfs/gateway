@@ -116,6 +116,11 @@ impl Accounts {
         std::iter::once(&self.primary).chain(self.secondary.as_ref())
     }
 
+    /// The primary owner this single-tenant data root reports for every bucket and object.
+    pub(crate) fn data_root_owner(&self) -> (&str, &str) {
+        (&self.primary.owner_id, &self.primary.display_name)
+    }
+
     /// The owner id a verified access key id runs as.
     ///
     /// `None` for an access key this launcher never registered. The authenticator cannot admit
