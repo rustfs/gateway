@@ -672,6 +672,7 @@ gateway_modules = (
     "post_object_runtime",
     "precondition_contract",
     "precondition_reachability",
+    "presigned_put",
     "refusal_order_guards",
     "reject_rendering",
     "replication_token",

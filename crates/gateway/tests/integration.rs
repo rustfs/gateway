@@ -92,6 +92,8 @@ mod post_object_runtime;
 mod precondition_contract;
 #[path = "precondition_reachability.rs"]
 mod precondition_reachability;
+#[path = "presigned_put.rs"]
+mod presigned_put;
 #[path = "refusal_order_guards.rs"]
 mod refusal_order_guards;
 #[path = "reject_rendering.rs"]
