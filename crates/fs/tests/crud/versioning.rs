@@ -15,7 +15,7 @@
 //! Signed production-service evidence for persistent object versioning.
 //!
 //! Responsible for: enabled/suspended transitions, opaque versions, delete markers, restart
-//! persistence, deterministic census ordering, and pre-publication refusal of unsafe legacy paths.
+//! persistence, deterministic census ordering, and pre-publication refusal of invalid legacy paths.
 //! NOT responsible for: lifecycle, multipart version publication, copy, tags, or ordinary listing.
 //! Upstream: the shared CRUD service fixture. Downstream: the crate verification gate.
 
@@ -343,7 +343,7 @@ async fn n_put_preflights_symlinked_legacy_path_before_publishing_null_version()
     assert_eq!(current.body().as_ref(), b"previous");
 }
 
-/// Negative — another unsafe legacy file type is refused without replacing the readable object.
+/// Negative — another invalid legacy file type is refused without replacing the readable object.
 #[tokio::test]
 async fn n_put_preflights_non_file_legacy_path_before_publishing_null_version() {
     let root = TestRoot::new();
@@ -352,7 +352,7 @@ async fn n_put_preflights_non_file_legacy_path_before_publishing_null_version() 
     assert_eq!(put(&service, "legacy-directory-put", "key", b"previous").await.status(), 200);
 
     let legacy = legacy_object_path(&root, "legacy-directory-put", "key");
-    std::fs::create_dir(&legacy).expect("the unsafe legacy directory is creatable");
+    std::fs::create_dir(&legacy).expect("the invalid legacy directory is creatable");
     let failed = put(&service, "legacy-directory-put", "key", b"must-not-publish").await;
     assert_eq!(failed.status(), 400, "{}", body(&failed));
     assert!(legacy.is_dir());
@@ -375,7 +375,7 @@ async fn n_put_publication_failure_retains_the_previous_readable_object() {
     let bucket = root.0.join(format!("b-{}", hex::encode("legacy-publish-failure")));
     let sequence = bucket.join("version-sequence");
     std::fs::remove_file(&sequence).expect("the sequence fixture is removable");
-    std::fs::create_dir(&sequence).expect("the unsafe sequence fixture is creatable");
+    std::fs::create_dir(&sequence).expect("the invalid sequence fixture is creatable");
 
     let failed = put(&service, "legacy-publish-failure", "key", b"must-not-publish").await;
     assert_eq!(failed.status(), 400, "{}", body(&failed));
