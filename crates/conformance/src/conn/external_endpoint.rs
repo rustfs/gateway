@@ -15,19 +15,69 @@
 //! External HTTP(S) endpoint syntax, resolution, and transport selection.
 //!
 //! Responsible for: validating one authority-only endpoint, selecting its default port, resolving
-//! every socket address within an absolute setup deadline, and trying each transport address.
+//! every socket address through one bounded worker within an absolute setup deadline, and trying
+//! each transport address.
 //! Not responsible for: HTTP framing or judging observations. Upstream: `external`; downstream:
 //! `external_tls`.
 
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::Path;
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::OnceLock;
+use std::sync::mpsc::{self, RecvTimeoutError, SyncSender, TrySendError};
 use std::thread;
 use std::time::Instant;
 
 use super::external_tls::ExternalTransport;
 use crate::socket::Connection;
 use crate::sut::SutError;
+
+type ResolverJob = Box<dyn FnOnce() + Send + 'static>;
+const RESOLVER_QUEUE_CAPACITY: usize = 8;
+
+enum ResolverOutcome {
+    Complete(std::io::Result<Vec<SocketAddr>>),
+    Deadline,
+}
+
+struct ResolverWorker {
+    sender: SyncSender<ResolverJob>,
+}
+
+impl ResolverWorker {
+    fn start() -> std::io::Result<Self> {
+        // One executing job and this fixed queue are the complete resolver resource budget. The
+        // standard-library resolver cannot be cancelled, so a permanently stalled call must make
+        // later callers fail closed instead of allocating another native thread for each attempt.
+        let (sender, receiver) = mpsc::sync_channel::<ResolverJob>(RESOLVER_QUEUE_CAPACITY);
+        thread::Builder::new()
+            .name("gateway-external-dns".to_owned())
+            .spawn(move || {
+                while let Ok(job) = receiver.recv() {
+                    job();
+                }
+            })?;
+        Ok(Self { sender })
+    }
+
+    fn submit(&self, job: ResolverJob, diagnostic: &str) -> Result<(), SutError> {
+        self.sender.try_send(job).map_err(|error| match error {
+            TrySendError::Full(_) => SutError::Environment(format!(
+                "external endpoint `{diagnostic}` DNS resolver capacity is unavailable while the bounded worker is occupied"
+            )),
+            TrySendError::Disconnected(_) => {
+                SutError::Environment(format!("external endpoint `{diagnostic}` DNS resolver worker ended unexpectedly"))
+            }
+        })
+    }
+}
+
+fn resolver_worker() -> Result<&'static ResolverWorker, SutError> {
+    static WORKER: OnceLock<Result<ResolverWorker, String>> = OnceLock::new();
+    match WORKER.get_or_init(|| ResolverWorker::start().map_err(|error| error.to_string())) {
+        Ok(worker) => Ok(worker),
+        Err(error) => Err(SutError::Environment(format!("cannot start DNS resolver worker: {error}"))),
+    }
+}
 
 /// An endpoint and the authority that must appear in `Host`.
 #[derive(Clone, Debug)]
@@ -74,19 +124,37 @@ impl ExternalEndpoint {
     }
 
     pub(super) fn open(&self, deadline: Instant) -> Result<Connection, SutError> {
-        self.open_with(
+        self.open_with_worker(
             deadline,
+            resolver_worker()?,
             |authority| authority.to_socket_addrs().map(|resolved| resolved.collect()),
             |transport, address, attempt_deadline| transport.open(address, attempt_deadline),
         )
     }
 
-    fn open_with<R, C>(&self, deadline: Instant, resolver: R, mut connector: C) -> Result<Connection, SutError>
+    #[cfg(test)]
+    fn open_with<R, C>(&self, deadline: Instant, resolver: R, connector: C) -> Result<Connection, SutError>
     where
         R: FnOnce(String) -> std::io::Result<Vec<SocketAddr>> + Send + 'static,
         C: FnMut(&ExternalTransport, SocketAddr, Instant) -> Result<Connection, SutError>,
     {
-        let addresses = resolve_with_deadline(self.socket_authority.clone(), deadline, resolver)?;
+        let worker = ResolverWorker::start()
+            .map_err(|error| SutError::Environment(format!("cannot start isolated DNS resolver worker: {error}")))?;
+        self.open_with_worker(deadline, &worker, resolver, connector)
+    }
+
+    fn open_with_worker<R, C>(
+        &self,
+        deadline: Instant,
+        worker: &ResolverWorker,
+        resolver: R,
+        mut connector: C,
+    ) -> Result<Connection, SutError>
+    where
+        R: FnOnce(String) -> std::io::Result<Vec<SocketAddr>> + Send + 'static,
+        C: FnMut(&ExternalTransport, SocketAddr, Instant) -> Result<Connection, SutError>,
+    {
+        let addresses = resolve_with_worker(worker, self.socket_authority.clone(), deadline, resolver)?;
         if addresses.is_empty() {
             return Err(SutError::Environment(format!(
                 "external endpoint `{}` resolved to no addresses",
@@ -132,7 +200,12 @@ impl ExternalEndpoint {
     }
 }
 
-fn resolve_with_deadline<F>(socket_authority: String, deadline: Instant, resolver: F) -> Result<Vec<SocketAddr>, SutError>
+fn resolve_with_worker<F>(
+    worker: &ResolverWorker,
+    socket_authority: String,
+    deadline: Instant,
+    resolver: F,
+) -> Result<Vec<SocketAddr>, SutError>
 where
     F: FnOnce(String) -> std::io::Result<Vec<SocketAddr>> + Send + 'static,
 {
@@ -142,16 +215,24 @@ where
         .ok_or_else(|| SutError::Environment("external endpoint setup deadline expired before DNS resolution".to_owned()))?;
     let diagnostic = socket_authority.clone();
     let (sender, receiver) = mpsc::sync_channel(1);
-    thread::Builder::new()
-        .name("gateway-external-dns".to_owned())
-        .spawn(move || {
-            let _ = sender.send(resolver(socket_authority));
-        })
-        .map_err(|error| SutError::Environment(format!("cannot start DNS resolution for `{diagnostic}`: {error}")))?;
+    worker.submit(
+        Box::new(move || {
+            let outcome = if Instant::now() >= deadline {
+                ResolverOutcome::Deadline
+            } else {
+                ResolverOutcome::Complete(resolver(socket_authority))
+            };
+            let _ = sender.send(outcome);
+        }),
+        &diagnostic,
+    )?;
     match receiver.recv_timeout(remaining) {
-        Ok(Ok(addresses)) => Ok(addresses),
-        Ok(Err(error)) => Err(SutError::Environment(format!(
+        Ok(ResolverOutcome::Complete(Ok(addresses))) => Ok(addresses),
+        Ok(ResolverOutcome::Complete(Err(error))) => Err(SutError::Environment(format!(
             "external endpoint `{diagnostic}` could not be resolved: {error}"
+        ))),
+        Ok(ResolverOutcome::Deadline) => Err(SutError::Environment(format!(
+            "external endpoint `{diagnostic}` DNS resolution exceeded the setup deadline"
         ))),
         Err(RecvTimeoutError::Timeout) => Err(SutError::Environment(format!(
             "external endpoint `{diagnostic}` DNS resolution exceeded the setup deadline"
@@ -203,6 +284,8 @@ fn socket_authority(authority: &str, default_port: u16) -> Result<String, SutErr
 #[cfg(test)]
 mod tests {
     use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Condvar, Mutex};
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -269,11 +352,14 @@ mod tests {
 
     #[test]
     fn a_stalled_resolver_returns_at_the_absolute_setup_deadline() {
+        let worker = ResolverWorker::start().expect("start isolated resolver worker");
         let started = Instant::now();
         let deadline = started + Duration::from_millis(25);
+        let (finished_sender, finished_receiver) = mpsc::sync_channel(1);
 
-        let error = resolve_with_deadline("stalled.example:443".to_owned(), deadline, |_| {
+        let error = resolve_with_worker(&worker, "stalled.example:443".to_owned(), deadline, move |_| {
             thread::sleep(Duration::from_millis(200));
+            finished_sender.send(()).expect("test still awaits resolver completion");
             Ok(Vec::new())
         })
         .expect_err("a resolver may not hold the case past its setup deadline");
@@ -282,6 +368,91 @@ mod tests {
         assert!(error.to_string().contains("DNS resolution exceeded the setup deadline"));
         assert!(elapsed >= Duration::from_millis(25));
         assert!(elapsed < Duration::from_millis(100), "resolver timeout was not bounded: {elapsed:?}");
+        finished_receiver
+            .recv_timeout(Duration::from_millis(250))
+            .expect("the stalled resolver eventually releases its worker");
+    }
+
+    #[test]
+    fn n_repeated_timeouts_do_not_accumulate_resolver_workers() {
+        let worker = ResolverWorker::start().expect("start isolated resolver worker");
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (finished_sender, finished_receiver) = mpsc::sync_channel(1);
+
+        let first_release = Arc::clone(&release);
+        let first_calls = Arc::clone(&calls);
+        let first = resolve_with_worker(
+            &worker,
+            "first-stalled.example:443".to_owned(),
+            Instant::now() + Duration::from_millis(20),
+            move |_| {
+                first_calls.fetch_add(1, Ordering::SeqCst);
+                let (lock, wake) = &*first_release;
+                let blocked = lock.lock().expect("resolver release lock");
+                let _released = wake
+                    .wait_while(blocked, |released| !*released)
+                    .expect("resolver release notification");
+                finished_sender.send(()).expect("test still awaits resolver completion");
+                Ok(Vec::new())
+            },
+        )
+        .expect_err("the first resolver exceeds its caller deadline");
+
+        let mut repeated = Vec::new();
+        for attempt in 0..16 {
+            let repeated_calls = Arc::clone(&calls);
+            repeated.push(resolve_with_worker(
+                &worker,
+                format!("repeated-{attempt}.example:443"),
+                Instant::now() + Duration::from_millis(20),
+                move |_| {
+                    repeated_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(Vec::new())
+                },
+            ));
+        }
+
+        let (lock, wake) = &*release;
+        *lock.lock().expect("resolver release lock") = true;
+        wake.notify_one();
+        finished_receiver
+            .recv_timeout(Duration::from_millis(200))
+            .expect("the released resolver finishes");
+
+        assert!(first.to_string().contains("DNS resolution exceeded the setup deadline"));
+        assert!(repeated.iter().all(|result| {
+            let error = result
+                .as_ref()
+                .expect_err("a busy resolver worker refuses additional work")
+                .to_string();
+            error.contains("DNS resolver capacity is unavailable") || error.contains("DNS resolution exceeded the setup deadline")
+        }));
+
+        let recovery_deadline = Instant::now() + Duration::from_millis(200);
+        let recovered = loop {
+            let recovery_calls = Arc::clone(&calls);
+            match resolve_with_worker(
+                &worker,
+                "recovered.example:443".to_owned(),
+                Instant::now() + Duration::from_millis(20),
+                move |_| {
+                    recovery_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(Vec::new())
+                },
+            ) {
+                Err(error)
+                    if error.to_string().contains("DNS resolver capacity is unavailable")
+                        && Instant::now() < recovery_deadline =>
+                {
+                    thread::yield_now();
+                }
+                result => break result,
+            }
+        };
+
+        assert!(recovered.is_ok(), "the resolver worker must accept work after the stalled call exits");
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "only the stalled and recovery jobs may start");
     }
 
     #[test]
