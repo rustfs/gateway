@@ -70,10 +70,7 @@ impl PostObjectResponsePlan {
             (Some("201"), None) => SuccessAction::Created,
             (Some("204"), None) | (None, None) => SuccessAction::NoContent,
             (Some(_), None) => return Err(policy_refusal(PostPolicyError::Malformed)),
-            (None, Some(raw)) => {
-                validate_redirect(raw, bucket.as_str(), key.as_str())?;
-                SuccessAction::Redirect(raw.to_owned())
-            }
+            (None, Some(raw)) => SuccessAction::Redirect(validated_redirect(raw, bucket.as_str(), key.as_str())?),
         };
         Ok(Self {
             action,
@@ -136,7 +133,7 @@ fn unique_success_field<'a>(fields: &'a [(&str, &str)], wanted: &str) -> Result<
     Ok(found)
 }
 
-fn validate_redirect(raw: &str, bucket: &str, key: &str) -> Result<(), S3Error> {
+fn validated_redirect(raw: &str, bucket: &str, key: &str) -> Result<String, S3Error> {
     let rendered = build_success_action_redirect(raw, bucket, key, "", None).map_err(policy_refusal)?;
     let without_fragment = rendered.split_once('#').map_or(rendered.as_str(), |(base, _)| base);
     let uri = without_fragment
@@ -146,7 +143,7 @@ fn validate_redirect(raw: &str, bucket: &str, key: &str) -> Result<(), S3Error> 
         return Err(policy_refusal(PostPolicyError::Malformed));
     }
     HeaderValue::from_str(&rendered).map_err(|_| policy_refusal(PostPolicyError::Malformed))?;
-    Ok(())
+    Ok(raw.to_owned())
 }
 
 fn encoded_etag(encoded: &EncodedResponse) -> Result<&str, HandlerError> {
