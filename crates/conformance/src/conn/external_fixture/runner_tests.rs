@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Full runner coverage for external empty-bucket fixtures.
+//! Full runner coverage for external owned bucket and object fixtures.
 //!
-//! Responsible for: proving the CLI opt-in reaches fixture controls, an authored read-only
-//! exchange, and cleanup in order. NOT responsible for: unit-level ownership and failure cases or
-//! production S3 behavior. Upstream: `crate::cli`; downstream: a bounded loopback HTTP endpoint.
+//! Responsible for: proving the CLI opt-in reaches bucket and object fixture controls, an authored
+//! read-only exchange, and cleanup in dependency order. NOT responsible for: unit-level ownership
+//! and failure cases or production S3 behavior. Upstream: `crate::cli`; downstream: a bounded
+//! loopback HTTP endpoint.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -51,7 +52,7 @@ fn write_case(root: &Path, id: &str, polarity: &str, status: u16, setup: &str) {
 id = "{id}"
 schema_version = 1
 title = "External fixture runner control"
-rationale = "This isolated corpus proves opted-in empty-bucket state is bounded by one read-only case."
+rationale = "This isolated corpus proves opted-in owned bucket and object state is bounded by one read-only case."
 polarity = "{polarity}"
 operation = "GetBucketLocation"
 tags = ["xml", "region"]
@@ -90,7 +91,7 @@ fn isolated_corpus() -> TestCorpus {
         "c-external-fixture-0001",
         "positive",
         204,
-        "[[setup.buckets]]\nname = \"fixture-runner\"\nregion = \"us-west-2\"\n\n",
+        "[[setup.buckets]]\nname = \"fixture-runner\"\nregion = \"us-west-2\"\n\n[[setup.objects]]\nbucket = \"fixture-runner\"\nkey = \"fixture-key\"\nbody = { hex = \"00ff\" }\ncontent_type = \"application/octet-stream\"\nstorage_class = \"STANDARD_IA\"\nmetadata = { owner = \"fixture\", trace = \"one\" }\n\n",
     );
     write_case(&root, "c-external-fixture-n001", "negative", 400, "");
     write_case(&root, "c-external-fixture-n002", "negative", 403, "");
@@ -133,9 +134,12 @@ fn fixture_server() -> (String, thread::JoinHandle<Vec<Vec<u8>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture endpoint");
     listener.set_nonblocking(true).expect("bound fixture accept wait");
     let address = listener.local_addr().expect("fixture endpoint address");
-    let responses: [&[u8]; 4] = [
+    let responses: [&[u8]; 7] = [
         b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
         b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
         b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
     ];
@@ -162,7 +166,12 @@ fn fixture_server() -> (String, thread::JoinHandle<Vec<Vec<u8>>>) {
 }
 
 fn request_line(request: &[u8]) -> &str {
-    std::str::from_utf8(request)
+    let head_end = request
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|at| at + 4)
+        .expect("request head terminator");
+    std::str::from_utf8(&request[..head_end])
         .expect("fixture request is UTF-8")
         .lines()
         .next()
@@ -170,7 +179,7 @@ fn request_line(request: &[u8]) -> &str {
 }
 
 #[test]
-fn cli_runner_executes_default_auto_fixture_lifecycle_against_external_endpoint() {
+fn cli_runner_orders_owned_object_fixture_around_an_authored_read_only_exchange() {
     let corpus = isolated_corpus();
     let (url, server) = fixture_server();
     let args = [
@@ -193,11 +202,35 @@ fn cli_runner_executes_default_auto_fixture_lifecycle_against_external_endpoint(
         [
             "HEAD /fixture-runner HTTP/1.1",
             "PUT /fixture-runner HTTP/1.1",
+            "HEAD /fixture-runner/fixture-key HTTP/1.1",
+            "PUT /fixture-runner/fixture-key HTTP/1.1",
             "GET /fixture-runner?location HTTP/1.1",
+            "DELETE /fixture-runner/fixture-key HTTP/1.1",
             "DELETE /fixture-runner HTTP/1.1",
         ]
     );
     assert!(requests[1].ends_with(CREATE_BODY));
     let create = std::str::from_utf8(&requests[1]).expect("create request is UTF-8");
     assert!(create.contains("/us-west-2/s3/aws4_request"));
+    assert!(requests[3].ends_with(&[0x00, 0xff]));
+    let put_object = std::str::from_utf8(&requests[3][..requests[3].len() - 2]).expect("object request head is UTF-8");
+    assert!(
+        put_object
+            .to_ascii_lowercase()
+            .contains("content-type: application/octet-stream")
+    );
+    assert!(put_object.to_ascii_lowercase().contains("x-amz-storage-class: standard_ia"));
+    assert!(put_object.to_ascii_lowercase().contains("x-amz-meta-owner: fixture"));
+    assert!(put_object.to_ascii_lowercase().contains("x-amz-meta-trace: one"));
+    for request in [&requests[2], &requests[3], &requests[5]] {
+        let head_end = request
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|at| at + 4)
+            .expect("object control head terminator");
+        let control = std::str::from_utf8(&request[..head_end]).expect("object control request head is UTF-8");
+        assert!(control.to_ascii_lowercase().contains("authorization: aws4-hmac-sha256 "));
+        assert!(control.contains("/us-west-2/s3/aws4_request"));
+        assert!(control.contains("x-amz-date:"));
+    }
 }

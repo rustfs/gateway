@@ -44,7 +44,7 @@ impl Conn {
         Self::external_configured(root, endpoint, ca_path, false)
     }
 
-    /// Builds an HTTP(S) target whose explicit opt-in permits isolated empty-bucket fixtures.
+    /// Builds an HTTP(S) target whose explicit opt-in permits isolated owned bucket/object fixtures.
     pub fn external_with_fixtures(root: std::path::PathBuf, endpoint: &str, ca_path: Option<&Path>) -> Result<Conn, SutError> {
         Self::external_configured(root, endpoint, ca_path, true)
     }

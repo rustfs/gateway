@@ -74,7 +74,7 @@ options:
   --root <dir>              corpus directory holding case.schema.json
   --endpoint <http(s)-url>  external target (raw HTTP/1.1)
   --allow-external-fixtures
-                            allow isolated empty-bucket setup and automatic cleanup
+                            allow isolated owned bucket/object setup and automatic cleanup
   --ca-cert <pem-path>      additional CA certificates for an HTTPS endpoint
   --baseline <file>         tolerate the failures this file records; fail only on a regression
   --json <file>             write the machine-readable report
@@ -351,7 +351,7 @@ pub struct Options {
     pub endpoint: Option<String>,
     /// Additional PEM-encoded roots for an HTTPS endpoint.
     pub ca_cert: Option<PathBuf>,
-    /// Explicit permission to create and automatically remove external empty-bucket fixtures.
+    /// Explicit permission to create and automatically remove external owned bucket/object fixtures.
     pub external_fixtures: bool,
     /// Baseline document.
     pub baseline: Option<PathBuf>,
