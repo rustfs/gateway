@@ -144,6 +144,53 @@ async fn enabled_versions_and_delete_markers_survive_restart() {
     assert_ne!(header_text(&after_delete, "x-amz-version-id").expect("a later version id"), marker_id);
 }
 
+/// Negative — an unconfigured backend omits Owner instead of serializing an empty owner record.
+#[tokio::test]
+async fn n_unconfigured_owner_is_absent_from_version_census() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "owner-absent").await;
+    assert_eq!(set_versioning(&service, "owner-absent", "Enabled").await.status(), 200);
+    assert_eq!(put(&service, "owner-absent", "key", b"body").await.status(), 200);
+
+    let census = exchange(&service, signed(http::Method::GET, "/owner-absent?versions", Bytes::new())).await;
+    let census_body = body(&census);
+    assert_eq!(census.status(), 200, "{census_body}");
+    assert!(!census_body.contains("<Owner>"), "{census_body}");
+}
+
+/// Positive — every object version and delete marker carries the backend's configured owner.
+#[tokio::test]
+async fn configured_owner_covers_every_version_and_delete_marker() {
+    let root = TestRoot::new();
+    let backend = Arc::new(
+        FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
+            .expect("a usable test root")
+            .with_owner("version-owner", "Version Owner"),
+    );
+    let (_, service) = service_with_backend(backend);
+    create_bucket(&service, "owned-versions").await;
+    assert_eq!(set_versioning(&service, "owned-versions", "Enabled").await.status(), 200);
+    assert_eq!(put(&service, "owned-versions", "key", b"one").await.status(), 200);
+    assert_eq!(put(&service, "owned-versions", "key", b"two").await.status(), 200);
+    assert_eq!(
+        exchange(&service, signed(http::Method::DELETE, "/owned-versions/key", Bytes::new()),)
+            .await
+            .status(),
+        204
+    );
+
+    let census = exchange(&service, signed(http::Method::GET, "/owned-versions?versions", Bytes::new())).await;
+    let census_body = body(&census);
+    assert_eq!(census.status(), 200, "{census_body}");
+    assert_eq!(census_body.matches("<ID>version-owner</ID>").count(), 3, "{census_body}");
+    assert_eq!(
+        census_body.matches("<DisplayName>Version Owner</DisplayName>").count(),
+        3,
+        "{census_body}"
+    );
+}
+
 /// Positive — suspension replaces only the null version and preserves prior opaque versions.
 #[tokio::test]
 async fn suspension_keeps_opaque_history_and_replaces_null_current() {

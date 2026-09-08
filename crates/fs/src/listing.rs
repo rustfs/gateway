@@ -26,7 +26,7 @@ use std::collections::BTreeSet;
 
 use rustfs_gateway::dto::{
     CommonPrefix, ListMultipartUploads, ListMultipartUploadsOutput, ListObjects, ListObjectsOutput, ListObjectsV2,
-    ListObjectsV2Output, MultipartUpload, Object,
+    ListObjectsV2Output, MultipartUpload, Object, Owner,
 };
 use rustfs_gateway::{
     CursorSpec, ETag, ErrorCode, Handler, HandlerError, HandlerResult, ObjectKey, Req, Resp, Timestamp, key_count,
@@ -143,7 +143,7 @@ fn marker_index(candidates: &[Candidate], marker: &str) -> usize {
     candidates.partition_point(|candidate| candidate.name().as_bytes() <= marker.as_bytes())
 }
 
-fn page_entries(page: &[Candidate]) -> Result<(Vec<Object>, Vec<CommonPrefix>), HandlerError> {
+fn page_entries(page: &[Candidate], owner: Option<&Owner>) -> Result<(Vec<Object>, Vec<CommonPrefix>), HandlerError> {
     let mut contents = Vec::new();
     let mut common_prefixes = Vec::new();
     for candidate in page {
@@ -154,6 +154,7 @@ fn page_entries(page: &[Candidate]) -> Result<(Vec<Object>, Vec<CommonPrefix>), 
                 e_tag: ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?,
                 size: record.size,
                 storage_class: record.storage_class.clone(),
+                owner: owner.cloned(),
                 ..Object::default()
             }),
             Candidate::CommonPrefix(prefix) => common_prefixes.push(CommonPrefix { prefix: prefix.clone() }),
@@ -186,7 +187,7 @@ impl Handler<ListObjects> for FsBackend {
         let next_marker = is_truncated
             .then(|| page.last().map(|candidate| candidate.name().to_owned()))
             .flatten();
-        let (contents, common_prefixes) = page_entries(page)?;
+        let (contents, common_prefixes) = page_entries(page, self.reported_owner())?;
 
         Ok(Resp::new(ListObjectsOutput {
             is_truncated,
@@ -235,7 +236,12 @@ impl Handler<ListObjectsV2> for FsBackend {
             .flatten()
             .map(Into::into);
 
-        let (contents, common_prefixes) = page_entries(page)?;
+        let owner = if input.fetch_owner.unwrap_or(false) {
+            self.reported_owner()
+        } else {
+            None
+        };
+        let (contents, common_prefixes) = page_entries(page, owner)?;
         let returned_count = key_count(contents.len(), common_prefixes.len());
 
         Ok(Resp::new(ListObjectsV2Output {

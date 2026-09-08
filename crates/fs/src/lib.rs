@@ -33,7 +33,7 @@ use rustfs_gateway::dto::{
     AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CopyObject,
     CreateBucket, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketLifecycle, DeleteObject,
     GetBucketLifecycleConfiguration, GetBucketLocation, GetBucketVersioning, GetObject, HeadBucket, HeadObject,
-    ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, ListPartsOutput, Part,
+    ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, ListPartsOutput, Owner, Part,
     PutBucketLifecycleConfiguration, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
@@ -168,6 +168,7 @@ pub struct FsBackend {
     root: PathBuf,
     region: String,
     regions: RegionSet,
+    owner: Option<Owner>,
     temporary_id: AtomicU64,
     version_lock: tokio::sync::Mutex<()>,
     clock: Arc<dyn Clock>,
@@ -210,6 +211,7 @@ impl FsBackend {
             root: std::fs::canonicalize(root.as_ref())?,
             region: US_EAST_1.to_owned(),
             regions,
+            owner: None,
             temporary_id: AtomicU64::new(0),
             version_lock: tokio::sync::Mutex::new(()),
             clock,
@@ -263,6 +265,23 @@ impl FsBackend {
         self.regions = RegionSet::new([normalized]).map_err(|_| invalid())?;
         self.region = normalized.to_owned();
         Ok(self)
+    }
+
+    /// Reports one fixed owner for every object stored in this backend.
+    ///
+    /// The filesystem backend is single-tenant per data root. Configuring the owner at assembly
+    /// time keeps listing responses independent of the identity that happened to request them.
+    #[must_use]
+    pub fn with_owner(mut self, id: impl Into<String>, display_name: impl Into<String>) -> Self {
+        self.owner = Some(Owner {
+            id: Some(id.into()),
+            display_name: Some(display_name.into()),
+        });
+        self
+    }
+
+    fn reported_owner(&self) -> Option<&Owner> {
+        self.owner.as_ref()
     }
 
     /// The one region this backend serves.

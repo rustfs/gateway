@@ -41,9 +41,13 @@ use crate::ownership::{BucketOwners, decide};
 /// The configured region is handed to the backend as well as to the authenticator: it is what
 /// `HeadBucket` and `GetBucketLocation` report, and a deployment whose signer and whose backend
 /// disagreed about where its buckets are would answer a client two different regions depending on
-/// which it asked first.
+/// which it asked first. The primary configured account is the owner of this single-tenant data
+/// root, so that same id and display name are installed once for every listing response.
 pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
-    let backend = FsBackend::open(&options.data)?.with_region(&options.region)?;
+    let (owner_id, display_name) = options.accounts.data_root_owner();
+    let backend = FsBackend::open(&options.data)?
+        .with_region(&options.region)?
+        .with_owner(owner_id, display_name);
     match options.lifecycle_debug_interval {
         Some(interval) => backend.with_lifecycle_debug_interval(interval),
         None => Ok(backend),
@@ -126,6 +130,7 @@ mod tests {
     const ALT_SECRET: &str = "gateway-alt-secret-for-a-throwaway-service";
     const MAIN_OWNER: &str = "s3gate-main";
     const ALT_OWNER: &str = "s3gate-alt";
+    const MAIN_DISPLAY_NAME: &str = "Main <Owner> & \"Friends\"";
 
     struct TestRoot(PathBuf);
 
@@ -159,7 +164,7 @@ mod tests {
             "--owner-id".to_owned(),
             MAIN_OWNER.to_owned(),
             "--display-name".to_owned(),
-            MAIN_OWNER.to_owned(),
+            MAIN_DISPLAY_NAME.to_owned(),
             "--alt-access-key".to_owned(),
             ALT_KEY.to_owned(),
             "--alt-secret-key".to_owned(),
@@ -417,6 +422,64 @@ mod tests {
         );
         let refused = exchange(&service, mismatched).await;
         assert_eq!(refused.status(), 403, "{}", body_of(&refused));
+    }
+
+    /// Positive — the launcher-provided bucket owner reaches the serialized object entry, with
+    /// XML metacharacters escaped by the production response encoder.
+    #[tokio::test]
+    async fn configured_owner_reaches_list_objects_v2_wire() {
+        let root = TestRoot::new();
+        let options = two_identity_options(&root, &[]);
+        let (_backend, service) = assembled(&options);
+
+        assert_eq!(
+            exchange(&service, as_main(http::Method::PUT, "/reported-owner", Bytes::new()))
+                .await
+                .status(),
+            200
+        );
+        assert_eq!(
+            exchange(&service, as_main(http::Method::PUT, "/reported-owner/key", Bytes::from_static(b"body")),)
+                .await
+                .status(),
+            200
+        );
+
+        let listed = exchange(
+            &service,
+            as_main(http::Method::GET, "/reported-owner?list-type=2&fetch-owner=true", Bytes::new()),
+        )
+        .await;
+        let body = body_of(&listed);
+        assert_eq!(listed.status(), 200, "{body}");
+        assert!(body.contains("<ID>s3gate-main</ID>"), "{body}");
+        assert!(body.contains("<DisplayName>Main &lt;Owner&gt; &amp; \"Friends\"</DisplayName>"), "{body}");
+    }
+
+    /// Negative — configuring an owner does not bypass the ListObjectsV2 fetch-owner switch.
+    #[tokio::test]
+    async fn n_list_objects_v2_omits_owner_without_fetch_owner() {
+        let root = TestRoot::new();
+        let options = two_identity_options(&root, &[]);
+        let (_backend, service) = assembled(&options);
+
+        assert_eq!(
+            exchange(&service, as_main(http::Method::PUT, "/owner-gated", Bytes::new()))
+                .await
+                .status(),
+            200
+        );
+        assert_eq!(
+            exchange(&service, as_main(http::Method::PUT, "/owner-gated/key", Bytes::from_static(b"body")),)
+                .await
+                .status(),
+            200
+        );
+
+        let listed = exchange(&service, as_main(http::Method::GET, "/owner-gated?list-type=2", Bytes::new())).await;
+        let body = body_of(&listed);
+        assert_eq!(listed.status(), 200, "{body}");
+        assert!(!body.contains("<Owner>"), "{body}");
     }
 
     /// The same document and the same checksum the reference backend's own lifecycle tests use, so

@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! ListObjectsV2 production-handler and persisted-pagination evidence.
+//! ListObjects V1/V2 production-handler and persisted-pagination evidence.
 //!
 //! Responsible for: proving byte-ordered current-object pages, delimiter rollup, opaque cursor
 //! scope, URL encoding, restart recovery, and unsafe-storage refusals through signed requests.
-//! NOT responsible for: ListObjects V1, upload listing, lifecycle, or multipart completion.
+//! NOT responsible for: upload listing, lifecycle, or multipart completion.
 //! Upstream: the shared CRUD service fixture. Downstream: the FS crate verification gate.
 
 use super::*;
@@ -42,6 +42,39 @@ fn elements(body: &[u8], name: &str) -> Vec<String> {
 async fn put(service: &S3Service, bucket: &str, key: &str, bytes: &'static [u8]) {
     let response = exchange(service, signed(http::Method::PUT, &format!("/{bucket}/{key}"), Bytes::from_static(bytes))).await;
     assert_eq!(response.status(), 200, "{}", String::from_utf8_lossy(response.body()));
+}
+
+fn owner_service(root: &TestRoot) -> (Arc<FsBackend>, S3Service) {
+    let backend = Arc::new(
+        FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
+            .expect("a usable test root")
+            .with_owner("bucket<&owner", "Bucket <Display> & Name"),
+    );
+    let credentials = Arc::new(
+        StaticCredentials::new()
+            .with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid primary fixture credentials"))
+            .with(Credentials::new("AKIDALTERNATE", b"alternate").expect("valid alternate fixture credentials")),
+    );
+    service_with_backend_and_credentials(backend, credentials)
+}
+
+/// Negative — the authenticated requester never replaces the backend's fixed bucket owner.
+#[tokio::test]
+async fn n_two_identities_report_the_same_escaped_bucket_owner() {
+    let root = TestRoot::new();
+    let (_, service) = owner_service(&root);
+    create_bucket(&service, "shared-owner").await;
+    put(&service, "shared-owner", "key", b"body").await;
+
+    for request in [
+        signed_as("AKIDEXAMPLE", b"secret", http::Method::GET, "/shared-owner", Bytes::new()),
+        signed_as("AKIDALTERNATE", b"alternate", http::Method::GET, "/shared-owner", Bytes::new()),
+    ] {
+        let listed = exchange(&service, request).await;
+        assert_eq!(listed.status(), 200, "{}", String::from_utf8_lossy(listed.body()));
+        assert_eq!(elements(listed.body(), "ID"), ["bucket&lt;&amp;owner"]);
+        assert_eq!(elements(listed.body(), "DisplayName"), ["Bucket &lt;Display&gt; &amp; Name"]);
+    }
 }
 
 /// Positive — the V1 marker resumes after either an object or rolled-up prefix after restart.
