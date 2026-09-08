@@ -246,7 +246,7 @@ impl Conn {
         let Some(sign) = &wire.sign else {
             return Ok(Head {
                 bytes: raw.to_vec(),
-                declared_length: 0,
+                declared_length: parse_head(raw).map_or(0, |head| declared_content_length(&head.headers).unwrap_or(0)),
             });
         };
         let parsed = parse_head(raw).ok_or_else(|| {
