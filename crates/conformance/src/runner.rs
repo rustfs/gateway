@@ -181,97 +181,106 @@ fn run_case(
         .and_then(|meta| meta.read("caseMeta.timeout_ms"))
         .and_then(Value::as_integer);
     let started = std::time::Instant::now();
-    let concurrent = document
-        .read("connection")
-        .and_then(|connection| connection.read("connection.concurrent"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if concurrent {
-        if let Err(error) =
-            run_concurrent_exchanges(case, sut, options, goldens, &mut outcome, &mut captures, document, timeout_ms)
-        {
-            return not_run(outcome, &error, notes);
-        }
-    } else {
-        for exchange in case.exchanges() {
-            // The pause a multi-exchange case asks for between two requests. Honoured by actually
-            // waiting: a declared pause that the runner skipped would put the second request on the
-            // wire at a moment the case did not describe.
-            if let Some(delay_ms) = exchange.delay_ms.filter(|delay| *delay > 0) {
-                std::thread::sleep(std::time::Duration::from_millis(delay_ms.unsigned_abs()));
+    let mut outcome = 'prepared: {
+        let concurrent = document
+            .read("connection")
+            .and_then(|connection| connection.read("connection.concurrent"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if concurrent {
+            if let Err(error) =
+                run_concurrent_exchanges(case, sut, options, goldens, &mut outcome, &mut captures, document, timeout_ms)
+            {
+                break 'prepared not_run(outcome, &error, notes);
             }
-            let Some(request) = exchange.request else { continue };
-            let request = match interpolate_value(request, &captures) {
-                Ok(request) => request,
-                Err(message) => {
-                    outcome.diagnostics.push(Diagnostic::deny(
-                        "runner/interpolation",
-                        &format!("{}/request", exchange.pointer),
-                        message,
-                    ));
-                    outcome.verdict = Verdict::Failed;
-                    return outcome;
+        } else {
+            for exchange in case.exchanges() {
+                // The pause a multi-exchange case asks for between two requests. Honoured by actually
+                // waiting: a declared pause that the runner skipped would put the second request on the
+                // wire at a moment the case did not describe.
+                if let Some(delay_ms) = exchange.delay_ms.filter(|delay| *delay > 0) {
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms.unsigned_abs()));
                 }
-            };
-            for attempt in 0..exchange.repeat {
-                let plan = ExchangePlan {
-                    case_id: &case.id,
-                    index: exchange.index,
-                    request: request.clone(),
-                    clock: document.read("clock"),
-                    connection: document.read("connection"),
-                    timeout_ms,
-                    transport: options.transport,
-                    profile: options.profile,
-                };
-                let observed = match sut.exchange(&plan) {
-                    Ok(observed) => observed,
-                    Err(error) => return not_run(outcome, &error, notes),
-                };
-                // A transport that had to produce part of the record some way other than by measuring
-                // it says so here, and the case carries the warning. A green line whose assertion
-                // could not have failed is the defect this suite keeps regrowing.
-                for note in &observed.notes {
-                    outcome.diagnostics.push(Diagnostic::warn(
-                        "harness/by-construction",
-                        &format!("{}/expect", exchange.pointer),
-                        format!("exchange {}, attempt {}: {note}", exchange.label(), attempt + 1),
-                    ));
-                }
-                let Some(expectation) = exchange.expect else { continue };
-                // The expectation is interpolated on the same terms as the request, and for the same
-                // reason: an assertion naming `${capture.x}` that reached the comparison unsubstituted
-                // would be judged against the literal reference. On a `contains` that reads as a red
-                // case; on a `not_contains` it reads as a green one and can never fail. Substitution
-                // happens here rather than once per exchange because `captures` grows as the exchanges
-                // run, and an expectation may only name a value an *earlier* exchange bound — this
-                // exchange's own `expect.capture` is collected below, after the judgement.
-                let expectation = match interpolate_value(expectation, &captures) {
-                    Ok(expectation) => expectation,
+                let Some(request) = exchange.request else { continue };
+                let request = match interpolate_value(request, &captures) {
+                    Ok(request) => request,
                     Err(message) => {
                         outcome.diagnostics.push(Diagnostic::deny(
                             "runner/interpolation",
-                            &format!("{}/expect", exchange.pointer),
+                            &format!("{}/request", exchange.pointer),
                             message,
                         ));
                         outcome.verdict = Verdict::Failed;
-                        return outcome;
+                        break 'prepared outcome;
                     }
                 };
-                let judgement = expect::judge(&expectation, &observed, &format!("{}/expect", exchange.pointer), goldens);
-                for mut diagnostic in judgement.diagnostics {
-                    diagnostic.message =
-                        format!("exchange {}, attempt {}: {}", exchange.label(), attempt + 1, diagnostic.message);
-                    outcome.diagnostics.push(diagnostic);
+                for attempt in 0..exchange.repeat {
+                    let plan = ExchangePlan {
+                        case_id: &case.id,
+                        index: exchange.index,
+                        request: request.clone(),
+                        clock: document.read("clock"),
+                        connection: document.read("connection"),
+                        timeout_ms,
+                        transport: options.transport,
+                        profile: options.profile,
+                    };
+                    let observed = match sut.exchange(&plan) {
+                        Ok(observed) => observed,
+                        Err(error) => break 'prepared not_run(outcome, &error, notes),
+                    };
+                    // A transport that had to produce part of the record some way other than by measuring
+                    // it says so here, and the case carries the warning. A green line whose assertion
+                    // could not have failed is the defect this suite keeps regrowing.
+                    for note in &observed.notes {
+                        outcome.diagnostics.push(Diagnostic::warn(
+                            "harness/by-construction",
+                            &format!("{}/expect", exchange.pointer),
+                            format!("exchange {}, attempt {}: {note}", exchange.label(), attempt + 1),
+                        ));
+                    }
+                    let Some(expectation) = exchange.expect else { continue };
+                    // The expectation is interpolated on the same terms as the request, and for the same
+                    // reason: an assertion naming `${capture.x}` that reached the comparison unsubstituted
+                    // would be judged against the literal reference. On a `contains` that reads as a red
+                    // case; on a `not_contains` it reads as a green one and can never fail. Substitution
+                    // happens here rather than once per exchange because `captures` grows as the exchanges
+                    // run, and an expectation may only name a value an *earlier* exchange bound — this
+                    // exchange's own `expect.capture` is collected below, after the judgement.
+                    let expectation = match interpolate_value(expectation, &captures) {
+                        Ok(expectation) => expectation,
+                        Err(message) => {
+                            outcome.diagnostics.push(Diagnostic::deny(
+                                "runner/interpolation",
+                                &format!("{}/expect", exchange.pointer),
+                                message,
+                            ));
+                            outcome.verdict = Verdict::Failed;
+                            break 'prepared outcome;
+                        }
+                    };
+                    let judgement = expect::judge(&expectation, &observed, &format!("{}/expect", exchange.pointer), goldens);
+                    for mut diagnostic in judgement.diagnostics {
+                        diagnostic.message =
+                            format!("exchange {}, attempt {}: {}", exchange.label(), attempt + 1, diagnostic.message);
+                        outcome.diagnostics.push(diagnostic);
+                    }
+                    captures.extend(judgement.captures);
                 }
-                captures.extend(judgement.captures);
             }
         }
-    }
+        outcome.verdict = if outcome.diagnostics.iter().any(|d| d.severity == Severity::Deny) {
+            Verdict::Failed
+        } else {
+            Verdict::Passed
+        };
+        outcome
+    };
     if let Err(error) = sut.finish(&case.id) {
         outcome
             .diagnostics
             .push(Diagnostic::deny("runner/cleanup", "", error.to_string()));
+        outcome.verdict = Verdict::Failed;
     }
     // `case.timeout_ms` is a whole-case budget, and the schema says exceeding it is a case failure
     // of kind `hang` rather than an environment error. Enforced here rather than in a transport,
@@ -284,14 +293,9 @@ fn run_case(
                 "/case/timeout_ms",
                 format!("the case took {elapsed}ms and declares a {limit}ms budget"),
             ));
+            outcome.verdict = Verdict::Failed;
         }
     }
-
-    outcome.verdict = if outcome.diagnostics.iter().any(|d| d.severity == Severity::Deny) {
-        Verdict::Failed
-    } else {
-        Verdict::Passed
-    };
     outcome
 }
 
@@ -566,5 +570,7 @@ fn glob_prefix(pattern: &[char], text: &[char]) -> bool {
     }
 }
 
+#[cfg(test)]
+mod lifecycle_tests;
 #[cfg(test)]
 mod tests;
