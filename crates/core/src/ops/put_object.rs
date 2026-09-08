@@ -31,10 +31,9 @@
 //! cluster that differs between operations, which is exactly why it is declared and not inferred.
 //! The evaluation call is not here, for the reason recorded in [`crate::ops::get_object`].
 //!
-//! `PutObject` is the operation that makes the POST-policy shape interesting: a browser upload
-//! reaches it through a signed form rather than a header signature. The floor here stays
-//! header-only, because widening it is a decision about a deployment, and the default that is
-//! never wrong is the narrow one.
+//! `PutObject` is the operation that makes both browser POST policy and presigned upload shapes
+//! interesting. A browser upload reaches it through a signed form, while SDKs use a presigned
+//! `PUT`; the floor admits the latter without admitting presigned access to other write operations.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{PutObject, PutObjectInput, PutObjectOutput};
@@ -61,8 +60,8 @@ static SPEC: OperationSpec = OperationSpec::standard("PutObject")
     .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
     .build();
 
-/// Header signatures only, and not privileged.
-static FLOOR: OperationFloor = OperationFloor::builtin("PutObject", SigService::S3);
+/// Header and presigned signatures, and not privileged.
+static FLOOR: OperationFloor = OperationFloor::builtin_presigned("PutObject", SigService::S3);
 
 impl Operation for PutObject {
     const NAME: &'static str = "PutObject";
