@@ -21,7 +21,7 @@
 //! [`super::Conn`].
 
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use super::external_endpoint::ExternalEndpoint;
 use super::external_pacing::{validate_authored_steps, write_authored_body};
@@ -86,6 +86,10 @@ impl Conn {
             ));
         }
         let budget = budget_of(plan.timeout_ms);
+        let started = Instant::now();
+        let deadline = started
+            .checked_add(budget)
+            .ok_or_else(|| SutError::Environment("external endpoint setup deadline cannot be represented".to_owned()))?;
         let cleartext = !endpoint.is_tls();
         validate_authored_steps(&wire, cleartext, budget)?;
         let head = self.head(&wire, &request_time)?;
@@ -98,13 +102,13 @@ impl Conn {
         }
         let fresh = !reuse || existing.is_none_or(|(state, _)| state != ConnectionState::Open);
         if fresh {
-            self.connection = Some(endpoint.open()?);
+            self.connection = Some(endpoint.open(deadline)?);
         }
         let connection = self
             .connection
             .as_mut()
             .ok_or_else(|| SutError::Environment("external endpoint connection was not opened".to_owned()))?;
-        let result = execute_socket_exchange(connection, &wire, &head, budget, cleartext)?;
+        let result = execute_socket_exchange(connection, &wire, &head, started, deadline, cleartext)?;
         if result.torn_down || endpoint.is_tls() {
             self.connection = None;
         }
@@ -116,13 +120,15 @@ fn execute_socket_exchange(
     connection: &mut Connection,
     wire: &crate::inprocess::Wire,
     head: &Head,
-    budget: Duration,
+    started: Instant,
+    deadline: Instant,
     cleartext: bool,
 ) -> Result<super::exchange::SocketExchangeResult, SutError> {
+    let budget = deadline
+        .checked_duration_since(started)
+        .ok_or_else(|| SutError::Environment("external endpoint exchange deadline precedes its start".to_owned()))?;
     validate_authored_steps(wire, cleartext, budget)?;
     connection.start_exchange();
-    let started = Instant::now();
-    let deadline = started + budget;
     connection.write(&head.bytes)?;
     let progress = write_authored_body(connection, wire, head.declared_length, deadline)?;
     let discard_unfinished_request = progress.measured_at_response && !progress.fully_sent;
@@ -221,6 +227,7 @@ mod tests {
     use std::process::ExitCode;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
+    use std::time::Duration;
 
     use crate::cli::{self, exit};
     use crate::sut::{Profile, Transport};
@@ -298,13 +305,16 @@ mod tests {
     fn execute_response_result(response: &'static [u8]) -> Result<super::super::exchange::SocketExchangeResult, SutError> {
         let (url, server) = responding_server(response);
         let endpoint = ExternalEndpoint::parse(&url).expect("local endpoint");
-        let mut connection = Connection::open(endpoint.address()).expect("connect client");
+        let mut connection = endpoint
+            .open(Instant::now() + Duration::from_secs(2))
+            .expect("connect client");
         let wire = empty_wire();
         let head = Head {
             bytes: format!("GET / HTTP/1.1\r\nHost: {}\r\n\r\n", endpoint.authority()).into_bytes(),
             declared_length: 0,
         };
-        let result = execute_socket_exchange(&mut connection, &wire, &head, Duration::from_secs(2), true);
+        let started = Instant::now();
+        let result = execute_socket_exchange(&mut connection, &wire, &head, started, started + Duration::from_secs(2), true);
         let _ = server.join().expect("server exits");
         result
     }
@@ -422,6 +432,7 @@ status = {status}
         let mut wire = empty_wire();
         wire.raw_head = Some(raw.clone());
         wire.steps.push(ChunkStep::Data(b"part".to_vec(), 0));
+        let started = Instant::now();
         let result = execute_socket_exchange(
             &mut connection,
             &wire,
@@ -429,7 +440,8 @@ status = {status}
                 bytes: raw,
                 declared_length: 0,
             },
-            Duration::from_secs(2),
+            started,
+            started + Duration::from_secs(2),
             true,
         )
         .expect("external exchange");
@@ -573,7 +585,8 @@ status = {status}
             bytes: b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n".to_vec(),
             declared_length: 0,
         };
-        let error = execute_socket_exchange(&mut connection, &wire, &head, Duration::from_secs(2), true)
+        let started = Instant::now();
+        let error = execute_socket_exchange(&mut connection, &wire, &head, started, started + Duration::from_secs(2), true)
             .err()
             .expect("segmented surplus byte must not be discarded");
         server.join().expect("server exits");
@@ -777,7 +790,7 @@ status = {status}
         drop(listener);
         let endpoint = ExternalEndpoint::parse(&format!("http://{address}")).expect("local endpoint");
 
-        let error = match Connection::open(endpoint.address()) {
+        let error = match endpoint.open(Instant::now() + Duration::from_secs(1)) {
             Ok(_) => panic!("nothing is listening"),
             Err(error) => error,
         };
