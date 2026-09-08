@@ -15,7 +15,7 @@
 //! Signed production-service evidence for persistent object versioning.
 //!
 //! Responsible for: enabled/suspended transitions, opaque versions, delete markers, restart
-//! persistence, deterministic census ordering, and corrupted or unsafe storage refusal.
+//! persistence, deterministic census ordering, and pre-publication refusal of unsafe legacy paths.
 //! NOT responsible for: lifecycle, multipart version publication, copy, tags, or ordinary listing.
 //! Upstream: the shared CRUD service fixture. Downstream: the crate verification gate.
 
@@ -311,4 +311,97 @@ async fn symlinked_version_storage_is_refused() {
     let response = put(&service, "linked-versions", "key", b"outside").await;
     assert_eq!(response.status(), 400);
     assert!(!outside.0.join("body").exists());
+}
+
+/// Negative — a legacy symlink is refused before a replacement null version becomes current.
+#[cfg(unix)]
+#[tokio::test]
+async fn n_put_preflights_symlinked_legacy_path_before_publishing_null_version() {
+    use std::os::unix::fs::symlink;
+
+    let root = TestRoot::new();
+    let outside = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "legacy-link-put").await;
+    assert_eq!(put(&service, "legacy-link-put", "key", b"previous").await.status(), 200);
+
+    let outside_file = outside.0.join("outside");
+    std::fs::write(&outside_file, b"outside sentinel").expect("the outside fixture is writable");
+    let legacy = legacy_object_path(&root, "legacy-link-put", "key");
+    symlink(&outside_file, &legacy).expect("the legacy fixture symlink is creatable");
+
+    let failed = put(&service, "legacy-link-put", "key", b"must-not-publish").await;
+    assert_eq!(failed.status(), 400, "{}", body(&failed));
+    assert!(body(&failed).contains("<Code>InvalidRequest</Code>"));
+    assert_eq!(
+        std::fs::read(&outside_file).expect("the outside fixture remains readable"),
+        b"outside sentinel"
+    );
+
+    let current = exchange(&service, signed(http::Method::GET, "/legacy-link-put/key", Bytes::new())).await;
+    assert_eq!(current.status(), 200, "{}", body(&current));
+    assert_eq!(current.body().as_ref(), b"previous");
+}
+
+/// Negative — another unsafe legacy file type is refused without replacing the readable object.
+#[tokio::test]
+async fn n_put_preflights_non_file_legacy_path_before_publishing_null_version() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "legacy-directory-put").await;
+    assert_eq!(put(&service, "legacy-directory-put", "key", b"previous").await.status(), 200);
+
+    let legacy = legacy_object_path(&root, "legacy-directory-put", "key");
+    std::fs::create_dir(&legacy).expect("the unsafe legacy directory is creatable");
+    let failed = put(&service, "legacy-directory-put", "key", b"must-not-publish").await;
+    assert_eq!(failed.status(), 400, "{}", body(&failed));
+    assert!(legacy.is_dir());
+
+    let current = exchange(&service, signed(http::Method::GET, "/legacy-directory-put/key", Bytes::new())).await;
+    assert_eq!(current.status(), 200, "{}", body(&current));
+    assert_eq!(current.body().as_ref(), b"previous");
+}
+
+/// Negative — a publication failure after a safe preflight retains the prior readable version.
+#[tokio::test]
+async fn n_put_publication_failure_retains_the_previous_readable_object() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "legacy-publish-failure").await;
+    assert_eq!(put(&service, "legacy-publish-failure", "key", b"previous").await.status(), 200);
+    let legacy = legacy_object_path(&root, "legacy-publish-failure", "key");
+    std::fs::write(&legacy, b"safe legacy bytes").expect("the safe legacy fixture is writable");
+
+    let bucket = root.0.join(format!("b-{}", hex::encode("legacy-publish-failure")));
+    let sequence = bucket.join("version-sequence");
+    std::fs::remove_file(&sequence).expect("the sequence fixture is removable");
+    std::fs::create_dir(&sequence).expect("the unsafe sequence fixture is creatable");
+
+    let failed = put(&service, "legacy-publish-failure", "key", b"must-not-publish").await;
+    assert_eq!(failed.status(), 400, "{}", body(&failed));
+    assert!(legacy.is_file());
+
+    let current = exchange(&service, signed(http::Method::GET, "/legacy-publish-failure/key", Bytes::new())).await;
+    assert_eq!(current.status(), 200, "{}", body(&current));
+    assert_eq!(current.body().as_ref(), b"previous");
+}
+
+/// Positive — a safe legacy regular file is retired after its replacement is published.
+#[tokio::test]
+async fn put_retires_a_safe_legacy_file_after_publishing_its_replacement() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "legacy-regular-put").await;
+    let legacy = legacy_object_path(&root, "legacy-regular-put", "key");
+    std::fs::write(&legacy, b"legacy bytes").expect("the safe legacy fixture is writable");
+    let before = exchange(&service, signed(http::Method::GET, "/legacy-regular-put/key", Bytes::new())).await;
+    assert_eq!(before.status(), 200);
+    assert_eq!(before.body().as_ref(), b"legacy bytes");
+
+    let stored = put(&service, "legacy-regular-put", "key", b"replacement").await;
+    assert_eq!(stored.status(), 200, "{}", body(&stored));
+    assert!(!legacy.exists());
+    let current = exchange(&service, signed(http::Method::GET, "/legacy-regular-put/key", Bytes::new())).await;
+    assert_eq!(current.status(), 200);
+    assert_eq!(current.body().as_ref(), b"replacement");
 }

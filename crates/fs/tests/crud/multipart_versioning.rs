@@ -15,7 +15,7 @@
 //! Production multipart-version publication evidence for the filesystem reference backend.
 //!
 //! Responsible for: proving that completed uploads enter the same Enabled/Suspended/null version
-//! lineage as ordinary object writes and remain addressable after storage is reopened.
+//! lineage as ordinary object writes, including refusal before unsafe legacy-path replacement.
 //! NOT responsible for: minimum-part sizing, checksum negotiation, lifecycle, or upload-id minting.
 //! Upstream: the shared CRUD service fixture and persistent version authority. Downstream: the
 //! crate verification gate.
@@ -248,5 +248,43 @@ async fn n_invalid_part_creates_no_version_record() {
     let versions = exchange(&service, signed(http::Method::GET, "/mpu-invalid?versions", Bytes::new())).await;
     assert!(!String::from_utf8_lossy(versions.body()).contains("<Version>"));
     let uploads = exchange(&service, signed(http::Method::GET, "/mpu-invalid?uploads", Bytes::new())).await;
+    assert!(String::from_utf8_lossy(uploads.body()).contains(&upload_id));
+}
+
+/// Negative — completion rejects a legacy symlink before replacing the readable null version.
+#[cfg(unix)]
+#[tokio::test]
+async fn n_completion_preflights_symlinked_legacy_path_before_publishing_null_version() {
+    use std::os::unix::fs::symlink;
+
+    let root = TestRoot::new();
+    let outside = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "mpu-legacy-link").await;
+    let previous = exchange(
+        &service,
+        signed(http::Method::PUT, "/mpu-legacy-link/key", Bytes::from_static(b"previous")),
+    )
+    .await;
+    assert_eq!(previous.status(), 200);
+    let (upload_id, part) = start_one(&service, "mpu-legacy-link", "key", b"must-not-publish").await;
+
+    let outside_file = outside.0.join("outside");
+    std::fs::write(&outside_file, b"outside sentinel").expect("the outside fixture is writable");
+    let legacy = legacy_object_path(&root, "mpu-legacy-link", "key");
+    symlink(&outside_file, &legacy).expect("the legacy fixture symlink is creatable");
+
+    let failed = complete(&service, "mpu-legacy-link", "key", &upload_id, &[(1, &part)]).await;
+    assert_eq!(failed.status(), 400, "{}", String::from_utf8_lossy(failed.body()));
+    assert!(String::from_utf8_lossy(failed.body()).contains("<Code>InvalidRequest</Code>"));
+    assert_eq!(
+        std::fs::read(&outside_file).expect("the outside fixture remains readable"),
+        b"outside sentinel"
+    );
+
+    let current = exchange(&service, signed(http::Method::GET, "/mpu-legacy-link/key", Bytes::new())).await;
+    assert_eq!(current.status(), 200);
+    assert_eq!(current.body().as_ref(), b"previous");
+    let uploads = exchange(&service, signed(http::Method::GET, "/mpu-legacy-link?uploads", Bytes::new())).await;
     assert!(String::from_utf8_lossy(uploads.body()).contains(&upload_id));
 }
