@@ -14,9 +14,9 @@
 
 //! Persistent multipart-upload record authority for the filesystem reference backend.
 //!
-//! Responsible for: decoding one upload record, validating its filesystem components, persisting
-//! multipart checksum negotiation and the user metadata the initiating request carried, and
-//! enumerating active uploads without following symbolic links.
+//! Responsible for: durably allocating opaque upload IDs, decoding one upload record, validating
+//! its filesystem components, persisting multipart checksum negotiation and the user metadata the
+//! initiating request carried, and enumerating active uploads without following symbolic links.
 //! NOT responsible for: pagination, delimiter rollup, object publication, or lifecycle.
 //! Upstream: upload initiation and retirement handlers. Downstream: upload capability resolution,
 //! completion-time object publication, and `ListMultipartUploads`.
@@ -29,8 +29,18 @@
 //! reference). Losing them at initiation therefore loses them permanently, which is why the
 //! initiating map is persisted into the upload record and read back at completion rather than
 //! being taken from the request that finishes the upload.
+//!
+//! # Why allocation has its own root authority
+//!
+//! Upload directories are capability storage, not an index from which the next capability may be
+//! inferred. A bucket-scoped sequence is advanced and synchronized before its ID is returned, so
+//! a reopen cannot replay an active capability and allocation never enumerates upload directories.
+//! Upload IDs are resolved together with their bucket and key, so that bucket is the complete
+//! uniqueness scope and the counter can live beside the upload records whose scanner already
+//! ignores exact dot-prefixed authority files.
 
 use std::collections::BTreeMap;
+use std::io::{self, Write as _};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
@@ -40,6 +50,84 @@ use tokio::io::AsyncWriteExt as _;
 
 use super::records::{decode_metadata_section, encode_metadata_section, validate_user_metadata};
 use super::{FsBackend, PARTS_DIR, UPLOAD_RECORD, storage_error};
+
+const UPLOAD_ID_SEQUENCE: &str = ".multipart-upload-id-sequence";
+const UPLOAD_ID_SEQUENCE_TEMP: &str = ".tmp-multipart-upload-id-sequence";
+
+fn initialize_upload_id_sequence(uploads: &Path) -> io::Result<()> {
+    let sequence = uploads.join(UPLOAD_ID_SEQUENCE);
+    match std::fs::symlink_metadata(&sequence) {
+        Ok(_) => read_upload_id_sequence(uploads).map(|_| ()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(sequence)?;
+            file.write_all(b"0\n")?;
+            file.sync_all()
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn read_upload_id_sequence(uploads: &Path) -> io::Result<u64> {
+    let sequence = uploads.join(UPLOAD_ID_SEQUENCE);
+    let metadata = std::fs::symlink_metadata(&sequence)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(sequence_error());
+    }
+    let encoded = std::fs::read_to_string(sequence)?;
+    let digits = encoded.strip_suffix('\n').ok_or_else(sequence_error)?;
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) || (digits.len() > 1 && digits.starts_with('0')) {
+        return Err(sequence_error());
+    }
+    digits.parse().map_err(|_| sequence_error())
+}
+
+fn persist_upload_id_sequence(uploads: &Path, next: u64) -> io::Result<()> {
+    let sequence = uploads.join(UPLOAD_ID_SEQUENCE);
+    let temporary = uploads.join(UPLOAD_ID_SEQUENCE_TEMP);
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+    let written = (|| {
+        file.write_all(format!("{next}\n").as_bytes())?;
+        file.sync_all()?;
+        let metadata = std::fs::symlink_metadata(&sequence)?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(sequence_error());
+        }
+        std::fs::rename(&temporary, sequence)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(temporary);
+    }
+    written
+}
+
+fn sequence_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "the multipart upload ID sequence is not a safe canonical counter",
+    )
+}
+
+fn validate_upload_id_sequence_for_delete(uploads: &Path) -> io::Result<bool> {
+    let sequence = uploads.join(UPLOAD_ID_SEQUENCE);
+    match std::fs::symlink_metadata(&sequence) {
+        Ok(_) => {
+            read_upload_id_sequence(uploads)?;
+            Ok(true)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+fn validate_upload_id_sequence_temp_for_delete(uploads: &Path) -> io::Result<bool> {
+    let temporary = uploads.join(UPLOAD_ID_SEQUENCE_TEMP);
+    match std::fs::symlink_metadata(temporary) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
+        Ok(_) => Err(sequence_error()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct UploadChecksum {
@@ -211,6 +299,50 @@ impl RecordedUpload for UploadRecord {
 }
 
 impl FsBackend {
+    async fn allocate_upload_id(&self, bucket: &str) -> Result<String, HandlerError> {
+        let _guard = self.upload_id_lock.lock().await;
+        let uploads = self.uploads_path(bucket);
+        initialize_upload_id_sequence(&uploads).map_err(|_| storage_error())?;
+        let current = read_upload_id_sequence(&uploads).map_err(|_| storage_error())?;
+        let next = current.checked_add(1).ok_or_else(storage_error)?;
+        persist_upload_id_sequence(&uploads, next).map_err(|_| storage_error())?;
+        Ok(format!("fs-v2-{current:016x}"))
+    }
+
+    pub(super) fn upload_directory_is_empty_for_delete(&self, bucket: &str) -> Result<bool, HandlerError> {
+        let uploads = self.uploads_path(bucket);
+        let entries = std::fs::read_dir(&uploads).map_err(|_| storage_error())?;
+        for entry in entries {
+            let entry = entry.map_err(|_| storage_error())?;
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                return Ok(false);
+            };
+            match name.as_str() {
+                UPLOAD_ID_SEQUENCE => {
+                    validate_upload_id_sequence_for_delete(&uploads).map_err(|_| storage_error())?;
+                }
+                UPLOAD_ID_SEQUENCE_TEMP => {
+                    validate_upload_id_sequence_temp_for_delete(&uploads).map_err(|_| storage_error())?;
+                }
+                _ => return Ok(false),
+            }
+        }
+        Ok(true)
+    }
+
+    pub(super) fn remove_upload_id_authority_for_delete(&self, bucket: &str) -> Result<(), HandlerError> {
+        let uploads = self.uploads_path(bucket);
+        let sequence_exists = validate_upload_id_sequence_for_delete(&uploads).map_err(|_| storage_error())?;
+        let temporary_exists = validate_upload_id_sequence_temp_for_delete(&uploads).map_err(|_| storage_error())?;
+        if temporary_exists {
+            std::fs::remove_file(uploads.join(UPLOAD_ID_SEQUENCE_TEMP)).map_err(|_| storage_error())?;
+        }
+        if sequence_exists {
+            std::fs::remove_file(uploads.join(UPLOAD_ID_SEQUENCE)).map_err(|_| storage_error())?;
+        }
+        Ok(())
+    }
+
     fn decode_upload_record(&self, upload: &Path) -> Result<UploadRecord, HandlerError> {
         let upload_metadata = std::fs::symlink_metadata(upload).map_err(|_| storage_error())?;
         if !upload_metadata.is_dir() || upload_metadata.file_type().is_symlink() {
@@ -280,7 +412,7 @@ impl FsBackend {
         validate_user_metadata(metadata)?;
         self.require_bucket(bucket.as_str()).await?;
         let uploads = self.uploads_path(bucket.as_str());
-        let upload_id = format!("fs-{:x}-{:x}", std::process::id(), self.temporary_id.fetch_add(1, Ordering::Relaxed));
+        let upload_id = self.allocate_upload_id(bucket.as_str()).await?;
         let destination = self.upload_path(bucket.as_str(), &upload_id);
         if tokio::fs::symlink_metadata(&destination).await.is_ok() {
             return Err(storage_error());
