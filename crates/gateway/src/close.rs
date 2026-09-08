@@ -224,6 +224,24 @@ pub const fn after_undeclared_length() -> ConnectionIntent {
     ConnectionIntent::Close
 }
 
+/// Attaches the lingering-read obligation for either shape of request data that may still arrive.
+///
+/// A wire-reader proof means a framed body has not reached EOF. `MissingContentLength` is the
+/// complementary framing disagreement: HTTP says the request is empty, while the 411 proves the
+/// peer intended to send a body whose unframed octets may arrive after the response.
+pub(crate) fn attach_lingering_read<B>(
+    code: Option<&ErrorCode>,
+    proof: Option<crate::wire_read::RequestBodyUnfinished>,
+    response: &mut http::Response<B>,
+) {
+    #[cfg(feature = "server")]
+    if proof.is_some() || code.is_some_and(|code| *code == ErrorCode::MISSING_CONTENT_LENGTH) {
+        response.extensions_mut().insert(rustfs_gateway_server::UnfinishedRequestBody);
+    }
+    #[cfg(not(feature = "server"))]
+    let _ = (code, proof, response);
+}
+
 /// The verdict a refusal's own error code carries, for the stages that produce one without a
 /// [`WireReject`].
 ///

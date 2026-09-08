@@ -190,7 +190,11 @@ where
             .get::<ConnectionIntent>()
             .copied()
             .is_some_and(ConnectionIntent::must_close);
+        let response_needs_linger = needs_lingering_read(&response);
         let mut locked = io.lock().await;
+        if response_needs_linger {
+            locked.stream.mark_request_body_unfinished();
+        }
         if !locked.body_complete()
             && (force_close || response_must_close || !locked.drain_request_body(MAX_LINGER_DRAIN_BYTES).await.unwrap_or(false))
         {
@@ -211,4 +215,28 @@ where
 async fn close_socket(io: &Arc<Mutex<ConnectionIo>>) {
     let mut locked = io.lock().await;
     let _result: io::Result<()> = locked.stream.shutdown().await;
+}
+
+fn needs_lingering_read<B>(response: &Response<B>) -> bool {
+    response
+        .extensions()
+        .get::<rustfs_gateway_server::UnfinishedRequestBody>()
+        .is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::needs_lingering_read;
+
+    #[test]
+    fn an_unfinished_response_requests_a_lingering_read() {
+        let mut response = http::Response::new(());
+        response.extensions_mut().insert(rustfs_gateway_server::UnfinishedRequestBody);
+        assert!(needs_lingering_read(&response));
+    }
+
+    #[test]
+    fn an_unmarked_response_does_not_request_a_lingering_read() {
+        assert!(!needs_lingering_read(&http::Response::new(())));
+    }
 }
