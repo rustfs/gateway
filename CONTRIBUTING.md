@@ -97,6 +97,19 @@ described in the license, without additional terms.
 5. Expect review comments on public API shape and on anything touching signature verification
    or parsing; those areas get scrutinised hard on purpose.
 
+### Recording role reviews
+
+Under one visible `## Role Verdicts` heading in the PR description, record each required
+role as a list item. Use either `- simplicity-adversary: path/to/file.rs:123 <concrete finding>`
+or `- simplicity-adversary: attacked <specific surfaces> — no break found`. Replace the
+placeholders with the actual review evidence. The `- ` list marker is required, and the
+`no break found` suffix must end a null report (optional final punctuation is allowed).
+Bare approval does not satisfy the gate; role findings remain advisory.
+
+The CI workflow reads the PR body from its triggering event. After correcting the description,
+trigger a fresh pull-request event, for example by pushing a follow-up commit. Re-running an
+existing workflow reuses its original event payload and will not see the corrected body.
+
 ## Commits and pull requests
 
 - **Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)**:

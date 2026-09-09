@@ -8828,14 +8828,18 @@ probe_role_verdict_guard_exists() {
 probe_role_verdict_guard_exists
 
 expect_role_result() {
-    local expected="$1" desc="$2" changed="$3" body="$4" changed_diff="${5:-}" rc=0
+    local expected="$1" desc="$2" changed="$3" body="$4" changed_diff="${5:-}" diagnostic="${6:-}" rc=0 output
     cases=$((cases + 1))
     guard_case_owned "$cases" || return 0
-    GATEWAY_CHECK_ROOT="$REPO_ROOT" \
+    output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" \
         GATEWAY_CHANGED_FILES="$changed" \
         GATEWAY_CHANGED_DIFF="$changed_diff" \
         GATEWAY_PR_BODY_JSON="$(json_string "$body")" \
-        "${SCRIPT_DIR}/check_role_verdicts.sh" >/dev/null 2>&1 || rc=$?
+        "${SCRIPT_DIR}/check_role_verdicts.sh" 2>&1)" || rc=$?
+    if [[ -n "$diagnostic" && "$output" != *"$diagnostic"* ]]; then
+        fail_msg "check_role_verdicts.sh missing diagnostic for: ${desc}"
+        return
+    fi
     if [[ "$expected" == pass && "$rc" -eq 0 ]]; then
         pass_msg "check_role_verdicts.sh allows: ${desc}"
     elif [[ "$expected" == fail && "$rc" -ne 0 ]]; then
@@ -8859,6 +8863,24 @@ expect_role_result pass 'a signature change with its high-risk three-role except
 expect_role_result pass 'an HTTP change with its high-risk four-role exception' \
     $'M\tcrates/http/src/lib.rs' \
     $'## Role Verdicts\n- simplicity-adversary: attacked API surface and abstraction count — no break found.\n- security-adversary: attacked parser limits and malformed input — no break found.\n- concurrency-durability: attacked cancellation and partial-read paths — no break found.\n- perf-engineer: attacked allocation and copy boundaries — no break found.'
+expect_role_result pass 'a canonical list item ending in the null-report suffix' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n- simplicity-adversary: attacked missing inputs and stale PR metadata — no break found'
+expect_role_result fail 'a null report without the required list marker' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\nsimplicity-adversary: attacked missing inputs — no break found' '' \
+    '- simplicity-adversary: attacked <specific surfaces> — no break found'
+expect_role_result fail 'a null report without the terminal no-break suffix' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n- simplicity-adversary: attacked missing inputs' '' \
+    '- simplicity-adversary: attacked <specific surfaces> — no break found'
+expect_role_result fail 'a null report with prose after the terminal suffix' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n- simplicity-adversary: attacked missing inputs — no break found after review' '' \
+    'The suffix must end the null report'
+expect_role_result fail 'a missing role section explains stale workflow event metadata' \
+    $'M\tscripts/check_example.sh' '' '' \
+    'Re-running an old workflow uses its original PR event payload'
 expect_role_result fail 'a missing required security verdict' \
     $'M\tcrates/sig/src/lib.rs' \
     $'## Role Verdicts\n- simplicity-adversary: attacked API surface and abstraction count — no break found.\n- test-adversary: attacked comparison reversion and negative cases — no break found.'
