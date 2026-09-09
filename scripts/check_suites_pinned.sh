@@ -150,8 +150,8 @@ for required in (s3tests_workflow, s3tests_runner, sut_library):
 
 workflow_text = s3tests_workflow.read_text(encoding="utf-8")
 toolchain = re.search(
-    r"^\s*uses:\s*(?:dtolnay/rust-toolchain|actions-rust-lang/setup-rust-toolchain)@"
-    r"[0-9a-f]{40}\s*$",
+    r"^(?P<indent>[ \t]*)uses:[ \t]*(?:dtolnay/rust-toolchain|actions-rust-lang/setup-rust-toolchain)@"
+    r"[0-9a-f]{40}[ \t]*$",
     workflow_text,
     re.MULTILINE,
 )
@@ -166,6 +166,17 @@ if toolchain is None:
         ".github/workflows/e2e-s3tests.yml must install Rust through a toolchain action "
         "pinned to an exact 40-hex revision"
     )
+if toolchain is not None:
+    # Bind the input to this action, not a later step or a comment containing the selector.
+    indent = re.escape(toolchain.group("indent"))
+    selection = re.match(
+        rf"\n{indent}with:[ \t]*\n{indent}  toolchain:[ \t]*stable[ \t]*(?:\n|$)",
+        workflow_text[toolchain.end():],
+    )
+    if selection is None:
+        failures.append(
+            ".github/workflows/e2e-s3tests.yml must set with.toolchain to stable on the pinned Rust action step"
+        )
 if release_build is None:
     failures.append(
         ".github/workflows/e2e-s3tests.yml must run "
