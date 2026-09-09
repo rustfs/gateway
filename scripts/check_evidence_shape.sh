@@ -18,7 +18,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
-python3 - "$REPO_DIR" <<'PYEOF'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_evidence_shape)" || exit 1
+"$PYTHON" - "$REPO_DIR" <<'PYEOF'
 import pathlib
 import sys
 import tomllib

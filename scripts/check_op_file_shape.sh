@@ -95,7 +95,9 @@ cd "$ROOT_DIR"
 # `|| exit 0` form is right for a directory that may not exist yet, and wrong
 # here, where a missing ops tree means the repository moved and this guard has
 # been reporting success over nothing.
-python3 - "crates/core/src/ops" "allowances/file_size.txt" <<'PYEOF'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_op_file_shape)" || exit 1
+"$PYTHON" - "crates/core/src/ops" "allowances/file_size.txt" <<'PYEOF'
 import pathlib
 import re
 import sys

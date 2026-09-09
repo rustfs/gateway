@@ -11,6 +11,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python test_test_target_coverage)" || exit 1
 GUARD=scripts/check_test_target_coverage.sh
 SANDBOX=""
 cases=0
@@ -27,6 +29,9 @@ initialize_sandbox() {
     SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gateway-coverage-guard.XXXXXX")"
     mkdir -p "$SANDBOX/scripts"
     cp "$REPO_ROOT/$GUARD" "$SANDBOX/scripts/"
+    # The guards resolve their interpreter through lib/python.sh next to themselves.
+    mkdir -p "$SANDBOX/scripts/lib"
+    cp "$REPO_ROOT/scripts/lib/python.sh" "$SANDBOX/scripts/lib/"
     cp "$REPO_ROOT/Cargo.toml" "$SANDBOX/Cargo.toml"
     # Every consolidation guard the coverage table points at, so a row that names a guard which
     # does not exist can be told apart from one whose guard stopped naming its crate.
@@ -38,7 +43,7 @@ initialize_sandbox() {
     # would reproduce inside the self-test the exact defect the guard exists to remove: it would
     # go on passing after a member arrived that it had never heard of. `fuzz/` has a Cargo.toml
     # and is not a member, and this is what keeps it out without naming it.
-    python3 - "$REPO_ROOT" "$SANDBOX" <<'PYEOF'
+    "$PYTHON" - "$REPO_ROOT" "$SANDBOX" <<'PYEOF'
 from pathlib import Path
 import shutil
 import sys
@@ -129,7 +134,7 @@ expect_pass() {
 }
 
 edit_guard() {
-    python3 - "$1" "$2" <<'PYEOF'
+    "$PYTHON" - "$1" "$2" <<'PYEOF'
 import pathlib
 import sys
 
@@ -199,7 +204,7 @@ expect_fail 'a fifteenth loose test file in an excepted crate is rejected' \
     mut_exception_count_outgrown
 
 mut_exception_stale_after_consolidation() {
-    python3 - <<'PYEOF'
+    "$PYTHON" - <<'PYEOF'
 import pathlib
 path = pathlib.Path("crates/http/Cargo.toml")
 text = path.read_text()
@@ -229,7 +234,7 @@ expect_fail 'an exception row with no tracking issue is rejected' \
 # Covered rows are claims about another guard, and a claim that stops being true must say so.
 # --------------------------------------------------------------------------------------------
 mut_covered_crate_loses_its_consolidated_shape() {
-    python3 - <<'PYEOF'
+    "$PYTHON" - <<'PYEOF'
 import pathlib
 path = pathlib.Path("crates/sig/Cargo.toml")
 path.write_text(path.read_text().replace("autotests = false\n", "", 1))
@@ -244,7 +249,7 @@ mut_covered_guard_deleted() {
 expect_fail 'a covered row naming a guard that no longer exists is rejected' mut_covered_guard_deleted
 
 mut_covered_guard_stops_naming_its_crate() {
-    python3 - <<'PYEOF'
+    "$PYTHON" - <<'PYEOF'
 import pathlib
 path = pathlib.Path("scripts/check_sig_test_target_consolidation.sh")
 path.write_text(path.read_text().replace("crates/sig", "crates/somewhere-else", 1))

@@ -14,16 +14,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
-if ! command -v python3 >/dev/null 2>&1; then
-    printf 'check_rust_toolchain_msrv: required command is missing: python3\n' >&2
-    exit 1
-fi
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_rust_toolchain_msrv)" || exit 1
 if ! command -v ruby >/dev/null 2>&1; then
     printf 'check_rust_toolchain_msrv: required command is missing: ruby\n' >&2
     exit 1
 fi
 
-TOOLCHAIN_CONTRACT="$(python3 - "$REPO_ROOT" <<'PY'
+TOOLCHAIN_CONTRACT="$("$PYTHON" - "$REPO_ROOT" <<'PY'
 from pathlib import Path
 import re
 import sys

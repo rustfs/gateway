@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 
 # WHAT: Maps all 39 response-encoding acceptance ids in rustfs/backlog#1701 section 7 to
 # executable evidence or to an explicit owning block.
@@ -79,12 +80,10 @@ requirements=(
     'c-enc-0065|negative|bound|crates/gateway/src/commit.rs::test fn c_enc_0065_five_hundred_twelve_commits_have_linear_timer_wakes'
 )
 
-command -v python3 >/dev/null 2>&1 || {
-    printf 'check_response_encoding_ledger: required command is missing: python3\n' >&2
-    exit 1
-}
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_response_encoding_ledger)" || exit 1
 
-python3 - "$ROOT" "${requirements[@]}" <<'PYEOF'
+"$PYTHON" - "$ROOT" "${requirements[@]}" <<'PYEOF'
 import os
 import re
 import subprocess

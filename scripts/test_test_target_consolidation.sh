@@ -19,9 +19,11 @@ trap cleanup EXIT
 
 initialize_sandbox() {
     SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/gateway-target-guard.XXXXXX")"
-    mkdir -p "$SANDBOX/scripts" "$SANDBOX/crates/core" "$SANDBOX/crates/gateway/src" \
+    mkdir -p "$SANDBOX/scripts/lib" "$SANDBOX/crates/core" "$SANDBOX/crates/gateway/src" \
         "$SANDBOX/crates/conformance/src"
     cp "$REPO_ROOT/scripts/check_test_target_consolidation.sh" "$SANDBOX/scripts/"
+    # The guard resolves its interpreter through lib/python.sh next to itself.
+    cp "$REPO_ROOT/scripts/lib/python.sh" "$SANDBOX/scripts/lib/"
     cp "$REPO_ROOT/scripts/check_monomorphic_dispatch.sh" "$SANDBOX/scripts/"
     cp "$REPO_ROOT/scripts/run_gateway_tsan.sh" "$SANDBOX/scripts/"
     cp "$REPO_ROOT/crates/core/Cargo.toml" "$SANDBOX/crates/core/"

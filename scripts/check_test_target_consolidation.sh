@@ -19,12 +19,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
-command -v python3 >/dev/null 2>&1 || {
-    printf '%s\n' 'required command is missing: python3' >&2
-    exit 1
-}
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_test_target_consolidation)" || exit 1
 
-python3 - "$REPO_ROOT" <<'PYEOF'
+"$PYTHON" - "$REPO_ROOT" <<'PYEOF'
 from pathlib import Path
 import re
 import sys

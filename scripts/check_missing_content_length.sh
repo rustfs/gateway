@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 
 # WHAT: Binds c-lim-0020 and c-lim-0022 to the real no-length PutObject socket refusal.
 # WHY: A codec-only 411 does not prove the wire case is non-streaming or that the connection closes.
@@ -14,12 +15,13 @@ fail() {
     exit 1
 }
 
-command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_missing_content_length)" || exit 1
 for path in "$CASE" "$WIRED"; do
     [[ -f "$path" ]] || fail "required evidence is missing: ${path#"$ROOT"/}"
 done
 
-python3 - "$CASE" "$WIRED" <<'PYEOF'
+"$PYTHON" - "$CASE" "$WIRED" <<'PYEOF'
 import re
 import sys
 import tomllib

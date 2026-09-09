@@ -22,7 +22,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
-python3 - "$ROOT_DIR" <<'PYEOF'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_quirk_ledger)" || exit 1
+"$PYTHON" - "$ROOT_DIR" <<'PYEOF'
 from __future__ import annotations
 
 import pathlib
