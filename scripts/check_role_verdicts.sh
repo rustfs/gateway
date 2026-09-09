@@ -293,8 +293,22 @@ headings = [index for index, line in enumerate(lines) if line == "## Role Verdic
 if not required:
     print("check_role_verdicts: changed paths require no expert role")
     raise SystemExit(0)
+
+def fail_verdict(message: str, role: str) -> None:
+    fail(
+        f"{message}\n"
+        "Under one visible ## Role Verdicts heading, use a list item in either form:\n"
+        f"- {role}: attacked <specific surfaces> — no break found\n"
+        f"- {role}: path/to/file.rs:123 <concrete finding>\n"
+        "The '- ' list marker is required. The suffix must end the null report "
+        "(optional final punctuation is allowed).\n"
+        "After editing the PR body, trigger a fresh pull-request event, such as pushing "
+        "a follow-up commit. Re-running an old workflow uses its original PR event payload."
+    )
+
+
 if len(headings) != 1:
-    fail("PR body must contain exactly one visible ## Role Verdicts section")
+    fail_verdict("PR body must contain exactly one visible ## Role Verdicts section", sorted(required)[0])
 start = headings[0] + 1
 end = next((index for index in range(start, len(lines)) if re.match(r"^##\s+", lines[index])), len(lines))
 verdicts: dict[str, str] = {}
@@ -304,7 +318,7 @@ for line in lines[start:end]:
         continue
     role, verdict = match.groups()
     if role in verdicts:
-        fail(f"duplicate verdict line for {role}")
+        fail_verdict(f"duplicate verdict line for {role}", role)
     verdicts[role] = verdict
 
 bare = {"pass", "ok", "lgtm", "n/a", "na", "none", "pending", "todo", "-"}
@@ -312,11 +326,14 @@ for role in sorted(required):
     verdict = verdicts.get(role, "")
     reason = ", ".join(sorted(reasons[role]))
     if not verdict:
-        fail(f"missing substantive verdict for {role}; selected by {reason} (rule: AGENTS.md Expert Roles & Trigger Table)")
+        fail_verdict(
+            f"missing substantive verdict for {role}; selected by {reason} (rule: AGENTS.md Expert Roles & Trigger Table)",
+            role,
+        )
     normalized = verdict.strip().lower().rstrip(".! ")
     words = re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", normalized)
     if normalized in bare or len(words) < 2:
-        fail(f"bare pass is not a result for {role}; state what was attacked (selected by {reason})")
+        fail_verdict(f"bare pass is not a result for {role}; state what was attacked (selected by {reason})", role)
     finding = re.search(r"(?:^|[\s`(])(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+:[1-9][0-9]*(?:$|[^0-9])", verdict)
     null_report = re.fullmatch(
         r"attacked\s+\S(?:.*\S)?\s+(?:—|--|-)\s+no break found[.!]?",
@@ -324,9 +341,10 @@ for role in sorted(required):
         flags=re.IGNORECASE,
     )
     if not finding and not null_report:
-        fail(
+        fail_verdict(
             f"verdict for {role} must contain a repository-relative file:line finding or "
-            f"an 'attacked ... — no break found' null report (selected by {reason})"
+            f"an 'attacked ... — no break found' null report (selected by {reason})",
+            role,
         )
 
 print(f"check_role_verdicts: recorded substantive verdicts for {', '.join(sorted(required))}")
