@@ -17,6 +17,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/post_policy.rs` | Strict browser POST-policy parsing, field enforcement, and signature proof. | A POST form condition, filename, size range, or proof changes. |
 | `src/post_policy_tests.rs` | Focused unit tests for POST-policy parsing and enforcement. | A POST-policy parser control or proof changes. |
 | `src/post_policy_json.rs` | Bounded duplicate-free JSON parsing for POST policies. | JSON shape, string escaping, nesting, or element limits change. |
+| `src/post_policy_redirect.rs` | The `success_action_redirect` builder: scheme, authority grammar, host allowlist, and parameter placement. | A redirect URL is accepted or refused wrongly, or the `Location` shape changes. |
 | `src/query.rs` | Presigned-query constraints and duplicate detection. | Query authentication, expiry, or duplicate handling fails. |
 | `src/scheme.rs` | Closed authentication-scheme dimensions. | Header, query, POST, or SigV2 dispatch changes. |
 | `src/scope.rs` | H5 scope cross-checks. | Credential date, region, service, or terminator validation changes. |
