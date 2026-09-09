@@ -93,6 +93,11 @@ fn run(corpus: &Corpus, response_status: u16, report: &std::path::Path) -> ExitC
                 Err(error) => panic!("accept external CLI request: {error}"),
             }
         };
+        // The listener is non-blocking so the accept loop can watch its own deadline, and on
+        // macOS an accepted socket inherits that flag; a non-blocking read answers `WouldBlock`
+        // instead of waiting for the request head, and the read timeout below never applies.
+        // Linux hands back a blocking socket, which is why this only flaked on one platform.
+        stream.set_nonblocking(false).expect("blocking exchange");
         stream.set_read_timeout(Some(Duration::from_secs(10))).expect("read deadline");
         stream
             .set_write_timeout(Some(Duration::from_secs(10)))
