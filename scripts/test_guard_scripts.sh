@@ -12631,6 +12631,45 @@ expect_fail check_suites_pinned.sh \
     mut_s3tests_toolchain_pin_deleted \
     'must install Rust through a toolchain action pinned to an exact 40-hex revision'
 
+mut_s3tests_toolchain_selection() {
+    python3 - "$1" <<'PYEOF'
+import pathlib
+import sys
+
+path = pathlib.Path(".github/workflows/e2e-s3tests.yml")
+text = path.read_text()
+old = "        with:\n          toolchain: stable\n"
+if text.count(old) != 1:
+    raise SystemExit("s3-tests explicit Rust toolchain fixture is missing or ambiguous")
+mode = sys.argv[1]
+replacement = {
+    "deleted": "",
+    "changed": "        with:\n          toolchain: beta\n",
+    "misplaced": "",
+}[mode]
+text = text.replace(old, replacement, 1)
+if mode == "misplaced":
+    text = text.replace("      - name: Build the compatibility SUT\n",
+                        "      - name: Build the compatibility SUT\n" + old, 1)
+path.write_text(text)
+PYEOF
+}
+mut_s3tests_toolchain_selection_deleted() { mut_s3tests_toolchain_selection deleted; }
+mut_s3tests_toolchain_selection_changed() { mut_s3tests_toolchain_selection changed; }
+mut_s3tests_toolchain_selection_misplaced() { mut_s3tests_toolchain_selection misplaced; }
+expect_fail check_suites_pinned.sh \
+    'the weekly Rust action loses its explicit toolchain input' \
+    mut_s3tests_toolchain_selection_deleted \
+    'must set with.toolchain to stable on the pinned Rust action step'
+expect_fail check_suites_pinned.sh \
+    'the weekly Rust action selects beta instead of stable' \
+    mut_s3tests_toolchain_selection_changed \
+    'must set with.toolchain to stable on the pinned Rust action step'
+expect_fail check_suites_pinned.sh \
+    'the stable toolchain input is attached to the build step instead of the Rust action' \
+    mut_s3tests_toolchain_selection_misplaced \
+    'must set with.toolchain to stable on the pinned Rust action step'
+
 mut_s3tests_release_build_deleted() {
     python3 - <<'PYEOF'
 import pathlib
