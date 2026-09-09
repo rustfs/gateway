@@ -148,3 +148,85 @@ fn valid_fields(signature: &str) -> Vec<(&str, &str)> {
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
+
+// `success_action_redirect` construction (rustfs/gateway#656). The helper promises a `Location`
+// value a caller can emit without re-checking it, so an authority that is missing or malformed
+// must be refused here rather than by every caller.
+
+fn redirect(raw: &str) -> Result<String, PostPolicyError> {
+    build_success_action_redirect(raw, "bucket", "key", "\"etag\"", None)
+}
+
+#[test]
+fn a_redirect_with_an_authority_gains_its_parameters_before_the_fragment() {
+    assert_eq!(
+        redirect("https://example.com/done?x=1#top").expect("a valid redirect"),
+        "https://example.com/done?x=1&bucket=bucket&key=key&etag=%22etag%22#top"
+    );
+    assert_eq!(
+        redirect("http://example.com:8080").expect("a bare authority with a port"),
+        "http://example.com:8080?bucket=bucket&key=key&etag=%22etag%22"
+    );
+    assert_eq!(
+        redirect("https://[::1]:8443/cb").expect("an IPv6 literal with a port"),
+        "https://[::1]:8443/cb?bucket=bucket&key=key&etag=%22etag%22"
+    );
+}
+
+#[test]
+fn a_redirect_without_an_authority_is_malformed() {
+    for raw in [
+        "https:///missing-host",
+        "https://",
+        "https://?x=1",
+        "https://#top",
+        "https://:8443/path",
+        "http:///",
+    ] {
+        assert_eq!(redirect(raw).err(), Some(PostPolicyError::Malformed), "{raw}");
+    }
+}
+
+#[test]
+fn a_redirect_with_a_malformed_authority_is_malformed() {
+    for raw in [
+        "https://exa mple.com/",
+        "https://example.com:port/",
+        "https://example.com:80 80/",
+        "https://[::1/",
+        "https://[]/",
+        "https://[::1]x/",
+        "https://exam<ple.com/",
+        "https://exam\"ple.com/",
+        "https://exam^ple.com/",
+        "https://exam|ple.com/",
+        "https://exam{ple}.com/",
+    ] {
+        assert_eq!(redirect(raw).err(), Some(PostPolicyError::Malformed), "{raw}");
+    }
+}
+
+#[test]
+fn a_redirect_with_userinfo_is_malformed() {
+    // `allowed.example:x@evil.com` reads as host `allowed.example` to a naive port split while a
+    // browser goes to `evil.com`; userinfo has no place in a redirect target, so it is refused.
+    for raw in [
+        "https://user@example.com/",
+        "https://user:secret@example.com/",
+        "https://allowed.example:x@evil.com/",
+    ] {
+        assert_eq!(redirect(raw).err(), Some(PostPolicyError::Malformed), "{raw}");
+    }
+}
+
+#[test]
+fn the_host_allowlist_compares_the_host_alone() {
+    let allowed = Some(["Example.COM", "[::1]"].as_slice());
+    let permitted = |raw: &str| build_success_action_redirect(raw, "b", "k", "e", allowed);
+    assert!(permitted("https://example.com:8443/cb").is_ok());
+    assert!(permitted("https://[::1]/cb").is_ok());
+    assert!(permitted("https://[::1]:8443/cb").is_ok());
+    assert_eq!(permitted("https://example.com.evil/cb").err(), Some(PostPolicyError::Malformed));
+    assert_eq!(permitted("https://[::2]/cb").err(), Some(PostPolicyError::Malformed));
+    assert_eq!(permitted("https://example.com:x@evil.com/cb").err(), Some(PostPolicyError::Malformed));
+}

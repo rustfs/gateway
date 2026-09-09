@@ -671,92 +671,9 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
     mac.finalize().into_bytes().into()
 }
 
-/// Q7: Safe construction of `success_action_redirect`.
-///
-/// Rules:
-/// 1. Only `http` and `https` schemes are allowed.
-/// 2. Control characters (including CR, LF) are rejected.
-/// 3. `bucket`, `key`, and `etag` are appended as query parameters.
-/// 4. Parameters are inserted **before** any existing fragment.
-/// 5. An optional host allowlist is checked.
-/// 6. Validation failure returns 400, **never** falls back to `success_action_status`.
-///
-/// # Errors
-///
-/// [`PostPolicyError::Malformed`] when the URL is invalid, has a disallowed scheme,
-/// contains control characters, or the host is not in the allowlist.
-pub fn build_success_action_redirect(
-    raw: &str,
-    bucket: &str,
-    key: &str,
-    etag: &str,
-    allowed_hosts: Option<&[&str]>,
-) -> Result<String, PostPolicyError> {
-    // Reject control characters (CR, LF, NUL, etc.) before URL parsing.
-    if raw.bytes().any(|b| b < 0x20 || b == 0x7f) {
-        return Err(PostPolicyError::Malformed);
-    }
-
-    // Parse the URL. We use a simple manual parse to avoid adding a `url` crate dependency
-    // for this single use case. The URL must start with http:// or https://.
-    let scheme_end = raw.find("://").ok_or(PostPolicyError::Malformed)?;
-    let scheme = &raw[..scheme_end];
-    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
-        return Err(PostPolicyError::Malformed);
-    }
-
-    // Extract host for allowlist check.
-    let after_scheme = &raw[scheme_end + 3..];
-    let host_end = after_scheme.find(['/', '?', '#']).unwrap_or(after_scheme.len());
-    let host = &after_scheme[..host_end];
-
-    // Strip port for allowlist comparison.
-    let host_without_port = host.rsplit_once(':').map_or(host, |(h, _)| h);
-
-    if let Some(allowed) = allowed_hosts
-        && !allowed.iter().any(|h| h.eq_ignore_ascii_case(host_without_port))
-    {
-        return Err(PostPolicyError::Malformed);
-    }
-
-    // Build the redirect URL with bucket, key, and etag as query parameters.
-    // Parameters must be inserted before any fragment.
-    let (base, fragment) = match raw.find('#') {
-        Some(pos) => (&raw[..pos], Some(&raw[pos..])),
-        None => (raw, None),
-    };
-
-    let separator = if base.contains('?') { '&' } else { '?' };
-    let mut result = String::with_capacity(base.len() + 128);
-    result.push_str(base);
-    result.push(separator);
-    result.push_str("bucket=");
-    push_percent_encoded(&mut result, bucket.as_bytes());
-    result.push_str("&key=");
-    push_percent_encoded(&mut result, key.as_bytes());
-    result.push_str("&etag=");
-    push_percent_encoded(&mut result, etag.as_bytes());
-
-    if let Some(frag) = fragment {
-        result.push_str(frag);
-    }
-
-    Ok(result)
-}
-
-/// Percent-encodes bytes into the output string using RFC 3986 unreserved rules.
-fn push_percent_encoded(out: &mut String, bytes: &[u8]) {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    for &byte in bytes {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(byte as char);
-        } else {
-            out.push('%');
-            out.push(HEX[(byte >> 4) as usize] as char);
-            out.push(HEX[(byte & 0x0f) as usize] as char);
-        }
-    }
-}
+#[path = "post_policy_redirect.rs"]
+mod redirect;
+pub use redirect::build_success_action_redirect;
 
 #[cfg(test)]
 #[path = "post_policy_tests.rs"]
