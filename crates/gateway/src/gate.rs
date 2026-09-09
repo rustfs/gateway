@@ -598,6 +598,24 @@ mod unfinished_body_tests {
         );
     }
 
+    /// Positive — `MissingContentLength` proves a different unfinished-body shape: HTTP frames an
+    /// empty request, but the refusal exists only because this operation required the body the
+    /// peer meant to send. The server must therefore wait briefly for those unframed trailing
+    /// octets rather than dropping them with RST.
+    #[test]
+    fn an_undeclared_length_refusal_marks_the_rendered_response_for_lingering_close() {
+        let error = from_handler(
+            HandlerError::new(ErrorCode::MISSING_CONTENT_LENGTH, "length required"),
+            ResponseKind::Other,
+            ConnectionIntent::MayKeepAlive,
+        );
+        let response = render(&error, &RequestTrace::from_bits(1, 2));
+        assert!(
+            response.extensions().get::<UnfinishedRequestBody>().is_some(),
+            "the 411 framing disagreement did not survive into the transport"
+        );
+    }
+
     /// Positive — every live-body policy refusal is emitted only while its monitor still owns a
     /// producer that has not reported EOF.
     #[test]
@@ -704,16 +722,14 @@ mod unfinished_body_tests {
     /// end, so it must never synthesize the server marker.
     #[test]
     fn a_generic_close_does_not_claim_that_the_request_body_is_unfinished() {
-        let error = from_handler(
-            HandlerError::new(ErrorCode::INTERNAL_ERROR, "generic close"),
-            ResponseKind::Other,
-            ConnectionIntent::Close,
-        );
-        let response = render(&error, &RequestTrace::from_bits(1, 2));
-        assert!(
-            response.extensions().get::<UnfinishedRequestBody>().is_none(),
-            "ConnectionIntent::Close was treated as body-progress evidence"
-        );
+        for code in [ErrorCode::INTERNAL_ERROR, ErrorCode::ACCESS_DENIED] {
+            let error = from_handler(HandlerError::new(code, "generic close"), ResponseKind::Other, ConnectionIntent::Close);
+            let response = render(&error, &RequestTrace::from_bits(1, 2));
+            assert!(
+                response.extensions().get::<UnfinishedRequestBody>().is_none(),
+                "ConnectionIntent::Close or an unrelated error code was treated as body-progress evidence"
+            );
+        }
     }
 
     /// Negative — a transport failure says framing did not complete, but it does not prove that

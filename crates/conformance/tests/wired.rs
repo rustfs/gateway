@@ -336,6 +336,25 @@ fn both_production_drivers_keep_alive_after_a_small_drainable_body() {
     }
 }
 
+/// Negative — both production drivers must linger after a `411` long enough for the peer's
+/// unframed trailing octets to arrive, then end with FIN rather than dropping unread bytes with
+/// RST. The raw case separately asserts that no trailing octet is released before the refusal;
+/// together those facts make this a post-response close observation rather than a body drain that
+/// delayed the answer.
+///
+/// `a_refusal_over_a_drainable_body_keeps_the_connection_over_a_socket` is the opposite close
+/// direction, and `socket::tests::a_server_that_closes_without_lingering_is_observed_reset` is the
+/// opposite wire classification. Without both controls, an observer stuck on `closed` could make
+/// this test green without measuring the production socket.
+#[test]
+fn both_production_drivers_close_orderly_after_undeclared_length_refusal() {
+    for driver in [ProductionDriver::Hyper, ProductionDriver::SelfHeld] {
+        let report = run_over_production("c-object-0030", driver);
+        let outcome = only(&report);
+        assert_eq!(outcome.verdict, Verdict::Passed, "{driver:?}: {:?}", failures(outcome));
+    }
+}
+
 /// Positive — the raw observer must decode the chunked body both production writers use for an
 /// application response whose length is not frozen in advance.
 #[test]

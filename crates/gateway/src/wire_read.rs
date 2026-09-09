@@ -120,15 +120,6 @@ struct WireProgressState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RequestBodyUnfinished(());
 
-impl RequestBodyUnfinished {
-    pub(crate) fn attach<B>(self, response: &mut http::Response<B>) {
-        #[cfg(feature = "server")]
-        response.extensions_mut().insert(rustfs_gateway_server::UnfinishedRequestBody);
-        #[cfg(not(feature = "server"))]
-        let _ = (self, response);
-    }
-}
-
 /// Shared accounting retained by the request owner while a framed pipeline owns the reader.
 #[derive(Clone)]
 pub(crate) struct WireProgress {

@@ -483,9 +483,7 @@ pub fn render(error: &S3Error, trace: &RequestTrace) -> Response<Body> {
     trace.apply(headers);
     // Only the transport turns these typed extensions into socket action.
     response.extensions_mut().insert(error.connection);
-    if let Some(proof) = error.body_unfinished {
-        proof.attach(&mut response);
-    }
+    crate::close::attach_lingering_read(error.code.as_ref(), error.body_unfinished, &mut response);
     response
 }
 
