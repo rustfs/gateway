@@ -73,6 +73,7 @@ second copy is a second thing to keep in sync.
 | 0015 | Required streaming request members use controlled construction | Accepted |
 | 0016 | Explicit construction for required structural-union inputs | Accepted |
 | 0017 | Carry the SSE enforcement proof on handler requests | Accepted |
+| 0018 | The dialect vtable decision of ADR-0007 stands; ADR-0010 replaced only its request layout | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.
