@@ -233,9 +233,29 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build documentation without warnings
         run: scripts/ci_budget.sh 240 "documentation build" env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-      - name: Run README and API examples
+
+  # The README and API examples used to be a second step of the documentation job, sharing its
+  # runner and its cache. `cargo test --doc --workspace` compiles the whole workspace in the test
+  # profile, which the `cargo doc` step ahead of it does not produce, so on a cache miss the two
+  # compiles stacked inside one 240-second slice and the step was stopped with no assertion
+  # failed (rustfs/gateway#670: run 34269757915, and every PR that missed the cache after it).
+  # Splitting across runners is the remedy AGENTS.md names for an overrun; the examples now get
+  # their own runner, their own cache key, and a slice sized for a cold test-profile compile plus
+  # the examples themselves, the same shape as Cold bootstrap's. The documentation job keeps the
+  # 240 seconds it needs for `cargo doc` alone.
+  examples:
+    name: README and API examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Run README and API examples (maximum 7 minutes after setup)
         run: |
-          scripts/ci_budget.sh 240 "README and API examples" bash -c '
+          scripts/ci_budget.sh 420 "README and API examples" bash -c '
             set -euo pipefail
             cargo test --doc --workspace
             cargo build --examples --workspace
@@ -637,7 +657,7 @@ jobs:
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs]
+    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -667,6 +687,7 @@ jobs:
           ERROR_STATUS_RESULT: ${{ needs.error-status-self-test.result }}
           TSAN_RESULT: ${{ needs.gateway-tsan.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
+          EXAMPLES_RESULT: ${{ needs.examples.result }}
         run: |
           test "$WORKSPACE_RESULT" = success
           test "$WORKSPACE_2_RESULT" = success
@@ -691,3 +712,4 @@ jobs:
           test "$ERROR_STATUS_RESULT" = success
           test "$TSAN_RESULT" = success
           test "$DOCS_RESULT" = success
+          test "$EXAMPLES_RESULT" = success
