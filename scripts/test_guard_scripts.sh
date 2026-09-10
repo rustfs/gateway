@@ -18148,6 +18148,50 @@ PYEOF
 expect_fail check_sig_test_target_consolidation.sh \
     'a duplicated sig integration registration' mut_sig_registration_duplicated
 
+mut_http_autotests_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("autotests = false\n", "autotests = true\n", 1))
+PYEOF
+}
+expect_fail check_http_test_target_consolidation.sh \
+    'restoring http implicit test discovery' mut_http_autotests_restored
+
+mut_http_registration_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/integration.rs")
+text = path.read_text()
+path.write_text(text.replace('#[path = "host_ambiguity.rs"]\nmod host_ambiguity;\n', '', 1))
+PYEOF
+}
+expect_fail check_http_test_target_consolidation.sh \
+    'an omitted http integration registration' mut_http_registration_omitted
+
+mut_http_fixture_registration_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/integration.rs")
+text = path.read_text()
+path.write_text(text.replace('#[path = "support/mod.rs"]\nmod support;\n', '', 1))
+PYEOF
+}
+expect_fail check_http_test_target_consolidation.sh \
+    'the http harness no longer registering its fixture module' mut_http_fixture_registration_omitted
+
+mut_http_suite_redeclares_the_fixture_module() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/host_ambiguity.rs")
+text = path.read_text()
+path.write_text(text.replace("use crate::support::", "mod support;\nuse crate::support::", 1))
+PYEOF
+}
+expect_fail check_http_test_target_consolidation.sh \
+    'an http suite declaring the harness-owned fixture module itself' mut_http_suite_redeclares_the_fixture_module
+
 mut_sig_source_unregistered() {
     cp crates/sig/tests/canonical_request.rs crates/sig/tests/unregistered_contract.rs
 }

@@ -43,6 +43,7 @@ COVERED = {
     "crates/corpus": "check_test_target_coverage.sh",
     "crates/dialect-minio": "check_test_target_coverage.sh",
     "crates/gateway": "check_test_target_consolidation.sh",
+    "crates/http": "check_http_test_target_consolidation.sh",
     "crates/server": "check_server_test_target_consolidation.sh",
     "crates/sig": "check_sig_test_target_consolidation.sh",
     "xtask": "check_xtask_test_target_consolidation.sh",
@@ -56,13 +57,6 @@ EXCEPTIONS = {
         "rustfs/gateway#277",
         "one CRUD integration target; consolidation starts when a second source would otherwise "
         "create another linked test binary",
-    ),
-    "crates/http": (
-        14,
-        "rustfs/gateway#277",
-        "fourteen wire-layer suites — tests/ingest_known_answer.rs (gateway#5) added the newest "
-        "one; the largest single block of the remaining debt and the first crate phase 2 "
-        "consolidates",
     ),
     "crates/macros": (
         2,

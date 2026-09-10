@@ -21,14 +21,12 @@
 //! NOT responsible for: framing or host, which have their own suites.
 //! Upstream: `support`. Downstream: nothing.
 
-mod support;
-
+use crate::support::{accept, accept_with, raw_value};
 use http::{HeaderName, Request, header::CONTENT_TYPE, header::HOST};
 use rustfs_gateway_http::{
     CanonicalHeadersError, LimitKind, Limits, MetadataReject, SignedHeaderList, SignedHeadersError, WireReject,
     decode_metadata_value, encode_metadata_value, is_significant_header, validate_metadata_key, validate_metadata_value,
 };
-use support::{accept, accept_with, raw_value};
 
 fn put(headers: Vec<(HeaderName, http::HeaderValue)>) -> Request<&'static str> {
     let mut request = Request::builder()

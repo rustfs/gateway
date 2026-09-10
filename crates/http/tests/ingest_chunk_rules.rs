@@ -23,10 +23,8 @@
 //!
 //! 5 positive / 28 negative.
 
-mod support;
-
+use crate::support::ingest::{ScriptReader, drain_pipeline, no_observers, raw_chunk_body, unsigned_body, unsigned_pipeline};
 use rustfs_gateway_http::{ChunkLimits, ChunkReject};
-use support::ingest::{ScriptReader, drain_pipeline, no_observers, raw_chunk_body, unsigned_body, unsigned_pipeline};
 
 const FOUR_GIB_CHUNK_HEADER: &[u8] = b"ffffffff\r\n";
 const RSS_HEADROOM_BYTES: u64 = 8 * 1024 * 1024;
@@ -143,7 +141,7 @@ fn measure_peak_rss(mode: PeakMode) -> u64 {
     command.arg("-l");
     let output = command
         .arg(executable)
-        .args(["--exact", RSS_PROBE_TEST, "--nocapture"])
+        .args(["--exact", &crate::probe_test_name!(RSS_PROBE_TEST), "--nocapture"])
         .env(RSS_PROBE_ENV, mode.name())
         .output()
         .expect("the peak-RSS probe starts under /usr/bin/time");
@@ -240,7 +238,7 @@ fn measure_concurrent_probe(attack: bool) -> (u64, std::time::Duration) {
     let mode = if attack { "attack" } else { "control" };
     let output = command
         .arg(executable)
-        .args(["--exact", CONCURRENT_PROBE_TEST, "--nocapture"])
+        .args(["--exact", &crate::probe_test_name!(CONCURRENT_PROBE_TEST), "--nocapture"])
         .env(CONCURRENT_PROBE_ENV, mode)
         .output()
         .expect("the concurrent chunk probe starts under /usr/bin/time");
@@ -780,8 +778,8 @@ fn the_peer_is_never_asked_for_more_than_the_window() {
 /// above holds across a resumption.
 #[test]
 fn a_socket_that_pends_does_not_change_the_outcome() {
+    use crate::support::ingest::{FramingFixture, declared_length};
     use rustfs_gateway_http::{ChunkFraming, IngestPipeline, IngestPolicy};
-    use support::ingest::{FramingFixture, declared_length};
 
     let framing = ChunkFraming::derive(&FramingFixture::streaming_unsigned_trailer()).expect("consistent");
     let reader = ScriptReader::new(unsigned_body(&[b"alpha", b"beta"]), 3).pending_every(3);

@@ -24,11 +24,9 @@
 //! Six of these shapes are answered `200` by a bare hyper server, which performs no `Host`
 //! validation of any kind. Every one of them is refused here.
 
-mod support;
-
+use crate::support::{absolute_form, accept, h2, origin_form, raw_value};
 use http::{Request, StatusCode, Version, header::HOST};
 use rustfs_gateway_http::{HostError, HostSource, Limits, MAX_HOST_BYTES, RawHost, WireReject, WireRequest};
-use support::{absolute_form, accept, h2, origin_form, raw_value};
 
 fn host_error(request: Request<&'static str>) -> HostError {
     match accept(request) {

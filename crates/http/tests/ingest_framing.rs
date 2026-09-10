@@ -22,14 +22,14 @@
 //!
 //! 5 positive / 13 negative.
 
-mod support;
-
+use crate::support::ingest::{
+    FramingFixture, ScriptReader, declared_length, no_body_ceiling, no_observers, wire_framing_with_length,
+};
 use http::{HeaderMap, HeaderValue, Version, header::CONTENT_LENGTH, header::TRANSFER_ENCODING};
 use rustfs_gateway_http::{
     ChunkFraming, ChunkLimits, ChunkReject, Framing, IngestPipeline, IngestPolicy, Limits, ModeConfusion, WireReject,
     validate_decoded_length,
 };
-use support::ingest::{FramingFixture, ScriptReader, declared_length, no_body_ceiling, no_observers, wire_framing_with_length};
 
 fn decoded_of(framing: &ChunkFraming, header: Option<&str>, wire_length: u64) -> Result<Option<u64>, ChunkReject> {
     let wire = wire_framing_with_length(wire_length);

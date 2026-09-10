@@ -150,7 +150,7 @@ fn cost(len: usize) -> (u64, u64) {
 fn measure(len: usize) -> (u64, u64) {
     let executable = std::env::current_exe().expect("the active test binary has a path");
     let output = Command::new(executable)
-        .args(["--exact", PROBE_TEST, "--nocapture"])
+        .args(["--exact", &crate::probe_test_name!(PROBE_TEST), "--nocapture"])
         .env(PROBE_ENV, len.to_string())
         .output()
         .expect("the isolated allocation probe starts");

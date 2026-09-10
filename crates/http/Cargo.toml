@@ -11,6 +11,9 @@ authors.workspace = true
 # consumed s3s. Publishing would buy nothing and cost a cross-repository version
 # lockstep on every change to a ring-0 type.
 publish = false
+# Every integration source is a module of tests/integration.rs, one linked test binary; enforced
+# by scripts/check_http_test_target_consolidation.sh (rustfs/gateway#277 phase 2).
+autotests = false
 
 [package.metadata.gateway]
 ring = 0
@@ -45,6 +48,10 @@ hmac = { workspace = true }
 sha2 = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [[bench]]
 name = "parse"
