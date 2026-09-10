@@ -83,3 +83,39 @@ pub fn absolute_form(target: &str, host_header: &str) -> Request<TestBody> {
         .body("")
         .expect("valid fixture request")
 }
+
+/// The libtest name of a test in the calling module, as `--exact` on this binary must spell it.
+///
+/// Every source under `tests/` is a module of one consolidated target (rustfs/gateway#277), so a
+/// probe that re-runs the current binary must name `<module>::<test>`, not `<test>`; and the same
+/// helper keeps a source correct if it is ever linked on its own again, where `module_path!()` is
+/// the crate name alone and the test name carries no prefix.
+#[macro_export]
+macro_rules! probe_test_name {
+    ($local:expr) => {
+        $crate::support::probe_test_name(module_path!(), $local)
+    };
+}
+
+pub fn probe_test_name(module_path: &str, local: &str) -> String {
+    match module_path.split_once("::") {
+        Some((_, rest)) => format!("{rest}::{local}"),
+        None => local.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod probe_name_tests {
+    use super::probe_test_name;
+
+    #[test]
+    fn a_consolidated_module_qualifies_the_test_and_a_standalone_target_does_not() {
+        assert_eq!(
+            probe_test_name("integration::ingest_chunk_rules", "rss_probe"),
+            "ingest_chunk_rules::rss_probe"
+        );
+        assert_eq!(probe_test_name("integration::a::b", "t"), "a::b::t");
+        assert_eq!(probe_test_name("ingest_chunk_rules", "rss_probe"), "rss_probe");
+        assert_ne!(probe_test_name("integration::ingest_chunk_rules", "rss_probe"), "rss_probe");
+    }
+}

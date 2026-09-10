@@ -26,6 +26,7 @@ after it has accepted.
 | `src/form/mod.rs` | The POST Object form, read so that the file's ceiling is known before the file is. | The policy-before-file order is in question. |
 | `src/form/reader.rs` | The text fields before the file, and the door to the part after it. | A POST form text field or its ceiling changes. |
 | `src/form/file.rs` | The file part, read under a ceiling named before it started. | The file read path or its ceiling changes. |
+| `tests/integration.rs` | The one Cargo test target every `tests/*.rs` source is a module of; `check_http_test_target_consolidation.sh` pins it. | A test source is added, or `cargo test -p rustfs-gateway-http` links more than one integration binary. |
 | `tests/support/mod.rs` | Request builders shared by the acceptance suites. | A suite needs a new request shape. |
 | `tests/support/ingest.rs` | Wire-shaped ingest fixtures: raw `aws-chunked` bytes and a scripted socket. | An ingest suite needs new wire bytes. |
 | `tests/host_ambiguity.rs` | Cases `c-wire-0001`..`0004`, `0007`, `0033`..`0039`: the ways a request can name two hosts. | Change addressing. |

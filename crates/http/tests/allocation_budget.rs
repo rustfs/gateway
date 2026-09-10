@@ -26,11 +26,9 @@
 //! are the structural equivalent: every buffer this layer owns reports whether it stayed inline,
 //! and a writer that allocated would have grown the caller's pre-sized `String`.
 
-mod support;
-
+use crate::support::{accept, raw_value};
 use http::{HeaderName, Request, header::HOST};
 use rustfs_gateway_http::SignedHeaderList;
-use support::{accept, raw_value};
 
 #[test]
 fn indexing_an_eight_parameter_query_stays_off_the_heap() {
@@ -52,7 +50,7 @@ fn indexing_an_eight_parameter_query_stays_off_the_heap() {
 
 #[test]
 fn a_normal_host_stays_off_the_heap_in_both_its_forms() {
-    let accepted = accept(support::origin_form("/bucket/key")).expect("valid fixture");
+    let accepted = accept(crate::support::origin_form("/bucket/key")).expect("valid fixture");
     assert!(
         accepted.host().is_inline(),
         "the raw and the normalised host both fit inline for any realistic name"

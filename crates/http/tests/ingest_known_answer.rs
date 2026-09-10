@@ -19,7 +19,7 @@
 //! both directions — the exact chain accepted, and the chain broken in isolation at the seed, the
 //! key, a chunk's data, and a chunk's position all refused.
 //! NOT responsible for: chunk syntax, framing selection, or trailer parsing — `ingest_verify.rs`
-//! and its siblings own those, and every one of their fixtures is `support::ingest::SignedChunker`,
+//! and its siblings own those, and every one of their fixtures is `crate::support::ingest::SignedChunker`,
 //! a second implementation written independently from the same specification. That catches a
 //! typo; it cannot catch a shared misreading of the specification, which is exactly the gap this
 //! file closes. See gateway#5.

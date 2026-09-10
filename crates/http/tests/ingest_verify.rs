@@ -23,11 +23,13 @@
 //!
 //! 4 positive / 24 negative.
 
-mod support;
-
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
+use crate::support::ingest::{
+    FramingFixture, ScriptReader, SignedChunker, TEST_AMZ_DATE, TEST_SCOPE_LINE, declared_length, drain_pipeline, hex_lower,
+    no_observers, signed_pipeline, unsigned_body, unsigned_trailer_pipeline,
+};
 use http::{HeaderName, HeaderValue};
 use rustfs_gateway_http::{
     ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, ChunkSigningKey, IngestPipeline, IngestPolicy,
@@ -35,10 +37,6 @@ use rustfs_gateway_http::{
 };
 use rustfs_gateway_stream::{AsyncPayloadRead, ReadProgress, StreamError, TrailingHeaders};
 use smallvec::SmallVec;
-use support::ingest::{
-    FramingFixture, ScriptReader, SignedChunker, TEST_AMZ_DATE, TEST_SCOPE_LINE, declared_length, drain_pipeline, hex_lower,
-    no_observers, signed_pipeline, unsigned_body, unsigned_trailer_pipeline,
-};
 
 const KEY: [u8; 32] = [0x11; 32];
 const SEED: [u8; 32] = [0x22; 32];

@@ -21,11 +21,9 @@
 //! decoded in P3-03.
 //! Upstream: `support`. Downstream: nothing.
 
-mod support;
-
+use crate::support::accept;
 use http::{Request, StatusCode, Version, header::CONTENT_LENGTH, header::HOST, header::TRANSFER_ENCODING};
 use rustfs_gateway_http::{BodyLength, LimitKind, Limits, MAX_CHUNK_SIZE_LINE_BYTES, WireReject, validate_chunk_size_line};
-use support::accept;
 
 fn with_headers(pairs: &[(&'static str, &str)], version: Version) -> Request<&'static str> {
     let mut builder = Request::builder().method("PUT").uri("/bucket/key").version(version);
@@ -234,7 +232,7 @@ fn c_wire_0063_an_over_large_declared_body_is_400_entity_too_large_and_never_dra
         ..Limits::default()
     };
     let request = with_headers(&[("content-length", "4096")], Version::HTTP_11);
-    let reject = support::accept_with(request, &limits).expect_err("over the body ceiling");
+    let reject = crate::support::accept_with(request, &limits).expect_err("over the body ceiling");
     assert_eq!(reject, WireReject::LimitExceeded(LimitKind::BodyBytes));
     // S3 answers 400 EntityTooLarge and never 413; clients branch on the code in the XML body,
     // not on the status. Following the RFC here would emit a shape no S3 client has seen.

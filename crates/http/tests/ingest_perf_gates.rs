@@ -22,18 +22,16 @@
 //!
 //! 8 positive / 10 negative.
 
-mod support;
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::support::ingest::{
+    SignedChunker, drain_pipeline, hmac_sha256, no_observers, signed_pipeline, unsigned_body, unsigned_pipeline,
+};
 use rustfs_gateway_http::{ChunkLimits, ChunkSigningKey, ScopeId, SigningKeyCache};
 use rustfs_gateway_stream::{ByteCounter, ByteObserver, ObserverOutcome, Payload, StreamMetrics};
 use rustfs_gateway_types::ChecksumAlgorithm;
 use smallvec::SmallVec;
-use support::ingest::{
-    SignedChunker, drain_pipeline, hmac_sha256, no_observers, signed_pipeline, unsigned_body, unsigned_pipeline,
-};
 
 const KEY: [u8; 32] = [0x11; 32];
 const SEED: [u8; 32] = [0x22; 32];

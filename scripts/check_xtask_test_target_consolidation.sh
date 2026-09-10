@@ -10,8 +10,12 @@ REPO_ROOT="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/python.sh"
 PYTHON="$(gateway_python check_xtask_test_target_consolidation)" || exit 1
 
+# GATEWAY_TEST_TARGET_FIXTURES names harness-owned fixture modules that are directories rather
+# than test sources, as `<module>=<path>` pairs: `support=support/mod.rs`. The harness registers
+# each exactly once, after the test modules, and no test module may declare it again.
 "$PYTHON" - "$REPO_ROOT" "${GATEWAY_TEST_TARGET_CRATE:-xtask}" \
-    "${GATEWAY_TEST_TARGET_MODULES:-cli_contract,scaffold_must_be_red,toolchain_contract,why_contract}" <<'PYEOF'
+    "${GATEWAY_TEST_TARGET_MODULES:-cli_contract,scaffold_must_be_red,toolchain_contract,why_contract}" \
+    "${GATEWAY_TEST_TARGET_FIXTURES:-}" <<'PYEOF'
 from pathlib import Path
 import re
 import sys
@@ -22,6 +26,12 @@ crate_relative = Path(sys.argv[2])
 crate = root / crate_relative
 tests = crate / "tests"
 modules = tuple(sys.argv[3].split(","))
+fixtures: list[tuple[str, str]] = []
+for pair in filter(None, sys.argv[4].split(",")):
+    name, separator, relative = pair.partition("=")
+    if not separator or not name or not relative:
+        raise SystemExit(f"GATEWAY_TEST_TARGET_FIXTURES entry must be <module>=<path>, got {pair!r}")
+    fixtures.append((name, relative))
 crate_name = crate.name
 
 
@@ -224,6 +234,11 @@ for module in modules:
     if re.search(r"#!\s*\[\s*(?:cfg|cfg_attr)\b", code):
         fail(f"{path.relative_to(root)} may not disable its module with a file-level cfg")
 
+for fixture_name, _ in fixtures:
+    fixture_mod = re.compile(r"\bmod\s+" + re.escape(fixture_name) + r"\s*;")
+    for module in modules:
+        if fixture_mod.search(module_code[module]):
+            fail(f"{module}.rs declares the harness-owned fixture module `{fixture_name}` itself")
 if crate_name == "sig":
     shared_fixture_use = "use crate::security_floor_fixtures::*;"
     for module in ("security_floor", "security_floor_schemes"):
@@ -262,6 +277,8 @@ if crate_name == "sig":
         anchor + '\n#[path = "security_floor_fixtures/mod.rs"]\nmod security_floor_fixtures;',
         1,
     )
+for fixture_name, relative in fixtures:
+    harness += f'\n#[path = "{relative}"]\nmod {fixture_name};'
 harness += "\n"
 try:
     if harness_path.read_text() != harness:

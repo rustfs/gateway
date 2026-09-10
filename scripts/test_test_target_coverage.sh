@@ -36,7 +36,8 @@ initialize_sandbox() {
     # Every consolidation guard the coverage table points at, so a row that names a guard which
     # does not exist can be told apart from one whose guard stopped naming its crate.
     for guard in check_test_target_consolidation.sh check_server_test_target_consolidation.sh \
-        check_sig_test_target_consolidation.sh check_xtask_test_target_consolidation.sh; do
+        check_sig_test_target_consolidation.sh check_xtask_test_target_consolidation.sh \
+        check_http_test_target_consolidation.sh; do
         cp "$REPO_ROOT/scripts/$guard" "$SANDBOX/scripts/"
     done
     # The member set is resolved from the root manifest's own patterns, not listed here. A list
@@ -190,23 +191,23 @@ expect_fail 'a new member consolidated but named by no table is rejected' \
 # Exception rows are debt records, and every way one can become a lie.
 # --------------------------------------------------------------------------------------------
 mut_exception_row_deleted() {
-    edit_guard '    "crates/http": (
-        14,' '    "crates/httpx": (
-        14,'
+    edit_guard '    "crates/macros": (
+        2,' '    "crates/macrosx": (
+        2,'
 }
 expect_fail 'deleting the exception row for an unconsolidated crate is rejected' \
     mut_exception_row_deleted
 
 mut_exception_count_outgrown() {
-    touch crates/http/tests/fifteenth_loose_file.rs
+    touch crates/macros/tests/third_loose_file.rs
 }
-expect_fail 'a fifteenth loose test file in an excepted crate is rejected' \
+expect_fail 'a third loose test file in an excepted crate is rejected' \
     mut_exception_count_outgrown
 
 mut_exception_stale_after_consolidation() {
     "$PYTHON" - <<'PYEOF'
 import pathlib
-path = pathlib.Path("crates/http/Cargo.toml")
+path = pathlib.Path("crates/macros/Cargo.toml")
 text = path.read_text()
 text = text.replace('[package]\n', '[package]\nautotests = false\n', 1)
 path.write_text(text + '\n[[test]]\nname = "integration"\npath = "tests/integration.rs"\n')
@@ -290,7 +291,7 @@ expect_fail 'a table row naming a directory that is not a workspace member is re
 mut_member_is_both_covered_and_excepted() {
     edit_guard '    "crates/sig": "check_sig_test_target_consolidation.sh",' \
         '    "crates/sig": "check_sig_test_target_consolidation.sh",
-    "crates/http": "check_sig_test_target_consolidation.sh",'
+    "crates/macros": "check_sig_test_target_consolidation.sh",'
 }
 expect_fail 'a member listed in both tables at once is rejected' mut_member_is_both_covered_and_excepted
 
