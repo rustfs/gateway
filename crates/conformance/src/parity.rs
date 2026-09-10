@@ -175,6 +175,7 @@ mod tests {
             profile: "aws".to_owned(),
             outcomes,
             filtered_out: 0,
+            left_to_other_shards: 0,
             notes: Vec::new(),
             polarity: (1, 1),
             validate_only: false,

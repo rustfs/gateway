@@ -301,6 +301,19 @@ end
 # The five groups must be the five distinct fifths of one split, or a fifth of the
 # suite silently never runs while all five jobs report success.
 require_equal(guard_runs.uniq.length, 5, "the guard runners do not cover five distinct shards")
+# Transport parity is two halves of one comparison for the same reason: a runner that repeats
+# the other's shard leaves half the corpus uncompared while both jobs report success.
+parity_ids = ["transport-parity", "transport-parity-2"]
+parity_runs = (0...2).map do |shard|
+  <<~RUN
+    scripts/ci_budget.sh 480 "production transport parity #{shard + 1}/2" cargo run --package rustfs-gateway-conformance --bin rustfs-gateway-conformance -- diff-transports --exclude-slow --shard #{shard}/2
+  RUN
+end
+parity_ids.each_with_index do |job_id, index|
+  require_equal(jobs.fetch(job_id).fetch("steps").last.fetch("run"), parity_runs.fetch(index),
+                "#{job_id} command changed, lost its shard, or can hide a failure")
+end
+require_equal(parity_runs.uniq.length, 2, "the transport parity runners do not cover two distinct shards")
 require_equal(target.fetch("steps").last.fetch("run"), target_run,
               "target-consolidation-self-test command changed or can hide a failure")
 quirk_ledgers.each_with_index do |job, index|
@@ -360,8 +373,8 @@ end
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "workspace-tests-2", "workspace-tests-3", "transport-parity", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "guard-self-test-5", "target-consolidation-self-test", "quirk-ledger-self-test", "quirk-ledger-self-test-2", "quirk-ledger-self-test-3", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs", "examples"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all twenty-five workers within the budget")
+              ["Test", ["workspace-tests", "workspace-tests-2", "workspace-tests-3", "transport-parity", "transport-parity-2", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "guard-self-test-5", "target-consolidation-self-test", "quirk-ledger-self-test", "quirk-ledger-self-test-2", "quirk-ledger-self-test-3", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs", "examples"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all twenty-six workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
@@ -370,6 +383,7 @@ expected_env = {
   "WORKSPACE_2_RESULT" => "${{ needs.workspace-tests-2.result }}",
   "WORKSPACE_3_RESULT" => "${{ needs.workspace-tests-3.result }}",
   "TRANSPORT_PARITY_RESULT" => "${{ needs.transport-parity.result }}",
+  "TRANSPORT_PARITY_2_RESULT" => "${{ needs.transport-parity-2.result }}",
   "PERSISTENCE_GOLDENS_RESULT" => "${{ needs.persistence-goldens.result }}",
   "SIGNING_SUITE_RESULT" => "${{ needs.signing-suite.result }}",
   "GUARD_RESULT" => "${{ needs.guard-self-test.result }}",
@@ -398,6 +412,7 @@ expected_run = <<~'RUN'
   test "$WORKSPACE_2_RESULT" = success
   test "$WORKSPACE_3_RESULT" = success
   test "$TRANSPORT_PARITY_RESULT" = success
+  test "$TRANSPORT_PARITY_2_RESULT" = success
   test "$PERSISTENCE_GOLDENS_RESULT" = success
   test "$SIGNING_SUITE_RESULT" = success
   test "$GUARD_RESULT" = success
@@ -568,4 +583,4 @@ if build_groups != [0, 1, 2, 3, 4]:
     )
 PY
 
-printf 'OK: three workspace shards, transport parity, persistence goldens, signing suite, five guard shards, target-consolidation, three quirk-ledger shards, DTO compiler, five build guard shards, error-status and TSAN workers are parallel behind Test\n'
+printf 'OK: three workspace shards, two transport parity shards, persistence goldens, signing suite, five guard shards, target-consolidation, three quirk-ledger shards, DTO compiler, five build guard shards, error-status and TSAN workers are parallel behind Test\n'
