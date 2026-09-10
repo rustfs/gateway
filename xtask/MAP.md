@@ -20,6 +20,7 @@ Agent entry point for repository automation commands.
 | `src/sigsuite.rs` | Pinned external signing-suite fetch and run process boundary. | Official signing-suite checkout or invocation changes. |
 | `src/verify.rs` | Bounded crate/operation verification and full workspace verification selection; core compile-fail contracts stay in the full workspace gate. | A crate/op/all verification command is wrong. |
 | `src/repo_root.rs` | Runtime discovery of the repository root from the process environment, never a compile-time path. | An xtask command reads the wrong checkout, or a sandbox-built binary names a directory that no longer exists. |
+| `src/verify/prebuild.rs` | The build that runs ahead of a crate's 30-second deadline: command derivation, execution with no deadline, and the compiled-crate count. | A crate loop is charged for a build, or the prebuild selects the wrong targets. |
 | `src/verify/process.rs` | Deadline-aware child supervision and output capture. | Verification children block, leak, or report out of order. |
 | `src/verify/selection.rs` | Crate-local Cargo test and Clippy target selection. | A crate's bounded verification scope is wrong or too slow. |
 | `src/verify/tests.rs` | Verification selection and scheduling unit contracts. | A bounded verification scope or schedule changes. |

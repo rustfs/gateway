@@ -1779,7 +1779,7 @@ expect_fail check_xtask_codegen_surface.sh \
     'the launcher no longer recording command startup' mut_xtask_launcher_timestamp_removed
 
 mut_xtask_verify_ignores_launcher_time() {
-    perl -0pi -e 's/        started,\n/        started: None,\n/' xtask/src/verify.rs
+    perl -0pi -e 's/        started: started\.and_then\(\|started\| started\.checked_add\(build\.elapsed\)\),\n/        started: None,\n/' xtask/src/verify.rs
 }
 expect_fail check_xtask_codegen_surface.sh \
     'crate verification ignoring launcher time' mut_xtask_verify_ignores_launcher_time
