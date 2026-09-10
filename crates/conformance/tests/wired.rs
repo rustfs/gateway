@@ -80,8 +80,46 @@ fn only(report: &rustfs_gateway_conformance::report::Report) -> &CaseOutcome {
     report.outcomes.first().expect("one case selected")
 }
 
+/// What to print when a verdict is not the one asserted: the failing assertions, or — for a skip,
+/// which has none — the reason the runner recorded. A skipped case used to render as `[]` here,
+/// so every report of a `Skipped` where `Passed` was required had to be diagnosed from nothing
+/// (rustfs/gateway#456, #578; AGENTS.md "skip with the reason").
 fn failures(outcome: &CaseOutcome) -> Vec<String> {
-    outcome.failures().iter().map(ToString::to_string).collect()
+    let mut lines: Vec<String> = outcome.failures().iter().map(ToString::to_string).collect();
+    if outcome.verdict == Verdict::Skipped {
+        lines.push(match &outcome.skip_reason {
+            Some(reason) if !reason.is_empty() => format!("skipped: {reason}"),
+            _ => "skipped, and the runner recorded no reason".to_owned(),
+        });
+    }
+    lines
+}
+
+/// Negative — a skip renders its reason, never `[]`; positive — a pass renders nothing extra.
+#[test]
+fn a_skipped_outcome_names_its_reason_in_the_assertion_message() {
+    let mut outcome = CaseOutcome {
+        id: "c-none-0000".to_owned(),
+        domain: "none".to_owned(),
+        relative: "cases/none/c-none-0000.toml".to_owned(),
+        title: None,
+        verdict: Verdict::Skipped,
+        phase: rustfs_gateway_conformance::report::Phase::Execute,
+        skip_reason: Some("the socket driver is not available on this host".to_owned()),
+        diagnostics: Vec::new(),
+        quirks: Vec::new(),
+        evidence: Vec::new(),
+    };
+    assert_eq!(
+        failures(&outcome),
+        vec!["skipped: the socket driver is not available on this host".to_owned()]
+    );
+    outcome.skip_reason = None;
+    assert_eq!(failures(&outcome), vec!["skipped, and the runner recorded no reason".to_owned()]);
+    outcome.skip_reason = Some(String::new());
+    assert_eq!(failures(&outcome), vec!["skipped, and the runner recorded no reason".to_owned()]);
+    outcome.verdict = Verdict::Passed;
+    assert!(failures(&outcome).is_empty());
 }
 
 /// Positive — the whole path works end to end: fixtures established, request signed, signature
