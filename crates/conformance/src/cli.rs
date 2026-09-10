@@ -33,7 +33,7 @@ use crate::keys;
 #[cfg(feature = "production-transports")]
 use crate::production::ProductionDriver;
 use crate::report::{Baseline, Report, Verdict};
-use crate::runner::{self, RunOptions};
+use crate::runner::{self, RunOptions, Shard};
 use crate::sut::{Profile, Sut, Transport};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -52,38 +52,8 @@ pub mod exit {
     pub const ENVIRONMENT: u8 = 3;
 }
 
-/// The usage text, also printed on a command-line error.
-pub const USAGE: &str = "\
-usage: rustfs-gateway-conformance <command> [options]
-
-commands:
-  run                       load the corpus and run it against a target
-  diff-transports           run both production drivers in parallel and compare every case result
-  validate                  load the corpus and check it against the frozen schema and the
-                            conventions, without touching a target; every case it accepts is
-                            reported `validated`, never `passed`, because nothing was executed
-  baseline                  print a baseline document for the current results
-  audit-keys                run the corpus, then check that every key the frozen schema declares
-                            is one this harness actually reads
-
-options:
-  --filter <glob>           select cases whose path or id matches (`etag/`, `*mpu*`, `c-sig-0001`)
-  --transport <hyper|conn>  assembly path to inject (default hyper)
-  --profile <aws|minio|strict>
-                            the profile the target claims (default aws)
-  --root <dir>              corpus directory holding case.schema.json
-  --endpoint <http(s)-url>  external target (raw HTTP/1.1)
-  --allow-external-fixtures
-                            allow isolated owned bucket/object setup and automatic cleanup
-  --ca-cert <pem-path>      additional CA certificates for an HTTPS endpoint
-  --baseline <file>         tolerate the failures this file records; fail only on a regression
-  --json <file>             write the machine-readable report
-  --junit <file>            write a JUnit document
-  --exclude-slow            leave `slow` cases out, as the pull-request gate does
-  -h, --help                print this text
-
-exit codes: 0 ok, 1 regression against the baseline, 2 usage, 3 environment
-";
+mod usage;
+pub use usage::USAGE;
 
 /// Runs the command line.
 ///
@@ -181,6 +151,7 @@ pub fn run_filtered(filter: &str) -> Result<Report, String> {
         profile: Profile::Aws,
         include_slow: true,
         validate_only: false,
+        shard: None,
     };
     Ok(runner::run(&corpus, &mut InProcess::new(root), &options))
 }
@@ -231,6 +202,7 @@ fn execute_prepared(options: &Options, sut: &mut dyn Sut, corpus: &Corpus, basel
         transport: options.transport,
         profile: options.profile,
         include_slow: !options.exclude_slow,
+        shard: options.shard,
         validate_only: options.command == Command::Validate,
     };
     let report = runner::run(corpus, sut, &run_options);
@@ -300,7 +272,9 @@ pub fn status_code(report: &Report, baseline: Option<&Baseline>, command: Comman
     // A selector that named no case is an environment problem for every command, `validate`
     // included. `--filter '<case-id>'` is how the feedback-loop table selects one case, so a typo
     // in the id checked nothing and exited 0 — the same shape as a command that checked something.
-    if report.outcomes.is_empty() {
+    // A shard that owns none of a non-empty selection is a partial run, not an empty one: the
+    // cases exist and the other shards run them, and this report says so in its notes.
+    if report.outcomes.is_empty() && report.left_to_other_shards == 0 {
         return exit::ENVIRONMENT;
     }
     // A run in which nothing executed is an environment problem, not a pass. Reporting it as
@@ -359,6 +333,8 @@ pub struct Options {
     pub json: Option<PathBuf>,
     /// Where to write the JUnit report.
     pub junit: Option<PathBuf>,
+    /// This worker's share of the selected cases, when the run is split across workers.
+    pub shard: Option<Shard>,
     /// Whether to leave `slow` cases out.
     pub exclude_slow: bool,
 }
@@ -385,6 +361,7 @@ impl Options {
             json: None,
             junit: None,
             exclude_slow: false,
+            shard: None,
         };
         let mut transport_explicit = false;
         let mut iter = args.iter();
@@ -405,6 +382,7 @@ impl Options {
             match flag.as_str() {
                 "-h" | "--help" => return Ok(None),
                 "--exclude-slow" => options.exclude_slow = true,
+                "--shard" => options.shard = Some(Shard::parse(&value()?)?),
                 "--filter" => options.filter = Some(value()?),
                 "--root" => options.root = Some(PathBuf::from(value()?)),
                 "--endpoint" => options.endpoint = Some(value()?),
@@ -448,15 +426,18 @@ impl Options {
 }
 
 #[cfg(test)]
+#[path = "cli/shard_tests.rs"]
+mod shard_tests;
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::OnceLock;
 
-    fn args(list: &[&str]) -> Vec<String> {
+    pub(super) fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|item| (*item).to_owned()).collect()
     }
 
-    fn corpus() -> &'static (PathBuf, Corpus) {
+    pub(super) fn corpus() -> &'static (PathBuf, Corpus) {
         static CORPUS: OnceLock<(PathBuf, Corpus)> = OnceLock::new();
         CORPUS.get_or_init(|| {
             let root = Corpus::discover_root().expect("the repository corpus");
@@ -486,6 +467,7 @@ mod tests {
             profile: Profile::Aws,
             include_slow: true,
             validate_only: false,
+            shard: None,
         };
         let report = runner::run(corpus, target(selected_transport, root.clone()).as_mut(), &options);
         assert_eq!(
@@ -525,6 +507,7 @@ mod tests {
             json: None,
             junit: None,
             exclude_slow: false,
+            shard: None,
         }
     }
 
@@ -733,6 +716,7 @@ mod tests {
                 evidence: Vec::new(),
             }],
             filtered_out: 0,
+            left_to_other_shards: 0,
             notes: Vec::new(),
             polarity: (1, 0),
             validate_only: false,
@@ -753,6 +737,7 @@ mod tests {
             notes: Vec::new(),
             polarity: (1, 0),
             validate_only: false,
+            left_to_other_shards: 0,
         };
         assert_eq!(status_code(&report, None, Command::Run), exit::ENVIRONMENT);
     }
@@ -768,6 +753,7 @@ mod tests {
             notes: Vec::new(),
             polarity: (1, 0),
             validate_only: false,
+            left_to_other_shards: 0,
         };
         report.outcomes.push(crate::report::CaseOutcome {
             id: "c-object-0001".to_owned(),

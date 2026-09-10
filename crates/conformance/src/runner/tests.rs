@@ -25,7 +25,7 @@ use crate::observation::Observation;
 use crate::sut::{ExchangePlan, Scripted, SutError, Unwired};
 use std::sync::OnceLock;
 
-fn corpus() -> &'static Corpus {
+pub(super) fn corpus() -> &'static Corpus {
     static CORPUS: OnceLock<Corpus> = OnceLock::new();
     CORPUS.get_or_init(|| {
         let root = Corpus::discover_root().expect("the repository corpus");

@@ -103,6 +103,9 @@ pub(super) fn transport_child_args(options: &Options, root: &Path, transport: Tr
     if options.exclude_slow {
         args.push("--exclude-slow".to_owned());
     }
+    if let Some(shard) = options.shard {
+        args.extend(["--shard".to_owned(), format!("{}/{}", shard.index, shard.count)]);
+    }
     args
 }
 

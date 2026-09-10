@@ -356,6 +356,13 @@ jobs:
         run: |
           scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c 'cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway'
 
+  # Transport parity runs the whole corpus twice (once per production driver) and compares.
+  # On one runner it sat at 413-471s of a 480s budget for nine consecutive main runs and hit
+  # exit 124 twice in one day (rustfs/gateway#641), and its job is already at nine minutes
+  # against the ten-minute ceiling, so no budget can help it. The corpus is now cut in two by
+  # `--shard`, which numbers the selected cases in corpus order and hands each runner every
+  # second one; the two green jobs together are the complete comparison, and each child pair
+  # reports how many cases it left to the other shard.
   transport-parity:
     name: Production transport parity
     runs-on: ubuntu-latest
@@ -366,9 +373,23 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Compare production transports (maximum 8 minutes after setup)
+      - name: Compare production transports 1 of 2 (maximum 8 minutes after setup)
         run: |
-          scripts/ci_budget.sh 480 "production transport parity" cargo run --package rustfs-gateway-conformance --bin rustfs-gateway-conformance -- diff-transports --exclude-slow
+          scripts/ci_budget.sh 480 "production transport parity 1/2" cargo run --package rustfs-gateway-conformance --bin rustfs-gateway-conformance -- diff-transports --exclude-slow --shard 0/2
+
+  transport-parity-2:
+    name: Production transport parity 2
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Compare production transports 2 of 2 (maximum 8 minutes after setup)
+        run: |
+          scripts/ci_budget.sh 480 "production transport parity 2/2" cargo run --package rustfs-gateway-conformance --bin rustfs-gateway-conformance -- diff-transports --exclude-slow --shard 1/2
 
   # The corpus is embedded in family providers rather than stored under a corpus/ directory.
   # corpus-report derives this byte total from the concrete accepted and rejected sample inputs.
@@ -675,7 +696,7 @@ jobs:
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
+    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -686,6 +707,7 @@ jobs:
           WORKSPACE_2_RESULT: ${{ needs.workspace-tests-2.result }}
           WORKSPACE_3_RESULT: ${{ needs.workspace-tests-3.result }}
           TRANSPORT_PARITY_RESULT: ${{ needs.transport-parity.result }}
+          TRANSPORT_PARITY_2_RESULT: ${{ needs.transport-parity-2.result }}
           PERSISTENCE_GOLDENS_RESULT: ${{ needs.persistence-goldens.result }}
           SIGNING_SUITE_RESULT: ${{ needs.signing-suite.result }}
           GUARD_RESULT: ${{ needs.guard-self-test.result }}
@@ -712,6 +734,7 @@ jobs:
           test "$WORKSPACE_2_RESULT" = success
           test "$WORKSPACE_3_RESULT" = success
           test "$TRANSPORT_PARITY_RESULT" = success
+          test "$TRANSPORT_PARITY_2_RESULT" = success
           test "$PERSISTENCE_GOLDENS_RESULT" = success
           test "$SIGNING_SUITE_RESULT" = success
           test "$GUARD_RESULT" = success

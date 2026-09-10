@@ -172,6 +172,12 @@ pub struct Report {
     pub outcomes: Vec<CaseOutcome>,
     /// Cases filtered out before anything ran.
     pub filtered_out: usize,
+    /// Selected cases this run left to the other shards of a `--shard` split; `0` without one.
+    ///
+    /// Kept apart from `filtered_out` because it answers a different question: those cases were
+    /// wanted and will run elsewhere, so a shard that owns none of them is a partial run, not an
+    /// empty selection.
+    pub left_to_other_shards: usize,
     /// Run-wide notes, printed once at the end.
     ///
     /// A reason that applies to every case — "no target is wired, and here is what the facade
@@ -286,6 +292,12 @@ impl Report {
         }
         if self.filtered_out > 0 {
             out.push_str(&format!("  filtered  {} case(s) excluded by --filter\n", self.filtered_out));
+        }
+        if self.left_to_other_shards > 0 {
+            out.push_str(&format!(
+                "  sharded   {} selected case(s) belong to the other shards\n",
+                self.left_to_other_shards
+            ));
         }
         out.push('\n');
 

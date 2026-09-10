@@ -12,6 +12,7 @@ ADRs; this map only selects files.
 | `src/toml.rs` | Minimal TOML value parser used by the corpus. | Syntax parsing fails before schema validation. |
 | `src/runner.rs` | Case/exchange execution order and timeout coordination. | A case runs in the wrong order or never reaches a verdict. |
 | `src/runner/lifecycle_tests.rs` | Post-prepare cleanup and failure-classification regression coverage. | A runner early return may bypass fixture cleanup. |
+| `src/runner/shard_tests.rs` | The `--shard` partition: every selected case exactly once, in corpus order, and the partial-run note. | Shards overlap, skip a case, or run silently as a whole. |
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
 | `src/expect/events.rs` | Event-stream count and byte-exact payload matching. | An event payload expectation is ignored or misjudged. |
 | `src/inprocess.rs` | In-process facade transport. | Hyper-independent execution differs from the socket path. |
@@ -21,6 +22,8 @@ ADRs; this map only selects files.
 | `src/parity.rs` | Per-case verdict, phase, failure and skip-reason comparison. | Production transport results disagree or a case is missing. |
 | `src/production.rs` | Production Hyper and self-held server assemblies with request pacing. | A transport label does not select the production driver it names. |
 | `src/cli/parity.rs` | Isolated child-process orchestration for production transport comparison. | The parity command launches or collects one driver incorrectly. |
+| `src/cli/usage.rs` | The usage text: every command, option, and exit code as the reader sees them. | An option is added, renamed, or its wording changes. |
+| `src/cli/shard_tests.rs` | The `--shard` command-line contract: parsing, forwarding to the parity children, the partial-run exit code. | A shard option is parsed, forwarded, or classified wrongly. |
 | `src/socket.rs` | Real socket transport and connection observations. | A wire-level close/reuse fact is wrong. |
 | `src/socket/connect.rs` | Plain and TLS client connection setup, including absolute setup deadlines. | A TCP connect or TLS handshake escapes the case budget. |
 | `src/socket/response.rs` | Fixed-length and chunked HTTP/1.1 response decoding. | A raw response body is truncated or framed incorrectly. |

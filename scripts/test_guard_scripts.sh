@@ -15944,8 +15944,8 @@ expect_fail check_ci_test_split.sh \
     'the official signing suite runner build being replaced with a no-op' mut_ci_signing_suite_build_dropped
 
 mut_ci_signing_suite_not_aggregated() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test' \
-        'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, guard-self-test'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test' \
+        'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, guard-self-test'
 }
 expect_fail check_ci_test_split.sh \
     'the official signing suite result leaving the aggregate Test check' mut_ci_signing_suite_not_aggregated
@@ -16002,8 +16002,8 @@ expect_fail check_ci_test_split.sh \
     mut_ci_persistence_job_budget_widened
 
 mut_ci_persistence_not_aggregated() {
-    replace_ci_text 'transport-parity, persistence-goldens, signing-suite' \
-        'transport-parity, signing-suite'
+    replace_ci_text 'transport-parity, transport-parity-2, persistence-goldens, signing-suite' \
+        'transport-parity, transport-parity-2, signing-suite'
 }
 expect_fail check_ci_test_split.sh \
     'the persistence goldens result leaving the required Test check' \
@@ -16384,22 +16384,22 @@ expect_fail check_ci_test_split.sh \
     'the branch-protected Test check being renamed' mut_ci_required_name_changed
 
 mut_ci_aggregate_drops_third_workspace() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
-        'needs: [workspace-tests, workspace-tests-2, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+        'needs: [workspace-tests, workspace-tests-2, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for the third workspace shard' \
     mut_ci_aggregate_drops_third_workspace
 
 mut_ci_aggregate_drops_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
         'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for guard mutations' mut_ci_aggregate_drops_guard
 
 mut_ci_aggregate_drops_transport_parity() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
         'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]'
 }
 expect_fail check_ci_test_split.sh \
@@ -16423,7 +16423,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_transport_parity_comparison_removed
 
 mut_ci_aggregate_drops_target() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
         'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, guard-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -16431,7 +16431,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_target
 
 mut_ci_aggregate_drops_quirk_ledger() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
         'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, guard-self-test, target-consolidation-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -16439,7 +16439,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_quirk_ledger
 
 mut_ci_aggregate_drops_dto_compiler() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
         'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -16447,7 +16447,7 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_dto_compiler
 
 mut_ci_aggregate_drops_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
         'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, guard-self-test, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -16455,39 +16455,39 @@ expect_fail check_ci_test_split.sh \
     mut_ci_aggregate_drops_build_guard
 
 mut_ci_aggregate_drops_second_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
-        'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+        'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, error-status-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for the second build-backed worker' \
     mut_ci_aggregate_drops_second_build_guard
 
 mut_ci_aggregate_drops_third_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
-        'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+        'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, error-status-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for the third build-backed worker' \
     mut_ci_aggregate_drops_third_build_guard
 
 mut_ci_aggregate_drops_fourth_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
-        'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+        'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for the fourth build-backed worker' \
     mut_ci_aggregate_drops_fourth_build_guard
 
 mut_ci_aggregate_drops_fifth_build_guard() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
-        'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, error-status-self-test, gateway-tsan, docs, examples]'
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+        'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, error-status-self-test, gateway-tsan, docs, examples]'
 }
 expect_fail check_ci_test_split.sh \
     'the required Test check no longer waiting for the fifth build-backed worker' \
     mut_ci_aggregate_drops_fifth_build_guard
 
 mut_ci_aggregate_drops_error_status() {
-    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
+    replace_ci_text 'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]' \
         'needs: [workspace-tests, workspace-tests-2, workspace-tests-3, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, dto-compiler-self-test, build-guard-self-test, gateway-tsan]'
 }
 expect_fail check_ci_test_split.sh \
@@ -16624,12 +16624,12 @@ expect_fail check_ci_test_split.sh \
 mut_ci_aggregate_budget_widened() {
     replace_ci_text '  test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
+    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1' '  test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
+    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2'
@@ -16757,6 +16757,31 @@ mut_ci_fifth_guard_repeats_the_fourth() {
 }
 expect_fail check_ci_test_split.sh \
     'the fifth guard shard repeating the fourth' mut_ci_fifth_guard_repeats_the_fourth
+
+mut_ci_second_parity_result_ignored() {
+    replace_ci_text 'TRANSPORT_PARITY_2_RESULT: ${{ needs.transport-parity-2.result }}' 'TRANSPORT_PARITY_2_RESULT: success'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check ignoring the second transport parity shard result' mut_ci_second_parity_result_ignored
+
+mut_ci_second_parity_comparison_dropped() {
+    replace_ci_text '          test "$TRANSPORT_PARITY_2_RESULT" = success' '          true'
+}
+expect_fail check_ci_test_split.sh \
+    'the aggregate check dropping the second transport parity shard comparison' mut_ci_second_parity_comparison_dropped
+
+mut_ci_second_parity_repeats_the_first() {
+    replace_ci_text '"production transport parity 2/2" cargo run --package rustfs-gateway-conformance --bin rustfs-gateway-conformance -- diff-transports --exclude-slow --shard 1/2' \
+        '"production transport parity 2/2" cargo run --package rustfs-gateway-conformance --bin rustfs-gateway-conformance -- diff-transports --exclude-slow --shard 0/2'
+}
+expect_fail check_ci_test_split.sh \
+    'the second transport parity shard repeating the first' mut_ci_second_parity_repeats_the_first
+
+mut_ci_parity_shard_dropped() {
+    replace_ci_text 'diff-transports --exclude-slow --shard 0/2' 'diff-transports --exclude-slow'
+}
+expect_fail check_ci_test_split.sh \
+    'a transport parity runner comparing the whole corpus again instead of its shard' mut_ci_parity_shard_dropped
 
 mut_ci_workspace_comparison_dropped() {
     replace_ci_text '          test "$WORKSPACE_RESULT" = success' '          true'

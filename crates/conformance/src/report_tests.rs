@@ -60,6 +60,7 @@ fn report() -> Report {
             outcome("c-mpu-0001", "mpu", Verdict::Skipped),
         ],
         filtered_out: 0,
+        left_to_other_shards: 0,
         notes: vec!["the facade must expose: a service entry point".to_owned()],
         polarity: (2, 1),
         validate_only: false,

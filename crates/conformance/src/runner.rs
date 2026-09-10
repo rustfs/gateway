@@ -53,6 +53,56 @@ pub struct RunOptions {
     pub include_slow: bool,
     /// Stop after the corpus checks, without touching a target.
     pub validate_only: bool,
+    /// Run only every `count`-th selected case starting at `index`, so the corpus can be spread
+    /// over several workers that together cover it exactly once.
+    pub shard: Option<Shard>,
+}
+
+/// One worker's share of the selected cases: the `index`-th of `count`, by selection order.
+///
+/// The partition is over the cases the filter and the `slow` rule already selected, numbered in
+/// corpus order, so `n` shards with the same options run disjoint sets whose union is the whole
+/// selection — which is what lets `diff-transports` be split across CI runners without any case
+/// running twice or not at all (rustfs/gateway#641).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shard {
+    /// Which share this is, from `0` to `count - 1`.
+    pub index: usize,
+    /// How many shares the selection is cut into.
+    pub count: usize,
+}
+
+impl Shard {
+    /// Parses the `<index>/<count>` spelling the command line uses.
+    ///
+    /// # Errors
+    ///
+    /// Returns the reason when the text is not two integers separated by `/`, the count is zero,
+    /// or the index is not below the count.
+    pub fn parse(text: &str) -> Result<Shard, String> {
+        let Some((index, count)) = text.split_once('/') else {
+            return Err(format!("`--shard` needs `<index>/<count>`, got `{text}`"));
+        };
+        let index: usize = index
+            .parse()
+            .map_err(|_| format!("`--shard` index must be an unsigned integer, got `{index}`"))?;
+        let count: usize = count
+            .parse()
+            .map_err(|_| format!("`--shard` count must be an unsigned integer, got `{count}`"))?;
+        if count == 0 {
+            return Err("`--shard` count must be at least 1".to_owned());
+        }
+        if index >= count {
+            return Err(format!("`--shard` index {index} is not below its count {count}"));
+        }
+        Ok(Shard { index, count })
+    }
+
+    /// Whether the `ordinal`-th selected case belongs to this share.
+    #[must_use]
+    pub fn owns(self, ordinal: usize) -> bool {
+        ordinal % self.count == self.index
+    }
 }
 
 impl Default for RunOptions {
@@ -63,6 +113,7 @@ impl Default for RunOptions {
             profile: Profile::Aws,
             include_slow: true,
             validate_only: false,
+            shard: None,
         }
     }
 }
@@ -97,12 +148,29 @@ pub fn run(corpus: &Corpus, sut: &mut dyn Sut, options: &RunOptions) -> Report {
         notes.push("validate: schema check only — no cases were executed".to_owned());
     }
     let mut filtered_out = 0;
+    let mut left_to_other_shards = 0;
+    let mut ordinal = 0;
     for case in corpus.cases() {
         if !selected(case, options) {
             filtered_out += 1;
             continue;
         }
+        let owned = options.shard.is_none_or(|shard| shard.owns(ordinal));
+        ordinal += 1;
+        if !owned {
+            left_to_other_shards += 1;
+            continue;
+        }
         outcomes.push(run_case(case, sut, options, &goldens, &mut notes));
+    }
+    if let Some(shard) = options.shard {
+        // Said on the report, so a partial run can never read as the whole corpus.
+        notes.push(format!(
+            "shard {}/{}: {} selected case(s) ran here, {left_to_other_shards} belong to the other shards",
+            shard.index,
+            shard.count,
+            outcomes.len()
+        ));
     }
     Report {
         target: sut.describe(),
@@ -110,6 +178,7 @@ pub fn run(corpus: &Corpus, sut: &mut dyn Sut, options: &RunOptions) -> Report {
         profile: options.profile.as_str().to_owned(),
         outcomes,
         filtered_out,
+        left_to_other_shards,
         notes,
         polarity: lint::polarity_balance(corpus),
         validate_only: options.validate_only,
@@ -572,5 +641,7 @@ fn glob_prefix(pattern: &[char], text: &[char]) -> bool {
 
 #[cfg(test)]
 mod lifecycle_tests;
+#[cfg(test)]
+mod shard_tests;
 #[cfg(test)]
 mod tests;
