@@ -645,6 +645,9 @@ status = {status}
                     Err(error) => panic!("accept client before deadline: {error}"),
                 }
             };
+            // An accepted socket inherits the listener's non-blocking flag on macOS; put it back
+            // into blocking mode so the read timeout below is the deadline (rustfs/gateway#684).
+            stream.set_nonblocking(false).expect("blocking head read");
             stream
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .expect("set head deadline");

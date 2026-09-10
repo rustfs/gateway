@@ -99,6 +99,10 @@ fn isolated_corpus() -> TestCorpus {
 }
 
 fn read_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    // The fixture listener is non-blocking so its accept loop can watch its own deadline, and on
+    // macOS an accepted socket inherits that flag: a non-blocking read answers `WouldBlock` at once
+    // instead of waiting for the request, and the timeout below never applies (rustfs/gateway#684).
+    stream.set_nonblocking(false).expect("blocking fixture request read");
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .expect("set fixture request deadline");
