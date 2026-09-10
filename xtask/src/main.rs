@@ -33,6 +33,7 @@ mod mutate;
 mod new_op;
 #[cfg(feature = "full")]
 mod operation_spec_guard;
+mod repo_root;
 #[cfg(feature = "full")]
 mod route;
 #[cfg(feature = "operation")]

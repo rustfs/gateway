@@ -63,10 +63,7 @@ fn lock_string(name: &str) -> &'static str {
 }
 
 fn root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("xtask is inside the repository")
-        .to_owned()
+    crate::repo_root::repo_root()
 }
 
 fn checkout() -> PathBuf {

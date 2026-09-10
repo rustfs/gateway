@@ -66,10 +66,8 @@ impl fmt::Display for Diagnostic {
 }
 
 pub(super) fn command(args: &[String]) -> ExitCode {
-    let Some(root) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() else {
-        eprintln!("xtask has no workspace parent");
-        return ExitCode::FAILURE;
-    };
+    let root = crate::repo_root::repo_root();
+    let root = root.as_path();
     let started = Instant::now();
     let result = match args {
         [validate] if validate == "validate" => validate_samples(root).map(|report| {
@@ -303,22 +301,20 @@ fn escape_pointer(value: &str) -> String {
 mod tests {
     use super::*;
 
-    fn root() -> &'static Path {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("xtask has a workspace parent")
+    fn root() -> PathBuf {
+        crate::repo_root::repo_root()
     }
 
     #[test]
     fn c_ir_0001_through_0005_validate() {
-        let report = validate_samples(root()).expect("schema and positive samples must validate");
+        let report = validate_samples(&root()).expect("schema and positive samples must validate");
         assert_eq!(report.samples, 3);
         assert!(report.quirk_refs > 0);
     }
 
     #[test]
     fn c_ir_n001_through_n014_are_rejected_for_the_named_rule() {
-        let report = negative::validate_expected_failures(root(), Path::new("spec/ir/samples/invalid"))
+        let report = negative::validate_expected_failures(&root(), Path::new("spec/ir/samples/invalid"))
             .expect("all negative samples must be rejected for their named rule");
         assert_eq!(report.samples, 14);
         assert_eq!(report.rejected, 14);
@@ -363,7 +359,7 @@ mod tests {
 
     #[test]
     fn ir_version_other_than_two_gets_the_exact_const_diagnostic() {
-        let schema = load_schema(root()).expect("schema must load");
+        let schema = load_schema(&root()).expect("schema must load");
         let validator = compile_schema(&schema).expect("schema must compile");
         let mut doc: Value =
             read_json(&root().join("spec/ir/samples/GetBucketLocation.json")).expect("positive sample must parse");
@@ -378,7 +374,7 @@ mod tests {
 
     #[test]
     fn ir_v2_accepts_an_owned_upload_id_capability() {
-        let schema = load_schema(root()).expect("schema must load");
+        let schema = load_schema(&root()).expect("schema must load");
         let validator = compile_schema(&schema).expect("schema must compile");
         let mut doc: Value =
             read_json(&root().join("spec/ir/samples/GetBucketLocation.json")).expect("positive sample must parse");
@@ -394,7 +390,7 @@ mod tests {
 
     #[test]
     fn n_ir_v2_rejects_an_unknown_capability_exchange() {
-        let schema = load_schema(root()).expect("schema must load");
+        let schema = load_schema(&root()).expect("schema must load");
         let validator = compile_schema(&schema).expect("schema must compile");
         let mut doc: Value =
             read_json(&root().join("spec/ir/samples/GetBucketLocation.json")).expect("positive sample must parse");
@@ -409,7 +405,7 @@ mod tests {
 
     #[test]
     fn n_ir_v2_rejects_extra_capability_properties() {
-        let schema = load_schema(root()).expect("schema must load");
+        let schema = load_schema(&root()).expect("schema must load");
         let validator = compile_schema(&schema).expect("schema must compile");
         let mut doc: Value =
             read_json(&root().join("spec/ir/samples/GetBucketLocation.json")).expect("positive sample must parse");
