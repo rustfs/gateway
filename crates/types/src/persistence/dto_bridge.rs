@@ -546,6 +546,26 @@ mod tests {
     }
 
     #[test]
+    fn public_access_block_dto_bridge_accepts_exactly_the_four_boolean_spellings() {
+        // The lexical forms `PersistenceCodecError::InvalidBoolean` documents: the pinned old
+        // decoder takes `true`, `false`, `TRUE`, `FALSE` and nothing else (rustfs/gateway#465).
+        let parse = |text: &str| {
+            parse_public_access_block_dto(
+                format!(
+                    "<PublicAccessBlockConfiguration><BlockPublicAcls>{text}</BlockPublicAcls></PublicAccessBlockConfiguration>"
+                )
+                .as_bytes(),
+            )
+        };
+        for (text, expected) in [("true", true), ("TRUE", true), ("false", false), ("FALSE", false)] {
+            assert_eq!(parse(text).expect(text).block_public_acls, Some(expected), "{text}");
+        }
+        for text in ["True", "False", " true", "true ", "tRUE", "yes", ""] {
+            assert_eq!(parse(text).expect_err(text), PersistenceCodecError::InvalidBoolean, "{text:?}");
+        }
+    }
+
+    #[test]
     fn public_access_block_dto_bridge_rejects_a_noncanonical_boolean() {
         assert_eq!(
             parse_public_access_block_dto(
