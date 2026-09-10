@@ -27,13 +27,10 @@ use rustfs_gateway_codegen::{CodegenInput, CodegenOutput, Report, semantic};
 
 use crate::catalog;
 
-/// The repository root, derived from this crate's manifest directory so the commands work from
-/// any working directory.
+/// The repository root, discovered at runtime so the commands work from any working directory
+/// and a binary built in one checkout never carries that checkout's path into another.
 pub(crate) fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
+    crate::repo_root::repo_root()
 }
 
 /// `cargo xtask codegen [--check] [--diff]`.

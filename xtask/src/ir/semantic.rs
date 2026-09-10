@@ -316,15 +316,13 @@ fn walk(value: &Value, at: &str, visit: &mut impl FnMut(&Value, &str)) {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::PathBuf;
 
     use super::*;
     use crate::ir::read_json;
 
-    fn root() -> &'static Path {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("xtask has a workspace parent")
+    fn root() -> PathBuf {
+        crate::repo_root::repo_root()
     }
 
     fn overlay() -> Overlay {

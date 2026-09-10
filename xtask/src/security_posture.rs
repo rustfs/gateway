@@ -48,9 +48,7 @@ pub(crate) fn command(args: &[String]) -> ExitCode {
 }
 
 fn repository_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
+    crate::repo_root::repo_root()
 }
 
 fn dry_run(root: PathBuf) -> Result<String, String> {
