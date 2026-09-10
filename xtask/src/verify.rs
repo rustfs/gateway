@@ -14,12 +14,14 @@
 
 //! Bounded repository verification commands.
 //!
-//! Responsible for: selecting a meaningful test scope and enforcing the documented feedback
-//! budget. NOT responsible for: defining crate-local tests.
+//! Responsible for: selecting a meaningful test scope, building its artifacts ahead of the
+//! deadline, and enforcing the documented feedback budget over the work that is left.
+//! NOT responsible for: defining crate-local tests.
 //! Upstream: the `verify` command. Downstream: Cargo and the operation catalog.
 
 mod budget;
 mod launcher;
+mod prebuild;
 mod process;
 mod selection;
 
@@ -33,6 +35,7 @@ use serde::Deserialize;
 
 use budget::{BudgetFailure, KilledStep};
 use launcher::launcher_started;
+use prebuild::{prebuild_commands, run_prebuild};
 use process::CancelledStep;
 use selection::crate_steps;
 
@@ -86,6 +89,7 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
         }
     };
     let step_batches = crate_step_batches(&package);
+    let conformance_case = standalone_crate_case(&package);
     let subject = if package == "rustfs-gateway" {
         format!(
             "crate {package} fast runtime scope; compile-time, representative conformance, and million-key RSS contracts remain in cargo test --workspace"
@@ -99,6 +103,15 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
     } else {
         format!("crate {package}")
     };
+    let build = match run_prebuild(&prebuild_commands(&step_batches, conformance_case), &subject) {
+        Ok(build) => build,
+        Err(exit) => return exit,
+    };
+    eprintln!(
+        "verify: {subject} build compiled {} crate(s) in {:.2}s outside the budget",
+        build.compiled_crates,
+        build.elapsed.as_secs_f64()
+    );
     run_step_batches(
         &step_batches,
         Duration::from_secs(30),
@@ -107,8 +120,8 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
         RunOptions {
             json,
             operation_cases: None,
-            started,
-            conformance_case: standalone_crate_case(&package),
+            started: started.and_then(|started| started.checked_add(build.elapsed)),
+            conformance_case,
         },
     )
 }

@@ -672,6 +672,7 @@ let package = match resolve_workspace_package(name) {
     }
 };
 let step_batches = crate_step_batches(&package);
+let conformance_case = standalone_crate_case(&package);
 let subject = if package == "rustfs-gateway" {
     format!(
         "crate {package} fast runtime scope; compile-time, representative conformance, and million-key RSS contracts remain in cargo test --workspace"
@@ -685,6 +686,15 @@ let subject = if package == "rustfs-gateway" {
 } else {
     format!("crate {package}")
 };
+let build = match run_prebuild(&prebuild_commands(&step_batches, conformance_case), &subject) {
+    Ok(build) => build,
+    Err(exit) => return exit,
+};
+eprintln!(
+    "verify: {subject} build compiled {} crate(s) in {:.2}s outside the budget",
+    build.compiled_crates,
+    build.elapsed.as_secs_f64()
+);
 run_step_batches(
     &step_batches,
     Duration::from_secs(30),
@@ -693,8 +703,8 @@ run_step_batches(
     RunOptions {
         json,
         operation_cases: None,
-        started,
-        conformance_case: standalone_crate_case(&package),
+        started: started.and_then(|started| started.checked_add(build.elapsed)),
+        conformance_case,
     },
 )
 ''')
