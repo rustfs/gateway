@@ -47,7 +47,8 @@
 //! | `WireReject::LimitExceeded(BodyBytes)` | close | **policy** — refused *for* the size; draining performs the transfer the refusal avoids. §9.3 then forces the close |
 //! | every other `WireReject` | may keep | **RFC 9112 §9.3** — framing intact, remainder bounded; drain and the connection survives |
 //! | `ChunkReject`, per [`rustfs_gateway_http::ChunkReject::must_close_connection`] | both | `aws-chunked` is a content encoding inside a wire body whose extent §6.3 already fixed |
-//! | an authentication failure | close | **policy** — see [`after_auth_failure`] |
+//! | an authentication failure with body octets still owed | close | **policy** — see [`after_auth_failure`] |
+//! | an authentication failure with nothing owed | may keep | **RFC 9112 §9.3** — there is nothing to decline to drain; `c-cred-0002`..`0030`, `c-sig-0583`, `c-sig-0584` |
 //! | an authorisation denial | may keep | **the corpus** — `c-copy-0019`, `c-copy-0020`, `c-copy-0021` all assert `connection_after = "open"` for a `403 AccessDenied` |
 //! | a body past the operation's cap or the assembly's ceiling | close | **policy**, the same shape as `BodyBytes`; `c-object-0015` |
 //! | `411 MissingContentLength` | close | **RFC 9112 §11.2** — see [`after_undeclared_length`] |
@@ -145,7 +146,8 @@ pub fn after_chunk_reject(reject: &ChunkReject) -> ConnectionIntent {
     }
 }
 
-/// The third leg: an authentication failure ends the connection.
+/// The third leg: an authentication failure ends the connection **when the request still owes
+/// body octets**, and keeps it when nothing is owed.
 ///
 /// **This row is a policy decision, not an RFC one, and it is the one this module most wants a
 /// maintainer to look at.** RFC 9112 §9.3 forces the close only once the server has decided not to
@@ -170,9 +172,23 @@ pub fn after_chunk_reject(reject: &ChunkReject) -> ConnectionIntent {
 /// `c-copy-0020` and `c-copy-0021` are `403 AccessDenied` with `connection_after = "open"`, while
 /// `c-sig-0001` is the uniform credential `403` with `connection_after = "closed"`. Two `403`s,
 /// two connection verdicts, and identity is what separates them.
+///
+/// `body_owed` is [`rustfs_gateway_http::Framing::has_body`] at the moment of the refusal: whether
+/// the peer announced octets this server has not read. The policy is a refusal to *drain*, so it
+/// has nothing to say when there is nothing to drain — a bodyless `GET` refused for its
+/// credential is answered and the connection is in sync, exactly as §9.3 describes, and closing
+/// it would cost every client a fresh connection for the ordinary outcome of a wrong key. Twenty-
+/// eight corpus cases assert that (`c-cred-0002`..`0030`, `c-bkt-0030`, `c-sig-0583`, `c-sig-0584`),
+/// and real S3 keeps a connection alive after a bodyless `403`. The uniformity across
+/// [`AuthError`] variants is preserved on both sides of the split: a peer learns nothing from the
+/// connection state that it did not already know from its own request framing.
 #[must_use]
-pub const fn after_auth_failure(_error: &AuthError) -> ConnectionIntent {
-    ConnectionIntent::Close
+pub const fn after_auth_failure(_error: &AuthError, body_owed: bool) -> ConnectionIntent {
+    if body_owed {
+        ConnectionIntent::Close
+    } else {
+        ConnectionIntent::MayKeepAlive
+    }
 }
 
 /// An authorisation denial keeps the connection.
@@ -274,14 +290,16 @@ mod tests {
     /// of them stops testing anything.
     #[test]
     fn the_two_forbidden_outcomes_do_not_share_a_connection_verdict() {
-        assert_eq!(after_auth_failure(&AuthError::SignatureDoesNotMatch), ConnectionIntent::Close);
+        assert_eq!(after_auth_failure(&AuthError::SignatureDoesNotMatch, true), ConnectionIntent::Close);
         assert_eq!(after_denial(), ConnectionIntent::MayKeepAlive);
     }
 
-    /// Negative — every authentication failure closes, including the ones that are about the clock
-    /// rather than the credential. A table with holes in it is a table a peer can probe.
+    /// Negative — every authentication failure closes when body octets are owed, including the ones
+    /// that are about the clock rather than the credential; and positive — every one keeps when
+    /// nothing is owed. A table with holes in it on either side is a table a peer can probe by
+    /// error kind, which is the property the split must not break.
     #[test]
-    fn no_authentication_failure_keeps_the_connection() {
+    fn authentication_failures_close_on_an_owed_body_and_keep_without_one_uniformly() {
         for error in [
             AuthError::SignatureDoesNotMatch,
             AuthError::InvalidAccessKeyId,
@@ -289,7 +307,12 @@ mod tests {
             AuthError::AccessDenied,
             AuthError::AuthorizationHeaderMalformed,
         ] {
-            assert!(after_auth_failure(&error).must_close(), "{error:?}");
+            assert!(after_auth_failure(&error, true).must_close(), "{error:?} with a body owed");
+            assert_eq!(
+                after_auth_failure(&error, false),
+                ConnectionIntent::MayKeepAlive,
+                "{error:?} with nothing owed"
+            );
         }
     }
 

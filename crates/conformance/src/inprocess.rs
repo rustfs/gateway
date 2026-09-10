@@ -286,6 +286,13 @@ pub struct InProcess {
 }
 
 impl InProcess {
+    /// Books one exchange for the counters `finish` reads; the socket drivers share this fixture and book here too.
+    pub(crate) fn record_exchange(&self) {
+        if self.case_id == "c-cred-0006" {
+            self.credential_exchanges.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
     /// Builds a target rooted at a corpus directory, which is where `body.file` payloads are read
     /// from.
     #[must_use]
@@ -1258,43 +1265,30 @@ impl Sut for InProcess {
     }
 
     fn finish(&mut self, case_id: &str) -> Result<(), SutError> {
-        if matches!(case_id, "c-authz-1001" | "c-authz-1011" | "c-authz-1012")
-            && self.authz_backend_calls.load(Ordering::SeqCst) != 0
-        {
-            return Err(SutError::Environment(format!(
-                "{case_id} reached the copy backend after authorization refused the source"
-            )));
-        }
-        match case_id {
-            "c-cred-0002" if self.credential_backend_calls.load(Ordering::SeqCst) != 0 => {
-                return Err(SutError::Environment(
-                    "c-cred-0002 called the credential provider for an anonymous request".to_owned(),
-                ));
+        let calls = |counter: &AtomicUsize| counter.load(Ordering::SeqCst);
+        let violation = match case_id {
+            "c-authz-1001" | "c-authz-1011" | "c-authz-1012" if calls(&self.authz_backend_calls) != 0 => {
+                format!("{case_id} reached the copy backend after authorization refused the source")
             }
-            "c-cred-0006" if self.credential_backend_calls.load(Ordering::SeqCst) >= 100 => {
-                return Err(SutError::Environment(
-                    "c-cred-0006 sent all 100 misses to the credential backend".to_owned(),
-                ));
+            "c-cred-0002" if calls(&self.credential_backend_calls) != 0 => {
+                "c-cred-0002 called the credential provider for an anonymous request".to_owned()
             }
-            "c-cred-0006" if self.credential_exchanges.load(Ordering::SeqCst) != 100 => {
-                return Err(SutError::Environment(
-                    "c-cred-0006 did not execute exactly 100 identical misses".to_owned(),
-                ));
+            "c-cred-0006" if calls(&self.credential_backend_calls) >= 100 => {
+                "c-cred-0006 sent all 100 misses to the credential backend".to_owned()
             }
-            "c-cred-0024" if self.credential_governor_calls.load(Ordering::SeqCst) != 1 => {
-                return Err(SutError::Environment(
-                    "c-cred-0024 did not classify the forged key as a credential lookup".to_owned(),
-                ));
+            "c-cred-0006" if calls(&self.credential_exchanges) != 100 => {
+                "c-cred-0006 did not execute exactly 100 identical misses".to_owned()
             }
-            _ => {}
-        }
-        Ok(())
+            "c-cred-0024" if calls(&self.credential_governor_calls) != 1 => {
+                "c-cred-0024 did not classify the forged key as a credential lookup".to_owned()
+            }
+            _ => return Ok(()),
+        };
+        Err(SutError::Environment(violation))
     }
 
     fn exchange(&mut self, plan: &ExchangePlan<'_>) -> Result<Observation, SutError> {
-        if self.case_id == "c-cred-0006" {
-            self.credential_exchanges.fetch_add(1, Ordering::SeqCst);
-        }
+        self.record_exchange();
         let (fixed, request_time, skew_ms) = clock_of(plan.clock)?;
         read_connection(plan.connection)?;
         if let Ok(mut fixture) = self.state.lock() {
@@ -1434,6 +1428,7 @@ impl Sut for InProcess {
             request_body_fully_sent: Some(progress.is_exhausted()),
             ttfb_ms: Some(elapsed_ms),
             elapsed_ms,
+            harness_wait_ms: 0,
             // Always `Open`, and never derived from the service's own verdict.
             //
             // `open` is a genuine fact about this transport: there is no connection, and the

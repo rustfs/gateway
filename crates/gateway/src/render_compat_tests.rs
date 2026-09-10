@@ -87,7 +87,7 @@ fn an_authentication_failure_closes_the_connection() {
         AuthError::InvalidAccessKeyId,
         AuthError::RequestTimeTooSkewed,
     ] {
-        let rendered = from_auth(error, ResponseKind::Other);
+        let rendered = from_auth(error, ResponseKind::Other, true);
         assert!(rendered.must_close_connection(), "{error:?}");
         assert!(announces_close(&rendered), "{error:?}");
     }
@@ -99,6 +99,7 @@ fn closed_scope_contexts_preserve_authentication_teardown() {
         AuthError::AuthorizationHeaderMalformed,
         ErrorContext::authorization_scope_malformed(),
         ResponseKind::Other,
+        true,
     );
     assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
     assert!(malformed.details().is_empty());
@@ -109,6 +110,7 @@ fn closed_scope_contexts_preserve_authentication_teardown() {
         AuthError::AuthorizationHeaderMalformed,
         ErrorContext::authorization_region_mismatch(region),
         ResponseKind::Other,
+        true,
     );
     assert_eq!(mismatch.status(), StatusCode::BAD_REQUEST);
     assert_eq!(mismatch.details().len(), 1);
@@ -122,7 +124,7 @@ fn an_authorisation_denial_keeps_the_connection() {
     assert!(!denied.must_close_connection());
     assert!(!announces_close(&denied));
 
-    let unverified = from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other);
+    let unverified = from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other, true);
     assert_eq!(unverified.status(), StatusCode::FORBIDDEN);
     assert!(unverified.must_close_connection());
 }
@@ -130,7 +132,7 @@ fn an_authorisation_denial_keeps_the_connection() {
 #[test]
 fn a_close_cannot_be_downgraded_by_a_later_stage() {
     let error = with_connection(
-        from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other),
+        from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other, true),
         ConnectionIntent::MayKeepAlive,
     );
     assert!(error.must_close_connection());
@@ -146,7 +148,10 @@ fn an_ordinary_refusal_keeps_the_connection_and_no_refusal_writes_the_header() {
     assert_eq!(ordinary.connection_intent(), ConnectionIntent::MayKeepAlive);
     assert_eq!(carried_verdict(&ordinary), Some(ConnectionIntent::MayKeepAlive));
 
-    for error in [ordinary, from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other)] {
+    for error in [
+        ordinary,
+        from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other, true),
+    ] {
         assert!(
             render(&error, &trace()).headers().get(http::header::CONNECTION).is_none(),
             "render must leave the hop-by-hop header to the transport"
@@ -226,6 +231,41 @@ fn a_rendered_refusal_carries_the_client_message() {
         assert!(
             rendered.contains(&format!("<Message>{}</Message>", reject.message())),
             "the document for {reject:?} does not carry its client message:\n{rendered}"
+        );
+    }
+}
+
+/// Negative and positive — the owed-body fact reaches the close policy through every auth seam:
+/// with body octets owed the refusal closes, and with nothing owed it keeps, for the plain,
+/// detailed, and contextual renderings alike.
+#[test]
+fn an_auth_refusal_closes_only_when_body_octets_are_owed() {
+    for body_owed in [true, false] {
+        let expected = if body_owed {
+            ConnectionIntent::Close
+        } else {
+            ConnectionIntent::MayKeepAlive
+        };
+        assert_eq!(
+            from_auth(AuthError::InvalidAccessKeyId, ResponseKind::Other, body_owed).connection,
+            expected,
+            "plain, body_owed = {body_owed}"
+        );
+        assert_eq!(
+            from_auth_with_detail(AuthError::SignatureDoesNotMatch, None, false, ResponseKind::Other, body_owed).connection,
+            expected,
+            "detailed, body_owed = {body_owed}"
+        );
+        assert_eq!(
+            from_auth_context(
+                AuthError::AuthorizationHeaderMalformed,
+                ErrorContext::authorization_scope_malformed(),
+                ResponseKind::Other,
+                body_owed
+            )
+            .connection,
+            expected,
+            "contextual, body_owed = {body_owed}"
         );
     }
 }

@@ -362,6 +362,7 @@ impl Sut for Conn {
         self.inner.set_fixture_now(fixed.unix_seconds);
 
         let wire = self.inner.read_wire(&plan.request)?;
+        self.inner.record_exchange();
         if wire.h2_frames {
             return Err(SutError::Environment(
                 "`request.h2_frames` needs an HTTP/2 framing layer; this transport writes HTTP/1.1 \
@@ -379,11 +380,13 @@ impl Sut for Conn {
 
         let addr = self.addr(fixed.unix_seconds, skew_ms, plan.profile)?;
         // Replace a connection already observed closed rather than hiding that fact behind a later write error.
+        // The probe is an observation window, so what it costs is the harness's, not the target's.
+        let mut reuse_probe = Duration::ZERO;
         let fresh = !reuse
             || self
                 .connection
                 .as_ref()
-                .is_none_or(|connection| connection.observe() != ConnectionState::Open);
+                .is_none_or(|connection| charged_to_harness(&mut reuse_probe, || connection.observe()) != ConnectionState::Open);
         if fresh {
             self.connection = None;
             let pacer = Arc::new(Pacer::new());
@@ -414,10 +417,14 @@ impl Sut for Conn {
             .connection
             .as_mut()
             .ok_or_else(|| SutError::Environment("no connection was opened".to_owned()))?;
-        let result = exchange::execute_socket_exchange(connection, &pacer, &wire, &head, budget)?;
+        let mut result = exchange::execute_socket_exchange(connection, &pacer, &wire, &head, budget)?;
         if result.torn_down {
             self.connection = None;
         }
+        result.observation.harness_wait_ms = result
+            .observation
+            .harness_wait_ms
+            .saturating_add(u64::try_from(reuse_probe.as_millis()).unwrap_or(u64::MAX));
         Ok(result.observation)
     }
 
@@ -439,6 +446,43 @@ struct DispatchedExchange {
     progress: BodyProgress,
     started: Instant,
     deadline: Instant,
+    /// What the harness itself spent waiting while the request went out: authored pacing,
+    /// stalls, and teardown delays. Measured around each wait, so scheduler overshoot lands here
+    /// rather than on the target.
+    harness_wait: Duration,
+}
+
+/// Runs `wait` and adds its wall-clock cost to the harness's own account.
+fn charged_to_harness<T>(harness_wait: &mut Duration, wait: impl FnOnce() -> T) -> T {
+    let started = Instant::now();
+    let result = wait();
+    *harness_wait += started.elapsed();
+    result
+}
+
+/// One exchange's clock: the deadline the target is held to, and what the harness has spent of
+/// the wall time on its own waiting, which the runner subtracts before judging that deadline.
+struct ExchangeClock {
+    deadline: Instant,
+    harness_wait: Duration,
+}
+
+impl ExchangeClock {
+    fn until(deadline: Instant) -> Self {
+        Self {
+            deadline,
+            harness_wait: Duration::ZERO,
+        }
+    }
+
+    fn remaining(&self) -> Result<Duration, SutError> {
+        remaining(self.deadline)
+    }
+
+    /// Runs `wait` on the harness's account.
+    fn charged<T>(&mut self, wait: impl FnOnce() -> T) -> T {
+        charged_to_harness(&mut self.harness_wait, wait)
+    }
 }
 
 fn dispatch_socket_exchange(
@@ -452,11 +496,13 @@ fn dispatch_socket_exchange(
     let started = Instant::now();
     let deadline = started + budget;
     connection.write(&head.bytes)?;
-    let progress = write_body(connection, pacer, wire, head.declared_length, deadline)?;
+    let mut clock = ExchangeClock::until(deadline);
+    let progress = write_body(connection, pacer, wire, head.declared_length, &mut clock)?;
     Ok(DispatchedExchange {
         progress,
         started,
         deadline,
+        harness_wait: clock.harness_wait,
     })
 }
 
@@ -468,6 +514,7 @@ fn observe_socket_exchange(
 ) -> exchange::SocketExchangeResult {
     let DispatchedExchange {
         progress,
+        mut harness_wait,
         started,
         deadline,
     } = dispatched;
@@ -522,6 +569,7 @@ fn observe_socket_exchange(
                 request_body_fully_sent: Some(progress.fully_sent),
                 ttfb_ms: Some(ttfb_ms),
                 elapsed_ms,
+                harness_wait_ms: 0,
                 connection_after: None,
                 events,
                 notes,
@@ -540,6 +588,7 @@ fn observe_socket_exchange(
             request_body_fully_sent: Some(progress.fully_sent),
             ttfb_ms: None,
             elapsed_ms: elapsed_ms(started),
+            harness_wait_ms: 0,
             connection_after: None,
             events: Vec::new(),
             notes: progress.notes,
@@ -557,6 +606,7 @@ fn observe_socket_exchange(
             request_body_fully_sent: Some(progress.fully_sent),
             ttfb_ms: None,
             elapsed_ms: elapsed_ms(started),
+            harness_wait_ms: 0,
             connection_after: None,
             events: Vec::new(),
             notes: {
@@ -568,10 +618,11 @@ fn observe_socket_exchange(
             },
         },
     };
-    let (connection_after, pending_input) = connection.observe_pending();
+    let (connection_after, pending_input) = charged_to_harness(&mut harness_wait, || connection.observe_pending());
     exchange::SocketExchangeResult {
         observation: Observation {
             connection_after: Some(connection_after),
+            harness_wait_ms: u64::try_from(harness_wait.as_millis()).unwrap_or(u64::MAX),
             ..observation
         },
         torn_down,
@@ -621,7 +672,7 @@ fn write_body(
     pacer: &Arc<Pacer>,
     wire: &Wire,
     declared_length: u64,
-    deadline: Instant,
+    clock: &mut ExchangeClock,
 ) -> Result<BodyProgress, SutError> {
     let mut satisfied = 0_u64;
     let mut notes = Vec::new();
@@ -631,13 +682,13 @@ fn write_body(
             ChunkStep::Data(bytes, delay_ms) => {
                 let not_before = Instant::now()
                     .checked_add(Duration::from_millis(*delay_ms))
-                    .filter(|not_before| *not_before <= deadline)
+                    .filter(|not_before| *not_before <= clock.deadline)
                     .ok_or_else(|| {
                         SutError::Environment(format!(
                             "data chunk {index} declares a {delay_ms}ms delay beyond the remaining exchange timeout"
                         ))
                     })?;
-                let wait = remaining(deadline)?;
+                let wait = clock.remaining()?;
                 match pacer.await_demand(&mut satisfied, wait) {
                     Demand::More => {}
                     Demand::Answered => {
@@ -658,7 +709,7 @@ fn write_body(
                         )));
                     }
                 }
-                if pacer.await_delay_or_answered(not_before.saturating_duration_since(Instant::now())) {
+                if clock.charged(|| pacer.await_delay_or_answered(not_before.saturating_duration_since(Instant::now()))) {
                     sent_at_response = Some(connection.body_written());
                     catch_up(connection, wire, index);
                     break;
@@ -670,7 +721,7 @@ fn write_body(
                 delay_ms,
                 duration_ms,
             } => {
-                if let Some(note) = control(connection, pacer, &mut satisfied, action, *delay_ms, *duration_ms, deadline)? {
+                if let Some(note) = control(connection, pacer, &mut satisfied, action, *delay_ms, *duration_ms, clock)? {
                     notes.push(note);
                 }
                 if connection.torn_down() {
@@ -692,109 +743,8 @@ fn write_body(
     })
 }
 
-/// Writes the data frames the case declared and the pacing had not released yet.
-///
-/// The pacing is an *instrument*: it exists so that "how much of the body had gone out when the
-/// answer arrived" is a fact about the server rather than about a kernel buffer, and that question
-/// is settled the moment the answer exists. Leaving the rest unwritten after that point would make
-/// this client permanently truncate every request the service refused early — which is not what any
-/// client does, and which would make the connection unusable for reasons the case never described.
-/// `c-object-0013` is the case that shows it: eleven bytes, refused on the head, and
-/// `connection_after = "open"` — which the service grants only on condition that the remainder is
-/// drained, and there is nothing to drain if the client never sent it.
-///
-/// Only the frames the *case* wrote, never up to a declared `Content-Length`: `c-mpu-0027`
-/// announces five gigabytes and means to send ten bytes. Errors are dropped, because a server that
-/// is already closing is the ordinary outcome here and is not a failure of the exchange.
-fn catch_up(connection: &mut Connection, wire: &Wire, from: usize) {
-    for step in wire.steps.iter().skip(from) {
-        match step {
-            ChunkStep::Data(bytes, _) => {
-                if connection.write_body(bytes).is_err() {
-                    return;
-                }
-            }
-            // A declared teardown is not performed here. It was scripted relative to a request in
-            // flight, and the request is over.
-            ChunkStep::Control { .. } => return,
-        }
-    }
-}
-
-/// Carries out one control chunk, returning a note when the act makes an assertion unfalsifiable.
-fn control(
-    connection: &mut Connection,
-    pacer: &Arc<Pacer>,
-    satisfied: &mut u64,
-    action: &str,
-    delay_ms: u64,
-    duration_ms: u64,
-    deadline: Instant,
-) -> Result<Option<String>, SutError> {
-    match action {
-        // A stall is "hold the connection open and send nothing", and it is the one place a
-        // duration is the instruction rather than an approximation of one. It is still cut short
-        // the moment there is an answer to read, so a server that refuses on the head does not cost
-        // the case its own `terminate_within_ms`.
-        "stall" => {
-            let _ = pacer.stall_until_answered(Duration::from_millis(duration_ms).min(remaining(deadline)?));
-            Ok(None)
-        }
-        // Both teardowns wait for the server to have taken what was already written, so that
-        // "close after the body" is not a race with the server's first read. That wait is on the
-        // peer; the `delay_ms` that follows is the case's own instruction about *when* to tear the
-        // connection down relative to the work it started, and there is no acknowledgement that
-        // could stand in for it.
-        "half_close" => {
-            wait_for_teardown(pacer, satisfied, action, delay_ms, deadline)?;
-            connection.half_close()?;
-            Ok(None)
-        }
-        "close" => {
-            wait_for_teardown(pacer, satisfied, action, delay_ms, deadline)?;
-            connection.close()?;
-            Ok(Some(
-                "this client closed the connection itself, so `kind = \"connection_reset\"` and \
-                 `connection_after = \"closed\"` on this exchange are facts about a socket nobody \
-                 was going to answer on, and cannot fail. The case's own comment says as much — \
-                 what it actually asserts is in its later exchanges"
-                    .to_owned(),
-            ))
-        }
-        other => Err(SutError::Environment(format!(
-            "a `{other}` control chunk is not carried out by this transport, and is refused rather \
-             than dropped: a case that scripts a connection-level act and is answered from a \
-             connection that never performed it is a false green"
-        ))),
-    }
-}
-
-fn wait_for_teardown(
-    pacer: &Arc<Pacer>,
-    satisfied: &mut u64,
-    action: &str,
-    delay_ms: u64,
-    deadline: Instant,
-) -> Result<(), SutError> {
-    let handover_budget = teardown_handover_budget(action, delay_ms, remaining(deadline)?)?;
-    let _ = pacer.await_handover(satisfied, handover_budget);
-    sleep(delay_ms);
-    let _ = remaining(deadline)?;
-    Ok(())
-}
-
-fn teardown_handover_budget(action: &str, delay_ms: u64, budget: Duration) -> Result<Duration, SutError> {
-    budget.checked_sub(Duration::from_millis(delay_ms)).ok_or_else(|| {
-        SutError::Environment(format!(
-            "{action} control chunk declares a {delay_ms}ms delay beyond the remaining exchange timeout"
-        ))
-    })
-}
-
-fn sleep(millis: u64) {
-    if millis > 0 {
-        std::thread::sleep(Duration::from_millis(millis));
-    }
-}
+mod control_chunks;
 #[cfg(test)]
 mod tests;
+
+use control_chunks::{catch_up, control};

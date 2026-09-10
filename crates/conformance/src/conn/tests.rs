@@ -20,6 +20,7 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use super::control_chunks::teardown_handover_budget;
 use super::*;
 use crate::socket::SERVER_READ_TIMEOUT;
 use crate::toml;
@@ -326,7 +327,7 @@ fn an_unperformed_control_action_is_refused_rather_than_dropped() {
         "stop_reading",
         0,
         10,
-        Instant::now() + Duration::from_millis(50),
+        &mut ExchangeClock::until(Instant::now() + Duration::from_millis(50)),
     )
     .expect_err("must be refused");
     assert!(format!("{error}").contains("stop_reading"), "{error}");
@@ -348,7 +349,7 @@ fn a_control_delay_cannot_outlive_the_exchange_deadline() {
             action,
             80,
             0,
-            Instant::now() + Duration::from_millis(100),
+            &mut ExchangeClock::until(Instant::now() + Duration::from_millis(100)),
         )
         .expect_err("the delay exceeds the deadline");
         assert!(format!("{error}").contains("exhausted its declared timeout"), "{action}: {error}");
@@ -452,7 +453,14 @@ fn data_chunk_delay_sets_a_not_before_arrival_deadline() {
         .write(b"PUT /conf/k HTTP/1.1\r\nhost: s3.example.com\r\ncontent-length: 3\r\n\r\n")
         .expect("the request head is written");
     let write_started = Instant::now();
-    write_body(&mut connection, &pacer, &wire, 3, write_started + Duration::from_secs(1)).expect("the paced body is written");
+    write_body(
+        &mut connection,
+        &pacer,
+        &wire,
+        3,
+        &mut ExchangeClock::until(write_started + Duration::from_secs(1)),
+    )
+    .expect("the paced body is written");
 
     let (body, second_arrival) = observed_rx
         .recv_timeout(Duration::from_secs(1))
@@ -506,8 +514,14 @@ fn an_answer_interrupts_the_production_body_writer() {
         .write(b"PUT /conf/k HTTP/1.1\r\nhost: s3.example.com\r\ncontent-length: 2\r\n\r\n")
         .expect("the request head is written");
     let started = Instant::now();
-    let progress =
-        write_body(&mut connection, &pacer, &wire, 2, started + Duration::from_secs(6)).expect("the answer interrupts the delay");
+    let progress = write_body(
+        &mut connection,
+        &pacer,
+        &wire,
+        2,
+        &mut ExchangeClock::until(started + Duration::from_secs(6)),
+    )
+    .expect("the answer interrupts the delay");
     server.join().expect("the listener exits");
     assert!(
         started.elapsed() < Duration::from_millis(500),
@@ -535,7 +549,7 @@ fn a_data_chunk_delay_cannot_outlive_the_exchange_deadline() {
         &Arc::new(Pacer::new()),
         &wire,
         1,
-        Instant::now() + Duration::from_millis(20),
+        &mut ExchangeClock::until(Instant::now() + Duration::from_millis(20)),
     )
     .expect_err("the delay exceeds the deadline");
     server.join().expect("the listener exits");
@@ -589,8 +603,14 @@ fn a_wedged_exchange_is_reported_as_unmeasured_rather_than_as_a_count() {
     // signalled — a peer that says nothing, which is what the net is for.
     let pacer = Arc::new(Pacer::new());
     let mut connection = Connection::open(listener.addr()).expect("the listener accepts");
-    let error =
-        write_body(&mut connection, &pacer, &wire, 14, Instant::now() + Duration::from_millis(30)).expect_err("must not report");
+    let error = write_body(
+        &mut connection,
+        &pacer,
+        &wire,
+        14,
+        &mut ExchangeClock::until(Instant::now() + Duration::from_millis(30)),
+    )
+    .expect_err("must not report");
     assert!(format!("{error}").contains("wedged"), "{error}");
     assert_eq!(connection.body_written(), 0);
 }

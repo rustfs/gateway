@@ -21,7 +21,7 @@
 //! [`super::Conn`].
 
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::external_endpoint::ExternalEndpoint;
 use super::external_pacing::{validate_authored_steps, write_authored_body};
@@ -136,6 +136,7 @@ pub(super) fn execute_socket_exchange(
         wire,
         head,
         DispatchedExchange {
+            harness_wait: Duration::ZERO,
             progress,
             started,
             deadline,
