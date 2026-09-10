@@ -250,6 +250,8 @@ fn run_case(
         .and_then(|meta| meta.read("caseMeta.timeout_ms"))
         .and_then(Value::as_integer);
     let started = std::time::Instant::now();
+    // The harness's own waiting, measured where it happens and kept out of the target's budget.
+    let mut harness_wait_ms: u64 = 0;
     let mut outcome = 'prepared: {
         let concurrent = document
             .read("connection")
@@ -257,9 +259,17 @@ fn run_case(
             .and_then(Value::as_bool)
             .unwrap_or(false);
         if concurrent {
-            if let Err(error) =
-                run_concurrent_exchanges(case, sut, options, goldens, &mut outcome, &mut captures, document, timeout_ms)
-            {
+            if let Err(error) = run_concurrent_exchanges(
+                case,
+                sut,
+                options,
+                goldens,
+                &mut outcome,
+                &mut captures,
+                document,
+                timeout_ms,
+                &mut harness_wait_ms,
+            ) {
                 break 'prepared not_run(outcome, &error, notes);
             }
         } else {
@@ -268,7 +278,10 @@ fn run_case(
                 // waiting: a declared pause that the runner skipped would put the second request on the
                 // wire at a moment the case did not describe.
                 if let Some(delay_ms) = exchange.delay_ms.filter(|delay| *delay > 0) {
+                    let paused = std::time::Instant::now();
                     std::thread::sleep(std::time::Duration::from_millis(delay_ms.unsigned_abs()));
+                    harness_wait_ms =
+                        harness_wait_ms.saturating_add(u64::try_from(paused.elapsed().as_millis()).unwrap_or(u64::MAX));
                 }
                 let Some(request) = exchange.request else { continue };
                 let request = match interpolate_value(request, &captures) {
@@ -298,6 +311,7 @@ fn run_case(
                         Ok(observed) => observed,
                         Err(error) => break 'prepared not_run(outcome, &error, notes),
                     };
+                    harness_wait_ms = harness_wait_ms.saturating_add(observed.harness_wait_ms);
                     // A transport that had to produce part of the record some way other than by measuring
                     // it says so here, and the case carries the warning. A green line whose assertion
                     // could not have failed is the defect this suite keeps regrowing.
@@ -351,21 +365,40 @@ fn run_case(
             .push(Diagnostic::deny("runner/cleanup", "", error.to_string()));
         outcome.verdict = Verdict::Failed;
     }
-    // `case.timeout_ms` is a whole-case budget, and the schema says exceeding it is a case failure
-    // of kind `hang` rather than an environment error. Enforced here rather than in a transport,
-    // because a transport that has itself hung is not in a position to report it.
+    // `case.timeout_ms` is a whole-case budget on the *target*, and the schema says exceeding it
+    // is a case failure of kind `hang` rather than an environment error. Enforced here rather than
+    // in a transport, because a transport that has itself hung is not in a position to report it.
+    // The harness's own waiting is subtracted first: authored pacing, stalls, teardown delays, the
+    // pauses between exchanges, and the window spent observing the connection after each answer
+    // are the harness's instruments, and a scheduler that overshoots one of them has not observed
+    // the target hanging (rustfs/gateway#426).
     if let Some(limit) = timeout_ms {
-        let elapsed = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
-        if elapsed > limit {
-            outcome.diagnostics.push(Diagnostic::deny(
-                "runner/timeout",
-                "/case/timeout_ms",
-                format!("the case took {elapsed}ms and declares a {limit}ms budget"),
-            ));
+        let elapsed = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        if let Some(message) = timeout_verdict(elapsed, harness_wait_ms, limit) {
+            outcome
+                .diagnostics
+                .push(Diagnostic::deny("runner/timeout", "/case/timeout_ms", message));
             outcome.verdict = Verdict::Failed;
         }
     }
     outcome
+}
+
+/// The `case.timeout_ms` verdict: the diagnostic when the target's share of the case's wall time
+/// exceeds the budget, `None` otherwise.
+///
+/// `harness_wait_ms` is subtracted from `elapsed_ms` before the comparison and both numbers are
+/// printed, so a report reads "the target took N of the M the case took" rather than charging
+/// the target for the harness's own pacing. A negative or absent budget budgets nothing.
+fn timeout_verdict(elapsed_ms: u64, harness_wait_ms: u64, limit_ms: i64) -> Option<String> {
+    let limit = u64::try_from(limit_ms).ok()?;
+    let target_ms = elapsed_ms.saturating_sub(harness_wait_ms);
+    (target_ms > limit).then(|| {
+        format!(
+            "the target took {target_ms}ms of the {elapsed_ms}ms the case took ({harness_wait_ms}ms was the harness's \
+             own waiting) and the case declares a {limit}ms budget"
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -378,6 +411,7 @@ fn run_concurrent_exchanges(
     captures: &mut Captures,
     document: &Value,
     timeout_ms: Option<i64>,
+    harness_wait_ms: &mut u64,
 ) -> Result<(), SutError> {
     let exchanges = case.exchanges();
     if exchanges.len() < 2 {
@@ -454,6 +488,7 @@ fn run_concurrent_exchanges(
 
     let mut batch_captures = Captures::new();
     for (exchange, observed) in exchanges.iter().zip(observations) {
+        *harness_wait_ms = harness_wait_ms.saturating_add(observed.harness_wait_ms);
         for note in &observed.notes {
             outcome.diagnostics.push(Diagnostic::warn(
                 "harness/by-construction",
@@ -639,6 +674,8 @@ fn glob_prefix(pattern: &[char], text: &[char]) -> bool {
     }
 }
 
+#[cfg(test)]
+mod budget_tests;
 #[cfg(test)]
 mod lifecycle_tests;
 #[cfg(test)]

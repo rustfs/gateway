@@ -160,6 +160,13 @@ must agree case for case; a case that could name a path would be a case that hid
 - **Signing is computed, never pasted.** Cases declare `sign.mode` and let the runner sign. Negative
   signature cases sign correctly and then alter exactly one canonical component via `sign.tamper`, so
   a failure names the component instead of reporting that a hex string did not match.
+- **`timeout_ms` budgets the target, not the harness.** The runner measures its own waiting — authored
+  `delay_ms` pacing, `stall` durations, teardown delays, the pauses between exchanges, and the window
+  spent observing the connection after each answer — reports it as `harness_wait_ms`, and subtracts it
+  before judging `case.timeout_ms`; the diagnostic prints the target's share, the whole, and the
+  harness's share. A scheduler that overshoots one of those waits has not observed the target
+  hanging. A declared delay must still fit the exchange's own timeout, which is checked before the
+  bytes go out (rustfs/gateway#426).
 - **Setup is not under test.** Fixtures may be established with normalised, correctly signed
   requests. Anything a case asserts must appear in `request` or `exchanges`.
 - **Tag vocabulary.** `streaming`, `chunked`, `trailer`, `signature`, `sigv4`, `sigv2`, `presigned`,

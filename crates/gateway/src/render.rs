@@ -220,7 +220,7 @@ pub(crate) fn from_pre_auth(error: PreAuthError, response: ResponseKind) -> S3Er
     )
 }
 
-pub(crate) fn from_auth(error: AuthError, response: ResponseKind) -> S3Error {
+pub(crate) fn from_auth(error: AuthError, response: ResponseKind, body_owed: bool) -> S3Error {
     // A comparison failure is deliberately collapsed into the unknown-key response. Keeping the
     // internal variants distinct lets the verifier test its state machine without making the
     // access-key store observable on the wire. Authentication has its own connection policy; it is
@@ -233,7 +233,8 @@ pub(crate) fn from_auth(error: AuthError, response: ResponseKind) -> S3Error {
     } else {
         (ErrorCode::known(error.code()).unwrap_or(ErrorCode::ACCESS_DENIED), error.message())
     };
-    from_handler(HandlerError::new(code, message), response, crate::close::after_auth_failure(&error))
+    let connection = crate::close::after_auth_failure(&error, body_owed);
+    from_handler(HandlerError::new(code, message), response, connection)
 }
 
 pub(crate) fn from_auth_with_detail(
@@ -241,17 +242,18 @@ pub(crate) fn from_auth_with_detail(
     detail: Option<&SignatureMismatchDetail>,
     verbose: bool,
     response: ResponseKind,
+    body_owed: bool,
 ) -> S3Error {
     let Some((canonical_request, string_to_sign)) = detail.as_ref().and_then(|detail| detail.for_response(verbose)) else {
-        return from_auth(error, response);
+        return from_auth(error, response, body_owed);
     };
     if error != AuthError::SignatureDoesNotMatch {
-        return from_auth(error, response);
+        return from_auth(error, response, body_owed);
     }
     let mut rendered = from_handler(
         HandlerError::new(ErrorCode::SIGNATURE_DOES_NOT_MATCH, error.message()),
         response,
-        crate::close::after_auth_failure(&error),
+        crate::close::after_auth_failure(&error, body_owed),
     );
     rendered.extras = Some(Box::new(Extras {
         headers: Vec::new(),
@@ -303,9 +305,9 @@ fn redact_sensitive_canonical_values(canonical_request: &str) -> String {
         .join("\n")
 }
 
-pub(crate) fn from_auth_context(error: AuthError, context: ErrorContext, response: ResponseKind) -> S3Error {
+pub(crate) fn from_auth_context(error: AuthError, context: ErrorContext, response: ResponseKind, body_owed: bool) -> S3Error {
     let mut rendered = from_resolution(resolve(context, response), response);
-    rendered.connection = crate::close::after_auth_failure(&error);
+    rendered.connection = crate::close::after_auth_failure(&error, body_owed);
     rendered
 }
 
@@ -538,7 +540,7 @@ mod tests {
     /// Negative — a comparison rejection carries the uniform credential code and no request data.
     #[tokio::test]
     async fn a_rendered_refusal_echoes_nothing_from_the_request() {
-        let error = from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other);
+        let error = from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other, true);
         let collected = crate::wire::collect(render(&error, &trace()))
             .await
             .expect("an in-memory body");
@@ -551,8 +553,8 @@ mod tests {
     /// Negative — a wrong signature and unknown key have one rendered response.
     #[test]
     fn the_two_credential_rejections_are_indistinguishable() {
-        let unknown = from_auth(AuthError::InvalidAccessKeyId, ResponseKind::Other);
-        let mismatch = from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other);
+        let unknown = from_auth(AuthError::InvalidAccessKeyId, ResponseKind::Other, true);
+        let mismatch = from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other, true);
         assert_eq!(unknown.code(), mismatch.code());
         assert_eq!(unknown.message(), mismatch.message());
         assert_eq!(unknown.status(), mismatch.status());
@@ -562,7 +564,7 @@ mod tests {
     #[test]
     fn a_malformed_scope_is_a_bad_request() {
         assert_eq!(
-            from_auth(AuthError::AuthorizationHeaderMalformed, ResponseKind::Other).status(),
+            from_auth(AuthError::AuthorizationHeaderMalformed, ResponseKind::Other, true).status(),
             http::StatusCode::FORBIDDEN
         );
     }

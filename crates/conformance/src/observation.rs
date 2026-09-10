@@ -356,6 +356,12 @@ pub struct Observation {
     pub ttfb_ms: Option<u64>,
     /// Milliseconds from the first request byte until the exchange finished.
     pub elapsed_ms: u64,
+    /// Milliseconds of `elapsed_ms` that were the harness's own waiting rather than the target's:
+    /// authored `delay_ms` pacing, `stall` durations, teardown delays, and the window spent
+    /// observing the connection after the response. Measured where the wait happens, never
+    /// derived from what a case declared, and excluded from `case.timeout_ms`, which budgets the
+    /// target (rustfs/gateway#426). A transport with no waiting of its own reports `0`.
+    pub harness_wait_ms: u64,
     /// The connection state afterwards.
     pub connection_after: Option<ConnectionState>,
     /// Frames, when this was an event stream.
@@ -391,6 +397,7 @@ impl Observation {
             request_body_fully_sent: None,
             ttfb_ms: None,
             elapsed_ms: 0,
+            harness_wait_ms: 0,
             connection_after: None,
             events: Vec::new(),
             notes: Vec::new(),

@@ -11,6 +11,7 @@ ADRs; this map only selects files.
 | `src/schema.rs` | Frozen schema validation. | A TOML shape is accepted or rejected incorrectly. |
 | `src/toml.rs` | Minimal TOML value parser used by the corpus. | Syntax parsing fails before schema validation. |
 | `src/runner.rs` | Case/exchange execution order and timeout coordination. | A case runs in the wrong order or never reaches a verdict. |
+| `src/runner/budget_tests.rs` | The `case.timeout_ms` verdict: the target is charged, the harness's own waiting is not. | A timeout is judged on the wrong share of the wall time. |
 | `src/runner/lifecycle_tests.rs` | Post-prepare cleanup and failure-classification regression coverage. | A runner early return may bypass fixture cleanup. |
 | `src/runner/shard_tests.rs` | The `--shard` partition: every selected case exactly once, in corpus order, and the partial-run note. | Shards overlap, skip a case, or run silently as a whole. |
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
@@ -29,6 +30,7 @@ ADRs; this map only selects files.
 | `src/socket/response.rs` | Fixed-length and chunked HTTP/1.1 response decoding. | A raw response body is truncated or framed incorrectly. |
 | `src/socket/stream.rs` | The client transport under one connection: plain socket or TLS session. | Authored bytes are altered, or the socket underneath a TLS session is unobservable. |
 | `src/conn/` | Connection state and reusable transport helpers. | A multi-exchange case loses connection state. |
+| `src/conn/control_chunks.rs` | Control chunks on a socket exchange: body catch-up, stalls, teardowns, and what they charge to the harness account. | A `stall`, `half_close`, or `close` control chunk is carried out or timed wrongly. |
 | `src/conn/bind.rs` | Queues a pacing rendezvous before a fresh socket connects. | A socket case skips only under scheduler load. |
 | `src/conn/external.rs` | Authored HTTP/1.1 exchange against an external endpoint. | `--endpoint` connects, writes, or reports unavailable observations incorrectly. |
 | `src/conn/external_pacing.rs` | Cleartext external-body delays and early-response observation. | A delayed chunk is sent too early or after a response already exists. |

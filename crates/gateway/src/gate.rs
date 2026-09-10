@@ -778,7 +778,7 @@ mod unfinished_body_tests {
     #[test]
     fn closing_auth_and_wire_refusals_do_not_claim_body_progress() {
         let refusals = [
-            from_auth(rustfs_gateway_sig::AuthError::SignatureDoesNotMatch, ResponseKind::Other),
+            from_auth(rustfs_gateway_sig::AuthError::SignatureDoesNotMatch, ResponseKind::Other, true),
             from_wire_reject(rustfs_gateway_http::WireReject::MalformedChunkFraming),
         ];
         for refusal in refusals {

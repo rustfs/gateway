@@ -795,7 +795,7 @@ impl S3Service {
             // scope. Keep that fail-closed response distinct from a verifier's well-formed but
             // unserved scope, which is `400 AuthorizationHeaderMalformed`.
             Err(error) => {
-                return outcome.refuse(from_auth(error, response_kind));
+                return outcome.refuse(from_auth(error, response_kind, wire.framing().has_body()));
             }
         };
         // H4's run-time half: a receipt minted for another request cannot be attached to this one.
@@ -814,13 +814,14 @@ impl S3Service {
                     }
                     None => ErrorContext::authorization_scope_malformed(),
                 };
-                return outcome.refuse(from_auth_context(error, context, response_kind));
+                return outcome.refuse(from_auth_context(error, context, response_kind, wire.framing().has_body()));
             }
             return outcome.refuse(from_auth_with_detail(
                 error,
                 signature_mismatch.as_ref(),
                 config.config().verbose_signature_errors(),
                 response_kind,
+                wire.framing().has_body(),
             ));
         }
         // The proof, minted from the verdict that has just been checked. The `else` arm is
