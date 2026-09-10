@@ -211,7 +211,9 @@ pub enum PersistenceCodecError {
     MissingRequiredField,
     /// A scalar field appeared more than once where the old decoder rejects duplicates.
     DuplicateField,
-    /// A persisted XML boolean is not the lowercase lexical form accepted by the old decoder.
+    /// A persisted XML boolean is not one of the exact lexical forms the pinned old decoder
+    /// accepts: `true`, `false`, `TRUE`, or `FALSE`. Mixed case, numerals, surrounding
+    /// whitespace, and empty text are all refused.
     InvalidBoolean,
     /// A nested Bucket Encryption element is not recognized by the pinned old decoder.
     UnexpectedBucketEncryptionElement,
