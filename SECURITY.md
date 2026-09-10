@@ -17,9 +17,10 @@ the next release.
 
 ## Reporting a vulnerability
 
-Report privately through GitHub Security Advisory: go to
-<https://github.com/rustfs/gateway/security/advisories/new> (repository → **Security** →
-**Report a vulnerability**). If you cannot use GitHub, email **security@rustfs.com**.
+Email **security@rustfs.com**. While this repository is private, GitHub's private vulnerability
+reporting cannot be enabled and its advisory form does not exist, so email is the channel; once the
+repository is public and the form at `https://github.com/rustfs/gateway/security/advisories/new`
+resolves (repository → **Security** → **Report a vulnerability**), either works.
 
 **Do not open a public issue, pull request, or discussion for a suspected vulnerability**, and
 do not post a proof of concept publicly before the coordinated disclosure window closes.
