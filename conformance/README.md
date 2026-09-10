@@ -166,9 +166,9 @@ must agree case for case; a case that could name a path would be a case that hid
   `xml`, `wire-bytes`, `etag`, `routing`, `vhost`, `conditional`, `preconditions`, `list`,
   `pagination`, `multipart`, `checksum`, `range`, `encoding`, `cors`, `preflight`, `encryption`, `lifecycle`, `replication`, `bucketconfig`, `region`, `security`, `dos`,
   `sse`, `timing`, `connection`, `event-stream`, `tls`, `h2`, `error-shape`, `known-divergence`, `tagging`,
-  `object-lock`, `restore`, `select`, `acl`, `naming`, `object-attributes`, and `slow`. `slow` is reserved: it moves a case out of
+  `object-lock`, `restore`, `select`, `acl`, `naming`, `object-attributes`, `read`, `validation`, `xml-shape`, `upload-id`, `limits`, `boundary`, `integrity`, `delimiter`, `versions`, `delete`, `framing`, `owner`, `root`, `storage-class`, `metadata`, `rfc9110`, `buckets`, `empty-elements`, `compatibility`, `round-trip`, `ordering`, `durability`, `head`, `batch`, `response-overrides`, `idempotence`, and `slow`. `slow` is reserved: it moves a case out of
   the pull-request gate and
-  into the merge queue. `region` marks a case whose subject is the deployment's region posture — the
+  into the merge queue. `xml-shape` marks a case whose subject is the element layout of one response body — order, wrapping, which optional elements appear — where `xml` marks XML handling in general; `error-shape` likewise covers both the body and the diagnostic headers of a failed answer. `region` marks a case whose subject is the deployment's region posture — the
   location-constraint rules and the `x-amz-bucket-region` redirect contract. `object-lock` marks a
   case about the WORM family's codec — the lock configuration, retention and legal-hold documents;
   lock *enforcement* is later work and no case here asserts it. `restore` marks a case about

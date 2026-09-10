@@ -14,7 +14,7 @@ misparsed. Asserting the empty body, and that no entity tag came back with it, i
 'the abort worked' from 'something was written and reported as an abort'."""
 polarity = "positive"
 operation = "AbortMultipartUpload"
-tags = ["multipart", "status", "framing"]
+tags = ["multipart", "framing"]
 quirks = ["q-mpu-abort-0035"]
 
 [[case.evidence]]

@@ -10,7 +10,7 @@ rationale = """
 The two wire formats for this instant are not interchangeable and neither is derivable from the other by a client: the header form has one-second resolution and the body form has three decimal places. An implementation that renders the body form without the fractional part produces a value some SDKs reject outright, and one that renders a different instant makes conditional requests fail intermittently."""
 polarity = "positive"
 operation = "ListObjectsV2"
-tags = ["list", "timestamp", "xml"]
+tags = ["list", "xml-shape", "xml"]
 timeout_ms = 15000
 quirks = ["q-keycount-0018"]
 

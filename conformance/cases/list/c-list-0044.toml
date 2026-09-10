@@ -10,7 +10,7 @@ rationale = """
 Without the request identifiers a support conversation about a listing has nothing to correlate, and these are the headers operators paste into one. The error half is the odd one: the success bodies in this family carry the S3 namespace and the error document does not, so an implementation that applies one rule to both emits a namespaced Error that several SDKs decline to parse — turning a clear error into a parse failure at the client."""
 polarity = "negative"
 operation = "ListBuckets"
-tags = ["list", "headers", "error", "xml"]
+tags = ["list", "error-shape", "xml"]
 timeout_ms = 15000
 quirks = ["q-buckets-0071"]
 

@@ -10,7 +10,7 @@ rationale = """
 Rust, Java and C# all render a boolean with a casing of their own, and two of the three are wrong here. Strict parsers reject the wrong casing outright and lenient ones read it as false, which turns a truncated listing into a complete one — a silent short read rather than an error. Both pages are asserted so that neither spelling can be right by accident."""
 polarity = "negative"
 operation = "ListObjectsV2"
-tags = ["list", "xml", "boolean"]
+tags = ["list", "xml", "xml-shape"]
 timeout_ms = 15000
 quirks = ["q-empty-0016"]
 

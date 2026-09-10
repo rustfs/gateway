@@ -10,7 +10,7 @@ rationale = """
 Answering 404 for an empty bucket conflates "there is nothing here" with "there is no here", and a client that creates a bucket and immediately lists it treats the 404 as a failed create. The key count must still be present and zero: an absent count is not the same as zero to a client doing arithmetic on it."""
 polarity = "negative"
 operation = "ListObjectsV2"
-tags = ["list", "empty", "xml"]
+tags = ["list", "empty-elements", "xml"]
 timeout_ms = 15000
 quirks = ["q-keycount-0018", "q-empty-0016"]
 

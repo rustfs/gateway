@@ -12,7 +12,7 @@ name the caller expects, and nothing in the response says so. The refusal is wha
 re-upload the missing part instead of discovering the hole months later."""
 polarity = "negative"
 operation = "CompleteMultipartUpload"
-tags = ["multipart", "error-shape", "data-loss"]
+tags = ["multipart", "error-shape", "durability"]
 quirks = ["q-mpu-etag-0028"]
 
 [[case.evidence]]

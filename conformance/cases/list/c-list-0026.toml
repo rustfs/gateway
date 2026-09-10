@@ -10,7 +10,7 @@ rationale = """
 The status alone is not enough: several conditions answer 404 here and a client branches on the code, not the number. Answering an empty listing instead is worse than answering the wrong code, because a sync tool reads it as "the bucket is empty" and deletes its local copy."""
 polarity = "negative"
 operation = "ListObjectsV2"
-tags = ["list", "error"]
+tags = ["list", "error-shape"]
 timeout_ms = 15000
 quirks = ["q-keycount-0018"]
 

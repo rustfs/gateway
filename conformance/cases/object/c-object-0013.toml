@@ -15,7 +15,7 @@ must also happen before the body is consumed, otherwise a rejected upload still 
 transfer."""
 polarity = "negative"
 operation = "PutObject"
-tags = ["checksum", "write", "error-shape"]
+tags = ["checksum", "error-shape"]
 timeout_ms = 10000
 quirks = ["q-checksum-0006"]
 

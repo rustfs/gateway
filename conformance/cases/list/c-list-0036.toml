@@ -10,7 +10,7 @@ rationale = """
 These four characters are legal in a key and structural in the document, so passing them through does not corrupt one element — it changes where the elements are. A key containing a closing tag can therefore inject siblings into the response, which is the listing equivalent of an injection bug and not merely a formatting one. The escaped forms are asserted directly because a parser-level check would accept the injected document as well-formed."""
 polarity = "negative"
 operation = "ListObjectsV2"
-tags = ["list", "escaping", "xml"]
+tags = ["list", "xml-shape", "xml"]
 timeout_ms = 15000
 quirks = ["q-encoding-0015"]
 

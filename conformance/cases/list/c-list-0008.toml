@@ -10,7 +10,7 @@ rationale = """
 This pair is how every object browser renders a folder, and getting it wrong is how a browser renders a million rows. The prefix must be stripped from neither the keys nor the common prefixes — both are absolute — and the common prefixes must be the next level down, not the leaves. All three mistakes produce a well-formed response that a client renders wrongly."""
 polarity = "positive"
 operation = "ListObjectsV2"
-tags = ["list", "delimiter", "prefix"]
+tags = ["list", "delimiter"]
 timeout_ms = 15000
 quirks = ["q-flat-0019", "q-keycount-0018"]
 

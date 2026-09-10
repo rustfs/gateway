@@ -15,7 +15,7 @@ known, so it is asserted together with the body elements a client reads on succe
 missing either half looks successful and is unusable."""
 polarity = "positive"
 operation = "CompleteMultipartUpload"
-tags = ["multipart", "versioning", "xml-shape"]
+tags = ["multipart", "versions", "xml-shape"]
 quirks = ["q-mpu-late-error-0033"]
 
 [[case.evidence]]
