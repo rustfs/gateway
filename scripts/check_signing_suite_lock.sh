@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 
 # WHAT: Validates the pinned smithy-rs signing-suite identity and complete case census.
 # WHY: A missing checkout or a hand-picked subset must never count as official-suite evidence.
@@ -14,11 +15,12 @@ fail() {
     exit 1
 }
 
-command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_signing_suite_lock)" || exit 1
 [[ -f "$LOCK" ]] || fail 'protected signing-suite lock is missing'
 [[ -f "$RUNNER" ]] || fail 'signing-suite runner is missing'
 
-python3 - "$ROOT" "${1:-}" "${2:-}" <<'PY'
+"$PYTHON" - "$ROOT" "${1:-}" "${2:-}" <<'PY'
 from __future__ import annotations
 
 import subprocess

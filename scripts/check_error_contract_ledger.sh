@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 
 # WHAT: Maps every one of the 24 acceptance ids in rustfs/backlog#1694 §7 — routing versus
 # parameter validation, and the error code to HTTP status contract — to a named assertion inside a
@@ -114,12 +115,10 @@ case_polarity=(
     'conformance/cases/object/c-object-0038.toml|negative'
 )
 
-command -v python3 >/dev/null 2>&1 || {
-    printf 'check_error_contract_ledger: required command is missing: python3\n' >&2
-    exit 1
-}
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_error_contract_ledger)" || exit 1
 
-python3 - "$ROOT" "$EXPECTED_POSITIVE" "$EXPECTED_NEGATIVE" "$(printf '%s\n' "${case_polarity[@]}")" "${requirements[@]}" <<'PYEOF'
+"$PYTHON" - "$ROOT" "$EXPECTED_POSITIVE" "$EXPECTED_NEGATIVE" "$(printf '%s\n' "${case_polarity[@]}")" "${requirements[@]}" <<'PYEOF'
 import re
 import sys
 import tomllib

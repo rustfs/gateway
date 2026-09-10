@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 
 # WHAT: Maps every one of the 62 object data-plane acceptance ids in rustfs/backlog#1680 §7 to a
 # named assertion inside a real conformance case or Rust test, or to an explicitly declared block
@@ -166,12 +167,10 @@ case_polarity=(
     'conformance/cases/tagging/c-tagging-0019.toml|positive'
 )
 
-command -v python3 >/dev/null 2>&1 || {
-    printf 'check_object_semantics_ledger: required command is missing: python3\n' >&2
-    exit 1
-}
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_object_semantics_ledger)" || exit 1
 
-python3 - "$ROOT" "$EXPECTED_POSITIVE" "$EXPECTED_NEGATIVE" "$(printf '%s\n' "${case_polarity[@]}")" "${requirements[@]}" <<'PYEOF'
+"$PYTHON" - "$ROOT" "$EXPECTED_POSITIVE" "$EXPECTED_NEGATIVE" "$(printf '%s\n' "${case_polarity[@]}")" "${requirements[@]}" <<'PYEOF'
 import re
 import sys
 import tomllib

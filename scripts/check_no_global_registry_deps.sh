@@ -46,12 +46,12 @@ fail() {
     exit 1
 }
 
-command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
-python3 -c 'import tomllib' >/dev/null 2>&1 || fail 'required Python module is missing: tomllib'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_no_global_registry_deps)" || exit 1
 [[ -f "${ROOT_DIR}/docs/adr/0003-no-global-registry-crates.md" ]] || \
     fail 'rule input is missing: docs/adr/0003-no-global-registry-crates.md'
 
-python3 - "$ROOT_DIR" <<'PY'
+"$PYTHON" - "$ROOT_DIR" <<'PY'
 from __future__ import annotations
 
 import os

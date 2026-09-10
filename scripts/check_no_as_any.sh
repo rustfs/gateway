@@ -38,12 +38,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
-if ! command -v python3 >/dev/null 2>&1; then
-    printf 'check_no_as_any: required command is missing: python3\n' >&2
-    exit 1
-fi
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_no_as_any)" || exit 1
 
-python3 - "$ROOT_DIR" <<'PY'
+"$PYTHON" - "$ROOT_DIR" <<'PY'
 from pathlib import Path
 import re
 import sys

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 
 # WHAT: Pins crc-fast to the reduced feature posture and keeps types on the workspace declaration.
 # WHY: rustfs/backlog#1706 c-cks-n009 forbids crc-fast's ffi and panic-handler default features.
@@ -16,7 +17,9 @@ for input in "$ROOT_MANIFEST" "$TYPES_MANIFEST"; do
     }
 done
 
-python3 - "$ROOT_MANIFEST" "$TYPES_MANIFEST" <<'PYEOF'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_checksum_dependencies)" || exit 1
+"$PYTHON" - "$ROOT_MANIFEST" "$TYPES_MANIFEST" <<'PYEOF'
 import pathlib
 import sys
 import tomllib

@@ -17,11 +17,11 @@ fail() {
     exit 1
 }
 
-command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
-python3 -c 'import tomllib' >/dev/null 2>&1 || fail 'required Python module is missing: tomllib'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_layer_dependencies)" || exit 1
 [[ -f "${ROOT_DIR}/AGENTS.md" ]] || fail 'rule input is missing: AGENTS.md'
 
-python3 - "$ROOT_DIR" "$MODE" <<'PY'
+"$PYTHON" - "$ROOT_DIR" "$MODE" <<'PY'
 from __future__ import annotations
 
 import os

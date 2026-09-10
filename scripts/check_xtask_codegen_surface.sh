@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 
 # WHAT: Keeps codegen, facade and conformance verification on a bounded xtask dependency surface.
 # WHY: Cargo builds every normal xtask dependency before dispatch, so one heavy dependency makes
@@ -13,7 +14,8 @@ fail() {
     exit 1
 }
 
-command -v python3 >/dev/null 2>&1 || fail 'python3 is required'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_xtask_codegen_surface)" || exit 1
 for required in .cargo/config.toml Cargo.toml xtask-launcher/Cargo.toml xtask-launcher/src/main.rs xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs xtask/src/verify/launcher.rs \
     crates/conformance/Cargo.toml crates/conformance/src/cli.rs scripts/check_case_keys_honoured.sh \
     crates/gateway/tests/cors_runtime.rs crates/server/tests/server_load.rs \
@@ -21,7 +23,7 @@ for required in .cargo/config.toml Cargo.toml xtask-launcher/Cargo.toml xtask-la
     [[ -f "${ROOT}/${required}" ]] || fail "required input is missing: ${required}"
 done
 
-python3 - "$ROOT" <<'PYEOF'
+"$PYTHON" - "$ROOT" <<'PYEOF'
 import re
 import sys
 import tomllib

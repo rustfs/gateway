@@ -77,6 +77,12 @@ enumeration surface instead of changing the wire error code.
   including when an MSRV bump is allowed — is in [docs/msrv.md](docs/msrv.md).
 - **Development toolchain: 1.97.1**, pinned in `rust-toolchain.toml` together with the components (`rustfmt`, `clippy`,
   `rust-src`, `rust-analyzer`) that repository automation expects. `rustup` picks it up automatically inside a checkout.
+- **Python floor: 3.11.** The repository guards under `scripts/` parse manifests and conformance cases with the
+  standard-library `tomllib` and write PEP 604 unions that are evaluated at runtime, so they resolve their interpreter
+  through `scripts/lib/python.sh`: the first of `python3.13`, `python3.12`, `python3.11`, `python3` on `PATH` that is
+  3.11 or newer, or exactly `GATEWAY_PYTHON` when that is set. macOS ships `/usr/bin/python3` as 3.9.6, which is
+  refused by version with a line naming the floor rather than by a traceback from inside a guard; `brew install
+  python@3.13` (or any 3.11+ interpreter on `PATH`) satisfies it.
 
 ```bash
 cargo build --workspace          # build every crate

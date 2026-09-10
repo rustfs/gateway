@@ -27,7 +27,9 @@ if [[ ! -f "$MANIFEST" || ! -f "$SOCKET" || ! -f "$CONN" ]]; then
     exit 1
 fi
 
-python3 - "$MANIFEST" "$SOCKET" "$CONN" <<'PYEOF'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_runner_raw_bytes)" || exit 1
+"$PYTHON" - "$MANIFEST" "$SOCKET" "$CONN" <<'PYEOF'
 import pathlib
 import re
 import sys

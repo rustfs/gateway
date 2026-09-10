@@ -2929,6 +2929,108 @@ probe_object_ledger_guard_missing_python() {
 }
 probe_object_ledger_guard_missing_python
 
+# -- scripts/lib/python.sh ------------------------------------------------------------------------
+#
+# Three guards died in the middle of their inline programs on the macOS system interpreter
+# (3.9.6): two on `import tomllib`, one on a PEP 604 union evaluated at runtime
+# (rustfs/gateway#503, #583, #623). The interpreter is now resolved in one place against one
+# floor, so the controls are: a below-floor interpreter is refused *by version*, with a line
+# naming the floor and no traceback, before any program runs; an interpreter at the floor is
+# accepted and the guard then passes on the clean tree; the resolver names the floor when only
+# an old interpreter is on PATH and keeps the `required command is missing: python3` line when
+# there is none; and lowering the floor makes the refusal disappear, which is what proves the
+# refusal is the floor's doing.
+
+python_floor_shim() {
+    local shim
+    shim="$(mktemp -d "${TMPDIR:-/tmp}/gateway-python-floor.XXXXXX")"
+    printf '#!/bin/bash\ncase "$1" in -c) printf 3.9.6 ;; esac\n' >"${shim}/python3"
+    chmod +x "${shim}/python3"
+    printf '%s\n' "$shim"
+}
+
+probe_python_floor_refuses_a_below_floor_interpreter() {
+    local guard shim output rc all_ok=1
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    shim="$(python_floor_shim)"
+    for guard in check_ring_boundaries.sh check_object_semantics_ledger.sh check_op_file_shape.sh; do
+        rc=0
+        output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" GATEWAY_PYTHON="${shim}/python3" \
+            bash "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+        if [[ "$rc" -eq 0 || "$output" != *'which is Python 3.9.6; the repository floor is 3.11'* || "$output" == *'Traceback'* ]]; then
+            all_ok=0
+            fail_msg "${guard} did not refuse a Python 3.9.6 interpreter by version: rc=${rc}: ${output}"
+        fi
+    done
+    rm -rf "$shim"
+    if [[ "$all_ok" -eq 1 ]]; then
+        pass_msg 'the three floor-dependent guards refuse a Python 3.9.6 interpreter before running any program'
+    fi
+}
+probe_python_floor_refuses_a_below_floor_interpreter
+
+probe_python_floor_accepts_an_interpreter_at_the_floor() {
+    local guard real output rc all_ok=1
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    real="$(bash -c 'source "$1/lib/python.sh"; gateway_python probe' _ "$SCRIPT_DIR")" || {
+        fail_msg 'no interpreter at the repository floor is available to run the positive control'
+        return
+    }
+    for guard in check_ring_boundaries.sh check_object_semantics_ledger.sh check_op_file_shape.sh; do
+        rc=0
+        output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" GATEWAY_PYTHON="$real" bash "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+        if [[ "$rc" -ne 0 ]]; then
+            all_ok=0
+            fail_msg "${guard} failed with an interpreter at the floor (${real}): ${output}"
+        fi
+    done
+    if [[ "$all_ok" -eq 1 ]]; then
+        pass_msg "the three floor-dependent guards pass with an interpreter at the floor (${real})"
+    fi
+}
+probe_python_floor_accepts_an_interpreter_at_the_floor
+
+probe_python_floor_resolver_names_the_floor_or_the_missing_tool() {
+    local shim old_output old_rc=0 none_output none_rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    shim="$(python_floor_shim)"
+    old_output="$(PATH="$shim" /bin/bash -c 'source "$1/lib/python.sh"; gateway_python probe' _ "$SCRIPT_DIR" 2>&1)" || old_rc=$?
+    none_output="$(PATH="/nonexistent" /bin/bash -c 'source "$1/lib/python.sh"; gateway_python probe' _ "$SCRIPT_DIR" 2>&1)" || none_rc=$?
+    rm -rf "$shim"
+    if [[ "$old_rc" -ne 0 && "$old_output" == *"python3 is 3.9.6 at ${shim}/python3; the repository floor is Python 3.11"* &&
+        "$none_rc" -ne 0 && "$none_output" == *'required command is missing: python3'* ]]; then
+        pass_msg 'lib/python.sh names the floor for an old PATH interpreter and the missing tool for none'
+    else
+        fail_msg "lib/python.sh diagnostics drifted: old=${old_rc}:${old_output} none=${none_rc}:${none_output}"
+    fi
+}
+probe_python_floor_resolver_names_the_floor_or_the_missing_tool
+
+probe_python_floor_lowering_the_floor_admits_the_old_interpreter() {
+    local shim lowered output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    shim="$(python_floor_shim)"
+    lowered="$(mktemp "${TMPDIR:-/tmp}/gateway-python-lowered.XXXXXX")"
+    sed 's/^GATEWAY_PYTHON_FLOOR_MINOR=11$/GATEWAY_PYTHON_FLOOR_MINOR=9/' "${SCRIPT_DIR}/lib/python.sh" >"$lowered"
+    if ! grep -q '^GATEWAY_PYTHON_FLOOR_MINOR=9$' "$lowered"; then
+        fail_msg 'the floor mutation changed nothing; lib/python.sh no longer spells the floor the way this case expects'
+        rm -rf "$shim" "$lowered"
+        return
+    fi
+    output="$(GATEWAY_PYTHON="${shim}/python3" bash -c 'source "$1"; gateway_python probe' _ "$lowered" 2>&1)" || rc=$?
+    rm -rf "$shim" "$lowered"
+    if [[ "$rc" -eq 0 && "$output" == *"/python3" ]]; then
+        pass_msg 'lowering the floor admits the 3.9.6 shim, so the refusal above is the floor and not the shim'
+    else
+        fail_msg "lowering the floor did not admit the shim: rc=${rc}: ${output}"
+    fi
+}
+probe_python_floor_lowering_the_floor_admits_the_old_interpreter
+
 # -- check_response_encoding_ledger.sh -----------------------------------------------------------
 
 mut_response_encoding_ledger_row_deleted() {

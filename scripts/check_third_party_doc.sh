@@ -43,7 +43,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
-python3 - "$ROOT_DIR" <<'PYEOF'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_third_party_doc)" || exit 1
+"$PYTHON" - "$ROOT_DIR" <<'PYEOF'
 import re
 import sys
 from pathlib import Path

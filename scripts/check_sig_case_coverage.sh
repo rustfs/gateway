@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 
 # WHAT: Maps every P2-01 through P2-06 acceptance id to named executable evidence.
 # WHY: rustfs/backlog#1678 and rustfs/backlog#1679 require explicit cases; nearby doctests or a
@@ -153,10 +154,8 @@ negative=0
 expected=1
 compile_fail_paths=()
 
-command -v python3 >/dev/null 2>&1 || {
-    printf 'check_sig_case_coverage: required command is missing: python3\n' >&2
-    exit 1
-}
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_sig_case_coverage)" || exit 1
 
 evidence_requests=()
 
@@ -166,7 +165,7 @@ validate_rust_evidence() {
 }
 
 run_evidence_validations() {
-    python3 - "$ROOT" "${evidence_requests[@]}" <<'PYEOF'
+    "$PYTHON" - "$ROOT" "${evidence_requests[@]}" <<'PYEOF'
 import re
 import sys
 import tomllib
@@ -1421,7 +1420,7 @@ validate_rust_evidence "$xtask_security_posture" format_literal_exact \
     '"SECURITY_POSTURE anonymous_reachable_ops=[{anonymous}] custom_verifier=none sigv2_policy=HeaderOnly presigned_allowed_ops=[{presigned}] aws_signature_verifier=built-in"' \
     'check_sig_case_coverage: dry-run output lost a required startup-posture field'
 
-python3 - "$ROOT/crates/gateway/Cargo.toml" <<'PYEOF'
+"$PYTHON" - "$ROOT/crates/gateway/Cargo.toml" <<'PYEOF'
 import sys
 import tomllib
 from pathlib import Path

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 
 # WHAT: Maps every rustfs/backlog#1706 scalar acceptance id to one atomic executable test or guard.
 # WHY: P1-04 contains 71 cases, not 60; a type existing is not evidence that each protocol rule is
@@ -40,10 +41,8 @@ all=("${etag[@]}" "${checksum[@]}" "${timestamp[@]}" "${name[@]}" "${range[@]}" 
     exit 1
 }
 
-command -v python3 >/dev/null 2>&1 || {
-    printf 'check_scalar_case_coverage: required command is missing: python3\n' >&2
-    exit 1
-}
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_scalar_case_coverage)" || exit 1
 
 [[ -f "$SCALAR_TESTS_MOD" ]] || {
     printf 'check_scalar_case_coverage: scalar test module wiring is missing\n' >&2
@@ -80,7 +79,7 @@ evidence_for() {
 
 validate_rust_test() {
     local file="$1" marker="$2"
-    python3 - "$file" "$marker" <<'PYEOF'
+    "$PYTHON" - "$file" "$marker" <<'PYEOF'
 import re
 import sys
 from pathlib import Path
@@ -219,7 +218,7 @@ PYEOF
 
 validate_toml_case() {
     local file="$1" expected_id="$2"
-    python3 - "$file" "$expected_id" <<'PYEOF'
+    "$PYTHON" - "$file" "$expected_id" <<'PYEOF'
 import sys
 import tomllib
 from pathlib import Path

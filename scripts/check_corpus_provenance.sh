@@ -37,10 +37,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
-command -v python3 >/dev/null 2>&1 || {
-    printf 'check_corpus_provenance: required command is missing: python3\n' >&2
-    exit 1
-}
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_corpus_provenance)" || exit 1
 
 for required in corpus corpus/MANIFEST.toml crates/corpus/src/store.rs; do
     if [[ ! -e "${ROOT_DIR}/${required}" ]]; then
@@ -49,7 +47,7 @@ for required in corpus corpus/MANIFEST.toml crates/corpus/src/store.rs; do
     fi
 done
 
-python3 - "$ROOT_DIR" <<'PYEOF'
+"$PYTHON" - "$ROOT_DIR" <<'PYEOF'
 import json
 import pathlib
 import re

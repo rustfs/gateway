@@ -29,12 +29,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
-command -v python3 >/dev/null 2>&1 || {
-    printf 'check_client_versions_pinned: required command is missing: python3\n' >&2
-    exit 1
-}
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_client_versions_pinned)" || exit 1
 
-python3 - "$ROOT_DIR" <<'PY'
+"$PYTHON" - "$ROOT_DIR" <<'PY'
 import re
 import sys
 import tomllib

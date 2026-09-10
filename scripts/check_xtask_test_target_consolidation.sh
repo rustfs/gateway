@@ -7,12 +7,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
-command -v python3 >/dev/null 2>&1 || {
-    printf '%s\n' 'required command is missing: python3' >&2
-    exit 1
-}
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_xtask_test_target_consolidation)" || exit 1
 
-python3 - "$REPO_ROOT" "${GATEWAY_TEST_TARGET_CRATE:-xtask}" \
+"$PYTHON" - "$REPO_ROOT" "${GATEWAY_TEST_TARGET_CRATE:-xtask}" \
     "${GATEWAY_TEST_TARGET_MODULES:-cli_contract,scaffold_must_be_red,toolchain_contract,why_contract}" <<'PYEOF'
 from pathlib import Path
 import re

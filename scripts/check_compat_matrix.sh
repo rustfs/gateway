@@ -41,7 +41,8 @@ fail() {
     exit 1
 }
 
-command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_compat_matrix)" || exit 1
 command -v git >/dev/null 2>&1 || fail 'required command is missing: git'
 [[ -f "$ROOT_DIR/compat/known-fail.txt" ]] || fail 'required input is missing: compat/known-fail.txt'
 [[ -f "$ROOT_DIR/compat/matrix.json" ]] || fail 'required input is missing: compat/matrix.json'
@@ -66,7 +67,7 @@ if ! git -C "$ROOT_DIR" show "${baseline_ref}:compat/known-fail.txt" >"$previous
     printf 'check_compat_matrix: compat/known-fail.txt is new in %s; the ratchet starts here\n' "$baseline_ref"
 fi
 
-python3 - "$ROOT_DIR" "$previous" <<'PY'
+"$PYTHON" - "$ROOT_DIR" "$previous" <<'PY'
 import json
 import re
 import sys

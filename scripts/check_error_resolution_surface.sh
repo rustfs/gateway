@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 
 # WHAT: Keeps ADR-0008's error construction surface closed across core and the facade.
 # WHY: A second public S3Error writer, status authority or filter-side resolved error can bypass
@@ -19,10 +20,12 @@ fail() {
     exit 1
 }
 
-for required in grep awk python3; do
+for required in grep awk; do
     command -v "$required" >/dev/null 2>&1 \
         || fail "required command is missing: ${required}"
 done
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_error_resolution_surface)" || exit 1
 for required in "$CORE_HANDLER" "$CORE_RESOLUTION" "$FACADE_RENDER" "$FILTER" "$CORE_HARNESS" "$GATEWAY_HARNESS"; do
     [[ -f "$required" ]] || fail "required source is missing: ${required#"${ROOT}/"}"
 done
@@ -68,7 +71,7 @@ if grep -En 'success\(StatusCode::OK\)' "$CORE_RESOLUTION" >/dev/null; then
     fail 'CreateBucket success must not enter the error resolver'
 fi
 
-python3 - "$ROOT" <<'PYEOF'
+"$PYTHON" - "$ROOT" <<'PYEOF'
 import os
 import re
 import sys

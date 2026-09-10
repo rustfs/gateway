@@ -50,7 +50,9 @@ if [[ ! -f "$REPORT" ]]; then
     exit 1
 fi
 
-python3 - "$REPORT" <<'PYEOF'
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_s3tests_report)" || exit 1
+"$PYTHON" - "$REPORT" <<'PYEOF'
 import subprocess
 import sys
 import tempfile
