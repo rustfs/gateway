@@ -15,7 +15,7 @@ the wrong place, and under concurrency that is an out-of-memory condition an una
 caller can trigger at will."""
 polarity = "negative"
 operation = "DeleteObjects"
-tags = ["limits", "delete", "resource-exhaustion"]
+tags = ["limits", "delete", "dos"]
 timeout_ms = 20000
 quirks = ["q-deletes-0027"]
 

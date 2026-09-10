@@ -15,7 +15,7 @@ error and therefore invisible in any status-code assertion. The entity tag must 
 without it the client cannot refresh its cache entry."""
 polarity = "negative"
 operation = "GetObject"
-tags = ["conditional", "caching", "rfc9110"]
+tags = ["conditional", "rfc9110"]
 timeout_ms = 10000
 quirks = ["q-etag-0004"]
 

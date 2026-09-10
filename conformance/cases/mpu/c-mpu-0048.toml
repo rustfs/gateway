@@ -12,7 +12,7 @@ caller's request, the caller cannot reconcile its own accounting. Requesting a s
 server's ceiling is what makes the two failures separable in one exchange."""
 polarity = "negative"
 operation = "ListParts"
-tags = ["multipart", "pagination", "consistency"]
+tags = ["multipart", "pagination", "validation"]
 quirks = ["q-mpu-marker-0040", "q-mpu-part-0031"]
 
 [[case.evidence]]

@@ -12,7 +12,7 @@ beginning and an enumeration loop that trusts it never terminates. The case send
 once so that a fix for one of them cannot pass while another still panics."""
 polarity = "negative"
 operation = "ListParts"
-tags = ["multipart", "pagination", "error-shape", "robustness"]
+tags = ["multipart", "pagination", "error-shape", "security"]
 quirks = ["q-mpu-marker-0040"]
 
 [[case.evidence]]
