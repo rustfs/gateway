@@ -56,6 +56,20 @@ The timing test is guarded against being vacuous: a positive control that compar
 with early return measures 7.85x relative difference against a 0.20 tolerance, while the real
 implementation measures 0.0008.
 
+## Signed-chunk overhead limit
+
+A signed `aws-chunked` upload pays a fixed header of roughly 85 bytes per chunk, so a stream of
+tiny chunks is mostly framing and makes the server do HMAC work out of proportion to the bytes it
+delivers. `ChunkLimits::max_overhead_permille` bounds that ratio in integer permille (a float on
+the data path would be slower and locale-shaped); the default of 50 refuses signed chunks smaller
+than about 1,740 bytes. AWS SDKs never chunk below 8 KiB, so no known client is affected, but the
+number rests on that estimate rather than on a measurement of real clients: a non-AWS SigV4 signer,
+an SDK with an unusual chunk size, or a proxy that re-frames a stream could sit below it. The
+threshold is therefore a deployment-visible limit — raise it with
+`ChunkLimits::with_max_overhead_permille` only against a measured client, never pre-emptively,
+and record the measurement on rustfs/gateway#6, where the default is to be re-decided once the
+client matrix has run.
+
 ## Deployment constraint
 
 **Never run a debug build of `rustfs-gateway-sig` in production.** `subtle`'s invariant checks are
