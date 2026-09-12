@@ -413,16 +413,25 @@ status = {status}
 
     #[test]
     fn unsigned_raw_head_preserves_bytes_and_reports_a_truncated_body_as_not_fully_sent() {
+        let raw = b"PUT /raw HTTP/1.1\r\nHost: example.test\r\nContent-Length: 5\r\n\r\n".to_vec();
+        let expected_request = [raw.as_slice(), b"part"].concat();
+        let request_len = expected_request.len();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
         let address = listener.local_addr().expect("listener address");
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept client");
             stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("set request deadline");
+            // Consume the four authored body bytes, not the declared five, before closing.
+            let mut captured = vec![0; request_len];
+            stream.read_exact(&mut captured).expect("read the authored request bytes");
+            stream
                 .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
                 .expect("write response");
+            captured
         });
         let mut connection = Connection::open(address).expect("connect client");
-        let raw = b"PUT /raw HTTP/1.1\r\nHost: example.test\r\nContent-Length: 5\r\n\r\n".to_vec();
         let mut wire = empty_wire();
         wire.raw_head = Some(raw.clone());
         wire.steps.push(ChunkStep::Data(b"part".to_vec(), 0));
@@ -436,8 +445,9 @@ status = {status}
         let started = Instant::now();
         let result = execute_socket_exchange(&mut connection, &wire, &head, started, started + Duration::from_secs(2), true)
             .expect("external exchange");
-        server.join().expect("server exits");
+        let captured = server.join().expect("server exits");
 
+        assert_eq!(captured, expected_request, "the fixture consumes the authored bytes before closing");
         assert_eq!(result.observation.request_body_fully_sent, Some(false));
     }
 
