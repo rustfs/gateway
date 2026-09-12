@@ -521,6 +521,7 @@ impl InProcess {
             })),
         };
         let builder = sigv2::configure_case(builder, &self.case_id);
+        let builder = security::configure_version_list(builder, &self.case_id, Arc::clone(&self.authz_backend_calls));
         let backend_calls = Arc::clone(&self.authz_backend_calls);
         let copy_backend_calls = Arc::clone(&self.authz_backend_calls);
         builder
@@ -1266,6 +1267,7 @@ impl Sut for InProcess {
 
     fn finish(&mut self, case_id: &str) -> Result<(), SutError> {
         let calls = |counter: &AtomicUsize| counter.load(Ordering::SeqCst);
+        security::finish_version_list(case_id, calls(&self.authz_backend_calls))?;
         let violation = match case_id {
             "c-authz-1001" | "c-authz-1011" | "c-authz-1012" if calls(&self.authz_backend_calls) != 0 => {
                 format!("{case_id} reached the copy backend after authorization refused the source")

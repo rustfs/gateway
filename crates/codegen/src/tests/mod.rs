@@ -21,6 +21,7 @@
 //! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 
 mod all_unknown_tests;
+mod authorization_tests;
 mod boolean_tests;
 mod bounds_tests;
 mod codegen_tests;

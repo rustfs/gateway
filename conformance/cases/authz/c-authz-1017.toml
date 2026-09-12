@@ -1,0 +1,30 @@
+[case]
+id = "c-authz-1017"
+schema_version = 1
+title = "Version-list permission for another bucket is refused"
+rationale = "The version-list action does not authorize a different bucket resource."
+polarity = "negative"
+operation = "ListObjectVersions"
+tags = ["security", "list"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html"
+summary = "AWS requires the distinct ListBucketVersions action on the bucket for version listing."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "authz-versions"
+
+[request]
+method = "GET"
+target = "/authz-versions?versions"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 403
+
+[expect.error]
+code = "AccessDenied"

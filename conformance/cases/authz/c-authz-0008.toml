@@ -1,0 +1,27 @@
+[case]
+id = "c-authz-0008"
+schema_version = 1
+title = "Version listing accepts its own bucket permission"
+rationale = "The signed version-list route must present ListBucketVersions with the requested bucket to the authorizer."
+polarity = "positive"
+operation = "ListObjectVersions"
+tags = ["security", "list"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html"
+summary = "AWS requires the distinct ListBucketVersions action on the bucket for version listing."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "authz-versions"
+
+[request]
+method = "GET"
+target = "/authz-versions?versions"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200

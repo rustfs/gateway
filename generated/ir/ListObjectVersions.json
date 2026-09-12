@@ -14,7 +14,7 @@
             "alt_success_statuses": [],
             "path_shape": "/{Bucket}"
           },
-  "auth": { "requirement": "Required", "action": "s3:ListBucket", "presigned_allowed": true, "service": "s3" },
+  "auth": { "requirement": "Required", "action": "s3:ListBucketVersions", "presigned_allowed": true, "service": "s3" },
   "payload": {
                "request": { "kind": "None", "buffering": "None", "max_bytes": null },
                "response": { "kind": "XmlBody", "buffering": "Full", "max_bytes": null }

@@ -246,7 +246,7 @@ cases = ""
 
 [[operation]]
 name = "ListObjectVersions"
-cases = "c-list-0012,c-list-0013,c-list-0014,c-list-0033,c-list-0034"
+cases = "c-authz-0008,c-authz-1016,c-authz-1017,c-list-0012,c-list-0013,c-list-0014,c-list-0033,c-list-0034"
 
 [[operation]]
 name = "ListObjects"

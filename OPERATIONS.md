@@ -3209,7 +3209,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 ### ListObjectVersions
 
-`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 610 · auth Required (`s3:ListBucket`, presigned allowed) · spec `spec/operations/ListObjectVersions.toml`
+`GET /{Bucket}` &rarr; 200 · target Bucket · precedence 610 · auth Required (`s3:ListBucketVersions`, presigned allowed) · spec `spec/operations/ListObjectVersions.toml`
 
 **Route predicates**
 
