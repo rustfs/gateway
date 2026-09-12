@@ -171,7 +171,9 @@ fixed now so that the same check does not get written twice under two names.
 | `check_runner_raw_bytes.sh` | Case requests retain a raw TCP byte path and acquire no normalizing client dependency | P8-01 |
 | `check_xfail_ratchet.sh` | The Ceph s3-tests tolerated set only shrinks, unless the same change raises the file's generation by exactly one | P8-05 |
 | `check_s3tests_filter.sh` | The s3-tests marker filter never grows an exclusion, never excludes `fails_on_rgw`, and always excludes `fails_on_aws` | P8-05 |
-| `check_suites_pinned.sh` | External suites are reached at an exact commit or image digest, never a branch or a moving tag, and every suite workflow is cron-only | P8-05 |
+| `check_suites_pinned.sh` | External suites are reached at an exact commit or image digest, never a branch or a moving tag, and every suite workflow is cron-only; the mint runner is complete, pinned to a linux/amd64 digest, launches through `ci/lib/sut.sh`, names every SDK, copies and redacts `/mint/log` before judging it, and uploads only its aggregate | P8-05 |
+| `check_mint_baseline.sh` | Each per-SDK count in `ci/mint/baseline.txt` only goes down, unless the same change raises the generation by exactly one, and the SDK set is exactly `MINT_SDKS` in `ci/mint/pins.env` | P8-05 |
+| `check_mint_report.sh` | Not a policy guard: proves the mint report fails on a count above the baseline, reports KNOWN and IMPROVED counts, keeps NA apart from failures, refuses incomplete or malformed runs, proposes generation +1 only from a complete run, and redacts signing material | P8-05 |
 | `check_no_vendored_suites.sh` | No external suite's source is committed here, detected by both path and content fingerprint | P8-05 |
 | `check_third_party_doc.sh` | Every external suite's licence review records the upstream, the SPDX id, the vendoring decision, a re-runnable verification command, and the pin the runner actually uses | P8-05 |
 | `check_s3tests_report.sh` | Not a policy guard: proves the baseline-aware report fails on an unlisted failure, tolerates a listed one, reports fixed and stale entries, and refuses a run that measured nothing | P8-05 |

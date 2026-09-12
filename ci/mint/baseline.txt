@@ -1,0 +1,44 @@
+# MinIO mint failures this implementation is known to have, counted per SDK.
+#
+# WHAT THIS FILE IS
+#   One line per SDK directory the pinned image runs: `<sdk> <failures>`. ci/mint/report.py
+#   counts the FAIL records each SDK wrote and compares that count with the SDK's line here.
+#   More failures is a REGRESSION and fails the scheduled job. Fewer is IMPROVED, and means the
+#   count should come down. NA records are reported separately and never count as failures.
+#
+# WHY COUNTS AND NOT TEST NAMES
+#   Mint's SDK suites share no naming scheme, and several of them stop at their first failure.
+#   A list of test names would change with every upstream quirk. A count per SDK is the
+#   coarsest measurement that still turns red when an SDK that used to pass starts failing.
+#
+# THE RATCHET
+#   Any pull request may lower a count. Only a pull request that also raises the generation
+#   below by exactly one may raise a count. scripts/check_mint_baseline.sh refuses every other
+#   increase. It also refuses a baseline whose SDK set differs from MINT_SDKS in
+#   ci/mint/pins.env.
+#
+# HOW TO PROPOSE A NEW BASELINE
+#   Run the workflow with `mode: record`. A complete run writes baseline.proposed.txt with the
+#   generation already raised. An incomplete run writes no proposal. Attribute every non-zero
+#   count before you land it.
+#
+# GENERATION 0 IS STRICT ON PURPOSE
+#   Every count is zero because nothing had been measured when this file was written. A count
+#   written from a guess is a guarantee quietly withdrawn.
+#
+# generation: 0
+.minio-dotnet 0
+aws-sdk-go-v2 0
+aws-sdk-java-v2 0
+aws-sdk-php 0
+aws-sdk-ruby 0
+awscli 0
+healthcheck 0
+mc 0
+minio-go 0
+minio-java 0
+minio-js 0
+minio-py 0
+s3cmd 0
+s3select 0
+versioning 0

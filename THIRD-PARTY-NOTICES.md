@@ -35,7 +35,8 @@ Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 ## External acceptance suites
 
 The three entries below are the licence review behind
-`.github/workflows/e2e-s3tests.yml` and `ci/s3tests/`. Each records the licence,
+`.github/workflows/e2e-s3tests.yml`, `.github/workflows/e2e-mint.yml`, `ci/s3tests/`
+and `ci/mint/`. Each records the licence,
 **how that licence was verified rather than only what it says**, and the pin.
 `scripts/check_third_party_doc.sh` asserts every row stays here and stays
 complete; `scripts/check_no_vendored_suites.sh` asserts none of the source ever
@@ -64,14 +65,23 @@ Copyright the Ceph authors.
   the assumption that it inherits one is the reason this suite gets skipped.
 - Repository status: **archived** (read-only; last push 2026-01-08). Its bundled
   SDK suites are therefore frozen and will receive no upstream fix, which is why
-  the mint job, when it lands, must never become a blocking gate.
+  `.github/workflows/e2e-mint.yml` is scheduled evidence and never a blocking gate.
 - Vendored: **no.** Run as a container image, pinned by digest and never by a
-  tag: an archived repository still republishes `:latest`.
-- Pin: recorded with the runner in a follow-up to rustfs/backlog#1764; the
-  runner is not in this repository yet.
+  tag: an archived repository's image tags can still be re-pointed.
+- Pin: image `docker.io/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200`,
+  the `edge` build of 2026-01-08 and a single-platform linux/amd64 manifest. The
+  runner pulls exactly this digest; `ci/mint/pins.env` records it with the SDK
+  census.
 - Verified 2026-09-02:
   - `gh api repos/minio/mint --jq .license.spdx_id` → `Apache-2.0`
   - `gh api repos/minio/mint --jq .archived` → `true`
+- Pin verified 2026-09-12:
+  - `docker buildx imagetools inspect minio/mint:edge` → the digest above, as a
+    single-platform manifest
+  - `docker buildx imagetools inspect minio/mint:edge --format '{{json .Image}}'`
+    → `"architecture": "amd64"`, `"os": "linux"`
+  - `curl -s 'https://hub.docker.com/v2/repositories/minio/mint/tags?page_size=30'`
+    → exactly two tags, `latest` (2024-05-28) and `edge` (2026-01-08)
 
 Copyright the MinIO authors.
 

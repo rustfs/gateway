@@ -148,50 +148,49 @@ for required in (s3tests_workflow, s3tests_runner, sut_library):
         )
         raise SystemExit(1)
 
-workflow_text = s3tests_workflow.read_text(encoding="utf-8")
-toolchain = re.search(
-    r"^(?P<indent>[ \t]*)uses:[ \t]*(?:dtolnay/rust-toolchain|actions-rust-lang/setup-rust-toolchain)@"
-    r"[0-9a-f]{40}[ \t]*$",
-    workflow_text,
-    re.MULTILINE,
-)
-release_build = re.search(
-    r"^\s*run:\s*cargo build --release -p rustfs-gateway-compat-sut\s*$",
-    workflow_text,
-    re.MULTILINE,
-)
-suite_run_match = re.search(r"^\s*ci/s3tests/run\.sh\b", workflow_text, re.MULTILINE)
-if toolchain is None:
-    failures.append(
-        ".github/workflows/e2e-s3tests.yml must install Rust through a toolchain action "
-        "pinned to an exact 40-hex revision"
+def require_release_sut_before(relative: str, workflow_text: str, runner: str) -> None:
+    """The workflow installs pinned stable Rust and builds the release SUT before the runner."""
+    toolchain = re.search(
+        r"^(?P<indent>[ \t]*)uses:[ \t]*(?:dtolnay/rust-toolchain|actions-rust-lang/setup-rust-toolchain)@"
+        r"[0-9a-f]{40}[ \t]*$",
+        workflow_text,
+        re.MULTILINE,
     )
-if toolchain is not None:
-    # Bind the input to this action, not a later step or a comment containing the selector.
-    indent = re.escape(toolchain.group("indent"))
-    selection = re.match(
-        rf"\n{indent}with:[ \t]*\n{indent}  toolchain:[ \t]*stable[ \t]*(?:\n|$)",
-        workflow_text[toolchain.end():],
+    release_build = re.search(
+        r"^\s*run:\s*cargo build --release -p rustfs-gateway-compat-sut\s*$",
+        workflow_text,
+        re.MULTILINE,
     )
-    if selection is None:
+    suite_run_match = re.search(rf"^\s*{re.escape(runner)}\b", workflow_text, re.MULTILINE)
+    if toolchain is None:
         failures.append(
-            ".github/workflows/e2e-s3tests.yml must set with.toolchain to stable on the pinned Rust action step"
+            f"{relative} must install Rust through a toolchain action pinned to an exact 40-hex revision"
         )
-if release_build is None:
-    failures.append(
-        ".github/workflows/e2e-s3tests.yml must run "
-        "`cargo build --release -p rustfs-gateway-compat-sut`"
-    )
-if (
-    toolchain is not None
-    and release_build is not None
-    and suite_run_match is not None
-    and not (toolchain.start() < release_build.start() < suite_run_match.start())
-):
-    failures.append(
-        ".github/workflows/e2e-s3tests.yml must install Rust and build the release "
-        "compatibility SUT before invoking ci/s3tests/run.sh"
-    )
+    if toolchain is not None:
+        # Bind the input to this action, not a later step or a comment containing the selector.
+        indent = re.escape(toolchain.group("indent"))
+        selection = re.match(
+            rf"\n{indent}with:[ \t]*\n{indent}  toolchain:[ \t]*stable[ \t]*(?:\n|$)",
+            workflow_text[toolchain.end():],
+        )
+        if selection is None:
+            failures.append(f"{relative} must set with.toolchain to stable on the pinned Rust action step")
+    if release_build is None:
+        failures.append(f"{relative} must run `cargo build --release -p rustfs-gateway-compat-sut`")
+    if suite_run_match is None:
+        failures.append(f"{relative} never invokes {runner}")
+    elif (
+        toolchain is not None
+        and release_build is not None
+        and not (toolchain.start() < release_build.start() < suite_run_match.start())
+    ):
+        failures.append(
+            f"{relative} must install Rust and build the release compatibility SUT before invoking {runner}"
+        )
+
+
+workflow_text = s3tests_workflow.read_text(encoding="utf-8")
+require_release_sut_before(".github/workflows/e2e-s3tests.yml", workflow_text, "ci/s3tests/run.sh")
 
 runner_text = s3tests_runner.read_text(encoding="utf-8")
 sut_start = runner_text.find("\nsut_start\n")
@@ -264,6 +263,138 @@ if endpoint_branch < 0 or command_branch < 0 or endpoint_branch >= command_branc
         "ci/lib/sut.sh must prefer GATEWAY_SUT_ENDPOINT before requiring "
         "GATEWAY_SUT_COMMAND, so an external endpoint remains authoritative"
     )
+
+# --- rule 6: the MinIO mint runner is complete --------------------------------------------
+MINT_INPUTS = (
+    ".github/workflows/e2e-mint.yml",
+    "ci/mint/run.sh",
+    "ci/mint/pins.env",
+    "ci/mint/report.py",
+    "ci/mint/baseline.txt",
+)
+missing_mint = [name for name in MINT_INPUTS if not (root / name).is_file()]
+if missing_mint:
+    print(
+        "check_suites_pinned: the mint runner is incomplete; required inputs are missing: "
+        + ", ".join(missing_mint),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
+def read_env(path: Path) -> dict[str, str]:
+    found: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        found[key.strip()] = value.strip().strip('"')
+    return found
+
+
+mint_pins = read_env(root / "ci/mint/pins.env")
+mint_image = mint_pins.get("MINT_IMAGE", "")
+if not re.fullmatch(r"docker\.io/minio/mint@sha256:[0-9a-f]{64}", mint_image):
+    failures.append(
+        f"ci/mint/pins.env must set MINT_IMAGE to docker.io/minio/mint@sha256:<64 hex>, got {mint_image!r}. "
+        "An archived image is still re-tagged; only a digest names one build."
+    )
+mint_platform = mint_pins.get("MINT_PLATFORM", "")
+if mint_platform != "linux/amd64":
+    failures.append(
+        f"ci/mint/pins.env must set MINT_PLATFORM=linux/amd64, got {mint_platform!r}; the pinned digest is "
+        "a single-platform linux/amd64 manifest"
+    )
+mint_sdks = mint_pins.get("MINT_SDKS", "").split()
+if not mint_sdks or len(set(mint_sdks)) != len(mint_sdks):
+    failures.append("ci/mint/pins.env must name each SDK in MINT_SDKS exactly once")
+
+MINT_WORKFLOW = ".github/workflows/e2e-mint.yml"
+mint_workflow_text = (root / MINT_WORKFLOW).read_text(encoding="utf-8")
+require_release_sut_before(MINT_WORKFLOW, mint_workflow_text, "ci/mint/run.sh")
+if not re.search(r"^  workflow_dispatch:\s*$", mint_workflow_text, re.MULTILINE):
+    failures.append(f"{MINT_WORKFLOW} must stay dispatchable, so a record run can be started by hand")
+if not re.search(r"^\s*-\s*record\s*$", mint_workflow_text, re.MULTILINE):
+    failures.append(f"{MINT_WORKFLOW} must offer a `record` mode input")
+for number, raw in enumerate(mint_workflow_text.splitlines(), start=1):
+    used = re.match(r"^\s*(?:-\s*)?uses:\s*(\S+)", raw)
+    if used is not None and not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}", used.group(1)):
+        failures.append(
+            f"{MINT_WORKFLOW}:{number}: uses {used.group(1)}; every action is pinned by a 40-hex commit"
+        )
+uploads = re.findall(r"uses:\s*actions/upload-artifact@", mint_workflow_text)
+upload_paths = re.findall(r"^\s*path:\s*(.+?)\s*$", mint_workflow_text, re.MULTILINE)
+if len(uploads) != 1 or upload_paths != ["${{ runner.temp }}/mint-out"]:
+    failures.append(
+        f"{MINT_WORKFLOW} must upload exactly one artifact, from `${{{{ runner.temp }}}}/mint-out`: the "
+        "repository-owned aggregate. The console and the raw per-SDK JSON stay in runner storage, because "
+        "upstream failure text can carry Authorization, presigned-query or signature material."
+    )
+issue_steps = [step for step in re.split(r"(?m)^      - ", mint_workflow_text) if "gh issue create" in step]
+if len(issue_steps) != 1:
+    failures.append(f"{MINT_WORKFLOW} must file regression issues from exactly one step")
+else:
+    condition = re.search(r"(?m)^\s*if:\s*(.+?)\s*$", issue_steps[0])
+    if condition is None or condition.group(1) != "failure() && steps.suite.outputs.status == '1'":
+        failures.append(
+            f"{MINT_WORKFLOW}: the issue step must run only on "
+            "`failure() && steps.suite.outputs.status == '1'`; an incomplete run (exit 3) measured "
+            "nothing and must not file a regression"
+        )
+
+mint_runner = (root / "ci/mint/run.sh").read_text(encoding="utf-8")
+mint_start = mint_runner.find("\nsut_start\n")
+if 'source "${ROOT_DIR}/ci/lib/sut.sh"' not in mint_runner or mint_start < 0:
+    failures.append(
+        "ci/mint/run.sh must start or adopt its SUT through ci/lib/sut.sh (source it, then call "
+        "sut_start on its own line); a second launcher is a second place for the exit-3 rule to go missing"
+    )
+mint_before_start = mint_runner[:mint_start] if mint_start >= 0 else mint_runner
+mint_default = mint_before_start.find(': "${GATEWAY_SUT_COMMAND:=')
+if mint_default < 0:
+    failures.append(
+        "ci/mint/run.sh must default GATEWAY_SUT_COMMAND with the overridable `:=` form before sut_start"
+    )
+else:
+    if "target/release/compat-sut" not in mint_before_start:
+        failures.append("ci/mint/run.sh's default SUT must be target/release/compat-sut")
+    mint_flags = ("--data", "--host", "--port", "--region", "--access-key", "--secret-key")
+    missing_mint_flags = [flag for flag in mint_flags if flag not in mint_before_start[mint_default:]]
+    if missing_mint_flags:
+        failures.append(
+            "ci/mint/run.sh's default GATEWAY_SUT_COMMAND is missing required flags: " + ", ".join(missing_mint_flags)
+        )
+if 'source "${ROOT_DIR}/ci/mint/pins.env"' not in mint_runner:
+    failures.append("ci/mint/run.sh must read its image, platform and SDK census from ci/mint/pins.env")
+if 'docker pull --quiet --platform "$MINT_PLATFORM" "$MINT_IMAGE"' not in mint_runner:
+    failures.append("ci/mint/run.sh must pull the pinned image with --platform \"$MINT_PLATFORM\"")
+
+# The run's steps, in the only order that makes its verdict mean anything.
+MINT_STEPS = (
+    ("census", "-A /mint/run/core", "its SDK census check against the image"),
+    ("suite", '"$MINT_IMAGE" "${MINT_SDK_LIST[@]}"', "its suite run naming every SDK explicitly"),
+    ("copy", 'docker cp "$MINT_CONTAINER:/mint/log"', "its copy of /mint/log out of the container"),
+    ("redact", 'report.py" redact', "its redaction of the copied evidence"),
+    ("judge", 'report.py" "${REPORT_ARGS[@]}"', "its judgement of the redacted evidence"),
+)
+positions: dict[str, int] = {}
+for key, marker, description in MINT_STEPS:
+    positions[key] = mint_runner.find(marker)
+    if positions[key] < 0:
+        failures.append(f"ci/mint/run.sh lost {description}: {marker}")
+if all(position >= 0 for position in positions.values()):
+    ordered = [positions[key] for key, _, _ in MINT_STEPS]
+    if ordered != sorted(ordered):
+        failures.append(
+            "ci/mint/run.sh must check the census, run the suite, copy /mint/log out, redact it, and only "
+            "then judge it, in that order; a report written before the log is copied judges nothing"
+        )
+    suite_command = mint_runner[mint_runner.rfind("docker run", 0, positions["suite"]):positions["suite"]]
+    if '--platform "$MINT_PLATFORM"' not in suite_command:
+        failures.append('ci/mint/run.sh must run the suite container with --platform "$MINT_PLATFORM"')
+if not re.search(r"REPORT_ARGS=\(\s*judge\b", mint_runner):
+    failures.append("ci/mint/run.sh must hand the report the `judge` command")
 
 # --- rule 4: the pull-request workflow keeps its distance ---------------------------------
 gate = root / ".github/workflows/ci.yml"
