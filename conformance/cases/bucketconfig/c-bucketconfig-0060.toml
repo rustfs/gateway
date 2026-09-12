@@ -1,0 +1,47 @@
+[case]
+id = "c-bucketconfig-0060"
+schema_version = 1
+title = "A bare Enabled versioning body is not a configuration document"
+rationale = """
+s3s, built with its `minio` feature, accepts the literal text `Enabled` as a whole versioning body, on the premise that MinIO sends one. No client this project has examined does: minio-go and mc marshal the XML document, and MinIO's own server decodes the versioning body as XML and nothing else. The gateway therefore keeps the AWS contract — the body is the document — and this is the case that states it, so that accepting the literal is a decision someone makes with a consumer in hand rather than a leniency that arrives with a codec change. The Content-MD5 is the correct digest of the seven-byte body on purpose: the refusal must come from the document, not from the integrity claim that c-bucketconfig-0035 already covers. The accepting half of the pair is c-bucketconfig-0001, the same status spelled as XML."""
+polarity = "negative"
+operation = "PutBucketVersioning"
+tags = ["bucketconfig", "xml", "error-shape"]
+timeout_ms = 10000
+# Empty on purpose: the IR's `body_literal` switch is false for this operation and no quirk row
+# describes the refusal; a backlink to a row that does not state it would overstate the ledger.
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html"
+summary = "The write's request body is the VersioningConfiguration XML document carrying the status."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/minio/minio/blob/5f78691fcfcf8a1d4cd83c600538385ea6bef8c0/internal/bucket/versioning/versioning.go#L158-L167"
+summary = "MinIO's server parses the versioning body with an XML decoder only, so it has no bare-literal form either."
+kind = "minio"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/612"
+summary = "Upstream added a feature-gated bare Enabled body for this write, which is the leniency this case records the gateway as not adopting."
+kind = "s3s-pr"
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+
+[request]
+method = "PUT"
+target = "/conf-bucketconfig?versioning"
+headers = { "content-md5" = "ANI6duQ7Rtrp7Hqp3L67Mg==" }
+body = { utf8 = 'Enabled' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true

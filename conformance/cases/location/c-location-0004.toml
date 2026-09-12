@@ -1,8 +1,5 @@
 # c-location-0004 — the read resolves the bucket before it answers about a region.
 #
-# 0003 is skipped on purpose: `model/overlays/quirks/bucket.toml` already reserves that identifier
-# for `q-region-0003`, the legacy `EU` alias row, which is a CreateBucket rule and not this one.
-#
 # Schema dimensions exercised: an error code on a subresource read whose target does not exist.
 
 [case]
