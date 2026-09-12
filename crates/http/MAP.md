@@ -40,6 +40,7 @@ after it has accepted.
 | `tests/ingest_framing.rs` | Whether the chunk parser runs at all, and whether the two declared lengths agree. | Change payload/framing selection. |
 | `tests/ingest_verify.rs` | The chunk signature chain and the promise that nothing unverified is handed over. | Change signature-chain verification or trailer parsing. |
 | `tests/ingest_known_answer.rs` | `ChunkSigner` verified against AWS's published chunked-upload example, not our own builder. | Change the chunk string-to-sign or its HMAC chain. |
+| `tests/chunked_decode_replay.rs` | Replays the committed `fuzz/seeds/chunked_decode/` seeds through the `chunked_decode` fuzz property on stable. | Change the ingest pipeline, or add a minimised fuzz regression seed. |
 | `tests/ingest_perf_gates.rs` | Ingestion allocation and cost gates, stated as equalities rather than wall clocks. | Change the hot path. |
 | `tests/form_limits.rs` | POST Object form ceilings and the order in which they are decided. | Change `src/form/`. |
 | `tests/form_allocations.rs` | Measures that reading a file part costs a heap independent of the file. | Change the file read path. |
