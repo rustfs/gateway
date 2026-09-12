@@ -33,6 +33,7 @@ ADRs; this map only selects files.
 | `src/conn/control_chunks.rs` | Control chunks on a socket exchange: body catch-up, stalls, teardowns, and what they charge to the harness account. | A `stall`, `half_close`, or `close` control chunk is carried out or timed wrongly. |
 | `src/conn/bind.rs` | Queues a pacing rendezvous before a fresh socket connects. | A socket case skips only under scheduler load. |
 | `src/conn/external.rs` | Authored HTTP/1.1 exchange against an external endpoint. | `--endpoint` connects, writes, or reports unavailable observations incorrectly. |
+| `src/conn/external/tests.rs` | Authored-byte capture, early-response, refusal, and CLI controls for external endpoints. | External exchange or fixture behavior changes. |
 | `src/conn/external_pacing.rs` | Cleartext external-body delays and early-response observation. | A delayed chunk is sent too early or after a response already exists. |
 | `src/conn/external_endpoint.rs` | Strict HTTP(S) endpoint parsing, resolution, and protocol selection. | An endpoint scheme, authority, host, or default port is handled incorrectly. |
 | `src/conn/external_fixture.rs` | Opt-in external owned-bucket/object planning and read-only enforcement. | A remote fixture shape or authored mutation is accepted incorrectly. |
