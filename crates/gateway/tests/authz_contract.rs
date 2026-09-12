@@ -267,28 +267,6 @@ fn base() -> ServiceBuilder {
         .dialect(&crate::support::ping_dialect())
 }
 
-/// A backend for the one AWS operation this suite drives, so that a refusal is about a **bucket**
-/// rather than about the service. The handler is never reached: every request that gets this far is
-/// refused above it, and that is itself one of the assertions.
-struct Listing;
-
-impl rustfs_gateway::Handler<rustfs_gateway::dto::ListObjectsV2> for Listing {
-    async fn call(
-        &self,
-        _request: rustfs_gateway::Req<rustfs_gateway::dto::ListObjectsV2>,
-    ) -> rustfs_gateway::HandlerResult<rustfs_gateway::dto::ListObjectsV2> {
-        Ok(rustfs_gateway::Resp::new(rustfs_gateway::dto::ListObjectsV2Output::default()))
-    }
-
-    async fn call_with_context(
-        &self,
-        _request: rustfs_gateway::Req<rustfs_gateway::dto::ListObjectsV2>,
-        _context: rustfs_gateway::HandlerContext,
-    ) -> rustfs_gateway::HandlerResult<rustfs_gateway::dto::ListObjectsV2> {
-        Ok(rustfs_gateway::Resp::new(rustfs_gateway::dto::ListObjectsV2Output::default()))
-    }
-}
-
 struct Copying;
 
 impl rustfs_gateway::Handler<rustfs_gateway::dto::CopyObject> for Copying {
