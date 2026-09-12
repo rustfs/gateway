@@ -108,7 +108,10 @@ mkdir -p "$WORK_DIR" "$OUT_DIR"
 source "${ROOT_DIR}/ci/lib/sut.sh"
 
 MINT_CONTAINER="gateway-mint-$$-${RANDOM}"
+MINT_ENV_FILE="${WORK_DIR}/mint.env"
+# shellcheck disable=SC2329 # invoked by the EXIT trap below.
 mint_cleanup() {
+    rm -f "$MINT_ENV_FILE"
     docker rm -f "$MINT_CONTAINER" "${MINT_CONTAINER}-census" >/dev/null 2>&1 || true
     sut_stop
 }
@@ -149,7 +152,9 @@ export MINT_ACCESS_KEY MINT_SECRET_KEY MINT_REGION MINT_SUT_HOST MINT_SUT_PORT M
 
 # --- the system under test ---------------------------------------------------------------
 # The names stay literal in the command: sut_start logs the launch shape, and expanding the
-# secret here would put it in that log. bash -c expands the exported values in the child.
+# secret here would put it in that log. bash -c expands the exported values in the child, so
+# the embedded quotes are for that shell and not this one.
+# shellcheck disable=SC2089,SC2090
 : "${GATEWAY_SUT_COMMAND:=\"\$MINT_SUT_BINARY\" \
     --data \"${WORK_DIR}/compat-sut-data\" \
     --host \"\$MINT_SUT_HOST\" \
@@ -157,6 +162,7 @@ export MINT_ACCESS_KEY MINT_SECRET_KEY MINT_REGION MINT_SUT_HOST MINT_SUT_PORT M
     --region \"\$MINT_REGION\" \
     --access-key \"\$MINT_ACCESS_KEY\" \
     --secret-key \"\$MINT_SECRET_KEY\"}"
+# shellcheck disable=SC2090 # the child `bash -c` in ci/lib/sut.sh is the shell that reads it.
 export GATEWAY_SUT_COMMAND
 export GATEWAY_SUT_HOST="${GATEWAY_SUT_HOST:-$MINT_SUT_HOST}"
 export GATEWAY_SUT_PORT="${GATEWAY_SUT_PORT:-$MINT_SUT_PORT}"
@@ -188,8 +194,8 @@ printf 'run: the image carries exactly the %s pinned SDK(s)\n' "${#MINT_SDK_LIST
 
 # --- the suite ---------------------------------------------------------------------------
 # Handed over as an env file rather than as arguments, so the secret never appears on a
-# process command line. The file lives in the work directory with the other raw evidence.
-MINT_ENV_FILE="${WORK_DIR}/mint.env"
+# process command line. The file is private to this user and removed as soon as the
+# container has read it.
 (
     umask 077
     printf '%s=%s\n' \
@@ -213,6 +219,7 @@ docker run --name "$MINT_CONTAINER" \
     "$MINT_IMAGE" "${MINT_SDK_LIST[@]}" >"$CONSOLE" 2>&1
 MINT_STATUS="$?"
 set -e
+rm -f "$MINT_ENV_FILE"
 printf 'run: mint exited %s after %ss; its exit is not a verdict, the records are\n' \
     "$MINT_STATUS" "$((SECONDS - MINT_STARTED))"
 
