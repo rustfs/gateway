@@ -494,6 +494,19 @@ impl InProcess {
                 .policy_source(policy_from(|_| Err(PolicyError::unavailable())))
                 .authorizer(allow_when(|_| true)),
             "c-authz-1010" => builder.authorizer(FixedDecision(Decision::Indeterminate)),
+            "c-authz-0008" | "c-authz-1016" | "c-authz-1017" => {
+                let (action, bucket) = match self.case_id.as_str() {
+                    "c-authz-1016" => ("s3:ListBucket", "authz-versions"),
+                    "c-authz-1017" => ("s3:ListBucketVersions", "another-bucket"),
+                    _ => ("s3:ListBucketVersions", "authz-versions"),
+                };
+                builder.authorizer(allow_when(move |request| {
+                    request.action == action
+                        && request.resource == rustfs_gateway::ResourceShape::Bucket
+                        && request.bucket.is_some_and(|name| name.as_str() == bucket)
+                        && request.key.is_none()
+                }))
+            }
             "c-object-0053" => builder.authorizer(security::HeadObjectPolicy),
             "c-authz-1014" => {
                 let source = Arc::clone(&self.authz_policy_version);
@@ -523,7 +536,17 @@ impl InProcess {
         let builder = sigv2::configure_case(builder, &self.case_id);
         let backend_calls = Arc::clone(&self.authz_backend_calls);
         let copy_backend_calls = Arc::clone(&self.authz_backend_calls);
+        let version_backend_calls = Arc::clone(&self.authz_backend_calls);
         builder
+            .op_layer::<dto::ListObjectVersions, _>(op_layer(
+                move |request: Req<dto::ListObjectVersions>, next: Next<'_, dto::ListObjectVersions>| {
+                    let backend_calls = Arc::clone(&version_backend_calls);
+                    Box::pin(async move {
+                        backend_calls.fetch_add(1, Ordering::SeqCst);
+                        next.run(request).await
+                    }) as BoxFuture<'_, HandlerResult<dto::ListObjectVersions>>
+                },
+            ))
             .op_layer::<dto::CopyObject, _>(op_layer(move |request: Req<dto::CopyObject>, next: Next<'_, dto::CopyObject>| {
                 let backend_calls = Arc::clone(&copy_backend_calls);
                 Box::pin(async move {
@@ -1267,6 +1290,12 @@ impl Sut for InProcess {
     fn finish(&mut self, case_id: &str) -> Result<(), SutError> {
         let calls = |counter: &AtomicUsize| counter.load(Ordering::SeqCst);
         let violation = match case_id {
+            "c-authz-1016" | "c-authz-1017" if calls(&self.authz_backend_calls) != 0 => {
+                format!("{case_id} reached version-list dispatch after authorization refused the request")
+            }
+            "c-authz-0008" if calls(&self.authz_backend_calls) != 1 => {
+                "c-authz-0008 did not reach version-list dispatch exactly once".to_owned()
+            }
             "c-authz-1001" | "c-authz-1011" | "c-authz-1012" if calls(&self.authz_backend_calls) != 0 => {
                 format!("{case_id} reached the copy backend after authorization refused the source")
             }

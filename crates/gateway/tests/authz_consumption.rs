@@ -14,7 +14,7 @@
 
 //! Input-derived resources are authorized before a backend can receive a request.
 //!
-//! Responsible for: the copy-source denial exploit path and its backend call measurement.
+//! Responsible for: copy-source and version-list authorization, including measured backend calls.
 //! NOT responsible for: policy evaluation or audit formatting.
 //! Upstream: `rustfs_gateway_core::authz`. Downstream: the facade service pipeline.
 
@@ -271,4 +271,74 @@ async fn an_unreadable_policy_is_a_403_and_never_reaches_the_backend() {
     assert_eq!(status, http::StatusCode::FORBIDDEN);
     assert!(body.contains("<Code>AccessDenied</Code>"), "{body}");
     assert_eq!(reached.load(Ordering::SeqCst), 0);
+}
+
+struct ListBackend(Arc<AtomicUsize>);
+
+impl<O: rustfs_gateway::Operation> Handler<O> for ListBackend
+where
+    O::Output: Default,
+{
+    async fn call(&self, _request: Req<O>) -> HandlerResult<O> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(Resp::new(O::Output::default()))
+    }
+}
+
+async fn list_authorization(target: &str, allowed_action: &'static str, allowed_bucket: &'static str) -> (u16, usize) {
+    let reached = Arc::new(AtomicUsize::new(0));
+    let backend = Arc::new(ListBackend(Arc::clone(&reached)));
+    let service = support::wired_at_signed_time()
+        .authorizer(rustfs_gateway::allow_when(move |request| {
+            request.action == allowed_action
+                && request.resource == rustfs_gateway::ResourceShape::Bucket
+                && request.bucket.is_some_and(|bucket| bucket.as_str() == allowed_bucket)
+                && request.key.is_none()
+        }))
+        .register::<dto::ListObjectVersions, _>(Arc::clone(&backend))
+        .register::<dto::ListObjects, _>(Arc::clone(&backend))
+        .register::<dto::ListObjectsV2, _>(backend)
+        .build()
+        .expect("the list operations are registered");
+    let (status, _) = exchange(&service, support::signed(http::Method::GET, target)).await;
+    (status.as_u16(), reached.load(Ordering::SeqCst))
+}
+
+// AWS assigns version listing a distinct bucket permission:
+// https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html
+#[tokio::test]
+async fn n_list_versions_refuses_ordinary_list_permission_before_the_handler() {
+    assert_eq!(list_authorization("/bucket?versions", "s3:ListBucket", "bucket").await, (403, 0));
+}
+
+#[tokio::test]
+async fn n_list_versions_refuses_an_unrelated_permission_before_the_handler() {
+    assert_eq!(list_authorization("/bucket?versions", "s3:GetObject", "bucket").await, (403, 0));
+}
+
+#[tokio::test]
+async fn n_list_versions_refuses_permission_for_another_bucket() {
+    assert_eq!(
+        list_authorization("/bucket?versions", "s3:ListBucketVersions", "another-bucket").await,
+        (403, 0)
+    );
+}
+
+#[tokio::test]
+async fn n_list_versions_permission_does_not_grant_ordinary_listing() {
+    for target in ["/bucket", "/bucket?list-type=2"] {
+        assert_eq!(list_authorization(target, "s3:ListBucketVersions", "bucket").await, (403, 0), "{target}");
+    }
+}
+
+#[tokio::test]
+async fn list_versions_authorizes_its_bucket_permission_and_reaches_the_handler() {
+    assert_eq!(list_authorization("/bucket?versions", "s3:ListBucketVersions", "bucket").await, (200, 1));
+}
+
+#[tokio::test]
+async fn list_versions_fix_preserves_ordinary_list_authorization() {
+    for target in ["/bucket", "/bucket?list-type=2"] {
+        assert_eq!(list_authorization(target, "s3:ListBucket", "bucket").await, (200, 1), "{target}");
+    }
 }

@@ -53,7 +53,7 @@ use crate::registry::OperationSpec;
 /// is a key listing, a different operation, not a malformed one.
 static SPEC: OperationSpec = OperationSpec::standard("ListObjectVersions")
     .required_params(&[])
-    .auth(AuthRequirement::new("s3:ListBucket", ResourceShape::Bucket))
+    .auth(AuthRequirement::new("s3:ListBucketVersions", ResourceShape::Bucket))
     .build();
 
 /// Header signatures only, and not privileged.

@@ -15,7 +15,7 @@ quirks = ["q-root-0060", "q-version-0061", "q-order-0066", "q-encoding-0067", "q
 
 [auth]
 requirement = "Required"
-action = "s3:ListBucket"
+action = "s3:ListBucketVersions"
 presigned_allowed = true
 service = "s3"
 

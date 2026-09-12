@@ -243,9 +243,11 @@ quirks = ["q-encoding-0067"]
 # `<Version>` and `DeleteMarkers` as `<DeleteMarker>`; neither element is named after its shape,
 # and a reader who assumes otherwise produces a body no SDK will parse.
 # =============================================================================================
+# https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html
+# AWS assigns version listing a distinct bucket permission from ordinary object listing.
 [op.ListObjectVersions]
 precedence = 610
-auth_action = "s3:ListBucket"
+auth_action = "s3:ListBucketVersions"
 error_codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument", "PermanentRedirect"]
 quirk_refs = [
   "q-root-0060",
