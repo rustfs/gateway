@@ -91,6 +91,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{collections::BTreeMap, path::PathBuf};
 mod conditional_race;
+pub(crate) mod h2_frames;
 mod profile;
 mod security;
 mod sigv2;
@@ -774,8 +775,8 @@ pub(crate) struct Wire {
     pub(crate) headers: Vec<(String, String)>,
     /// The head verbatim, when the case wrote one instead of a structured request line.
     pub(crate) raw_head: Option<Vec<u8>>,
-    /// Whether the case scripted HTTP/2 frames, which no transport here can send.
-    pub(crate) h2_frames: bool,
+    /// The authored HTTP/2 frames, in declaration order; empty when the case scripted none.
+    pub(crate) h2_frames: Vec<h2_frames::H2Frame>,
     /// The wire version the case asked for.
     pub(crate) http_version: Option<String>,
     /// The whole body, which is what the signature and `Content-Length` are stated over.
@@ -804,7 +805,7 @@ impl InProcess {
         if wire.raw_head.is_some() {
             return Err(needs_a_socket("raw_head_utf8"));
         }
-        if wire.h2_frames {
+        if !wire.h2_frames.is_empty() {
             return Err(needs_a_socket("h2_frames"));
         }
         if wire.http_version.as_deref() == Some("h2") {
@@ -841,7 +842,7 @@ impl InProcess {
             }
             (None, None) => None,
         };
-        let h2_frames = request.read("requestSpec.h2_frames").is_some();
+        let h2_frames = h2_frames::read(request.read("requestSpec.h2_frames"))?;
         let http_version = request
             .read("requestSpec.http_version")
             .and_then(Value::as_str)

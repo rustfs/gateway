@@ -614,3 +614,51 @@ fn a_wedged_exchange_is_reported_as_unmeasured_rather_than_as_a_count() {
     assert!(format!("{error}").contains("wedged"), "{error}");
     assert_eq!(connection.body_written(), 0);
 }
+
+// -- Authored HTTP/2 frames ---------------------------------------------------------------------
+
+/// `GET /` addressed to [`HOST`](crate::inprocess::HOST), as an HPACK block written out by hand:
+/// `:method GET` (static index 2), `:scheme http` (6), `:path /` (4), then `:authority` as a literal
+/// with incremental indexing on static name 1 and a 14-octet raw string. No encoder produced it.
+pub(super) const ANONYMOUS_GET_ROOT_HPACK: &str = "828684410e73332e6578616d706c652e636f6d";
+
+/// One `[request]` block that is nothing but a prior-knowledge SETTINGS frame and an authored
+/// stream-1 HEADERS frame carrying `block_hex`.
+pub(super) fn h2_request(block_hex: &str) -> Value {
+    block(&format!(
+        "method = \"GET\"\ntarget = \"/\"\nhttp_version = \"h2\"\n\
+         [[h2_frames]]\ntype = \"settings\"\nstream_id = 0\n\
+         [[h2_frames]]\ntype = \"headers\"\nstream_id = 1\nflags = [\"end_stream\", \"end_headers\"]\n\
+         payload_hex = \"{block_hex}\"\n"
+    ))
+}
+
+pub(super) fn h2_plan<'a>(case_id: &'a str, request: Value, connection: Option<&'a Value>) -> ExchangePlan<'a> {
+    ExchangePlan {
+        case_id,
+        index: 0,
+        request,
+        clock: None,
+        connection,
+        timeout_ms: Some(5_000),
+        transport: rustfs_gateway::Transport::Hyper,
+        profile: crate::sut::Profile::Aws,
+    }
+}
+
+/// Positive — an authored HEADERS script reaches the production Hyper server over plaintext
+/// prior-knowledge HTTP/2, and the observation is the status that server framed on stream 1.
+///
+/// Anonymous `GET /` is refused by the service, so `403` here is the service's answer read back off
+/// a HEADERS frame; nothing on the client side knows that number.
+#[cfg(feature = "production-transports")]
+#[test]
+fn production_hyper_executes_an_authored_h2_headers_script() {
+    let mut conn = Conn::production(std::path::PathBuf::from("."), ProductionDriver::Hyper);
+    conn.prepare("s-h2-0001", None).expect("the empty fixture prepares");
+    let observation = conn
+        .exchange(&h2_plan("s-h2-0001", h2_request(ANONYMOUS_GET_ROOT_HPACK), None))
+        .expect("the authored frames are executed");
+    assert_eq!(observation.status, Some(403), "{observation:?}");
+    assert_eq!(observation.http_version.as_deref(), Some("h2"), "{observation:?}");
+}

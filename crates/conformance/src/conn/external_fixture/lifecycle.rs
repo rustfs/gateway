@@ -222,7 +222,7 @@ impl Conn {
             target: target.to_owned(),
             headers: control_headers(body.len(), extra_headers),
             raw_head: None,
-            h2_frames: false,
+            h2_frames: Vec::new(),
             http_version: None,
             body: body.to_vec(),
             frames: (!body.is_empty()).then(|| body.to_vec()).into_iter().collect(),

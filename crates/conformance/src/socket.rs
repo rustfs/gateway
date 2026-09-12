@@ -1143,6 +1143,14 @@ impl Connection {
         }
     }
 
+    /// One read of whatever the peer has sent, waiting at most `timeout`, failure classified.
+    ///
+    /// The raw input of the HTTP/2 frame reader in `crate::conn`, which does its own framing.
+    pub(crate) fn read_available(&mut self, sink: &mut Vec<u8>, timeout: Duration) -> Result<usize, ReadFailure> {
+        self.set_read_timeout(timeout.max(Duration::from_millis(1)));
+        self.pull(sink)
+    }
+
     /// What state the socket is in, asked of the socket.
     #[must_use]
     pub fn observe(&self) -> ConnectionState {

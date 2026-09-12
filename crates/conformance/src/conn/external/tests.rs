@@ -90,7 +90,7 @@ fn empty_wire() -> crate::inprocess::Wire {
         target: "/".to_owned(),
         headers: Vec::new(),
         raw_head: None,
-        h2_frames: false,
+        h2_frames: Vec::new(),
         http_version: None,
         body: Vec::new(),
         frames: Vec::new(),
