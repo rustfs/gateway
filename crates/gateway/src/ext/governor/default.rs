@@ -90,7 +90,7 @@ impl ClientShard {
             if let Some(victim) = victim
                 && let Some(evicted) = self.entries.remove(&victim)
             {
-                meter = evicted.meter;
+                meter = evicted.meter.after_eviction(rate, now);
             }
         }
         let admitted = meter.take(rate, now);
@@ -431,6 +431,61 @@ mod tests {
         assert!(admits(&governor, ClassKind::Unauthenticated, Some(first)));
         assert!(!admits(&governor, ClassKind::Unauthenticated, Some(second)));
         assert_eq!(governor.tracked_clients(), 1);
+    }
+
+    #[test]
+    fn eviction_cannot_refill_an_idle_victim_to_a_full_burst() {
+        let rate = Rate::new(2, 1);
+        let mut shard = ClientShard::new(rate, MonotonicNow::from_millis(0), 1);
+        let first = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let second = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
+        let decisions = [
+            shard.take(first, rate, MonotonicNow::from_millis(0)),
+            shard.take(second, rate, MonotonicNow::from_millis(1_000)),
+            shard.take(second, rate, MonotonicNow::from_millis(1_000)),
+            // Returning after eviction must also inherit the outstanding debt.
+            shard.take(first, rate, MonotonicNow::from_millis(1_000)),
+            // Once retained, the address can still recover its ordinary full burst.
+            shard.take(first, rate, MonotonicNow::from_millis(3_000)),
+            shard.take(first, rate, MonotonicNow::from_millis(3_000)),
+            shard.take(first, rate, MonotonicNow::from_millis(3_000)),
+        ];
+        assert_eq!(decisions, [true, true, false, false, true, true, false]);
+    }
+
+    #[test]
+    fn eviction_preserves_deeper_debt_and_fractional_refill() {
+        let rate = Rate::new(4, 1);
+        let mut shard = ClientShard::new(rate, MonotonicNow::from_millis(0), 1);
+        let first = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let second = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
+        let decisions = [
+            shard.take(first, rate, MonotonicNow::from_millis(0)),
+            shard.take(first, rate, MonotonicNow::from_millis(0)),
+            shard.take(first, rate, MonotonicNow::from_millis(0)),
+            shard.take(first, rate, MonotonicNow::from_millis(0)),
+            shard.take(second, rate, MonotonicNow::from_millis(500)),
+            shard.take(first, rate, MonotonicNow::from_millis(999)),
+            shard.take(first, rate, MonotonicNow::from_millis(1_000)),
+            shard.take(first, rate, MonotonicNow::from_millis(1_000)),
+        ];
+        assert_eq!(decisions, [true, true, true, true, false, false, true, false]);
+    }
+
+    #[test]
+    fn eviction_spends_a_single_token_burst_before_the_current_request() {
+        let rate = Rate::new(1, 1);
+        let mut shard = ClientShard::new(rate, MonotonicNow::from_millis(0), 1);
+        let first = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let second = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
+        let decisions = [
+            shard.take(first, rate, MonotonicNow::from_millis(0)),
+            shard.take(second, rate, MonotonicNow::from_millis(1_000)),
+            shard.take(second, rate, MonotonicNow::from_millis(1_999)),
+            shard.take(second, rate, MonotonicNow::from_millis(2_000)),
+            shard.take(second, rate, MonotonicNow::from_millis(2_000)),
+        ];
+        assert_eq!(decisions, [true, false, false, true, false]);
     }
 
     #[test]
