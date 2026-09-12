@@ -37,6 +37,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "chunked_decode"
+path = "fuzz_targets/chunked_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "copy_source_parse"
 path = "fuzz_targets/copy_source_parse.rs"
 test = false
