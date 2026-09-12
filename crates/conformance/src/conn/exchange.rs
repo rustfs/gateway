@@ -73,7 +73,7 @@ impl Conn {
             self.inner.set_fixture_now(fixed.unix_seconds);
 
             let wire = self.inner.read_wire(&plan.request)?;
-            if wire.h2_frames || wire.http_version.as_deref() == Some("h2") {
+            if !wire.h2_frames.is_empty() || wire.http_version.as_deref() == Some("h2") {
                 return Err(SutError::Environment("concurrent batches currently require HTTP/1.1 requests".to_owned()));
             }
             let head = self.head(&wire, &request_time)?;

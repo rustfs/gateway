@@ -44,6 +44,11 @@ ADRs; this map only selects files.
 | `src/conn/external_fixture/region.rs` | Fixture region validation, signing scope, and CreateBucketConfiguration XML. | A remote bucket is created or signed for the wrong region. |
 | `src/conn/external_fixture/runner_tests.rs` | Full CLI-to-external-endpoint fixture lifecycle regression coverage. | The runner does not create, exercise, or clean up an opted-in remote fixture. |
 | `src/conn/external_tls.rs` | Verified TLS client setup with public and explicit CA roots. | HTTPS trust, ALPN, or certificate failure classification is wrong. |
+| `src/conn/h2.rs` | Authored `request.h2_frames` scripts: exact preface and frame envelopes to production Hyper, and the response read back off peer frames. | A frame script is refused wrongly, written differently from its declaration, or its response is misread. |
+| `src/conn/h2/hpack.rs` | HPACK decoding of the peer's response header blocks, dynamic table included. | A decoded response header is wrong, or a malformed block is accepted. |
+| `src/conn/h2/huffman.rs` | RFC 7541 Huffman decoding for HPACK string literals. | A Huffman-coded header name or value decodes wrongly. |
+| `src/conn/h2/tests.rs` | Refusals, the exact wire image, the peer-frame reader, and HPACK controls for authored HTTP/2. | Authored HTTP/2 behavior changes. |
+| `src/inprocess/h2_frames.rs` | Reads `request.h2_frames` into typed, ordered frame declarations. | A declared frame field is lost before a transport sees it. |
 | `src/conn/server.rs` | Lazily assembles test and production listeners with the case clock and profile. | The socket transports assemble a different policy from in-process execution. |
 | `src/sign.rs` | Request signing for corpus inputs. | A signed case sends the wrong request. |
 | `src/fixture.rs` | Deterministic fixture backend used by local runs. | Setup state or a fixture operation behaves wrongly. |

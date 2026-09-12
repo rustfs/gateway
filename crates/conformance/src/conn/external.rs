@@ -79,7 +79,7 @@ impl Conn {
         self.inner.set_fixture_now(fixed.unix_seconds);
         let wire = self.inner.read_wire(&plan.request)?;
         self.external_fixtures.ensure_read_only(plan.case_id, &wire)?;
-        if wire.h2_frames || wire.http_version.as_deref() == Some("h2") {
+        if !wire.h2_frames.is_empty() || wire.http_version.as_deref() == Some("h2") {
             return Err(SutError::Environment(
                 "external endpoint HTTP/2 framing is not implemented; this target writes HTTP/1.1 bytes".to_owned(),
             ));

@@ -57,7 +57,8 @@
 //! means moving a row in `close.rs` rather than a line in the harness.
 //! * **Streaming signature modes** (`sigv4_streaming*`) still need aws-chunked framing on the wire,
 //!   which nothing here writes. `crate::inprocess::sign_request` refuses them by name.
-//! * **HTTP/2** framing does not exist on either transport.
+//! * **HTTP/2** exists only as an authored `request.h2_frames` script against the production Hyper
+//!   driver (`h2`); a structured request with `http_version = "h2"` is still refused.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -82,6 +83,7 @@ mod external_endpoint;
 mod external_fixture;
 mod external_pacing;
 mod external_tls;
+mod h2;
 mod server;
 #[cfg(test)]
 use exchange::read_concurrent_connection;
@@ -266,7 +268,7 @@ impl Conn {
             target: parsed.target.clone(),
             headers: parsed.headers.clone(),
             raw_head: None,
-            h2_frames: false,
+            h2_frames: Vec::new(),
             http_version: None,
             body: wire.body.clone(),
             frames: Vec::new(),
@@ -363,12 +365,8 @@ impl Sut for Conn {
 
         let wire = self.inner.read_wire(&plan.request)?;
         self.inner.record_exchange();
-        if wire.h2_frames {
-            return Err(SutError::Environment(
-                "`request.h2_frames` needs an HTTP/2 framing layer; this transport writes HTTP/1.1 \
-                 bytes by hand"
-                    .to_owned(),
-            ));
+        if !wire.h2_frames.is_empty() {
+            return self.exchange_h2(plan, &wire, fixed.unix_seconds, skew_ms, reuse);
         }
         if wire.http_version.as_deref() == Some("h2") {
             return Err(SutError::Environment(
@@ -529,29 +527,8 @@ fn observe_socket_exchange(
     let observation = match read {
         Ok(response) => {
             let elapsed_ms = elapsed_ms(started);
-            let (outcome, termination, before_error, events, event_note) = if has_event_stream_content_type(&response.headers) {
-                match decode_event_stream(&response.body) {
-                    Ok(events) => (Outcome::EventStream, None, None, events, None),
-                    Err(error) => (
-                        Outcome::StreamError,
-                        Some(StreamTermination::MalformedEventStream),
-                        None,
-                        Vec::new(),
-                        Some(format!("the event stream could not be decoded: {error}")),
-                    ),
-                }
-            } else {
-                match late_error_offset(response.status, &response.body) {
-                    None => (Outcome::Response, None, None, Vec::new(), None),
-                    Some(offset) => (
-                        Outcome::StreamError,
-                        Some(StreamTermination::ErrorDocument),
-                        Some(offset),
-                        Vec::new(),
-                        None,
-                    ),
-                }
-            };
+            let (outcome, termination, before_error, events, event_note) =
+                classify_body(response.status, &response.headers, &response.body);
             let mut notes = progress.notes;
             if let Some(note) = event_note {
                 notes.push(note);
@@ -640,6 +617,43 @@ fn request_method(wire: &Wire, head: &Head) -> String {
         return wire.method.clone();
     }
     parse_head(&head.bytes).map_or_else(|| wire.method.clone(), |parsed| parsed.method)
+}
+
+/// What a complete response's body makes of it: outcome, termination, error offset, events, and a
+/// note when the body could not be decoded.
+type Classified = (
+    Outcome,
+    Option<StreamTermination>,
+    Option<u64>,
+    Vec<crate::observation::ObservedEvent>,
+    Option<String>,
+);
+
+/// Classifies a complete response body, for the HTTP/1.1 reader here and the HTTP/2 reader in `h2`:
+/// an event stream is decoded, and an `<Error>` document inside a success status is a stream error.
+fn classify_body(status: u16, headers: &[(String, String)], body: &[u8]) -> Classified {
+    if has_event_stream_content_type(headers) {
+        return match decode_event_stream(body) {
+            Ok(events) => (Outcome::EventStream, None, None, events, None),
+            Err(error) => (
+                Outcome::StreamError,
+                Some(StreamTermination::MalformedEventStream),
+                None,
+                Vec::new(),
+                Some(format!("the event stream could not be decoded: {error}")),
+            ),
+        };
+    }
+    match late_error_offset(status, body) {
+        None => (Outcome::Response, None, None, Vec::new(), None),
+        Some(offset) => (
+            Outcome::StreamError,
+            Some(StreamTermination::ErrorDocument),
+            Some(offset),
+            Vec::new(),
+            None,
+        ),
+    }
 }
 
 fn elapsed_ms(started: Instant) -> u64 {

@@ -286,38 +286,38 @@ pub const DECLARED: &[(&str, Disposition, &str)] = &[
     ),
     (
         "h2Frame.type",
-        Disposition::BehindRefusal("requestSpec.h2_frames"),
-        "frame scripting is refused as a whole; there is no HTTP/2 framing layer here",
+        Disposition::Unexercised("requestSpec.h2_frames"),
+        "which frame is written; read by `inprocess/h2_frames.rs` and executed by `conn/h2.rs`, but no case writes `request.h2_frames` yet",
     ),
     (
         "h2Frame.stream_id",
-        Disposition::BehindRefusal("requestSpec.h2_frames"),
-        "which stream a scripted frame belongs to; `request.h2_frames` is refused whole for want of an HTTP/2 framing layer",
+        Disposition::Unexercised("requestSpec.h2_frames"),
+        "which stream a scripted frame belongs to; read and written verbatim, but no case writes `request.h2_frames` yet",
     ),
     (
         "h2Frame.flags",
-        Disposition::BehindRefusal("requestSpec.h2_frames"),
-        "the flags on a scripted frame; `request.h2_frames` is refused whole for want of an HTTP/2 framing layer",
+        Disposition::Unexercised("requestSpec.h2_frames"),
+        "the flags on a scripted frame; read and written as bits, but no case writes `request.h2_frames` yet",
     ),
     (
         "h2Frame.payload_hex",
-        Disposition::BehindRefusal("requestSpec.h2_frames"),
-        "the bytes of a scripted frame; `request.h2_frames` is refused whole for want of an HTTP/2 framing layer",
+        Disposition::Unexercised("requestSpec.h2_frames"),
+        "the octets of a scripted frame; read and written verbatim, but no case writes `request.h2_frames` yet",
     ),
     (
         "h2Frame.error_code",
-        Disposition::BehindRefusal("requestSpec.h2_frames"),
-        "the code of a scripted RST_STREAM or GOAWAY; `request.h2_frames` is refused whole for want of an HTTP/2 framing layer",
+        Disposition::Unexercised("requestSpec.h2_frames"),
+        "the code of a scripted RST_STREAM or GOAWAY; read so that it is refused by name, and no case writes `request.h2_frames` yet",
     ),
     (
         "h2Frame.increment",
-        Disposition::BehindRefusal("requestSpec.h2_frames"),
-        "the size of a scripted WINDOW_UPDATE; `request.h2_frames` is refused whole for want of an HTTP/2 framing layer",
+        Disposition::Unexercised("requestSpec.h2_frames"),
+        "the size of a scripted WINDOW_UPDATE; read so that it is refused by name, and no case writes `request.h2_frames` yet",
     ),
     (
         "h2Frame.delay_ms",
-        Disposition::BehindRefusal("requestSpec.h2_frames"),
-        "the pause before a scripted frame is written; `request.h2_frames` is refused whole for want of an HTTP/2 framing layer",
+        Disposition::Unexercised("requestSpec.h2_frames"),
+        "the pause before a scripted frame is written; honoured as a not-before wait, but no case writes `request.h2_frames` yet",
     ),
     // -- Read, but out of reach of this corpus ---------------------------------------------------
     (

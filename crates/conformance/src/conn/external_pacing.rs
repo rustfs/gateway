@@ -133,7 +133,7 @@ mod tests {
             target: "/bucket/key".to_owned(),
             headers: Vec::new(),
             raw_head: None,
-            h2_frames: false,
+            h2_frames: Vec::new(),
             http_version: None,
             body: b"late".to_vec(),
             frames: Vec::new(),
