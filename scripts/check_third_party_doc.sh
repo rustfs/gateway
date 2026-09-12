@@ -128,6 +128,20 @@ else:
             "than none"
         )
 
+# The same for the mint image: the digest the notice reviewed must be the one the runner pulls.
+mint_pins = root / "ci/mint/pins.env"
+if not mint_pins.is_file():
+    failures.append("required input is missing: ci/mint/pins.env")
+else:
+    match = re.search(r"(?m)^MINT_IMAGE=\S+@(sha256:[0-9a-f]{64})\s*$", mint_pins.read_text(encoding="utf-8"))
+    if match is None:
+        failures.append("ci/mint/pins.env declares no digest-pinned MINT_IMAGE")
+    elif match.group(1) not in sections.get("MinIO mint", ""):
+        failures.append(
+            f"THIRD-PARTY-NOTICES.md does not record the image digest the mint runner pulls ({match.group(1)}); "
+            "a review of software that is not the software being run is worse than none"
+        )
+
 if failures:
     for failure in failures:
         print(f"check_third_party_doc: {failure}", file=sys.stderr)

@@ -13065,6 +13065,389 @@ expect_fail check_sut_launcher.sh \
     'a configuration rendered with a blank credential, which reads as a signing defect' \
     mut_sut_renders_a_blank_credential
 
+# ---------------------------------------------------------------------------
+# MinIO mint (P8-05, rustfs/backlog#1764). Every case names the diagnostic it
+# expects, so a guard that goes red for an unrelated reason does not count.
+# ---------------------------------------------------------------------------
+
+# mint_mutate <path> <old> <new>: replaces the first occurrence of <old>; a literal `\n` in
+# either argument is a newline. A missing subject is refused, so a mutation that stopped
+# matching cannot pass as a guard that stopped catching.
+mint_mutate() {
+    python3 - "$@" <<'PYEOF'
+import pathlib
+import sys
+
+path, old, new = sys.argv[1], sys.argv[2].replace("\\n", "\n"), sys.argv[3].replace("\\n", "\n")
+target = pathlib.Path(path)
+text = target.read_text()
+if old not in text:
+    raise SystemExit(f"missing mutation subject in {path}: {old}")
+target.write_text(text.replace(old, new, 1))
+PYEOF
+}
+
+MINT_REPORT=ci/mint/report.py
+
+mut_mint_report_counts_na_as_failure() {
+    mint_mutate "$MINT_REPORT" '        elif status == "NA":\n            tally.na += 1' \
+        '        elif status == "NA":\n            tally.failed += 1'
+}
+expect_fail check_mint_report.sh 'mint NA records counted as failures' \
+    mut_mint_report_counts_na_as_failure 'NA is reported apart and is neither a failure nor a pass'
+
+mut_mint_report_skips_malformed_json() {
+    mint_mutate "$MINT_REPORT" \
+        '            problems.append(f"{sdk}: record {ordinal} in {sdk}/log.json is not valid JSON")\n            return None' \
+        '            break'
+}
+expect_fail check_mint_report.sh 'a truncated mint record silently ends the log instead of failing closed' \
+    mut_mint_report_skips_malformed_json 'a truncated JSON record is an incomplete run'
+
+mut_mint_report_accepts_unknown_status() {
+    mint_mutate "$MINT_REPORT" '        else:\n            problems.append(\n                f"{sdk}: record {ordinal} has status' \
+        '        else:\n            continue\n            problems.append(\n                f"{sdk}: record {ordinal} has status'
+}
+expect_fail check_mint_report.sh 'a mint record with an unknown status silently ignored' \
+    mut_mint_report_accepts_unknown_status 'an unknown status is an incomplete run'
+
+mut_mint_report_ignores_unknown_suite() {
+    mint_mutate "$MINT_REPORT" 'if entry.is_dir() and entry.name not in sdks:' 'if False:'
+}
+expect_fail check_mint_report.sh 'a mint suite outside the census ignored' \
+    mut_mint_report_ignores_unknown_suite 'a suite the runner never asked for is an incomplete run'
+
+mut_mint_report_tolerates_missing_record() {
+    mint_mutate "$MINT_REPORT" '        problems.append(f"{sdk}: produced no record ({sdk}/log.json is missing)")\n' ''
+}
+expect_fail check_mint_report.sh 'a baseline SDK that left no mint record dropped from the verdict' \
+    mut_mint_report_tolerates_missing_record 'a baseline SDK that left no record is an incomplete run'
+
+mut_mint_report_tolerates_regression() {
+    mint_mutate "$MINT_REPORT" '    if failed > baseline:\n        return "REGRESSION"' \
+        '    if False:\n        return "REGRESSION"'
+}
+expect_fail check_mint_report.sh 'a mint failure count above the baseline read as tolerated' \
+    mut_mint_report_tolerates_regression 'a count above the baseline is a REGRESSION and fails'
+
+mut_mint_report_hides_improvement() {
+    mint_mutate "$MINT_REPORT" '    if failed < baseline:\n        return "IMPROVED"' \
+        '    if False:\n        return "IMPROVED"'
+}
+expect_fail check_mint_report.sh 'a mint count below the baseline no longer asks for the baseline to shrink' \
+    mut_mint_report_hides_improvement 'a count below the baseline is IMPROVED, not silently KNOWN'
+
+mut_mint_report_environment_as_result() {
+    mint_mutate "$MINT_REPORT" '    if problems:\n        code = EXIT_ENVIRONMENT' '    if False:\n        code = EXIT_ENVIRONMENT'
+}
+expect_fail check_mint_report.sh 'an incomplete mint run judged as a result instead of exiting 3' \
+    mut_mint_report_environment_as_result 'is an incomplete run'
+
+mut_mint_report_tolerates_silent_sdk_failure() {
+    mint_mutate "$MINT_REPORT" 'if outcomes.get(sdk) == "FAILED" and tally.failed == 0:' 'if False:'
+}
+expect_fail check_mint_report.sh 'a mint SDK that exited non-zero without a FAIL record read as clean' \
+    mut_mint_report_tolerates_silent_sdk_failure 'an SDK whose runner failed without a FAIL record is an incomplete run'
+
+mut_mint_report_ignores_unstarted_sdk() {
+    mint_mutate "$MINT_REPORT" '            problems.append(f"{sdk}: the console never reported it starting")' '            pass'
+}
+expect_fail check_mint_report.sh 'a mint SDK the console never started accepted' \
+    mut_mint_report_ignores_unstarted_sdk 'an SDK the console never saw start is an incomplete run'
+
+mut_mint_report_ignores_cut_short_sdk() {
+    mint_mutate "$MINT_REPORT" \
+        '            problems.append(f"{name}: the console never reported it finishing; the run was cut short")\n            continue' \
+        '            continue'
+}
+expect_fail check_mint_report.sh 'a mint SDK cut short mid-run accepted' \
+    mut_mint_report_ignores_cut_short_sdk 'an SDK the console never saw finish is an incomplete run'
+
+mut_mint_report_ignores_baseline_census() {
+    mint_mutate "$MINT_REPORT" '    if missing:\n        problems.append("the baseline has no line for: "' \
+        '    if False:\n        problems.append("the baseline has no line for: "'
+}
+expect_fail check_mint_report.sh 'a mint SDK without a baseline line dropped from the verdict' \
+    mut_mint_report_ignores_baseline_census "a baseline without an SDK's line is an incomplete run"
+
+mut_mint_report_keeps_generation() {
+    mint_mutate "$MINT_REPORT" 'f"# generation: {generation + 1}",' 'f"# generation: {generation}",'
+}
+expect_fail check_mint_report.sh 'a mint record proposal that does not raise the generation' \
+    mut_mint_report_keeps_generation 'record mode proposes generation + 1'
+
+mut_mint_report_proposes_incomplete_run() {
+    mint_mutate "$MINT_REPORT" '        if problems:\n            # A stale' '        if False:\n            # A stale'
+}
+expect_fail check_mint_report.sh 'a partial mint run turned into a baseline proposal' \
+    mut_mint_report_proposes_incomplete_run 'record mode writes no proposal for an incomplete run'
+
+mut_mint_report_may_overwrite_baseline() {
+    mint_mutate "$MINT_REPORT" '    if record_path is not None and record_path.resolve() == baseline_path.resolve():' \
+        '    if False:'
+}
+expect_fail check_mint_report.sh 'mint record mode allowed to overwrite the reviewed baseline' \
+    mut_mint_report_may_overwrite_baseline 'record mode refuses to overwrite the reviewed baseline'
+
+mut_mint_report_redacts_nothing() {
+    mint_mutate "$MINT_REPORT" '    for pattern in REDACTIONS:' '    for pattern in ():'
+}
+expect_fail check_mint_report.sh 'mint evidence redaction reduced to the secret literal alone' \
+    mut_mint_report_redacts_nothing 'redaction left'
+
+mut_mint_report_leaks_error_text() {
+    mint_mutate "$MINT_REPORT" '            tally.failing.append(printable(document.get("function")))' \
+        '            tally.failing.append(printable(document.get("function")) + str(document.get("error")))'
+}
+expect_fail check_mint_report.sh "upstream failure text carried into the uploaded mint aggregate" \
+    mut_mint_report_leaks_error_text "the aggregate report never carries a record's error text"
+
+mut_mint_input_deleted() {
+    rm -f ci/mint/report.py
+}
+expect_fail check_suites_pinned.sh 'the mint reporter deleted from the runner inputs' \
+    mut_mint_input_deleted 'the mint runner is incomplete; required inputs are missing: ci/mint/report.py'
+
+mut_mint_image_short_digest() {
+    mint_mutate ci/mint/pins.env \
+        'MINT_IMAGE=docker.io/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200' \
+        'MINT_IMAGE=docker.io/minio/mint@sha256:08a05e68'
+}
+expect_fail check_suites_pinned.sh 'the mint image pinned by a truncated digest' \
+    mut_mint_image_short_digest 'must set MINT_IMAGE to docker.io/minio/mint@sha256:<64 hex>'
+
+mut_mint_image_by_tag() {
+    mint_mutate ci/mint/pins.env \
+        'MINT_IMAGE=docker.io/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200' \
+        'MINT_IMAGE=docker.io/minio/mint:edge'
+}
+expect_fail check_suites_pinned.sh 'the mint image pinned by a tag an archived repository can re-point' \
+    mut_mint_image_by_tag 'pulls docker.io/minio/mint:edge, a moving tag'
+
+mut_mint_platform_changed() {
+    mint_mutate ci/mint/pins.env 'MINT_PLATFORM=linux/amd64' 'MINT_PLATFORM=linux/arm64'
+}
+expect_fail check_suites_pinned.sh 'the mint platform moved off the pinned linux/amd64 manifest' \
+    mut_mint_platform_changed 'must set MINT_PLATFORM=linux/amd64'
+
+mut_mint_sdk_listed_twice() {
+    mint_mutate ci/mint/pins.env 'MINT_SDKS=".minio-dotnet ' 'MINT_SDKS=".minio-dotnet .minio-dotnet '
+}
+expect_fail check_suites_pinned.sh 'a mint SDK named twice in the census' \
+    mut_mint_sdk_listed_twice 'must name each SDK in MINT_SDKS exactly once'
+
+mut_mint_workflow_enters_the_pull_request_gate() {
+    mint_mutate .github/workflows/e2e-mint.yml 'on:\n  schedule:' 'on:\n  pull_request:\n  schedule:'
+}
+expect_fail check_suites_pinned.sh 'the mint workflow added to the ten-minute pull-request gate' \
+    mut_mint_workflow_enters_the_pull_request_gate 'e2e-mint.yml triggers on pull_request'
+
+mut_mint_workflow_loses_its_schedule() {
+    mint_mutate .github/workflows/e2e-mint.yml '    - cron: "0 4 * * 2"\n' ''
+}
+expect_fail check_suites_pinned.sh 'the mint workflow left with no schedule' \
+    mut_mint_workflow_loses_its_schedule 'e2e-mint.yml declares no cron schedule'
+
+mut_mint_workflow_loses_dispatch() {
+    mint_mutate .github/workflows/e2e-mint.yml '  workflow_dispatch:\n' ''
+}
+expect_fail check_suites_pinned.sh 'the mint workflow can no longer be dispatched for a record run' \
+    mut_mint_workflow_loses_dispatch 'must stay dispatchable'
+
+mut_mint_workflow_uploads_raw_evidence() {
+    mint_mutate .github/workflows/e2e-mint.yml 'path: ${{ runner.temp }}/mint-out' 'path: ${{ runner.temp }}/mint-work'
+}
+expect_fail check_suites_pinned.sh 'the mint workflow uploading the raw console and per-SDK JSON' \
+    mut_mint_workflow_uploads_raw_evidence 'must upload exactly one artifact'
+
+mut_mint_workflow_action_by_tag() {
+    mint_mutate .github/workflows/e2e-mint.yml \
+        'uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2' 'uses: actions/upload-artifact@v4'
+}
+expect_fail check_suites_pinned.sh 'a mint workflow action pinned by a moving tag' \
+    mut_mint_workflow_action_by_tag 'every action is pinned by a 40-hex commit'
+
+mut_mint_workflow_debug_build() {
+    mint_mutate .github/workflows/e2e-mint.yml 'run: cargo build --release -p rustfs-gateway-compat-sut' \
+        'run: cargo build -p rustfs-gateway-compat-sut'
+}
+expect_fail check_suites_pinned.sh 'the mint workflow stops building the release compatibility SUT' \
+    mut_mint_workflow_debug_build 'e2e-mint.yml must run `cargo build --release -p rustfs-gateway-compat-sut`'
+
+mut_mint_workflow_build_after_runner() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/e2e-mint.yml")
+text = path.read_text()
+step = (
+    "      - name: Build the compatibility SUT\n"
+    "        run: cargo build --release -p rustfs-gateway-compat-sut\n\n"
+)
+if step not in text:
+    raise SystemExit("missing mutation subject: the mint release build step")
+path.write_text(text.replace(step, "", 1) + "\n" + step)
+PYEOF
+}
+expect_fail check_suites_pinned.sh 'the mint release SUT build moved after the runner invocation' \
+    mut_mint_workflow_build_after_runner \
+    'e2e-mint.yml must install Rust and build the release compatibility SUT before invoking ci/mint/run.sh'
+
+mut_mint_workflow_never_runs_the_runner() {
+    mint_mutate .github/workflows/e2e-mint.yml 'ci/mint/run.sh --mode' 'ci/mint/other.sh --mode'
+}
+expect_fail check_suites_pinned.sh 'the mint workflow stops invoking its runner' \
+    mut_mint_workflow_never_runs_the_runner 'e2e-mint.yml never invokes ci/mint/run.sh'
+
+mut_mint_workflow_files_issue_for_environment() {
+    mint_mutate .github/workflows/e2e-mint.yml "if: failure() && steps.suite.outputs.status == '1'" 'if: failure()'
+}
+expect_fail check_suites_pinned.sh 'the mint workflow filing a regression issue for an incomplete run' \
+    mut_mint_workflow_files_issue_for_environment 'the issue step must run only on'
+
+mut_mint_runner_bypasses_shared_sut() {
+    mint_mutate ci/mint/run.sh '\nsut_start\n' '\n"$MINT_SUT_BINARY" &\n'
+}
+expect_fail check_suites_pinned.sh 'the mint runner launching its own SUT outside ci/lib/sut.sh' \
+    mut_mint_runner_bypasses_shared_sut 'must start or adopt its SUT through ci/lib/sut.sh'
+
+mut_mint_runner_default_flag_deleted() {
+    mint_mutate ci/mint/run.sh '--access-key' '--removed-access-key'
+}
+expect_fail check_suites_pinned.sh 'the mint default SUT command loses its credential flag' \
+    mut_mint_runner_default_flag_deleted 'is missing required flags: --access-key'
+
+mut_mint_runner_stops_naming_sdks() {
+    mint_mutate ci/mint/run.sh '"$MINT_IMAGE" "${MINT_SDK_LIST[@]}" >"$CONSOLE"' '"$MINT_IMAGE" >"$CONSOLE"'
+}
+expect_fail check_suites_pinned.sh 'the mint runner lets mint pick its SDKs, skipping hidden ones' \
+    mut_mint_runner_stops_naming_sdks 'lost its suite run naming every SDK explicitly'
+
+mut_mint_runner_skips_census() {
+    mint_mutate ci/mint/run.sh '-A /mint/run/core' '-A /mint'
+}
+expect_fail check_suites_pinned.sh 'the mint runner no longer checks the image census' \
+    mut_mint_runner_skips_census 'lost its SDK census check against the image'
+
+mut_mint_runner_pulls_without_platform() {
+    mint_mutate ci/mint/run.sh 'docker pull --quiet --platform "$MINT_PLATFORM" "$MINT_IMAGE"' \
+        'docker pull --quiet "$MINT_IMAGE"'
+}
+expect_fail check_suites_pinned.sh 'the mint image pulled for whatever platform the host is' \
+    mut_mint_runner_pulls_without_platform 'must pull the pinned image with --platform'
+
+mut_mint_runner_runs_without_platform() {
+    mint_mutate ci/mint/run.sh '    --platform "$MINT_PLATFORM" \' '    \'
+}
+expect_fail check_suites_pinned.sh 'the mint suite container run without the pinned platform' \
+    mut_mint_runner_runs_without_platform 'must run the suite container with --platform'
+
+mut_mint_runner_skips_redaction() {
+    mint_mutate ci/mint/run.sh 'report.py" redact --secret-env' 'report.py" judge --secret-env'
+}
+expect_fail check_suites_pinned.sh 'the mint runner judging evidence nobody redacted' \
+    mut_mint_runner_skips_redaction 'lost its redaction of the copied evidence'
+
+mut_mint_runner_reports_before_log() {
+    mint_mutate ci/mint/run.sh 'MINT_LOG="${WORK_DIR}/mint-log"\n' \
+        'python3 "${ROOT_DIR}/ci/mint/report.py" "${REPORT_ARGS[@]}"\nMINT_LOG="${WORK_DIR}/mint-log"\n'
+}
+expect_fail check_suites_pinned.sh 'the mint report written before /mint/log is copied out' \
+    mut_mint_runner_reports_before_log 'in that order'
+
+mut_mint_baseline_raised_without_generation() {
+    mint_mutate ci/mint/baseline.txt '\nawscli 0\n' '\nawscli 3\n'
+}
+expect_fail check_mint_baseline.sh 'a mint count raised without raising the generation' \
+    mut_mint_baseline_raised_without_generation 'went up without raising the generation'
+
+mut_mint_baseline_raised_with_generation() {
+    mint_mutate ci/mint/baseline.txt '\nawscli 0\n' '\nawscli 3\n'
+    mint_mutate ci/mint/baseline.txt '# generation: 0' '# generation: 1'
+}
+expect_guard_pass check_mint_baseline.sh 'a mint count raised in the change that raises the generation by one' \
+    mut_mint_baseline_raised_with_generation
+
+mut_mint_baseline_generation_jumped() {
+    mint_mutate ci/mint/baseline.txt '\nawscli 0\n' '\nawscli 3\n'
+    mint_mutate ci/mint/baseline.txt '# generation: 0' '# generation: 2'
+}
+expect_fail check_mint_baseline.sh 'a mint generation jumped to bank room for later increases' \
+    mut_mint_baseline_generation_jumped 'the generation jumped 0 -> 2'
+
+mut_mint_baseline_generation_backwards() {
+    mint_mutate ci/mint/baseline.txt '# generation: 0' '# generation: 1'
+    git add ci/mint/baseline.txt
+    git -c user.name=t -c user.email=t@t commit -qm 'mint baseline generation 1'
+    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 0'
+}
+expect_fail check_mint_baseline.sh 'a mint generation moved backwards' \
+    mut_mint_baseline_generation_backwards 'the generation went backwards, 1 -> 0'
+
+mut_mint_baseline_drops_an_sdk() {
+    mint_mutate ci/mint/baseline.txt '\n.minio-dotnet 0\n' '\n'
+}
+expect_fail check_mint_baseline.sh 'a mint SDK the runner runs left without a baseline line' \
+    mut_mint_baseline_drops_an_sdk 'no line for [.minio-dotnet]'
+
+mut_mint_census_drops_an_sdk() {
+    mint_mutate ci/mint/pins.env 'MINT_SDKS=".minio-dotnet ' 'MINT_SDKS="'
+}
+expect_fail check_mint_baseline.sh 'a mint baseline line for an SDK the census no longer runs' \
+    mut_mint_census_drops_an_sdk 'lines for SDKs the runner does not run [.minio-dotnet]'
+
+mut_mint_baseline_duplicate_sdk() {
+    mint_mutate ci/mint/baseline.txt '\nawscli 0\n' '\nawscli 0\nawscli 0\n'
+}
+expect_fail check_mint_baseline.sh 'a mint SDK listed twice in the baseline' \
+    mut_mint_baseline_duplicate_sdk 'awscli is listed more than once'
+
+mut_mint_baseline_header_removed() {
+    mint_mutate ci/mint/baseline.txt '# generation: 0\n' ''
+}
+expect_fail check_mint_baseline.sh 'the mint baseline generation header removed' \
+    mut_mint_baseline_header_removed 'no `# generation: <n>` header'
+
+mut_mint_baseline_deleted() {
+    rm -f ci/mint/baseline.txt
+}
+expect_fail check_mint_baseline.sh "the mint baseline deleted, which must fail rather than skip" \
+    mut_mint_baseline_deleted 'required input is missing: ci/mint/baseline.txt'
+
+mut_mint_pin_drifts_from_the_notice() {
+    mint_mutate ci/mint/pins.env \
+        'MINT_IMAGE=docker.io/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200' \
+        'MINT_IMAGE=docker.io/minio/mint@sha256:1111111111111111111111111111111111111111111111111111111111111111'
+}
+expect_fail check_third_party_doc.sh 'the mint runner pulling a digest the licence review never saw' \
+    mut_mint_pin_drifts_from_the_notice 'does not record the image digest the mint runner pulls'
+
+mut_mint_notice_drops_the_digest() {
+    mint_mutate THIRD-PARTY-NOTICES.md \
+        'docker.io/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200' \
+        'docker.io/minio/mint:edge'
+}
+expect_fail check_third_party_doc.sh 'the mint licence review recording a tag instead of the pulled digest' \
+    mut_mint_notice_drops_the_digest 'does not record the image digest the mint runner pulls'
+
+# Built from fragments: check_no_vendored_suites.sh reads this file too, and a literal copy
+# of the preamble here would make the self-test the violation it tests for.
+mut_vendored_mint_runner_by_content() {
+    local prefix='MINT_'
+    mkdir -p tools/sdk-runner
+    printf '#!/bin/bash\n%sMODE=${%sMODE:-core}\n%sDATA_DIR=${%sDATA_DIR:-/mint/data}\n' \
+        "$prefix" "$prefix" "$prefix" "$prefix" >tools/sdk-runner/entry.sh
+}
+expect_fail check_no_vendored_suites.sh "a renamed copy of mint's runner, still mint by its preamble" \
+    mut_vendored_mint_runner_by_content "carries mint's runner environment preamble"
+
+mut_vendored_mint_run_tree() {
+    mkdir -p third_party/mint/run/core/awscli
+    printf 'echo placeholder\n' >third_party/mint/run/core/awscli/run.sh
+}
+expect_fail check_no_vendored_suites.sh "mint's per-SDK runner tree committed to this repository" \
+    mut_vendored_mint_run_tree "sits under a vendored copy of mint's runner tree"
+
 mut_runner_sdk_dependency() {
     add_conformance_dependency 'aws-sdk-s3 = "1"'
 }
