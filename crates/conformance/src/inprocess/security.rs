@@ -14,18 +14,59 @@
 
 //! Deterministic security extension sources for the in-process target.
 //!
-//! Responsible for: fixed authorization outcomes and bucket-owner metadata availability.
+//! Responsible for: fixed authorization outcomes, dispatch counts, and bucket-owner metadata availability.
 //! NOT responsible for: policy parsing, signing, or judging a conformance expectation.
 //! Upstream: the selected case id. Downstream: `super::InProcess` service assembly.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rustfs_gateway::{
-    Authorizer, AuthzRequest, BoxFuture, BucketName, BucketOwnerError, BucketOwnerSource, Decision, InputAuthzRequest,
-    InputDecisions, RequestContext,
+    Authorizer, AuthzRequest, BoxFuture, BucketName, BucketOwnerError, BucketOwnerSource, Decision, HandlerResult,
+    InputAuthzRequest, InputDecisions, Next, Req, RequestContext, ResourceShape, ServiceBuilder, allow_when, dto, op_layer,
 };
 
+use crate::sut::SutError;
+
 const BUCKET_OWNER_ACCOUNT_ID: &str = "123456789012";
+
+pub(super) fn configure_version_list(builder: ServiceBuilder, case_id: &str, calls: Arc<AtomicUsize>) -> ServiceBuilder {
+    let builder = if matches!(case_id, "c-authz-0008" | "c-authz-1016" | "c-authz-1017") {
+        let (action, bucket) = match case_id {
+            "c-authz-1016" => ("s3:ListBucket", "authz-versions"),
+            "c-authz-1017" => ("s3:ListBucketVersions", "another-bucket"),
+            _ => ("s3:ListBucketVersions", "authz-versions"),
+        };
+        builder.authorizer(allow_when(move |request| {
+            request.action == action
+                && request.resource == ResourceShape::Bucket
+                && request.bucket.is_some_and(|name| name.as_str() == bucket)
+                && request.key.is_none()
+        }))
+    } else {
+        builder
+    };
+    builder.op_layer::<dto::ListObjectVersions, _>(op_layer(
+        move |request: Req<dto::ListObjectVersions>, next: Next<'_, dto::ListObjectVersions>| {
+            let calls = Arc::clone(&calls);
+            Box::pin(async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                next.run(request).await
+            }) as BoxFuture<'_, HandlerResult<dto::ListObjectVersions>>
+        },
+    ))
+}
+
+pub(super) fn finish_version_list(case_id: &str, calls: usize) -> Result<(), SutError> {
+    let violation = match case_id {
+        "c-authz-1016" | "c-authz-1017" if calls != 0 => {
+            format!("{case_id} reached version-list dispatch after authorization refused the request")
+        }
+        "c-authz-0008" if calls != 1 => "c-authz-0008 did not reach version-list dispatch exactly once".to_owned(),
+        _ => return Ok(()),
+    };
+    Err(SutError::Environment(violation))
+}
 
 pub(super) struct HeadObjectPolicy;
 

@@ -283,6 +283,11 @@ where
         self.0.fetch_add(1, Ordering::SeqCst);
         Ok(Resp::new(O::Output::default()))
     }
+
+    async fn call_with_context(&self, _request: Req<O>, _context: rustfs_gateway::HandlerContext) -> HandlerResult<O> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(Resp::new(O::Output::default()))
+    }
 }
 
 async fn list_authorization(target: &str, allowed_action: &'static str, allowed_bucket: &'static str) -> (u16, usize) {
