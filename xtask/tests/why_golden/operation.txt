@@ -7,6 +7,7 @@ EVIDENCE  captures/get-bucket-location-aws.http — Recorded AWS response used a
           https://github.com/s3s-project/s3s/pull/127 — Upstream shipped a double wrapped body until this change, which is why the unwrapping must be data in the IR rather than a codegen special case.
 CASES     c-location-0001 — GetBucketLocation answers with LocationConstraint as the root element
           c-location-0002 — A us-east-1 bucket answers with an empty LocationConstraint element
+          c-location-0003 — A bucket placed with the legacy EU constraint answers EU verbatim
           c-location-0004 — GetBucketLocation on a bucket that does not exist is NoSuchBucket
 ADR       ADR-0001 — Licensing and provenance boundary
 SPEC      spec/operations/GetBucketLocation.toml

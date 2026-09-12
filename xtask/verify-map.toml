@@ -110,7 +110,7 @@ cases = "c-lifecycle-0002,c-lifecycle-0003,c-lifecycle-0004,c-lifecycle-0005,c-l
 
 [[operation]]
 name = "GetBucketLocation"
-cases = "c-location-0001,c-location-0002,c-location-0004"
+cases = "c-location-0001,c-location-0002,c-location-0003,c-location-0004"
 
 [[operation]]
 name = "GetBucketLogging"
@@ -306,7 +306,7 @@ cases = "c-tagging-0005,c-tagging-0008,c-tagging-0012,c-tagging-0014,c-tagging-0
 
 [[operation]]
 name = "PutBucketVersioning"
-cases = "c-bucketconfig-0001,c-bucketconfig-0003,c-bucketconfig-0035,c-bucketconfig-0043,c-bucketconfig-0046"
+cases = "c-bucketconfig-0001,c-bucketconfig-0003,c-bucketconfig-0035,c-bucketconfig-0043,c-bucketconfig-0046,c-bucketconfig-0060"
 
 [[operation]]
 name = "PutBucketWebsite"

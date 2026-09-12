@@ -1,0 +1,50 @@
+# c-location-0003 — the legacy EU constraint is answered as EU, not rewritten to eu-west-1.
+#
+# Schema dimensions exercised: an exact response body over the one enum value that names a region
+# by an alias, and a needle for the modern name a normalising gateway would substitute.
+
+[case]
+id = "c-location-0003"
+schema_version = 1
+title = "A bucket placed with the legacy EU constraint answers EU verbatim"
+rationale = """
+`EU` is the historical constraint for eu-west-1, and a bucket created with it keeps reporting it: the read returns `EU`, and it is the client that maps the alias to a region — minio-go does so in its bucket-location cache, which is only necessary because the wire carries the alias. The gateway already normalises `EU` on the way *in* (CreateBucket matches it against eu-west-1, c-bkt-0014), so the tempting defect is to reuse that normalisation on the way out. That is a quiet change: `eu-west-1` is a valid answer shape, and a client that compares the stored constraint with the one it wrote would see a bucket that moved. The exact body is pinned so that neither an enclosing wrapper nor a rewritten value can pass, and the needle for the modern name makes the substitution fail with a message that names it."""
+polarity = "positive"
+operation = "GetBucketLocation"
+tags = ["xml", "wire-bytes", "region"]
+timeout_ms = 10000
+quirks = ["q-region-0003"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html"
+summary = "The response's constraint values keep the historical EU alias alongside the modern region identifiers."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/minio/minio-go/blob/v7.1.0/bucket-cache.go#L121-L124"
+summary = "The client maps an EU answer to eu-west-1 itself after reading the location, so the server is expected to send the alias unchanged."
+kind = "minio"
+
+[[setup.buckets]]
+name = "conf-location-legacy"
+region = "EU"
+
+[request]
+method = "GET"
+target = "/conf-location-legacy?location"
+headers = { }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+not_contains_utf8 = ["eu-west-1"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>'''
