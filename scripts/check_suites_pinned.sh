@@ -265,6 +265,23 @@ if endpoint_branch < 0 or command_branch < 0 or endpoint_branch >= command_branc
         "GATEWAY_SUT_COMMAND, so an external endpoint remains authoritative"
     )
 
+# --- rule 6: the MinIO mint runner is complete --------------------------------------------
+MINT_INPUTS = (
+    ".github/workflows/e2e-mint.yml",
+    "ci/mint/run.sh",
+    "ci/mint/pins.env",
+    "ci/mint/report.py",
+    "ci/mint/baseline.txt",
+)
+missing_mint = [name for name in MINT_INPUTS if not (root / name).is_file()]
+if missing_mint:
+    print(
+        "check_suites_pinned: the mint runner is incomplete; required inputs are missing: "
+        + ", ".join(missing_mint),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
 # --- rule 4: the pull-request workflow keeps its distance ---------------------------------
 gate = root / ".github/workflows/ci.yml"
 if not gate.is_file():
