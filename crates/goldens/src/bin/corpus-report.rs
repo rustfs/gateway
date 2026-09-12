@@ -15,24 +15,35 @@
 //! Command-line validation and rendering of the complete persisted XML corpus.
 //!
 //! Responsible for: validating all named persistence families, rendering their concrete counts,
-//! and returning a failing process status for invalid evidence or output errors.
+//! rendering source and acceptance blockers, and offering an explicit strict closure mode.
 //! NOT responsible for: defining corpus cases, persistence codecs, CI orchestration, or report
 //! validation rules.
 //! Upstream: `rustfs-gateway-goldens` corpus APIs. Downstream: developers and release automation
 //! invoking the `corpus-report` binary.
 
+use std::env;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-use rustfs_gateway_goldens::{CorpusCoverageError, CorpusReport, build_persistence_corpus_report};
+use rustfs_gateway_goldens::{
+    CorpusCoverageError, CorpusReport, build_acceptance_census, build_persistence_corpus_report, build_persistence_source_report,
+    require_acceptance_closure,
+};
 
 fn run(
     build: impl FnOnce() -> Result<CorpusReport, CorpusCoverageError>,
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> ExitCode {
-    match build() {
-        Ok(report) => match stdout.write_all(report.render().as_bytes()) {
+    let result = build()
+        .map_err(|error| format!("corpus validation failed: {error}"))
+        .and_then(|report| {
+            let sources = build_persistence_source_report(&report).map_err(|error| format!("source census failed: {error}"))?;
+            let acceptance = build_acceptance_census().map_err(|error| format!("acceptance census failed: {error}"))?;
+            Ok(format!("{}{}{}", report.render(), sources.render(), acceptance.render()))
+        });
+    match result {
+        Ok(report) => match stdout.write_all(report.as_bytes()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 drop(writeln!(stderr, "corpus report write failed: {error}"));
@@ -40,14 +51,36 @@ fn run(
             }
         },
         Err(error) => {
-            drop(writeln!(stderr, "corpus validation failed: {error}"));
+            drop(writeln!(stderr, "{error}"));
             ExitCode::FAILURE
         }
     }
 }
 
 fn main() -> ExitCode {
-    run(build_persistence_corpus_report, &mut io::stdout().lock(), &mut io::stderr().lock())
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let mut stdout = io::stdout().lock();
+    let mut stderr = io::stderr().lock();
+    match args.as_slice() {
+        [] => run(build_persistence_corpus_report, &mut stdout, &mut stderr),
+        [arg] if arg == "--require-closure" => match require_acceptance_closure() {
+            Ok(report) => match stdout.write_all(report.render().as_bytes()) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    drop(writeln!(stderr, "migration closure report write failed: {error}"));
+                    ExitCode::FAILURE
+                }
+            },
+            Err(error) => {
+                drop(writeln!(stderr, "migration closure failed: {error}"));
+                ExitCode::FAILURE
+            }
+        },
+        _ => {
+            drop(writeln!(stderr, "usage: corpus-report [--require-closure]"));
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(test)]
