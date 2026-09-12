@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! External HTTP fixture, authored-byte, refusal, and CLI controls.
+//! Responsible for: external HTTP fixture, authored-byte, refusal, and CLI controls.
 //! NOT responsible for: endpoint parsing, TLS setup, or production socket exchange logic.
 //! Upstream: the external endpoint transport. Downstream: loopback peers and isolated case fixtures.
 
