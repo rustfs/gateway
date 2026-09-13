@@ -56,10 +56,9 @@ async fn context_json_malformed_data_reaches_neither_body_nor_handler() {
         let (response, calls, read) = call_context(encoded).await;
         assert_eq!(calls, 0, "invalid context reached the handler");
         assert_eq!(read, 0, "invalid context consumed the body");
-        assert_eq!(response.status(), 400);
-        let body = String::from_utf8_lossy(response.body());
-        assert!(body.contains("<Code>InvalidArgument</Code>"));
-        assert!(body.contains("<Message>x-amz-server-side-encryption-context must be a JSON object with unique string keys and string values</Message>"));
+        // The leak checks run before the exact-sentence check: a refusal that appended the
+        // context to the fixed sentence would otherwise fail on the sentence and never prove
+        // these two can fail on their own.
         let seen = everything_the_caller_sees(&response);
         let visible = String::from_utf8_lossy(&seen);
         assert!(!visible.contains(encoded), "encoded context escaped into the response");
@@ -67,6 +66,10 @@ async fn context_json_malformed_data_reaches_neither_body_nor_handler() {
             !visible.contains("confidential-context-marker"),
             "decoded context escaped into the response"
         );
+        assert_eq!(response.status(), 400);
+        let body = String::from_utf8_lossy(response.body());
+        assert!(body.contains("<Code>InvalidArgument</Code>"));
+        assert!(body.contains("<Message>x-amz-server-side-encryption-context must be a JSON object with unique string keys and string values</Message>"));
     }
 }
 
