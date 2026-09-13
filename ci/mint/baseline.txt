@@ -11,11 +11,24 @@
 #   A list of test names would change with every upstream quirk. A count per SDK is the
 #   coarsest measurement that still turns red when an SDK that used to pass starts failing.
 #
+# EXCLUDED SDKS
+#   `<sdk> excluded <owner issue URL> <reason>` takes an SDK out of the verdict. Use it only for
+#   an SDK whose records cannot be attributed at all: a runner that writes none, or writes text
+#   that is not JSON. A count, however high, is always preferred, because a count still turns
+#   red. The owner is an issue in rustfs/gateway or rustfs/backlog, and closing it means
+#   removing the line.
+#   An excluded SDK is still run on every schedule. Running the four below was measured not to
+#   disturb the others: every other SDK's counts were identical with them in the run. The
+#   report lists excluded SDKs in their own section and flags one as RECOVERED when it starts
+#   writing valid records. A counted SDK's record found in an excluded SDK's log makes the
+#   run incomplete.
+#
 # THE RATCHET
-#   Any pull request may lower a count. Only a pull request that also raises the generation
-#   below by exactly one may raise a count. scripts/check_mint_baseline.sh refuses every other
-#   increase. It also refuses a baseline whose SDK set differs from MINT_SDKS in
-#   ci/mint/pins.env.
+#   Any pull request may lower a count, remove an exclusion, or put an excluded SDK back under
+#   a count. Only a pull request that also raises the generation below by exactly one may raise
+#   a count or add an exclusion. scripts/check_mint_baseline.sh refuses every other increase.
+#   It also refuses an exclusion without an owner or reason, an SDK listed twice (so an
+#   excluded SDK has no count), and an SDK set that differs from MINT_SDKS in ci/mint/pins.env.
 #
 # HOW TO PROPOSE A NEW BASELINE
 #   Run the workflow with `mode: record`. A complete run writes baseline.proposed.txt with the

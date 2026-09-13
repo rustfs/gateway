@@ -13202,6 +13202,78 @@ mut_mint_report_leaks_error_text() {
 expect_fail check_mint_report.sh "upstream failure text carried into the uploaded mint aggregate" \
     mut_mint_report_leaks_error_text "the aggregate report never carries a record's error text"
 
+# Excluded SDKs (rustfs/backlog#1764, generation 1): run and reported, never judged, and never
+# a place for a counted SDK's records to disappear into.
+mut_mint_report_ignores_exclusions() {
+    mint_mutate "$MINT_REPORT" '            if sdk in exclusions:\n                observed: list[str] = []' \
+        '            if False:\n                observed: list[str] = []'
+}
+expect_fail check_mint_report.sh 'a mint exclusion that no longer takes the SDK out of the completeness check' \
+    mut_mint_report_ignores_exclusions 'an excluded SDK that left no record is reported apart and the run is complete'
+
+mut_mint_report_excluded_may_hide_counted() {
+    mint_mutate "$MINT_REPORT" 'sorted(records_naming(log_dir, sdk, counted_names).items())' 'sorted({}.items())'
+}
+expect_fail check_mint_report.sh "a counted mint SDK's records hidden inside an excluded SDK's log" \
+    mut_mint_report_excluded_may_hide_counted "an excluded SDK whose log carries a counted SDK's records is an incomplete run"
+
+mut_mint_report_hides_recovery() {
+    mint_mutate "$MINT_REPORT" '        recovered = tally is not None and not observed' '        recovered = False'
+}
+expect_fail check_mint_report.sh 'an excluded mint SDK that writes valid records again never flagged' \
+    mut_mint_report_hides_recovery 'flagged RECOVERED and still not judged'
+
+mut_mint_report_recovers_on_records_alone() {
+    mint_mutate "$MINT_REPORT" '        recovered = tally is not None and not observed' '        recovered = tally is not None'
+}
+expect_fail check_mint_report.sh 'an excluded mint SDK flagged RECOVERED while its failure is still unattributed' \
+    mut_mint_report_recovers_on_records_alone 'whose runner failed without a FAIL record is not RECOVERED'
+
+mut_mint_report_judges_excluded_as_zero() {
+    mint_mutate "$MINT_REPORT" '            exclusions[parts[0]] = Exclusion(parts[2], " ".join(parts[3:]))\n            continue' \
+        '            counts[parts[0]] = 0\n            continue'
+}
+expect_fail check_mint_report.sh 'an excluded mint SDK judged against a zero count' \
+    mut_mint_report_judges_excluded_as_zero 'is reported apart and the run is complete'
+
+mut_mint_report_drops_excluded_section() {
+    mint_mutate "$MINT_REPORT" '    lines += render_excluded(excluded)\n' ''
+}
+expect_fail check_mint_report.sh 'excluded mint SDKs silently dropped from the uploaded summary' \
+    mut_mint_report_drops_excluded_section 'an excluded SDK that left no record is reported apart'
+
+mut_mint_report_proposal_drops_exclusion() {
+    mint_mutate "$MINT_REPORT" \
+        '            lines.append(f"{sdk} {EXCLUDED} {entry.exclusion.owner} {entry.exclusion.reason}")' '            pass'
+}
+expect_fail check_mint_report.sh 'a mint record proposal that loses the exclusion list' \
+    mut_mint_report_proposal_drops_exclusion 'record mode carries an exclusion into the proposal unchanged'
+
+mut_mint_report_excluded_leave_console() {
+    mint_mutate "$MINT_REPORT" 'outcomes = read_progress(Path(args.progress), sdks, problems)' \
+        'outcomes = read_progress(Path(args.progress), [sdk for sdk in sdks if sdk not in exclusions], problems)'
+}
+expect_fail check_mint_report.sh 'an excluded mint SDK no longer has to start and finish in order' \
+    mut_mint_report_excluded_leave_console 'an excluded SDK the console never saw start is still an incomplete run'
+
+mut_mint_report_accepts_ownerless_exclusion() {
+    mint_mutate "$MINT_REPORT" '            if len(parts) < 3 or not OWNER.fullmatch(parts[2]):' '            if False:'
+}
+expect_fail check_mint_report.sh 'a mint exclusion accepted without an owning issue' \
+    mut_mint_report_accepts_ownerless_exclusion 'an exclusion without an owning issue is refused'
+
+mut_mint_report_accepts_foreign_owner() {
+    mint_mutate "$MINT_REPORT" 'github\.com/rustfs/(?:gateway|backlog)/issues/' 'github\.com/[^/]+/[^/]+/issues/'
+}
+expect_fail check_mint_report.sh 'a mint exclusion owned by an issue outside this project' \
+    mut_mint_report_accepts_foreign_owner 'an exclusion owned outside this project is refused'
+
+mut_mint_report_accepts_reasonless_exclusion() {
+    mint_mutate "$MINT_REPORT" '            if len(parts[3:]) < REASON_MIN_WORDS:' '            if False:'
+}
+expect_fail check_mint_report.sh 'a mint exclusion accepted without a reason' \
+    mut_mint_report_accepts_reasonless_exclusion 'an exclusion without a reason is refused'
+
 mut_mint_input_deleted() {
     rm -f ci/mint/report.py
 }

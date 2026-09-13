@@ -48,6 +48,22 @@ the run is incomplete, exits 3 and writes no proposal when any of these is true:
     * an SDK's runner exited non-zero without writing a FAIL record, which leaves the
       failure unattributable.
 
+# Excluded SDKs
+
+A baseline line `<sdk> excluded <owner issue URL> <reason>` takes an SDK out of the verdict,
+but never out of the run or the report. An excluded SDK:
+
+    * is still run and still has to start and finish on the console, in order: an excluded
+      SDK that hangs or reorders the run hides every SDK after it;
+    * may leave no record, an unreadable record or an unattributable failure, and none of that
+      makes the run incomplete. Each is reported in the excluded section instead;
+    * never counts toward a regression, and a record-mode proposal carries its line unchanged;
+    * makes the run incomplete if its log holds a record naming a counted SDK. Those results
+      would be dropped along with the exclusion, so a counted SDK would be judged on a subset
+      without anybody noticing;
+    * is flagged RECOVERED, without changing the exit code, when its log becomes a complete,
+      attributable measurement. That is the signal to remove the line.
+
 Exit codes: 0 ok, 1 regression, 2 usage, 3 environment.
 """
 
@@ -69,6 +85,12 @@ EXIT_ENVIRONMENT = 3
 STATUSES = ("PASS", "FAIL", "NA")
 SDK_NAME = re.compile(r"[A-Za-z0-9._-]+")
 REDACTED = "[REDACTED]"
+EXCLUDED = "excluded"
+# An exclusion is owned by an issue in this repository or in the planning tracker, and nowhere
+# else: an owner outside the project is an owner nobody here is obliged to close.
+OWNER = re.compile(r"https://github\.com/rustfs/(?:gateway|backlog)/issues/[1-9][0-9]*")
+# A reason is a sentence, not a token: `tbd` or `flaky` names no cause anybody could check.
+REASON_MIN_WORDS = 3
 # A failing function name is the one piece of third-party text the aggregate report carries,
 # because a count cannot be attributed without it. It is redacted, stripped of control
 # characters and capped, and only this many are listed per SDK.
@@ -152,13 +174,20 @@ def printable(value: object, limit: int = FUNCTION_LIMIT) -> str:
     return text
 
 
-def read_baseline(path: Path) -> tuple[int, dict[str, int]]:
+@dataclass
+class Exclusion:
+    owner: str
+    reason: str
+
+
+def read_baseline(path: Path) -> tuple[int, dict[str, int], dict[str, Exclusion]]:
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         raise ReportError(f"cannot read the baseline {path}: {error}", EXIT_ENVIRONMENT) from error
     generation: int | None = None
     counts: dict[str, int] = {}
+    exclusions: dict[str, Exclusion] = {}
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if line.startswith("# generation:"):
@@ -173,16 +202,32 @@ def read_baseline(path: Path) -> tuple[int, dict[str, int]]:
         if not entry:
             continue
         parts = entry.split()
-        if len(parts) != 2 or not SDK_NAME.fullmatch(parts[0]) or not re.fullmatch(r"[0-9]+", parts[1]):
-            raise ReportError(f"{path}:{number}: expected `<sdk> <failures>`", EXIT_ENVIRONMENT)
-        if parts[0] in counts:
+        if not SDK_NAME.fullmatch(parts[0]):
+            raise ReportError(
+                f"{path}:{number}: expected `<sdk> <failures>` or `<sdk> {EXCLUDED} <owner> <reason>`", EXIT_ENVIRONMENT
+            )
+        if parts[0] in counts or parts[0] in exclusions:
             raise ReportError(f"{path}:{number}: {parts[0]} is listed more than once", EXIT_ENVIRONMENT)
+        if len(parts) >= 2 and parts[1] == EXCLUDED:
+            if len(parts) < 3 or not OWNER.fullmatch(parts[2]):
+                raise ReportError(
+                    f"{path}:{number}: the exclusion of {parts[0]} names no owning rustfs/gateway or rustfs/backlog issue",
+                    EXIT_ENVIRONMENT,
+                )
+            if len(parts[3:]) < REASON_MIN_WORDS:
+                raise ReportError(f"{path}:{number}: the exclusion of {parts[0]} gives no reason", EXIT_ENVIRONMENT)
+            exclusions[parts[0]] = Exclusion(parts[2], " ".join(parts[3:]))
+            continue
+        if len(parts) != 2 or not re.fullmatch(r"[0-9]+", parts[1]):
+            raise ReportError(
+                f"{path}:{number}: expected `<sdk> <failures>` or `<sdk> {EXCLUDED} <owner> <reason>`", EXIT_ENVIRONMENT
+            )
         counts[parts[0]] = int(parts[1])
     if generation is None:
         raise ReportError(f"{path}: no `# generation: <n>` header; the ratchet has nothing to compare", EXIT_ENVIRONMENT)
     if not counts:
-        raise ReportError(f"{path} names no SDK; a baseline with nothing in it judges nothing", EXIT_ENVIRONMENT)
-    return generation, counts
+        raise ReportError(f"{path} counts no SDK; a baseline with nothing in it judges nothing", EXIT_ENVIRONMENT)
+    return generation, counts, exclusions
 
 
 @dataclass
@@ -242,6 +287,35 @@ def read_records(log_dir: Path, sdk: str, problems: list[str]) -> Tally | None:
     return tally
 
 
+def records_naming(log_dir: Path, sdk: str, counted: dict[str, str]) -> dict[str, int]:
+    """Counts the records in `sdk`'s log whose `name` is a counted SDK's, keyed by that SDK.
+
+    Unlike `read_records` this reads past text that is not JSON, because an excluded SDK's log
+    is allowed to be broken, and a broken log is exactly where a stray record would otherwise go
+    unseen. `counted` maps a name with any leading dot removed to the SDK directory it names:
+    mint's `.minio-dotnet` writes records named `minio-dotnet`.
+    """
+    try:
+        text = (log_dir / sdk / "log.json").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    decoder = json.JSONDecoder()
+    found: dict[str, int] = {}
+    position = text.find("{")
+    while position >= 0:
+        try:
+            document, end = decoder.raw_decode(text, position)
+        except json.JSONDecodeError:
+            position = text.find("{", position + 1)
+            continue
+        name = document.get("name") if isinstance(document, dict) else None
+        if isinstance(name, str) and name.lstrip(".") in counted:
+            other = counted[name.lstrip(".")]
+            found[other] = found.get(other, 0) + 1
+        position = text.find("{", end)
+    return found
+
+
 def read_progress(path: Path, sdks: list[str], problems: list[str]) -> dict[str, str]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -291,7 +365,38 @@ def verdict_for(failed: int, baseline: int) -> str:
     return "KNOWN" if failed else "OK"
 
 
-def render_markdown(image: str, generation: int, rows: list[Row], problems: list[str], code: int) -> str:
+@dataclass
+class ExcludedRow:
+    sdk: str
+    exclusion: Exclusion
+    # Repository-authored text only: what this run observed about the SDK's records.
+    observed: str
+    recovered: bool
+    tally: Tally | None
+
+
+def render_excluded(excluded: list[ExcludedRow]) -> list[str]:
+    if not excluded:
+        return []
+    lines = [
+        "",
+        "### Excluded SDKs",
+        "",
+        "Run, reported, and never judged: they count toward neither completeness nor the ratchet.",
+        "",
+        "| SDK | owner | reason | observed |",
+        "| --- | --- | --- | --- |",
+    ]
+    for row in excluded:
+        observed = f"**RECOVERED**: {row.observed}; remove the exclusion" if row.recovered else row.observed
+        cells = (row.exclusion.owner, printable(row.exclusion.reason, 400), printable(observed, 400))
+        lines.append(f"| `{row.sdk}` | " + " | ".join(cell.replace("|", "\\|") for cell in cells) + " |")
+    return lines
+
+
+def render_markdown(
+    image: str, generation: int, rows: list[Row], excluded: list[ExcludedRow], problems: list[str], code: int
+) -> str:
     lines = ["## MinIO mint", ""]
     if image:
         lines += [f"Image: `{image}`", ""]
@@ -317,23 +422,34 @@ def render_markdown(image: str, generation: int, rows: list[Row], problems: list
             lines.append(f"- `{row.sdk}`: " + "; ".join(name.replace("|", "\\|") for name in shown))
             if len(row.tally.failing) > len(shown):
                 lines.append(f"  - and {len(row.tally.failing) - len(shown)} more")
+    lines += render_excluded(excluded)
     return "\n".join(lines) + "\n"
 
 
-def render_proposal(generation: int, rows: list[Row]) -> str:
+def render_proposal(generation: int, sdks: list[str], rows: list[Row], excluded: list[ExcludedRow]) -> str:
     passed = sum(row.tally.passed for row in rows)
     failed = sum(row.tally.failed for row in rows)
     na = sum(row.tally.na for row in rows)
     lines = [
         "# Proposed ci/mint/baseline.txt, written by ci/mint/report.py in record mode.",
-        f"# Measured {len(rows)} SDK(s): {passed} PASS, {failed} FAIL, {na} NA.",
+        f"# Measured {len(rows)} SDK(s): {passed} PASS, {failed} FAIL, {na} NA; {len(excluded)} excluded.",
         "# Attribute every non-zero count below before it replaces the reviewed baseline.",
+        "# Exclusions are carried over unchanged; removing one is a separate, reviewed decision.",
         f"# generation: {generation + 1}",
     ]
-    for row in rows:
-        for name in row.tally.failing[:FUNCTIONS_PER_SDK]:
-            lines.append(f"#   {row.sdk} failed: {name}")
-        lines.append(f"{row.sdk} {row.tally.failed}")
+    counted = {row.sdk: row for row in rows}
+    uncounted = {row.sdk: row for row in excluded}
+    for sdk in sdks:
+        if sdk in counted:
+            row = counted[sdk]
+            for name in row.tally.failing[:FUNCTIONS_PER_SDK]:
+                lines.append(f"#   {sdk} failed: {name}")
+            lines.append(f"{sdk} {row.tally.failed}")
+        elif sdk in uncounted:
+            entry = uncounted[sdk]
+            state = "RECOVERED" if entry.recovered else "observed"
+            lines.append(f"#   {sdk} {state}: {printable(entry.observed, 400)}")
+            lines.append(f"{sdk} {EXCLUDED} {entry.exclusion.owner} {entry.exclusion.reason}")
     return "\n".join(lines) + "\n"
 
 
@@ -345,11 +461,12 @@ def judge(args: argparse.Namespace) -> int:
     record_path = Path(args.record) if args.record else None
     if record_path is not None and record_path.resolve() == baseline_path.resolve():
         raise ReportError("record mode writes a proposal; it never overwrites the reviewed baseline", EXIT_USAGE)
-    generation, allowed = read_baseline(baseline_path)
+    generation, allowed, exclusions = read_baseline(baseline_path)
 
     problems: list[str] = []
-    missing = sorted(set(sdks) - set(allowed))
-    extra = sorted(set(allowed) - set(sdks))
+    listed = set(allowed) | set(exclusions)
+    missing = sorted(set(sdks) - listed)
+    extra = sorted(listed - set(sdks))
     if missing:
         problems.append("the baseline has no line for: " + ", ".join(missing))
     if extra:
@@ -357,6 +474,8 @@ def judge(args: argparse.Namespace) -> int:
 
     log_dir = Path(args.log_dir)
     tallies: dict[str, Tally] = {}
+    # What an excluded SDK's log would have made incomplete, kept apart instead of discarded.
+    excluded_reads: dict[str, tuple[Tally | None, list[str]]] = {}
     if not log_dir.is_dir():
         problems.append("the copied /mint/log directory is missing")
     else:
@@ -365,16 +484,43 @@ def judge(args: argparse.Namespace) -> int:
                 shown = entry.name if SDK_NAME.fullmatch(entry.name) else "(unrecognised)"
                 problems.append(f"{shown}: an unknown suite wrote records; the census no longer describes the image")
         for sdk in sdks:
+            if sdk in exclusions:
+                observed: list[str] = []
+                excluded_reads[sdk] = (read_records(log_dir, sdk, observed), observed)
+                continue
             tally = read_records(log_dir, sdk, problems)
             if tally is not None:
                 tallies[sdk] = tally
 
+    # Excluded SDKs stay in the console check: one that hangs or runs out of order hides every
+    # SDK after it, which is the run breaking, not the SDK.
     outcomes = read_progress(Path(args.progress), sdks, problems)
     for sdk, tally in tallies.items():
         if outcomes.get(sdk) == "FAILED" and tally.failed == 0:
             problems.append(
                 f"{sdk}: its runner exited non-zero without writing a FAIL record, so the failure cannot be attributed"
             )
+
+    counted_names = {sdk.lstrip("."): sdk for sdk in sdks if sdk not in exclusions}
+    excluded: list[ExcludedRow] = []
+    for sdk in sdks:
+        if sdk not in exclusions:
+            continue
+        if log_dir.is_dir():
+            for other, count in sorted(records_naming(log_dir, sdk, counted_names).items()):
+                problems.append(
+                    f"{sdk}: excluded, but its log carries {count} record(s) naming {other}, a counted SDK; "
+                    f"the exclusion would drop them from {other}'s verdict"
+                )
+        tally, observed = excluded_reads.get(sdk, (None, ["the copied /mint/log directory is missing"]))
+        if tally is not None and outcomes.get(sdk) == "FAILED" and tally.failed == 0:
+            observed.append(f"{sdk}: its runner exited non-zero without writing a FAIL record")
+        recovered = tally is not None and not observed
+        if recovered:
+            text = f"{tally.passed} PASS, {tally.failed} FAIL, {tally.na} NA"
+        else:
+            text = "; ".join(note.removeprefix(f"{sdk}: ") for note in observed)
+        excluded.append(ExcludedRow(sdk, exclusions[sdk], text, recovered, tally))
 
     rows = [
         Row(sdk, tallies[sdk], allowed[sdk], verdict_for(tallies[sdk].failed, allowed[sdk]))
@@ -394,6 +540,14 @@ def judge(args: argparse.Namespace) -> int:
             f"mint: {row.verdict:<10} {row.sdk} fail={row.tally.failed} baseline={row.baseline} "
             f"pass={row.tally.passed} na={row.tally.na}"
         )
+    for entry in excluded:
+        print(f"mint: EXCLUDED   {entry.sdk} owner={entry.exclusion.owner} observed: {printable(entry.observed, 400)}")
+    for entry in excluded:
+        if entry.recovered:
+            print(
+                f"mint: RECOVERED  {entry.sdk} wrote a complete, attributable log ({entry.observed}); "
+                f"remove its exclusion and close or update {entry.exclusion.owner}"
+            )
     for problem in problems:
         print(f"mint: INCOMPLETE {problem}")
     print(
@@ -401,14 +555,17 @@ def judge(args: argparse.Namespace) -> int:
         f"pass={sum(row.tally.passed for row in rows)} fail={sum(row.tally.failed for row in rows)} "
         f"na={sum(row.tally.na for row in rows)} regression={len(regressions)} "
         f"improved={sum(row.verdict == 'IMPROVED' for row in rows)} "
-        f"known={sum(row.verdict == 'KNOWN' for row in rows)} incomplete={len(problems)} generation={generation}"
+        f"known={sum(row.verdict == 'KNOWN' for row in rows)} excluded={len(excluded)} "
+        f"recovered={sum(entry.recovered for entry in excluded)} incomplete={len(problems)} generation={generation}"
     )
     if problems:
         print("mint: the run is incomplete, so it measured nothing that may be compared with the baseline; "
               "it is NOT a regression")
 
     if args.markdown:
-        Path(args.markdown).write_text(render_markdown(args.image, generation, rows, problems, code), encoding="utf-8")
+        Path(args.markdown).write_text(
+            render_markdown(args.image, generation, rows, excluded, problems, code), encoding="utf-8"
+        )
     if args.json:
         payload = {
             "image": args.image,
@@ -427,6 +584,15 @@ def judge(args: argparse.Namespace) -> int:
                 }
                 for row in rows
             },
+            "excluded": {
+                entry.sdk: {
+                    "owner": entry.exclusion.owner,
+                    "reason": entry.exclusion.reason,
+                    "observed": entry.observed,
+                    "recovered": entry.recovered,
+                }
+                for entry in excluded
+            },
         }
         Path(args.json).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if record_path is not None:
@@ -436,7 +602,7 @@ def judge(args: argparse.Namespace) -> int:
             record_path.unlink(missing_ok=True)
             print("mint: no baseline proposal written; an incomplete run must never become a baseline")
         else:
-            record_path.write_text(render_proposal(generation, rows), encoding="utf-8")
+            record_path.write_text(render_proposal(generation, sdks, rows, excluded), encoding="utf-8")
             print(f"mint: proposed generation {generation + 1} written to {record_path}")
     return code
 

@@ -17,10 +17,19 @@ set -euo pipefail
 #                   SDK that exited non-zero without a FAIL record, a baseline
 #                   whose census differs, a baseline without a generation:
 #                   every one exits 3, never 1
+#     excluded      an excluded SDK with no record, a non-JSON log or an
+#                   unattributed runner failure leaves the run complete and is
+#                   listed in its own section, while the same SDK counted is
+#                   exit 3; its FAIL records never become a regression; it is
+#                   flagged RECOVERED only when its log is complete and
+#                   attributable; a counted SDK's record inside its log, or its
+#                   absence from the console, is exit 3; an exclusion without
+#                   an in-project owner or a reason is refused
 #     record        a complete run proposes generation + 1 with the observed
 #                   counts and leaves the reviewed baseline byte-identical; an
 #                   incomplete run proposes nothing and removes a stale proposal;
-#                   a proposal aimed at the baseline itself is refused
+#                   a proposal aimed at the baseline itself is refused; an
+#                   exclusion is carried into the proposal unchanged
 #     redaction     Authorization, presigned-query signatures, StringToSign and
 #                   the secret leave the evidence files, and the aggregate
 #                   report carries no record's `error` text
@@ -102,10 +111,22 @@ def console(outcomes: dict[str, str | None], order: list[str] | None = None) -> 
 HEALTHY_PROGRESS = {"awscli": "done", "minio-go": "FAILED", ".minio-dotnet": "done"}
 
 
-def baseline(counts: dict[str, int] | None = None, generation: str | None = "4") -> str:
+OWNER_URL = "https://github.com/rustfs/gateway/issues/9999"
+EXCLUSION_REASON = "its runner cannot write a record in this probe"
+
+
+def baseline(counts: dict[str, int] | None = None, generation: str | None = "4",
+             excluded: dict[str, str] | None = None) -> str:
+    """`excluded` maps an SDK to the rest of its line after `<sdk> excluded`."""
     counts = counts if counts is not None else {"awscli": 0, "minio-go": 1, ".minio-dotnet": 0}
     header = "" if generation is None else f"# generation: {generation}\n"
-    return "# probe baseline\n" + header + "".join(f"{sdk} {count}\n" for sdk, count in counts.items())
+    lines = "".join(f"{sdk} {count}\n" for sdk, count in counts.items())
+    lines += "".join(f"{sdk} excluded {rest}\n" for sdk, rest in (excluded or {}).items())
+    return "# probe baseline\n" + header + lines
+
+
+# The fixture's third SDK, excluded: the shape every excluded-SDK probe below starts from.
+EXCLUDING_DOTNET = baseline({"awscli": 0, "minio-go": 1}, excluded={".minio-dotnet": f"{OWNER_URL} {EXCLUSION_REASON}"})
 
 
 def probe(
@@ -246,6 +267,64 @@ probe("a baseline without an SDK's line is an incomplete run", 3, ["the baseline
 
 probe("a baseline without a generation header is refused", 3, ["generation"], base=baseline(generation=None))
 
+# --- excluded SDKs: reported apart, never judged, never a place to hide a counted one -------
+DOTNET_FAILED = console({**HEALTHY_PROGRESS, ".minio-dotnet": "FAILED"})
+dotnet_silent = healthy_logs()
+dotnet_silent[".minio-dotnet"] = None
+probe("an excluded SDK that left no record is reported apart and the run is complete", 0,
+      ["EXCLUDED   .minio-dotnet owner=" + OWNER_URL, "produced no record", "### Excluded SDKs",
+       EXCLUSION_REASON, "excluded=1", "recovered=0", "incomplete=0"],
+      ["INCOMPLETE", "RECOVERED"], logs=dotnet_silent, base=EXCLUDING_DOTNET, progress=DOTNET_FAILED)
+
+# The control: the same silent, failed runner is an incomplete run the moment it is counted.
+probe("the same silent SDK, counted instead of excluded, is an incomplete run", 3,
+      [".minio-dotnet: produced no record"], ["EXCLUDED "], logs=dotnet_silent, progress=DOTNET_FAILED)
+
+# mc's shape: a runner that prints its own diagnostics into the record stream.
+preamble = healthy_logs()
+preamble[".minio-dotnet"] = "Dependency check complete\n" + rec("minio-dotnet", "MakeBucket", "FAIL")
+probe("an excluded SDK whose log opens with text that is not JSON is reported apart", 0,
+      ["EXCLUDED   .minio-dotnet", "record 1 in .minio-dotnet/log.json is not valid JSON"],
+      ["INCOMPLETE", "REGRESSION ", "RECOVERED"], logs=preamble, base=EXCLUDING_DOTNET, progress=DOTNET_FAILED)
+
+hiding = healthy_logs()
+hiding[".minio-dotnet"] = "Dependency check complete\n" + rec("awscli", "put-object", "FAIL")
+probe("an excluded SDK whose log carries a counted SDK's records is an incomplete run", 3,
+      [".minio-dotnet: excluded, but its log carries 1 record(s) naming awscli"], ["REGRESSION "],
+      logs=hiding, base=EXCLUDING_DOTNET, progress=DOTNET_FAILED)
+
+recovered = healthy_logs()
+recovered[".minio-dotnet"] = "\n".join([
+    rec("minio-dotnet", "MakeBucket", "PASS"), rec("minio-dotnet", "PutObject", "FAIL"),
+    rec("minio-dotnet", "ListenBucketNotification", "NA"),
+])
+probe("an excluded SDK that writes valid records again is flagged RECOVERED and still not judged", 0,
+      ["RECOVERED  .minio-dotnet", "1 PASS, 1 FAIL, 1 NA", "recovered=1", "incomplete=0"],
+      ["REGRESSION ", "INCOMPLETE"], logs=recovered, base=EXCLUDING_DOTNET, progress=DOTNET_FAILED)
+
+# The other direction: valid records alone are not a recovery while the failure stays unattributed.
+passing_but_failed = healthy_logs()
+probe("an excluded SDK whose runner failed without a FAIL record is not RECOVERED", 0,
+      ["EXCLUDED   .minio-dotnet", "exited non-zero without writing a FAIL record", "recovered=0"],
+      ["RECOVERED ", "INCOMPLETE"], logs=passing_but_failed, base=EXCLUDING_DOTNET, progress=DOTNET_FAILED)
+
+probe("an excluded SDK the console never saw start is still an incomplete run", 3,
+      [".minio-dotnet: the console never reported it starting"], base=EXCLUDING_DOTNET,
+      progress=console(HEALTHY_PROGRESS, order=["awscli", "minio-go"]))
+
+probe("an exclusion without an owning issue is refused", 3, ["names no owning"],
+      base=baseline({"awscli": 0, "minio-go": 1}, excluded={".minio-dotnet": EXCLUSION_REASON}))
+
+probe("an exclusion owned outside this project is refused", 3, ["names no owning"],
+      base=baseline({"awscli": 0, "minio-go": 1},
+                    excluded={".minio-dotnet": "https://github.com/minio/mint/issues/1 " + EXCLUSION_REASON}))
+
+probe("an exclusion without a reason is refused", 3, ["gives no reason"],
+      base=baseline({"awscli": 0, "minio-go": 1}, excluded={".minio-dotnet": OWNER_URL}))
+
+probe("an SDK both counted and excluded is refused", 3, [".minio-dotnet is listed more than once"],
+      base=EXCLUDING_DOTNET + ".minio-dotnet 0\n")
+
 # --- record mode ---------------------------------------------------------------------------
 
 
@@ -279,6 +358,23 @@ probe("record mode writes no proposal for an incomplete run and removes a stale 
 
 probe("record mode refuses to overwrite the reviewed baseline", 2, ["never overwrites the reviewed baseline"],
       record_at_baseline=True)
+
+
+def carries_exclusion(work: Path, proposal: Path) -> str | None:
+    problem = proposed({"awscli": 0, "minio-go": 1}, 5)(work, proposal)
+    if problem:
+        return problem
+    text = proposal.read_text(encoding="utf-8")
+    if f"\n.minio-dotnet excluded {OWNER_URL} {EXCLUSION_REASON}\n" not in text:
+        return f"the proposal dropped or rewrote the exclusion:\n{text}"
+    if "\n.minio-dotnet 0\n" in text:
+        return f"the proposal gave an excluded SDK a count:\n{text}"
+    return None
+
+
+probe("record mode carries an exclusion into the proposal unchanged and gives it no count", 0,
+      ["proposed generation 5"], logs=dotnet_silent, base=EXCLUDING_DOTNET, progress=DOTNET_FAILED,
+      record=True, after=carries_exclusion)
 
 # --- what leaves the run -------------------------------------------------------------------
 probe("the aggregate report never carries a record's error text", 0, ["SelectObjectContent(ctx)"], [UNIQUE_ERROR])
