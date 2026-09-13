@@ -1,0 +1,54 @@
+# c-naming-0030 — the write that would create an unreachable object is refused first
+#
+[case]
+id = "c-naming-0030"
+schema_version = 1
+title = "A PutObject whose key holds a backslash-delimited dot-dot segment is refused before anything is stored"
+rationale = """
+A write the gateway accepted under a key its own reads refuse would store an object no client could \
+fetch or delete again. Refusing the write at the same floor as the read keeps the two sides \
+consistent: nothing the gateway stores is ever unreachable through it. A storage layer on Windows \
+reads the backslash as a separator, so accepting this spelling would also write outside the key's \
+directory."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["naming", "routing", "security"]
+timeout_ms = 10000
+quirks = ["q-naming-0003"]
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-f4vq-9ffr-m8m3"
+summary = "A key spelled with a parent traversal was authorised as a key and then used as a path."
+kind = "other"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/754"
+summary = "The migration ruling keeps the write refused for every assembly."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[request]
+method = "PUT"
+target = "/conf-naming/a/..%5Cb.txt"
+body = { utf8 = "would be unreachable" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
