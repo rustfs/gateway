@@ -312,12 +312,20 @@ if ((${#MINT_TLS_LIST[@]} > 0)); then
     mint_pass "${MINT_CONTAINER}-tls" "$TLS_CONSOLE" "$TLS_LOG" "${MINT_SERVER_HOST}:${MINT_SUT_TLS_PORT}" 1 \
         "${MINT_TLS_LIST[@]}"
     # One tree, as if one container had written it, so records are read exactly as before.
-    # Both passes writing the same SDK's directory would make one of them silently win.
+    # Both passes writing the same SDK's directory would make one of them silently win, so
+    # that is refused. Mint also writes files at the top of /mint/log in every run (a combined
+    # log.json, measured in https://github.com/rustfs/gateway/actions/runs/34788803143);
+    # ci/mint/report.py reads only the per-SDK directories, so the TLS pass's copies are kept
+    # beside the first pass's under a suffix rather than refused or dropped.
     while IFS= read -r -d '' entry; do
         name="${entry##*/}"
-        [[ ! -e "${MINT_LOG}/${name}" ]] ||
-            sut_die "both passes wrote /mint/log/${name}; refusing to judge a tree one of them overwrote"
-        mv "$entry" "${MINT_LOG}/${name}"
+        if [[ -d "$entry" ]]; then
+            [[ ! -e "${MINT_LOG}/${name}" ]] ||
+                sut_die "both passes wrote /mint/log/${name}; refusing to judge a tree one of them overwrote"
+            mv "$entry" "${MINT_LOG}/${name}"
+        else
+            mv "$entry" "${MINT_LOG}/${name}.tls-pass"
+        fi
     done < <(find "$TLS_LOG" -mindepth 1 -maxdepth 1 -print0)
     rm -rf "$TLS_LOG"
     MINT_REPORT_PASSES+=(--pass "${MINT_TLS_LIST[*]}" "$TLS_CONSOLE")
