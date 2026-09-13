@@ -1737,7 +1737,7 @@ checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustfs-gateway"
-version = "0.36.0"
+version = "0.37.0"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -1799,6 +1799,7 @@ dependencies = [
  "proptest",
  "rcgen",
  "rustfs-gateway",
+ "rustfs-gateway-stream",
  "rustls",
  "tokio",
  "webpki-roots",
@@ -1806,7 +1807,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-core"
-version = "0.30.0"
+version = "0.31.0"
 dependencies = [
  "bytes",
  "dhat",

@@ -20,6 +20,7 @@ ADRs; this map only selects files.
 | `src/inprocess/profile.rs` | Maps conformance profiles and deadlines onto measured facade policy. | A profile or timeout appears in cases but does not change target behavior. |
 | `src/inprocess/security.rs` | Fixed authorization, dispatch observations, and bucket-owner sources for security cases. | A security case needs a deterministic policy, dispatch count, or metadata-source outcome. |
 | `src/observation.rs` | Response and event-stream observations, including frame validation. | An event-stream case is classified incorrectly. |
+| `src/observation/select_error_tests.rs` | Independent Select error goldens, malformed-frame controls, and production transport tests. | The encoder or observer changes request-level error framing. |
 | `src/parity.rs` | Per-case verdict, phase, failure and skip-reason comparison. | Production transport results disagree or a case is missing. |
 | `src/production.rs` | Production Hyper and self-held server assemblies with request pacing. | A transport label does not select the production driver it names. |
 | `src/cli/parity.rs` | Isolated child-process orchestration for production transport comparison. | The parity command launches or collects one driver incorrectly. |

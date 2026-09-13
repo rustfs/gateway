@@ -67,9 +67,9 @@ pub const EVENT_STREAM_CONTENT_TYPE: &str = match SELECT_EVENT_MEDIA_TYPE {
 
 /// The largest payload one message may carry, in bytes.
 ///
-/// AWS caps a whole message at 16 MiB. The overhead of the largest frame this module writes is
-/// well under a kilobyte, so a kilobyte is subtracted rather than computed: a producer that
-/// wants the exact remaining room should ask, and one that wants a chunk size should use a round
+/// AWS caps a whole message at 16 MiB. The headers of the payload-bearing event frames this
+/// module writes are well under a kilobyte, so a kilobyte is subtracted rather than computed:
+/// a producer that wants the exact remaining room should ask, and one that wants a chunk size should use a round
 /// number far below the ceiling. A payload past this is refused rather than truncated — a
 /// truncated record is a wrong answer, and a refused one is a bug report.
 pub const MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024 - 1024;
@@ -79,8 +79,8 @@ const FRAME_OVERHEAD: usize = 4 + 4 + 4 + 4;
 
 /// What went wrong while framing a message.
 ///
-/// Two variants and no third. Both are producer mistakes — nothing a client sends can reach
-/// them — so both messages are constants and neither repeats a byte of the payload.
+/// These are producer mistakes. Messages are constants and never repeat bytes from a header
+/// or payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventStreamError {
     /// A payload larger than [`MAX_PAYLOAD_BYTES`].
@@ -88,6 +88,9 @@ pub enum EventStreamError {
     /// The producer has to split the records itself: this module frames what it is given and
     /// never decides where a record boundary is, because only the producer knows.
     PayloadTooLarge,
+    /// A header name exceeds 255 bytes, a string value exceeds 65,535 bytes, or all encoded
+    /// headers exceed 128 KiB.
+    HeaderTooLarge,
     /// An event that the sequence contract does not allow at this point.
     OutOfOrder,
 }
@@ -98,6 +101,7 @@ impl EventStreamError {
     pub const fn message(self) -> &'static str {
         match self {
             Self::PayloadTooLarge => "an event-stream payload exceeded the maximum message size",
+            Self::HeaderTooLarge => "an event-stream header exceeded its wire length limit",
             Self::OutOfOrder => "an event-stream message was produced out of sequence",
         }
     }
@@ -163,31 +167,35 @@ impl EventKind {
 /// The producer splits; this function never truncates.
 pub fn encode_event(kind: EventKind, payload: &[u8], out: &mut Vec<u8>) -> Result<(), EventStreamError> {
     let mut headers = Vec::new();
-    push_string_header(&mut headers, ":message-type", "event");
-    push_string_header(&mut headers, ":event-type", kind.event_type());
+    push_string_header(&mut headers, ":message-type", "event")?;
+    push_string_header(&mut headers, ":event-type", kind.event_type())?;
     if let Some(content_type) = kind.content_type() {
-        push_string_header(&mut headers, ":content-type", content_type);
+        push_string_header(&mut headers, ":content-type", content_type)?;
     }
     encode_message(&headers, payload, out)
 }
 
-/// Appends one in-band exception message to `out`.
+/// Appends one S3 Select request-level error message to `out`.
 ///
 /// This is the shape an error takes once the status line has already gone out as `200`: the
 /// failure is a frame, not a status. A stream that simply stops instead hangs the client — the
 /// failure upstream shipped twice — so a producer that gives up owes this message and then an
-/// [`EventKind::End`] is *not* sent, because the exception is itself terminal.
+/// [`EventKind::End`] is *not* sent, because the error is itself terminal.
+/// The code and message occupy `:error-code` and `:error-message` string headers; the frame
+/// carries no payload.
+/// https://docs.aws.amazon.com/AmazonS3/latest/developerguide/RESTSelectObjectAppendix.html
 ///
 /// # Errors
 ///
-/// [`EventStreamError::PayloadTooLarge`] when the message text is longer than
-/// [`MAX_PAYLOAD_BYTES`].
+/// [`EventStreamError::HeaderTooLarge`] when either string exceeds 65,535 UTF-8 bytes or the
+/// complete encoded header block exceeds 128 KiB.
+/// A refused frame leaves `out` unchanged.
 pub fn encode_exception(code: &str, message: &str, out: &mut Vec<u8>) -> Result<(), EventStreamError> {
     let mut headers = Vec::new();
-    push_string_header(&mut headers, ":message-type", "exception");
-    push_string_header(&mut headers, ":exception-type", code);
-    push_string_header(&mut headers, ":content-type", "text/xml");
-    encode_message(&headers, message.as_bytes(), out)
+    push_string_header(&mut headers, ":message-type", "error")?;
+    push_string_header(&mut headers, ":error-code", code)?;
+    push_string_header(&mut headers, ":error-message", message)?;
+    encode_message(&headers, &[], out)
 }
 
 /// The `<Stats>` document a [`EventKind::Stats`] frame carries.
@@ -215,25 +223,24 @@ fn accounting_document(root: &str, scanned: u64, processed: u64, returned: u64) 
 ///
 /// Every header this protocol needs is a string, so the other fifteen value types have no
 /// encoder here: an encoder with no caller is a branch nothing checks.
-fn push_string_header(headers: &mut Vec<u8>, name: &str, value: &str) {
-    // Both lengths are bounded by construction: the names are literals and the values are either
-    // literals or an error code, and a header block over 128 KiB is unreachable from them. The
-    // conversions saturate and the slices are taken with `get`, so a future caller with a longer
-    // value writes a truncated header rather than a length that disagrees with its bytes — the
-    // one failure a downstream parser cannot recover from.
-    let name_len = u8::try_from(name.len()).unwrap_or(u8::MAX);
-    let name_bytes = name.as_bytes().get(..usize::from(name_len)).unwrap_or_default();
+fn push_string_header(headers: &mut Vec<u8>, name: &str, value: &str) -> Result<(), EventStreamError> {
+    let name_len = u8::try_from(name.len()).map_err(|_| EventStreamError::HeaderTooLarge)?;
+    let value_len = u16::try_from(value.len()).map_err(|_| EventStreamError::HeaderTooLarge)?;
     headers.push(name_len);
-    headers.extend_from_slice(name_bytes);
+    headers.extend_from_slice(name.as_bytes());
     headers.push(7);
-    let value_len = u16::try_from(value.len()).unwrap_or(u16::MAX);
-    let value_bytes = value.as_bytes().get(..usize::from(value_len)).unwrap_or_default();
     headers.extend_from_slice(&value_len.to_be_bytes());
-    headers.extend_from_slice(value_bytes);
+    headers.extend_from_slice(value.as_bytes());
+    Ok(())
 }
 
 /// The one place a message is assembled, so the two CRC ranges are written down once.
 fn encode_message(headers: &[u8], payload: &[u8], out: &mut Vec<u8>) -> Result<(), EventStreamError> {
+    // Services must limit the complete encoded header block as well as each string value.
+    // https://smithy.io/2.0/aws/amazon-eventstream.html#message-format
+    if headers.len() > 128 * 1024 {
+        return Err(EventStreamError::HeaderTooLarge);
+    }
     if payload.len() > MAX_PAYLOAD_BYTES {
         return Err(EventStreamError::PayloadTooLarge);
     }
@@ -400,14 +407,17 @@ impl EventSequence {
         Ok(())
     }
 
-    /// Appends an in-band exception and terminates.
+    /// Appends an in-band S3 Select error and terminates.
     ///
     /// Allowed from either live phase, because a failure can happen after the accounting and
     /// before the terminator, and the client still has to be told rather than left waiting.
     ///
     /// # Errors
     ///
-    /// [`EventStreamError::OutOfOrder`] once the stream has already ended.
+    /// [`EventStreamError::OutOfOrder`] once the stream has already ended, or
+    /// [`EventStreamError::HeaderTooLarge`] when either string exceeds 65,535 UTF-8 bytes or the
+    /// complete encoded header block exceeds 128 KiB.
+    /// A refused error frame leaves the sequence live and its output unchanged.
     pub fn exception(&mut self, code: &str, message: &str, out: &mut Vec<u8>) -> Result<(), EventStreamError> {
         if self.phase == Phase::Terminated {
             return Err(EventStreamError::OutOfOrder);
