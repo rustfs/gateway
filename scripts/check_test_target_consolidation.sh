@@ -217,6 +217,7 @@ core_modules = (
     "purity_guard",
     "range_part_table",
     "registration",
+    "replication_invariants",
     "replication_roundtrip",
     "response_override_safety",
     "route_only",
