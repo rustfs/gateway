@@ -302,13 +302,20 @@ def aggregate(arguments: argparse.Namespace) -> int:
             # production `S3Service` with real SigV4 verification, not a mock — but it is also not
             # the general-purpose server binary that issue asks for, so the identity is recorded
             # rather than assumed, and these rows must be re-measured when that binary lands.
+            # Generation 2 (rustfs/gateway#719): the same binary also serves a TLS listener with a
+            # throwaway authority, and a scenario a client can only express over TLS (boto3's
+            # x-amz-trailer upload) is measured there. The assembly changed, so the rows are a new
+            # generation even though the binary name did not.
             "name": "rustfs-gateway-fs",
             "version": arguments.sut_version,
             "commit": git_commit(root),
-            "generation": 1,
+            "generation": 2,
             "binary": "compat-sut",
             "package": "rustfs-gateway-compat-sut",
-            "assembly": "rustfs-gateway-fs behind rustfs-gateway-server, SigV4 verified, plaintext",
+            "assembly": (
+                "rustfs-gateway-fs behind rustfs-gateway-server, SigV4 verified, plaintext plus a TLS "
+                "listener (throwaway self-signed authority) for TLS-only scenarios"
+            ),
             "provisional": True,
             "provisional_reason": (
                 "measured against the matrix's own launcher; the general-purpose server binary is "
