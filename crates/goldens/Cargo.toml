@@ -38,6 +38,11 @@ zip = { version = "8.6.0", default-features = false }
 rustfs-gateway-core = { workspace = true }
 rustfs-gateway-http = { workspace = true }
 rustfs-gateway-stream = { workspace = true }
+# The request-context diff authenticates and resolves the same raw request the way the gateway
+# does: the facade's SigV4 authenticator and virtual-host resolver, the signature crate's floor,
+# scope check and client signer. Dev-only, for the same reason as the three above.
+rustfs-gateway = { workspace = true }
+rustfs-gateway-sig = { workspace = true }
 bytes = { workspace = true }
 futures-core = { workspace = true }
 http = { workspace = true }
