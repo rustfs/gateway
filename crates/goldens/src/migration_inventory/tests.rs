@@ -16,8 +16,9 @@
 //!
 //! Responsible for: proving the real inventory in full, and that every way the decision can stop
 //! holding — a revision that refuses, a decoder that reads or answers differently, a lost
-//! tolerance, a writer sample with a declaration, fixture drift — is refused by name. NOT
-//! responsible for: family D1-D5. Upstream: `super`. Downstream: none; test-only.
+//! tolerance, a writer sample with a declaration, fixture drift — is refused by name.
+//! NOT responsible for: family D1-D5.
+//! Upstream: `super`. Downstream: none; test-only.
 
 use rustfs_gateway_types::compat::{parse_s3s_replication, parse_s3s_versioning};
 use rustfs_gateway_types::persistence::{parse_replication, parse_versioning};
