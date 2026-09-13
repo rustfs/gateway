@@ -116,7 +116,7 @@ pub struct Input {
     pub sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-key`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub sse_customer_key: Option<crate::SseCustomerKey>,
-    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
+    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub sse_customer_key_md5: Option<String>,
     /// Wire `x-amz-server-side-encryption-aws-kms-key-id`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub ssekms_key_id: Option<String>,
@@ -195,7 +195,7 @@ impl std::fmt::Debug for Input {
             .field("website_redirect_location", &self.website_redirect_location)
             .field("sse_customer_algorithm", &self.sse_customer_algorithm)
             .field("sse_customer_key", &redact(&self.sse_customer_key))
-            .field("sse_customer_key_md5", &self.sse_customer_key_md5)
+            .field("sse_customer_key_md5", &redact(&self.sse_customer_key_md5))
             .field("ssekms_key_id", &redact(&self.ssekms_key_id))
             .field("ssekms_encryption_context", &redact(&self.ssekms_encryption_context))
             .field("bucket_key_enabled", &self.bucket_key_enabled)
@@ -236,7 +236,7 @@ pub struct Output {
     pub version_id: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-algorithm`, bound as Header. Optional.
     pub sse_customer_algorithm: Option<String>,
-    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
+    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub sse_customer_key_md5: Option<String>,
     /// Wire `x-amz-server-side-encryption-aws-kms-key-id`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub ssekms_key_id: Option<String>,
@@ -285,7 +285,7 @@ impl std::fmt::Debug for Output {
             .field("server_side_encryption", &self.server_side_encryption)
             .field("version_id", &self.version_id)
             .field("sse_customer_algorithm", &self.sse_customer_algorithm)
-            .field("sse_customer_key_md5", &self.sse_customer_key_md5)
+            .field("sse_customer_key_md5", &redact(&self.sse_customer_key_md5))
             .field("ssekms_key_id", &redact(&self.ssekms_key_id))
             .field("ssekms_encryption_context", &redact(&self.ssekms_encryption_context))
             .field("bucket_key_enabled", &self.bucket_key_enabled)

@@ -27,11 +27,11 @@
 /// destructure it exhaustively (P3). A required member is a bare type and an optional one is
 /// `Option<T>`; `Default` fills a required member with a wire-invalid placeholder (P10) that
 /// [`ServerSideEncryptionByDefault::check_required`] refuses to let off the decode path.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ServerSideEncryptionByDefault {
     /// Wire `SSEAlgorithm`, bound as BodyXml. Required.
     pub sse_algorithm: crate::ops::enums::SseAlgorithm,
-    /// Wire `KMSMasterKeyID`, bound as BodyXml. Optional.
+    /// Wire `KMSMasterKeyID`, bound as BodyXml. Optional. Secret: `Debug` prints a placeholder.
     pub kms_master_key_id: Option<String>,
 }
 
@@ -53,5 +53,18 @@ impl ServerSideEncryptionByDefault {
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
         crate::reject_placeholder("ServerSideEncryptionByDefault", "SSEAlgorithm", &self.sse_algorithm)?;
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for ServerSideEncryptionByDefault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn redact<T>(value: &Option<T>) -> Option<&'static str> {
+            value.as_ref().map(|_| "<redacted>")
+        }
+
+        f.debug_struct("ServerSideEncryptionByDefault")
+            .field("sse_algorithm", &self.sse_algorithm)
+            .field("kms_master_key_id", &redact(&self.kms_master_key_id))
+            .finish()
     }
 }

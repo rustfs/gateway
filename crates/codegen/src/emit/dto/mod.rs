@@ -287,19 +287,46 @@ pub fn debug_impl(type_name: &str, fields: &[Field]) -> String {
         out.push_str("        fn redact<T>(value: &Option<T>) -> Option<&'static str> {\n");
         out.push_str("            value.as_ref().map(|_| \"<redacted>\")\n        }\n\n");
     }
-    out.push_str(&format!("        f.debug_struct(\"{type_name}\")\n"));
+    let mut links = vec![format!("debug_struct(\"{type_name}\")")];
     for field in fields {
         let name = naming::field_name(&field.name);
         let bare = field.required || Registry::is_container(&field.ty);
-        match (registry::is_redacted(field), bare) {
+        links.push(match (registry::is_redacted(field), bare) {
             // A bare secret is always present, so there is nothing to keep distinguishable and the
             // placeholder can be written straight in.
-            (true, true) => out.push_str(&format!("            .field(\"{name}\", &\"<redacted>\")\n")),
-            (true, false) => out.push_str(&format!("            .field(\"{name}\", &redact(&self.{name}))\n")),
-            (false, _) => out.push_str(&format!("            .field(\"{name}\", &self.{name})\n")),
+            (true, true) => format!("field(\"{name}\", &\"<redacted>\")"),
+            (true, false) => format!("field(\"{name}\", &redact(&self.{name}))"),
+            (false, _) => format!("field(\"{name}\", &self.{name})"),
+        });
+    }
+    links.push("finish()".to_owned());
+    out.push_str(&debug_chain(&links));
+    out.push_str("    }\n}\n");
+    out
+}
+
+/// The `f.debug_struct(..)...finish()` chain in rustfmt's layout, because the generated tree is
+/// checked by `cargo fmt --check` as well as compared byte for byte.
+///
+/// rustfmt keeps a chain on one line while the line fits [`MAX_WIDTH`] and the links after the
+/// receiver fit the default `chain_width`, sixty per cent of it — the same rule
+/// `emit::codec::decode::layout::for_header` applies. A one-field shape such as `Ssekms` is short
+/// enough to stay on one line; every wider one is broken link by link.
+fn debug_chain(links: &[String]) -> String {
+    const CHAIN_WIDTH: usize = MAX_WIDTH * 6 / 10;
+    const INDENT: &str = "        ";
+    let chain: String = links.iter().map(|link| format!(".{link}")).collect();
+    if INDENT.len() + "f".len() + chain.len() <= MAX_WIDTH && chain.len() <= CHAIN_WIDTH {
+        return format!("{INDENT}f{chain}\n");
+    }
+    let mut out = String::new();
+    for (index, link) in links.iter().enumerate() {
+        if index == 0 {
+            out.push_str(&format!("{INDENT}f.{link}\n"));
+        } else {
+            out.push_str(&format!("{INDENT}    .{link}\n"));
         }
     }
-    out.push_str("            .finish()\n    }\n}\n");
     out
 }
 

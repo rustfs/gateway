@@ -329,11 +329,23 @@ fn same_members(left: &[Field], right: &[Field]) -> bool {
 /// AGENTS.md forbids credentials and SSE-C key material in logs. A derived `Debug` on a struct
 /// carrying one of these fields would put the secret one `{:?}` away from a log file, so the
 /// emitter writes the `Debug` implementation by hand for those structs instead.
+///
+/// The key digests are listed for the same reason `rustfs-gateway-core`'s `KeyFingerprint` has no
+/// `Debug`: anything derived from key material does not render itself. The XML body members carry
+/// the same KMS key ids and context as the headers, inside a bucket or restore document.
+/// `tests/sensitive_debug_tests.rs` walks the registry against an independent list of these names.
 pub const REDACTED_WIRE_NAMES: &[&str] = &[
     "x-amz-server-side-encryption-customer-key",
     "x-amz-copy-source-server-side-encryption-customer-key",
+    "x-amz-server-side-encryption-customer-key-md5",
+    "x-amz-copy-source-server-side-encryption-customer-key-md5",
     "x-amz-server-side-encryption-aws-kms-key-id",
     "x-amz-server-side-encryption-context",
+    "KMSMasterKeyID",
+    "ReplicaKmsKeyID",
+    "KeyId",
+    "KMSKeyId",
+    "KMSContext",
 ];
 
 /// Model members whose string value must use the dedicated zeroizing DTO carrier.

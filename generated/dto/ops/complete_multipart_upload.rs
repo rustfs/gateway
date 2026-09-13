@@ -88,7 +88,7 @@ pub struct Input {
     pub sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-key`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub sse_customer_key: Option<crate::SseCustomerKey>,
-    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
+    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub sse_customer_key_md5: Option<String>,
 }
 
@@ -136,7 +136,7 @@ impl std::fmt::Debug for Input {
             .field("if_none_match", &self.if_none_match)
             .field("sse_customer_algorithm", &self.sse_customer_algorithm)
             .field("sse_customer_key", &redact(&self.sse_customer_key))
-            .field("sse_customer_key_md5", &self.sse_customer_key_md5)
+            .field("sse_customer_key_md5", &redact(&self.sse_customer_key_md5))
             .finish()
     }
 }

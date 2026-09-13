@@ -1,0 +1,56 @@
+# c-sig-0594 — a presigned request cannot carry an unsigned customer key.
+
+[case]
+id = "c-sig-0594"
+schema_version = 1
+title = "A presigned PutObject whose SSE-C key headers are left unsigned is refused before the SSE gate"
+rationale = """
+The runner presigns the URL over host alone and then sends the SSE-C algorithm, key and key digest \
+as headers that are not in X-Amz-SignedHeaders. Whoever holds the URL could otherwise attach a key \
+of their choosing, so the whole chain — query-string authentication, the signed-header rules and \
+only then the SSE gate — must refuse with 403 SignatureDoesNotMatch rather than reach the cleartext \
+refusal c-sig-0595 answers for the same request signed in full. The error body names neither the \
+key nor its digest."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["signature", "sigv4", "presigned", "security", "sse"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html"
+summary = "A SigV4 presigned URL lists the headers it covers in X-Amz-SignedHeaders, and every x-amz header the request sends has to be among them."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html"
+summary = "A presigned request for a customer-key object still sends the algorithm, key and digest as request headers."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[request]
+method = "PUT"
+target = "/conf-sig/presigned-unsigned-ssec.bin"
+headers = { "x-amz-server-side-encryption-customer-algorithm" = "AES256", "x-amz-server-side-encryption-customer-key" = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "x-amz-server-side-encryption-customer-key-md5" = "tP/LI3N87DFaSk0aoqYgzg==" }
+body = { size = 16 }
+sign = { mode = "presigned_v4", service = "s3", region = "us-east-1", credential = "valid", expires_s = 60, signed_headers = ["host"] }
+
+[expect]
+kind = "response"
+status = 403
+# Refused before the body is read, so the connection cannot be reused (c-sig-0001's shape).
+connection_after = "closed"
+headers_absent = ["x-amz-server-side-encryption-customer-key", "x-amz-server-side-encryption-customer-key-md5"]
+
+[expect.error]
+code = "SignatureDoesNotMatch"
+request_id_present = true
+
+[expect.body]
+not_contains_utf8 = ["AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "tP/LI3N87DFaSk0aoqYgzg=="]

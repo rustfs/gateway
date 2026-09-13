@@ -27,9 +27,9 @@
 /// destructure it exhaustively (P3). A required member is a bare type and an optional one is
 /// `Option<T>`; `Default` fills a required member with a wire-invalid placeholder (P10) that
 /// [`EncryptionConfiguration::check_required`] refuses to let off the decode path.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct EncryptionConfiguration {
-    /// Wire `ReplicaKmsKeyID`, bound as BodyXml. Optional.
+    /// Wire `ReplicaKmsKeyID`, bound as BodyXml. Optional. Secret: `Debug` prints a placeholder.
     pub replica_kms_key_id: Option<String>,
 }
 
@@ -50,5 +50,17 @@ impl EncryptionConfiguration {
     /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for EncryptionConfiguration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn redact<T>(value: &Option<T>) -> Option<&'static str> {
+            value.as_ref().map(|_| "<redacted>")
+        }
+
+        f.debug_struct("EncryptionConfiguration")
+            .field("replica_kms_key_id", &redact(&self.replica_kms_key_id))
+            .finish()
     }
 }

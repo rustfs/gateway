@@ -76,7 +76,7 @@ pub struct Input {
     pub sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-key`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub sse_customer_key: Option<crate::SseCustomerKey>,
-    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
+    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub sse_customer_key_md5: Option<String>,
     /// Wire `x-amz-request-payer`, bound as Header. Optional.
     pub request_payer: Option<crate::ops::enums::RequestPayer>,
@@ -123,7 +123,7 @@ impl std::fmt::Debug for Input {
             .field("part_number_marker", &self.part_number_marker)
             .field("sse_customer_algorithm", &self.sse_customer_algorithm)
             .field("sse_customer_key", &redact(&self.sse_customer_key))
-            .field("sse_customer_key_md5", &self.sse_customer_key_md5)
+            .field("sse_customer_key_md5", &redact(&self.sse_customer_key_md5))
             .field("request_payer", &self.request_payer)
             .field("expected_bucket_owner", &self.expected_bucket_owner)
             .field("object_attributes", &self.object_attributes)
