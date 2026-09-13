@@ -572,7 +572,10 @@ fn permute_children_of(document: &str, element: &str, seed: u64) -> String {
     let mut occurrence = 0u64;
     while let Some(at) = rest.find(&open) {
         let inner_start = at + open.len();
-        let inner_end = inner_start + rest[inner_start..].find(&close).expect("every element the encoder opens it closes");
+        let inner_end = inner_start
+            + rest[inner_start..]
+                .find(&close)
+                .expect("every element the encoder opens it closes");
         let children = top_level_children(&rest[inner_start..inner_end]);
         out.push_str(&rest[..inner_start]);
         out.push_str(&permute(&children, seed ^ occurrence.wrapping_mul(0xA24B_AED4_963E_E407)).concat());

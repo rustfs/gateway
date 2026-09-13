@@ -327,7 +327,10 @@ fn c_dto_n027_a_replication_destination_never_prints_its_account_or_replica_key(
         ..Default::default()
     };
     for rendered in [format!("{destination:?}"), format!("{destination:#?}")] {
-        assert!(!rendered.contains("must-never-be-logged"), "a replication secret reached Debug: {rendered}");
+        assert!(
+            !rendered.contains("must-never-be-logged"),
+            "a replication secret reached Debug: {rendered}"
+        );
         assert!(
             rendered.contains("arn:aws:s3:::replica-bucket"),
             "the destination bucket is not a secret and stays visible: {rendered}"

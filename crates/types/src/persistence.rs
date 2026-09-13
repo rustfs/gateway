@@ -174,7 +174,8 @@ impl fmt::Debug for PersistedEncryptionByDefault {
     }
 }
 
-/// The `Debug` stand-in for an optional stored KMS key identifier: `None`, or
+/// The `Debug` stand-in for an optional stored secret identifier — a KMS key id, or the
+/// replication destination account id `q-repl-0010` classifies beside it: `None`, or
 /// `Some(<redacted N bytes>)`. Presence and length keep a two-sided diagnostic readable (absent
 /// against present, or two ids of different length); the text itself never reaches the output.
 pub(crate) struct RedactedKeyId<'a>(pub(crate) Option<&'a str>);
