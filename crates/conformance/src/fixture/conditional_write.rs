@@ -193,6 +193,13 @@ impl ConditionalRaceCoordinator {
 /// `blocked` is the bucket's `BlockedEncryptionTypes` verdict for this request, decided by the
 /// handler from the framework's SSE proof. It is applied after the body is drained, like every
 /// other refusal here, so a refused write still consumes exactly the body it framed.
+///
+/// The three `x-amz-object-lock-*` headers set the new version's retention and legal hold, so
+/// they are held to the rules their document twins are: the bucket must have object lock on
+/// (`q-lock-0015` — a lock on an unlocked bucket is a promise no enforcement path reads), and the
+/// values must pass `validate_object_write_lock` against this case's clock. Both refusals come
+/// before anything is stored. Ignoring the headers instead would answer `200` for a write the
+/// client believes is protected, which is the one wrong answer this family exists to prevent.
 pub(super) async fn put_object(
     state: &Arc<Mutex<Fixture>>,
     input: dto::PutObjectInput,
@@ -201,11 +208,19 @@ pub(super) async fn put_object(
     let bytes = drain(input.body).await?;
     require_content_md5(input.content_md5.as_deref(), &bytes)?;
     blocked?;
+    let lock_mode = input.object_lock_mode.as_ref().map(|mode| mode.as_str());
+    let lock_until = input.object_lock_retain_until_date.as_ref();
+    let lock_hold = input.object_lock_legal_hold_status.as_ref().map(|status| status.as_str());
     let (now, existing, generation, conditional_races) = {
         let fixture = state
             .lock()
             .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
         require_bucket(&fixture, &input.bucket)?;
+        if lock_mode.is_some() || lock_until.is_some() || lock_hold.is_some() {
+            require_object_lock(&fixture, input.bucket.as_str())?;
+            validate_object_write_lock(lock_mode, lock_until, lock_hold, fixture.now)
+                .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        }
         (
             fixture.now,
             fixture.object(input.bucket.as_str(), input.key.as_str()).cloned(),
@@ -230,6 +245,16 @@ pub(super) async fn put_object(
     if let Some(class) = input.storage_class.as_ref() {
         object.storage_class = class.to_string();
     }
+    // Validated above: a mode and an instant arrive together or not at all.
+    if let (Some(mode), Some(until)) = (lock_mode, lock_until) {
+        object.retention = Some(dto::ObjectLockRetention {
+            mode: Some(dto::Mode::custom(mode.to_owned())),
+            retain_until_date: Some(*until),
+        });
+    }
+    object.legal_hold = lock_hold.map(|status| dto::ObjectLockLegalHold {
+        status: Some(dto::Status::custom(status.to_owned())),
+    });
     let size = object.body.len() as i64;
     let etag = object.etag.clone();
     let written = if guard_before_mutation {

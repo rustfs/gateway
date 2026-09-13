@@ -18,7 +18,9 @@
 //! Responsible for: the `decode ∘ encode` identity over `ObjectLockConfiguration`,
 //! `ObjectLockRetention` and `ObjectLockLegalHold` — each is written by a `Get` and read by the
 //! matching `Put`, and a stored WORM document has to come back saying the same thing — together
-//! with the wire shape that identity is only worth anything against.
+//! with the wire shape that identity is only worth anything against; and the conservative
+//! direction of `x-amz-bypass-governance-retention` as a property over every value and casing
+//! the generated decoder can be handed, repeated lines included (`q-lock-0012`).
 //! NOT responsible for: the semantic rules of `ops::shared::object_lock` — the closed `Mode`,
 //! `Status` and `ObjectLockEnabled` sets, the `Days`/`Years` mutex and its floor, and the
 //! future-only `RetainUntilDate` — all of which that module owns and its own tests pin. Nor
@@ -620,4 +622,111 @@ fn n_an_unknown_element_is_refused_rather_than_dropped() {
 
     let error = decode_retention(unknown).expect_err("an unknown retention setting never reaches the handler");
     assert_eq!(error.code().as_str(), "MalformedXML", "{error:?}");
+}
+
+// ── the bypass switch ────────────────────────────────────────────────────────────────────────
+//
+// `x-amz-bypass-governance-retention` is the one header that weakens GOVERNANCE protection, so the
+// direction of every parse failure is a security property (`q-lock-0012`). The fixed tables in
+// `c-lock-0009`, `c-lock-0023` and `crates/gateway/tests/object_lock_intent.rs` name a handful of
+// spellings; these properties range over every printable value and every casing, through the
+// generated `PutObjectRetention` decoder — the code that actually reads the header — rather than
+// through the parsing helper it happens to call today.
+
+/// What a retention write's decoder makes of the bypass header, given its header lines.
+///
+/// `Err(())` for any refusal — at acceptance or in the decoder. The document and the integrity
+/// claim are fixed and valid, so the header lines are the only variable.
+fn bypass_after_decode(lines: &[&str]) -> Result<Option<bool>, ()> {
+    let mut builder = Request::builder()
+        .method("PUT")
+        .uri("http://host.invalid/photos/key?retention")
+        .header("host", "host.invalid")
+        .header(INTEGRITY[0].0, INTEGRITY[0].1);
+    for line in lines {
+        // `Builder::header` appends, so two entries here are two field lines on the wire.
+        builder = builder.header("x-amz-bypass-governance-retention", *line);
+    }
+    let request = builder.body(()).map_err(|_| ())?;
+    let request = WireRequest::accept(request, &Limits::default()).map_err(|_| ())?;
+    let view = MetaView::of(&request, TargetKind::Object).expect("view");
+    let body = RequestBody::Buffered(Bytes::from_static(
+        b"<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>",
+    ));
+    dto::PutObjectRetention::decode(&view, body)
+        .map(|input| input.bypass_governance_retention)
+        .map_err(|_| ())
+}
+
+/// One spelling of `word` with every letter's case chosen independently.
+fn any_casing_of(word: &'static str) -> impl Strategy<Value = String> {
+    prop::collection::vec(any::<bool>(), word.len()).prop_map(move |upper| {
+        word.chars()
+            .zip(upper)
+            .map(|(letter, upper)| if upper { letter.to_ascii_uppercase() } else { letter })
+            .collect()
+    })
+}
+
+/// Either boolean, in any casing, paired with the value it spells.
+fn any_boolean_spelling() -> impl Strategy<Value = (String, bool)> {
+    prop_oneof![
+        any_casing_of("true").prop_map(|spelling| (spelling, true)),
+        any_casing_of("false").prop_map(|spelling| (spelling, false)),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(512))]
+
+    /// Every casing of `true` and `false` is read as the value it spells — the AWS CLI sends
+    /// `True` (s3s#151) — and the value reaches the input, not merely the acceptance.
+    #[test]
+    fn object_lock_bool_header_reads_every_casing_as_the_value_it_spells((spelling, value) in any_boolean_spelling()) {
+        prop_assert_eq!(bypass_after_decode(&[spelling.as_str()]), Ok(Some(value)), "spelling {:?}", spelling);
+    }
+
+    /// Negative — anything else is refused. Never `Ok(Some(true))`, and never `Ok(None)` either:
+    /// reading an unreadable value as "said nothing" would be the quieter half of the same guess.
+    #[test]
+    fn object_lock_bool_header_refuses_every_value_that_is_not_a_boolean(value in "[ -~]{0,12}") {
+        prop_assume!(!value.eq_ignore_ascii_case("true") && !value.eq_ignore_ascii_case("false"));
+        prop_assert_eq!(bypass_after_decode(&[value.as_str()]), Err(()), "value {:?}", value);
+    }
+
+    /// Negative — the same refusal for values that come close: a boolean with a prefix or a
+    /// suffix, or padded with whitespace. These are the shapes a lenient `starts_with` or `trim`
+    /// fallback would read as `true`, and uniform sampling above almost never generates them.
+    #[test]
+    fn object_lock_bool_header_refuses_a_boolean_with_anything_around_it(
+        (spelling, _) in any_boolean_spelling(),
+        prefix in "[ -~]{0,3}",
+        suffix in "[ -~]{0,3}",
+    ) {
+        prop_assume!(!prefix.is_empty() || !suffix.is_empty());
+        let value = format!("{prefix}{spelling}{suffix}");
+        prop_assert_eq!(bypass_after_decode(&[value.as_str()]), Err(()), "value {:?}", value);
+    }
+
+    /// Negative — two header lines are refused whatever each says, `True` beside `false`
+    /// included (`c-lock-0031` is the wire form). Two lines are two answers to one question, and
+    /// taking either would let whichever the decoder happened to read first decide a bypass.
+    #[test]
+    fn object_lock_bool_header_refuses_two_lines_whatever_each_says(
+        (first, _) in any_boolean_spelling(),
+        (second, _) in any_boolean_spelling(),
+    ) {
+        prop_assert_eq!(
+            bypass_after_decode(&[first.as_str(), second.as_str()]),
+            Err(()),
+            "lines {:?} and {:?}", first, second
+        );
+    }
+}
+
+/// The control the properties above stand on: with no header line at all the decoder reports
+/// `None`, so the refusals are about the value and not about the fixture request.
+#[test]
+fn object_lock_bool_header_absent_is_none_rather_than_a_refusal() {
+    assert_eq!(bypass_after_decode(&[]), Ok(None));
 }

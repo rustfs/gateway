@@ -20,11 +20,13 @@
 //!
 //! Responsible for: the semantic rules of the `ObjectLockConfiguration`, `Retention` and
 //! `LegalHold` documents — the closed `Mode`, `Status` and `ObjectLockEnabled` value sets, the
-//! `Days`/`Years` mutex and its ≥1 floor, and the future-only `RetainUntilDate` — held once so
-//! that every backend refuses the same documents with the same codes.
-//! NOT responsible for: decoding the documents (the generated codecs, which refuse unknown
-//! request elements — `q-lock-0014` — and already refuse an empty body, a wrong root and an
-//! unreadable timestamp); storing them; or **enforcing** them. Whether a delete or
+//! `Days`/`Years` mutex and its ≥1 floor, and the future-only `RetainUntilDate` — and the same
+//! rules over the third wire form, the `x-amz-object-lock-*` headers an object write carries,
+//! held once so that every backend refuses the same documents and headers with the same codes.
+//! NOT responsible for: decoding the documents or the headers (the generated codecs, which refuse
+//! unknown request elements — `q-lock-0014` — and already refuse an empty body, a wrong root, an
+//! unreadable timestamp and a retain-until header in any format but ISO 8601 — `q-timestamp-0011`);
+//! storing them; or **enforcing** them. Whether a delete or
 //! overwrite of a protected object is refused, whether a COMPLIANCE retention may be shortened,
 //! and what `x-amz-bypass-governance-retention` actually bypasses are the storage side's
 //! decisions — this module's whole contribution is that the intent reaching that code is exactly
@@ -56,8 +58,8 @@
 //! production backend passes its own. A validator that read the wall clock itself would be
 //! untestable and would smuggle a side effect into a pure rule.
 
-use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::{Mode, ObjectLockConfiguration, ObjectLockLegalHold, ObjectLockRetention};
+use rustfs_gateway_types::{ErrorCode, Timestamp};
 
 use crate::contracts::{
     OBJECT_LOCK_BUCKET_STATE_PRECONDITION, OBJECT_LOCK_DEFAULT_EXACTLY_ONE_PERIOD, OBJECT_LOCK_DEFAULT_MIN_PERIOD,
@@ -91,6 +93,13 @@ pub enum ObjectLockRejection {
     StatusUnknown,
     /// A `RetainUntilDate` that is not in the future of the caller's clock (`q-lock-0013`).
     RetainUntilNotInFuture,
+    /// An object write whose `x-amz-object-lock-mode` or `x-amz-object-lock-legal-hold` header
+    /// is outside the closed set its document twin is held to. A header, not a document, so the
+    /// refusal is an argument error rather than `MalformedXML`.
+    WriteHeaderValueUnknown,
+    /// An object write naming a retention mode without a retain-until instant, or an instant
+    /// without a mode. A retention is the pair; half of one is a protection nobody can evaluate.
+    WriteHeadersUnpaired,
 }
 
 impl ObjectLockRejection {
@@ -106,7 +115,10 @@ impl ObjectLockRejection {
             | ObjectLockRejection::PeriodOrModeMissing
             | ObjectLockRejection::StatusUnknown => ErrorCode::MALFORMED_XML,
             // Well-formed values outside their documented range.
-            ObjectLockRejection::PeriodOutOfRange | ObjectLockRejection::RetainUntilNotInFuture => ErrorCode::INVALID_ARGUMENT,
+            ObjectLockRejection::PeriodOutOfRange
+            | ObjectLockRejection::RetainUntilNotInFuture
+            | ObjectLockRejection::WriteHeaderValueUnknown
+            | ObjectLockRejection::WriteHeadersUnpaired => ErrorCode::INVALID_ARGUMENT,
         }
     }
 
@@ -121,6 +133,12 @@ impl ObjectLockRejection {
             ObjectLockRejection::PeriodOutOfRange => "the retention period must be at least one day or one year",
             ObjectLockRejection::StatusUnknown => "Status must be ON or OFF",
             ObjectLockRejection::RetainUntilNotInFuture => "the retain until date must be in the future",
+            ObjectLockRejection::WriteHeaderValueUnknown => {
+                "x-amz-object-lock-mode must be GOVERNANCE or COMPLIANCE and x-amz-object-lock-legal-hold must be ON or OFF"
+            }
+            ObjectLockRejection::WriteHeadersUnpaired => {
+                "x-amz-object-lock-retain-until-date and x-amz-object-lock-mode must both be supplied"
+            }
         }
     }
 }
@@ -214,6 +232,49 @@ pub fn validate_retention(retention: &ObjectLockRetention, now_unix_seconds: i64
     Ok(())
 }
 
+/// Checks the lock headers of one object write, first refusal wins.
+///
+/// The header twin of [`validate_retention`] and [`validate_legal_hold`], for the three
+/// `x-amz-object-lock-*` headers `PutObject`, `CopyObject` and `CreateMultipartUpload` carry. The
+/// values arrive already decoded — the retain-until instant through the one ISO 8601 header
+/// binding (`q-timestamp-0011`) — so this parses nothing: it holds the headers to the same closed
+/// sets and the same future-only instant as the documents, plus the one rule only the header form
+/// can break, that a mode and an instant come together or not at all. Checked in wire order: the
+/// mode, the pairing, the instant, then the hold.
+///
+/// Whether the bucket has object lock on is not decided here: the caller holds the bucket, and
+/// [`object_lock_requires_enabled_bucket`] is the rule it applies (`q-lock-0015`).
+///
+/// # Errors
+///
+/// [`ObjectLockRejection`] naming the first rule the headers break.
+pub fn validate_object_write_lock(
+    mode: Option<&str>,
+    retain_until: Option<&Timestamp>,
+    legal_hold: Option<&str>,
+    now_unix_seconds: i64,
+) -> Result<(), ObjectLockRejection> {
+    if let Some(mode) = mode
+        && !OBJECT_LOCK_MODE_VALUES.contains(&mode)
+    {
+        return Err(ObjectLockRejection::WriteHeaderValueUnknown);
+    }
+    if mode.is_some() != retain_until.is_some() {
+        return Err(ObjectLockRejection::WriteHeadersUnpaired);
+    }
+    let retention = ObjectLockRetention {
+        mode: mode.map(|mode| Mode::custom(mode.to_owned())),
+        retain_until_date: retain_until.copied(),
+    };
+    validate_retention(&retention, now_unix_seconds)?;
+    if let Some(status) = legal_hold
+        && !OBJECT_LOCK_LEGAL_HOLD_VALUES.contains(&status)
+    {
+        return Err(ObjectLockRejection::WriteHeaderValueUnknown);
+    }
+    Ok(())
+}
+
 /// Checks a decoded legal-hold document.
 ///
 /// The `Status` set is closed by comparison against the two documented constants rather than by
@@ -238,7 +299,6 @@ pub fn validate_legal_hold(legal_hold: &ObjectLockLegalHold) -> Result<(), Objec
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rustfs_gateway_types::Timestamp;
     use rustfs_gateway_types::dto::{DefaultRetention, ObjectLockEnabled, ObjectLockRule, Status};
 
     /// A fixed "now" for the clock-dependent checks: 2026-01-01T00:00:00Z.
@@ -481,10 +541,97 @@ mod tests {
             ObjectLockRejection::PeriodOutOfRange,
             ObjectLockRejection::StatusUnknown,
             ObjectLockRejection::RetainUntilNotInFuture,
+            ObjectLockRejection::WriteHeaderValueUnknown,
+            ObjectLockRejection::WriteHeadersUnpaired,
         ] {
             assert!(!rejection.reason().is_empty());
             assert_eq!(rejection.code().default_status().as_u16(), 400, "{rejection:?}");
         }
+    }
+
+    // ── the object-write headers ─────────────────────────────────────────────────────────────
+
+    /// 2030-01-01T00:00:00Z, well after [`NOW`].
+    fn later() -> Timestamp {
+        Timestamp::from_secs(1_893_456_000)
+    }
+
+    #[test]
+    fn a_write_with_no_lock_header_passes() {
+        assert_eq!(validate_object_write_lock(None, None, None, NOW), Ok(()));
+    }
+
+    #[test]
+    fn a_paired_mode_and_date_and_either_hold_status_pass() {
+        for (mode, hold) in [("GOVERNANCE", Some("ON")), ("COMPLIANCE", Some("OFF")), ("COMPLIANCE", None)] {
+            assert_eq!(
+                validate_object_write_lock(Some(mode), Some(&later()), hold, NOW),
+                Ok(()),
+                "mode = {mode}, hold = {hold:?}"
+            );
+        }
+        assert_eq!(validate_object_write_lock(None, None, Some("ON"), NOW), Ok(()));
+    }
+
+    #[test]
+    fn n_a_mode_without_a_date_or_a_date_without_a_mode_is_refused() {
+        assert_eq!(
+            validate_object_write_lock(Some("GOVERNANCE"), None, None, NOW),
+            Err(ObjectLockRejection::WriteHeadersUnpaired)
+        );
+        assert_eq!(
+            validate_object_write_lock(None, Some(&later()), Some("ON"), NOW),
+            Err(ObjectLockRejection::WriteHeadersUnpaired)
+        );
+        assert_eq!(ObjectLockRejection::WriteHeadersUnpaired.code(), ErrorCode::INVALID_ARGUMENT);
+    }
+
+    #[test]
+    fn n_an_out_of_set_mode_header_is_refused_case_sensitively() {
+        for spelling in ["governance", "ARCHIVE", "Compliance", ""] {
+            assert_eq!(
+                validate_object_write_lock(Some(spelling), Some(&later()), None, NOW),
+                Err(ObjectLockRejection::WriteHeaderValueUnknown),
+                "spelling = {spelling:?}"
+            );
+        }
+        // A header is not a document: the refusal is an argument error, not MalformedXML.
+        assert_eq!(ObjectLockRejection::WriteHeaderValueUnknown.code(), ErrorCode::INVALID_ARGUMENT);
+    }
+
+    #[test]
+    fn n_an_out_of_set_hold_header_is_refused_case_sensitively() {
+        for spelling in ["on", "Off", "Enabled", ""] {
+            assert_eq!(
+                validate_object_write_lock(None, None, Some(spelling), NOW),
+                Err(ObjectLockRejection::WriteHeaderValueUnknown),
+                "spelling = {spelling:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn n_a_header_date_in_the_past_or_present_is_refused() {
+        for instant in [NOW - 1, NOW] {
+            assert_eq!(
+                validate_object_write_lock(Some("GOVERNANCE"), Some(&Timestamp::from_secs(instant)), None, NOW),
+                Err(ObjectLockRejection::RetainUntilNotInFuture),
+                "instant = {instant}"
+            );
+        }
+    }
+
+    #[test]
+    fn n_the_header_checks_run_in_wire_order() {
+        // An unknown mode wins over the missing date, which wins over the hold's bad spelling.
+        assert_eq!(
+            validate_object_write_lock(Some("ARCHIVE"), None, Some("on"), NOW),
+            Err(ObjectLockRejection::WriteHeaderValueUnknown)
+        );
+        assert_eq!(
+            validate_object_write_lock(Some("GOVERNANCE"), None, Some("on"), NOW),
+            Err(ObjectLockRejection::WriteHeadersUnpaired)
+        );
     }
 
     #[test]

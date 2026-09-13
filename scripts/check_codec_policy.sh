@@ -263,6 +263,62 @@ for overlay in sorted(overlays.glob("*.toml")):
         ):
             fail(f"{overlay.relative_to(root)} makes {target.group(1)} stricter than lenient")
 
+# --- Object lock: the three security writes allow-registered, the persisted configuration read
+# lenient at its root (rustfs/backlog#1726, ADR-0007). A write that skipped an unknown WORM setting
+# answers 200 for a lock nobody stored; a persisted reader that refused an unknown root element would
+# turn a stored WORM configuration into an unreadable one. Unknown *nested* children are refused by
+# the historical reader and the current one alike (crates/goldens/src/object_lock.rs, D1-D5), so that
+# is compatibility, not a leniency this guard could hold the reader to. -------------------------
+
+lock_rule = quirk_record(source("model/overlays/quirks/object-lock.toml"), "q-lock-0014")
+for pattern, message in [
+    (r'^mutation_dimension\s*=\s*"unknown_element_policy"$', "q-lock-0014 no longer governs the unknown-element policy"),
+    (r'^codec_value\s*=\s*"reject"$', "the object-lock write path is no longer allow-registered (q-lock-0014)"),
+    (r'^target\s*=\s*"PutObjectLockConfiguration"$', "q-lock-0014 no longer targets PutObjectLockConfiguration"),
+    (r'^cases\s*=\s*\[[^\]]*"c-lock-0010"[^\]]*\]$', "q-lock-0014 is not bound to its refusal case"),
+]:
+    require(pattern, lock_rule, message)
+require(
+    r'^codec_value = "reject"$',
+    source("spec/quirks/q-lock-0014.toml"),
+    "the generated rule table no longer records q-lock-0014 as reject",
+)
+LOCK_WRITES = {
+    "PutObjectLockConfiguration": "put_object_lock_configuration",
+    "PutObjectRetention": "put_object_retention",
+    "PutObjectLegalHold": "put_object_legal_hold",
+}
+for operation, stem in LOCK_WRITES.items():
+    require(
+        r'^quirks = \[[^\]]*"q-lock-0014"[^\]]*\]$',
+        source(f"spec/operations/{operation}.toml"),
+        f"{operation} no longer carries q-lock-0014",
+    )
+    if UNKNOWN_GUARD not in source(f"generated/codec/ops/{stem}.rs"):
+        fail(f"the generated {operation} decoder no longer refuses an unregistered element")
+lock_case = source("conformance/cases/lock/c-lock-0010.toml")
+require(r'^quirks = \["q-lock-0014"\]$', lock_case, "c-lock-0010 no longer binds q-lock-0014")
+require(r'^status = 400$\s*(?:\n.*?)*?^code = "MalformedXML"$', lock_case, "c-lock-0010 no longer expects 400 MalformedXML")
+lock_reader = re.search(
+    r'pub fn parse_object_lock\(input: &\[u8\]\) -> Result<PersistedObjectLockConfiguration, PersistenceCodecError> \{\n(.*?)\n\}\n',
+    persisted,
+    re.DOTALL,
+)
+if lock_reader is None:
+    fail("cannot locate the persisted ObjectLockConfiguration reader")
+if 'root.name != "ObjectLockConfiguration"' not in lock_reader.group(1):
+    fail("the persisted ObjectLockConfiguration reader no longer reads its root")
+if "children" in lock_reader.group(1) or "nknown" in lock_reader.group(1):
+    fail("the persisted ObjectLockConfiguration reader inspects unknown root children; persisted reads stay lenient (ADR-0007)")
+for name in [
+    "n_a_security_request_refuses_unknown_lock_root",
+    "n_a_security_request_refuses_unknown_retention_root",
+    "n_a_security_request_refuses_unknown_legal_hold_root",
+    "persisted_lock_bytes_with_an_unknown_root_element_stay_readable",
+]:
+    if f"fn {name}()" not in boundary:
+        fail(f"the executable object-lock write/read boundary lost {name}")
+
 # --- Replication: the one fail-closed stored configuration (rustfs/backlog#1725). RustFS parses the
 # stored replication document fail-closed, so a write decoder that grew stricter would not switch the
 # feature off the way it would for the six switches above — it would make the bucket unusable on the
@@ -296,7 +352,7 @@ if not statuses or set(statuses) != {"200"}:
     fail("c-replication-0019 no longer expects the unknown-element write and its read-back to succeed")
 
 print(
-    "check_codec_policy: bucket configuration write grading, replication leniency, CORS leniency and "
-    "selected/unselected Lifecycle XML policies are bound"
+    "check_codec_policy: bucket configuration and object-lock write grading, replication leniency, CORS "
+    "leniency and selected/unselected Lifecycle XML policies are bound"
 )
 PY
