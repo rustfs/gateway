@@ -13428,39 +13428,39 @@ expect_fail check_suites_pinned.sh 'the mint report written before /mint/log is 
     mut_mint_runner_reports_before_log 'in that order'
 
 mut_mint_baseline_raised_without_generation() {
-    mint_mutate ci/mint/baseline.txt '\nawscli 0\n' '\nawscli 3\n'
+    mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\nminio-go 3\n'
 }
 expect_fail check_mint_baseline.sh 'a mint count raised without raising the generation' \
     mut_mint_baseline_raised_without_generation 'went up without raising the generation'
 
 mut_mint_baseline_raised_with_generation() {
-    mint_mutate ci/mint/baseline.txt '\nawscli 0\n' '\nawscli 3\n'
-    mint_mutate ci/mint/baseline.txt '# generation: 0' '# generation: 1'
+    mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\nminio-go 3\n'
+    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 2'
 }
 expect_guard_pass check_mint_baseline.sh 'a mint count raised in the change that raises the generation by one' \
     mut_mint_baseline_raised_with_generation
 
 mut_mint_baseline_generation_jumped() {
-    mint_mutate ci/mint/baseline.txt '\nawscli 0\n' '\nawscli 3\n'
-    mint_mutate ci/mint/baseline.txt '# generation: 0' '# generation: 2'
+    mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\nminio-go 3\n'
+    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 3'
 }
 expect_fail check_mint_baseline.sh 'a mint generation jumped to bank room for later increases' \
-    mut_mint_baseline_generation_jumped 'the generation jumped 0 -> 2'
+    mut_mint_baseline_generation_jumped 'the generation jumped 1 -> 3'
 
 mut_mint_baseline_generation_backwards() {
-    mint_mutate ci/mint/baseline.txt '# generation: 0' '# generation: 1'
+    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 2'
     git add ci/mint/baseline.txt
-    git -c user.name=t -c user.email=t@t commit -qm 'mint baseline generation 1'
-    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 0'
+    git -c user.name=t -c user.email=t@t commit -qm 'mint baseline generation 2'
+    mint_mutate ci/mint/baseline.txt '# generation: 2' '# generation: 1'
 }
 expect_fail check_mint_baseline.sh 'a mint generation moved backwards' \
-    mut_mint_baseline_generation_backwards 'the generation went backwards, 1 -> 0'
+    mut_mint_baseline_generation_backwards 'the generation went backwards, 2 -> 1'
 
 mut_mint_baseline_drops_an_sdk() {
-    mint_mutate ci/mint/baseline.txt '\n.minio-dotnet 0\n' '\n'
+    mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\n'
 }
 expect_fail check_mint_baseline.sh 'a mint SDK the runner runs left without a baseline line' \
-    mut_mint_baseline_drops_an_sdk 'no line for [.minio-dotnet]'
+    mut_mint_baseline_drops_an_sdk 'no line for [minio-go]'
 
 mut_mint_census_drops_an_sdk() {
     mint_mutate ci/mint/pins.env 'MINT_SDKS=".minio-dotnet ' 'MINT_SDKS="'
@@ -13469,13 +13469,71 @@ expect_fail check_mint_baseline.sh 'a mint baseline line for an SDK the census n
     mut_mint_census_drops_an_sdk 'lines for SDKs the runner does not run [.minio-dotnet]'
 
 mut_mint_baseline_duplicate_sdk() {
-    mint_mutate ci/mint/baseline.txt '\nawscli 0\n' '\nawscli 0\nawscli 0\n'
+    mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\nminio-go 0\nminio-go 0\n'
 }
 expect_fail check_mint_baseline.sh 'a mint SDK listed twice in the baseline' \
-    mut_mint_baseline_duplicate_sdk 'awscli is listed more than once'
+    mut_mint_baseline_duplicate_sdk 'minio-go is listed more than once'
+
+# The exclusion list shrinks freely and widens only with the generation, and every entry
+# names an in-project owner and a reason. The go-v2 line is generation 1's, reviewed.
+MINT_GO_V2_EXCLUSION='aws-sdk-go-v2 excluded https://github.com/rustfs/gateway/issues/718 HeadObject omits Content-Type, and the suite panics before writing its first record'
+
+mut_mint_baseline_excludes_without_generation() {
+    mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' \
+        '\nminio-go excluded https://github.com/rustfs/gateway/issues/718 an SDK hidden to make a red run green\n'
+}
+expect_fail check_mint_baseline.sh 'a counted mint SDK excluded without raising the generation' \
+    mut_mint_baseline_excludes_without_generation '1 SDK(s) newly excluded without raising the generation'
+
+mut_mint_baseline_excludes_with_generation() {
+    mut_mint_baseline_excludes_without_generation
+    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 2'
+}
+expect_guard_pass check_mint_baseline.sh 'a mint SDK excluded in the change that raises the generation by one' \
+    mut_mint_baseline_excludes_with_generation
+
+mut_mint_baseline_restores_excluded_sdk() {
+    mint_mutate ci/mint/baseline.txt "$MINT_GO_V2_EXCLUSION" 'aws-sdk-go-v2 4'
+}
+expect_guard_pass check_mint_baseline.sh 'an excluded mint SDK put back under a count, which only narrows' \
+    mut_mint_baseline_restores_excluded_sdk
+
+mut_mint_baseline_exclusion_without_owner() {
+    mint_mutate ci/mint/baseline.txt 'aws-sdk-go-v2 excluded https://github.com/rustfs/gateway/issues/718 ' \
+        'aws-sdk-go-v2 excluded '
+}
+expect_fail check_mint_baseline.sh 'a mint exclusion that names no owning issue' \
+    mut_mint_baseline_exclusion_without_owner 'the exclusion of aws-sdk-go-v2 names no owner'
+
+mut_mint_baseline_exclusion_foreign_owner() {
+    mint_mutate ci/mint/baseline.txt 'https://github.com/rustfs/gateway/issues/718' 'https://github.com/minio/mint/issues/718'
+}
+expect_fail check_mint_baseline.sh 'a mint exclusion owned by an issue outside this project' \
+    mut_mint_baseline_exclusion_foreign_owner 'the exclusion of aws-sdk-go-v2 names no owner'
+
+mut_mint_baseline_exclusion_without_reason() {
+    mint_mutate ci/mint/baseline.txt "$MINT_GO_V2_EXCLUSION" \
+        'aws-sdk-go-v2 excluded https://github.com/rustfs/gateway/issues/718 flaky'
+}
+expect_fail check_mint_baseline.sh 'a mint exclusion whose reason is one word' \
+    mut_mint_baseline_exclusion_without_reason 'the exclusion of aws-sdk-go-v2 gives no reason'
+
+mut_mint_baseline_excluded_and_counted() {
+    mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\nminio-go 0\naws-sdk-go-v2 0\n'
+}
+expect_fail check_mint_baseline.sh 'an excluded mint SDK that also carries a count' \
+    mut_mint_baseline_excluded_and_counted 'aws-sdk-go-v2 is listed more than once'
+
+mut_mint_baseline_excludes_outside_census() {
+    mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' \
+        '\nminio-go 0\naws-sdk-rust excluded https://github.com/rustfs/gateway/issues/718 an SDK the pinned image never runs\n'
+    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 2'
+}
+expect_fail check_mint_baseline.sh 'a mint exclusion for an SDK outside the pinned census' \
+    mut_mint_baseline_excludes_outside_census 'lines for SDKs the runner does not run [aws-sdk-rust]'
 
 mut_mint_baseline_header_removed() {
-    mint_mutate ci/mint/baseline.txt '# generation: 0\n' ''
+    mint_mutate ci/mint/baseline.txt '# generation: 1\n' ''
 }
 expect_fail check_mint_baseline.sh 'the mint baseline generation header removed' \
     mut_mint_baseline_header_removed 'no `# generation: <n>` header'
