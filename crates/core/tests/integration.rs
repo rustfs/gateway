@@ -122,6 +122,9 @@ mod route_table;
 #[path = "rule_filter_boundaries.rs"]
 mod rule_filter_boundaries;
 
+#[path = "security_request_policy.rs"]
+mod security_request_policy;
+
 #[path = "select_restore_roundtrip.rs"]
 mod select_restore_roundtrip;
 

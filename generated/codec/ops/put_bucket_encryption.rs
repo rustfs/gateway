@@ -85,6 +85,9 @@ impl OperationCodec for dto::PutBucketEncryption {
 /// body and a bare one decode identically.
 fn read_blocked_encryption_types(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::BlockedEncryptionTypes, CodecError> {
     let mut shape = dto::BlockedEncryptionTypes { ..Default::default() };
+    if node.children.iter().any(|child| !["EncryptionType"].contains(&child.name.as_str())) {
+        return Err(CodecError::malformed_xml("the body contains an unknown element"));
+    }
     for item in node.children_named("EncryptionType") {
         let raw = item.text.as_str();
         shape.encryption_type.push(dto::EncryptionType::custom(raw.to_owned()));
@@ -99,6 +102,9 @@ fn read_server_side_encryption_by_default(
     node: &rustfs_gateway_xml::XmlNode,
 ) -> Result<dto::ServerSideEncryptionByDefault, CodecError> {
     let mut shape = dto::ServerSideEncryptionByDefault { ..Default::default() };
+    if node.children.iter().any(|child| !["SSEAlgorithm", "KMSMasterKeyID"].contains(&child.name.as_str())) {
+        return Err(CodecError::malformed_xml("the body contains an unknown element"));
+    }
     if let Some(raw) = node.child_text("SSEAlgorithm") {
         shape.sse_algorithm = dto::SseAlgorithm::custom(raw.to_owned());
     } else {
@@ -117,6 +123,9 @@ fn read_server_side_encryption_configuration(
     node: &rustfs_gateway_xml::XmlNode,
 ) -> Result<dto::ServerSideEncryptionConfiguration, CodecError> {
     let mut shape = dto::ServerSideEncryptionConfiguration { ..Default::default() };
+    if node.children.iter().any(|child| !["Rule"].contains(&child.name.as_str())) {
+        return Err(CodecError::malformed_xml("the body contains an unknown element"));
+    }
     for item in node.children_named("Rule") {
         shape.rules.push(read_server_side_encryption_rule(item)?);
     }
@@ -131,6 +140,9 @@ fn read_server_side_encryption_configuration(
 /// body and a bare one decode identically.
 fn read_server_side_encryption_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ServerSideEncryptionRule, CodecError> {
     let mut shape = dto::ServerSideEncryptionRule { ..Default::default() };
+    if node.children.iter().any(|child| !["ApplyServerSideEncryptionByDefault", "BucketKeyEnabled", "BlockedEncryptionTypes"].contains(&child.name.as_str())) {
+        return Err(CodecError::malformed_xml("the body contains an unknown element"));
+    }
     if let Some(child) = node.child("ApplyServerSideEncryptionByDefault") {
         shape.apply_server_side_encryption_by_default = Some(read_server_side_encryption_by_default(child)?);
     }

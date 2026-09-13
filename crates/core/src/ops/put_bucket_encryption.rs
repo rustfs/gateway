@@ -31,10 +31,9 @@
 //!
 //! The decoder refuses a body that is not XML, a wrong root, and a document with no `Rule` —
 //! `Rules` is a required member, so clearing the configuration is spelled
-//! `DeleteBucketEncryption`, never an empty document. It does **not** refuse an element it does
-//! not know (`q-enc-0006`) and does not bound the rule list (`q-enc-0008`): the stored
-//! configuration is re-parsed on every future release, and a decoder that got stricter would
-//! silently turn default encryption off with no symptom until objects land unencrypted.
+//! `DeleteBucketEncryption`, never an empty document. Unknown request elements are refused
+//! (`q-enc-0006`), while the rule list remains unbounded (`q-enc-0008`). Persisted configuration
+//! reads use separate compatibility codecs; their leniency does not govern HTTP writes.
 //! Semantic refusals — an out-of-set `SSEAlgorithm`, a `KMSMasterKeyID` beside a non-KMS
 //! algorithm — are
 //! [`shared::encryption::validate_encryption`](super::shared::encryption::validate_encryption)'s

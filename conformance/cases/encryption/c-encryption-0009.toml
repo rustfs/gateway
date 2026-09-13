@@ -1,28 +1,42 @@
 [case]
 id = "c-encryption-0009"
 schema_version = 1
-title = "An unknown element inside a Rule is skipped on the write and absent from the read"
+title = "An unknown encryption setting is refused without replacing the existing configuration"
 rationale = """
-AWS ignores unknown elements in request XML, and this family inherits the leniency for the same reason lifecycle did: the stored document is re-parsed by every future release, and a decoder that refuses what it does not recognise would silently turn default encryption off the day AWS adds a member — the fail-open persistence path downgrades an unparseable document to no document. The element is skipped, not stored: the read-back golden proves the document came out without it, so the leniency never becomes an invisible round-trip of unvalidated bytes."""
-polarity = "positive"
+Security HTTP writes must not silently discard a setting the caller expects to enforce. Establish a known configuration, refuse an unknown field, then read the original configuration. Persisted metadata compatibility is tested separately; this request path must not inherit its leniency."""
+polarity = "negative"
 operation = "PutBucketEncryption"
 tags = ["encryption", "xml", "wire-bytes"]
 timeout_ms = 10000
 quirks = ["q-enc-0006"]
 
 [[case.evidence]]
-url = "https://github.com/s3s-project/s3s/issues/613"
-summary = "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match."
-kind = "s3s-issue"
+url = "https://github.com/rustfs/gateway/blob/50adc72e/docs/adr/ADR-0007-ext-field-codec.md"
+summary = "The security request policy rejects unknown unregistered fields while persisted reads retain their separate compatibility boundary."
+kind = "other"
 
 [[case.evidence]]
-url = "https://github.com/s3s-project/s3s/pull/617"
-summary = "The upstream change that makes unknown request elements a skip rather than an error."
-kind = "s3s-pr"
-
+url = "https://github.com/rustfs/gateway/blob/50adc72e/docs/adr/0018-dialect-vtables-stand-after-adr-0010.md"
+summary = "The accepted amendment retains ADR-0007's security codec policy independently of request-carrier layout."
+kind = "other"
 
 [[setup.buckets]]
 name = "conf-encryption"
+
+[[exchanges]]
+name = "establish-known-configuration"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "6vzSAkrj6gUU1ZdQlOJRWQ==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
 
 [[exchanges]]
 name = "put-with-unknown-element"
@@ -36,8 +50,12 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 
 [exchanges.expect]
 kind = "response"
-status = 200
+status = 400
 connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
 
 [[exchanges]]
 name = "read-back"

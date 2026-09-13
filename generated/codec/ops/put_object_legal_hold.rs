@@ -100,6 +100,9 @@ impl OperationCodec for dto::PutObjectLegalHold {
 /// body and a bare one decode identically.
 fn read_object_lock_legal_hold(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ObjectLockLegalHold, CodecError> {
     let mut shape = dto::ObjectLockLegalHold { ..Default::default() };
+    if node.children.iter().any(|child| !["Status"].contains(&child.name.as_str())) {
+        return Err(CodecError::malformed_xml("the body contains an unknown element"));
+    }
     if let Some(raw) = node.child_text("Status") {
         shape.status = Some(dto::Status::custom(raw.to_owned()));
     }

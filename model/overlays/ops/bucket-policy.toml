@@ -178,7 +178,7 @@ error_codes = ["NoSuchBucket", "AccessDenied", "MalformedXML", "InvalidArgument"
 url_encoded_fields = []
 input_hot = ["PublicAccessBlockConfiguration"]
 output_hot = []
-quirk_refs = ["q-pab-0002", "q-pab-0004"]
+quirk_refs = ["q-pab-0002", "q-pab-0004", "q-pab-0005"]
 
 # =============================================================================================
 # DeletePublicAccessBlock
