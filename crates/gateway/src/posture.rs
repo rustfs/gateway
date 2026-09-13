@@ -21,9 +21,10 @@
 
 use std::collections::BTreeSet;
 
-use rustfs_gateway_core::{InstalledClaim, OperationSpec, Router};
 use rustfs_gateway_sig::{OperationFloor, SecurityFloor};
 
+// The start-up report's facade: `crate::builder` asks this module for both lines.
+pub(crate) use crate::dialect_posture::log_dialect_posture;
 use crate::ext::{CredentialGuardConfig, Rate};
 
 /// Security-sensitive assembly configuration for a start-up report, not runtime observations.
@@ -107,7 +108,7 @@ impl core::fmt::Display for SecurityPosture {
     }
 }
 
-fn format_names(names: &BTreeSet<&'static str>) -> String {
+pub(crate) fn format_names(names: &BTreeSet<&'static str>) -> String {
     names.iter().copied().collect::<Vec<_>>().join(",")
 }
 
@@ -161,86 +162,11 @@ pub(crate) fn log_startup_posture<'a>(
     );
 }
 
-/// The dialect half of the start-up report (ADR-0024): every path prefix a dialect took away from
-/// S3 routing, as `prefix@dialect`, every operation whose handler may be handed the caller's
-/// secret, and whether the assembly widened that to every operation.
-///
-/// A line of its own rather than two more fields on `SECURITY_POSTURE`, whose exact shape the
-/// dry-run and its guard pin; this one is new, and says so by its tag.
-pub(crate) fn render_dialect_posture<'a>(
-    claims: impl Iterator<Item = &'a InstalledClaim>,
-    caller_secret_ops: impl Iterator<Item = &'static str>,
-    every_operation: bool,
-) -> String {
-    let claims: BTreeSet<String> = claims
-        .map(|installed| format!("{}@{}", installed.claim.prefix, installed.dialect))
-        .collect();
-    let caller_secret_ops: BTreeSet<&'static str> = caller_secret_ops.collect();
-    format!(
-        "DIALECT_POSTURE claimed_prefixes=[{}] caller_secret_ops=[{}] caller_secret_scope={}",
-        claims.into_iter().collect::<Vec<_>>().join(","),
-        format_names(&caller_secret_ops),
-        if every_operation { "every-operation" } else { "opted-in" },
-    )
-}
-
-/// Writes [`render_dialect_posture`] for an assembled router to the start-up log.
-pub(crate) fn log_dialect_posture(router: &Router, every_operation: bool) {
-    let registry = router.registry();
-    let caller_secret_ops = registry
-        .names()
-        .filter(|name| registry.get(name).is_some_and(OperationSpec::receives_caller_secret));
-    eprintln!(
-        "{}",
-        render_dialect_posture(router.claims().claims().iter(), caller_secret_ops, every_operation)
-    );
-}
-
 #[cfg(test)]
 mod tests {
-    use rustfs_gateway_core::{InstalledClaim, PathClaim};
     use rustfs_gateway_sig::{OperationFloor, SecurityFloor, SigService};
 
-    use super::{render_dialect_posture, render_startup_posture};
-
-    const EVIDENCE: &[&str] = &["https://github.com/rustfs/backlog/issues/1744"];
-
-    fn installed(dialect: &'static str, prefix: &'static str) -> InstalledClaim {
-        InstalledClaim {
-            dialect,
-            claim: PathClaim {
-                prefix,
-                reason: "fixture",
-                evidence: EVIDENCE,
-            },
-        }
-    }
-
-    /// Positive — every claim and every opted-in operation is named, sorted.
-    #[test]
-    fn the_dialect_report_names_every_claim_and_every_secret_operation() {
-        let claims = [installed("rustfs", "/rustfs/admin"), installed("rustfs", "/minio/admin")];
-        let report = render_dialect_posture(claims.iter(), ["rustfs:AddServiceAccount"].into_iter(), false);
-        assert_eq!(
-            report,
-            "DIALECT_POSTURE claimed_prefixes=[/minio/admin@rustfs,/rustfs/admin@rustfs] caller_secret_ops=[rustfs:AddServiceAccount] caller_secret_scope=opted-in"
-        );
-    }
-
-    /// Negative — an assembly with no claim and no opt-in says so, rather than omitting the line.
-    #[test]
-    fn a_dialect_report_with_nothing_installed_prints_empty_lists() {
-        let report = render_dialect_posture(core::iter::empty(), core::iter::empty(), false);
-        assert_eq!(
-            report,
-            "DIALECT_POSTURE claimed_prefixes=[] caller_secret_ops=[] caller_secret_scope=opted-in"
-        );
-        let widened = render_dialect_posture(core::iter::empty(), core::iter::empty(), true);
-        assert_eq!(
-            widened,
-            "DIALECT_POSTURE claimed_prefixes=[] caller_secret_ops=[] caller_secret_scope=every-operation"
-        );
-    }
+    use super::render_startup_posture;
 
     #[test]
     fn the_startup_report_names_each_security_sensitive_dimension() {

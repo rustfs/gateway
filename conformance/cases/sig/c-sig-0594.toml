@@ -38,19 +38,34 @@ name = "conf-sig"
 method = "PUT"
 target = "/conf-sig/presigned-unsigned-ssec.bin"
 headers = { "x-amz-server-side-encryption-customer-algorithm" = "AES256", "x-amz-server-side-encryption-customer-key" = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "x-amz-server-side-encryption-customer-key-md5" = "tP/LI3N87DFaSk0aoqYgzg==" }
-body = { size = 16 }
 sign = { mode = "presigned_v4", service = "s3", region = "us-east-1", credential = "valid", expires_s = 60, signed_headers = ["host"] }
+
+# Paced like c-sig-0001, so the refusal arrives before the 16-byte payload does. Sent all at once,
+# the unread bytes are still in the server's receive buffer when it closes, and Linux turns that
+# close into a RST, which the runner correctly reports as `reset` rather than `closed`.
+[[request.chunks]]
+utf8 = "unsigned"
+delay_ms = 300
+
+[[request.chunks]]
+utf8 = "-ssec-ok"
+delay_ms = 300
 
 [expect]
 kind = "response"
 status = 403
-# Refused before the body is read, so the connection cannot be reused (c-sig-0001's shape).
-connection_after = "closed"
 headers_absent = ["x-amz-server-side-encryption-customer-key", "x-amz-server-side-encryption-customer-key-md5"]
 
 [expect.error]
 code = "SignatureDoesNotMatch"
 request_id_present = true
+
+# Refused before the body is read (c-sig-0001's shape). This is asserted as request progress,
+# which every transport measures, rather than as `connection_after = "closed"`, which the
+# in-process target behind conformance/baseline.json reports as `open` by construction.
+[expect.request_progress]
+body_bytes_sent_at_response = 0
+body_fully_sent = false
 
 [expect.body]
 not_contains_utf8 = ["AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "tP/LI3N87DFaSk0aoqYgzg=="]

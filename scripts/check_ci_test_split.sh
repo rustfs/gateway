@@ -228,12 +228,12 @@ require_equal(error_status_steps.last.keys, ["name", "run"],
               "error-status-self-test command can skip or hide failure")
 
 workspace_runs = [<<~'RUN', <<~'RUN', <<~'RUN']
-  scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types
+  scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig
 RUN
   scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c 'cargo test --package rustfs-gateway-conformance && cargo check --package rustfs-gateway'
   scripts/ci_budget.sh 60 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 RUN
-  scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c 'cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway'
+  scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c 'cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'
 RUN
 signing_suite_run = <<~'RUN'
   scripts/ci_budget.sh 180 "signing suite build" cargo build --package xtask --bin xtask

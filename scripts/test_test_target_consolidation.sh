@@ -77,39 +77,27 @@ verify_restore_control() {
     printf '%s\n' '  ok   sandbox restore handles tracked, untracked, and magic paths'
 }
 
-expect_fail() {
-    local description="$1" mutation="$2"
-    local rc=0
+# One runner for both directions: `expected` is `fail` (the guard must reject the mutation) or
+# `pass` (it must accept it). Everything else about a case is identical either way.
+run_case() {
+    local expected="$1" description="$2" mutation="$3"
+    local rc=0 outcome=pass
     cases=$((cases + 1))
     reset_sandbox
     (cd "$SANDBOX" && "$mutation")
     GATEWAY_CHECK_ROOT="$SANDBOX" bash "$SANDBOX/scripts/check_test_target_consolidation.sh" \
         >/dev/null 2>&1 || rc=$?
     reset_sandbox
-    if [[ "$rc" -ne 0 ]]; then
+    [[ "$rc" -eq 0 ]] || outcome=fail
+    if [[ "$outcome" == "$expected" ]]; then
         printf '  ok   %s\n' "$description"
     else
         printf '  FAIL %s\n' "$description" >&2
         failures=$((failures + 1))
     fi
 }
-
-expect_pass() {
-    local description="$1" mutation="$2"
-    local rc=0
-    cases=$((cases + 1))
-    reset_sandbox
-    (cd "$SANDBOX" && "$mutation")
-    GATEWAY_CHECK_ROOT="$SANDBOX" bash "$SANDBOX/scripts/check_test_target_consolidation.sh" \
-        >/dev/null 2>&1 || rc=$?
-    reset_sandbox
-    if [[ "$rc" -eq 0 ]]; then
-        printf '  ok   %s\n' "$description"
-    else
-        printf '  FAIL %s\n' "$description" >&2
-        failures=$((failures + 1))
-    fi
-}
+expect_fail() { run_case fail "$@"; }
+expect_pass() { run_case pass "$@"; }
 
 if ! bash "$REPO_ROOT/scripts/check_test_target_consolidation.sh" >/dev/null; then
     printf '%s\n' 'target-consolidation positive control failed' >&2
@@ -795,6 +783,10 @@ mut_gateway_declaration_outside_a_literal() {
     printf '\n#[path = "../tests/integration.rs"]\nmod plain;\n' >>crates/gateway/tests/facade_probe.rs
 }
 expect_fail 'the same declaration outside a literal is still caught' mut_gateway_declaration_outside_a_literal
+
+# azc_* shares compile_fail/ with host_resolver_*; a directory-keyed fixture map checked only one.
+mut_gateway_azc_pair_mismatched() { mv crates/gateway/tests/compile_fail/azc_0016_denial_code{,s}.stderr; }
+expect_fail 'a mismatched azc_* source/golden pair is rejected' mut_gateway_azc_pair_mismatched
 
 printf '%s case(s), %s failure(s)\n' "$cases" "$failures"
 [[ "$failures" -eq 0 ]]

@@ -16888,7 +16888,7 @@ expect_fail check_ci_test_split.sh \
     'the third workspace test job being renamed away' mut_ci_third_workspace_job_missing
 
 mut_ci_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types' 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job running only one package' mut_ci_workspace_command_weakened
@@ -16907,20 +16907,20 @@ expect_fail check_ci_test_split.sh \
     mut_ci_second_workspace_gateway_prebuild_dropped
 
 mut_ci_third_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the third workspace shard running the wrong package' mut_ci_third_workspace_command_weakened
 
 mut_ci_third_workspace_compat_feature_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types'
 }
 
 # The move of `rustfs-gateway` out of the shard that ran out of time and into the shard that was
 # never above 4% of its clock is the whole point of the rebalance. A shard 3 that quietly drops it
 # again would leave the gateway package tested nowhere while all three jobs stayed green.
 mut_ci_third_workspace_gateway_package_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s'
 }
 expect_fail check_ci_test_split.sh \
     'the third workspace shard dropping the gateway package the second one handed it' \
@@ -16928,6 +16928,15 @@ expect_fail check_ci_test_split.sh \
 expect_fail check_ci_test_split.sh \
     'the types tests losing the workspace compat-s3s feature graph' \
     mut_ci_third_workspace_compat_feature_dropped
+
+# Shard 1 excludes the sig package because shard 3 runs it; a shard 3 that stops running it would
+# leave the sig tests running nowhere while all three jobs stayed green.
+mut_ci_third_workspace_sig_package_dropped() {
+    replace_ci_text 'cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'cargo test --package rustfs-gateway'\'''
+}
+expect_fail check_ci_test_split.sh \
+    'the third workspace shard dropping the sig package the first one handed it' \
+    mut_ci_third_workspace_sig_package_dropped
 
 mut_ci_handlers_facade_fixture_removed() {
     replace_ci_text '          scripts/ci_budget.sh 60 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
@@ -16948,8 +16957,8 @@ expect_fail check_ci_test_split.sh \
     mut_ci_handlers_facade_fixture_moved_before_gateway_prebuild
 
 mut_ci_workspace_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types' \
-        '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types || true'
+    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' \
+        '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig || true'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job swallowing a failure or timeout' mut_ci_workspace_failure_swallowed
@@ -21208,10 +21217,12 @@ from pathlib import Path
 
 path = Path("crates/core/src/registry/reject.rs")
 text = path.read_text()
-subject = "        .handler_deadline_class(HandlerDeadlineClass::Standard)\n"
+# Anchored on the `SPEC` builder: #788 added `SECRET_HUNGRY_SPEC` with the same class line.
+builder = '    static SPEC: OperationSpec = OperationSpec::builder("WriteGetObjectResponse", 200, None)\n'
+subject = builder + "        .handler_deadline_class(HandlerDeadlineClass::Standard)\n"
 if text.count(subject) != 1:
     raise SystemExit("missing unique final-batch deadline removal subject")
-path.write_text(text.replace(subject, "", 1))
+path.write_text(text.replace(subject, builder, 1))
 PYEOF
 }
 expect_fail_with_diagnostic check_handler_deadline_class.sh \
