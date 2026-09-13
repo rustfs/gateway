@@ -467,14 +467,18 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # crates/gateway/tests/request_context_runtime.rs.
 # explicit=36: the 36th is `SecretHungry`'s spec in crates/core/src/registry/reject.rs, the
 # rowless `WriteGetObjectResponse` authority fixture again with the caller-secret opt-in (ADR-0024).
-if central_builders != 102 or explicit_builders != 36:
+# explicit=39: the 37th to 39th are ADR-0025's vendor fixtures, each one `const fn spec` stating
+# Standard: the `rustfs:` class operations in crates/goldens/src/rustfs_admin_proof/classes.rs, the
+# `acme:R*` rule fixtures in crates/core/src/registry/reject_rule_tests.rs, and the `example:*` pair
+# in crates/gateway/tests/action_rules_runtime.rs.
+if central_builders != 102 or explicit_builders != 39:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=36"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=39"
     )
 
 print(
-    "check_handler_deadline_class: 143 repository builder sites are inventoried "
-    "(138 classified: 102 central standard, 36 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 146 repository builder sites are inventoried "
+    "(141 classified: 102 central standard, 39 explicit; 5 authority tests)"
 )
 PY

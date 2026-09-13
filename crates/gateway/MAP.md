@@ -11,7 +11,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/lib.rs` | Modules and public re-exports | A downstream caller cannot name a type |
 | `src/builder.rs`, `src/builder/assembly_update.rs` | Registration and validated initial or replacement assemblies | Adding a knob or diagnosing candidate validation |
 | `src/config.rs`, `src/routing.rs` | One atomic settings, routing, and middleware snapshot | Updating a live generation or checking one-load-per-request |
-| `src/service.rs`, `src/service/update.rs` | Ordered pipeline and atomic assembly publication; ADR-0024's service-level addressing, secret opt-in and typed path values are decided in `src/routed_facts.rs` | Moving a stage, replacing middleware, or tracing a response |
+| `src/service.rs`, `src/service/update.rs` | Ordered pipeline and atomic assembly publication; ADR-0024's service-level addressing, secret opt-in and typed path values, and ADR-0025's bound bucket and subject, are decided in `src/routed_facts.rs`; the route stage asks one question per action | Moving a stage, replacing middleware, or tracing a response |
 | `src/service_tests.rs` | The pipeline's own unit suite, split out at the 800-line limit | Changing what is decidable without a request |
 | `src/adapt.rs` | tower and hyper adapters | Wiring a server or checking `Infallible` |
 | `src/conn/**` | Optional plaintext HTTP/1.1 request framing and response transport | Auditing the self-held socket path or adding file-region transfer |

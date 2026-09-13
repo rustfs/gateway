@@ -353,6 +353,19 @@ pub(crate) fn key_rejected(rejection: NameRejection) -> CodecError {
     CodecError::new(rejection.key_error_code(), rejection.reason()).about("Key")
 }
 
+/// A raw bucket label under exactly the rules a path-style S3 request's first segment meets.
+///
+/// For a claimed row that binds a template parameter as its authorisation bucket (ADR-0025): the
+/// raw segment goes through this, never the decoded parameter value, so an escaped spelling is
+/// refused here exactly as it is for `/{bucket}`.
+///
+/// # Errors
+///
+/// `InvalidBucketName`, about `Bucket`, never echoing the value.
+pub fn bucket_label(raw: &str, names: &NamePolicy) -> Result<BucketName, CodecError> {
+    bucket_of(raw, names)
+}
+
 fn bucket_of(raw: &str, names: &NamePolicy) -> Result<BucketName, CodecError> {
     // A bucket label is never percent-encoded on the wire: the naming rules admit only characters
     // that need no escaping, so a `%` here is a spelling no client produces — and the floor

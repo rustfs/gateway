@@ -586,7 +586,7 @@ fn an_action_the_overlay_does_not_record_is_refused() {
         first_dialect_error(result),
         DialectError::ActionMismatch {
             name: "acme:HeadObjectReport",
-            declared: "acme:SomethingElse",
+            declared: "acme:SomethingElse".to_owned(),
             overlay: "acme:HeadObjectReport",
         }
     );

@@ -85,11 +85,31 @@ pub struct ClaimedEntry {
     entry: RouteEntry,
     template: PathTemplate,
     claim: PathClaim,
+    bucket_param: Option<&'static str>,
 }
 
 impl ClaimedEntry {
     pub(crate) fn new(entry: RouteEntry, template: PathTemplate, claim: PathClaim) -> Self {
-        Self { entry, template, claim }
+        Self {
+            entry,
+            template,
+            claim,
+            bucket_param: None,
+        }
+    }
+
+    /// This row, binding its template parameter `param` as the authorisation bucket (ADR-0025).
+    /// The dialect checks that the template has the parameter before it builds one.
+    pub(crate) const fn with_bucket_param(mut self, param: Option<&'static str>) -> Self {
+        self.bucket_param = param;
+        self
+    }
+
+    /// The template parameter whose raw segment is the request's bucket, when the operation is
+    /// authorised on a bucket; `None` for a service-level claimed row.
+    #[must_use]
+    pub const fn bucket_param(&self) -> Option<&'static str> {
+        self.bucket_param
     }
 
     /// The route entry: the operation, its precedence and its method, query and header predicates.

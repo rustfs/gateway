@@ -39,6 +39,7 @@ fn request<'a>(caller: Option<&'a Identity>, shape: ResourceShape) -> AuthzReque
         route_key: None,
         identity: caller,
         target_origin: TargetOrigin::Path,
+        subject: None,
     }
 }
 

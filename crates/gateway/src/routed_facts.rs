@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! What routing decided about a request beyond its operation (ADR-0024): whether it is
-//! service-level, the target every later stage addresses, whether its handler may hold the
-//! caller's secret, and a claimed row's typed path values.
+//! What routing decided about a request beyond its operation (ADR-0024, ADR-0025): whether it is
+//! service-level, the target every later stage addresses, a claimed row's bound bucket, whether its
+//! handler may hold the caller's secret, a claimed row's typed path values, and the subject the
+//! request names.
 //!
-//! Responsible for: [`RoutedFacts::of`], one pure function over the dispatch and the raw path.
+//! Responsible for: [`RoutedFacts::of`], one pure function over the dispatch, the raw target and
+//! the deployment's name policy.
 //! NOT responsible for: routing (`rustfs-gateway-core`'s router), dropping the secret
-//! (`crate::service`, on the line that reads the verdict), or rendering a refusal.
+//! (`crate::service`, on the line that reads the verdict), asking the authorizer, or rendering a
+//! refusal.
 //! Upstream: `rustfs_gateway_core::Dispatch`, `crate::dispatch::target_of`. Downstream:
 //! `crate::service`.
 //!
@@ -29,8 +32,18 @@
 //! path-style `/rustfs/admin/…` from reaching the governor, both authorizer stages, the audit
 //! event and the handler context as bucket `rustfs`. The raw path is untouched, so the signature
 //! and the context still read it exactly as it arrived.
+//!
+//! # Why a bound bucket is read from the raw segment
+//!
+//! A claimed row may bind one template parameter as its bucket (`/quota/{bucket}`). The segment
+//! then goes through `bucket_label`, the very function a path-style `/{bucket}` meets, *before*
+//! it is decoded: the S3 rules admit no character that needs escaping, so an escaped spelling is
+//! refused here exactly as it is there, and the governor, both authorizer stages and the handler
+//! see one `BucketName`.
 
-use rustfs_gateway_core::{CodecError, Dispatch, PathParams, ResourceShape, TargetKind};
+use rustfs_gateway_core::codec::bucket_label;
+use rustfs_gateway_core::{CodecError, Dispatch, PathParams, ResourceShape, Subject, TargetKind};
+use rustfs_gateway_types::{BucketName, NamePolicy};
 
 use crate::dispatch::target_of;
 
@@ -38,12 +51,19 @@ use crate::dispatch::target_of;
 pub(crate) struct RoutedFacts {
     /// No bucket and no key reach any later stage.
     pub(crate) service_level: bool,
-    /// The target every later stage addresses: `Service` for a service-level request.
+    /// A claimed row answered: its path is not S3 addressing, so no bucket CORS applies.
+    pub(crate) claimed: bool,
+    /// The target every later stage addresses: `Service` for a service-level request, `Bucket`
+    /// for a claimed row that binds its bucket.
     pub(crate) target: TargetKind,
+    /// The bucket a claimed row's template parameter names, validated as S3 validates one.
+    pub(crate) bound_bucket: Option<BucketName>,
     /// Whether the routed operation opted in to the caller's secret.
     pub(crate) hands_caller_secret: bool,
     /// The claimed row's decoded values; none outside a claim.
     pub(crate) path_params: PathParams,
+    /// The account the request acts on, for an operation that declares a subject rule.
+    pub(crate) subject: Option<Subject>,
 }
 
 impl RoutedFacts {
@@ -51,14 +71,10 @@ impl RoutedFacts {
     ///
     /// # Errors
     ///
-    /// A `400 InvalidArgument` naming the path parameter whose value no handler may be handed. The
-    /// message is a constant and never carries the value.
-    pub(crate) fn of(dispatched: &Dispatch<'_>, raw_path: &str) -> Result<Self, CodecError> {
-        let service_level = dispatched.claimed.is_some()
-            || dispatched
-                .spec
-                .auth
-                .is_some_and(|auth| auth.resource == ResourceShape::Service);
+    /// A `400 InvalidArgument` naming the path parameter or the subject parameter whose value no
+    /// handler may be handed, or a `400 InvalidBucketName` for a bound bucket that breaks the S3
+    /// naming rules. Every message is a constant and never carries the value.
+    pub(crate) fn of(dispatched: &Dispatch<'_>, raw_path: &str, raw_query: &str, names: &NamePolicy) -> Result<Self, CodecError> {
         let path_params = match dispatched.claimed {
             Some(claimed) => claimed.template().extract(raw_path).map_err(|error| {
                 let refusal = CodecError::invalid_argument(error.message());
@@ -69,15 +85,55 @@ impl RoutedFacts {
             })?,
             None => PathParams::none(),
         };
+        let bound_bucket = match dispatched
+            .claimed
+            .and_then(|claimed| Some((claimed, claimed.bucket_param()?)))
+        {
+            Some((claimed, param)) => {
+                // The row matched, so the template has the parameter; a `None` here is refused
+                // rather than read as "no bucket", which would make the request service-level.
+                let raw = claimed
+                    .template()
+                    .raw_value(raw_path, param)
+                    .ok_or_else(|| CodecError::invalid_argument("the bound bucket parameter matched nothing").about(param))?;
+                Some(bucket_label(raw, names)?)
+            }
+            None => None,
+        };
+        let subject = match dispatched.spec.auth.and_then(|auth| auth.subject()) {
+            Some(rule) => {
+                let subject = rule.extract(raw_query).map_err(|error| {
+                    let refusal = CodecError::invalid_argument(error.message());
+                    match rule {
+                        rustfs_gateway_core::SubjectRule::Query { param, .. } => refusal.about(param),
+                        rustfs_gateway_core::SubjectRule::Caller => refusal,
+                    }
+                })?;
+                Some(subject)
+            }
+            None => None,
+        };
+        let service_level = bound_bucket.is_none()
+            && (dispatched.claimed.is_some()
+                || dispatched
+                    .spec
+                    .auth
+                    .is_some_and(|auth| auth.resource == ResourceShape::Service));
+        let target = if service_level {
+            TargetKind::Service
+        } else if bound_bucket.is_some() {
+            TargetKind::Bucket
+        } else {
+            target_of(dispatched.entry)
+        };
         Ok(Self {
             service_level,
-            target: if service_level {
-                TargetKind::Service
-            } else {
-                target_of(dispatched.entry)
-            },
+            claimed: dispatched.claimed.is_some(),
+            target,
+            bound_bucket,
             hands_caller_secret: dispatched.spec.receives_caller_secret(),
             path_params,
+            subject,
         })
     }
 }

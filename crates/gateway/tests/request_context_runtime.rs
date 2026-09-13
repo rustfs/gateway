@@ -227,6 +227,7 @@ fn probe_dialect() -> Dialect {
             precedence: 10,
             rows: PROBE_ROWS,
             shadows: &[],
+            bucket_param: None,
         })
         .build()
         .expect("the probe's record and declaration agree")

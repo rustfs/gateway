@@ -223,6 +223,25 @@ operation at one or more `ClaimedRow { template, selector }` inside it.
 - **Reported.** Start-up prints `DIALECT_POSTURE claimed_prefixes=[prefix@dialect,…]
   caller_secret_ops=[…]` beside `SECURITY_POSTURE`.
 
+## Action rules, subjects and bound buckets (ADR-0025)
+
+- **Several actions.** `AuthRequirement::any_of(&[..], shape)` or `all_of(&[..], shape)`. The
+  facade asks the authorizer one question per action and combines the answers, failing closed:
+  any-of allows on any `Allow`, all-of refuses on any refusal, and a count mismatch is
+  `Indeterminate`. The overlay's `action` spells the rule: `anyOf(admin:A, admin:B)`.
+- **Whose account.** `.about_subject(SubjectRule::Caller)` for an operation on the caller's own
+  account, whose action must be a label in the dialect's own namespace (`rustfs:SelfAccountInfo`),
+  or `.about_subject(SubjectRule::Query { param, when_absent })` for one that names an account in
+  the query. The subject is decoded once before authentication and refused when repeated,
+  escaped in its key, ambiguous or malformed. Both authorizer stages read it as
+  `AuthzRequest::subject`, and the handler reads it as `context.subject()`. An anonymous caller is
+  never asked about. Whether a named subject is the caller is the authorizer's decision. The
+  overlay spells it: `admin:GetUser about query(accessKey, absent=refused)`.
+- **A bound bucket.** `ClaimedRoute { bucket_param: Some("bucket"), .. }` on an operation declaring
+  `ResourceShape::Bucket`, where every row's template has `{bucket}`. The raw segment meets the
+  path-style S3 bucket rules before authentication, and the governor, the authorizer and the
+  handler see that bucket. The overlay's selector ends in `⇒ BucketParam("bucket")`.
+
 ## Clean-room policy
 
 **Never read MinIO server source when implementing MinIO-compatible behaviour.** The same applies to

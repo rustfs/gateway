@@ -133,6 +133,15 @@ impl ContextRequest {
         Self::new(Method::PUT, host, path, "", body)
     }
 
+    /// A bodiless `POST` of `path?query` on `host`.
+    #[allow(
+        dead_code,
+        reason = "only the RustFS admin proof sends one, through the s3s_f3e17541 compilation"
+    )]
+    pub(crate) fn post(host: &str, path: &str, query: &str) -> Self {
+        Self::new(Method::POST, host, path, query, b"")
+    }
+
     /// A bodiless `GET` of `path?query` on `host`.
     pub(crate) fn get(host: &str, path: &str, query: &str) -> Self {
         Self::new(Method::GET, host, path, query, b"")
