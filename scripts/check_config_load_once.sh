@@ -19,23 +19,126 @@ fail() {
 [[ -f "$RUNTIME_EVIDENCE" ]] || fail 'c-lim-0005 runtime evidence is missing'
 
 # rcu also exposes a current snapshot; only assembly, update, and final-drop sites may use it.
-actual="$({
-    cd "$ROOT_DIR"
-    grep -RInE '(\.|::)(load|load_full|rcu)([^[:alnum:]_]|$)' crates/gateway/src --include='*.rs' \
-        | cut -d: -f1,2 \
-        | LC_ALL=C sort
-} || true)"
-expected="$(grep -Ev '^[[:space:]]*(#|$)' "$ALLOWLIST" | LC_ALL=C sort)"
+# Every source line naming load, load_full or rcu is a ledger entry `path | enclosing fn | line`,
+# compared as a multiset. A line number is not part of it: an edit elsewhere in the file moves a
+# load without changing what it reads or where it runs (gateway#707, gateway#727). A new load, an
+# edited load line, a load moved into another function, or a repeat of a listed one still fails.
+python3 - "$ROOT_DIR" "$ALLOWLIST" <<'PY'
+from collections import Counter
+from pathlib import Path
+import re
+import sys
 
-[[ -n "$actual" ]] || fail 'no hot-configuration load exists'
-[[ "$actual" == "$expected" ]] || {
-    printf 'check_config_load_once: expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
-    exit 1
-}
-for snapshot_entry in 286 303; do
-    [[ "$(grep -c "^crates/gateway/src/service.rs:${snapshot_entry}$" <<<"$expected")" == 1 ]] \
-        || fail 'each request entry must allowlist exactly one assembly snapshot load'
-done
+root, allowlist = Path(sys.argv[1]), Path(sys.argv[2])
+load = re.compile(r"(\.|::)(load|load_full|rcu)([^A-Za-z0-9_]|$)")
+ident = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+whitespace = re.compile(r"\s*")
+raw_string = re.compile(r'[bc]?r(#*)"')
+
+
+def enclosing_functions(text, offsets):
+    """Name of the innermost `fn` whose body holds each offset; braces in comments, strings and
+    char literals do not count, so a test-local `impl` above an assertion does not claim it."""
+    pending_offsets = sorted(offsets)
+    owners, stack, pending, depth, i = {}, [], None, 0, 0
+    while True:
+        while pending_offsets and pending_offsets[0] <= i:
+            owners[pending_offsets.pop(0)] = stack[-1][0] if stack else "<no fn>"
+        if not pending_offsets or i >= len(text):
+            return owners
+        c = text[i]
+        if text.startswith("//", i):
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+        elif text.startswith("/*", i):
+            nesting, i = 1, i + 2
+            while i < len(text) and nesting:
+                if text.startswith("/*", i):
+                    nesting, i = nesting + 1, i + 2
+                elif text.startswith("*/", i):
+                    nesting, i = nesting - 1, i + 2
+                else:
+                    i += 1
+        elif match := raw_string.match(text, i):
+            close = '"' + match.group(1)
+            end = text.find(close, match.end())
+            i = len(text) if end < 0 else end + len(close)
+        elif c == '"':
+            i += 1
+            while i < len(text) and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+        elif c == "'":
+            if text.startswith("\\", i + 1):
+                end = text.find("'", i + 3)
+                i = len(text) if end < 0 else end + 1
+            elif text.startswith("'", i + 2):
+                i += 3
+            else:
+                i += 1  # a lifetime
+        elif word := ident.match(text, i):
+            i = word.end()
+            if word.group() == "fn":
+                name = ident.match(text, whitespace.match(text, i).end())
+                if name and name.start() > i:
+                    pending = (name.group(), depth)
+        else:
+            if c == "{":
+                if pending and pending[1] == depth:
+                    stack.append(pending)
+                    pending = None
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if stack and stack[-1][1] == depth:
+                    stack.pop()
+            elif c == ";" and pending and pending[1] == depth:
+                pending = None  # a bodiless trait method
+            i += 1
+
+
+actual = Counter()
+for path in sorted((root / "crates/gateway/src").rglob("*.rs")):
+    text = path.read_text(encoding="utf-8")
+    hits, offset = [], 0
+    for line in text.splitlines(keepends=True):
+        if match := load.search(line):
+            hits.append((offset + match.start(), line.strip()))
+        offset += len(line)
+    if not hits:
+        continue
+    owners = enclosing_functions(text, [start for start, _ in hits])
+    relative = path.relative_to(root).as_posix()
+    actual.update(f"{relative} | {owners[start]} | {line}" for start, line in hits)
+
+expected = Counter()
+for number, line in enumerate(allowlist.read_text(encoding="utf-8").splitlines(), 1):
+    entry = line.strip()
+    if not entry or entry.startswith("#"):
+        continue
+    if len(entry.split(" | ", 2)) != 3:
+        raise SystemExit(
+            f"check_config_load_once: scripts/config_load_allowlist.txt:{number} is not `path | enclosing fn | line`: {entry}"
+        )
+    expected[entry] += 1
+
+if not actual:
+    raise SystemExit("check_config_load_once: no hot-configuration load exists")
+if actual != expected:
+    lines = ["check_config_load_once: the hot-configuration load ledger drifted"]
+    for sign, heading, drift in (
+        ("+", "unlisted (a new load, an edited load line, or a load moved into this fn):", actual - expected),
+        ("-", "listed but absent (a removed load, an edited load line, or a load moved out of this fn):", expected - actual),
+    ):
+        if drift:
+            lines.append(f"  {heading}")
+            lines.extend(f"  {sign} {entry}" for entry in sorted(drift.elements()))
+    lines.append("  A listed load moved within its function never drifts; update the allowlist only for a reviewed load.")
+    raise SystemExit("\n".join(lines))
+for entry_fn in ("call", "call_monomorphic"):
+    if expected[f"crates/gateway/src/service.rs | {entry_fn} | let snapshot = self.inner.config.load_full();"] != 1:
+        raise SystemExit("check_config_load_once: each request entry must allowlist exactly one assembly snapshot load")
+PY
 
 # Every write to the one ConfigStore is an rcu except the single complete replacement. A settings
 # update and a registry update that each load, then store, can overwrite each other; no test can

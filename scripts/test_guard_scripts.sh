@@ -18023,6 +18023,27 @@ expect_fail check_config_load_once.sh \
     'a typed request stage dropping cancellation' mut_request_cancellation_stage_propagation_removed \
     'request cancellation does not cross every typed snapshot stage'
 
+# A mutation that also edits a listed load line stops at the load ledger and never reaches the rule
+# it targets. This rewrites the sandbox ledger to follow it, so the later rule is proved on its own.
+# An empty <old-entry> appends <new-entry>.
+config_load_ledger_edit() {
+    python3 - "$1" "$2" <<'PYEOF'
+from pathlib import Path
+import sys
+
+path = Path("scripts/config_load_allowlist.txt")
+old, new = sys.argv[1], sys.argv[2]
+lines = path.read_text().splitlines()
+if old:
+    if lines.count(old) != 1:
+        raise SystemExit(f"config-load ledger entry drifted: {old}")
+    lines[lines.index(old)] = new
+else:
+    lines.append(new)
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+
 mut_extension_config_load() {
     python3 - <<'PYEOF'
 import pathlib
@@ -18043,7 +18064,7 @@ PYEOF
 }
 expect_fail check_config_load_once.sh \
     'c-lim-0041 adding a hot-configuration load inside the extension tree' mut_extension_config_load \
-    'crates/gateway/src/ext/mod.rs:'
+    '+ crates/gateway/src/ext/mod.rs | c_lim_0041_illicit_config_load | let _snapshot = store.load_full();'
 
 mut_second_config_load() {
     python3 - <<'PYEOF'
@@ -18088,9 +18109,32 @@ if text.count(subject) != 2:
     raise SystemExit("request-entry assembly snapshot anchors drifted")
 path.write_text(text.replace(subject, replacement, 1))
 PYEOF
+    config_load_ledger_edit \
+        'crates/gateway/src/service.rs | call | let snapshot = self.inner.config.load_full();' \
+        'crates/gateway/src/service.rs | call | let snapshot = self.inner.config.load();'
 }
 expect_fail check_config_load_once.sh \
     'the dynamic request entry losing its owned assembly snapshot' mut_request_entry_routing_snapshot_borrowed \
+    'each request entry must allowlist exactly one assembly snapshot load'
+
+mut_request_entry_runtime_from_second_read() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "        let snapshot = self.inner.config.load_full();\n        let runtime = snapshot.runtime();\n"
+replacement = "        let snapshot = self.inner.config.load_full();\n        let runtime = self.inner.config.load_full().runtime();\n"
+if text.count(subject) != 2:
+    raise SystemExit("request-entry assembly snapshot anchors drifted")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+    config_load_ledger_edit '' \
+        'crates/gateway/src/service.rs | call | let runtime = self.inner.config.load_full().runtime();'
+}
+expect_fail check_config_load_once.sh \
+    'the dynamic request entry taking middleware from a second read the ledger was updated to allow' \
+    mut_request_entry_runtime_from_second_read \
     'dynamic and monomorphic request entries must each capture one owned assembly snapshot'
 
 mut_pipeline_routing_reload_added() {
@@ -18246,6 +18290,155 @@ PYEOF
 expect_fail check_config_load_once.sh \
     'a second hot-configuration read through a function item' mut_config_load_function_item
 
+# gateway#707 and gateway#727: lines added or removed elsewhere in a file moved listed loads and
+# failed the guard with no violation. The shift must pass, and the same shift carrying one more load
+# must not, so a guard stuck on either answer fails one of the two.
+mut_config_load_lines_shifted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+audit = Path("crates/gateway/src/ext/authz_audit.rs")
+for path in sorted(Path("crates/gateway/src").rglob("*.rs")):
+    if path != audit:
+        path.write_text("// line-shift control\n// line-shift control\n" + path.read_text())
+
+text = audit.read_text()
+subject = "        assert_eq!(sink.1.load(Ordering::SeqCst), 3);\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique authorization-audit load subject")
+before, after = text.split(subject)
+if before.count("\n\n") < 2:
+    raise SystemExit("authorization-audit shift subject has too few blank lines")
+audit.write_text(before.replace("\n\n", "\n", 2) + subject + after)
+
+path = Path("crates/gateway/src/ext/governor/default.rs")
+lines = path.read_text().splitlines(keepends=True)
+owner = [i for i, line in enumerate(lines) if "fn concurrent_callers_cannot_overdraw_the_atomic_aggregate_meter(" in line]
+if len(owner) != 1:
+    raise SystemExit("missing unique governor test subject")
+at = owner[0]
+while lines[at - 1].lstrip().startswith(("#[", "///")):
+    at -= 1
+lines.insert(at, "    #[test]\n    fn a_new_unit_test_above_a_listed_load() {\n        assert_eq!(1 + 1, 2);\n    }\n\n")
+path.write_text("".join(lines))
+PYEOF
+}
+expect_guard_pass check_config_load_once.sh \
+    'gateway#707 and gateway#727 line shifts that only move listed loads within their functions' \
+    mut_config_load_lines_shifted
+
+mut_config_load_lines_shifted_with_new_load() {
+    mut_config_load_lines_shifted
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "    pub fn limits(&self) -> &Limits {\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique service limits subject")
+path.write_text(text.replace(subject, subject + "        let _torn = self.inner.config.load_full();\n", 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'the same line shift carrying one new unlisted hot-configuration load' \
+    mut_config_load_lines_shifted_with_new_load \
+    '+ crates/gateway/src/service.rs | limits | let _torn = self.inner.config.load_full();'
+
+mut_config_load_lines_shifted_with_repeated_load() {
+    mut_config_load_lines_shifted
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/ext/governor/default.rs")
+text = path.read_text()
+subject = "        assert_eq!(admitted.load(Ordering::Relaxed), BURST as usize);\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique governor load subject")
+path.write_text(text.replace(subject, subject * 2, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'the same line shift carrying a repeat of a listed load in its own function' \
+    mut_config_load_lines_shifted_with_repeated_load \
+    '+ crates/gateway/src/ext/governor/default.rs | concurrent_callers_cannot_overdraw_the_atomic_aggregate_meter | assert_eq!(admitted.load(Ordering::Relaxed), BURST as usize);'
+
+# The owner of a load is found by counting braces; braces that are not code must not move it. Each
+# decoy closes a brace inside the dynamic entry above its snapshot load, so a lexer that counted any
+# one of them would end `call` early and hand its load to no function.
+mut_config_load_braces_in_literals() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "        let snapshot = self.inner.config.load_full();\n        let runtime = snapshot.runtime();\n        let mode = DynamicMode {\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique dynamic request entry subject")
+decoys = r'''        let _braces = ("}", r#"a "}" b"#, '}'); // }''' + "\n"
+decoys += "        /* } /* } */ } */\n"
+path.write_text(text.replace(subject, decoys + subject, 1))
+PYEOF
+}
+expect_guard_pass check_config_load_once.sh \
+    'braces inside strings, raw strings, chars and nested comments above the request entries' \
+    mut_config_load_braces_in_literals
+
+mut_config_load_line_edited_in_place() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/builder/assembly_update.rs")
+text = path.read_text()
+subject = "Arc::clone(&builder.config.load_full().config)"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique assembly-update load subject")
+path.write_text(text.replace(subject, "Arc::clone(&builder.config.load().config)", 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a listed load edited in place on its own line' mut_config_load_line_edited_in_place \
+    '- crates/gateway/src/builder/assembly_update.rs | into_snapshot | let config = Arc::clone(&builder.config.load_full().config);'
+
+mut_config_load_moved_to_another_fn() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+load = "        let snapshot = self.inner.config.load();\n"
+source = "    pub fn operations(&self) -> impl Iterator<Item = &'static str> {\n" + load
+target = "    pub fn limits(&self) -> &Limits {\n"
+if text.count(source) != 1 or text.count(target) != 1:
+    raise SystemExit("missing unique service move subjects")
+text = text.replace(source, source[: -len(load)], 1)
+path.write_text(text.replace(target, target + load, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a listed load moved into another function with its line unchanged' mut_config_load_moved_to_another_fn \
+    '+ crates/gateway/src/service.rs | limits | let snapshot = self.inner.config.load();'
+
+mut_request_entry_snapshot_renamed_out_of_call() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "    pub async fn call<B>(&self, request: Request<B>) -> Response<Body>\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique dynamic request entry subject")
+path.write_text(text.replace(subject, subject.replace("fn call<", "fn call_dynamic<"), 1))
+PYEOF
+    config_load_ledger_edit \
+        'crates/gateway/src/service.rs | call | let snapshot = self.inner.config.load_full();' \
+        'crates/gateway/src/service.rs | call_dynamic | let snapshot = self.inner.config.load_full();'
+}
+expect_fail check_config_load_once.sh \
+    'the request snapshot leaving the dynamic entry with the ledger updated to follow it' \
+    mut_request_entry_snapshot_renamed_out_of_call \
+    'each request entry must allowlist exactly one assembly snapshot load'
+
 mut_config_load_allowlist_deleted() {
     rm -f scripts/config_load_allowlist.txt
 }
@@ -18263,8 +18456,9 @@ PYEOF
 expect_fail check_config_load_once.sh \
     'a real request path dropping the decoded snapshot stage' mut_config_snapshot_stage_deleted
 
-# Same-line load-then-store rewrites keep every file:line in the load allowlist, so only the
-# write-primitive rule can see that a partial update may now overwrite a concurrent one.
+# A load-then-store rewrite edits a listed load line, which the load ledger rejects first. Each
+# mutation updates the ledger to follow it, so the write-primitive rule is proved to see on its own
+# that a partial update may now overwrite a concurrent one.
 mut_settings_update_load_then_store() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -18276,6 +18470,9 @@ if text.count(subject) != 1:
     raise SystemExit("missing mutation subject: the settings update's rcu")
 path.write_text(text.replace(subject, "        let current = self.store.load_full(); self.store.store({\n", 1))
 PYEOF
+    config_load_ledger_edit \
+        'crates/gateway/src/config.rs | store | self.store.rcu(|current| {' \
+        'crates/gateway/src/config.rs | store | let current = self.store.load_full(); self.store.store({'
 }
 expect_fail check_config_load_once.sh \
     'a settings update that loads then stores and can overwrite a concurrent registry update' \
@@ -18294,6 +18491,9 @@ if text.count(subject) != 1:
 replacement = "        let current = self.inner.config.load_full(); arc_swap::ArcSwapAny::store(&self.inner.config, {\n"
 path.write_text(text.replace(subject, replacement, 1))
 PYEOF
+    config_load_ledger_edit \
+        'crates/gateway/src/service/update.rs | replace_registry | self.inner.config.rcu(|current| {' \
+        'crates/gateway/src/service/update.rs | replace_registry | let current = self.inner.config.load_full(); arc_swap::ArcSwapAny::store(&self.inner.config, {'
 }
 expect_fail check_config_load_once.sh \
     'a registry update storing through UFCS and able to overwrite a concurrent settings update' \

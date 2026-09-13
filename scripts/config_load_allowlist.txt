@@ -1,49 +1,55 @@
-crates/gateway/src/builder.rs:662
-crates/gateway/src/builder/assembly_update.rs:137
-crates/gateway/src/clock.rs:338
-crates/gateway/src/commit.rs:606
-crates/gateway/src/commit.rs:609
-crates/gateway/src/commit.rs:635
-crates/gateway/src/commit.rs:640
-crates/gateway/src/config.rs:321
-crates/gateway/src/config.rs:391
-crates/gateway/src/config.rs:401
-crates/gateway/src/dispatch.rs:597
-crates/gateway/src/ext/authz_audit.rs:257
-crates/gateway/src/ext/cors.rs:108
-crates/gateway/src/ext/cors.rs:278
-crates/gateway/src/ext/cors.rs:295
-crates/gateway/src/ext/cors.rs:394
-crates/gateway/src/ext/cors.rs:456
-crates/gateway/src/ext/cors.rs:570
-crates/gateway/src/ext/cors.rs:595
-crates/gateway/src/ext/cors.rs:616
-crates/gateway/src/ext/cors.rs:627
-crates/gateway/src/ext/cors.rs:640
-crates/gateway/src/ext/cors.rs:670
-crates/gateway/src/ext/credential_guard.rs:143
-crates/gateway/src/ext/credential_guard.rs:144
-crates/gateway/src/ext/credential_guard.rs:145
-crates/gateway/src/ext/credential_guard.rs:146
-crates/gateway/src/ext/credential_guard.rs:293
-crates/gateway/src/ext/credential_guard.rs:313
-crates/gateway/src/ext/governor.rs:390
-crates/gateway/src/ext/governor.rs:391
-crates/gateway/src/ext/governor/default.rs:624
-crates/gateway/src/ext/governor/meter.rs:63
-crates/gateway/src/ext/governor/meter.rs:90
-crates/gateway/src/ext/oplayer.rs:288
-crates/gateway/src/conn/metrics.rs:128
-crates/gateway/src/operation_mode.rs:290
-crates/gateway/src/probe.rs:60
-crates/gateway/src/probe.rs:69
-crates/gateway/src/request_config.rs:63
-crates/gateway/src/request_deadline.rs:301
-crates/gateway/src/request_deadline.rs:308
-crates/gateway/src/service/update.rs:33
-crates/gateway/src/service/update.rs:61
-crates/gateway/src/service.rs:234
-crates/gateway/src/service.rs:248
-crates/gateway/src/service.rs:273
-crates/gateway/src/service.rs:286
-crates/gateway/src/service.rs:303
+# Every source line under crates/gateway/src that names load, load_full or rcu, one per line, as
+#   path | innermost enclosing fn | the source line, trimmed
+# scripts/check_config_load_once.sh compares the tree with this list as a multiset: a line listed
+# twice occurs twice. There is no line number, so an unrelated edit that moves a load within its
+# function needs no change here. Adding, editing, or moving a load into another function does:
+# that is the review point for a second hot-configuration read within one request.
+crates/gateway/src/builder/assembly_update.rs | into_snapshot | let config = Arc::clone(&builder.config.load_full().config);
+crates/gateway/src/builder.rs | build | self.config.rcu(|current| {
+crates/gateway/src/clock.rs | monotonic | MonotonicNow(self.millis.load(Ordering::SeqCst))
+crates/gateway/src/commit.rs | pending_work_starts_only_after_the_head_is_finalized | assert_eq!(started.load(Ordering::SeqCst), 0, "the work started before finalization");
+crates/gateway/src/commit.rs | pending_work_starts_only_after_the_head_is_finalized | assert_eq!(started.load(Ordering::SeqCst), 1);
+crates/gateway/src/commit.rs | dropping_the_response_body_does_not_cancel_started_work | if completed.load(Ordering::SeqCst) == 1 {
+crates/gateway/src/commit.rs | dropping_the_response_body_does_not_cancel_started_work | assert_eq!(completed.load(Ordering::SeqCst), 1, "body drop canceled the backend work");
+crates/gateway/src/config.rs | store | self.store.rcu(|current| {
+crates/gateway/src/config.rs | load_entry | Arc::clone(&store.load_full().config)
+crates/gateway/src/config.rs | load_replacement | store.load_full()
+crates/gateway/src/conn/metrics.rs | read_counter | counter.load(Ordering::Relaxed)
+crates/gateway/src/dispatch.rs | handler_deadline_signals_cleanup_and_discards_the_late_result | assert!(cleaned.load(Ordering::Acquire), "the handler did not observe the deadline signal");
+crates/gateway/src/ext/authz_audit.rs | n_a_sink_sees_all_three_states_apart | assert_eq!(sink.1.load(Ordering::SeqCst), 3);
+crates/gateway/src/ext/cors.rs | load | (**self).load(bucket)
+crates/gateway/src/ext/cors.rs | get | let outcome = flight.load.await;
+crates/gateway/src/ext/cors.rs | lookup | load: flight.load.clone(),
+crates/gateway/src/ext/cors.rs | load_collapsed | match load_before_deadline(inner.load(&bucket), timeout).await {
+crates/gateway/src/ext/cors.rs | reads | self.reads.load(Ordering::SeqCst)
+crates/gateway/src/ext/cors.rs | n_a_failing_source_does_not_become_a_per_request_read | assert_eq!(source.0.load(Ordering::SeqCst), 1);
+crates/gateway/src/ext/cors.rs | n_a_never_resolving_source_is_cut_off_and_negative_cached | assert_eq!(source.0.load(Ordering::SeqCst), 1, "a timed-out source was retried");
+crates/gateway/src/ext/cors.rs | n_concurrent_cold_misses_share_one_source_read | assert_eq!(source.0.load(Ordering::SeqCst), 1, "concurrent misses were not coalesced");
+crates/gateway/src/ext/cors.rs | n_cancelling_the_last_waiter_allows_a_retry | while source.0.load(Ordering::SeqCst) == 0 {
+crates/gateway/src/ext/cors.rs | n_cancelling_the_last_waiter_allows_a_retry | assert_eq!(source.0.load(Ordering::SeqCst), 2, "the cancelled flight was reused");
+crates/gateway/src/ext/cors.rs | n_cancelling_one_waiter_keeps_the_shared_flight | assert_eq!(source.0.load(Ordering::SeqCst), 1, "one cancellation discarded a live flight");
+crates/gateway/src/ext/credential_guard.rs | metrics | backend_errors: self.metrics.backend_errors.load(Ordering::Relaxed),
+crates/gateway/src/ext/credential_guard.rs | metrics | timeouts: self.metrics.timeouts.load(Ordering::Relaxed),
+crates/gateway/src/ext/credential_guard.rs | metrics | panics: self.metrics.panics.load(Ordering::Relaxed),
+crates/gateway/src/ext/credential_guard.rs | metrics | negative_cache_hits: self.metrics.negative_cache_hits.load(Ordering::Relaxed),
+crates/gateway/src/ext/credential_guard.rs | a_repeated_missing_key_does_not_amplify_to_the_backend | assert_eq!(inner.0.load(Ordering::SeqCst), 1);
+crates/gateway/src/ext/credential_guard.rs | n_provider_errors_are_not_cached | assert_eq!(inner.0.load(Ordering::SeqCst), 2);
+crates/gateway/src/ext/governor/default.rs | concurrent_callers_cannot_overdraw_the_atomic_aggregate_meter | assert_eq!(admitted.load(Ordering::Relaxed), BURST as usize);
+crates/gateway/src/ext/governor/meter.rs | take | let mut current = self.state.load(Ordering::Relaxed);
+crates/gateway/src/ext/governor/meter.rs | refund | let mut current = self.state.load(Ordering::Relaxed);
+crates/gateway/src/ext/governor.rs | a_lease_holds_exactly_one_body_quota | assert_eq!(first.load(Ordering::Relaxed), 0);
+crates/gateway/src/ext/governor.rs | a_lease_holds_exactly_one_body_quota | assert_eq!(second.load(Ordering::Relaxed), 1);
+crates/gateway/src/ext/oplayer.rs | a_layer_that_does_not_delegate_stops_the_chain | assert_eq!(inner_ran.load(std::sync::atomic::Ordering::SeqCst), 0);
+crates/gateway/src/operation_mode.rs | selected_entry_and_runtime_route_mismatch_is_fail_closed | assert_eq!(callbacks.load(Ordering::SeqCst), 0, "a callback ran before identity refusal");
+crates/gateway/src/probe.rs | bytes_read | self.bytes_read.load(Ordering::SeqCst)
+crates/gateway/src/probe.rs | is_exhausted | self.exhausted.load(Ordering::SeqCst)
+crates/gateway/src/request_config.rs | outcome | match self.0.load(Ordering::Acquire) {
+crates/gateway/src/request_deadline.rs | wait_without_runtime | if signal.fired.load(Ordering::Acquire) {
+crates/gateway/src/request_deadline.rs | wait_without_runtime | if signal.fired.load(Ordering::Acquire) {
+crates/gateway/src/service/update.rs | drop | self.config.rcu(|current| {
+crates/gateway/src/service/update.rs | replace_registry | self.inner.config.rcu(|current| {
+crates/gateway/src/service.rs | fmt | let snapshot = self.inner.config.load();
+crates/gateway/src/service.rs | operations | let snapshot = self.inner.config.load();
+crates/gateway/src/service.rs | response_body_corrections_total | self.inner.response_body_corrections.load(Ordering::Relaxed)
+crates/gateway/src/service.rs | call | let snapshot = self.inner.config.load_full();
+crates/gateway/src/service.rs | call_monomorphic | let snapshot = self.inner.config.load_full();
