@@ -314,12 +314,6 @@ quirks = ["q-length-0007"]
 
 [[op.PutObject.field]]
 side = "input"
-name = "ContentType"
-default_string = "binary/octet-stream"
-quirks = ["q-content-0008"]
-
-[[op.PutObject.field]]
-side = "input"
 name = "Expires"
 quirks = ["q-timestamp-0005"]
 

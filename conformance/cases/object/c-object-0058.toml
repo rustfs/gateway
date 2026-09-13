@@ -1,0 +1,71 @@
+# c-object-0058 — HeadObject on an object written without a content type answers the S3 default.
+#
+# Schema dimensions exercised: a two-exchange write-then-read, header-set assertion.
+
+[case]
+id = "c-object-0058"
+schema_version = 1
+title = "A HEAD of an object stored without a content type answers binary octet-stream"
+rationale = """
+The default media type is a property of the read, not of the write: a write without the header \
+reaches its backend as no type at all, so a backend that derives one from the key can do so, and \
+a backend that stores nothing must still be answered with `binary/octet-stream` on the read. HEAD is \
+how a client learns the type before it downloads, so it is pinned separately from the GET that \
+`c-object-0017` covers: an encoder that applied the default on one of the two and not the other \
+would pass that case and omit the header here, which is the omission that crashed the Go SDK \
+suite."""
+polarity = "positive"
+operation = "HeadObject"
+tags = ["object-attributes", "wire-bytes"]
+timeout_ms = 10000
+quirks = ["q-content-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html"
+summary = "The documented HEAD response carries the same stored representation headers as the GET."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/749"
+summary = "Moving the default from the write to the read lets a backend decide what an untyped object is."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "write-without-a-type"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object/defaults/untyped-head.bin"
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "head-back"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-object/defaults/untyped-head.bin"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "binary/octet-stream"
+"content-length" = "11"

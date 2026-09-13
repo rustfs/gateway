@@ -82,7 +82,7 @@ pub struct Input {
     pub content_md5: Option<String>,
     /// Every header under `x-amz-checksum-`. Optional.
     pub checksum_spec: Option<crate::ChecksumSpec>,
-    /// Wire `content-type`, bound as Header. Optional. Wire default `"binary/octet-stream"`.
+    /// Wire `content-type`, bound as Header. Optional.
     pub content_type: Option<String>,
     /// Wire `x-amz-sdk-checksum-algorithm`, bound as Header. Optional.
     pub checksum_algorithm: Option<crate::ops::enums::ChecksumAlgorithm>,

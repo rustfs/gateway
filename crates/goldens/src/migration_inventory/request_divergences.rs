@@ -125,13 +125,15 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 14] = [
         aws: "the object is stored with the S3 default media type, binary/octet-stream",
         aws_evidence: API_PUT_OBJECT,
         s3s: "content_type is None",
-        gateway: "the decoder fills binary/octet-stream (q-content-0008); the input no longer records that the header was absent",
-        client_impact: "RustFS derives a type from the key extension when none is stored (options.rs detect_content_type_from_object_name); \
-                        an a.png uploaded without the header would come back as binary/octet-stream instead of image/png",
+        gateway: "content_type is None, as on s3s; the S3 default is written on the read, by the GetObject and HeadObject encoders \
+                  when the backend names no type (q-content-0008). Until rustfs/gateway#749 the decoder filled it on the write",
+        client_impact: "none once the decode agrees: RustFS derives a type from the key extension when none is sent \
+                        (options.rs detect_content_type_from_object_name), so a.png still reads back as image/png; \
+                        a backend that stores no type still answers binary/octet-stream",
         ruling: DivergenceRuling::RustfsProfile,
-        follow_up: DivergenceFollowUp::Open("https://github.com/rustfs/gateway/issues/749"),
+        follow_up: DivergenceFollowUp::Landed("c-object-0058"),
         test_file: PUT_DECODE,
-        test: "an_absent_content_type_is_defaulted_by_the_gateway_and_left_absent_by_s3s",
+        test: "an_absent_content_type_is_left_absent_by_both_stacks",
     },
     RequestDivergence {
         id: "rd-put-0002",

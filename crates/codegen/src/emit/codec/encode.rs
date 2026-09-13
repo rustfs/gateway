@@ -87,6 +87,7 @@ fn one_field(ir: &OperationIr, field: &Field, rules: &CodecRules) -> Result<Stri
             }
             let _ = writeln!(out, "            let rendered = {rendered};");
             out.push_str(&suppression(field, &format!("response.set_header(\"{wire}\", rendered);"))?);
+            out.push_str(&header_default(field, &wire)?);
             out.push_str("        }\n");
         }
         Binding::PrefixHeaders => match &field.ty {
@@ -200,6 +201,29 @@ fn one_field(ir: &OperationIr, field: &Field, rules: &CodecRules) -> Result<Stri
         }
     }
     Ok(out)
+}
+
+/// The `else` arm of an optional response header: its wire default, when the member declares one.
+///
+/// A response default answers "the backend named nothing" — `q-content-0008`'s
+/// `binary/octet-stream` on a read of an object stored without a type — so the AWS answer holds
+/// for every backend rather than for the ones that remember to write it (rustfs/gateway#749). It
+/// describes a representation, and a `304` carries none (RFC 9110 §15.4.5): the default is not
+/// written on one, which `c-cond-0005`, `-0007`, `-0017` and `-0022` hold. Only a string default
+/// has a header form, and a default under a suppression rule would contradict it, so both are
+/// refused rather than emitted half-right.
+fn header_default(field: &Field, wire: &str) -> Result<String, String> {
+    use rustfs_gateway_model::json::Value;
+    match (&field.default, field.required) {
+        (None, _) | (Some(_), true) => Ok(String::new()),
+        (Some(Value::Str(text)), false) if field.omit_when.is_none() => Ok(format!(
+            "        }} else if status != 304 {{\n            response.set_header(\"{wire}\", {text:?});\n"
+        )),
+        (Some(_), false) => Err(format!(
+            "codec {}: a response header default must be a string under no suppression rule",
+            field.name
+        )),
+    }
 }
 
 /// Wraps a write in the suppression rule the IR recorded for the field.

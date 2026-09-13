@@ -116,8 +116,7 @@ binding = "Header"
 type = "String"
 required = false
 hot = true
-default = "binary/octet-stream"
-quirks = ["q-content-0008", "q-mpu-metadata-0039"]
+quirks = ["q-mpu-metadata-0039"]
 
 [[input]]
 name = "Expires"

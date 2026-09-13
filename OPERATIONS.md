@@ -616,7 +616,7 @@ An `Error` body can follow an already-flushed `200`.
 
 - `q-etag-0004` (etag_render on `PutObject.ETag`) — In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes.
 - `q-timestamp-0005` (timestamp_format on `PutObject.Expires`) — The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all.
-- `q-content-0008` (default_value on `PutObject.ContentType`) — The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.
+- `q-content-0008` (default_value on `GetObject.ContentType`) — The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.
 - `q-meta-0009` (prefix_headers on `PutObject.Metadata`) — User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.
 - `q-sse-0010` (secret_hygiene on `PutObject`) — The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.
 - `q-timestamp-0011` (timestamp_format on `PutObject.ObjectLockRetainUntilDate`) — This is the only request header carrying the extended date time format instead of the HTTP date format.
@@ -740,7 +740,6 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Quirks**
 
 - `q-timestamp-0005` (timestamp_format on `PutObject.Expires`) — The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all.
-- `q-content-0008` (default_value on `PutObject.ContentType`) — The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.
 - `q-meta-0009` (prefix_headers on `PutObject.Metadata`) — User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.
 - `q-sse-0010` (secret_hygiene on `PutObject`) — The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.
 - `q-timestamp-0011` (timestamp_format on `PutObject.ObjectLockRetainUntilDate`) — This is the only request header carrying the extended date time format instead of the HTTP date format.
@@ -2343,7 +2342,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `q-etag-0004` (etag_render on `PutObject.ETag`) — In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes.
 - `q-timestamp-0005` (timestamp_format on `PutObject.Expires`) — The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all.
-- `q-content-0008` (default_value on `PutObject.ContentType`) — The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.
+- `q-content-0008` (default_value on `GetObject.ContentType`) — The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.
 - `q-meta-0009` (prefix_headers on `PutObject.Metadata`) — User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.
 - `q-response-0023` (response_override on `GetObject`) — A fixed set of response- query parameters overwrites the corresponding response headers, and the overwrite is applied once at the end of encoding rather than inside each field binding.
 - `q-storageclass-0024` (omit_when on `GetObject.StorageClass`) — The storage class response header is suppressed for the default class, which is the exact opposite of the listing body element that is always written.
@@ -2834,7 +2833,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `q-etag-0004` (etag_render on `PutObject.ETag`) — In a header position the entity tag is always written with surrounding double quotes, unlike the bare form used by GetObjectAttributes.
 - `q-timestamp-0005` (timestamp_format on `PutObject.Expires`) — The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all.
-- `q-content-0008` (default_value on `PutObject.ContentType`) — The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.
+- `q-content-0008` (default_value on `GetObject.ContentType`) — The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.
 - `q-meta-0009` (prefix_headers on `PutObject.Metadata`) — User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.
 - `q-storageclass-0024` (omit_when on `GetObject.StorageClass`) — The storage class response header is suppressed for the default class, which is the exact opposite of the listing body element that is always written.
 - `q-head-0025` (head_mirrors on `HeadObject`) — The head response carries exactly the header set of the corresponding get, and no body on any status, so the two header sets must be one derivation rather than two hand-written tables.
@@ -4193,7 +4192,6 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-timestamp-0005` (timestamp_format on `PutObject.Expires`) — The value must be round tripped as an opaque string, because stored values are frequently not parseable dates at all.
 - `q-checksum-0006` (checksum_headers on `PutObject`) — The eleven separate checksum members collapse into one packed spec, and more than one checksum header on a request is a hard error rather than a merge.
 - `q-length-0007` (error_code on `PutObject.ContentLength`) — A PUT without a content length is rejected with a dedicated 411 code rather than a generic bad request.
-- `q-content-0008` (default_value on `PutObject.ContentType`) — The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.
 - `q-meta-0009` (prefix_headers on `PutObject.Metadata`) — User metadata keys are lowercased on return, non ASCII values use encoded word syntax, and the combined size is capped.
 - `q-sse-0010` (secret_hygiene on `PutObject`) — The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.
 - `q-timestamp-0011` (timestamp_format on `PutObject.ObjectLockRetainUntilDate`) — This is the only request header carrying the extended date time format instead of the HTTP date format.

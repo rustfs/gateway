@@ -349,7 +349,37 @@ fn content_type_default_is_read_from_each_lowered_field() {
         .find(|(path, _)| path.to_string_lossy().ends_with("spec/quirks/q-content-0008.toml"))
         .expect("the content-type default is generated as mutable data");
 
-    assert_eq!(quirk.matches("current = \"binary/octet-stream\"").count(), 4);
+    // The default belongs to the read: the two response members carry it, and no request member
+    // does, so a write without the header reaches its backend as "no type" (rustfs/gateway#749).
+    assert_eq!(quirk.matches("current = \"binary/octet-stream\"").count(), 2);
+    assert!(quirk.contains("GetObject.output.ContentType.default_string"), "{quirk}");
+    assert!(quirk.contains("HeadObject.output.ContentType.default_string"), "{quirk}");
+    assert!(!quirk.contains(".input.ContentType"), "{quirk}");
+}
+
+#[test]
+fn a_response_header_default_is_written_by_the_encoder_and_a_request_one_is_not_invented() {
+    let artifacts = artifacts();
+    let codec = |name: &str| {
+        artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("generated/codec/ops/{name}.rs")))
+            .map(|(_, body)| body.as_str())
+            .expect("the operation has a generated codec")
+    };
+    for read in ["get_object", "head_object"] {
+        assert!(
+            codec(read).contains("response.set_header(\"content-type\", \"binary/octet-stream\")"),
+            "{read} must answer the S3 default when its backend names no type"
+        );
+    }
+    for write in ["put_object", "create_multipart_upload"] {
+        assert!(
+            !codec(write).contains("binary/octet-stream"),
+            "{write} must not invent a type the client never sent"
+        );
+    }
 }
 
 #[test]
