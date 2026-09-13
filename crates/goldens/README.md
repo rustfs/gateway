@@ -62,21 +62,6 @@ the report.
   bucket-metadata import archive, which RustFS stores verbatim, so such a configuration fails
   closed after migration until it is put again through the S3 API.
 
-## Rollback constraints
-
-Some state a release creates cannot be read back by the previous release, and no persisted form
-the previous release tolerates exists. `src/migration_inventory/rollback_constraints.rs` records
-each one with its operator action, bound to a pinned test that re-proves it, and prints it in
-the migration inventory. Every entry answers to rustfs/backlog#1768 (writer admission and
-rollback).
-
-- **`rb-mpu-0001` (rustfs/gateway#751).** rustfs-gateway 0.42.0 accepts the SHA-512, MD5 and
-  XXHash checksums S3 added in 2026-04. The previous release refuses them on UploadPart and
-  CompleteMultipartUpload, and its fs backend reads an upload record naming one as a storage
-  error. Before rolling back to a gateway release older than 0.42.0, drain the in-flight multipart
-  uploads that use one of the five: complete or abort them, or roll back to the s3s stack
-  instead, which every admitted revision supports. Completed objects are unaffected.
-
 ## Resolving a blocker
 
 Blockers are cleared by evidence, never by editing the verdict:

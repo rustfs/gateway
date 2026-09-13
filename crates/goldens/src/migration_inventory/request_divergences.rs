@@ -22,8 +22,9 @@
 //! entry, so a divergence cannot be pinned without a ruling or ruled without a pin.
 //! NOT responsible for: observing the divergences (the named tests in `operation_diff` drive both
 //! stacks), persisted-byte refusals (the parent module), or implementing a follow-up.
-//! Upstream: the named tests in `operation_diff/put_object/divergences.rs` and
-//! `operation_diff/context/put_object.rs`. Downstream: `corpus-report`, and the RustFS adapter work
+//! Upstream: the named tests in `operation_diff/put_object/divergences.rs`,
+//! `operation_diff/context/put_object.rs` and `operation_diff/context/get_bucket_location.rs`.
+//! Downstream: `corpus-report`, and the RustFS adapter work
 //! of rustfs/backlog#1752.
 //!
 //! # The default the rulings follow
@@ -79,7 +80,7 @@ pub enum DivergenceFollowUp {
 /// One pinned divergence and its ruling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequestDivergence {
-    /// Stable id, `rd-<put|ctx>-NNNN`; the pinned test's doc carries it as `Ruling: `id``.
+    /// Stable id, `rd-<put|ctx|loc>-NNNN`; the pinned test's doc carries it as `Ruling: `id``.
     pub id: &'static str,
     /// Operation the request addresses.
     pub operation: &'static str,
@@ -107,16 +108,19 @@ pub struct RequestDivergence {
 
 const PUT_DECODE: &str = "operation_diff/put_object/divergences.rs";
 const PUT_CONTEXT: &str = "operation_diff/context/put_object.rs";
+const LOCATION_CONTEXT: &str = "operation_diff/context/get_bucket_location.rs";
 
 /// The files whose named-divergence sections the register is checked against.
-const PINNED_TEST_FILES: [&str; 2] = [PUT_DECODE, PUT_CONTEXT];
+const PINNED_TEST_FILES: [&str; 3] = [PUT_DECODE, PUT_CONTEXT, LOCATION_CONTEXT];
 
 const API_PUT_OBJECT: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html";
+const API_GET_BUCKET_LOCATION: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html";
+const ERROR_RESPONSES: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html";
 const M1_ADAPTER: &str = "https://github.com/rustfs/backlog/issues/1752";
 const ADAPTER_SEAM: &str = "https://github.com/rustfs/gateway/issues/753";
 
 /// Every decided request divergence.
-pub const REQUEST_DIVERGENCES: [RequestDivergence; 14] = [
+pub const REQUEST_DIVERGENCES: [RequestDivergence; 18] = [
     RequestDivergence {
         id: "rd-put-0001",
         operation: "PutObject",
@@ -210,13 +214,12 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 14] = [
         aws: "supports SHA-512, MD5, XXHash3, XXHash64 and XXHash128 checksums since 2026-04",
         aws_evidence: "https://aws.amazon.com/about-aws/whats-new/2026/04/s3-five-additional-checksum-algorithms/",
         s3s: "hands the value to the handler; RustFS verifies and stores it",
-        gateway: "binds the value into ChecksumSpec like the other five algorithms, verifies it against the body, and the \
-                  compat conversion hands it to the same s3s member",
-        client_impact: "none: both stacks hand the handler the same checksum member",
+        gateway: "the pinned model predates the algorithms, so the checksum binder refuses the header as an unknown algorithm",
+        client_impact: "a client configured for one of the new algorithms is refused",
         ruling: DivergenceRuling::AlignAws,
-        follow_up: DivergenceFollowUp::Landed("c-checksum-0003"),
+        follow_up: DivergenceFollowUp::Open("https://github.com/rustfs/gateway/issues/751"),
         test_file: PUT_DECODE,
-        test: "a_checksum_algorithm_added_in_2026_04_is_handed_over_by_both_stacks",
+        test: "a_checksum_algorithm_the_gateway_model_predates_is_refused_by_the_gateway_and_kept_by_s3s",
     },
     RequestDivergence {
         id: "rd-put-0007",
@@ -348,6 +351,72 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 14] = [
         test_file: PUT_CONTEXT,
         test: "divergence_repeated_metadata_lines_are_refused_by_both_stacks",
     },
+    RequestDivergence {
+        id: "rd-loc-0001",
+        operation: "GetBucketLocation",
+        request: "any request answered with an XML body",
+        aws: "the XML declaration is followed by a line break before the root element",
+        aws_evidence: API_GET_BUCKET_LOCATION,
+        s3s: "writes the declaration and the root element with nothing between them",
+        gateway: "writes the declaration and a line break, byte for byte what S3 sends (rustfs_gateway_xml::DECLARATION)",
+        client_impact: "none: the line break is insignificant whitespace in the XML prolog, and every SDK and XML parser reads both \
+                        documents identically; only a byte-exact comparison of bodies sees it",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: LOCATION_CONTEXT,
+        test: "the_xml_declaration_is_followed_by_a_line_break_only_on_the_gateway",
+    },
+    RequestDivergence {
+        id: "rd-loc-0002",
+        operation: "GetBucketLocation",
+        request: "a known access key with a signature that does not match",
+        aws: "403 SignatureDoesNotMatch; InvalidAccessKeyId is reserved for a key that does not exist",
+        aws_evidence: ERROR_RESPONSES,
+        s3s: "403 SignatureDoesNotMatch",
+        gateway: "403 SignatureDoesNotMatch. Until rustfs/backlog#1752 render::from_auth collapsed it into InvalidAccessKeyId, \
+                  contradicting docs/security-model.md, which keeps the two codes distinct and relies on timing parity \
+                  and the credential rate limit against enumeration",
+        client_impact: "SDKs branch on the code: SignatureDoesNotMatch means a wrong secret or a clock or signing bug, \
+                        InvalidAccessKeyId a missing key, and several refresh credentials or stop retrying on the latter",
+        ruling: DivergenceRuling::AlignAws,
+        follow_up: DivergenceFollowUp::Landed("c-cred-0009"),
+        test_file: LOCATION_CONTEXT,
+        test: "a_forged_signature_on_a_known_key_is_signature_does_not_match_on_both_stacks",
+    },
+    RequestDivergence {
+        id: "rd-loc-0003",
+        operation: "GetBucketLocation",
+        request: "an access key that does not exist",
+        aws: "403 InvalidAccessKeyId with a prose message that SDKs do not parse",
+        aws_evidence: ERROR_RESPONSES,
+        s3s: "403 with the code and message the auth provider returns: RustFS IAMAuth answers InvalidAccessKeyId with a sentence \
+              of its own (rustfs/src/auth.rs); the s3s SimpleAuth the pin runs answers NotSignedUp",
+        gateway: "403 InvalidAccessKeyId with the constant message it gives every credential rejection \
+                  (\"the request was not authenticated\")",
+        client_impact: "none: clients branch on the code, not the message, and the code agrees; the gateway sentence names no \
+                        credential and is never copied from AWS prose",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: LOCATION_CONTEXT,
+        test: "an_unknown_access_key_is_invalid_access_key_id_on_the_gateway_and_the_auth_providers_answer_on_s3s",
+    },
+    RequestDivergence {
+        id: "rd-loc-0004",
+        operation: "GetBucketLocation",
+        request: "a SigV4 credential scope naming a region the deployment does not serve",
+        aws: "400 AuthorizationHeaderMalformed naming the region to use",
+        aws_evidence: ERROR_RESPONSES,
+        s3s: "verifies the signature for any region: expected_region is unset by default, and RustFS never sets it",
+        gateway: "400 AuthorizationHeaderMalformed with the configured region by default (ADR-0009, c-bkt-0030); with \
+                  SigV4Authenticator::accept_any_signing_region (ADR-0023) any region in the configured-name grammar is \
+                  verified like s3s does",
+        client_impact: "RustFS clients commonly sign with us-east-1 or an operator label whatever the server is set to; without the \
+                        profile every such request would become a 400",
+        ruling: DivergenceRuling::RustfsProfile,
+        follow_up: DivergenceFollowUp::Landed("c-location-0005"),
+        test_file: LOCATION_CONTEXT,
+        test: "a_scope_region_the_gateway_does_not_serve_is_verified_only_under_the_rustfs_profile",
+    },
 ];
 
 /// A register entry that does not hold as written.
@@ -377,7 +446,7 @@ pub enum RequestDivergenceError {
 impl fmt::Display for RequestDivergenceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MalformedId(id) => write!(formatter, "{id} is not an rd-<put|ctx>-NNNN id"),
+            Self::MalformedId(id) => write!(formatter, "{id} is not an rd-<put|ctx|loc>-NNNN id"),
             Self::DuplicateId(id) => write!(formatter, "{id} appears twice"),
             Self::MissingText { id, field } => write!(formatter, "{id} leaves {field} empty"),
             Self::EvidenceNotUrl(id) => write!(formatter, "{id} cites AWS evidence that is not a URL"),
@@ -496,7 +565,10 @@ fn check_register(entries: &[RequestDivergence]) -> Result<(), RequestDivergence
 }
 
 fn well_formed_id(id: &str) -> bool {
-    let Some(number) = id.strip_prefix("rd-put-").or_else(|| id.strip_prefix("rd-ctx-")) else {
+    let Some(number) = ["rd-put-", "rd-ctx-", "rd-loc-"]
+        .iter()
+        .find_map(|prefix| id.strip_prefix(prefix))
+    else {
         return false;
     };
     number.len() == 4 && number.bytes().all(|byte| byte.is_ascii_digit())

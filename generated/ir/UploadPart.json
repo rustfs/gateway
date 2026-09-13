@@ -22,18 +22,7 @@
              },
   "checksum": {
                 "http_checksum_required": false,
-                "request_algorithms": [
-                                        "CRC32",
-                                        "CRC32C",
-                                        "CRC64NVME",
-                                        "SHA1",
-                                        "SHA256",
-                                        "SHA512",
-                                        "MD5",
-                                        "XXHASH64",
-                                        "XXHASH3",
-                                        "XXHASH128"
-                                      ],
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
                 "response_algorithms": []
               },
   "input": {
@@ -326,21 +315,7 @@
                                 "summary": "Recorded rejection when two different checksum headers are sent together."
                               }
                             ],
-                "cases": [
-                           "c-checksum-0001",
-                           "c-checksum-0002",
-                           "c-checksum-0003",
-                           "c-checksum-0004",
-                           "c-checksum-0005",
-                           "c-checksum-0006",
-                           "c-checksum-0007",
-                           "c-checksum-0008",
-                           "c-checksum-0009",
-                           "c-checksum-0010",
-                           "c-checksum-0011",
-                           "c-checksum-0012",
-                           "c-checksum-0013"
-                         ]
+                "cases": ["c-checksum-0001", "c-checksum-0002"]
               },
               {
                 "id": "q-length-0007",

@@ -112,8 +112,8 @@ async fn n_c_reg_0004_authentication_failure_cannot_reach_vendor_authorization()
 
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(
-        body.contains("<Code>InvalidAccessKeyId</Code>"),
-        "the default must keep a wrong signature indistinguishable from an unknown key: {body}"
+        body.contains("<Code>SignatureDoesNotMatch</Code>"),
+        "a tampered signature on a known key is SignatureDoesNotMatch, as S3 answers it (rd-loc-0002): {body}"
     );
     assert_counts(&counts, 0, 0, 0);
 }

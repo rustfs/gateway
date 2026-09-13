@@ -37,6 +37,7 @@
 //! secret up a second time. The accepted `WireRequest` and the host classification are still built
 //! beside the service, for the input decode the GetBucketLocation proof compares.
 
+mod answers;
 mod get_bucket_location;
 mod put_object;
 
@@ -58,12 +59,17 @@ use rustfs_gateway_sig::{
     SigningScope,
 };
 
+use self::answers::answers;
 use super::seam::request_context::{GatewayRequestContext, Principal, VerifiedScope, request_to_s3s};
 use super::{HOST, block_on, oracle, s3s};
 
 /// The one credential both stacks' stores hold.
 pub(crate) const ACCESS_KEY: &str = "AKIDCONTEXTDIFF";
-pub(crate) const SECRET_KEY: &str = "context-diff-secret-key";
+const SECRET_KEY: &str = "context-diff-secret-key";
+/// A secret neither store holds: a forged signature on the shared access key.
+const FORGED_SECRET: &str = "not-the-context-diff-secret";
+/// An access key neither store holds.
+const UNKNOWN_ACCESS_KEY: &str = "AKIDNOTINANYSTORE";
 /// The regions the gateway serves. Two, so a region that is merely the first is not a pass.
 pub(crate) const REGIONS: [&str; 2] = ["us-east-1", "eu-west-1"];
 /// The base domain both stacks are told when a request is virtual-hosted.
@@ -85,7 +91,7 @@ pub(crate) struct ContextRequest {
     /// Query without its `?`; empty for none.
     query: String,
     headers: Vec<(HeaderName, HeaderValue)>,
-    pub(crate) body: Bytes,
+    body: Bytes,
     signing_region: Option<&'static str>,
     virtual_hosting: bool,
     transport_extension: bool,
@@ -93,6 +99,12 @@ pub(crate) struct ContextRequest {
     empty_query_marker: bool,
     /// Whether the gateway authenticator hands the caller's secret to the handler (ADR-0022).
     secret_hand_off: bool,
+    /// The access key the request is signed with.
+    access_key: &'static str,
+    /// The secret the request is signed with.
+    secret_key: &'static str,
+    /// Whether the gateway authenticator verifies any scope region (ADR-0023).
+    any_region: bool,
 }
 
 impl ContextRequest {
@@ -110,6 +122,9 @@ impl ContextRequest {
             absolute_form: false,
             empty_query_marker: false,
             secret_hand_off: true,
+            access_key: ACCESS_KEY,
+            secret_key: SECRET_KEY,
+            any_region: false,
         }
     }
 
@@ -138,6 +153,25 @@ impl ContextRequest {
     /// Leaves the gateway authenticator at its default, which keeps the caller's secret to itself.
     pub(crate) fn without_secret_hand_off(mut self) -> Self {
         self.secret_hand_off = false;
+        self
+    }
+
+    /// Signs with the shared access key and a secret neither store holds.
+    pub(crate) fn forged(mut self) -> Self {
+        self.secret_key = FORGED_SECRET;
+        self
+    }
+
+    /// Signs with an access key neither store holds.
+    pub(crate) fn unknown_key(mut self) -> Self {
+        self.access_key = UNKNOWN_ACCESS_KEY;
+        self
+    }
+
+    /// Gives the gateway authenticator the RustFS profile of rd-loc-0004 (ADR-0023): any scope
+    /// region in the configured-name grammar is verified. s3s needs no switch; it never checks.
+    pub(crate) fn rustfs_profile(mut self) -> Self {
+        self.any_region = true;
         self
     }
 
@@ -184,7 +218,7 @@ impl ContextRequest {
     }
 
     /// The header lines on the wire, signed at `now` when the request is signed.
-    pub(crate) fn wire_headers(&self, now: RequestNow) -> Result<HeaderMap, String> {
+    fn wire_headers(&self, now: RequestNow) -> Result<HeaderMap, String> {
         let mut headers = HeaderMap::new();
         headers.insert(http::header::HOST, HeaderValue::from_str(&self.host).map_err(|error| error.to_string())?);
         if self.method == Method::PUT {
@@ -198,8 +232,8 @@ impl ContextRequest {
         };
         let stamp = AmzDate::parse(&amz_date(now.unix_seconds())).map_err(|error| format!("stamp: {error:?}"))?;
         let scope = SigningScope::new(stamp.day(), region, SigService::S3).map_err(|error| format!("scope: {error:?}"))?;
-        let credentials =
-            SigningCredentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credentials: {error:?}"))?;
+        let credentials = SigningCredentials::new(self.access_key, self.secret_key.as_bytes())
+            .map_err(|error| format!("credentials: {error:?}"))?;
         let mut signer = SigV4Signer::new(credentials, scope);
         let raw_host = RawHost::from_host_header(self.host.as_bytes()).map_err(|error| format!("host: {error:?}"))?;
         let mut signing =
@@ -211,7 +245,7 @@ impl ContextRequest {
         Ok(signed.headers().clone())
     }
 
-    pub(crate) fn http_head(&self, headers: &HeaderMap) -> http::request::Builder {
+    fn http_head(&self, headers: &HeaderMap) -> http::request::Builder {
         let mut builder = http::Request::builder().method(self.method.clone()).uri(self.target());
         for (name, value) in headers {
             builder = builder.header(name, value);
@@ -404,6 +438,9 @@ fn gateway_service(request: &ContextRequest, recorded: &Arc<Mutex<Option<Recorde
     if request.secret_hand_off {
         authenticator = authenticator.hand_caller_secret_to_handlers();
     }
+    if request.any_region {
+        authenticator = authenticator.accept_any_signing_region();
+    }
     let backend = Arc::new(AdapterBackend {
         recorded: Arc::clone(recorded),
     });
@@ -535,6 +572,12 @@ impl s3s::S3 for ContextS3 {
 ///
 /// A harness failure. A refusal comes back as a status with no recorded request.
 pub(crate) fn s3s_side(request: &ContextRequest, headers: &HeaderMap) -> Result<(u16, Option<OracleRequest>), String> {
+    let (status, _body, recorded) = s3s_answer(request, headers)?;
+    Ok((status, recorded))
+}
+
+/// [`s3s_side`], with the response body.
+fn s3s_answer(request: &ContextRequest, headers: &HeaderMap) -> Result<(u16, Vec<u8>, Option<OracleRequest>), String> {
     let captured = Arc::new(Mutex::new(None));
     let mut builder = s3s::service::S3ServiceBuilder::new(ContextS3 {
         captured: Arc::clone(&captured),
@@ -556,11 +599,13 @@ pub(crate) fn s3s_side(request: &ContextRequest, headers: &HeaderMap) -> Result<
         .body(body)
         .map_err(|error| format!("fixture head: {error}"))?;
     let response = block_on(service.call(http_request)).map_err(|error| format!("s3s service failed: {error:?}"))?;
+    let (parts, mut body) = response.into_parts();
+    let body = block_on(body.store_all_limited(1 << 20)).map_err(|error| format!("s3s response body: {error}"))?;
     let recorded = captured
         .lock()
         .map_err(|_| "the recording slot is poisoned".to_owned())?
         .take();
-    Ok((response.status().as_u16(), recorded))
+    Ok((parts.status.as_u16(), body.to_vec(), recorded))
 }
 
 // ── both ──────────────────────────────────────────────────────────────────────────────────────

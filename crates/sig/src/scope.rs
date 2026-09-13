@@ -115,14 +115,7 @@ impl RegionSet {
         if regions.is_empty() {
             return Err(FloorConfigError::InvalidRegionSet);
         }
-        let ok = regions.iter().all(|region| {
-            !region.as_str().is_empty()
-                && region.as_str().len() <= ScopeRegion::MAX_LEN
-                && region
-                    .as_str()
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-        });
+        let ok = regions.iter().all(|region| Self::is_region_name(region.as_str()));
         if !ok {
             return Err(FloorConfigError::InvalidRegionSet);
         }
@@ -131,6 +124,16 @@ impl RegionSet {
         Ok(Self {
             regions: regions.into_boxed_slice(),
         })
+    }
+
+    /// The configured-name grammar: 1..=[`ScopeRegion::MAX_LEN`] bytes of lowercase ASCII letters,
+    /// digits or `-`.
+    fn is_region_name(region: &str) -> bool {
+        !region.is_empty()
+            && region.len() <= ScopeRegion::MAX_LEN
+            && region
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
     }
 
     /// Whether a presented region name is one this deployment serves. Byte-exact: the region is a
@@ -155,13 +158,34 @@ impl RegionSet {
 pub struct ExpectedScope<'a> {
     service: SigService,
     regions: &'a RegionSet,
+    any_region: bool,
 }
 
 impl<'a> ExpectedScope<'a> {
     /// Names the service the routed operation belongs to, and the regions this deployment serves.
     #[must_use]
     pub const fn new(service: SigService, regions: &'a RegionSet) -> Self {
-        Self { service, regions }
+        Self {
+            service,
+            regions,
+            any_region: false,
+        }
+    }
+
+    /// Admits every presented region that satisfies the configured-name grammar of
+    /// [`RegionSet::new`], not only the configured ones (ADR-0023, the RustFS profile of
+    /// rd-loc-0004). The date and service checks are unchanged, and the key is still derived from
+    /// the presented region, so a signature stays bound to the region the client named. A region
+    /// outside the grammar is still refused, naming the first configured region.
+    #[must_use]
+    pub const fn accepting_any_region(mut self) -> Self {
+        self.any_region = true;
+        self
+    }
+
+    /// Whether [`enforce_scope`] admits `region` under this expectation.
+    fn admits_region(&self, region: &str) -> bool {
+        self.regions.contains(region) || (self.any_region && RegionSet::is_region_name(region))
     }
 
     /// The service the routed operation belongs to.
@@ -218,7 +242,7 @@ pub fn enforce_scope(
     if presented.date() != clock.signed_at().day() {
         return Err(ScopeRejection(None));
     }
-    if !expected.regions().contains(presented.region()) {
+    if !expected.admits_region(presented.region()) {
         return Err(ScopeRejection(expected.regions().regions.first().cloned()));
     }
     if presented.service() != expected.service() {

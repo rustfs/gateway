@@ -57,15 +57,11 @@ fn every_family_and_form_matches_the_recorded_decision() {
     assert_eq!(report.tolerated(), 4);
     assert_eq!(
         report.render(),
-        "migration inventory: decided-refusals=1 rollback-constraints=1\n\
+        "migration inventory: decided-refusals=1\n\
          refusal persisted-doctype decision=https://github.com/rustfs/gateway/issues/469 witnesses=104 refused=100 tolerated=4 \
          old=reads under baseline s3s@9c4690d8, rollback s3s@bdcb6259, candidate s3s@f3e17541 new=Xml(DocTypeDeclaration) \
          writer-samples-with-doctype=0 boundary-fixtures=10 ingress=bucket-metadata-import-archive \
-         remediation=re-put-configuration-through-s3-api\n\
-         rollback constraints: entries=1 authority=https://github.com/rustfs/backlog/issues/1768\n\
-         constraint rb-mpu-0001 introduced-by=rustfs-gateway@0.42.0 s3s-rollback=unaffected \
-         action=drain-in-flight-multipart-uploads-using-the-2026-04-checksums \
-         test=rollback_past_the_2026_04_checksums_requires_draining_their_multipart_uploads\n"
+         remediation=re-put-configuration-through-s3-api\n"
     );
 }
 

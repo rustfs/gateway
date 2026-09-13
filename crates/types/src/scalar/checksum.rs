@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Object integrity: the ten S3 checksum algorithms, `Content-MD5`, and the packed value that
+//! Object integrity: the five S3 checksum algorithms, `Content-MD5`, and the packed value that
 //! carries one of them through the request pipeline.
 //!
 //! Responsible for: naming the algorithms and their wire headers, parsing and rendering the
 //! base64 wire form (including the composite `-N` suffix), selecting *the* checksum header out of
 //! a request's header set with the exact error code S3 uses for each way that can go wrong,
-//! opening digests through [`Checksummer`], and combining part checksums into a full-object or
+//! computing digests through [`Checksummer`], and combining part checksums into a full-object or
 //! composite value.
 //! NOT responsible for: deciding *where* verification happens — a checksum computed over a body
 //! that is still arriving is the P3 ingest pipeline's problem — and for trailer framing, which is
@@ -31,15 +31,17 @@
 //! The obvious shape — one `Option<String>` per algorithm on every input dto — puts eleven
 //! pointer-sized options plus their heap tails into a future that is held across four `await`
 //! points, and that state machine is copied for every in-flight request. [`ChecksumSpec`] is one
-//! fixed-size value instead: the algorithm and the base64 text inline. A compile-time assertion
+//! fixed-size value instead: algorithm, type, and the base64 text inline. A compile-time assertion
 //! below pins the size, so a future field addition cannot quietly undo it.
 
 use std::fmt;
 
+use bytes::Bytes;
 use crc_fast::CrcAlgorithm;
+use sha1::Sha1;
+use sha2::Sha256;
 
 use super::base64;
-use super::checksummer::{self, Checksummer};
 use super::error_code::ErrorCode;
 use super::parse_error::{ParseError, rules};
 use crate::placeholder::WirePlaceholder;
@@ -56,14 +58,14 @@ const CHECKSUM_ALGORITHM_HEADER: &str = "x-amz-checksum-algorithm";
 const CHECKSUM_MODE_HEADER: &str = "x-amz-checksum-mode";
 /// Upper bound on the number of parts, which bounds the `-N` suffix.
 const MAX_MULTIPART_PARTS: u32 = 10_000;
-/// Inline capacity for the base64 text: base64(SHA-512), the widest digest, is 88 bytes and a
-/// composite `-10000` suffix adds 6.
-const RAW_CAPACITY: usize = 94;
+/// Inline capacity for the base64 text: base64(SHA-256) is 44 bytes, `-10000` adds 6, and the
+/// remainder is headroom for an algorithm with a wider digest.
+const RAW_CAPACITY: usize = 88;
 
 /// A checksum algorithm S3 accepts on the wire.
 ///
-/// `#[non_exhaustive]` because this set grows: CRC64NVME was added years after the other four, the
-/// five after `Sha256` arrived in 2026-04 (rustfs/gateway#751), and a downstream `match` that compiled before that addition must keep compiling after the next one.
+/// `#[non_exhaustive]` because this set grows: CRC64NVME was added years after the other four, and
+/// a downstream `match` that compiled before that addition must keep compiling after the next one.
 /// It is a real `enum` rather than the `Cow` newtype the string-enumeration policy prescribes,
 /// because it is the discriminant inside [`ChecksumSpec`] and must stay one byte wide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -79,32 +81,11 @@ pub enum ChecksumAlgorithm {
     Sha1,
     /// SHA-256, `x-amz-checksum-sha256`.
     Sha256,
-    /// SHA-512, `x-amz-checksum-sha512`.
-    Sha512,
-    /// MD5, `x-amz-checksum-md5`. Not `Content-MD5`: see [`ContentMd5`].
-    Md5,
-    /// XXH64 with seed 0, `x-amz-checksum-xxhash64`.
-    XxHash64,
-    /// XXH3 64-bit, `x-amz-checksum-xxhash3`.
-    XxHash3,
-    /// XXH3 128-bit, `x-amz-checksum-xxhash128`.
-    XxHash128,
 }
 
 impl ChecksumAlgorithm {
-    /// Every algorithm: the original five, then the five added in 2026-04 in model order.
-    pub const ALL: &'static [Self] = &[
-        Self::Crc32,
-        Self::Crc32c,
-        Self::Crc64Nvme,
-        Self::Sha1,
-        Self::Sha256,
-        Self::Sha512,
-        Self::Md5,
-        Self::XxHash64,
-        Self::XxHash3,
-        Self::XxHash128,
-    ];
+    /// Every algorithm, in the order the AWS documentation lists them.
+    pub const ALL: &'static [Self] = &[Self::Crc32, Self::Crc32c, Self::Crc64Nvme, Self::Sha1, Self::Sha256];
 
     /// The lowercase wire header that carries this algorithm's value.
     #[must_use]
@@ -115,11 +96,6 @@ impl ChecksumAlgorithm {
             Self::Crc64Nvme => "x-amz-checksum-crc64nvme",
             Self::Sha1 => "x-amz-checksum-sha1",
             Self::Sha256 => "x-amz-checksum-sha256",
-            Self::Sha512 => "x-amz-checksum-sha512",
-            Self::Md5 => "x-amz-checksum-md5",
-            Self::XxHash64 => "x-amz-checksum-xxhash64",
-            Self::XxHash3 => "x-amz-checksum-xxhash3",
-            Self::XxHash128 => "x-amz-checksum-xxhash128",
         }
     }
 
@@ -132,11 +108,6 @@ impl ChecksumAlgorithm {
             Self::Crc64Nvme => "CRC64NVME",
             Self::Sha1 => "SHA1",
             Self::Sha256 => "SHA256",
-            Self::Sha512 => "SHA512",
-            Self::Md5 => "MD5",
-            Self::XxHash64 => "XXHASH64",
-            Self::XxHash3 => "XXHASH3",
-            Self::XxHash128 => "XXHASH128",
         }
     }
 
@@ -164,11 +135,9 @@ impl ChecksumAlgorithm {
     pub fn digest_len(self) -> usize {
         match self {
             Self::Crc32 | Self::Crc32c => 4,
-            Self::Crc64Nvme | Self::XxHash64 | Self::XxHash3 => 8,
-            Self::Md5 | Self::XxHash128 => 16,
+            Self::Crc64Nvme => 8,
             Self::Sha1 => 20,
             Self::Sha256 => 32,
-            Self::Sha512 => 64,
         }
     }
 
@@ -179,7 +148,7 @@ impl ChecksumAlgorithm {
         matches!(self, Self::Crc32 | Self::Crc32c | Self::Crc64Nvme)
     }
 
-    pub(super) fn crc_algorithm(self) -> Option<CrcAlgorithm> {
+    fn crc_algorithm(self) -> Option<CrcAlgorithm> {
         match self {
             Self::Crc32 => Some(CrcAlgorithm::Crc32IsoHdlc),
             Self::Crc32c => Some(CrcAlgorithm::Crc32Iscsi),
@@ -191,13 +160,17 @@ impl ChecksumAlgorithm {
     /// Opens a streaming digest for this algorithm.
     #[must_use]
     pub fn checksummer(self) -> Box<dyn Checksummer> {
-        checksummer::open(self)
+        match self {
+            Self::Sha1 => Box::new(RustCryptoChecksummer::<Sha1>::default()),
+            Self::Sha256 => Box::new(RustCryptoChecksummer::<Sha256>::default()),
+            other => Box::new(CrcChecksummer::new(other)),
+        }
     }
 
     /// The calculator target `crc-fast` selected for this CRC on the current host.
     ///
     /// This reports the implementation actually selected by `crc-fast`, rather than inferring it
-    /// from CPU features. `None` is returned for every algorithm that is not a CRC.
+    /// from CPU features. `None` is returned for the SHA algorithms, which do not use `crc-fast`.
     #[must_use]
     pub fn crc_acceleration_target(self) -> Option<String> {
         self.crc_algorithm().map(crc_fast::get_calculator_target)
@@ -255,7 +228,7 @@ impl ChecksumType {
 /// A decoded digest, sized for the widest algorithm so that reading one allocates nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChecksumDigest {
-    bytes: [u8; 64],
+    bytes: [u8; 32],
     len: u8,
 }
 
@@ -280,7 +253,7 @@ impl Default for ChecksumDigest {
     /// a bug, never as a digest — in particular, never let one satisfy an integrity check.
     fn default() -> Self {
         Self {
-            bytes: [0u8; 64],
+            bytes: [0u8; 32],
             len: 0,
         }
     }
@@ -292,15 +265,14 @@ impl WirePlaceholder for ChecksumDigest {
     }
 }
 
-/// One checksum, packed: the algorithm and the base64 text inline. The checksum type is read off
-/// the text rather than stored: a composite value, and only a composite value, carries the `-N`
-/// suffix, and base64 has no `-`. That keeps the widest value (a composite SHA-512) inside the budget.
+/// One checksum, packed: algorithm, type, and the base64 text inline.
 ///
 /// The stored text is the wire form, including any `-N` composite suffix, so rendering never
 /// re-encodes and never has to decide how to spell the suffix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChecksumSpec {
     algo: ChecksumAlgorithm,
+    kind: ChecksumType,
     raw: [u8; RAW_CAPACITY],
     len: u8,
 }
@@ -348,7 +320,7 @@ impl ChecksumSpec {
         };
         // The digest width is checked against the algorithm, which is what makes a CRC32 header
         // carrying a SHA-256 value a rejection rather than a silently accepted mismatch.
-        let mut decoded = [0u8; 64];
+        let mut decoded = [0u8; 32];
         let written = base64::decode_into("Checksum", body, &mut decoded).map_err(|_| ChecksumError::InvalidChecksumValue)?;
         if written != algo.digest_len() {
             return Err(ChecksumError::InvalidChecksumValue);
@@ -364,11 +336,7 @@ impl ChecksumSpec {
         let mut raw = [0u8; RAW_CAPACITY];
         raw[..bytes.len()].copy_from_slice(bytes);
         let len = u8::try_from(bytes.len()).map_err(|_| ChecksumError::InvalidChecksumValue)?;
-        let spec = Self { algo, raw, len };
-        if spec.checksum_type() != kind {
-            return Err(ChecksumError::InvalidChecksumValue);
-        }
-        Ok(spec)
+        Ok(Self { algo, kind, raw, len })
     }
 
     /// Applies an explicit `x-amz-checksum-type`.
@@ -377,10 +345,11 @@ impl ChecksumSpec {
     ///
     /// Returns [`ChecksumError::InvalidChecksumValue`] when the header contradicts the value's own
     /// shape: a `-N` suffix is composite by construction, and a value without one cannot be.
-    pub fn with_type(self, kind: ChecksumType) -> Result<Self, ChecksumError> {
-        if kind != self.checksum_type() {
+    pub fn with_type(mut self, kind: ChecksumType) -> Result<Self, ChecksumError> {
+        if kind != self.kind {
             return Err(ChecksumError::InvalidChecksumValue);
         }
+        self.kind = kind;
         Ok(self)
     }
 
@@ -393,11 +362,7 @@ impl ChecksumSpec {
     /// Whether the value is composite or full-object.
     #[must_use]
     pub fn checksum_type(&self) -> ChecksumType {
-        if self.raw[..usize::from(self.len)].contains(&b'-') {
-            ChecksumType::Composite
-        } else {
-            ChecksumType::FullObject
-        }
+        self.kind
     }
 
     /// The wire value, base64 plus any `-N` suffix.
@@ -411,7 +376,7 @@ impl ChecksumSpec {
     /// The part count of a composite checksum, or `None` for a full-object one.
     #[must_use]
     pub fn part_count(&self) -> Option<u32> {
-        if self.checksum_type() != ChecksumType::Composite {
+        if self.kind != ChecksumType::Composite {
             return None;
         }
         self.render_base64().rsplit_once('-')?.1.parse().ok()
@@ -425,11 +390,11 @@ impl ChecksumSpec {
     /// after construction, which the constructors make unreachable.
     pub fn digest(&self) -> Result<ChecksumDigest, ChecksumError> {
         let value = self.render_base64();
-        let body = match self.checksum_type() {
+        let body = match self.kind {
             ChecksumType::Composite => value.rsplit_once('-').map_or(value, |(body, _)| body),
             ChecksumType::FullObject => value,
         };
-        let mut bytes = [0u8; 64];
+        let mut bytes = [0u8; 32];
         let written = base64::decode_into("Checksum", body, &mut bytes).map_err(|_| ChecksumError::InvalidChecksumValue)?;
         let len = u8::try_from(written).map_err(|_| ChecksumError::InvalidChecksumValue)?;
         Ok(ChecksumDigest { bytes, len })
@@ -453,7 +418,7 @@ impl ChecksumSpec {
         let crc_algo = algo.crc_algorithm().ok_or(ChecksumError::NotCombinable)?;
         if parts
             .iter()
-            .any(|(spec, _)| spec.algo != algo || spec.checksum_type() == ChecksumType::Composite)
+            .any(|(spec, _)| spec.algo != algo || spec.kind == ChecksumType::Composite)
         {
             return Err(ChecksumError::NotCombinable);
         }
@@ -509,6 +474,7 @@ impl Default for ChecksumSpec {
     fn default() -> Self {
         Self {
             algo: ChecksumAlgorithm::Crc32,
+            kind: ChecksumType::FullObject,
             raw: [0u8; RAW_CAPACITY],
             len: 0,
         }
@@ -578,10 +544,10 @@ impl ContentMd5 {
     /// Opens the streaming digest [`ContentMd5::verify`] expects to be handed.
     ///
     /// It is an associated function of this type and not a free constructor elsewhere so that the
-    /// only MD5 a verifier can reach is the one the comparison takes. [`ChecksumAlgorithm::Md5`]
-    /// is the `x-amz-checksum-md5` algorithm S3 added in 2026-04; `Content-MD5` stays a separate
-    /// protocol feature with its own error codes (`InvalidDigest`, `BadDigest`), so the two are
-    /// verified independently when a request carries both.
+    /// only MD5 a verifier can reach is the one the comparison takes. MD5 is deliberately absent
+    /// from [`ChecksumAlgorithm`]: `Content-MD5` is a different protocol feature with different
+    /// error codes, and folding it into the algorithm enumeration would let it be selected by an
+    /// `x-amz-checksum-md5` header AWS does not define.
     #[must_use]
     pub fn digester() -> Md5Digest {
         Md5Digest::default()
@@ -761,5 +727,72 @@ where
     match declared_type {
         Some(kind) => spec.with_type(kind).map(Some),
         None => Ok(Some(spec)),
+    }
+}
+
+/// A streaming digest.
+///
+/// Hand-written rather than reusing a `digest` trait because the CRC backend and the SHA backends
+/// are built against two different major versions of `digest`, which coexist in the tree but share
+/// no trait. Object safety matters: the ingest pipeline stores one of these per in-flight request
+/// without knowing the algorithm at compile time.
+pub trait Checksummer: Send + Sync {
+    /// Feeds the next slice of the payload.
+    fn update(&mut self, buf: &[u8]);
+    /// Consumes the digest and returns it in wire byte order.
+    fn finalize(self: Box<Self>) -> Bytes;
+    /// The digest width in bytes.
+    fn size(&self) -> u64;
+}
+
+struct CrcChecksummer {
+    algo: ChecksumAlgorithm,
+    digest: crc_fast::Digest,
+}
+
+impl CrcChecksummer {
+    fn new(algo: ChecksumAlgorithm) -> Self {
+        // `crc_algorithm` is total over the CRC variants; ISO-HDLC is a safe stand-in that can
+        // only be reached if a non-CRC algorithm were routed here, which the caller prevents.
+        let crc = algo.crc_algorithm().unwrap_or(CrcAlgorithm::Crc32IsoHdlc);
+        Self {
+            algo,
+            digest: crc_fast::Digest::new(crc),
+        }
+    }
+}
+
+impl Checksummer for CrcChecksummer {
+    fn update(&mut self, buf: &[u8]) {
+        self.digest.update(buf);
+    }
+
+    fn finalize(self: Box<Self>) -> Bytes {
+        let width = self.algo.digest_len();
+        let value = self.digest.finalize();
+        Bytes::copy_from_slice(&value.to_be_bytes()[8 - width..])
+    }
+
+    fn size(&self) -> u64 {
+        self.algo.digest_len() as u64
+    }
+}
+
+#[derive(Default)]
+struct RustCryptoChecksummer<D: sha2::Digest + Send + Sync + Default> {
+    inner: D,
+}
+
+impl<D: sha2::Digest + Send + Sync + Default + 'static> Checksummer for RustCryptoChecksummer<D> {
+    fn update(&mut self, buf: &[u8]) {
+        sha2::Digest::update(&mut self.inner, buf);
+    }
+
+    fn finalize(self: Box<Self>) -> Bytes {
+        Bytes::copy_from_slice(&self.inner.finalize())
+    }
+
+    fn size(&self) -> u64 {
+        <D as sha2::Digest>::output_size() as u64
     }
 }

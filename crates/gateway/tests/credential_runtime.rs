@@ -386,6 +386,10 @@ fn everything_the_caller_sees(response: &WireResponse) -> Vec<u8> {
 /// `RequestId` and `HostId` are minted per request and are the only values in an error body that
 /// legitimately differ between two otherwise identical refusals. Nothing else is redacted — in
 /// particular the error code is not, because the code is the whole question.
+fn error_document(text: &str) -> Option<&str> {
+    text.split_once("<Error>").map(|(_, document)| document)
+}
+
 fn without_request_id(response: &WireResponse) -> String {
     let text = String::from_utf8_lossy(&everything_the_caller_sees(response)).into_owned();
     let mut out = text;
@@ -540,14 +544,19 @@ async fn five_unusable_credentials_produce_one_answer() {
     }
 }
 
-/// Negative — an unknown key and a known key carrying a wrong signature have one wire answer.
+/// Negative — rd-loc-0002: a wrong signature on a known key differs from an unknown key in its code alone.
 #[tokio::test]
-async fn a_wrong_secret_is_indistinguishable_from_an_unknown_key() {
-    let provider = fixtures();
-    let service = build(Arc::clone(&provider));
+async fn a_wrong_secret_differs_from_an_unknown_key_only_in_its_code() {
+    let service = build(fixtures());
     let unknown = without_request_id(&send(&service, UNKNOWN_KEY, SECRET, None).await);
     let wrong = without_request_id(&send(&service, LONG_TERM_KEY, WRONG_SECRET, None).await);
-    assert_eq!(unknown, wrong, "a wrong signature disclosed that the access key exists");
+    assert!(wrong.contains("<Code>SignatureDoesNotMatch</Code>"), "{wrong}");
+    let wrong = wrong.replacen("SignatureDoesNotMatch", "InvalidAccessKeyId", 1);
+    assert_eq!(
+        error_document(&unknown),
+        error_document(&wrong),
+        "a wrong signature differs in more than its code"
+    );
 }
 
 /// Positive — c-sig-0257: an operator who explicitly enables verbose signature errors receives
@@ -570,7 +579,7 @@ async fn c_sig_0257_default_signature_errors_are_not_verbose() {
     let provider = fixtures();
     let service = build(Arc::clone(&provider));
     let body = without_request_id(&send(&service, LONG_TERM_KEY, WRONG_SECRET, None).await);
-    assert!(body.contains("<Code>InvalidAccessKeyId</Code>"), "{body}");
+    assert!(body.contains("<Code>SignatureDoesNotMatch</Code>"), "{body}");
     assert!(!body.contains("<CanonicalRequest>"), "{body}");
     assert!(!body.contains("<StringToSign>"), "{body}");
 }

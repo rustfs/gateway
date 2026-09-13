@@ -35,7 +35,7 @@ use super::super::oracle;
 use super::super::put_object::generated_field_count;
 use super::super::seam::get_bucket_location::{GATEWAY_INPUT_MEMBERS, GATEWAY_OUTPUT_MEMBERS, input_to_s3s, output_from_s3s};
 use super::{
-    ACCESS_KEY, BASE_DOMAIN, CapturedInput, Compared, ContextRequest, PATH_HOST, access_key, compare, differing_context,
+    ACCESS_KEY, BASE_DOMAIN, CapturedInput, Compared, ContextRequest, PATH_HOST, access_key, answers, compare, differing_context,
     region_of,
 };
 
@@ -159,4 +159,83 @@ fn n_the_conversion_declares_every_gateway_member() {
             "{type_name}: the conversion is behind the model"
         );
     }
+}
+
+// ── the named divergences (rd-loc) ────────────────────────────────────────────────────────────
+
+/// The declaration both stacks open an XML body with.
+const XML_DECLARATION: &str = r#"<?xml version="1.0" encoding="UTF-8"?>"#;
+
+fn location_request() -> ContextRequest {
+    ContextRequest::get(PATH_HOST, "/photos", "location")
+}
+
+/// The gateway writes a line break after the XML declaration, as S3 does; s3s writes the root
+/// element straight after it. The documents are otherwise the same bytes.
+///
+/// Ruling: `rd-loc-0001`
+#[test]
+fn the_xml_declaration_is_followed_by_a_line_break_only_on_the_gateway() {
+    let (gateway, oracle) = answers(&location_request()).expect("both stacks answer");
+    assert_eq!((gateway.status, oracle.status), (200, 200), "{gateway:?} {oracle:?}");
+    let gateway_root = gateway.body.strip_prefix(XML_DECLARATION).expect("the gateway declares");
+    let oracle_root = oracle.body.strip_prefix(XML_DECLARATION).expect("s3s declares");
+    assert_eq!(gateway_root.strip_prefix('\n'), Some(oracle_root), "{gateway:?} {oracle:?}");
+    assert!(oracle_root.starts_with("<LocationConstraint"), "{oracle:?}");
+}
+
+/// A known access key with a wrong signature: both stacks answer `SignatureDoesNotMatch`. The
+/// gateway's message is still the one an unknown key gets, so the code is the only difference.
+///
+/// Ruling: `rd-loc-0002`
+#[test]
+fn a_forged_signature_on_a_known_key_is_signature_does_not_match_on_both_stacks() {
+    let (gateway, oracle) = answers(&location_request().signed("us-east-1").forged()).expect("both stacks answer");
+    assert_eq!((gateway.status, oracle.status), (403, 403), "{gateway:?} {oracle:?}");
+    assert_eq!(gateway.code(), Some("SignatureDoesNotMatch"), "{gateway:?}");
+    assert_eq!(oracle.code(), Some("SignatureDoesNotMatch"), "{oracle:?}");
+    let (unknown, _) = answers(&location_request().signed("us-east-1").unknown_key()).expect("both stacks answer");
+    assert_eq!(gateway.message(), unknown.message(), "one message for every credential rejection");
+}
+
+/// An access key neither store holds: the gateway answers `InvalidAccessKeyId` with its one
+/// credential-rejection message. On s3s the code and the message are whatever the auth provider
+/// returns: the harness's `SimpleAuth` answers `NotSignedUp`, and RustFS's `IAMAuth` answers
+/// `InvalidAccessKeyId` with a sentence of its own. Either way the message is not the gateway's.
+///
+/// Ruling: `rd-loc-0003`
+#[test]
+fn an_unknown_access_key_is_invalid_access_key_id_on_the_gateway_and_the_auth_providers_answer_on_s3s() {
+    let (gateway, oracle) = answers(&location_request().signed("us-east-1").unknown_key()).expect("both stacks answer");
+    assert_eq!((gateway.status, oracle.status), (403, 403), "{gateway:?} {oracle:?}");
+    assert_eq!(gateway.code(), Some("InvalidAccessKeyId"), "{gateway:?}");
+    assert_eq!(gateway.message(), Some("the request was not authenticated"));
+    assert_eq!(
+        oracle.code(),
+        Some("NotSignedUp"),
+        "s3s SimpleAuth's answer for a key it does not hold: {oracle:?}"
+    );
+    assert_ne!(gateway.message(), oracle.message(), "{oracle:?}");
+}
+
+/// A scope region the gateway does not serve: s3s verifies it, the gateway refuses it with the
+/// region to use, and verifies it like s3s under the RustFS profile — handing the handler the
+/// client's region, the context s3s hands its own.
+///
+/// Ruling: `rd-loc-0004`
+#[test]
+fn a_scope_region_the_gateway_does_not_serve_is_verified_only_under_the_rustfs_profile() {
+    let request = location_request().signed("ap-south-1");
+    let (gateway, oracle) = answers(&request).expect("both stacks answer");
+    assert_eq!(oracle.status, 200, "{oracle:?}");
+    assert_eq!(gateway.status, 400, "{gateway:?}");
+    assert_eq!(gateway.code(), Some("AuthorizationHeaderMalformed"), "{gateway:?}");
+    assert!(gateway.body.contains("<Region>eu-west-1</Region>"), "{gateway:?}");
+
+    let compared = compared(&request.rustfs_profile());
+    assert_eq!(differing_context(&compared.converted, &compared.oracle), NONE);
+    assert_eq!(
+        (region_of(&compared.converted), region_of(&compared.oracle)),
+        (Some("ap-south-1"), Some("ap-south-1"))
+    );
 }

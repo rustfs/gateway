@@ -206,11 +206,6 @@ impl UploadChecksum {
             (ChecksumAlgorithm::Crc64Nvme, part.checksum_crc64nvme.as_deref()),
             (ChecksumAlgorithm::Sha1, part.checksum_sha1.as_deref()),
             (ChecksumAlgorithm::Sha256, part.checksum_sha256.as_deref()),
-            (ChecksumAlgorithm::Sha512, part.checksum_sha512.as_deref()),
-            (ChecksumAlgorithm::Md5, part.checksum_md5.as_deref()),
-            (ChecksumAlgorithm::XxHash64, part.checksum_xxhash64.as_deref()),
-            (ChecksumAlgorithm::XxHash3, part.checksum_xxhash3.as_deref()),
-            (ChecksumAlgorithm::XxHash128, part.checksum_xxhash128.as_deref()),
         ];
         let mut present = values.into_iter().filter(|(_, value)| value.is_some());
         let Some((algorithm, Some(value))) = present.next() else {
@@ -516,30 +511,4 @@ fn invalid_checksum(message: &'static str) -> HandlerError {
 
 fn invalid_part_checksum(message: &'static str) -> HandlerError {
     HandlerError::new(ErrorCode::INVALID_PART, message)
-}
-
-/// Writes a completed upload's checksum into the one CompleteMultipartUpload member its algorithm
-/// names.
-///
-/// An algorithm this table does not know is a storage error rather than a silently omitted
-/// checksum: the record claimed one, and a response without it would tell the client none exists.
-pub(super) fn render_completed_checksum(
-    output: &mut dto::CompleteMultipartUploadOutput,
-    checksum: ChecksumSpec,
-) -> Result<(), HandlerError> {
-    let slot = match checksum.algorithm() {
-        ChecksumAlgorithm::Crc32 => &mut output.checksum_crc32,
-        ChecksumAlgorithm::Crc32c => &mut output.checksum_crc32c,
-        ChecksumAlgorithm::Crc64Nvme => &mut output.checksum_crc64nvme,
-        ChecksumAlgorithm::Sha1 => &mut output.checksum_sha1,
-        ChecksumAlgorithm::Sha256 => &mut output.checksum_sha256,
-        ChecksumAlgorithm::Sha512 => &mut output.checksum_sha512,
-        ChecksumAlgorithm::Md5 => &mut output.checksum_md5,
-        ChecksumAlgorithm::XxHash64 => &mut output.checksum_xxhash64,
-        ChecksumAlgorithm::XxHash3 => &mut output.checksum_xxhash3,
-        ChecksumAlgorithm::XxHash128 => &mut output.checksum_xxhash128,
-        _ => return Err(storage_error()),
-    };
-    *slot = Some(checksum.render_base64().to_owned());
-    Ok(())
 }

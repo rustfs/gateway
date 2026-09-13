@@ -64,6 +64,7 @@
 //! | Only watching: logs, metrics, audit | [`Observer`], which is read-only and always will be |
 
 mod authenticator;
+mod authenticator_switches;
 mod authorizer;
 mod authz_audit;
 mod bucket_owner;

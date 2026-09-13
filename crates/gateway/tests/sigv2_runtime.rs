@@ -211,11 +211,10 @@ async fn c_sig_0570_a_wrong_sigv2_signature_never_degrades_to_anonymous() {
 
     let (status, body) = exchange(&service, with_authorization(dated_v2(), &authorization)).await;
     assert_eq!(status, http::StatusCode::FORBIDDEN, "{body}");
-    // `InvalidAccessKeyId` and not `SignatureDoesNotMatch`: a wrong signature and an unknown key
-    // get the same bytes, so the pair cannot be used to confirm that a key exists. That is
-    // `render::from_auth`'s rule and it now covers SigV2 as well — see c-sig-0579, which asserts
-    // the unknown key produces this identical document.
-    assert!(body.contains("<Code>InvalidAccessKeyId</Code>"), "{body}");
+    // `SignatureDoesNotMatch`, as S3 answers a wrong signature on a known key (rd-loc-0002); the
+    // unknown key of c-sig-0579 is `InvalidAccessKeyId`. `render::from_auth` keeps the message and
+    // status one for both, so the code is the only difference, on SigV2 as on SigV4.
+    assert!(body.contains("<Code>SignatureDoesNotMatch</Code>"), "{body}");
     assert_eq!(reached.load(Ordering::SeqCst), 0, "a forged SigV2 signature reached the handler");
 }
 
@@ -246,7 +245,7 @@ async fn c_sig_0572_a_tampered_amz_header_is_refused() {
     );
     let (status, rendered) = exchange(&service, http::Request::from_parts(parts, body)).await;
     assert_eq!(status, http::StatusCode::FORBIDDEN, "{rendered}");
-    assert!(rendered.contains("<Code>InvalidAccessKeyId</Code>"), "{rendered}");
+    assert!(rendered.contains("<Code>SignatureDoesNotMatch</Code>"), "{rendered}");
     assert_eq!(reached.load(Ordering::SeqCst), 0);
 }
 

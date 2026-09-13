@@ -664,7 +664,7 @@ async fn a_mismatched_signature_is_refused_before_the_body_is_read() {
     let collected = rustfs_gateway::collect(response).await.expect("an in-memory body");
     let document = String::from_utf8(collected.body().to_vec()).expect("utf-8");
     assert_eq!(collected.status(), http::StatusCode::FORBIDDEN);
-    assert!(document.contains("<Code>InvalidAccessKeyId</Code>"), "{document}");
+    assert!(document.contains("<Code>SignatureDoesNotMatch</Code>"), "{document}");
     assert_eq!(progress.bytes_read(), 0, "the payload was read before the signature was judged");
     assert!(!progress.is_exhausted());
 }

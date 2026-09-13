@@ -27,18 +27,7 @@
              },
   "checksum": {
                 "http_checksum_required": false,
-                "request_algorithms": [
-                                        "CRC32",
-                                        "CRC32C",
-                                        "CRC64NVME",
-                                        "SHA1",
-                                        "SHA256",
-                                        "SHA512",
-                                        "MD5",
-                                        "XXHASH64",
-                                        "XXHASH3",
-                                        "XXHASH128"
-                                      ],
+                "request_algorithms": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"],
                 "response_algorithms": []
               },
   "input": {
