@@ -708,3 +708,6 @@ async fn n_the_same_request_without_the_removing_filter_is_still_refused() {
     assert_eq!(response.status().as_u16(), 400);
     assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
 }
+
+#[path = "sse_runtime/context.rs"]
+mod context;
