@@ -1,7 +1,7 @@
 [package]
 name = "rustfs-gateway-core"
 description = "Operations, routing table, typed pipeline and extension points"
-version = "0.30.0"
+version = "0.31.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -45,9 +45,12 @@ subtle = { workspace = true }
 # Wipes the decoded customer key when the stack frame that hashed it returns.
 zeroize = { workspace = true }
 
+# ADR-0019: bounded, duplicate-aware JSON context validation.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true }
-serde_json = { workspace = true }
 # Differential testing between the readable route table and its compiled form. The compiled
 # router is only allowed to exist because a generator can be pointed at both and told to find a
 # request they disagree about.

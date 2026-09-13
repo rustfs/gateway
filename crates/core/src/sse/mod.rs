@@ -71,6 +71,7 @@
 
 pub mod base64;
 pub mod consistency;
+mod context;
 pub mod headers;
 pub mod key;
 
@@ -284,6 +285,9 @@ const fn managed_reason(managed: &ManagedRejection) -> &'static str {
         }
         ManagedRejection::BucketKeyNotABoolean => "x-amz-server-side-encryption-bucket-key-enabled must be true or false",
         ManagedRejection::ContextNotBase64 => "x-amz-server-side-encryption-context must be base64 of at most 2048 UTF-8 bytes",
+        ManagedRejection::ContextNotJson => {
+            "x-amz-server-side-encryption-context must be a JSON object with unique string keys and string values"
+        }
     }
 }
 
