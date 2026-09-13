@@ -47,6 +47,8 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/codec/tests/metadata_and_url.rs` | Metadata symmetry and forced listing-encoding regressions. | RFC 2047 or `encoding-type=url` behavior changes. |
 | `src/authz.rs` | Authorization type-state and derived resources. | A handler can run without the intended proof. |
 | `src/cancellation.rs` | Runtime-independent handler cancellation signal and waiter registry. | A handler deadline or rollback signal is lost or amplified. |
+| `src/request_context.rs` | The read-only handler request context (ADR-0022): principal, verified scope, routed target, raw target and header lines, and the explicitly named caller secret. | A handler needs to know who called, or a context value is wrong or leaks. |
+| `src/request_context/tests.rs` | Unit tests: no context for a rejected verdict, nothing for an anonymous one, every line copied, `Debug` redaction. | A context unit guarantee changes. |
 | `src/committed.rs` | Typed frozen response heads and statusless detached work for the generated deferred-operation set. | A permitted operation, early header, or committed outcome is wrong. |
 | `src/handler.rs` | Typed handler request/response contracts, including the carried SSE proof. | Implement a backend or represent a committed failure. |
 | `src/static_dispatch.rs` | Sealed generic codec and concrete-handler entry. | Build or audit the monomorphic facade path. |

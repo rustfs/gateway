@@ -20,10 +20,12 @@
 //! pinned `s3s::S3Request<T>` (`method`, `uri`, `headers`, `extensions`, `credentials`, `region`,
 //! `service`, `trailing_headers`), around an input converted elsewhere. A fact the s3s request
 //! cannot hold is a [`ConversionError`] naming the member, never a default.
-//! NOT responsible for: gathering those facts (the gateway's wire layer publishes no way back to a
-//! header map or URI, so the caller assembles them from the typed views), the input members
-//! ([`super::put_object`]), any RustFS extension type, or any production call site. Nothing
-//! outside the goldens context diff calls it (rustfs/backlog#1762, rustfs/backlog#1752).
+//! NOT responsible for: gathering those facts. A handler reads every one of them from its request
+//! context (`Req::context`, ADR-0022) and copies them in — [`GatewayRequestContext::raw_headers`]
+//! for the header lines, [`Principal::from_handler`] for the principal and its handed-over secret —
+//! so an adapter needs no second source. Nor for the input members ([`super::put_object`]), any
+//! RustFS extension type, or any production call site: nothing outside the goldens context diff
+//! calls it yet (rustfs/backlog#1762, rustfs/backlog#1752).
 //! Upstream: the pinned s3s request type. Downstream: the goldens context diff; later the RustFS
 //! ring-2 adapter, which must add the RustFS extensions itself.
 //!
@@ -35,7 +37,7 @@
 //! hook, and this ring-0 crate may not name one. The ring-2 adapter owns installing them; an app
 //! body that finds one missing already fails closed (`ReqInfo not found in request extensions`).
 
-use http::{Extensions, HeaderMap, Method, Uri};
+use http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, Uri};
 
 use super::s3s;
 use s3s::S3Request;
@@ -91,6 +93,36 @@ impl core::fmt::Debug for Principal {
     }
 }
 
+impl Principal {
+    /// The principal a handler's request context names (ADR-0022): its access key id, the secret
+    /// the gateway authenticator handed over (`RequestPrincipal::secret_key_from_authenticator_lookup`)
+    /// and the verified scope.
+    ///
+    /// # Errors
+    ///
+    /// [`ConversionError`] naming `credentials` when no secret was handed over — s3s credentials
+    /// always carry one, and this conversion does not invent it — or when the secret is not UTF-8,
+    /// which the s3s secret type cannot spell.
+    pub fn from_handler(
+        access_key: &str,
+        secret_key: Option<&[u8]>,
+        scope: Option<VerifiedScope>,
+    ) -> Result<Self, ConversionError> {
+        let Some(secret_key) = secret_key else {
+            return Err(refusal(
+                "credentials",
+                "the gateway authenticator did not hand the caller's secret to the handler",
+            ));
+        };
+        let secret_key = core::str::from_utf8(secret_key).map_err(|_| refusal("credentials", "an s3s secret key is UTF-8"))?;
+        Ok(Self {
+            access_key: access_key.to_owned(),
+            secret_key: SecretKey::from(secret_key),
+            scope,
+        })
+    }
+}
+
 /// What the gateway knows about one request, beyond its decoded input.
 #[derive(Debug)]
 pub struct GatewayRequestContext {
@@ -100,7 +132,7 @@ pub struct GatewayRequestContext {
     pub raw_path: String,
     /// The query string exactly as it arrived, without its `?`. Empty when there is none.
     pub raw_query: String,
-    /// The request headers the gateway can read back, in arrival order per name.
+    /// Every accepted header line, in arrival order per name; see [`Self::raw_headers`].
     pub headers: HeaderMap,
     /// The authenticated principal. `None` for an anonymous request.
     pub principal: Option<Principal>,
@@ -108,6 +140,20 @@ pub struct GatewayRequestContext {
     pub host_region: Option<String>,
     /// Whether the request declared trailing headers (`x-amz-trailer`).
     pub declares_trailers: bool,
+}
+
+impl GatewayRequestContext {
+    /// The `headers` member, built from the raw field lines a handler's request context yields
+    /// (`RequestContextView::headers().iter_raw()`, ADR-0022): every accepted line in map order, an
+    /// unrelated value that is not UTF-8 included, so the s3s handler sees the lines it sees today.
+    #[must_use]
+    pub fn raw_headers<'a>(lines: impl IntoIterator<Item = (&'a HeaderName, &'a HeaderValue)>) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        for (name, value) in lines {
+            headers.append(name.clone(), value.clone());
+        }
+        headers
+    }
 }
 
 /// Wraps `input` in the s3s request context `context` describes.

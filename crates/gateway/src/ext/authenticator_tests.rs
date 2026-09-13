@@ -112,7 +112,7 @@ async fn c_sig_0428_form_field_material_uses_the_post_policy_authority() {
     let host = RawHost::from_host_header(b"example-bucket.s3.example.test").expect("valid host");
     let payload = PayloadMode::Empty;
     let request = Authentication::new(&sealed, &method, "/", &host, &payload, Some(0));
-    let Ok(Some(verdict)) = authenticator().try_verify(&request).await else {
+    let Ok(Some((verdict, _secret))) = authenticator().try_verify(&request).await else {
         panic!("authenticated verdict required")
     };
     assert!(verdict.is_authenticated());
@@ -170,7 +170,7 @@ async fn verify(headers: &http::HeaderMap, query: &str, operation: &OperationFlo
         .authenticate(&request)
         .await
         .expect("credential store is available");
-    let (verdict, _) = outcome.into_parts();
+    let (verdict, _, _) = outcome.into_parts();
     verdict
 }
 

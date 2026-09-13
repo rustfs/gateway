@@ -50,9 +50,9 @@
 //! before it is computed and is not revisited afterwards.
 
 use http::Method;
-use rustfs_gateway_core::{ArnForm, HostClass, TargetKind};
+use rustfs_gateway_core::{Addressed, AddressingStyle, ArnForm, HostClass, TargetKind};
 use rustfs_gateway_http::EffectiveHost;
-use rustfs_gateway_types::BucketName;
+use rustfs_gateway_types::{BucketName, ObjectKey};
 
 /// What a [`HostResolver`] is asked about.
 ///
@@ -150,6 +150,24 @@ impl VhostHint {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::LooksLikeVhostButNotConfigured => "vhost-not-configured",
+        }
+    }
+}
+
+impl ResolvedHost {
+    /// The routed target a handler's request context reports (ADR-0022): this classification's
+    /// addressing style, with the bucket and key the pipeline normalised and authorized.
+    pub(crate) fn addressed(&self, bucket: Option<&BucketName>, key: Option<&ObjectKey>) -> Addressed {
+        let style = match &self.addressing {
+            Addressing::Path => AddressingStyle::Path,
+            Addressing::VirtualHosted { region, .. } => AddressingStyle::VirtualHosted {
+                host_region: region.clone(),
+            },
+        };
+        Addressed {
+            style,
+            bucket: bucket.cloned(),
+            key: key.cloned(),
         }
     }
 }

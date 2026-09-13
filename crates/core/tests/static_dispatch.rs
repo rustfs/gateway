@@ -127,7 +127,12 @@ async fn the_static_entry_preserves_the_authorization_order() {
         },
         move |(), resources| async move {
             input_trail.lock().expect("trail lock").push("input-authorize");
-            Ok::<_, &'static str>((vec![rustfs_gateway_core::Decision::Allow; resources.len()], (), sse_proof()))
+            Ok::<_, &'static str>((
+                vec![rustfs_gateway_core::Decision::Allow; resources.len()],
+                (),
+                sse_proof(),
+                rustfs_gateway_core::RequestContextView::detached(StaticProbe::NAME),
+            ))
         },
     )
     .await
@@ -152,7 +157,14 @@ async fn a_routed_identity_mismatch_is_fail_closed() {
         backend,
         || async { Ok::<_, &'static str>(()) },
         |()| async { Ok::<_, &'static str>(((), RequestBody::Buffered(Bytes::new()))) },
-        |(), _| async { Ok::<_, &'static str>((Vec::new(), (), sse_proof())) },
+        |(), _| async {
+            Ok::<_, &'static str>((
+                Vec::new(),
+                (),
+                sse_proof(),
+                rustfs_gateway_core::RequestContextView::detached(StaticProbe::NAME),
+            ))
+        },
     )
     .await;
 

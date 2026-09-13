@@ -29,11 +29,13 @@ use crate::support::sse_proof;
 const _: () = assert!(size_of::<Req<PutObject>>() <= 136);
 const _: () = assert!(size_of::<Req<GetObject>>() <= 136);
 
+// 96 bytes plus one pointer: ADR-0022 boxes the handler request context, so the snapshot grows by
+// the `Box` and not by the context's own layout.
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(size_of::<Req<PutObject>>() == 96);
+const _: () = assert!(size_of::<Req<PutObject>>() == 104);
 
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(size_of::<Req<GetObject>>() == 96);
+const _: () = assert!(size_of::<Req<GetObject>>() == 104);
 
 #[test]
 fn c_dto_n011_req_put_object_has_the_boxed_snapshot_and_stays_within_the_ceiling() {
@@ -43,7 +45,7 @@ fn c_dto_n011_req_put_object_has_the_boxed_snapshot_and_stays_within_the_ceiling
         size_of::<Req<PutObject>>()
     );
     #[cfg(target_pointer_width = "64")]
-    assert_eq!(size_of::<Req<PutObject>>(), 96, "the boxed request snapshot drifted");
+    assert_eq!(size_of::<Req<PutObject>>(), 104, "the boxed request snapshot drifted");
 }
 
 #[test]
@@ -54,7 +56,7 @@ fn c_enc_0039_req_get_object_has_the_boxed_snapshot_and_stays_within_the_ceiling
         size_of::<Req<GetObject>>()
     );
     #[cfg(target_pointer_width = "64")]
-    assert_eq!(size_of::<Req<GetObject>>(), 96, "the boxed request snapshot drifted");
+    assert_eq!(size_of::<Req<GetObject>>(), 104, "the boxed request snapshot drifted");
 }
 
 #[test]

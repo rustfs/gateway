@@ -77,6 +77,7 @@ second copy is a second thing to keep in sync.
 | 0019 | Bounded JSON validation for the KMS encryption context | Accepted |
 | 0020 | Carry the verified credential scope on the authentication verdict | Accepted |
 | 0021 | Delegate anonymous admission to the Authorizer at service level | Accepted |
+| 0022 | A typed, read-only request context on handler requests | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

@@ -68,7 +68,7 @@ use rustfs_gateway_core::registry::erase_authorized_handler_with_context;
 use rustfs_gateway_core::{
     Answer as CoreAnswer, AuthRequirement, BoxFuture, CodecError, Decision, Denied, EncodedResponse, ErasedCodec, ErasedDecoded,
     ErasedRequest, Handler, HandlerCancellationSource, HandlerContext, HandlerError, MetaView, OperationCodec, OwnedResource,
-    Req, RequestBody, RequestBodyMode, Resp, RouteEntry, StaticCommittedResponse, TargetKind,
+    Req, RequestBody, RequestBodyMode, RequestContextView, Resp, RouteEntry, StaticCommittedResponse, TargetKind,
 };
 use rustfs_gateway_sig::OperationFloor;
 use rustfs_gateway_stream::ByteStream;
@@ -123,8 +123,10 @@ impl Future for Invocation {
     }
 }
 
-/// Call the backend with input that carries the authorization proof.
-type Invoke = Arc<dyn Fn(ErasedRequest, RequestConfig<Authorized>) -> Result<Invocation, HandlerError> + Send + Sync>;
+/// Call the backend with input that carries the authorization proof, and the request context the
+/// pipeline built for the same request (ADR-0022).
+type Invoke =
+    Arc<dyn Fn(ErasedRequest, RequestConfig<Authorized>, RequestContextView) -> Result<Invocation, HandlerError> + Send + Sync>;
 
 /// Write the answer back to the wire.
 type Encode = Arc<dyn Fn(ErasedOutput, &MetaView<'_>, u16) -> Result<EncodedResponse, CodecError> + Send + Sync>;
@@ -171,66 +173,70 @@ impl OperationDispatch {
             layers,
             operation: core::marker::PhantomData,
         }));
-        let invoke: Invoke = Arc::new(move |request: ErasedRequest, request_config: RequestConfig<Authorized>| {
-            let (cancellation, context) = HandlerCancellationSource::pair();
-            let call = handler(request, context, request_config.sse()?.clone());
-            let deadline_class = O::spec()
-                .deadline_class()
-                .ok_or_else(|| HandlerError::internal_error("registered operation is missing its handler deadline class"))?;
-            let deadline = request_config.config().handler_deadline(deadline_class);
-            let cleanup_grace = request_config.config().handler_cleanup_grace();
-            let commit_progress = request_config.config().commit_progress_deadline();
-            let request_cancellation = request_config.request_cancellation();
-            let deadline_cancellation = cancellation.clone();
-            Ok(Invocation {
-                _cancellation: cancellation,
-                inner: Box::pin(async move {
-                    // Keep the request's one configuration snapshot alive through the backend call.
-                    // No dispatch implementation can load or substitute another snapshot.
-                    let _request_config = request_config;
-                    let response = match handler_with_request_cancellation(
-                        call,
-                        deadline_cancellation,
-                        deadline,
-                        cleanup_grace,
-                        request_cancellation,
-                    )
-                    .await
-                    {
-                        HandlerCancellationOutcome::Completed(response) => response?,
-                        HandlerCancellationOutcome::Expired { cleanup_completed: true } => {
-                            _request_config.record_handler_deadline(true);
-                            return Err(HandlerError::internal_error("handler deadline exceeded after cleanup completed"));
-                        }
-                        HandlerCancellationOutcome::Expired {
-                            cleanup_completed: false,
-                        } => {
-                            _request_config.record_handler_deadline(false);
-                            return Err(HandlerError::internal_error("handler deadline exceeded before cleanup completed"));
-                        }
-                        HandlerCancellationOutcome::RequestAborted { cleanup_completed } => {
-                            let message = if cleanup_completed {
-                                "request ended after handler cleanup completed"
-                            } else {
-                                "request ended before handler cleanup completed"
-                            };
-                            return Err(HandlerError::internal_error(message));
-                        }
-                    };
-                    let response = response.downcast::<Resp<O>>().map_err(|_| {
-                        HandlerError::internal_error("the registered dispatch received another operation's response")
-                    })?;
-                    let response = response.map_commit_work(|work| commit_with_progress_deadline(work, commit_progress));
-                    let (answer, status) = response.into_parts();
-                    let answer = match answer {
-                        CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput),
-                        CoreAnswer::Committed(committed) => ErasedAnswer::Committed(StaticCommittedResponse::erase(committed)),
-                        CoreAnswer::EventStream(stream) => ErasedAnswer::EventStream(stream),
-                    };
-                    Ok((answer, status))
-                }),
-            })
-        });
+        let invoke: Invoke = Arc::new(
+            move |request: ErasedRequest, request_config: RequestConfig<Authorized>, request_context| {
+                let (cancellation, context) = HandlerCancellationSource::pair();
+                let call = handler(request, context, request_config.sse()?.clone(), request_context);
+                let deadline_class = O::spec()
+                    .deadline_class()
+                    .ok_or_else(|| HandlerError::internal_error("registered operation is missing its handler deadline class"))?;
+                let deadline = request_config.config().handler_deadline(deadline_class);
+                let cleanup_grace = request_config.config().handler_cleanup_grace();
+                let commit_progress = request_config.config().commit_progress_deadline();
+                let request_cancellation = request_config.request_cancellation();
+                let deadline_cancellation = cancellation.clone();
+                Ok(Invocation {
+                    _cancellation: cancellation,
+                    inner: Box::pin(async move {
+                        // Keep the request's one configuration snapshot alive through the backend call.
+                        // No dispatch implementation can load or substitute another snapshot.
+                        let _request_config = request_config;
+                        let response = match handler_with_request_cancellation(
+                            call,
+                            deadline_cancellation,
+                            deadline,
+                            cleanup_grace,
+                            request_cancellation,
+                        )
+                        .await
+                        {
+                            HandlerCancellationOutcome::Completed(response) => response?,
+                            HandlerCancellationOutcome::Expired { cleanup_completed: true } => {
+                                _request_config.record_handler_deadline(true);
+                                return Err(HandlerError::internal_error("handler deadline exceeded after cleanup completed"));
+                            }
+                            HandlerCancellationOutcome::Expired {
+                                cleanup_completed: false,
+                            } => {
+                                _request_config.record_handler_deadline(false);
+                                return Err(HandlerError::internal_error("handler deadline exceeded before cleanup completed"));
+                            }
+                            HandlerCancellationOutcome::RequestAborted { cleanup_completed } => {
+                                let message = if cleanup_completed {
+                                    "request ended after handler cleanup completed"
+                                } else {
+                                    "request ended before handler cleanup completed"
+                                };
+                                return Err(HandlerError::internal_error(message));
+                            }
+                        };
+                        let response = response.downcast::<Resp<O>>().map_err(|_| {
+                            HandlerError::internal_error("the registered dispatch received another operation's response")
+                        })?;
+                        let response = response.map_commit_work(|work| commit_with_progress_deadline(work, commit_progress));
+                        let (answer, status) = response.into_parts();
+                        let answer = match answer {
+                            CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput),
+                            CoreAnswer::Committed(committed) => {
+                                ErasedAnswer::Committed(StaticCommittedResponse::erase(committed))
+                            }
+                            CoreAnswer::EventStream(stream) => ErasedAnswer::EventStream(stream),
+                        };
+                        Ok((answer, status))
+                    }),
+                })
+            },
+        );
 
         let encode: Encode = Arc::new(|output: ErasedOutput, meta: &MetaView<'_>, status: u16| {
             // Unreachable through the service, which looks the entry up by the same name it
@@ -291,9 +297,14 @@ impl OperationDispatch {
         self.codec.authorize(decoded, decisions)
     }
 
-    /// Calls the backend with authorized input.
-    pub(crate) fn invoke(&self, request: ErasedRequest, config: RequestConfig<Authorized>) -> Result<Invocation, HandlerError> {
-        (self.invoke)(request, config)
+    /// Calls the backend with authorized input and the request context built for the same request.
+    pub(crate) fn invoke(
+        &self,
+        request: ErasedRequest,
+        config: RequestConfig<Authorized>,
+        context: RequestContextView,
+    ) -> Result<Invocation, HandlerError> {
+        (self.invoke)(request, config, context)
     }
 
     /// Encodes the answer.
@@ -692,7 +703,7 @@ mod tests {
             .guarded(crate::request_config::sse_proof_for_test())
             .decoded()
             .authorized();
-        dispatch.invoke(authorized, config)
+        dispatch.invoke(authorized, config, RequestContextView::detached("ListBuckets"))
     }
 
     struct NoBackend;

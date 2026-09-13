@@ -99,32 +99,50 @@ pub type HandlerResult<O> = Result<Resp<O>, HandlerError>;
 /// A decoded request on its way to the operation that will answer it.
 ///
 /// A wrapper around the input rather than the input itself, because this is where the pipeline
-/// (P4-04) adds what a handler is allowed to know about the caller — identity, region, request id.
-/// Adding those to a struct is a minor change; adding them to a bare `O::Input` parameter is a
-/// signature change in every handler that exists.
+/// adds what a handler is allowed to know about the caller: [`Req::context`] carries the verified
+/// principal and scope, the routed target and the accepted header lines (ADR-0022). Adding those
+/// to a struct is a minor change; adding them to a bare `O::Input` parameter is a signature change
+/// in every handler that exists.
 ///
 /// The input is boxed once when authorization becomes a handler request. Generated DTOs keep
 /// their public fields, `Default`, and functional-update construction, while `Req<O>` stays one
 /// pointer plus its authorization proofs even for large operations such as `PutObject`. Keeping
 /// the DTO inline here made every async handler future carry the whole request layout across each
-/// suspension point.
+/// suspension point. The context is boxed for the same reason.
 pub struct Req<O: Operation> {
     input: Box<O::Input>,
     resources: O::DerivedResources,
     read: crate::AuthorizedRead,
     sse: crate::SseEnforced,
+    context: Box<crate::RequestContextView>,
 }
 
 impl<O: Operation> Req<O> {
     /// Converts the framework's authorization proof into a handler request.
-    pub(crate) fn from_authorized(authorized: crate::Authorized<O>, sse: crate::SseEnforced) -> Self {
+    pub(crate) fn from_authorized(
+        authorized: crate::Authorized<O>,
+        sse: crate::SseEnforced,
+        context: crate::RequestContextView,
+    ) -> Self {
         let (input, resources, read) = authorized.into_parts();
         Self {
             input: Box::new(input),
             resources,
             read,
             sse,
+            context: Box::new(context),
         }
+    }
+
+    /// What the pipeline verified and routed about this request: principal, verified scope,
+    /// effective host and addressing, bucket and key, method and raw target, and every accepted
+    /// header line, read-only (ADR-0022).
+    ///
+    /// There is no mutable counterpart: a handler, or a layer in front of one, cannot change what
+    /// the next one is told about the caller.
+    #[must_use]
+    pub fn context(&self) -> &crate::RequestContextView {
+        &self.context
     }
 
     /// The decoded input.
@@ -176,7 +194,9 @@ where
     /// derives no second-stage resources.
     ///
     /// Registry and wire dispatch still require [`crate::Authorized<O>`]; this constructor cannot
-    /// be used for copy, batch-delete, or any future operation with derived resources.
+    /// be used for copy, batch-delete, or any future operation with derived resources. Nothing was
+    /// accepted or authenticated, so its context is [`crate::RequestContextView::detached`]:
+    /// anonymous, with no header line.
     #[must_use]
     pub fn new(input: O::Input, sse: crate::SseEnforced) -> Self {
         Self {
@@ -184,6 +204,7 @@ where
             resources: crate::NoDerived,
             read: crate::AuthorizedRead::empty(),
             sse,
+            context: Box::new(crate::RequestContextView::detached(O::NAME)),
         }
     }
 }
@@ -192,10 +213,12 @@ impl<O: Operation> fmt::Debug for Req<O>
 where
     O::Input: fmt::Debug,
 {
+    /// The context's own `Debug` redacts every secret and prints no header value or query.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Req")
             .field("operation", &O::NAME)
             .field("input", &self.input)
+            .field("context", &self.context)
             .finish()
     }
 }

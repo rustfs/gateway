@@ -148,7 +148,10 @@ mod tests {
 
         let authorized =
             authorize_input(prepare_input::<DeleteObjects>(input).expect("derived"), |_| Decision::Allow).expect("authorized");
-        let mut request = authorized.into_request(crate::SseEnforced::empty_for_unit_test());
+        let mut request = authorized.into_request(
+            crate::SseEnforced::empty_for_unit_test(),
+            crate::RequestContextView::detached("DeleteObjects"),
+        );
         let injected = rustfs_gateway_types::dto::ObjectIdentifier {
             key: ObjectKey::new("injected").expect("valid key"),
             ..Default::default()

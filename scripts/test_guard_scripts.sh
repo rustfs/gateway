@@ -21281,8 +21281,8 @@ from pathlib import Path
 
 path = Path("crates/core/src/static_dispatch.rs")
 text = path.read_text()
-subject = "invoke_handler(backend, authorized.into_request(sse), request_guard)"
-replacement = "invoke_handler(backend, authorized.into_request(sse), ())"
+subject = "invoke_handler(backend, authorized.into_request(sse, context), request_guard)"
+replacement = "invoke_handler(backend, authorized.into_request(sse, context), ())"
 if text.count(subject) != 1:
     raise SystemExit("missing unique static handler injection mutation subject")
 path.write_text(text.replace(subject, replacement, 1))

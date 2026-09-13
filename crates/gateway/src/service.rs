@@ -120,8 +120,8 @@ use rustfs_gateway_core::cors::{
 };
 use rustfs_gateway_core::{
     Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel, RequestBodyMode,
-    ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, SseConfig, StaticDispatchError, StaticDispatchOutcome,
-    TargetKind, TransportSecurity,
+    RequestContextView, ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, SseConfig, StaticDispatchError,
+    StaticDispatchOutcome, TargetKind, TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
     resolve,
 };
@@ -782,7 +782,7 @@ impl S3Service {
             }
         };
         // H4's run-time half: a receipt minted for another request cannot be attached to this one.
-        let (verdict, scope_rejection) = authentication.into_parts();
+        let (verdict, scope_rejection, caller_secret) = authentication.into_parts();
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
         if let Some(error) = verdict.rejection() {
             if error == AuthError::AuthorizationHeaderMalformed {
@@ -1054,6 +1054,8 @@ impl S3Service {
         let input_runtime = runtime;
         let input_meta = &meta;
         let input_verdict = &verdict;
+        let input_wire = &wire;
+        let addressed = resolved.addressed(meta.bucket(), effective_key.as_ref());
         let input_server_extensions = &server_extensions;
         let input_effective_key = effective_key.as_ref();
         let authorize_input = move |state: ReadForDecode, resources: Vec<OwnedResource>| async move {
@@ -1163,7 +1165,9 @@ impl S3Service {
             let config = config.with_missing_object_visibility(visibility).authorized();
             let map = |error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive);
             let sse = config.sse().cloned().map_err(map)?;
-            Ok((decisions, config, sse))
+            let context = RequestContextView::from_pipeline(operation, input_wire, addressed, input_verdict, caller_secret);
+            let context = context.ok_or_else(|| map(HandlerError::internal_error("a rejected request reached its handler")))?;
+            Ok((decisions, config, sse, context))
         };
         let execution = match std::panic::catch_unwind(AssertUnwindSafe(|| {
             mode.dispatch(op, operation, &meta, authorize_route, read_body, authorize_input)
