@@ -1865,6 +1865,8 @@ dependencies = [
  "hex",
  "rustfs-gateway-corpus",
  "rustfs-gateway-types",
+ "serde",
+ "serde_json",
  "sha2",
  "zip",
 ]

@@ -33,38 +33,33 @@ fn production_registry_is_the_exact_runtime_linked_39_case_set() {
     let report =
         validate_registry(&production_registry(), observations()).expect("the exact 39 acceptance cases must be registered");
     assert_eq!(report.cases().len(), 39);
-    assert_eq!(report.passed_count(), 36);
-    assert_eq!(report.blocked_count(), 3);
+    assert_eq!(report.passed_count(), 38);
+    assert_eq!(report.blocked_count(), 1);
+    assert_eq!(require_acceptance_closure(), Err(AcceptanceCensusError::ClosureBlocked(vec!["g-d1-003"])));
+    assert!(!report.render().contains("approved persisted-metadata source absent"));
+}
+
+/// Removing a collected source must turn its passing full-corpus cases red.
+#[test]
+fn source_absence_does_not_leave_full_corpus_cases_passing() {
+    let absent = RuntimeObservations {
+        corpus: observations().corpus.clone(),
+        families: observations().families.clone(),
+        sources: Err(PersistenceSourceError::SourceAbsent(PersistenceSource::HistoricalWriterMatrix)),
+    };
+    assert_eq!(absent.absent_source(), Some(PersistenceSource::HistoricalWriterMatrix));
     assert_eq!(
-        require_acceptance_closure(),
-        Err(AcceptanceCensusError::ApprovedSourceAbsent {
-            source: "d-prime-historical-writer-matrix",
-            cases: vec!["g-d4-001", "g-d5-001"],
-        })
-    );
-    assert!(
-        report
-            .render()
-            .contains("approved persisted-metadata source absent: d-prime-historical-writer-matrix")
+        validate_registry(&production_registry(), &absent),
+        Err(AcceptanceCensusError::BlockedCasePassed("g-d4-001"))
     );
 }
 
-/// Closure has two distinct reasons to stay shut, and they must not collapse into one line.
-/// While source (d') is absent the census names the source; the specification blocker behind
-/// `g-d1-003` is a separate verdict that only becomes visible once the source is collected.
 #[test]
-fn source_absence_is_reported_ahead_of_the_specification_blocker() {
-    let collected = RuntimeObservations {
-        corpus: observations().corpus.clone(),
-        families: observations().families.clone(),
-        sources: Err(PersistenceSourceError::DuplicateSource(PersistenceSource::ClientMatrix)),
-    };
-    assert_eq!(collected.absent_source(), None);
-    let rows = production_registry();
-    // With no absent source, `g-d4-001` and `g-d5-001` may no longer sit on rustfs/backlog#2096:
-    // the blocker is the missing corpus, not an undecided question, so the row goes red instead.
+fn n_collected_source_cannot_keep_a_stale_blocker() {
+    let mut rows = production_registry();
+    *rows.iter_mut().find(|row| row.id == "g-d4-001").unwrap() = CaseDeclaration::blocked("g-d4-001", ISSUE_2096);
     assert_eq!(
-        validate_registry(&rows, &collected),
+        validate_registry(&rows, observations()),
         Err(AcceptanceCensusError::InvalidBlocker("g-d4-001"))
     );
 }
@@ -77,7 +72,7 @@ fn n_non_absence_provenance_failure_is_not_a_blocker() {
         sha256: "0000000000000000000000000000000000000000000000000000000000000000",
     };
     assert!(!matches!(error, PersistenceSourceError::SourceAbsent(_)));
-    assert_eq!(required_blocker("g-d4-001", observations()), Some(ISSUE_2096));
+    assert_eq!(required_blocker("g-d4-001", observations()), None);
 }
 
 /// A census over the exact 39 IDs with the named rows blocked. Only the strict verdict reads it;
@@ -151,7 +146,7 @@ fn all_family_rows_fail_closed_when_one_family_stops_executing() {
             .collect(),
         sources: full.sources.clone(),
     };
-    for id in ["g-d2-001", "g-d3-001"] {
+    for id in ["g-d2-001", "g-d3-001", "g-d4-001", "g-d5-001"] {
         let row = production_registry()
             .into_iter()
             .find(|row| row.id == id)

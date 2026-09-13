@@ -145,6 +145,26 @@ pub fn run_four_way_all() -> Result<FourWayRunReport, FourWayRunError> {
         family.sample_count += sample_count;
         report.sample_count += sample_count;
     }
+    // The base corpus is rebuilt only so bytes it already holds count as aliases, keeping this
+    // sample count equal to the corpus report's accepted total.
+    let mut historical_families = crate::base_family_corpus_evidence().map_err(|error| FourWayRunError {
+        kind: crate::historical_writer::MANIFEST_FAILURE_FAMILY,
+        failure: crate::historical_writer::input_failure(error),
+    })?;
+    for (kind, sample_count) in
+        crate::historical_writer::append(&mut historical_families).map_err(|(kind, failure)| FourWayRunError { kind, failure })?
+    {
+        let family = report
+            .families
+            .iter_mut()
+            .find(|family| family.kind == kind)
+            .ok_or_else(|| FourWayRunError {
+                kind,
+                failure: crate::historical_writer::input_failure("historical family is absent from aggregate report"),
+            })?;
+        family.sample_count += sample_count;
+        report.sample_count += sample_count;
+    }
     Ok(report)
 }
 

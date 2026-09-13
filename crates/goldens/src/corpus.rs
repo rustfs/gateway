@@ -191,6 +191,10 @@ pub struct FamilyCorpusEvidence {
 }
 
 impl FamilyCorpusEvidence {
+    pub(crate) fn kind(&self) -> ConfigKind {
+        self.kind
+    }
+
     /// Groups concrete accepted and rejected cases under one family and its required variants.
     #[must_use]
     pub fn new(kind: ConfigKind, required_variants: Vec<CorpusVariant>, cases: Vec<CorpusCaseEvidence>) -> Self {

@@ -1,0 +1,1 @@
+<LifecycleConfiguration><ExpiryUpdatedAt>2026-09-12T12:56:24.234Z</ExpiryUpdatedAt><Rule><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload><Expiration><Days>31</Days></Expiration><Filter><Prefix>archive/</Prefix></Filter><ID>historical-lifecycle</ID><Status>Enabled</Status></Rule></LifecycleConfiguration>

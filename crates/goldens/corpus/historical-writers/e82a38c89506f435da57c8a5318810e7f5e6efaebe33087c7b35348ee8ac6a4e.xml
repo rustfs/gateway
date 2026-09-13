@@ -1,0 +1,1 @@
+<ObjectLockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>14</Days></DefaultRetention></Rule></ObjectLockConfiguration>

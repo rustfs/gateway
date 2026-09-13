@@ -1,0 +1,1 @@
+<NotificationConfiguration><CloudFunctionConfiguration><Event>s3:ObjectCreated:*</Event><Id>historical-notification</Id><CloudFunction>arn:aws:lambda:us-east-1:123456789012:function:historical</CloudFunction></CloudFunctionConfiguration></NotificationConfiguration>

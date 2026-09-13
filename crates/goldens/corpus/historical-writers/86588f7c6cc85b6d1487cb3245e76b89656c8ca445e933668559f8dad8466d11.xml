@@ -1,0 +1,1 @@
+<LifecycleConfiguration><Rule><ID>historical-lifecycle</ID><Status>Enabled</Status><Filter><Prefix>archive/</Prefix></Filter><Expiration><Days>31</Days></Expiration></Rule><ExpiryUpdatedAt>2026-09-12T12:01:41.099896081Z</ExpiryUpdatedAt></LifecycleConfiguration>

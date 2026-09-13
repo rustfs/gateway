@@ -47,31 +47,47 @@ fn row(registry: &mut [SourceRegistration], source: PersistenceSource) -> &mut S
         .expect("the production registry declares this source")
 }
 
+#[test]
+fn historical_writer_matrix_reports_all_six_collected_versions() {
+    let report = require_persistence_sources(corpus()).expect("all four approved sources have collected bytes");
+    let writers = report
+        .rows()
+        .iter()
+        .filter(|row| row.source == PersistenceSource::HistoricalWriterMatrix)
+        .map(|row| row.writer.expect("historical sources require an exact writer"))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        writers,
+        BTreeSet::from([
+            ("rustfs", "1.0.0-alpha.64"),
+            ("rustfs", "1.0.0-alpha.94"),
+            ("rustfs", "v1.0.0-beta.1"),
+            ("rustfs", "1.0.0-beta.12"),
+            ("minio", "RELEASE.2025-04-22T22-12-26Z"),
+            ("minio", "RELEASE.2025-09-07T16-13-09Z"),
+        ])
+    );
+    assert!(report.render().contains("4/4 approved sources present"));
+}
+
 /// The control the whole census rests on: the harness must be able to tell "the historical
 /// writer matrix has not been collected" from "it has". Both directions are asserted here,
 /// against the real corpus, so neither answer can be the only one the code can produce.
 #[test]
 fn absent_and_present_source_produce_different_verdicts() {
+    let mut absent = registry();
+    absent.retain(|row| row.source != PersistenceSource::HistoricalWriterMatrix);
     assert_eq!(
-        validate_sources(&registry(), corpus()),
+        validate_sources(&absent, corpus()),
         Err(PersistenceSourceError::SourceAbsent(PersistenceSource::HistoricalWriterMatrix)),
-        "source (d') is not collected yet, and the census must say so by name"
+        "withdrawing all historical writers must name the absent source"
     );
-
-    let mut collected = registry();
-    collected.push(SourceRegistration {
-        source: PersistenceSource::HistoricalWriterMatrix,
-        writer: Some("minio"),
-        version: Some("RELEASE.2025-07-23T15-54-02Z"),
-        witness_digests: &[MINIO_WITNESS],
-        reference: "mutation control standing in for a collected historical writer sample",
-    });
-    let report = validate_sources(&collected, corpus()).expect("every approved source is now registered and backed");
-    assert_eq!(report.rows().len(), PersistenceSource::ALL.len());
+    let report = validate_sources(&registry(), corpus()).expect("every approved source is registered and backed");
+    assert_eq!(report.rows().len(), 9);
     assert!(
         report
             .render()
-            .contains("d-prime-historical-writer-matrix: writer=minio@RELEASE.2025-07-23T15-54-02Z")
+            .contains("d-prime-historical-writer-matrix: writer=minio@RELEASE.2025-04-22T22-12-26Z")
     );
     assert!(report.render().contains("4/4 approved sources present"));
 }
@@ -242,4 +258,51 @@ fn witness_digests_name_real_corpus_samples() {
             .unwrap_or_else(|| panic!("the total line names {field}: {totals}"))
     };
     assert_eq!(digests.len(), counted("accepted=") + counted("rejected="));
+}
+
+#[test]
+fn n_withdrawing_one_historical_version_fails_closed() {
+    let mut mutant = registry();
+    mutant.retain(|row| row.version != Some("1.0.0-alpha.64"));
+    assert!(matches!(
+        validate_sources(&mutant, corpus()),
+        Err(PersistenceSourceError::HistoricalWriterMatrix(_))
+    ));
+}
+
+#[test]
+fn n_reassigning_historical_witness_to_another_writer_fails_closed() {
+    let mut mutant = registry();
+    let target = row(&mut mutant, PersistenceSource::HistoricalWriterMatrix);
+    target.witness_digests = &[MINIO_WITNESS];
+    assert!(matches!(
+        validate_sources(&mutant, corpus()),
+        Err(PersistenceSourceError::WitnessWriterMismatch { .. })
+    ));
+}
+
+/// With no (d′) row at all, the coverage report shows the source absent instead of failing: the
+/// six-writer check applies only once the source is present, and closure refuses absence.
+#[test]
+fn withdrawn_historical_matrix_is_reported_absent_not_invalid() {
+    let mut absent = registry();
+    absent.retain(|row| row.source != PersistenceSource::HistoricalWriterMatrix);
+    let report = source_report(&absent, corpus()).expect("an absent source is a reported state");
+    assert!(report.render().contains("3/4 approved sources present"));
+    assert!(report.render().contains("d-prime-historical-writer-matrix: absent"));
+    assert_eq!(
+        validate_sources(&absent, corpus()),
+        Err(PersistenceSourceError::SourceAbsent(PersistenceSource::HistoricalWriterMatrix))
+    );
+}
+
+#[test]
+fn n_omitting_one_historical_witness_fails_closed() {
+    let mut mutant = registry();
+    let target = row(&mut mutant, PersistenceSource::HistoricalWriterMatrix);
+    target.witness_digests = &target.witness_digests[1..];
+    assert!(matches!(
+        validate_sources(&mutant, corpus()),
+        Err(PersistenceSourceError::HistoricalWriterMatrix(_))
+    ));
 }

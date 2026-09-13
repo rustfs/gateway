@@ -1,0 +1,1 @@
+<CORSConfiguration><CORSRule><AllowedHeader>x-amz-meta-*</AllowedHeader><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://history.example.test</AllowedOrigin><ExposeHeader>ETag</ExposeHeader><ID>historical-cors</ID><MaxAgeSeconds>321</MaxAgeSeconds></CORSRule></CORSConfiguration>

@@ -35,42 +35,51 @@ fn sample_regression_commands_remain_successful() {
         .output()
         .expect("run four-way");
     assert!(four_way.status.success(), "{four_way:?}");
-    assert!(String::from_utf8_lossy(&four_way.stdout).starts_with("D1..D5 all clean, 183 samples across 13 families"));
+    assert!(String::from_utf8_lossy(&four_way.stdout).starts_with("D1..D5 all clean, 204 samples across 13 families"));
 }
 
 #[test]
 fn n_corpus_report_discloses_blocked_acceptance_rows() {
     let output = corpus_report();
     let text = String::from_utf8(output.stdout).expect("UTF-8 report");
-    assert!(text.contains("P9-01 acceptance census: passed=36 blocked=3 total=39"), "{text}");
+    assert!(text.contains("P9-01 acceptance census: passed=38 blocked=1 total=39"), "{text}");
     assert_eq!(text.lines().filter(|line| line.starts_with("g-")).count(), 39);
     for row in [
         "g-d1-003: blocked issue=https://github.com/rustfs/backlog/issues/2104",
-        "g-d4-001: blocked issue=https://github.com/rustfs/backlog/issues/2096",
-        "g-d5-001: blocked issue=https://github.com/rustfs/backlog/issues/2096",
+        "g-d4-001: passed source=crates/goldens/src/historical_writer.rs::append",
+        "g-d5-001: passed source=crates/goldens/src/historical_writer.rs::append",
     ] {
         assert!(text.contains(row), "missing {row}");
     }
+    assert!(!text.contains("issues/2096"), "{text}");
 }
 
+/// Source (d′) is collected: the report names every writer version, and nothing reads absent.
 #[test]
-fn n_corpus_report_discloses_missing_approved_source() {
+fn corpus_report_lists_every_approved_source_and_historical_writer() {
     let output = corpus_report();
     let text = String::from_utf8(output.stdout).expect("UTF-8 report");
-    assert!(text.contains("persisted metadata sources: 3/4 approved sources present"), "{text}");
+    assert!(text.contains("persisted metadata sources: 4/4 approved sources present"), "{text}");
     for row in [
         "a-repository-fixture: writer=n/a witnessed=",
         "b-client-matrix: writer=n/a witnessed=",
         "c-minio-migration-export: writer=minio@",
-        "d-prime-historical-writer-matrix: absent",
+        "d-prime-historical-writer-matrix: writer=rustfs@1.0.0-alpha.64 witnessed=",
+        "d-prime-historical-writer-matrix: writer=rustfs@1.0.0-alpha.94 witnessed=",
+        "d-prime-historical-writer-matrix: writer=rustfs@v1.0.0-beta.1 witnessed=",
+        "d-prime-historical-writer-matrix: writer=rustfs@1.0.0-beta.12 witnessed=",
+        "d-prime-historical-writer-matrix: writer=minio@RELEASE.2025-04-22T22-12-26Z witnessed=",
+        "d-prime-historical-writer-matrix: writer=minio@RELEASE.2025-09-07T16-13-09Z witnessed=",
     ] {
         assert!(text.contains(row), "missing {row}");
     }
-    assert!(text.contains("approved persisted-metadata source absent: d-prime-historical-writer-matrix"));
+    assert!(!text.contains(": absent"), "{text}");
+    assert!(!text.contains("approved persisted-metadata source absent"), "{text}");
 }
 
+/// With every source present, strict closure still refuses on rustfs/backlog#2104's blocker alone.
 #[test]
-fn n_strict_closure_refuses_missing_historical_writers() {
+fn n_strict_closure_still_refuses_the_specification_blocker() {
     let output = Command::new(env!("CARGO_BIN_EXE_corpus-report"))
         .arg("--require-closure")
         .output()
@@ -78,10 +87,7 @@ fn n_strict_closure_refuses_missing_historical_writers() {
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert!(output.stdout.is_empty());
     let diagnostic = String::from_utf8(output.stderr).expect("UTF-8 diagnostic");
-    assert_eq!(
-        diagnostic,
-        "migration closure failed: ApprovedSourceAbsent { source: \"d-prime-historical-writer-matrix\", cases: [\"g-d4-001\", \"g-d5-001\"] }\n"
-    );
+    assert_eq!(diagnostic, "migration closure failed: ClosureBlocked([\"g-d1-003\"])\n");
 }
 
 #[test]
