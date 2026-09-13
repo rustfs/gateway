@@ -205,7 +205,7 @@ mutation_dimension = "unknown_element_policy"
 codec_value = "reject"
 target = "PutPublicAccessBlock"
 summary = "Unknown HTTP public-access settings are refused before the handler; persisted metadata decoding remains separate."
-cases = ["c-bucketconfig-0020"]
+cases = ["c-bucketconfig-0061"]
 
   [[quirk.evidence]]
   kind = "other"

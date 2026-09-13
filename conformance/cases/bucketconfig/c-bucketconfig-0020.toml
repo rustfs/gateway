@@ -1,14 +1,14 @@
 [case]
 id = "c-bucketconfig-0020"
 schema_version = 1
-title = "Known public-access settings are accepted but an unknown setting is refused"
+title = "A public-access block naming all four switches is accepted with Content-MD5"
 rationale = """
-The four switches are the last line of defence against a bucket being made public by an ACL or a policy, so the write demands an integrity claim. The refusal without the header is c-bucketconfig-0040. A subsequent request containing an unknown access-control setting must fail rather than silently discarding it."""
+The four switches are the last line of defence against a bucket being made public by an ACL or a policy, so the write demands an integrity claim. The refusal without the header is c-bucketconfig-0040."""
 polarity = "positive"
 operation = "PutPublicAccessBlock"
 tags = ["bucketconfig", "xml", "checksum", "security"]
 timeout_ms = 10000
-quirks = ["q-pab-0002", "q-pab-0005"]
+quirks = ["q-pab-0002"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html"
@@ -16,43 +16,16 @@ summary = "The write reference declares all four settings as optional booleans a
 kind = "aws-doc"
 
 
-[[case.evidence]]
-url = "https://github.com/rustfs/gateway/blob/50adc72e/docs/adr/0018-dialect-vtables-stand-after-adr-0010.md"
-summary = "The accepted amendment retains ADR-0007's security codec policy independently of request-carrier layout."
-kind = "other"
-
 [[setup.buckets]]
 name = "conf-bucketconfig"
-[[exchanges]]
-name = "known-settings"
-
-[exchanges.request]
+[request]
 method = "PUT"
 target = "/conf-bucketconfig?publicAccessBlock"
 headers = { "content-md5" = "njdlwnEoAxGSpOozjhzsJQ==", "content-type" = "application/xml" }
 body = { utf8 = '<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
-[exchanges.expect]
+[expect]
 kind = "response"
 status = 200
 connection_after = "open"
-
-[[exchanges]]
-name = "unknown-setting"
-
-[exchanges.request]
-method = "PUT"
-target = "/conf-bucketconfig?publicAccessBlock"
-headers = { "content-md5" = "LwyjYeY4T9uswVTauzbhFw==", "content-type" = "application/xml" }
-body = { utf8 = '<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>true</RestrictPublicBuckets><FutureSetting>true</FutureSetting></PublicAccessBlockConfiguration>' }
-sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
-
-[exchanges.expect]
-kind = "response"
-status = 400
-connection_after = "open"
-
-[exchanges.expect.error]
-code = "MalformedXML"
-request_id_present = true
