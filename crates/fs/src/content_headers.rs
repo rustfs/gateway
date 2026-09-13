@@ -49,9 +49,11 @@ pub(super) const CONTENT_HEADERS_SECTION: &str = "headers/1";
 
 /// The media type S3 answers for an object stored without one.
 ///
-/// `PutObject.ContentType` declares this default in the pinned model, so a read of an object whose
-/// write named no type answers it rather than omitting the header — an omitted `Content-Type` is
-/// what crashed the `aws-sdk-go-v2` mint suite (rustfs/gateway#718).
+/// `GetObject.ContentType` and `HeadObject.ContentType` declare this default (`q-content-0008`), so
+/// a read of an object whose write named no type answers it rather than omitting the header — an
+/// omitted `Content-Type` is what crashed the `aws-sdk-go-v2` mint suite (rustfs/gateway#718). The
+/// write no longer fills it in (rustfs/gateway#749): an untyped `PutObject` arrives here as `None`,
+/// which this backend stores as no type and serves as this value.
 pub(super) const DEFAULT_CONTENT_TYPE: &str = "binary/octet-stream";
 
 /// The representation headers a write may carry and every later read must answer.

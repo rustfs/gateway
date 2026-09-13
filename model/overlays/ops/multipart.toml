@@ -84,8 +84,7 @@ element_order = ["Bucket", "Key", "UploadId"]
 [[op.CreateMultipartUpload.field]]
 side = "input"
 name = "ContentType"
-default_string = "binary/octet-stream"
-quirks = ["q-content-0008", "q-mpu-metadata-0039"]
+quirks = ["q-mpu-metadata-0039"]
 
 [[op.CreateMultipartUpload.field]]
 side = "input"

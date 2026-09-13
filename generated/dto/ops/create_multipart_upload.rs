@@ -74,7 +74,7 @@ pub struct Input {
     pub content_encoding: Option<String>,
     /// Wire `content-language`, bound as Header. Optional.
     pub content_language: Option<String>,
-    /// Wire `content-type`, bound as Header. Optional. Wire default `"binary/octet-stream"`.
+    /// Wire `content-type`, bound as Header. Optional.
     pub content_type: Option<String>,
     /// Wire `expires`, bound as Header. Optional.
     pub expires: Option<crate::OpaqueString>,

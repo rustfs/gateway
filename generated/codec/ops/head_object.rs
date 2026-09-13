@@ -286,6 +286,8 @@ impl OperationCodec for dto::HeadObject {
         if let Some(v) = output.content_type.as_ref() {
             let rendered = v.as_str();
             response.set_header("content-type", rendered);
+        } else if status != 304 {
+            response.set_header("content-type", "binary/octet-stream");
         }
         // ContentRange — header `content-range`.
         if let Some(v) = output.content_range.as_ref() {

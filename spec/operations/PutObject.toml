@@ -148,8 +148,7 @@ binding = "Header"
 type = "String"
 required = false
 hot = true
-default = "binary/octet-stream"
-quirks = ["q-content-0008"]
+quirks = []
 
 [[input]]
 name = "ChecksumAlgorithm"

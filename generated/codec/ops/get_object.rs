@@ -295,6 +295,8 @@ impl OperationCodec for dto::GetObject {
         if let Some(v) = output.content_type.as_ref() {
             let rendered = v.as_str();
             response.set_header("content-type", rendered);
+        } else if status != 304 {
+            response.set_header("content-type", "binary/octet-stream");
         }
         // Expires — header `expires`.
         if let Some(v) = output.expires.as_ref() {

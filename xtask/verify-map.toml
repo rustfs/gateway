@@ -210,7 +210,7 @@ cases = "c-bkt-0008,c-bkt-0009,c-bkt-0025,c-bkt-0026"
 
 [[operation]]
 name = "HeadObject"
-cases = "c-object-0002,c-object-0008,c-object-0018,c-object-0028,c-object-0038,c-object-0053,c-select-restore-0004,c-select-restore-0005,c-select-restore-0019"
+cases = "c-object-0002,c-object-0008,c-object-0018,c-object-0028,c-object-0038,c-object-0053,c-object-0058,c-select-restore-0004,c-select-restore-0005,c-select-restore-0019"
 
 [[operation]]
 name = "ListBucketAnalyticsConfigurations"

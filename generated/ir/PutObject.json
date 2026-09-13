@@ -131,8 +131,7 @@
                            "binding": { "kind": "Header" },
                            "type": { "kind": "String" },
                            "hot": true,
-                           "default": "binary/octet-stream",
-                           "quirk_refs": ["q-content-0008"]
+                           "quirk_refs": []
                          },
                          {
                            "name": "ChecksumAlgorithm",
@@ -630,20 +629,6 @@
                               }
                             ],
                 "cases": ["c-putobject-0001"]
-              },
-              {
-                "id": "q-content-0008",
-                "kind": "default_value",
-                "target": "PutObject.ContentType",
-                "summary": "The default media type is the S3 specific binary form, not the IANA registered octet stream spelling.",
-                "evidence": [
-                              {
-                                "kind": "aws-doc",
-                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html",
-                                "summary": "Documents the S3 specific default media type applied when the request omits the header."
-                              }
-                            ],
-                "cases": ["c-object-0001", "c-object-0006"]
               },
               {
                 "id": "q-meta-0009",

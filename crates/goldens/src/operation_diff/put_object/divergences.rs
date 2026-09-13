@@ -101,20 +101,29 @@ fn a_checksum_algorithm_the_gateway_model_predates_is_refused_by_the_gateway_and
     );
 }
 
-/// `q-content-0008`: the gateway decoder fills an absent `Content-Type` with the S3 default, so the
-/// converted input says `binary/octet-stream` where s3s says nothing. The conversion cannot undo
-/// it — the gateway input no longer records whether the client sent the header — so the migration
-/// has to decide which answer the RustFS app body gets.
+/// `q-content-0008`: an absent `Content-Type` decodes to no type on both stacks, so the RustFS app
+/// body gets the `None` it gets today and derives a type from the key's extension. The S3 default
+/// is applied on the read instead — the GetObject and HeadObject encoders answer
+/// `binary/octet-stream` when a backend names no type — so every other deployment keeps the AWS
+/// answer (`c-object-0017`, `c-object-0058`). It used to be filled at decode, where the conversion
+/// could not undo it.
 ///
 /// Ruling: `rd-put-0001`
 #[test]
-fn an_absent_content_type_is_defaulted_by_the_gateway_and_left_absent_by_s3s() {
+fn an_absent_content_type_is_left_absent_by_both_stacks() {
     let request = RawRequest::put(TARGET, BODY, 5);
     let diff = run_decode(&request, &request, convert).compared();
-    assert_eq!(diff.differing, ["content_type"]);
+    assert!(diff.differing.is_empty(), "{:?}", diff.differing);
     let probe = Arc::new(BodyProbe::default());
     let converted = input_to_s3s(gateway_decode(&request, &probe).expect("accepted")).expect("converts");
-    assert_eq!(converted.content_type.as_deref(), Some("binary/octet-stream"));
+    assert_eq!(converted.content_type, None, "the RustFS app body decides what an untyped object is");
+
+    // The control: a type the client did send reaches the app body unchanged on both stacks.
+    let typed = RawRequest::put(TARGET, BODY, 5).with("content-type", "image/png");
+    let diff = run_decode(&typed, &typed, convert).compared();
+    assert!(diff.differing.is_empty(), "{:?}", diff.differing);
+    let converted = input_to_s3s(gateway_decode(&typed, &probe).expect("accepted")).expect("converts");
+    assert_eq!(converted.content_type.as_deref(), Some("image/png"));
 }
 
 /// The gateway binds the algorithm to `x-amz-sdk-checksum-algorithm`, the header the SDKs send;

@@ -86,8 +86,6 @@ impl OperationCodec for dto::PutObject {
         if let Some(raw) = request.header("content-type") {
             let raw = raw.as_ref();
             input.content_type = Some(raw.to_owned());
-        } else {
-            input.content_type = Some("binary/octet-stream".to_owned());
         }
         // ChecksumAlgorithm — header `x-amz-sdk-checksum-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-sdk-checksum-algorithm") {
