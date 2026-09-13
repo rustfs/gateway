@@ -20,6 +20,8 @@
 //! Upstream: the `verify` command. Downstream: Cargo and the operation catalog.
 
 mod budget;
+#[cfg(feature = "full")]
+mod full_gate;
 mod launcher;
 mod prebuild;
 mod process;
@@ -583,113 +585,60 @@ struct RunOptions<'a> {
 fn run_all(json: bool) -> ExitCode {
     let root = codegen::repo_root();
     let scripts = root.join("scripts");
-    let setup = (
-        env!("CARGO").to_owned(),
-        vec!["test".to_owned(), "--workspace".to_owned(), "--no-run".to_owned()],
-        "workspace test build".to_owned(),
-    );
-    let commands = vec![
-        (
-            env!("CARGO").to_owned(),
-            vec![
-                "test".to_owned(),
-                "--workspace".to_owned(),
-                "--".to_owned(),
-                "--test-threads=1".to_owned(),
+    let stages = [
+        full_gate::Stage {
+            name: "workspace test build".to_owned(),
+            commands: vec![(
+                env!("CARGO").to_owned(),
+                vec!["test".to_owned(), "--workspace".to_owned(), "--no-run".to_owned()],
+                "workspace test build".to_owned(),
+            )],
+        },
+        full_gate::Stage {
+            name: "workspace tests and guard self-test".to_owned(),
+            commands: vec![
+                (
+                    env!("CARGO").to_owned(),
+                    vec![
+                        "test".to_owned(),
+                        "--workspace".to_owned(),
+                        "--".to_owned(),
+                        "--test-threads=1".to_owned(),
+                    ],
+                    "workspace tests".to_owned(),
+                ),
+                (
+                    "bash".to_owned(),
+                    vec![scripts.join("test_guard_scripts.sh").display().to_string()],
+                    "guard self-test".to_owned(),
+                ),
             ],
-            "workspace tests".to_owned(),
-        ),
-        (
-            "bash".to_owned(),
-            vec![scripts.join("test_guard_scripts.sh").display().to_string()],
-            "guard self-test".to_owned(),
-        ),
+        },
     ];
-
-    let started = Instant::now();
-    for (step, output) in run_setup_then_concurrently(&setup, &commands, &root) {
-        match output {
-            Ok(output) if output.status.success() => {}
-            Ok(output) => {
-                print_cargo_failure(&output);
-                print_json_failure(json, "verification command failed", &step);
-                return diagnostic(
-                    "verification command failed",
-                    &step,
-                    &format!("the full gate must finish within 10 minutes; command exited with {}", output.status),
-                );
-            }
-            Err(error) => {
-                return diagnostic(
-                    "verification command could not start",
-                    &step,
-                    &format!("the full gate must finish within 10 minutes; {error}"),
-                );
-            }
-        }
-    }
-    let elapsed = started.elapsed();
-    if elapsed > Duration::from_secs(600) {
-        return budget_diagnostic(
-            BudgetFailure::Overran { elapsed },
-            "workspace tests and build guards",
-            "the full gate must finish within 10 minutes",
-        );
-    }
-    print_success("workspace tests and build guards", elapsed, json, None);
-    ExitCode::SUCCESS
+    full_gate::verify(
+        &stages,
+        &root,
+        Duration::from_secs(600),
+        "workspace tests and build guards",
+        "the full gate must finish within 10 minutes",
+        json,
+    )
 }
 
 type GateCommand = (String, Vec<String>, String);
 type GateResult = (String, std::io::Result<Output>);
 
 #[cfg(feature = "full")]
-fn run_setup_then_concurrently(setup: &GateCommand, commands: &[GateCommand], current_dir: &Path) -> Vec<GateResult> {
-    let (program, args, step) = setup;
-    let output = Command::new(program).args(args).current_dir(current_dir).output();
-    let succeeded = output.as_ref().is_ok_and(|output| output.status.success());
-    let mut outputs = vec![(step.clone(), output)];
-    if succeeded {
-        outputs.extend(run_commands_concurrently(commands, current_dir));
-    }
-    outputs
-}
-
-#[cfg(feature = "full")]
-fn run_commands_concurrently(commands: &[GateCommand], current_dir: &Path) -> Vec<GateResult> {
-    let batch = process::run(commands, current_dir, None);
-    if batch.interrupted {
-        vec![(
-            "verification interrupted".to_owned(),
-            Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "verification interrupted")),
-        )]
-    } else {
-        batch.results
-    }
-}
-
-#[cfg(feature = "full")]
 fn run(args: &[&str], budget: Duration, subject: &str, rule: &str, json: bool) -> ExitCode {
-    let started = Instant::now();
-    let status = Command::new(env!("CARGO")).args(args).output();
-    let elapsed = started.elapsed();
-    match status {
-        Ok(output) if !output.status.success() => {
-            print_cargo_failure(&output);
-            print_json_failure(json, "verification command failed", subject);
-            diagnostic(
-                "verification command failed",
-                subject,
-                &format!("{rule}; cargo exited with {}", output.status),
-            )
-        }
-        Err(error) => diagnostic("cargo could not be started", subject, &format!("{rule}; {error}")),
-        Ok(_) if elapsed > budget => budget_diagnostic(BudgetFailure::Overran { elapsed }, subject, rule),
-        Ok(_) => {
-            print_success(subject, elapsed, json, None);
-            ExitCode::SUCCESS
-        }
-    }
+    let stages = [full_gate::Stage {
+        name: subject.to_owned(),
+        commands: vec![(
+            env!("CARGO").to_owned(),
+            args.iter().map(|argument| (*argument).to_owned()).collect(),
+            subject.to_owned(),
+        )],
+    }];
+    full_gate::verify(&stages, Path::new("."), budget, subject, rule, json)
 }
 
 fn take_json(args: &[String]) -> (Vec<String>, bool) {

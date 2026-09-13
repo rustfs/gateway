@@ -1996,6 +1996,22 @@ expect_fail check_xtask_codegen_surface.sh \
     'the crate-verification process supervisor becoming full-only' \
     mut_xtask_process_supervisor_becomes_full_only
 
+mut_xtask_full_gate_leaks_into_light_surface() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '#[cfg(feature = "full")]\nmod full_gate;'
+if text.count(old) != 1:
+    raise SystemExit("full-only gate stage runner module is missing")
+path.write_text(text.replace(old, "mod full_gate;", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the full-gate stage runner leaking into the light crate surface' \
+    mut_xtask_full_gate_leaks_into_light_surface
+
 mut_xtask_verify_operation_loses_operation_gate() {
     python3 - <<'PYEOF'
 from pathlib import Path

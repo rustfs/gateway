@@ -69,11 +69,12 @@ struct SupervisedChild {
     cancelled: bool,
 }
 
-struct Supervisor {
+struct Supervisor<'clock> {
     children: Vec<SupervisedChild>,
     capture_root: PathBuf,
     signals: SignalControl,
     cleaned: bool,
+    clock: &'clock dyn Fn() -> Instant,
 }
 
 #[cfg(unix)]
@@ -103,6 +104,21 @@ static SIGNAL_LISTENER_PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic
 static SIGNAL_LISTENER_HANDLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub(super) fn run(commands: &[GateCommand], current_dir: &Path, deadline: Option<Instant>) -> Batch {
+    run_with_clock(commands, current_dir, deadline, &Instant::now)
+}
+
+/// [`run`] against an injected clock.
+///
+/// Every deadline comparison the supervisor makes — waiting for the signal lock, starting a
+/// command, and polling running children — reads this clock, so a test can make a deadline expire
+/// at a point its child has proven it reached instead of at a wall-clock instant a loaded host
+/// may miss. Production passes `Instant::now`.
+pub(super) fn run_with_clock(
+    commands: &[GateCommand],
+    current_dir: &Path,
+    deadline: Option<Instant>,
+    clock: &dyn Fn() -> Instant,
+) -> Batch {
     if commands.is_empty() {
         return Batch {
             results: Vec::new(),
@@ -111,15 +127,15 @@ pub(super) fn run(commands: &[GateCommand], current_dir: &Path, deadline: Option
             cancelled: Vec::new(),
         };
     }
-    run_supervised(commands, current_dir, deadline)
+    run_supervised(commands, current_dir, deadline, clock)
 }
 
-fn run_supervised(commands: &[GateCommand], current_dir: &Path, deadline: Option<Instant>) -> Batch {
+fn run_supervised(commands: &[GateCommand], current_dir: &Path, deadline: Option<Instant>, clock: &dyn Fn() -> Instant) -> Batch {
     let capture_root = match capture_root() {
         Ok(path) => path,
         Err(error) => return failed_to_start(&commands[0].2, error),
     };
-    let signals = match SignalControl::new(deadline) {
+    let signals = match SignalControl::new(deadline, clock) {
         Ok(Some(signals)) => signals,
         Ok(None) => {
             let _ = fs::remove_dir_all(capture_root);
@@ -140,6 +156,7 @@ fn run_supervised(commands: &[GateCommand], current_dir: &Path, deadline: Option
         capture_root,
         signals,
         cleaned: false,
+        clock,
     };
     for (index, (program, args, step)) in commands.iter().enumerate() {
         match supervisor.spawn_before_deadline(index, program, args, step, current_dir, deadline) {
@@ -184,7 +201,7 @@ fn capture_root() -> io::Result<PathBuf> {
     ))
 }
 
-impl Supervisor {
+impl Supervisor<'_> {
     fn spawn_before_deadline(
         &mut self,
         index: usize,
@@ -194,7 +211,7 @@ impl Supervisor {
         current_dir: &Path,
         deadline: Option<Instant>,
     ) -> io::Result<bool> {
-        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        if deadline.is_some_and(|deadline| (self.clock)() >= deadline) {
             return Ok(false);
         }
         self.spawn(index, program, args, step, current_dir)?;
@@ -271,7 +288,7 @@ impl Supervisor {
                     cancelled: Vec::new(),
                 };
             }
-            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            if deadline.is_some_and(|deadline| (self.clock)() >= deadline) {
                 self.cancel_running();
                 return Batch {
                     cancelled: self.cancelled_steps(),
@@ -283,7 +300,7 @@ impl Supervisor {
             let delay = deadline
                 .map(|deadline| {
                     deadline
-                        .saturating_duration_since(Instant::now())
+                        .saturating_duration_since((self.clock)())
                         .min(Duration::from_millis(10))
                 })
                 .unwrap_or(Duration::from_millis(10));
@@ -371,7 +388,7 @@ impl Supervisor {
 
 #[cfg(unix)]
 impl SignalControl {
-    fn new(deadline: Option<Instant>) -> io::Result<Option<Self>> {
+    fn new(deadline: Option<Instant>, clock: &dyn Fn() -> Instant) -> io::Result<Option<Self>> {
         ensure_signal_listener()?;
         let guard = match deadline {
             None => SUPERVISOR_LOCK
@@ -384,7 +401,7 @@ impl SignalControl {
                         return Err(io::Error::other("signal supervisor lock is poisoned"));
                     }
                     Err(TryLockError::WouldBlock) => {
-                        let remaining = deadline.saturating_duration_since(Instant::now());
+                        let remaining = deadline.saturating_duration_since(clock());
                         if remaining.is_zero() {
                             return Ok(None);
                         }
@@ -416,8 +433,8 @@ impl SignalControl {
 
 #[cfg(not(unix))]
 impl SignalControl {
-    fn new(deadline: Option<Instant>) -> io::Result<Option<Self>> {
-        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+    fn new(deadline: Option<Instant>, clock: &dyn Fn() -> Instant) -> io::Result<Option<Self>> {
+        if deadline.is_some_and(|deadline| clock() >= deadline) {
             return Ok(None);
         }
         Ok(Some(Self))
@@ -441,7 +458,7 @@ impl Drop for SignalControl {
     }
 }
 
-impl Drop for Supervisor {
+impl Drop for Supervisor<'_> {
     fn drop(&mut self) {
         self.cleanup();
         if let Some(signal) = self.signals.finish() {

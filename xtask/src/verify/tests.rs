@@ -16,51 +16,7 @@
 //! NOT responsible for: defining production verification scopes or process supervision.
 //! Upstream: `super`. Downstream: the xtask unit-test runner.
 
-use std::fs;
-
 use super::*;
-
-#[test]
-fn full_gate_steps_start_before_either_is_awaited() {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("test clock must be after the Unix epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gateway-parallel-{}-{nonce}", std::process::id()));
-    fs::create_dir_all(&root).expect("test directory must be creatable");
-    let ready = root.join("ready");
-    let first = root.join("first");
-    let second = root.join("second");
-    let wait_for = |own: &std::path::Path, peer: &std::path::Path| {
-        vec![
-            "-c".to_owned(),
-            format!(
-                "test -f '{}' || exit 1; touch '{}'; for _ in $(seq 1 200); do test -f '{}' && exit 0; sleep 0.01; done; exit 1",
-                ready.display(),
-                own.display(),
-                peer.display()
-            ),
-        ]
-    };
-    let setup = (
-        "sh".to_owned(),
-        vec!["-c".to_owned(), format!("touch '{}'", ready.display())],
-        "setup".to_owned(),
-    );
-    let commands = vec![
-        ("sh".to_owned(), wait_for(&first, &second), "first".to_owned()),
-        ("sh".to_owned(), wait_for(&second, &first), "second".to_owned()),
-    ];
-
-    let outputs = run_setup_then_concurrently(&setup, &commands, &root);
-
-    assert!(
-        outputs
-            .iter()
-            .all(|(_, output)| output.as_ref().is_ok_and(|output| output.status.success()))
-    );
-    fs::remove_dir_all(root).expect("test directory must be removable");
-}
 
 #[test]
 fn the_facade_accepts_its_current_and_legacy_crate_names() {
