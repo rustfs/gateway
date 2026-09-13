@@ -240,10 +240,14 @@ signing_suite_run = <<~'RUN'
   scripts/ci_budget.sh 60 "signing suite fetch" target/debug/xtask sigsuite fetch
   scripts/ci_budget.sh 60 "signing suite run" target/debug/xtask sigsuite run
 RUN
+# The build is budgeted apart from the two runs, as the signing suite's is: a cache miss compiles
+# three s3s revisions, and a run budget that also pays for compilation reports a cold cache as a
+# slow report. 165 + 30 + 15 stays inside the job's four-minute timeout.
 persistence_goldens_run = <<~'RUN'
+  scripts/ci_budget.sh 165 "persistence goldens build" \
+    cargo build --quiet --package rustfs-gateway-goldens --bin corpus-report --bin four-way
   report="$(
-    scripts/ci_budget.sh 105 "persistence corpus report" \
-      cargo run --quiet --package rustfs-gateway-goldens --bin corpus-report
+    scripts/ci_budget.sh 30 "persistence corpus report" target/debug/corpus-report
   )"
   printf '%s\n' "$report"
   corpus_bytes="$(
@@ -252,8 +256,7 @@ persistence_goldens_run = <<~'RUN'
   )"
   test -n "$corpus_bytes"
   test "$corpus_bytes" -le 20971520
-  scripts/ci_budget.sh 105 "four-way persistence goldens" \
-    cargo run --quiet --package rustfs-gateway-goldens --bin four-way -- --all
+  scripts/ci_budget.sh 15 "four-way persistence goldens" target/debug/four-way --all
 RUN
 # Every runner declares the same budget it is given, so an overrun stops itself with a
 # diagnosis instead of being killed at exit 124 with every case still printing ok.

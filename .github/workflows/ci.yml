@@ -393,6 +393,11 @@ jobs:
 
   # The corpus is embedded in family providers rather than stored under a corpus/ directory.
   # corpus-report derives this byte total from the concrete accepted and rejected sample inputs.
+  # The build has its own budget, like the signing suite's, and the two runs are budgeted for what
+  # they measure. The corpus report runs in about 9s on a full cache hit (run 34765275532) and
+  # four-way in 1s, but since #745 compat-s3s compiles three s3s revisions, and a cache miss spent
+  # the whole 105s report budget compiling (runs 34767876614, 34768348356). 165 + 30 + 15 keeps the
+  # step's 210s inside the job's four minutes, so an overrun is still named by ci_budget.sh.
   persistence-goldens:
     name: Persistence goldens
     runs-on: ubuntu-latest
@@ -405,9 +410,10 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Run persisted XML goldens (maximum 3.5 minutes after setup)
         run: |
+          scripts/ci_budget.sh 165 "persistence goldens build" \
+            cargo build --quiet --package rustfs-gateway-goldens --bin corpus-report --bin four-way
           report="$(
-            scripts/ci_budget.sh 105 "persistence corpus report" \
-              cargo run --quiet --package rustfs-gateway-goldens --bin corpus-report
+            scripts/ci_budget.sh 30 "persistence corpus report" target/debug/corpus-report
           )"
           printf '%s\n' "$report"
           corpus_bytes="$(
@@ -416,8 +422,7 @@ jobs:
           )"
           test -n "$corpus_bytes"
           test "$corpus_bytes" -le 20971520
-          scripts/ci_budget.sh 105 "four-way persistence goldens" \
-            cargo run --quiet --package rustfs-gateway-goldens --bin four-way -- --all
+          scripts/ci_budget.sh 15 "four-way persistence goldens" target/debug/four-way --all
 
   # The runner build is 31-41s on a cache hit and once took the whole 90s budget at exit 124 on a
   # cache miss (run 33668574761). A budget sized for the hit turns every cache miss into a red
