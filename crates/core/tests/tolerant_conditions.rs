@@ -15,9 +15,9 @@
 //! The one header family this codec is required to ignore rather than refuse.
 //!
 //! Responsible for: RFC 9110 §13.1.3 and §13.1.4 over the two date conditions and the two read
-//! operations — that an unreadable value drops the condition and does not fail the decode, that a
-//! readable one still binds, and that the tolerance did not spread to a member that must stay
-//! strict.
+//! operations, and over the two copy-source date conditions of CopyObject and UploadPartCopy —
+//! that an unreadable value drops the condition and does not fail the decode, that a readable one
+//! still binds, and that the tolerance did not spread to a member that must stay strict.
 //! NOT responsible for: how a bound condition is then evaluated (`tests/precondition_range.rs`).
 //! Upstream: the generated codecs. Downstream: nothing.
 //!
@@ -29,7 +29,7 @@
 //! reads into `DateCondition`, which names the second case, and `honoured()` is the single site
 //! that collapses it.
 //!
-//! 3 positive / 9 negative.
+//! 4 positive / 12 negative.
 
 // The crate denies these so that no request path can panic on a caller's bytes. A test asserts
 // against a fixture it wrote itself, where a panic is the failure report; AGENTS.md exempts test
@@ -54,6 +54,8 @@ const NOT_DATES: &[&str] = &[
     "Xri, 02 Jan 2026 03:04:05 GMT",
     "Fri, 32 Jan 2026 03:04:05 GMT",
     "\u{4e2d}\u{6587}",
+    // What JavaScript's `new Date(undefined).toString()` renders, and what minio-js 8 sends.
+    "Invalid Date",
 ];
 
 /// One valid HTTP-date, in the spelling the fixture clock uses.
@@ -249,4 +251,103 @@ fn the_generated_decode_and_the_shared_reader_agree() {
         let directly = date_condition(spelling, TimestampFormat::HttpDate).honoured();
         assert_eq!(through_codec, directly, "{spelling:?}");
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The copy family: the same two conditions, evaluated against the source object
+// ---------------------------------------------------------------------------------------------
+
+const COPY_SOURCE: (&str, &str) = ("x-amz-copy-source", "/conf-copy/src/plain.txt");
+
+fn copy_request(uri: &str, headers: &[(&str, &str)]) -> WireRequest<()> {
+    let mut builder = Request::builder()
+        .method("PUT")
+        .uri(uri)
+        .header("host", "host.invalid")
+        .header(COPY_SOURCE.0, COPY_SOURCE.1);
+    for (name, value) in headers {
+        builder = builder.header(*name, *value);
+    }
+    let request = builder.body(()).expect("the fixture request is well formed");
+    WireRequest::accept(request, &Limits::default()).expect("the fixture request is acceptable")
+}
+
+fn copy(headers: &[(&str, &str)]) -> dto::CopyObjectInput {
+    let request = copy_request("http://host.invalid/conf-copy/dst/key", headers);
+    let view = MetaView::of(&request, TargetKind::Object).expect("the path has both labels");
+    dto::CopyObject::decode(&view, RequestBody::None).expect("a copy-source date condition never fails a decode")
+}
+
+fn part_copy(headers: &[(&str, &str)]) -> dto::UploadPartCopyInput {
+    let request = copy_request("http://host.invalid/conf-copy/dst/key?partNumber=1&uploadId=upload", headers);
+    let view = MetaView::of(&request, TargetKind::Object).expect("the path has both labels");
+    dto::UploadPartCopy::decode(&view, RequestBody::None).expect("a copy-source date condition never fails a decode")
+}
+
+/// Negative — no unreadable copy-source date refuses a CopyObject, on either member.
+///
+/// minio-js 8 sends `x-amz-copy-source-if-unmodified-since: Invalid Date` from its functional
+/// suite; that request is the reason this test exists (rustfs/gateway#764).
+#[test]
+fn no_unreadable_copy_source_date_refuses_a_copy() {
+    for spelling in NOT_DATES {
+        let input = copy(&[
+            ("x-amz-copy-source-if-modified-since", spelling),
+            ("x-amz-copy-source-if-unmodified-since", spelling),
+        ]);
+        assert!(input.copy_source_if_modified_since.is_none(), "{spelling:?}");
+        assert!(input.copy_source_if_unmodified_since.is_none(), "{spelling:?}");
+    }
+}
+
+/// Negative — each member separately, so a tolerance attached to one of them alone goes red.
+#[test]
+fn each_copy_source_date_is_tolerant_on_its_own() {
+    for header in ["x-amz-copy-source-if-modified-since", "x-amz-copy-source-if-unmodified-since"] {
+        let input = copy(&[(header, "Invalid Date")]);
+        assert!(input.copy_source_if_modified_since.is_none(), "{header}");
+        assert!(input.copy_source_if_unmodified_since.is_none(), "{header}");
+    }
+}
+
+/// Negative — UploadPartCopy shares the four copy-source conditions, and is no stricter.
+#[test]
+fn no_unreadable_copy_source_date_refuses_a_part_copy() {
+    for spelling in NOT_DATES {
+        for header in ["x-amz-copy-source-if-modified-since", "x-amz-copy-source-if-unmodified-since"] {
+            let input = part_copy(&[(header, spelling)]);
+            assert!(input.copy_source_if_modified_since.is_none(), "{header} {spelling:?}");
+            assert!(input.copy_source_if_unmodified_since.is_none(), "{header} {spelling:?}");
+        }
+    }
+}
+
+/// Negative — an unreadable copy-source date drops only itself: a readable sibling and the
+/// copy-source entity-tag condition still reach the operation.
+#[test]
+fn an_unreadable_copy_source_date_does_not_drop_the_conditions_beside_it() {
+    let input = copy(&[
+        ("x-amz-copy-source-if-modified-since", "Invalid Date"),
+        ("x-amz-copy-source-if-unmodified-since", A_DATE),
+        ("x-amz-copy-source-if-match", "\"0000000000000000000000000000dead\""),
+    ]);
+    assert!(input.copy_source_if_modified_since.is_none());
+    assert!(input.copy_source_if_unmodified_since.is_some(), "a readable sibling still binds");
+    assert!(input.copy_source_if_match.is_some(), "an entity-tag condition is not a date condition");
+}
+
+/// Positive — a readable copy-source date still binds on both operations and both members, so
+/// the tolerance cannot be implemented by dropping every copy-source date.
+#[test]
+fn a_readable_copy_source_date_still_binds() {
+    let dates = [
+        ("x-amz-copy-source-if-modified-since", A_DATE),
+        ("x-amz-copy-source-if-unmodified-since", A_DATE),
+    ];
+    let whole = copy(&dates);
+    assert!(whole.copy_source_if_modified_since.is_some());
+    assert!(whole.copy_source_if_unmodified_since.is_some());
+    let part = part_copy(&dates);
+    assert!(part.copy_source_if_modified_since.is_some());
+    assert!(part.copy_source_if_unmodified_since.is_some());
 }

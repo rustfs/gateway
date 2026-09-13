@@ -152,7 +152,7 @@ binding = "Header"
 type = "Timestamp(HttpDate)"
 required = false
 hot = false
-quirks = ["q-timestamp-0005", "q-copy-conditions-0081"]
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081", "q-copy-source-date-0159"]
 
 [[input]]
 name = "CopySourceIfNoneMatch"
@@ -170,7 +170,7 @@ binding = "Header"
 type = "Timestamp(HttpDate)"
 required = false
 hot = false
-quirks = ["q-timestamp-0005", "q-copy-conditions-0081"]
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081", "q-copy-source-date-0159"]
 
 [[input]]
 name = "Expires"

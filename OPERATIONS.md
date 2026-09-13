@@ -629,6 +629,7 @@ An `Error` body can follow an already-flushed `200`.
 - `q-copy-conditions-0081` (independent_conditions on `CopyObject.CopySourceIfMatch`) — The four `x-amz-copy-source-if-*` conditions are evaluated against the source object and the four unprefixed conditions against the destination, as two independent verdicts that are never merged, and a copy-source entity tag arrives unquoted from more than one SDK and is compared as an opaque tag rather than refused.
 - `q-copy-error-after-200-0082` (error_after_200 on `CopyObject`) — A copy that fails after the response head has been flushed answers with the success status and an `<Error>` document in the body, so the status alone never decides the outcome, and the response must not announce a trailer section it will not send.
 - `q-copy-source-version-0083` (response_header_pair on `CopyObject.CopySourceVersionId`) — The version of the object that was read and the version of the object that was written travel in two different response headers, so an implementation that writes one value into both tells the client the copy it just made is the version it copied from.
+- `q-copy-source-date-0159` (header_tolerance on `CopyObject.CopySourceIfUnmodifiedSince`) — A copy-source date condition whose value is not a valid HTTP-date is ignored and the copy proceeds, on both copy-source date members of CopyObject and UploadPartCopy, while a readable one is still evaluated against the source object.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -4881,6 +4882,7 @@ An `Error` body can follow an already-flushed `200`.
 - `q-copy-source-version-0083` (response_header_pair on `CopyObject.CopySourceVersionId`) — The version of the object that was read and the version of the object that was written travel in two different response headers, so an implementation that writes one value into both tells the client the copy it just made is the version it copied from.
 - `q-copy-part-root-0084` (wire_root_name on `UploadPartCopy`) — The response root element of a part copy is the copy-part spelling rather than the operation name or the output shape name, so a generator that derived the root from either emits a document no SDK parses.
 - `q-copy-range-0085` (range_strictness on `UploadPartCopy.CopySourceRange`) — A copy-source range carries end minus start plus one bytes, and unlike a read range it is refused rather than clamped when it runs past the end of the source and refused outright when it names more than one span; a zero-byte source is a legal copy of nothing rather than an arithmetic edge that faults.
+- `q-copy-source-date-0159` (header_tolerance on `CopyObject.CopySourceIfUnmodifiedSince`) — A copy-source date condition whose value is not a valid HTTP-date is ignored and the copy proceeds, on both copy-source date members of CopyObject and UploadPartCopy, while a readable one is still evaluated against the source object.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 

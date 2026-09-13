@@ -1,0 +1,75 @@
+# c-copy-0039 — an unreadable copy-source unmodified-since is ignored, not refused
+#
+# Schema dimensions exercised: the exact spelling minio-js 8 sends, with the destination read back to prove the copy happened
+
+[case]
+id = "c-copy-0039"
+schema_version = 1
+title = "A copy whose copy-source unmodified-since is not an HTTP-date ignores it and copies"
+rationale = """
+minio-js 8 builds this header from a date it no longer receives and sends the string `Invalid Date`. The copy-source date conditions are the read-side date conditions evaluated against the source object, and the rule for a date that cannot be read is the same: the condition is dropped, not the request. Answering 400 turns a formatting mistake in one header into a copy that can never succeed, for a condition that carries no requirement once it cannot be read."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["conditional", "preconditions", "timing"]
+timeout_ms = 10000
+quirks = ["q-copy-source-date-0159"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.4"
+summary = "A recipient ignores an unmodified-since condition whose value is not a valid HTTP-date."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "Documents the copy-source unmodified-since condition as a timestamp and defines no error for a value that is not one."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[[exchanges]]
+name = "the-unreadable-condition-is-ignored"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0039"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-copy-source-if-unmodified-since" = "Invalid Date" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+redact = ["LastModified"]
+contains_utf8 = ["<CopyObjectResult", "<ETag>&quot;5eb63bbbe01eeed093cb22bb8f5acdc3&quot;</ETag>"]
+not_contains_utf8 = ["<Error>"]
+
+[[exchanges]]
+name = "the-destination-holds-the-source"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-copy/dst/0039"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "hello world"
