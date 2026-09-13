@@ -44,8 +44,8 @@ name = "put-with-unknown-element"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock?object-lock"
-headers = { "content-type" = "application/xml", "content-md5" = "3JcGZWcPK5yleqhyJMU+Qg==" }
-body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><FutureMember>x</FutureMember><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>1</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
+headers = { "content-type" = "application/xml", "content-md5" = "dztdqSK2mBgefSwTsVPCmQ==" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><FutureMember>x</FutureMember><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>30</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [exchanges.expect]
@@ -72,4 +72,4 @@ connection_after = "open"
 
 [exchanges.expect.body]
 golden = "goldens/c-lock-0010.xml"
-not_contains_utf8 = ["FutureMember"]
+not_contains_utf8 = ["FutureMember", "COMPLIANCE"]

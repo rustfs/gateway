@@ -217,7 +217,7 @@
                                 "summary": "The accepted amendment retains ADR-0007's codec policy while changing only request-carrier layout."
                               }
                             ],
-                "cases": ["c-bucketconfig-0020"]
+                "cases": ["c-bucketconfig-0061"]
               }
             ],
   "ext_points": []
