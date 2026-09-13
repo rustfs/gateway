@@ -96,3 +96,19 @@ fn n_unknown_or_combined_modes_are_rejected() {
         assert_eq!(String::from_utf8_lossy(&output.stderr), "usage: corpus-report [--require-closure]\n");
     }
 }
+
+/// A non-UTF-8 argument is a usage error with status 1, not a panic with status 101.
+#[cfg(unix)]
+#[test]
+fn n_non_utf8_argument_is_a_usage_error_not_a_panic() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_corpus-report"))
+        .arg(OsStr::from_bytes(b"--require-closure\xff"))
+        .output()
+        .expect("run corpus-report");
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "usage: corpus-report [--require-closure]\n");
+}
