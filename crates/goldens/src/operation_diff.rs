@@ -400,13 +400,13 @@ struct RecordingS3 {
 impl s3s::S3 for RecordingS3 {
     // The pinned trait is declared with `#[async_trait]`; this is the signature that attribute
     // expands a `&self` method to, spelled out so the harness needs no proc-macro dependency.
-    fn put_object<'life0, 'async_trait>(
+    fn put_object<'life0, 'future>(
         &'life0 self,
         request: s3s::S3Request<oracle::PutObjectInput>,
-    ) -> Pin<Box<dyn Future<Output = s3s::S3Result<s3s::S3Response<oracle::PutObjectOutput>>> + Send + 'async_trait>>
+    ) -> Pin<Box<dyn Future<Output = s3s::S3Result<s3s::S3Response<oracle::PutObjectOutput>>> + Send + 'future>>
     where
-        'life0: 'async_trait,
-        Self: 'async_trait,
+        'life0: 'future,
+        Self: 'future,
     {
         let captured = Arc::clone(&self.captured);
         let output = self.output.clone();

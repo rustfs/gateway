@@ -16610,16 +16610,16 @@ expect_fail check_ci_test_split.sh \
     'the persistence goldens job being renamed away' mut_ci_persistence_goldens_job_missing
 
 mut_ci_persistence_corpus_report_dropped() {
-    replace_ci_text '      cargo run --quiet --package rustfs-gateway-goldens --bin corpus-report' \
-        '      true # corpus report dropped'
+    replace_ci_text 'target/debug/corpus-report' \
+        'true # corpus report dropped'
 }
 expect_fail check_ci_test_split.sh \
     'the persistence gate replacing corpus-report with a no-op' \
     mut_ci_persistence_corpus_report_dropped
 
 mut_ci_persistence_four_way_dropped() {
-    replace_ci_text '    cargo run --quiet --package rustfs-gateway-goldens --bin four-way -- --all' \
-        '    true # four-way assertions dropped'
+    replace_ci_text 'target/debug/four-way --all' \
+        'true # four-way assertions dropped'
 }
 expect_fail check_ci_test_split.sh \
     'the persistence gate replacing four-way --all with a no-op' \

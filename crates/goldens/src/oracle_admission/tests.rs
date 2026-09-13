@@ -15,8 +15,9 @@
 //! Fail-closed tests for per-revision oracle admission.
 //!
 //! Responsible for: proving the real observation of all three revisions, and that every
-//! validation rejection fires on a synthetic registry or a relabelled observation. NOT
-//! responsible for: family D1-D5 assertions. Upstream: `super`. Downstream: none; test-only.
+//! validation rejection fires on a synthetic registry or a relabelled observation.
+//! NOT responsible for: family D1-D5 assertions.
+//! Upstream: `super`. Downstream: none; test-only.
 
 use std::sync::OnceLock;
 

@@ -614,7 +614,9 @@ for dependencies in dependency_tables(sig):
                 f"check_sig_case_coverage: sig manifest gains serialization dependency {package}"
             )
 
-serde_json = core.get("dev-dependencies", {}).get("serde_json")
+# Core's tests reach the real serde_json whether core depends on it for production (ADR-0019's
+# SSE-KMS context validation) or only for its tests; either table carries the evidence.
+serde_json = core.get("dependencies", {}).get("serde_json") or core.get("dev-dependencies", {}).get("serde_json")
 if not isinstance(serde_json, dict) or serde_json.get("workspace") is not True:
     raise SystemExit(
         "check_sig_case_coverage: core dev tests do not enable real serde_json evidence"

@@ -441,25 +441,25 @@ type Answer<'a, T> = Pin<Box<dyn Future<Output = s3s::S3Result<s3s::S3Response<T
 impl s3s::S3 for ContextS3 {
     // The pinned trait is declared with `#[async_trait]`; these are the signatures that attribute
     // expands a `&self` method to, spelled out so the harness needs no proc-macro dependency.
-    fn put_object<'life0, 'async_trait>(
+    fn put_object<'life0, 'future>(
         &'life0 self,
         request: s3s::S3Request<oracle::PutObjectInput>,
-    ) -> Answer<'async_trait, oracle::PutObjectOutput>
+    ) -> Answer<'future, oracle::PutObjectOutput>
     where
-        'life0: 'async_trait,
-        Self: 'async_trait,
+        'life0: 'future,
+        Self: 'future,
     {
         self.record(request.map_input(|input| CapturedInput::Put(Box::new(input))));
         Box::pin(async { Ok(s3s::S3Response::new(oracle::PutObjectOutput::default())) })
     }
 
-    fn get_bucket_location<'life0, 'async_trait>(
+    fn get_bucket_location<'life0, 'future>(
         &'life0 self,
         request: s3s::S3Request<oracle::GetBucketLocationInput>,
-    ) -> Answer<'async_trait, oracle::GetBucketLocationOutput>
+    ) -> Answer<'future, oracle::GetBucketLocationOutput>
     where
-        'life0: 'async_trait,
-        Self: 'async_trait,
+        'life0: 'future,
+        Self: 'future,
     {
         self.record(request.map_input(CapturedInput::Location));
         Box::pin(async { Ok(s3s::S3Response::new(oracle::GetBucketLocationOutput::default())) })
