@@ -16,8 +16,9 @@
 //!
 //! Responsible for: invoking the exact old persistence codecs of every pinned s3s revision,
 //! selecting which revision answers, exposing family-scoped adapters over owned values, the
-//! single-operation DTO conversion in [`put_object`], and the request-context conversion in
-//! [`request_context`] — the only two submodules whose API names s3s types.
+//! single-operation DTO conversion in [`put_object`](crate::compat::put_object), and the
+//! request-context conversion in [`request_context`](crate::compat::request_context) — the only
+//! two submodules whose API names s3s types.
 //! NOT responsible for: production XML behavior, golden assertions, or wiring any conversion into a
 //! request path.
 //! Upstream: the three s3s revisions named by [`OracleRevision`]. Downstream:

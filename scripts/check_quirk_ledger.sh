@@ -278,6 +278,9 @@ def matching_delimiter(tokens: list[tuple[str, str, int]], start: int) -> int | 
         return None
     stack = [pairs[opening]]
     for index in range(start + 1, len(tokens)):
+        # A string literal such as "{" is data, not a delimiter (rustfs/backlog#1677).
+        if tokens[index][0] == "string":
+            continue
         value = tokens[index][1]
         if value in pairs:
             stack.append(pairs[value])
@@ -365,6 +368,8 @@ def production_tokens(tokens: list[tuple[str, str, int]]) -> list[tuple[str, str
         block_item = False
         semicolon_item = False
         for probe in range(item_start, len(tokens)):
+            if tokens[probe][0] == "string":
+                continue
             value = tokens[probe][1]
             if value in {"(", "["}:
                 probe_stack.append({"(": ")", "[": "]"}[value])
@@ -393,6 +398,8 @@ def production_tokens(tokens: list[tuple[str, str, int]]) -> list[tuple[str, str
         stack: list[str] = []
         item_end = None
         for candidate in range(item_start, len(tokens)):
+            if tokens[candidate][0] == "string":
+                continue
             value = tokens[candidate][1]
             if value in {"(", "[", "{"}:
                 if value == "{" and not stack and (block_item or not semicolon_item):

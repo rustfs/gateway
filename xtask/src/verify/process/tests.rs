@@ -68,6 +68,21 @@ fn process_alive(pid: &str) -> bool {
         .is_ok_and(|status| status.success())
 }
 
+/// Whether `pid` is still present once a killed orphan has had time to be reaped.
+///
+/// A SIGKILLed grandchild whose parent died with it is reparented to init and stays visible to
+/// `kill -0` as a zombie until init reaps it, so an immediate probe races that reap. Two seconds
+/// is far inside the `sleep 30` the grandchild would otherwise still be running.
+fn alive_after_reap_grace(pid: &str) -> bool {
+    for _ in 0..200 {
+        if !process_alive(pid) {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    true
+}
+
 fn terminate_pid(pid: &str) {
     let _ = Command::new("/bin/kill")
         .args(["-KILL", pid])
@@ -518,7 +533,7 @@ fn deadline_terminates_grandchildren_in_the_command_group() {
 
     let batch = run(&commands, Path::new("."), Some(Instant::now() + Duration::from_secs(1)));
     let pid = fs::read_to_string(&pid_file).expect("grandchild must publish its pid");
-    let alive = process_alive(pid.trim());
+    let alive = alive_after_reap_grace(pid.trim());
     if alive {
         terminate_pid(pid.trim());
     }
