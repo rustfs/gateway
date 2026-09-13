@@ -54,7 +54,7 @@ verification_cases=(
     'c-sig-0114|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0114_base64_padding_must_be_exact'
     'c-sig-0115|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0115_base64_whitespace_is_rejected'
     'c-sig-0116|negative|crates/sig/tests/verification_proof.rs|fn c_sig_0116_non_hex_characters_are_rejected'
-    'c-sig-0117|negative|crates/sig/tests/compile_fail/c_sig_0117_authenticated_requires_proof.rs|let _ = Verdict::Authenticated { identity, scheme };'
+    'c-sig-0117|negative|crates/sig/tests/compile_fail/c_sig_0117_authenticated_requires_proof.rs|let _ = Verdict::Authenticated { identity, scheme, scope: None };'
     'c-sig-0118|negative|crates/sig/tests/compile_fail/c_sig_0118_signature_match_private.rs|let _ = SignatureMatch(());'
     'c-sig-0119|negative|crates/sig/tests/compile_fail/c_sig_0119_signature_match_no_default.rs|let _ = SignatureMatch::default();'
     'c-sig-0120|negative|crates/sig/tests/compile_fail/c_sig_0120_anonymous_ack_private.rs|let _ = AnonymousAck(());'

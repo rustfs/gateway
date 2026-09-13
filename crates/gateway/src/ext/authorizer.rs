@@ -38,7 +38,7 @@
 //! explained which condition failed would let that caller map the policy one request at a time.
 
 use rustfs_gateway_core::{BoxFuture, ResourceIdentity, ResourceShape};
-use rustfs_gateway_sig::{Identity, RequestNow};
+use rustfs_gateway_sig::{Identity, RequestNow, VerifiedScope};
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
 pub use rustfs_gateway_core::{Decision, Denied as Denial};
@@ -71,17 +71,22 @@ pub struct RequestContext<'a> {
     now: RequestNow,
     policy: &'a PolicySnapshot,
     auth_scheme: AuthSchemeRef,
+    verified_scope: Option<&'a VerifiedScope>,
     server_extensions: &'a ServerExtensions,
 }
 
 impl<'a> RequestContext<'a> {
     /// Builds the immutable context shared by both stages.
+    ///
+    /// A context built here is anonymous and has no [`VerifiedScope`]: there is no parameter
+    /// through which one could be supplied, because only the pipeline holds a verdict.
     #[must_use]
     pub const fn new(now: RequestNow, policy: &'a PolicySnapshot) -> Self {
         Self {
             now,
             policy,
             auth_scheme: AuthSchemeRef::Anonymous,
+            verified_scope: None,
             server_extensions: &EMPTY_SERVER_EXTENSIONS,
         }
     }
@@ -90,14 +95,25 @@ impl<'a> RequestContext<'a> {
         now: RequestNow,
         policy: &'a PolicySnapshot,
         auth_scheme: AuthSchemeRef,
+        verified_scope: Option<&'a VerifiedScope>,
         server_extensions: &'a ServerExtensions,
     ) -> Self {
         Self {
             now,
             policy,
             auth_scheme,
+            verified_scope,
             server_extensions,
         }
+    }
+
+    /// The credential scope this request's signature was verified under (ADR-0020).
+    ///
+    /// Borrowed from the verdict the pipeline checked, never re-derived from a header. `None` for
+    /// an anonymous request and for a scheme without a credential scope (SigV2, a custom scheme).
+    #[must_use]
+    pub const fn verified_scope(&self) -> Option<&'a VerifiedScope> {
+        self.verified_scope
     }
 
     /// The single clock reading captured for this request.

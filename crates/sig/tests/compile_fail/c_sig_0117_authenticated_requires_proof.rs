@@ -14,7 +14,8 @@
 
 //! `c-sig-0117`: an authenticated verdict cannot be built without a comparison proof.
 //!
-//! Responsible for: proving the `proof` field is mandatory.
+//! Responsible for: proving the `proof` field is mandatory. Every other field is supplied —
+//! including the optional scope (ADR-0020) — so the one missing field rustc names is `proof`.
 //! NOT responsible for: runtime signature verification.
 //! Upstream: `rustfs_gateway_sig::Verdict`. Downstream: authentication callers.
 
@@ -23,5 +24,5 @@ use rustfs_gateway_sig::{AuthScheme, Identity, SigIdentity, SigService, Verdict}
 fn main() {
     let identity = Identity::new("AKID").unwrap();
     let scheme = AuthScheme::sigv4_header(SigIdentity::LongTerm, SigService::S3);
-    let _ = Verdict::Authenticated { identity, scheme };
+    let _ = Verdict::Authenticated { identity, scheme, scope: None };
 }

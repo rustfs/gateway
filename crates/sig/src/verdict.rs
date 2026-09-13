@@ -95,6 +95,7 @@
 
 use core::fmt;
 
+use crate::derive::VerifiedScope;
 use crate::error::{SigParseError, Unimplemented};
 use crate::scheme::AuthScheme;
 use crate::signature::{SignatureMatch, VerifyRejection};
@@ -490,6 +491,13 @@ pub enum Verdict {
         identity: Identity,
         /// How it was signed.
         scheme: AuthScheme,
+        /// The credential scope the signing key was derived from, when the scheme has one.
+        ///
+        /// `Some` only for a SigV4 verdict, and only with a [`VerifiedScope`] — which has no
+        /// public constructor and whose one public producer is [`crate::enforce_scope`]. A
+        /// scope the client wrote therefore cannot appear here unchecked. SigV2 and custom
+        /// schemes have no credential scope and carry `None`; nothing infers one (ADR-0020).
+        scope: Option<VerifiedScope>,
         /// The receipt from the comparison. Unforgeable, and required.
         proof: SignatureMatch,
     },
@@ -506,7 +514,45 @@ impl Verdict {
     /// up and finding it is not authentication.
     #[must_use]
     pub fn authenticated(identity: Identity, scheme: AuthScheme, proof: SignatureMatch) -> Self {
-        Self::Authenticated { identity, scheme, proof }
+        Self::Authenticated {
+            identity,
+            scheme,
+            scope: None,
+            proof,
+        }
+    }
+
+    /// Builds an authenticated verdict that also names the credential scope the signature was
+    /// verified under.
+    ///
+    /// The scope must be the one the signing key was derived from. A [`VerifiedScope`] is only
+    /// obtainable from [`crate::enforce_scope`], so a scope the client sent cannot be passed here
+    /// without having been cross-checked against the clock, the served regions and the routed
+    /// service first:
+    ///
+    /// ```compile_fail,E0599
+    /// use rustfs_gateway_sig::{AuthScheme, Identity, SigIdentity, SigService, SignatureMatch, Verdict, VerifiedScope};
+    /// fn claim(identity: Identity, proof: SignatureMatch) -> Verdict {
+    ///     let scheme = AuthScheme::sigv4_header(SigIdentity::LongTerm, SigService::S3);
+    ///     // No constructor: a region the client named cannot become a verified scope.
+    ///     Verdict::authenticated_in_scope(identity, scheme, VerifiedScope::new("20150830", "eu-west-1", "s3"), proof)
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0451
+    /// use rustfs_gateway_sig::{ScopeDate, VerifiedScope};
+    /// let date = ScopeDate::parse("20150830").expect("valid");
+    /// // Private fields: a struct literal is no way around the missing constructor either.
+    /// let _ = VerifiedScope { date, region: Box::from("eu-west-1"), service: Box::from("s3") };
+    /// ```
+    #[must_use]
+    pub fn authenticated_in_scope(identity: Identity, scheme: AuthScheme, scope: VerifiedScope, proof: SignatureMatch) -> Self {
+        Self::Authenticated {
+            identity,
+            scheme,
+            scope: Some(scope),
+            proof,
+        }
     }
 
     /// Builds an anonymous verdict from evidence that nothing was presented.
@@ -529,6 +575,19 @@ impl Verdict {
     pub fn identity(&self) -> Option<&Identity> {
         match self {
             Self::Authenticated { identity, .. } => Some(identity),
+            _ => None,
+        }
+    }
+
+    /// The credential scope the signature was verified under.
+    ///
+    /// `None` for an anonymous or rejected request, and for an authenticated one whose scheme has
+    /// no credential scope (SigV2, a custom scheme). Never a configured default: a caller that
+    /// needs a region for an unscoped request decides that for itself.
+    #[must_use]
+    pub const fn verified_scope(&self) -> Option<&VerifiedScope> {
+        match self {
+            Self::Authenticated { scope, .. } => scope.as_ref(),
             _ => None,
         }
     }
@@ -563,10 +622,13 @@ impl fmt::Debug for Verdict {
     /// intended pressure. The access key id is the one value here that is safe to print.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Authenticated { identity, scheme, .. } => f
+            Self::Authenticated {
+                identity, scheme, scope, ..
+            } => f
                 .debug_struct("Authenticated")
                 .field("identity", identity)
                 .field("scheme", scheme)
+                .field("scope", scope)
                 .field("proof", &"<constant-time match>")
                 .finish(),
             Self::Anonymous(_) => f.write_str("Anonymous"),
@@ -631,6 +693,49 @@ mod tests {
         let rendered = format!("{:?}", Verdict::authenticated(identity(), scheme, proof));
         assert!(rendered.contains("AKIAIOSFODNN7EXAMPLE"));
         assert!(rendered.contains("<constant-time match>"));
+    }
+
+    fn proof() -> SignatureMatch {
+        crate::Signature::HmacSha256(crate::CtBytes::from_array([3u8; 32]))
+            .ct_verify(&crate::Signature::HmacSha256(crate::CtBytes::from_array([3u8; 32])))
+            .expect("equal signatures match")
+    }
+
+    fn scope(region: &str) -> VerifiedScope {
+        VerifiedScope::from_checked_parts(crate::ScopeDate::parse("20150830").expect("valid"), region, "s3")
+    }
+
+    /// Positive — the scope the signature was verified under travels with the verdict, every
+    /// field in the spelling that was signed.
+    #[test]
+    fn an_authenticated_verdict_carries_the_scope_it_was_verified_under() {
+        let scheme = AuthScheme::sigv4_header(SigIdentity::LongTerm, SigService::S3);
+        let verdict = Verdict::authenticated_in_scope(identity(), scheme, scope("eu-west-1"), proof());
+        let carried = verdict.verified_scope().expect("a SigV4 verdict names its scope");
+        assert_eq!(
+            (carried.date().as_str(), carried.region(), carried.service()),
+            ("20150830", "eu-west-1", "s3")
+        );
+    }
+
+    /// Negative — a verdict that was never given a scope reports none, whatever its outcome. A
+    /// scope is never inferred: SigV2 and a custom scheme have no credential scope at all.
+    #[test]
+    fn a_verdict_built_without_a_scope_reports_none() {
+        let scheme = AuthScheme::sigv2_header(SigIdentity::LongTerm, SigService::S3);
+        assert!(Verdict::authenticated(identity(), scheme, proof()).verified_scope().is_none());
+        assert!(Verdict::reject(AuthError::SignatureDoesNotMatch).verified_scope().is_none());
+        let evidence = CredentialPresence::NONE.into_evidence().expect("nothing presented");
+        assert!(Verdict::anonymous(evidence).verified_scope().is_none());
+    }
+
+    /// Negative — the audit rendering names the scope, which is public, and still no proof bytes.
+    #[test]
+    fn debug_of_a_scoped_verdict_names_the_scope() {
+        let scheme = AuthScheme::sigv4_header(SigIdentity::LongTerm, SigService::S3);
+        let rendered = format!("{:?}", Verdict::authenticated_in_scope(identity(), scheme, scope("eu-west-1"), proof()));
+        assert!(rendered.contains("eu-west-1"), "{rendered}");
+        assert!(rendered.contains("<constant-time match>"), "{rendered}");
     }
 
     #[test]
