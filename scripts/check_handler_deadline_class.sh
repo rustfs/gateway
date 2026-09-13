@@ -245,7 +245,7 @@ if facade_source.count("pub use crate::request_config::HandlerDeadlineReport;") 
     fail("facade does not export the handler deadline report")
 if observer_source.count("pub handler_deadline: Option<HandlerDeadlineReport>,") != 1:
     fail("request observer does not expose the typed handler deadline report")
-event_body = service_source.partition("self.inner.observer.on_response(&RequestEvent {")[2].partition("});")[0]
+event_body = service_source.partition("runtime.observer.on_response(&RequestEvent {")[2].partition("});")[0]
 if not event_body or event_body.count("handler_deadline,") != 1:
     fail("response observation does not carry the request handler deadline report")
 for test_name in (

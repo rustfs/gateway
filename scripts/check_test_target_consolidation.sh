@@ -636,6 +636,7 @@ if (
 gateway_modules = (
     "assembly",
     "assembly_order",
+    "assembly_snapshot",
     "authz_consumption",
     "authz_contract",
     "authz_implementations",

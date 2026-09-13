@@ -220,7 +220,7 @@ async fn an_authorized_handler_sees_only_the_normalized_copy_source() {
     assert_eq!(reached.load(Ordering::SeqCst), 1);
 }
 
-/// c-azc-0002, c-azc-0028, c-azc-0029: both stages use one policy pointer, clock, and authorizer.
+/// c-azc-0002, c-azc-0029: both stages use one policy pointer, clock, and authorizer.
 #[tokio::test]
 async fn both_authorization_stages_share_one_policy_and_clock_snapshot() {
     let reads = Arc::new(AtomicUsize::new(0));

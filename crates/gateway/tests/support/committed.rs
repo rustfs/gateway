@@ -35,7 +35,13 @@ pub enum CopyCommit {
     Fail,
 }
 
-struct CopyCommitBackend(CopyCommit);
+pub struct CopyCommitBackend(CopyCommit);
+
+/// The committed-response backend alone, for an assembly replacement that registers it again.
+#[must_use]
+pub fn copy_commit_backend(outcome: CopyCommit) -> Arc<CopyCommitBackend> {
+    Arc::new(CopyCommitBackend(outcome))
+}
 
 impl Handler<CopyObject> for CopyCommitBackend {
     async fn call(&self, _request: Req<CopyObject>) -> HandlerResult<CopyObject> {
@@ -58,7 +64,7 @@ impl Handler<CopyObject> for CopyCommitBackend {
 /// A builder reaching the real generated operation that permits an error after `200`.
 #[must_use]
 pub fn copy_commit_builder(outcome: CopyCommit) -> ServiceBuilder {
-    super::wired_at_signed_time().register::<CopyObject, _>(Arc::new(CopyCommitBackend(outcome)))
+    super::wired_at_signed_time().register::<CopyObject, _>(copy_commit_backend(outcome))
 }
 
 /// A signed, body-less `CopyObject` request accepted by [`copy_commit_builder`].

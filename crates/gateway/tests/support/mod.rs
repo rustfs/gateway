@@ -37,7 +37,7 @@ mod handlers;
 pub mod select;
 pub mod vhost_stub;
 
-pub use committed::{CopyCommit, copy_commit_builder, copy_commit_request};
+pub use committed::{CopyCommit, copy_commit_backend, copy_commit_builder, copy_commit_request};
 pub use dialect::{content_ping as content_ping_dialect, head_ping as head_ping_dialect, ping as ping_dialect};
 
 use std::sync::Arc;

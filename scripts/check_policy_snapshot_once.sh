@@ -50,7 +50,9 @@ cd "$ROOT_DIR"
 TRAIT_FILE='crates/gateway/src/ext/policy.rs'
 PIPELINE_FILE='crates/gateway/src/service.rs'
 READER_FILE='crates/gateway/src/request_deadline.rs'
-# The field the pipeline holds the source behind.
+# The replaceable request generation the pipeline captures once at entry and reads the source from.
+RUNTIME_FILE='crates/gateway/src/routing.rs'
+# The field the captured generation holds the source behind.
 FIELD='policy_source'
 
 status=0
@@ -60,7 +62,7 @@ report() {
     status=1
 }
 
-for file in "$TRAIT_FILE" "$PIPELINE_FILE" "$READER_FILE"; do
+for file in "$TRAIT_FILE" "$PIPELINE_FILE" "$READER_FILE" "$RUNTIME_FILE"; do
     if [[ ! -f "$file" ]]; then
         report "check_policy_snapshot_once: ${file} does not exist; the guard cannot find the surface it is written about"
         exit 1
@@ -141,9 +143,12 @@ fi
 
 # -----------------------------------------------------------------------------
 # Rule 3 — the pipeline holds a source, it does not build one.
+#
+# The source lives in the replaceable generation each request captures at entry,
+# so a hot update cannot hand one request two sources.
 # -----------------------------------------------------------------------------
-if ! matches "$PIPELINE_FILE" "${FIELD}:[ \t]*Arc<dyn[ \t]+PolicySource>"; then
-    report "${PIPELINE_FILE}: no \`${FIELD}: Arc<dyn PolicySource>\` field; the source must be assembled once and held, not constructed where it is read"
+if ! matches "$RUNTIME_FILE" "${FIELD}:[ \t]*Arc<dyn[ \t]+PolicySource>"; then
+    report "${RUNTIME_FILE}: no \`${FIELD}: Arc<dyn PolicySource>\` field; the source must be assembled once and held, not constructed where it is read"
 fi
 
 # -----------------------------------------------------------------------------

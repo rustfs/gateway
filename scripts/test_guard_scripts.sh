@@ -15368,6 +15368,7 @@ expect_authz_fail_minimal() {
         crates/gateway/examples/custom_authorizer.rs
         crates/gateway/examples/minimal.rs
         crates/gateway/tests/assembly.rs
+        crates/gateway/tests/assembly_snapshot/authz_hot_update.rs
         crates/gateway/tests/authz_consumption.rs
         crates/gateway/tests/authz_contract.rs
         crates/gateway/tests/authz_contract/oracle.rs
@@ -15607,6 +15608,21 @@ mut_policy_module_deleted() {
 }
 expect_fail check_policy_snapshot_once.sh \
     "the guard's own subject deleted, which must fail rather than skip" mut_policy_module_deleted
+
+mut_policy_source_no_longer_held() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/gateway/src/routing.rs")
+s = p.read_text()
+subject = "    pub(crate) policy_source: Arc<dyn PolicySource>,\n"
+if s.count(subject) != 1:
+    raise SystemExit("missing mutation subject: the captured generation's policy source field")
+p.write_text(s.replace(subject, "    pub(crate) policy_source: fn() -> Box<dyn PolicySource>,\n", 1))
+AZPY
+}
+expect_fail check_policy_snapshot_once.sh \
+    'a request generation that builds its policy source instead of holding one' mut_policy_source_no_longer_held \
+    'no `policy_source: Arc<dyn PolicySource>` field'
 
 # ── check_authz_no_default_impl.sh (P6-02) ─────────────────────────────────────
 
@@ -17717,7 +17733,7 @@ PYEOF
 }
 expect_fail check_config_load_once.sh \
     'request entry dropping the server cancellation signal' mut_request_cancellation_capture_removed \
-    'shared request entry does not capture cancellation beside its one configuration snapshot'
+    'shared request entry does not carry cancellation beside its captured configuration'
 
 mut_request_cancellation_store_removed() {
     python3 - <<'PYEOF'
@@ -17780,8 +17796,8 @@ mut_second_config_load() {
 import pathlib
 path = pathlib.Path("crates/gateway/src/service.rs")
 text = path.read_text().replace(
-    "let config = self.inner.config.load_full();",
-    "let config = self.inner.config.load_full();\n        let _torn = self.inner.config.load_full();",
+    "let snapshot = self.inner.config.load_full();",
+    "let snapshot = self.inner.config.load_full();\n        let _torn = self.inner.config.load_full();",
     1,
 )
 path.write_text(text)
@@ -17790,22 +17806,38 @@ PYEOF
 expect_fail check_config_load_once.sh \
     'c-lim-0041 adding a second hot-configuration read in the request pipeline' mut_second_config_load
 
+mut_pipeline_config_rcu_added() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "        let snapshot = self.inner.config.load_full();\n"
+replacement = subject + "        let _torn = self.inner.config.rcu(Arc::clone);\n"
+if text.count(subject) != 2:
+    raise SystemExit("request-entry assembly snapshot anchors drifted")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a second pipeline snapshot read through the partial-update primitive' mut_pipeline_config_rcu_added
+
 mut_request_entry_routing_snapshot_borrowed() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
 path = Path("crates/gateway/src/service.rs")
 text = path.read_text()
-subject = "        let routing = self.inner.routing.load_full();\n"
-replacement = "        let routing = self.inner.routing.load();\n"
+subject = "        let snapshot = self.inner.config.load_full();\n"
+replacement = "        let snapshot = self.inner.config.load();\n"
 if text.count(subject) != 2:
-    raise SystemExit("request-entry routing snapshot anchors drifted")
+    raise SystemExit("request-entry assembly snapshot anchors drifted")
 path.write_text(text.replace(subject, replacement, 1))
 PYEOF
 }
 expect_fail check_config_load_once.sh \
-    'the dynamic request entry losing its owned routing snapshot' mut_request_entry_routing_snapshot_borrowed \
-    'dynamic and monomorphic request entries must each capture one routing snapshot'
+    'the dynamic request entry losing its owned assembly snapshot' mut_request_entry_routing_snapshot_borrowed \
+    'dynamic and monomorphic request entries must each capture one owned assembly snapshot'
 
 mut_pipeline_routing_reload_added() {
     python3 - <<'PYEOF'
@@ -17813,23 +17845,40 @@ from pathlib import Path
 
 path = Path("crates/gateway/src/service.rs")
 text = path.read_text()
-subject = "        let config = self.inner.config.load_full();\n"
-replacement = "        let _torn_routing = self.inner.routing.load_full();\n" + subject
+subject = "        let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();\n"
+replacement = "        let _torn_assembly = self.inner.config.load_full();\n" + subject
 if text.count(subject) != 1:
-    raise SystemExit("shared request configuration snapshot anchor drifted")
+    raise SystemExit("shared request cancellation anchor drifted")
 path.write_text(text.replace(subject, replacement, 1))
 PYEOF
 }
 expect_fail check_config_load_once.sh \
-    'a later pipeline stage reloading the routing snapshot' mut_pipeline_routing_reload_added
+    'a later pipeline stage reloading the assembly snapshot' mut_pipeline_routing_reload_added
+
+mut_request_snapshot_settings_detached() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "self.call_with_mode(request, mode, Arc::clone(&snapshot.config), runtime)"
+replacement = "self.call_with_mode(request, mode, Arc::new(crate::ServiceConfig::new(0)), runtime)"
+if text.count(subject) != 2:
+    raise SystemExit("request assembly handoff anchors drifted")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'request settings detached from their middleware generation' mut_request_snapshot_settings_detached \
+    'request settings and middleware must come from the same entry snapshot'
 
 mut_aliased_second_config_load() {
     python3 - <<'PYEOF'
 import pathlib
 path = pathlib.Path("crates/gateway/src/service.rs")
 text = path.read_text().replace(
-    "let config = self.inner.config.load_full();",
-    "let config = self.inner.config.load_full();\n        let config_store = &self.inner.config;\n        let _torn = config_store.load_full();",
+    "let snapshot = self.inner.config.load_full();",
+    "let snapshot = self.inner.config.load_full();\n        let config_store = &self.inner.config;\n        let _torn = config_store.load_full();",
     1,
 )
 path.write_text(text)
@@ -17843,8 +17892,8 @@ mut_as_ref_second_config_load() {
 import pathlib
 path = pathlib.Path("crates/gateway/src/service.rs")
 text = path.read_text().replace(
-    "let config = self.inner.config.load_full();",
-    "let config = self.inner.config.load_full();\n        let _torn = self.inner.config.as_ref().load_full();",
+    "let snapshot = self.inner.config.load_full();",
+    "let snapshot = self.inner.config.load_full();\n        let _torn = self.inner.config.as_ref().load_full();",
     1,
 )
 path.write_text(text)
@@ -17858,8 +17907,8 @@ mut_guarded_config_load() {
 import pathlib
 path = pathlib.Path("crates/gateway/src/service.rs")
 text = path.read_text().replace(
-    "let config = self.inner.config.load_full();",
-    "let config = self.inner.config.load_full();\n        let _torn = self.inner.config.load();",
+    "let snapshot = self.inner.config.load_full();",
+    "let snapshot = self.inner.config.load_full();\n        let _torn = self.inner.config.load();",
     1,
 )
 path.write_text(text)
@@ -17873,8 +17922,8 @@ mut_ufcs_config_load_full() {
 import pathlib
 path = pathlib.Path("crates/gateway/src/service.rs")
 text = path.read_text().replace(
-    "let config = self.inner.config.load_full();",
-    "let config = self.inner.config.load_full();\n        let _torn = arc_swap::ArcSwapAny::load_full(self.inner.config.as_ref());",
+    "let snapshot = self.inner.config.load_full();",
+    "let snapshot = self.inner.config.load_full();\n        let _torn = arc_swap::ArcSwapAny::load_full(self.inner.config.as_ref());",
     1,
 )
 path.write_text(text)
@@ -17888,8 +17937,8 @@ mut_ufcs_config_load() {
 import pathlib
 path = pathlib.Path("crates/gateway/src/service.rs")
 text = path.read_text().replace(
-    "let config = self.inner.config.load_full();",
-    "let config = self.inner.config.load_full();\n        let _torn = arc_swap::ArcSwapAny::load(self.inner.config.as_ref());",
+    "let snapshot = self.inner.config.load_full();",
+    "let snapshot = self.inner.config.load_full();\n        let _torn = arc_swap::ArcSwapAny::load(self.inner.config.as_ref());",
     1,
 )
 path.write_text(text)
@@ -17903,8 +17952,8 @@ mut_import_aliased_config_load_full() {
 import pathlib
 path = pathlib.Path("crates/gateway/src/service.rs")
 text = path.read_text().replace(
-    "let config = self.inner.config.load_full();",
-    "let config = self.inner.config.load_full();\n        use arc_swap::ArcSwapAny as Swap;\n        let _torn = Swap::load_full(self.inner.config.as_ref());",
+    "let snapshot = self.inner.config.load_full();",
+    "let snapshot = self.inner.config.load_full();\n        use arc_swap::ArcSwapAny as Swap;\n        let _torn = Swap::load_full(self.inner.config.as_ref());",
     1,
 )
 path.write_text(text)
@@ -17918,8 +17967,8 @@ mut_type_aliased_config_load() {
 import pathlib
 path = pathlib.Path("crates/gateway/src/service.rs")
 text = path.read_text().replace(
-    "let config = self.inner.config.load_full();",
-    "let config = self.inner.config.load_full();\n        type ConfigStoreAlias = arc_swap::ArcSwapAny<Arc<ServiceConfig>>;\n        let _torn = ConfigStoreAlias::load(self.inner.config.as_ref());",
+    "let snapshot = self.inner.config.load_full();",
+    "let snapshot = self.inner.config.load_full();\n        type ConfigStoreAlias = arc_swap::ArcSwapAny<Arc<crate::config::AssemblySnapshot>>;\n        let _torn = ConfigStoreAlias::load(self.inner.config.as_ref());",
     1,
 )
 path.write_text(text)
@@ -17933,8 +17982,8 @@ mut_config_load_function_item() {
 import pathlib
 path = pathlib.Path("crates/gateway/src/service.rs")
 text = path.read_text().replace(
-    "let config = self.inner.config.load_full();",
-    "let config = self.inner.config.load_full();\n        use arc_swap::ArcSwapAny as Swap;\n        let read = Swap::load_full;\n        let _torn = read(self.inner.config.as_ref());",
+    "let snapshot = self.inner.config.load_full();",
+    "let snapshot = self.inner.config.load_full();\n        use arc_swap::ArcSwapAny as Swap;\n        let read = Swap::load_full;\n        let _torn = read(self.inner.config.as_ref());",
     1,
 )
 path.write_text(text)
@@ -17959,6 +18008,43 @@ PYEOF
 }
 expect_fail check_config_load_once.sh \
     'a real request path dropping the decoded snapshot stage' mut_config_snapshot_stage_deleted
+
+# Same-line load-then-store rewrites keep every file:line in the load allowlist, so only the
+# write-primitive rule can see that a partial update may now overwrite a concurrent one.
+mut_settings_update_load_then_store() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/config.rs")
+text = path.read_text()
+subject = "        self.store.rcu(|current| {\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing mutation subject: the settings update's rcu")
+path.write_text(text.replace(subject, "        let current = self.store.load_full(); self.store.store({\n", 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a settings update that loads then stores and can overwrite a concurrent registry update' \
+    mut_settings_update_load_then_store \
+    'every ConfigStore write except the one complete replacement must be an rcu'
+
+mut_registry_update_ufcs_store() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service/update.rs")
+text = path.read_text()
+subject = "        self.inner.config.rcu(|current| {\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing mutation subject: the registry update's rcu")
+replacement = "        let current = self.inner.config.load_full(); arc_swap::ArcSwapAny::store(&self.inner.config, {\n"
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a registry update storing through UFCS and able to overwrite a concurrent settings update' \
+    mut_registry_update_ufcs_store \
+    'every ConfigStore write except the one complete replacement must be an rcu'
 
 mut_tsan_instrumentation_deleted() {
     python3 - <<'PYEOF'

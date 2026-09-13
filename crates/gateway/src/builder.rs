@@ -56,7 +56,7 @@ use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
 
 use crate::assembly::{AssemblyError, RuleRef};
 use crate::clock::{Clock, ClockPosture, ClockSkewAck, MAX_CLOCK_SKEW_SECONDS, SystemMonotonic, skew_from_system, system_clock};
-use crate::config::{ConfigHandle, ConfigStore, ServiceConfig};
+use crate::config::{AssemblySnapshot, ConfigHandle, ConfigStore, ServiceConfig};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
     Authenticator, Authorizer, AuthzAuditSink, BucketOwnerSource, CachedCorsSource, CorsCacheConfig, CorsSource, DefaultGovernor,
@@ -64,7 +64,10 @@ use crate::ext::{
     OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
 };
 use crate::posture::{SecurityPosture, log_startup_posture};
-use crate::routing::RoutingSnapshot;
+use crate::routing::{RoutingSnapshot, RuntimeAssembly};
+
+mod assembly_update;
+pub use self::assembly_update::AssemblyUpdate;
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
 use crate::{MonomorphicOperationSet, MonomorphicService};
@@ -168,7 +171,9 @@ impl ServiceBuilder {
             floor: SecurityFloor::new(),
             limits: Limits::default(),
             names: NamePolicy::default(),
-            config: Arc::new(arc_swap::ArcSwap::from_pointee(ServiceConfig::new(DEFAULT_MAX_BUFFERED_BODY_BYTES))),
+            config: Arc::new(arc_swap::ArcSwap::from_pointee(AssemblySnapshot::unassembled(ServiceConfig::new(
+                DEFAULT_MAX_BUFFERED_BODY_BYTES,
+            )))),
             authorizer: None,
             dangerous_allow_all_authorizer: false,
             authenticator: None,
@@ -564,8 +569,8 @@ impl ServiceBuilder {
     /// later requests and cannot change the settings an in-flight request already observes.
     #[must_use]
     pub fn config(self, config: ServiceConfig) -> (Self, ConfigHandle) {
-        self.config.store(Arc::new(config));
         let handle = ConfigHandle::new(&self.config);
+        handle.store(config);
         (self, handle)
     }
 
@@ -575,7 +580,7 @@ impl ServiceBuilder {
     /// `Limits::max_body_bytes`.
     #[must_use]
     pub fn max_buffered_body_bytes(self, bytes: u64) -> Self {
-        self.config.store(Arc::new(ServiceConfig::new(bytes)));
+        ConfigHandle::new(&self.config).store(ServiceConfig::new(bytes));
         self
     }
 
@@ -593,16 +598,7 @@ impl ServiceBuilder {
     /// authenticator, an [`OpLayer`] on an operation nobody registered, or an operation the router
     /// knows and this crate has no codec for. Nothing here degrades to a warning.
     pub fn build(self) -> Result<S3Service, AssemblyError> {
-        if self.pending.is_empty() {
-            return Err(AssemblyError::EmptyRegistry {
-                rule: RuleRef::EMPTY_REGISTRY,
-            });
-        }
-        let Some(authorizer) = self.authorizer else {
-            return Err(AssemblyError::MissingAuthorizer {
-                rule: RuleRef::MISSING_AUTHORIZER,
-            });
-        };
+        let authorizer = self.validate_assembly()?;
         let Some(authenticator) = self.authenticator else {
             return Err(AssemblyError::MissingAuthenticator {
                 rule: RuleRef::MISSING_AUTHENTICATOR,
@@ -654,26 +650,34 @@ impl ServiceBuilder {
             None => Arc::new(framework_governor),
         };
 
-        Ok(S3Service::from_inner(Inner {
-            routing: Arc::new(arc_swap::ArcSwap::from_pointee(routing)),
+        let runtime = Arc::new(RuntimeAssembly {
+            routing: Arc::new(routing),
             filters: Arc::from(self.filters),
+            authorizer,
+            policy_source: self.policy_source,
+            policy_timeout: self.policy_timeout,
+            authz_audit: self.authz_audit,
+            observer: self.observer,
+        });
+        self.config.rcu(|current| {
+            Arc::new(AssemblySnapshot {
+                config: Arc::clone(&current.config),
+                runtime: Some(Arc::clone(&runtime)),
+            })
+        });
+        Ok(S3Service::from_inner(Inner {
             floor: self.floor,
             limits: self.limits,
             names: self.names,
             config: self.config,
-            authorizer,
             authenticator,
             custom_signature_verifier: self.custom_signature_verifier,
             #[cfg(feature = "dangerous-replace-signature-verifier")]
             dangerously_replaced_signature_verifier: self.dangerously_replaced_signature_verifier,
-            policy_source: self.policy_source,
-            policy_timeout: self.policy_timeout,
-            authz_audit: self.authz_audit,
             authz_clock: Arc::new(SystemMonotonic::new()),
             bucket_owner_source: self.bucket_owner_source,
             host_resolver: self.host_resolver,
             governor,
-            observer: self.observer,
             clock: self.clock,
             clock_posture: self.clock_posture,
             security_posture,
