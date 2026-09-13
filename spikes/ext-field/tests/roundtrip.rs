@@ -20,8 +20,9 @@ use ext_field_spike::{
 use rustfs_gateway_core::Req as FrameworkReq;
 use rustfs_gateway_types::dto::PutBucketLifecycleConfiguration;
 
-// Measured after ADR-0017 adds the owned SSE enforcement proof to the boxed request.
-const MAIN_REQ_SIZE_64: usize = 96;
+// Measured after ADR-0017 adds the owned SSE enforcement proof to the boxed request and ADR-0022
+// adds the boxed handler request context (rustfs/gateway#771): 96 bytes plus one pointer.
+const MAIN_REQ_SIZE_64: usize = 104;
 
 const STANDARD_XML: &str = "<Rule><Expiration><Days>30</Days></Expiration><ID>rule-1</ID><Status>Enabled</Status></Rule>";
 const DIALECT_XML: &str = "<Rule><Expiration><Days>30</Days></Expiration><DelMarkerExpiration><Days>7</Days></DelMarkerExpiration><ID>rule-1</ID><Status>Enabled</Status></Rule>";
