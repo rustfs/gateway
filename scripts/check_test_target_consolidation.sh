@@ -838,8 +838,10 @@ for source_path in gateway_root.rglob("*.rs"):
         if target == gateway_integration_path.resolve():
             fail(f"{source_path.relative_to(root)} includes the consolidated gateway integration harness")
 
-fixture_sets = {
-    root / "crates/gateway/tests/compile_fail": ("azc_*", {
+# A list, not a dict keyed by directory: two sets share crates/gateway/tests/compile_fail, and a
+# dict silently kept only the last one, so the azc_* pairs were never checked.
+fixture_sets = [
+    (root / "crates/gateway/tests/compile_fail", "azc_*", {
         "azc_0014_missing_input",
         "azc_0015_forge_authorized",
         "azc_0016_denial_code",
@@ -847,17 +849,17 @@ fixture_sets = {
         "azc_0021_allow_all",
         "azc_0025_request_extensions",
     }),
-    root / "crates/gateway/tests/compile_fail": ("host_resolver_*", {
+    (root / "crates/gateway/tests/compile_fail", "host_resolver_*", {
         "host_resolver_async",
     }),
-    root / "crates/gateway/tests/trybuild/credential": ("*", {
+    (root / "crates/gateway/tests/trybuild/credential", "*", {
         "constructs_anonymous",
         "prints_and_compares_token",
         "provider_returns_secret",
         "provider_returns_verdict",
     }),
-}
-for directory, (pattern, expected_stems) in fixture_sets.items():
+]
+for directory, pattern, expected_stems in fixture_sets:
     try:
         sources = {path.stem for path in directory.glob(f"{pattern}.rs")}
         goldens = {path.stem for path in directory.glob(f"{pattern}.stderr")}
