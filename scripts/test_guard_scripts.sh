@@ -11826,13 +11826,30 @@ mut_rule_filter_call_only_in_comment() {
 from pathlib import Path
 import sys
 p = Path("crates/core/src/ops/shared") / (sys.argv[1] + ".rs")
+family = sys.argv[1]
+call = f"rule_filter::{family}("
 text = p.read_text()
-if "rule_filter::validate(" not in text:
-    raise SystemExit("shared filter call mutation subject is missing")
-p.write_text(text.replace("rule_filter::validate(", "independent_filter(")
-    + '\n// rule_filter::validate(children, conditions)\n'
-    + 'const _: &str = r#"rule_filter::validate(children, conditions)"#;\n'
-    + '#[cfg(test)]\nfn filter_probe() { rule_filter::validate(0, None); }\n')
+if call not in text:
+    raise SystemExit(f"missing mutation subject in {p}: {call}")
+p.write_text(text.replace(call, "independent_filter(")
+    + f'\n// {call}filter)\n'
+    + f'const _: &str = r#"{call}filter)"#;\n'
+    + f'#[cfg(test)]\nfn filter_probe(filter: &Filter) {{ {call}filter); }}\n')
+PYEOF
+}
+
+# An inline copy under a name the guard does not know: it still has to read
+# `And`, which only the filter grammar has any reason to read.
+mut_rule_filter_inline_copy() {
+    python3 - "$RULE_FILTER_FAMILY" <<'PYEOF'
+from pathlib import Path
+import sys
+p = Path("crates/core/src/ops/shared") / (sys.argv[1] + ".rs")
+call = f"rule_filter::{sys.argv[1]}(filter)"
+text = p.read_text()
+if call not in text:
+    raise SystemExit(f"missing mutation subject in {p}: {call}")
+p.write_text(text.replace(call, f"{{ let _ = filter.and.is_some(); {call} }}"))
 PYEOF
 }
 
@@ -11843,8 +11860,12 @@ for RULE_FILTER_FAMILY in lifecycle replication; do
         mut_rule_filter_local_copy
     expect_fail_with_diagnostic check_op_file_shape.sh \
         "$RULE_FILTER_FAMILY keeping only comments, strings and a test-only shared call" \
-        'must call shared::rule_filter from production code' \
+        "must call shared::rule_filter::$RULE_FILTER_FAMILY from production code" \
         mut_rule_filter_call_only_in_comment
+    expect_fail_with_diagnostic check_op_file_shape.sh \
+        "$RULE_FILTER_FAMILY counting a Filter member inline beside the shared call" \
+        'reads the Filter member `and`' \
+        mut_rule_filter_inline_copy
 done
 
 mut_rule_filter_removed() {

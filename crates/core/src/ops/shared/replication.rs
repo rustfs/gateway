@@ -19,10 +19,11 @@
 //!
 //! Responsible for: the semantic rules of a `ReplicationConfiguration` document — the V1/V2
 //! schema-version exclusivity of a rule (a `Filter` demands `Priority` and
-//! `DeleteMarkerReplication` beside it; a legacy rule carries neither), the filter's
-//! one-direct-child grammar and the two-condition floor of `<And>`, the thousand-rule cap, and
-//! the bounds and uniqueness of `ID` — held once so that every backend refuses the same
-//! documents with the same codes.
+//! `DeleteMarkerReplication` beside it; a legacy rule carries neither), the thousand-rule cap,
+//! and the bounds and uniqueness of `ID` — held once so that every backend refuses the same
+//! documents with the same codes. The filter's one-direct-child grammar and the two-condition
+//! floor of `<And>` are `shared::rule_filter`'s, the one authority lifecycle uses too; this
+//! module maps its refusal onto the family's codes.
 //! NOT responsible for: decoding the document (the generated codec, which is deliberately
 //! lenient about unknown elements — `q-repl-0005`), storing it, or **executing** it. Evaluating
 //! a rule against an object write, assuming the Role, moving bytes between sites and producing
@@ -221,14 +222,10 @@ fn validate_rule(rule: &ReplicationRule) -> Result<(), ReplicationRejection> {
         return Err(ReplicationRejection::IdTooLong);
     }
     classify_rule(rule)?;
+    // The filter's grammar is `shared::rule_filter`'s; an empty `<Filter/>` passes there, as AWS's
+    // documented spelling for "every object" (`q-repl-0007`).
     if let Some(filter) = &rule.filter {
-        let children =
-            usize::from(filter.prefix.is_some()) + usize::from(filter.tag.is_some()) + usize::from(filter.and.is_some());
-        let conditions = filter
-            .and
-            .as_ref()
-            .map(|and| usize::from(and.prefix.is_some()) + and.tags.len());
-        rule_filter::validate(children, conditions).map_err(|reason| match reason {
+        rule_filter::replication(filter).map_err(|reason| match reason {
             rule_filter::Rejection::FilterNotExclusive => ReplicationRejection::FilterNotExclusive,
             rule_filter::Rejection::AndBelowTwoConditions => ReplicationRejection::AndBelowTwoConditions,
         })?;

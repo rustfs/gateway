@@ -508,8 +508,18 @@ for family in ("lifecycle", "replication"):
         code = code[:start] + " " * (end - start) + code[end:]
     if re.search(r"\bfn\s+validate_filter\s*\(", code):
         fail(f"{path}: filter grammar belongs to shared::rule_filter")
-    if not re.search(r"\brule_filter\s*::\s*validate\s*\(", code):
-        fail(f"{path}: must call shared::rule_filter from production code")
+    # A private copy under any other name still has to read the members it
+    # counts; `And`, its tags and the size bounds are Filter-only members, so
+    # production code in a family module has no other reason to touch them.
+    if member := re.search(
+        r"\.\s*(and|tags|object_size_greater_than|object_size_less_than)\b", code
+    ):
+        fail(
+            f"{path}: reads the Filter member `{member.group(1)}`; the filter grammar "
+            f"belongs to shared::rule_filter"
+        )
+    if not re.search(rf"\brule_filter\s*::\s*{family}\s*\(", code):
+        fail(f"{path}: must call shared::rule_filter::{family} from production code")
 
 # -- Rule 3 -------------------------------------------------------------------
 

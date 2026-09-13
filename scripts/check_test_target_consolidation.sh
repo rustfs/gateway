@@ -219,6 +219,7 @@ core_modules = (
     "route_only",
     "route_sizes",
     "route_table",
+    "rule_filter_boundaries",
     "select_restore_roundtrip",
     "static_dispatch",
     "tagging_contract",

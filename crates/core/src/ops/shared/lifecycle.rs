@@ -17,11 +17,12 @@
 //! Shares: lifecycle
 //! Members: DeleteBucketLifecycle, GetBucketLifecycleConfiguration, PutBucketLifecycleConfiguration
 //!
-//! Responsible for: the semantic rules of a `LifecycleConfiguration` document — the filter's
-//! one-direct-child grammar and the two-condition floor of `<And>`, the rule's Filter-or-Prefix
-//! scope requirement, the `Days`/`Date`/`ExpiredObjectDeleteMarker` mutex, the midnight rule on
-//! every `Date`, the thousand-rule cap and the bounds and uniqueness of `ID` — held once so that
-//! every backend refuses the same documents with the same codes.
+//! Responsible for: the semantic rules of a `LifecycleConfiguration` document — the rule's
+//! Filter-or-Prefix scope requirement, the `Days`/`Date`/`ExpiredObjectDeleteMarker` mutex, the
+//! midnight rule on every `Date`, the thousand-rule cap and the bounds and uniqueness of `ID` —
+//! held once so that every backend refuses the same documents with the same codes. The filter's
+//! one-direct-child grammar and the two-condition floor of `<And>` are `shared::rule_filter`'s,
+//! the one authority replication uses too; this module maps its refusal onto the family's codes.
 //! NOT responsible for: decoding the document (the generated codec, which is deliberately lenient
 //! about unknown elements — `q-lc-0006`), storing it, or **evaluating** it. When a rule fires,
 //! what it expires and which storage class it transitions to are the storage backend's scanner's
@@ -165,19 +166,9 @@ fn validate_rule(rule: &LifecycleRule) -> Result<(), LifecycleRejection> {
     if rule.prefix.is_none() && rule.filter.is_none() {
         return Err(LifecycleRejection::ScopeMissing);
     }
+    // The filter's grammar, object-size members included, is `shared::rule_filter`'s.
     if let Some(filter) = &rule.filter {
-        let children = usize::from(filter.prefix.is_some())
-            + usize::from(filter.tag.is_some())
-            + usize::from(filter.object_size_greater_than.is_some())
-            + usize::from(filter.object_size_less_than.is_some())
-            + usize::from(filter.and.is_some());
-        let conditions = filter.and.as_ref().map(|and| {
-            usize::from(and.prefix.is_some())
-                + and.tags.len()
-                + usize::from(and.object_size_greater_than.is_some())
-                + usize::from(and.object_size_less_than.is_some())
-        });
-        rule_filter::validate(children, conditions).map_err(|reason| match reason {
+        rule_filter::lifecycle(filter).map_err(|reason| match reason {
             rule_filter::Rejection::FilterNotExclusive => LifecycleRejection::FilterNotExclusive,
             rule_filter::Rejection::AndBelowTwoConditions => LifecycleRejection::AndBelowTwoConditions,
         })?;
