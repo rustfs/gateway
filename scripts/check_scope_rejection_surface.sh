@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# WHAT: Keeps ADR-0009's scope-rejection authority typed, deterministic and facade-private.
-# WHY: Request text or a custom authenticator must not mint a trusted remediation Region detail.
-# HOW TO EXEMPT: There is no exemption. Amend ADR-0009 before changing this contract.
+# WHAT: Keeps ADR-0009's scope-rejection authority typed, deterministic and facade-private, and
+#       AuthenticationOutcome closed at ADR-0009's fields plus ADR-0022's one private caller secret.
+# WHY: Request text or a custom authenticator must not mint a trusted remediation Region detail,
+#      and the caller secret must travel only through the one ADR-0022 attachment point.
+# HOW TO EXEMPT: There is no exemption. Amend ADR-0009 or ADR-0022 before changing this contract.
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SIG_SCOPE="${ROOT}/crates/sig/src/scope.rs"
@@ -185,16 +187,28 @@ alphabet = list(
 if len(alphabet) != 1 or re.match(r"\s*b'-'", scope_source[alphabet[0].end() :]) is None:
     fail("configured regions must use the bounded RegionLabel-compatible alphabet")
 
-if dense_auth.count("pubstructAuthenticationOutcome{verdict:Verdict,scope_rejection:Option<ScopeRejection>,}") != 1:
+# AuthenticationOutcome is closed: its ADR-0009 fields plus exactly one ADR-0022 addition, the
+# optional caller secret an authenticator attaches through `with_caller_secret` for the handler
+# request context. All three stay private, and a fourth field fails.
+if dense_auth.count(
+    "pubstructAuthenticationOutcome{verdict:Verdict,scope_rejection:Option<ScopeRejection>,"
+    "caller_secret:Option<rustfs_gateway_sig::SecretBytes>,}"
+) != 1:
     fail("AuthenticationOutcome fields must remain private and closed")
-if "pubconstfnordinary(verdict:Verdict)->Self{Self{verdict,scope_rejection:None,}}" not in dense_auth:
+if "pubconstfnordinary(verdict:Verdict)->Self{Self{verdict,scope_rejection:None,caller_secret:None,}}" not in dense_auth:
     fail("ordinary outcomes must carry no scope proof")
+if (
+    "pubfnwith_caller_secret(mutself,secret:rustfs_gateway_sig::SecretBytes)->Self{"
+    "self.caller_secret=Some(secret);self}"
+    not in dense_auth
+):
+    fail("the ADR-0022 caller secret must be attached only through with_caller_secret")
 if "pubconstfnverdict(&self)->&Verdict{&self.verdict}" not in dense_auth:
     fail("the public verdict accessor must borrow the exact stored verdict")
 if (
     "fnscope_rejected(scope_rejection:ScopeRejection)->Self{Self{"
     "verdict:Verdict::reject(AuthError::AuthorizationHeaderMalformed),"
-    "scope_rejection:Some(scope_rejection),}}"
+    "scope_rejection:Some(scope_rejection),caller_secret:None,}}"
     not in dense_auth
 ):
     fail("the private scope carrier must fix AuthorizationHeaderMalformed")
@@ -267,13 +281,21 @@ for item in re.finditer(r"\bpub\b", body):
         fail("AuthenticationOutcome has an unterminated visible associated item")
     public_items.append(re.sub(r"\s+", "", body[item.start() : min(ends)]))
 
+# ADR-0009's surface plus exactly ADR-0022's additions: `with_caller_secret` (the one way to attach
+# the caller secret), the `pub(super)` `authenticated` constructor the built-in authenticator uses,
+# and the consuming split carrying the secret out. Anything else visible fails.
 allowed_items = {
     "pubconstfnordinary(verdict:Verdict)->Self",
     "pubconstfnverdict(&self)->&Verdict",
-    "pub(crate)fninto_parts(self)->(Verdict,Option<ScopeRejection>)",
+    "pubfnwith_caller_secret(mutself,secret:rustfs_gateway_sig::SecretBytes)->Self",
+    "pub(super)fnauthenticated(verdict:Verdict,caller_secret:Option<rustfs_gateway_sig::SecretBytes>)->Self",
+    "pub(crate)fninto_parts(self)->(Verdict,Option<ScopeRejection>,Option<rustfs_gateway_sig::SecretBytes>)",
 }
 if len(public_items) != len(allowed_items) or set(public_items) != allowed_items:
-    fail("AuthenticationOutcome must expose only ordinary, verdict and the crate-private consuming split")
+    fail(
+        "AuthenticationOutcome must expose only ordinary, verdict, the ADR-0022 with_caller_secret and "
+        "authenticated constructors, and the crate-private consuming split"
+    )
 PYEOF
 
-printf 'OK: ADR-0009 keeps scope remediation typed, stable and facade-private\n'
+printf 'OK: ADR-0009 keeps scope remediation typed, stable and facade-private; ADR-0022 adds only the private caller secret\n'

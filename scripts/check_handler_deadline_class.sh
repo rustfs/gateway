@@ -453,14 +453,18 @@ for path in sorted((root / "crates").rglob("*.rs")):
                 fail(f"explicit OperationSpec builder does not use Standard: {relative}")
             explicit_builders += 1
 
-if central_builders != 102 or explicit_builders != 27:
+# explicit=28: the 28th is `minio:PutObjectReplica` in
+# crates/dialect-minio/src/ops/put_object_replica.rs (rustfs/gateway#769). A dialect operation is
+# outside the standard authority, so it states its class; it states Standard, the class PutObject
+# has, because a replica write is the same body-streaming PUT with one more query key.
+if central_builders != 102 or explicit_builders != 28:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=27"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=28"
     )
 
 print(
-    "check_handler_deadline_class: 134 repository builder sites are inventoried "
-    "(129 classified: 102 central standard, 27 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 135 repository builder sites are inventoried "
+    "(130 classified: 102 central standard, 28 explicit; 5 authority tests)"
 )
 PY

@@ -27,12 +27,34 @@ op = pathlib.Path(sys.argv[3]).read_text()
 
 failures = []
 
-if not re.search(
-    r"fn\s+dispatch\s*<O,\s*B>\s*\([^)]*authorized\s*:\s*Authorized\s*<O>",
-    dispatch,
-    re.S,
-):
-    failures.append("dispatch must accept Authorized<O>, never Decoded<O> or Req<O>")
+# dispatch consumes the authorization proof itself, so no caller can hand a backend a request that
+# skipped authorization. ADR-0022 permits exactly one addition, the request context; any other
+# parameter, or Decoded<O> / Req<O> in place of Authorized<O>, fails.
+DISPATCH_PARAMETERS = [
+    "implementation: Arc<B>",
+    "authorized: Authorized<O>",
+    "sse: SseEnforced",
+    "request_context: RequestContextView",
+]
+signature = re.search(r"\bfn\s+dispatch\s*<O,\s*B>\s*\(", dispatch)
+parameters = None
+if signature is not None:
+    depth, index = 1, signature.end()
+    while index < len(dispatch) and depth:
+        depth += {"(": 1, ")": -1}.get(dispatch[index], 0)
+        index += 1
+    if depth == 0:
+        parameters = [
+            re.sub(r"\s*:\s*", ": ", " ".join(part.split()))
+            for part in dispatch[signature.end() : index - 1].split(",")
+            if part.strip()
+        ]
+if parameters != DISPATCH_PARAMETERS:
+    failures.append(
+        "dispatch must accept Authorized<O>, never Decoded<O> or Req<O>: its parameters must be exactly ("
+        + ", ".join(DISPATCH_PARAMETERS)
+        + f"), the ADR-0022 request context being the only addition; found {parameters}"
+    )
 
 start = authz.find("impl<O: Operation> Authorized<O>")
 if start < 0:

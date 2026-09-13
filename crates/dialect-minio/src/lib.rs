@@ -24,6 +24,7 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+pub mod ops;
 pub mod replication;
 
 pub use replication::{PutObjectReplica, PutObjectReplicaInput, ReplicaWriteResources, replication_dialect};
