@@ -15,7 +15,8 @@
 //! What a lock-state write actually hands a backend, read off a decoded request and nothing else.
 //!
 //! Responsible for: proving that the object-lock family's *intent* — the retention mode, the
-//! retain-until instant, the version selector and above all
+//! retain-until instant, the version selector, the three `x-amz-object-lock-*` headers of an
+//! object write, `x-amz-bucket-object-lock-enabled`, and above all
 //! `x-amz-bypass-governance-retention` — survives decoding into the input a handler receives, and
 //! that the shared validators can be called with it.
 //! NOT responsible for: what the rules decide (`rustfs-gateway-core`'s
@@ -41,7 +42,7 @@
 
 use rustfs_gateway::{
     Limits, MetaView, ObjectLockRejection, OperationCodec, RequestBody, TargetKind, Timestamp, WireRequest, dto,
-    validate_legal_hold, validate_retention,
+    validate_legal_hold, validate_object_write_lock, validate_retention,
 };
 
 /// 2026-01-01T00:00:00Z, the instant every clock-dependent assertion below is measured against.
@@ -179,9 +180,9 @@ fn n_the_same_document_is_refused_against_a_clock_past_its_instant() {
 
 /// The version selector reaches the handler, so a backend that serves versions can read it.
 ///
-/// This gateway's conformance fixture refuses `?versionId` on a lock read rather than answering
-/// the current version — an honest gap, recorded in `c-lock-0028`. That refusal is the fixture's,
-/// not the codec's, and this is where the difference is proved: the parameter arrives decoded.
+/// What a backend does with it is the backend's: the conformance fixture selects the named
+/// version (`c-lock-0040`, `c-lock-0042`) and refuses an id that names nothing (`c-lock-0028`).
+/// This is the codec half those cases stand on: the parameter arrives decoded, exactly once.
 #[test]
 fn the_version_selector_reaches_the_handler_decoded_once() {
     let input = decoded_retention("http://host.invalid/conf-lock/doc.txt?retention&versionId=v%2F1", &[MD5]);
@@ -224,4 +225,120 @@ fn n_the_bucket_object_lock_token_reaches_the_handler() {
         .expect("a well-formed lock write is not a refusal");
     assert_eq!(input.token.as_deref(), Some("conformance-token"));
     assert_eq!(input.object_lock_configuration.object_lock_enabled, Some(dto::ObjectLockEnabled::ENABLED));
+}
+
+// ── the object-write headers ─────────────────────────────────────────────────────────────────
+//
+// `PutObject` carries the three `x-amz-object-lock-*` headers into a stored lock state the
+// conformance corpus can read back (`c-lock-0036`). `CopyObject` and `CreateMultipartUpload` carry
+// the same three into an input no fixture read observes, so these assertions read the decoded
+// input: present reaches the handler, absent stays `None`, and an unreadable value is refused.
+
+/// The three headers, with the one date format they accept.
+const LOCK_HEADERS: [(&str, &str); 3] = [
+    ("x-amz-object-lock-mode", "COMPLIANCE"),
+    ("x-amz-object-lock-retain-until-date", "2030-01-01T00:00:00Z"),
+    ("x-amz-object-lock-legal-hold", "ON"),
+];
+
+/// What the three headers decoded to, as plain text and seconds, for either operation.
+type LockTriple = (Option<String>, Option<i64>, Option<String>);
+
+fn copy_lock(headers: &[(&'static str, &'static str)]) -> Result<LockTriple, ()> {
+    let mut all = vec![("x-amz-copy-source", "/conf-lock/source.txt")];
+    all.extend_from_slice(headers);
+    let request = accepted("PUT", "http://host.invalid/conf-lock/doc.txt", &all);
+    let view = MetaView::of(&request, TargetKind::Object).expect("both labels");
+    let input = dto::CopyObject::decode(&view, RequestBody::None).map_err(|_| ())?;
+    Ok((
+        input.object_lock_mode.map(|mode| mode.as_str().to_owned()),
+        input.object_lock_retain_until_date.as_ref().map(Timestamp::secs),
+        input.object_lock_legal_hold_status.map(|status| status.as_str().to_owned()),
+    ))
+}
+
+fn upload_lock(headers: &[(&'static str, &'static str)]) -> Result<LockTriple, ()> {
+    let request = accepted("POST", "http://host.invalid/conf-lock/doc.txt?uploads", headers);
+    let view = MetaView::of(&request, TargetKind::Object).expect("both labels");
+    let input = dto::CreateMultipartUpload::decode(&view, RequestBody::None).map_err(|_| ())?;
+    Ok((
+        input.object_lock_mode.map(|mode| mode.as_str().to_owned()),
+        input.object_lock_retain_until_date.as_ref().map(Timestamp::secs),
+        input.object_lock_legal_hold_status.map(|status| status.as_str().to_owned()),
+    ))
+}
+
+/// All three headers reach both handlers, the ISO 8601 instant as the second it names.
+#[test]
+fn the_three_lock_headers_reach_the_copy_and_upload_handlers() {
+    let expected = Ok((Some("COMPLIANCE".to_owned()), Some(1_893_456_000), Some("ON".to_owned())));
+    assert_eq!(copy_lock(&LOCK_HEADERS), expected);
+    assert_eq!(upload_lock(&LOCK_HEADERS), expected);
+}
+
+/// Negative — absent headers are `None`, not a default lock.
+#[test]
+fn n_absent_lock_headers_are_none_on_both_handlers() {
+    assert_eq!(copy_lock(&[]), Ok((None, None, None)));
+    assert_eq!(upload_lock(&[]), Ok((None, None, None)));
+}
+
+/// Negative — a retain-until date in HTTP-date form is refused on both, never read as an instant.
+///
+/// The header is the one request header in ISO 8601 (`q-timestamp-0011`); every other date header
+/// is an HTTP date, which is exactly the format a binding written by habit would accept here.
+#[test]
+fn n_an_http_date_retain_until_is_refused_on_both_handlers() {
+    let headers = [
+        ("x-amz-object-lock-mode", "GOVERNANCE"),
+        ("x-amz-object-lock-retain-until-date", "Tue, 01 Jan 2030 00:00:00 GMT"),
+    ];
+    assert_eq!(copy_lock(&headers), Err(()));
+    assert_eq!(upload_lock(&headers), Err(()));
+}
+
+/// Negative — the header twin of the document rules refuses what the decoder carries through.
+///
+/// The mode and hold enums are open, so an out-of-set value decodes; `validate_object_write_lock`
+/// is where it stops, and it has to be callable with exactly what the handler received.
+#[test]
+fn n_an_out_of_set_mode_decodes_and_the_shared_rule_refuses_it() {
+    let headers = [
+        ("x-amz-object-lock-mode", "ARCHIVE"),
+        ("x-amz-object-lock-retain-until-date", "2030-01-01T00:00:00Z"),
+    ];
+    let (mode, until, hold) = upload_lock(&headers).expect("an open enum value decodes");
+    let until = until.map(Timestamp::from_secs);
+    assert_eq!(
+        validate_object_write_lock(mode.as_deref(), until.as_ref(), hold.as_deref(), NOW),
+        Err(ObjectLockRejection::WriteHeaderValueUnknown)
+    );
+}
+
+// ── the bucket-creation switch ───────────────────────────────────────────────────────────────
+
+fn create_bucket_lock(value: &'static str) -> Result<Option<bool>, ()> {
+    let request = accepted("PUT", "http://host.invalid/conf-lock", &[("x-amz-bucket-object-lock-enabled", value)]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("the path has a bucket label");
+    dto::CreateBucket::decode(&view, RequestBody::None)
+        .map(|input| input.object_lock_enabled_for_bucket)
+        .map_err(|_| ())
+}
+
+/// The capitalised spelling enables object lock at creation, like the bypass header's.
+#[test]
+fn the_capitalised_bucket_lock_spelling_reaches_the_handler_as_true() {
+    assert_eq!(create_bucket_lock("True"), Ok(Some(true)));
+    assert_eq!(create_bucket_lock("FALSE"), Ok(Some(false)));
+}
+
+/// Negative — an unreadable value is refused, never read as "enable object lock".
+///
+/// Turning object lock on is irreversible, so a guess in the `true` direction is a bucket that can
+/// never be unlocked; the conservative direction here is the refusal.
+#[test]
+fn n_an_unreadable_bucket_lock_value_is_refused() {
+    for value in ["yes", "1", "enabled"] {
+        assert_eq!(create_bucket_lock(value), Err(()), "{value:?}");
+    }
 }

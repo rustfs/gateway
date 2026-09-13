@@ -1,0 +1,135 @@
+[case]
+id = "c-lock-0040"
+schema_version = 1
+title = "A retention written to a named version stays on that version after a newer one is written"
+rationale = """
+Retention protects an object version, not a key. The case writes a version, locks it by id, writes a newer version over it, and then asks for both: the older version must answer the document it was given and the current one must answer that it has none. Reporting the current version's state for the named one, or the named one's for the current, would each be a confident wrong answer about whether data is locked, and only a read by version id can tell them apart."""
+polarity = "positive"
+operation = "GetObjectRetention"
+tags = ["object-lock", "versions"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectRetention.html"
+summary = "The retention write documents versionId as selecting the object version the retention is placed on."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectRetention.html"
+summary = "The retention read documents versionId as selecting the version whose retention is reported."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-lock-versions"
+versioning = "enabled"
+object_lock = true
+
+[[exchanges]]
+name = "write-the-first-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock-versions/doc.txt"
+headers = { "content-type" = "text/plain" }
+body = { utf8 = 'first' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+first = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "lock-the-first-version-by-id"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock-versions/doc.txt?retention&versionId=${capture.first}"
+headers = { "content-type" = "application/xml", "content-md5" = "nRP4r9dIhDgQ95myRGb8sw==" }
+body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "write-a-newer-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock-versions/doc.txt"
+headers = { "content-type" = "text/plain" }
+body = { utf8 = 'second' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+second = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "the-first-version-keeps-its-retention"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock-versions/doc.txt?retention&versionId=${capture.first}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>'''
+
+[[exchanges]]
+name = "the-current-version-has-none"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock-versions/doc.txt?retention"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchObjectLockConfiguration"
+request_id_present = true
+
+[[exchanges]]
+name = "naming-the-current-version-agrees"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock-versions/doc.txt?retention&versionId=${capture.second}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchObjectLockConfiguration"
+request_id_present = true

@@ -706,7 +706,7 @@
                                 "summary": "Specifies the retain until date header in the extended date time format while every other date header uses the HTTP date format."
                               }
                             ],
-                "cases": ["c-objectlock-0001"]
+                "cases": ["c-objectlock-0001", "c-lock-0036", "c-lock-0037"]
               },
               {
                 "id": "q-timestamp-0012",

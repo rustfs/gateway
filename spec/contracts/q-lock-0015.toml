@@ -7,7 +7,7 @@ contract_value = "require_object_lock_enabled"
 mutation_dimension = "bucket_state_precondition"
 target = "PutObjectRetention"
 summary = "A retention or legal-hold write against a bucket that never enabled object lock is refused as 400 InvalidRequest: per-object lock state exists only inside a lock-enabled bucket, so accepting the write would store a protection promise no enforcement path will ever read."
-cases = ["c-lock-0005", "c-lock-0006", "c-lock-0025", "c-lock-0026"]
+cases = ["c-lock-0005", "c-lock-0006", "c-lock-0025", "c-lock-0026", "c-lock-0035"]
 
 [[evidence]]
 kind = "aws-doc"

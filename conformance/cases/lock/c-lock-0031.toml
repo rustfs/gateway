@@ -1,0 +1,72 @@
+[case]
+id = "c-lock-0031"
+schema_version = 1
+title = "A bypass header sent twice is refused, whichever line says true, and nothing is stored"
+rationale = """
+Two field lines for x-amz-bypass-governance-retention are two answers to the one question that decides whether GOVERNANCE protection may be weakened. Honouring either line lets the order in which some layer happens to read them decide a bypass, which is the s3s#176 class of ambiguity. The lines here are True and false, each a valid spelling on its own, so the refusal can only come from the repetition. The read-back proves the refused write stored nothing."""
+polarity = "negative"
+operation = "PutObjectRetention"
+tags = ["object-lock", "security", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-lock-0012"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectRetention.html"
+summary = "The request documents the bypass header as a single boolean, which two differing lines cannot be."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/176"
+summary = "Repeated single-valued headers are an open ambiguity upstream because implementations disagree on which line wins."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-lock"
+key = "doc.txt"
+body = { utf8 = "payload" }
+
+[[exchanges]]
+name = "write-with-two-bypass-lines"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock/doc.txt?retention"
+headers = { "content-type" = "application/xml", "content-md5" = "nRP4r9dIhDgQ95myRGb8sw==", "x-amz-bypass-governance-retention" = ["True", "false"] }
+body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[[exchanges]]
+name = "nothing-was-stored"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock/doc.txt?retention"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchObjectLockConfiguration"
+request_id_present = true

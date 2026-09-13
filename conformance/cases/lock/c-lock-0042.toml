@@ -1,0 +1,118 @@
+[case]
+id = "c-lock-0042"
+schema_version = 1
+title = "A legal hold placed on an older version by id lands on that version, not on the current one"
+rationale = """
+The legal-hold twin of c-lock-0040, in the other order: the newer version is written first, so when the hold names the older version by id the two are different objects. A hold that landed on the current version instead would read back ON for the version nobody held and 404 for the one that was, which on a compliance surface is a hold on the wrong data. The held version answers ON and the current one answers that no hold was ever placed on it."""
+polarity = "positive"
+operation = "GetObjectLegalHold"
+tags = ["object-lock", "versions"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html"
+summary = "The legal-hold write documents versionId as selecting the object version the hold is placed on."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectLegalHold.html"
+summary = "The legal-hold read documents versionId as selecting the version whose hold is reported."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-lock-versions"
+versioning = "enabled"
+object_lock = true
+
+[[exchanges]]
+name = "write-the-first-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock-versions/doc.txt"
+headers = { "content-type" = "text/plain" }
+body = { utf8 = 'first' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+first = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "write-a-newer-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock-versions/doc.txt"
+headers = { "content-type" = "text/plain" }
+body = { utf8 = 'second' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+second = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "hold-the-first-version-by-id"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock-versions/doc.txt?legal-hold&versionId=${capture.first}"
+headers = { "content-type" = "application/xml", "content-md5" = "oK1+ndJbG6HuGA87LDxznw==" }
+body = { utf8 = '<LegalHold><Status>ON</Status></LegalHold>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "the-first-version-is-still-held"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock-versions/doc.txt?legal-hold&versionId=${capture.first}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<LegalHold xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>ON</Status></LegalHold>'''
+
+[[exchanges]]
+name = "the-current-version-was-never-held"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock-versions/doc.txt?legal-hold"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchObjectLockConfiguration"
+request_id_present = true

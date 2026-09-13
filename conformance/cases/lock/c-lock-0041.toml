@@ -1,0 +1,138 @@
+[case]
+id = "c-lock-0041"
+schema_version = 1
+title = "A lock write naming a version that does not exist is NoSuchVersion, and one naming a delete marker is 405"
+rationale = """
+A version-scoped lock write has two ways to name nothing lockable, and they are different facts: an id this bucket never minted, and an id that names a deletion. The first is NoSuchVersion; the second is the MethodNotAllowed every other version-scoped request against a delete marker gets. Falling back to the current version for either would place a retention or hold on an object nobody named."""
+polarity = "negative"
+operation = "PutObjectLegalHold"
+tags = ["object-lock", "versions", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLegalHold.html"
+summary = "The legal-hold write documents versionId as selecting the object version the hold is placed on."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html"
+summary = "A delete marker is a version with no data, and version-scoped requests against one are refused as not allowed."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-lock-versions"
+versioning = "enabled"
+object_lock = true
+
+[[exchanges]]
+name = "write-a-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock-versions/doc.txt"
+headers = { "content-type" = "text/plain" }
+body = { utf8 = 'first' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+first = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "lock-a-version-that-was-never-minted"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock-versions/doc.txt?retention&versionId=conformance-version-9999"
+headers = { "content-type" = "application/xml", "content-md5" = "nRP4r9dIhDgQ95myRGb8sw==" }
+body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchVersion"
+request_id_present = true
+
+[[exchanges]]
+name = "hide-it-behind-a-delete-marker"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-lock-versions/doc.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[exchanges.expect.capture]
+marker = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "hold-the-delete-marker"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock-versions/doc.txt?legal-hold&versionId=${capture.marker}"
+headers = { "content-type" = "application/xml", "content-md5" = "oK1+ndJbG6HuGA87LDxznw==" }
+body = { utf8 = '<LegalHold><Status>ON</Status></LegalHold>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 405
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MethodNotAllowed"
+request_id_present = true
+
+[[exchanges]]
+name = "read-the-hold-of-the-delete-marker"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock-versions/doc.txt?legal-hold&versionId=${capture.marker}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 405
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MethodNotAllowed"
+request_id_present = true
+
+[[exchanges]]
+name = "the-real-version-was-not-held"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock-versions/doc.txt?legal-hold&versionId=${capture.first}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchObjectLockConfiguration"
+request_id_present = true

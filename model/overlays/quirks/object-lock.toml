@@ -228,7 +228,7 @@ mutation_dimension = "boolean_spelling_policy"
 codec_value = "ascii_case_insensitive"
 target  = "PutObjectRetention.BypassGovernanceRetention"
 summary = "x-amz-bypass-governance-retention is parsed ASCII-case-insensitively — True and TRUE are true, False is false — and any other value is refused as 400 InvalidArgument, never defaulted: this header is the one switch that weakens GOVERNANCE protection, so an unreadable value must fail closed rather than be guessed true."
-cases   = ["c-lock-0009", "c-lock-0023"]
+cases   = ["c-lock-0009", "c-lock-0023", "c-lock-0031"]
 
   [[quirk.evidence]]
   kind    = "s3s-pr"
@@ -278,7 +278,7 @@ mutation_dimension = "bucket_state_precondition"
 contract_value = "require_object_lock_enabled"
 target  = "PutObjectRetention"
 summary = "A retention or legal-hold write against a bucket that never enabled object lock is refused as 400 InvalidRequest: per-object lock state exists only inside a lock-enabled bucket, so accepting the write would store a protection promise no enforcement path will ever read."
-cases   = ["c-lock-0005", "c-lock-0006", "c-lock-0025", "c-lock-0026"]
+cases   = ["c-lock-0005", "c-lock-0006", "c-lock-0025", "c-lock-0026", "c-lock-0035"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"

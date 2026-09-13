@@ -7,7 +7,7 @@ codec_value = "ascii_case_insensitive"
 mutation_dimension = "boolean_spelling_policy"
 target = "PutObjectRetention.BypassGovernanceRetention"
 summary = "x-amz-bypass-governance-retention is parsed ASCII-case-insensitively — True and TRUE are true, False is false — and any other value is refused as 400 InvalidArgument, never defaulted: this header is the one switch that weakens GOVERNANCE protection, so an unreadable value must fail closed rather than be guessed true."
-cases = ["c-lock-0009", "c-lock-0023"]
+cases = ["c-lock-0009", "c-lock-0023", "c-lock-0031"]
 
 [[evidence]]
 kind = "s3s-pr"

@@ -1,0 +1,67 @@
+[case]
+id = "c-lock-0033"
+schema_version = 1
+title = "A lock configuration whose Content-MD5 names another default retention is BadDigest and changes nothing"
+rationale = """
+The digest is the real digest of the same configuration with a COMPLIANCE default, so the claim is well formed and names a document that differs by the one member deciding whether every future object in the bucket can be unlocked. The bucket was declared lock-enabled with no default, and the read-back must still say exactly that: a default retention installed by a refused write would apply to data nobody agreed to lock."""
+polarity = "negative"
+operation = "PutObjectLockConfiguration"
+tags = ["object-lock", "checksum", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html"
+summary = "The write reference documents Content-MD5 as the base64 digest of the lock configuration, which is the header this case gets wrong on purpose."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "The error list gives BadDigest for a Content-MD5 that disagrees with the body it accompanies."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[exchanges]]
+name = "write-carrying-another-documents-digest"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock?object-lock"
+headers = { "content-type" = "application/xml", "content-md5" = "pW7vq8+Mz5x5djdAkpIXqQ==" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>30</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "BadDigest"
+request_id_present = true
+
+[[exchanges]]
+name = "the-bucket-keeps-its-configuration"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock?object-lock"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<ObjectLockEnabled>Enabled</ObjectLockEnabled>"]
+not_contains_utf8 = ["DefaultRetention", "GOVERNANCE", "COMPLIANCE"]

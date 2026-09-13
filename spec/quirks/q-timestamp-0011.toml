@@ -6,7 +6,7 @@ classification = "mutable"
 mutation_dimension = "time_format"
 target = "PutObject.ObjectLockRetainUntilDate"
 summary = "This is the only request header carrying the extended date time format instead of the HTTP date format."
-cases = ["c-objectlock-0001"]
+cases = ["c-objectlock-0001", "c-lock-0036", "c-lock-0037"]
 
 [[source]]
 path = "PutObject.input.ObjectLockRetainUntilDate.timestamp_format"

@@ -182,7 +182,7 @@ cases = "c-etag-0001"
 
 [[operation]]
 name = "GetObjectLegalHold"
-cases = "c-lock-0013"
+cases = "c-lock-0013,c-lock-0042"
 
 [[operation]]
 name = "GetObjectLockConfiguration"
@@ -190,7 +190,7 @@ cases = "c-lock-0002,c-lock-0003,c-lock-0011,c-lock-0029"
 
 [[operation]]
 name = "GetObjectRetention"
-cases = "c-lock-0012,c-lock-0028"
+cases = "c-lock-0012,c-lock-0028,c-lock-0040"
 
 [[operation]]
 name = "GetObjectTagging"
@@ -314,7 +314,7 @@ cases = "c-bucketconfig-0012,c-bucketconfig-0014,c-bucketconfig-0036,c-bucketcon
 
 [[operation]]
 name = "PutObject"
-cases = "c-checksum-0001,c-checksum-0003,c-checksum-0004,c-checksum-0005,c-checksum-0006,c-checksum-0007,c-checksum-0008,c-checksum-0009,c-checksum-0010,c-checksum-0011,c-checksum-0012,c-checksum-0013,c-chunked-0001,c-chunked-0002,c-chunked-0003,c-cond-0001,c-cond-0006,c-cond-0009,c-cond-0011,c-cond-0012,c-cond-0013,c-cond-0018,c-copy-0022,c-encryption-0026,c-host-0008,c-naming-0025,c-naming-0030,c-object-0006,c-object-0013,c-object-0026,c-object-0027,c-object-0030,c-object-0040,c-object-0041,c-object-0042,c-object-0043,c-object-0044,c-object-0051,c-object-0054,c-object-0055,c-object-0056,c-object-0057,c-object-0059,c-object-0060,c-sig-0001,c-sig-0594,c-sig-0595,c-ssec-0001,c-ssec-0003,c-ssec-0005,c-ssec-0006,c-ssec-0007,c-ssec-0008,c-ssec-0009,c-ssec-0010,c-tagging-0003,c-tagging-0016,c-tagging-0017"
+cases = "c-checksum-0001,c-checksum-0003,c-checksum-0004,c-checksum-0005,c-checksum-0006,c-checksum-0007,c-checksum-0008,c-checksum-0009,c-checksum-0010,c-checksum-0011,c-checksum-0012,c-checksum-0013,c-chunked-0001,c-chunked-0002,c-chunked-0003,c-cond-0001,c-cond-0006,c-cond-0009,c-cond-0011,c-cond-0012,c-cond-0013,c-cond-0018,c-copy-0022,c-encryption-0026,c-host-0008,c-lock-0035,c-lock-0036,c-lock-0037,c-lock-0038,c-lock-0039,c-naming-0025,c-naming-0030,c-object-0006,c-object-0013,c-object-0026,c-object-0027,c-object-0030,c-object-0040,c-object-0041,c-object-0042,c-object-0043,c-object-0044,c-object-0051,c-object-0054,c-object-0055,c-object-0056,c-object-0057,c-object-0059,c-object-0060,c-sig-0001,c-sig-0594,c-sig-0595,c-ssec-0001,c-ssec-0003,c-ssec-0005,c-ssec-0006,c-ssec-0007,c-ssec-0008,c-ssec-0009,c-ssec-0010,c-tagging-0003,c-tagging-0016,c-tagging-0017"
 
 [[operation]]
 name = "PutObjectAcl"
@@ -326,15 +326,15 @@ cases = ""
 
 [[operation]]
 name = "PutObjectLegalHold"
-cases = "c-lock-0006,c-lock-0007,c-lock-0022,c-lock-0026"
+cases = "c-lock-0006,c-lock-0007,c-lock-0022,c-lock-0026,c-lock-0034,c-lock-0041"
 
 [[operation]]
 name = "PutObjectLockConfiguration"
-cases = "c-lock-0001,c-lock-0004,c-lock-0010,c-lock-0014,c-lock-0018,c-lock-0019,c-lock-0020,c-lock-0021"
+cases = "c-lock-0001,c-lock-0004,c-lock-0010,c-lock-0014,c-lock-0018,c-lock-0019,c-lock-0020,c-lock-0021,c-lock-0033"
 
 [[operation]]
 name = "PutObjectRetention"
-cases = "c-lock-0005,c-lock-0008,c-lock-0009,c-lock-0015,c-lock-0016,c-lock-0017,c-lock-0023,c-lock-0024,c-lock-0025,c-lock-0027,c-lock-0030"
+cases = "c-lock-0005,c-lock-0008,c-lock-0009,c-lock-0015,c-lock-0016,c-lock-0017,c-lock-0023,c-lock-0024,c-lock-0025,c-lock-0027,c-lock-0030,c-lock-0031,c-lock-0032"
 
 [[operation]]
 name = "PutObjectTagging"

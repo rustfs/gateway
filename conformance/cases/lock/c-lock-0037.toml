@@ -1,0 +1,67 @@
+[case]
+id = "c-lock-0037"
+schema_version = 1
+title = "A retain-until header in HTTP-date form is refused, because this header alone is ISO 8601"
+rationale = """
+Every other date header S3 reads is an HTTP date, so a decoder that bound this one by habit would accept Fri, 21 Dec 2029 and store whatever instant it parsed out of it. The refusal is what proves the header is bound to its own format rather than to the common one; the read afterwards proves nothing was written under a date nobody can be sure of."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["object-lock", "validation", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-timestamp-0011"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "The object write documents x-amz-object-lock-retain-until-date in the extended date time format, unlike every other date header."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/issues/484"
+summary = "Timestamp formats are bound per member upstream, and the suite behind that fix exercises each format separately."
+kind = "s3s-issue"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-lock"
+object_lock = true
+
+[[exchanges]]
+name = "write-with-an-http-date"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock/doc.txt"
+headers = { "content-type" = "text/plain", "x-amz-object-lock-mode" = "GOVERNANCE", "x-amz-object-lock-retain-until-date" = "Tue, 01 Jan 2030 00:00:00 GMT" }
+body = { utf8 = 'payload' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[[exchanges]]
+name = "no-object-was-created"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lock/doc.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true

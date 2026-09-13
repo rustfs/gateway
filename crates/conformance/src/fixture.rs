@@ -126,8 +126,9 @@ use rustfs_gateway::{
     refuse_blocked_encryption_type, resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint,
     resolve_part, resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate,
     validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
-    validate_notification, validate_policy, validate_public_access_block, validate_replication, validate_request_payment,
-    validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
+    validate_notification, validate_object_write_lock, validate_policy, validate_public_access_block, validate_replication,
+    validate_request_payment, validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning,
+    validate_website,
 };
 
 mod committed;
@@ -210,13 +211,15 @@ pub struct StoredObject {
     /// The retention document a retention write stored, exactly as validated — never invented,
     /// and never *evaluated*: whether this fixture's deletes and overwrites honour it is
     /// enforcement, which is deliberately not this fixture's. `None` is the observable state the
-    /// object-level `404 NoSuchObjectLockConfiguration` reports. Held on the object like the tag
-    /// set, because `[setup.objects]` declares no per-version lock state and inventing one would
-    /// be state no case wrote.
+    /// object-level `404 NoSuchObjectLockConfiguration` reports. Held on the object, and so on the
+    /// [`StoredVersion`] that owns it: a write naming `versionId` lands on that version
+    /// (`lock_state_of_mut`), an object write carrying the `x-amz-object-lock-*` headers sets it on
+    /// the version it creates, and `[setup.objects]` declares none, so every value here was
+    /// written by a request.
     pub retention: Option<dto::ObjectLockRetention>,
     /// The legal-hold document a hold write stored. `None` is "never set", which answers the
     /// same object-level 404 as an unset retention — not a `200` carrying `OFF`, which a
-    /// compliance audit would read as a hold that exists.
+    /// compliance audit would read as a hold that exists. Per version, like the retention.
     pub legal_hold: Option<dto::ObjectLockLegalHold>,
     /// The state of an archive retrieval on this copy, or `None` when none was ever asked for.
     ///
@@ -1707,26 +1710,46 @@ fn require_object_lock(fixture: &Fixture, bucket: &str) -> Result<(), HandlerErr
     ))
 }
 
-/// Refuses `?versionId` on a lock-state request rather than answering the current version's
-/// document.
+/// The object version a lock-state read acts on: the newest one, or the one `versionId` names.
 ///
-/// The tagging family's rule, on a surface where the cost of guessing is higher. This fixture
-/// keeps one retention and one hold per key, because `[setup.objects]` declares no per-version
-/// lock state and inventing some would be state no case wrote. Silently ignoring the parameter
-/// would report the *current* protection as the named version's, and a case asserting on that
-/// would go green against a wrong answer about whether data is locked.
-///
-/// # Errors
-///
-/// `NotImplemented` whenever the parameter is present, with a value or without.
-fn refuse_versioned_lock_state(version_id: Option<&str>) -> Result<(), HandlerError> {
-    if version_id.is_none() {
-        return Ok(());
+/// Per-version lock state is the representation this fixture already had, not one it invents:
+/// a [`StoredVersion`] owns its [`StoredObject`], and the retention and hold live on the object.
+/// A named version is selected the way every other version-scoped read in this file selects it
+/// ([`select_named`]): an id that names nothing is `NoSuchVersion`, an id that names a delete
+/// marker is `405 MethodNotAllowed`. What it must never be is the current version's document —
+/// on a compliance surface that is a confident wrong answer about whether data is locked, and
+/// `c-lock-0040` is the case that tells the two apart.
+fn lock_state_of<'a>(
+    fixture: &'a Fixture,
+    bucket: &str,
+    key: &str,
+    version_id: Option<&str>,
+) -> Result<&'a StoredObject, HandlerError> {
+    match version_id {
+        None => fixture.object(bucket, key).ok_or_else(|| no_such_key(key)),
+        Some(version_id) => select_named(fixture, bucket, key, version_id),
     }
-    Err(HandlerError::new(
-        ErrorCode::NOT_IMPLEMENTED,
-        "A header you provided implies functionality that is not implemented",
-    ))
+}
+
+/// [`lock_state_of`], writable, with the same two refusals for a named version.
+///
+/// The write is in place on the version it selects: protecting a version is not a new
+/// representation of it, so nothing is minted and no other version is touched.
+fn lock_state_of_mut<'a>(
+    fixture: &'a mut Fixture,
+    bucket: &str,
+    key: &str,
+    version_id: Option<&str>,
+) -> Result<&'a mut StoredObject, HandlerError> {
+    let Some(version_id) = version_id else {
+        return fixture.object_mut(bucket, key).ok_or_else(|| no_such_key(key));
+    };
+    let version = fixture.version_mut(bucket, key, version_id).ok_or_else(no_such_version)?;
+    let last_modified = version.last_modified;
+    version
+        .object
+        .as_mut()
+        .ok_or_else(|| versioned_delete_marker(version_id, last_modified))
 }
 
 /// What a read found under a key, before any precondition is evaluated.
@@ -4047,19 +4070,14 @@ impl Stub {
         Ok(Resp::new(dto::PutObjectLockConfigurationOutput::default()))
     }
 
-    /// One object's retention document, or the object-level 404.
+    /// One object version's retention document, or the object-level 404.
     ///
-    /// `versionId` is refused rather than ignored, for `refuse_versioned_lock_state`'s reason:
-    /// this fixture keeps one retention per key, so answering a request that named an older
-    /// version would report the current document as that version's — a wrong answer where a
-    /// refusal is merely a gap, and on a compliance surface a wrong answer is the worse one.
+    /// `versionId` selects the version through `lock_state_of`: the named version's document,
+    /// never the current one's, and `NoSuchVersion` for an id that names nothing.
     fn get_object_retention(&self, input: &dto::GetObjectRetentionInput) -> HandlerResult<dto::GetObjectRetention> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        refuse_versioned_lock_state(input.version_id.as_deref())?;
-        let object = fixture
-            .object(input.bucket.as_str(), input.key.as_str())
-            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        let object = lock_state_of(&fixture, input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())?;
         let retention = object.retention.clone().ok_or_else(no_such_retention)?;
         Ok(Resp::new(dto::GetObjectRetentionOutput {
             retention: Some(retention),
@@ -4080,12 +4098,9 @@ impl Stub {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         require_object_lock(&fixture, input.bucket.as_str())?;
-        refuse_versioned_lock_state(input.version_id.as_deref())?;
         let now = fixture.now;
         validate_retention(&input.retention, now).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
-        let object = fixture
-            .object_mut(input.bucket.as_str(), input.key.as_str())
-            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        let object = lock_state_of_mut(&mut fixture, input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())?;
         object.retention = Some(input.retention.clone());
         Ok(Resp::new(dto::PutObjectRetentionOutput::default()))
     }
@@ -4097,10 +4112,7 @@ impl Stub {
     fn get_object_legal_hold(&self, input: &dto::GetObjectLegalHoldInput) -> HandlerResult<dto::GetObjectLegalHold> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
-        refuse_versioned_lock_state(input.version_id.as_deref())?;
-        let object = fixture
-            .object(input.bucket.as_str(), input.key.as_str())
-            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        let object = lock_state_of(&fixture, input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())?;
         let legal_hold = object.legal_hold.clone().ok_or_else(no_such_legal_hold)?;
         Ok(Resp::new(dto::GetObjectLegalHoldOutput {
             legal_hold: Some(legal_hold),
@@ -4116,11 +4128,8 @@ impl Stub {
         let mut fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         require_object_lock(&fixture, input.bucket.as_str())?;
-        refuse_versioned_lock_state(input.version_id.as_deref())?;
         validate_legal_hold(&input.legal_hold).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
-        let object = fixture
-            .object_mut(input.bucket.as_str(), input.key.as_str())
-            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        let object = lock_state_of_mut(&mut fixture, input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())?;
         object.legal_hold = Some(input.legal_hold.clone());
         Ok(Resp::new(dto::PutObjectLegalHoldOutput::default()))
     }

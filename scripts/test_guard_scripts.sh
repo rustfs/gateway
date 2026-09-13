@@ -14397,6 +14397,70 @@ expect_fail check_codec_policy.sh \
     'the persisted PublicAccessBlock reader refusing an unknown element' \
     mut_codec_policy_persisted_pab_made_strict
 
+# The object-lock family's grading (rustfs/backlog#1726): the same four moves against the three
+# lock writes and the persisted ObjectLockConfiguration reader.
+
+mut_codec_policy_lock_guard_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("generated/codec/ops/put_object_retention.rs")
+text = path.read_text()
+old = '    if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {\n        return Err(CodecError::malformed_xml("the body contains an unknown element"));\n    }\n'
+if text.count(old) != 1:
+    raise SystemExit("retention guard mutation anchor is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the generated PutObjectRetention decoder skipping unregistered elements' \
+    mut_codec_policy_lock_guard_removed
+
+mut_codec_policy_lock_rule_made_lenient() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("model/overlays/quirks/object-lock.toml")
+text = path.read_text()
+old = 'mutation_dimension = "unknown_element_policy"\ncodec_value = "reject"\ntarget  = "PutObjectLockConfiguration"\n'
+if text.count(old) != 1:
+    raise SystemExit("object lock rule mutation anchor is not unique")
+path.write_text(text.replace(old, old.replace('"reject"', '"skip"'), 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the object-lock write rule flipped from reject to skip' \
+    mut_codec_policy_lock_rule_made_lenient
+
+mut_codec_policy_lock_case_unbound() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/lock/c-lock-0010.toml")
+text = path.read_text()
+old = 'quirks = ["q-lock-0014"]\n'
+if text.count(old) != 1:
+    raise SystemExit("object lock case mutation anchor is not unique")
+path.write_text(text.replace(old, "quirks = []\n", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the object-lock refusal case losing its rule binding' \
+    mut_codec_policy_lock_case_unbound
+
+mut_codec_policy_persisted_lock_made_strict() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/types/src/persistence.rs")
+text = path.read_text()
+old = '    if root.name != "ObjectLockConfiguration" {\n        return Err(PersistenceCodecError::WrongRoot);\n    }\n'
+if text.count(old) != 1:
+    raise SystemExit("persisted object lock mutation anchor is not unique")
+strict = old + '    reject_unknown_children(&root, &["ObjectLockEnabled", "Rule"])?;\n'
+path.write_text(text.replace(old, strict, 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the persisted ObjectLockConfiguration reader refusing an unknown root element' \
+    mut_codec_policy_persisted_lock_made_strict
+
 mut_codec_policy_policy_gate_removed() {
     python3 - <<'PYEOF'
 from pathlib import Path

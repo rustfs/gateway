@@ -340,10 +340,11 @@ pub use rustfs_gateway_core::sse::{
 // the caller's clock rather than reading one, which is what makes the future-only rule
 // testable — and what the conformance fixture pins per case. Enforcement — refusing deletes and
 // overwrites of protected objects, the governance bypass — is deliberately not exported,
-// because it is deliberately not implemented here.
+// because it is deliberately not implemented here. `validate_object_write_lock` holds the
+// `x-amz-object-lock-*` headers of an object write to the same rules as the two documents.
 pub use rustfs_gateway_core::ops::shared::object_lock::{
     ObjectLockRejection, object_lock_requires_enabled_bucket, validate_legal_hold, validate_lock_configuration,
-    validate_retention,
+    validate_object_write_lock, validate_retention,
 };
 
 // The replication document contract, exported for the same reason as the three above: what

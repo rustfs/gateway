@@ -1,12 +1,12 @@
 [case]
 id = "c-lock-0028"
 schema_version = 1
-title = "A retention read naming a version is refused rather than answered from the current one"
+title = "A retention read naming a version that does not exist is NoSuchVersion, never the current version's document"
 rationale = """
-This target keeps one retention per key, because nothing in the case format declares per-version lock state and inventing some would be state no case wrote. Ignoring the parameter would report the current protection as the named version, which on a compliance surface is a confident wrong answer where a refusal is merely a gap. The 501 is the honest reading and the case pins it as such, not as the behaviour AWS has."""
+The bucket here is not versioned, so the only version doc.txt has is null and the id v1 names nothing. Answering the current version's retention for it would report a protection state for a version that does not exist, which on a compliance surface is a confident wrong answer. The read is refused with the code every other version-scoped read gets for an id that names nothing. c-lock-0040 is the positive twin that reads a version which does exist."""
 polarity = "negative"
 operation = "GetObjectRetention"
-tags = ["object-lock", "known-divergence"]
+tags = ["object-lock", "versions", "error-shape"]
 timeout_ms = 10000
 quirks = ["q-lock-0002"]
 
@@ -31,18 +31,12 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 
 [expect]
 kind = "response"
-status = 501
+status = 404
 connection_after = "open"
 
 [expect.error]
-code = "NotImplemented"
+code = "NoSuchVersion"
 request_id_present = true
 
 [expect.headers_present]
 "content-type" = "application/xml"
-
-[expect.body]
-redact = ["RequestId", "HostId"]
-exact_utf8 = '''
-<?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>NotImplemented</Code><Message>A header you provided implies functionality that is not implemented</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
