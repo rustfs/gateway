@@ -38,7 +38,9 @@
 //! A reverse proxy in front of this gateway may inject a header of its own whose value is not
 //! UTF-8. Refusing the whole request for it is not a hypothetical inconvenience: it took down
 //! every `PutObject` behind one such proxy (s3s#597, rustfs#3124). So an unrelated header with
-//! non-UTF-8 bytes is skipped by [`HeaderView::iter_text`] and the request proceeds.
+//! non-UTF-8 bytes is skipped by [`HeaderView::iter_text`] and the request proceeds. A caller that
+//! must pass the line on unchanged reads it through [`HeaderView::iter_raw`]. Skipping a line is
+//! not the same as deleting it.
 //!
 //! The exception is exact: a header this gateway attributes meaning to
 //! ([`is_significant_header`]), or a header the signature covers, must be readable or the request
@@ -271,6 +273,33 @@ impl<'a> HeaderView<'a> {
         self.map
             .iter()
             .filter_map(|(name, value)| core::str::from_utf8(value.as_bytes()).ok().map(|text| (name, text)))
+    }
+
+    /// Every accepted field line, in map order, with its value exactly as it arrived.
+    ///
+    /// Wider than [`HeaderView::iter_text`] by one kind of line only: an unrelated header whose
+    /// value is not UTF-8, which the text view skips under the s3s#597 rule. It exists for a caller
+    /// that must pass the request's headers on unchanged, such as an adapter that builds another
+    /// stack's header map (rustfs/backlog#1752).
+    ///
+    /// It widens nothing acceptance decided. A significant header whose value is not UTF-8, a
+    /// repeated single-valued header and a repeated metadata key are all refused before a view
+    /// exists. So every line yielded here that the gateway attributes meaning to is already
+    /// readable text, and already unique where it must be.
+    ///
+    /// Read-only: the values are shared references into the accepted map, so no line another layer
+    /// has already read can be rewritten through this view.
+    ///
+    /// ```compile_fail,E0594
+    /// use http::{HeaderMap, HeaderValue};
+    /// use rustfs_gateway_http::HeaderView;
+    /// let map = HeaderMap::new();
+    /// for (_, value) in HeaderView::new(&map).iter_raw() {
+    ///     *value = HeaderValue::from_static("rewritten"); // a shared reference: does not compile
+    /// }
+    /// ```
+    pub fn iter_raw(&self) -> impl Iterator<Item = (&'a HeaderName, &'a HeaderValue)> {
+        self.map.iter()
     }
 
     /// A boolean header, parsed case-insensitively.

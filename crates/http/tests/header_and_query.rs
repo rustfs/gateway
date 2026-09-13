@@ -583,6 +583,113 @@ fn the_query_ceilings_are_enforced() {
     );
 }
 
+// ── raw field lines (rustfs/backlog#1752) ─────────────────────────────────────────────────────
+
+/// Positive — an unrelated value that is not UTF-8 is reachable byte for byte, where the text
+/// view skips it.
+#[test]
+fn iter_raw_yields_an_unrelated_non_utf8_value_byte_for_byte() {
+    let request = put(vec![(name("x-proxy-tag"), raw_value(&[0xC3, 0x28, 0xFF]))]);
+    let accepted = accept(request).expect("an unrelated unreadable header is accepted");
+    let raw: Vec<(&str, &[u8])> = accepted
+        .headers()
+        .iter_raw()
+        .map(|(name, value)| (name.as_str(), value.as_bytes()))
+        .collect();
+    assert!(raw.contains(&("x-proxy-tag", &[0xC3, 0x28, 0xFF][..])), "{raw:?}");
+}
+
+/// Positive — every line of a repeated name is kept, in arrival order, readable or not.
+#[test]
+fn iter_raw_keeps_every_line_of_a_repeated_header_in_arrival_order() {
+    let request = put(vec![
+        (name("x-proxy-hop"), raw_value(b"one")),
+        (name("x-amz-meta-a"), raw_value(b"1")),
+        (name("x-proxy-hop"), raw_value(&[0xFF])),
+        (name("x-proxy-hop"), raw_value(b"three")),
+    ]);
+    let accepted = accept(request).expect("accepted");
+    let hops: Vec<&[u8]> = accepted
+        .headers()
+        .iter_raw()
+        .filter(|(name, _)| name.as_str() == "x-proxy-hop")
+        .map(|(_, value)| value.as_bytes())
+        .collect();
+    assert_eq!(hops, [&b"one"[..], &[0xFF][..], &b"three"[..]]);
+}
+
+/// Positive — a map rebuilt from the raw lines equals the map that arrived, which is what an
+/// adapter handing a header map to another stack needs.
+#[test]
+fn a_map_rebuilt_from_the_raw_lines_equals_the_one_that_arrived() {
+    let request = put(vec![
+        (name("x-amz-meta-a"), raw_value(b"1")),
+        (name("x-proxy-tag"), raw_value(&[0xC3, 0x28])),
+        (name("x-proxy-hop"), raw_value(b"one")),
+        (name("x-proxy-hop"), raw_value(b"two")),
+        (CONTENT_TYPE, raw_value(b"text/plain")),
+    ]);
+    let arrived = request.headers().clone();
+    let accepted = accept(request).expect("accepted");
+    let mut rebuilt = http::HeaderMap::new();
+    for (name, value) in accepted.headers().iter_raw() {
+        rebuilt.append(name.clone(), value.clone());
+    }
+    assert_eq!(rebuilt, arrived);
+}
+
+/// Negative — raw access admits nothing acceptance refused: a significant header that is not
+/// UTF-8 still fails the request, so no accepted request has such a line to read.
+#[test]
+fn a_non_utf8_significant_header_never_reaches_raw_access() {
+    for header in [
+        "x-amz-date",
+        "x-amz-meta-note",
+        "x-amz-copy-source",
+        "authorization",
+        "content-type",
+    ] {
+        let header = name(header);
+        assert!(
+            is_significant_header(&header),
+            "{header} must be significant for this case to mean anything"
+        );
+        let request = put(vec![(header.clone(), raw_value(&[0xFF, 0xFE]))]);
+        assert_eq!(accept(request).err(), Some(WireReject::NonUtf8SignificantHeader(header)));
+    }
+}
+
+/// Negative — the raw view is wider than the text view by exactly the unrelated lines that are
+/// not UTF-8. Every line it yields that the gateway attributes meaning to is readable text.
+#[test]
+fn raw_access_is_wider_than_the_text_view_only_by_unrelated_unreadable_lines() {
+    let request = put(vec![
+        (name("x-amz-meta-a"), raw_value(b"1")),
+        (CONTENT_TYPE, raw_value(b"text/plain")),
+        (name("x-proxy-tag"), raw_value(&[0xC3, 0x28])),
+        (name("user-agent"), raw_value(&[0xFF])),
+        (name("x-proxy-hop"), raw_value(b"readable")),
+    ]);
+    let accepted = accept(request).expect("accepted");
+    let view = accepted.headers();
+    let text: Vec<(&str, &[u8])> = view
+        .iter_text()
+        .map(|(name, text)| (name.as_str(), text.as_bytes()))
+        .collect();
+    let mut only_raw: Vec<&str> = view
+        .iter_raw()
+        .filter(|(name, value)| !text.contains(&(name.as_str(), value.as_bytes())))
+        .map(|(name, _)| name.as_str())
+        .collect();
+    only_raw.sort_unstable();
+    assert_eq!(only_raw, ["user-agent", "x-proxy-tag"]);
+    for (name, value) in view.iter_raw() {
+        if is_significant_header(name) {
+            assert!(core::str::from_utf8(value.as_bytes()).is_ok(), "{name} is significant and must be text");
+        }
+    }
+}
+
 #[test]
 fn the_significant_header_set_covers_the_whole_x_amz_family() {
     assert!(is_significant_header(&name("x-amz-meta-foo")));
