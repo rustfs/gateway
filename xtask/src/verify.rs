@@ -606,8 +606,27 @@ fn run_all(json: bool) -> ExitCode {
         ),
     ];
 
+    let budget = Duration::from_secs(600);
     let started = Instant::now();
-    for (step, output) in run_setup_then_concurrently(&setup, &commands, &root) {
+    let batch = run_setup_then_concurrently(&setup, &commands, &root, started + budget);
+    if batch.interrupted {
+        return diagnostic(
+            "verification interrupted",
+            "workspace tests and build guards",
+            "the full gate must finish within 10 minutes",
+        );
+    }
+    if batch.timed_out {
+        let mut all_commands = vec![setup];
+        all_commands.extend(commands);
+        let killed = killed_steps(&all_commands, &batch.cancelled);
+        return budget_diagnostic(
+            BudgetFailure::KilledAtDeadline { budget, killed: &killed },
+            "workspace tests and build guards",
+            "the full gate must finish within 10 minutes",
+        );
+    }
+    for (step, output) in batch.results {
         match output {
             Ok(output) if output.status.success() => {}
             Ok(output) => {
@@ -629,7 +648,7 @@ fn run_all(json: bool) -> ExitCode {
         }
     }
     let elapsed = started.elapsed();
-    if elapsed > Duration::from_secs(600) {
+    if elapsed > budget {
         return budget_diagnostic(
             BudgetFailure::Overran { elapsed },
             "workspace tests and build guards",
@@ -644,28 +663,35 @@ type GateCommand = (String, Vec<String>, String);
 type GateResult = (String, std::io::Result<Output>);
 
 #[cfg(feature = "full")]
-fn run_setup_then_concurrently(setup: &GateCommand, commands: &[GateCommand], current_dir: &Path) -> Vec<GateResult> {
-    let (program, args, step) = setup;
-    let output = Command::new(program).args(args).current_dir(current_dir).output();
-    let succeeded = output.as_ref().is_ok_and(|output| output.status.success());
-    let mut outputs = vec![(step.clone(), output)];
-    if succeeded {
-        outputs.extend(run_commands_concurrently(commands, current_dir));
+fn run_setup_then_concurrently(
+    setup: &GateCommand,
+    commands: &[GateCommand],
+    current_dir: &Path,
+    deadline: Instant,
+) -> process::Batch {
+    let mut setup_batch = process::run(std::slice::from_ref(setup), current_dir, Some(deadline));
+    if setup_batch.timed_out
+        || setup_batch.interrupted
+        || !setup_batch
+            .results
+            .iter()
+            .all(|(_, output)| output.as_ref().is_ok_and(|output| output.status.success()))
+    {
+        return setup_batch;
     }
-    outputs
+    let mut runtime_batch = run_commands_concurrently(commands, current_dir, deadline);
+    // The full command list starts with setup, so runtime cancellation indices follow it.
+    for cancelled in &mut runtime_batch.cancelled {
+        cancelled.index += 1;
+    }
+    setup_batch.results.append(&mut runtime_batch.results);
+    runtime_batch.results = setup_batch.results;
+    runtime_batch
 }
 
 #[cfg(feature = "full")]
-fn run_commands_concurrently(commands: &[GateCommand], current_dir: &Path) -> Vec<GateResult> {
-    let batch = process::run(commands, current_dir, None);
-    if batch.interrupted {
-        vec![(
-            "verification interrupted".to_owned(),
-            Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "verification interrupted")),
-        )]
-    } else {
-        batch.results
-    }
+fn run_commands_concurrently(commands: &[GateCommand], current_dir: &Path, deadline: Instant) -> process::Batch {
+    process::run(commands, current_dir, Some(deadline))
 }
 
 #[cfg(feature = "full")]
@@ -766,5 +792,7 @@ fn diagnostic(what: &str, where_: &str, rule: &str) -> ExitCode {
     ExitCode::FAILURE
 }
 
+#[cfg(all(test, feature = "full", unix))]
+mod full_tests;
 #[cfg(all(test, feature = "full"))]
 mod tests;

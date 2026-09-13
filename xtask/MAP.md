@@ -24,6 +24,7 @@ Agent entry point for repository automation commands.
 | `src/verify/process.rs` | Deadline-aware child supervision and output capture. | Verification children block, leak, or report out of order. |
 | `src/verify/selection.rs` | Crate-local Cargo test and Clippy target selection. | A crate's bounded verification scope is wrong or too slow. |
 | `src/verify/tests.rs` | Verification selection and scheduling unit contracts. | A bounded verification scope or schedule changes. |
+| `src/verify/full_tests.rs` | Full-gate deadline, setup failure, and descendant cleanup controls. | The setup and runtime batches stop sharing a deadline or failure boundary. |
 | `src/why.rs` | Reverse trace and stable text/JSON rendering. | A `why` namespace or section changes. |
 | `src/why/distance.rs` | Edit-distance ranking for nearby reverse-trace targets. | Unknown-target suggestions drift. |
 | `src/why/error_code.rs` | Error-code status, producer and case reverse tracing. | The `why error-code` answer changes. |

@@ -52,12 +52,16 @@ fn full_gate_steps_start_before_either_is_awaited() {
         ("sh".to_owned(), wait_for(&second, &first), "second".to_owned()),
     ];
 
-    let outputs = run_setup_then_concurrently(&setup, &commands, &root);
+    let outputs = run_setup_then_concurrently(&setup, &commands, &root, Instant::now() + Duration::from_secs(30));
 
     assert!(
-        outputs
-            .iter()
-            .all(|(_, output)| output.as_ref().is_ok_and(|output| output.status.success()))
+        !outputs.timed_out
+            && !outputs.interrupted
+            && outputs.results.len() == 3
+            && outputs
+                .results
+                .iter()
+                .all(|(_, output)| output.as_ref().is_ok_and(|output| output.status.success()))
     );
     fs::remove_dir_all(root).expect("test directory must be removable");
 }
