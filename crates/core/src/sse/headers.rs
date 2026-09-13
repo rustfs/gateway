@@ -17,7 +17,7 @@
 //! Responsible for: the header names, [`SseHeaders::read`] (the single read of the family off a
 //! request head), the two customer-key trios, and the value rules of the managed channel — the
 //! algorithm's closed set, the KMS members' agreement with it, the strict boolean, and the
-//! encryption context's encoding and ceiling.
+//! encryption context's encoding, ceiling and JSON string-pair structure.
 //! NOT responsible for: the transport gate or the order the rules run in
 //! ([`super::enforce`]), the key itself ([`super::key`]), the multipart binding
 //! ([`super::consistency`]), or the bucket's stored default-encryption document
@@ -167,7 +167,8 @@ impl ManagedChannel<'_> {
     /// 4. the context and the bucket-key switch follow the key id: both describe a KMS
     ///    envelope, and neither means anything beside `AES256`;
     /// 5. the switch is `true` or `false` and nothing else;
-    /// 6. the context is canonical base64 of at most [`MAX_CONTEXT_BYTES`], and is UTF-8.
+    /// 6. the context is canonical base64 of at most [`MAX_CONTEXT_BYTES`] UTF-8 bytes,
+    ///    containing one JSON object with unique string keys and string values (ADR-0019).
     ///
     /// # Errors
     ///
@@ -206,6 +207,9 @@ impl ManagedChannel<'_> {
         if let Some(context) = self.context.as_deref() {
             let bytes = decode_bounded(context, MAX_CONTEXT_BYTES).map_err(|_| ManagedRejection::ContextNotBase64)?;
             core::str::from_utf8(&bytes).map_err(|_| ManagedRejection::ContextNotBase64)?;
+            if !super::context::is_valid(&bytes) {
+                return Err(ManagedRejection::ContextNotJson);
+            }
         }
         Ok(Some(algorithm))
     }
@@ -224,6 +228,8 @@ pub enum ManagedRejection {
     BucketKeyNotABoolean,
     /// `…-context` is not canonical base64 of at most [`MAX_CONTEXT_BYTES`] UTF-8 bytes.
     ContextNotBase64,
+    /// The decoded context is not one JSON object with unique string keys and string values.
+    ContextNotJson,
 }
 
 /// Every SSE header a request carries, read once.
@@ -376,6 +382,92 @@ mod tests {
         }
     }
 
+    fn context_json_is_accepted(json: &str) -> bool {
+        let encoded = crate::sse::tests_support::base64_of(json.as_bytes());
+        managed(Some("aws:kms"), None, Some(&encoded), None).validate().is_ok()
+    }
+
+    #[test]
+    fn context_json_accepts_string_pairs_unicode_escapes_and_whitespace() {
+        for json in [
+            r#"{"key":"value","empty":""}"#,
+            r#"{"emoji":"\ud83d\udd11","\u0061":"雪"}"#,
+            " \r\n\t{} ",
+        ] {
+            assert!(context_json_is_accepted(json), "valid context refused");
+        }
+    }
+
+    #[test]
+    fn context_json_rejects_scalar_and_array_roots() {
+        for json in ["null", "true", "1", r#""string""#, "[]", r#"["x"]"#] {
+            assert!(!context_json_is_accepted(json), "non-object context accepted");
+        }
+    }
+
+    #[test]
+    fn context_json_rejects_non_string_values() {
+        for json in [
+            r#"{"key":null}"#,
+            r#"{"key":false}"#,
+            r#"{"key":42}"#,
+            r#"{"key":[]}"#,
+            r#"{"key":{}}"#,
+        ] {
+            assert!(!context_json_is_accepted(json), "non-string context value accepted");
+        }
+    }
+
+    #[test]
+    fn context_json_rejects_plain_and_escape_equivalent_duplicate_keys() {
+        for json in [
+            r#"{"key":"a","key":"b"}"#,
+            r#"{"key":"a","\u006bey":"b"}"#,
+            r#"{"":"a","":"b"}"#,
+        ] {
+            assert!(!context_json_is_accepted(json), "duplicate context key accepted");
+        }
+    }
+
+    #[test]
+    fn context_json_rejects_truncated_and_malformed_input() {
+        for json in [
+            "",
+            "text",
+            "{",
+            r#"{"key":"value""#,
+            r#"{"key":"value",}"#,
+            r#"{"key" "value"}"#,
+        ] {
+            assert!(!context_json_is_accepted(json), "malformed context accepted");
+        }
+    }
+
+    #[test]
+    fn context_json_rejects_bad_escapes_and_unpaired_surrogates() {
+        for json in [
+            r#"{"key":"\q"}"#,
+            r#"{"key":"\uD800"}"#,
+            r#"{"key":"\uDC00"}"#,
+            "{\"key\":\"line\nbreak\"}",
+        ] {
+            assert!(!context_json_is_accepted(json), "invalid JSON string accepted");
+        }
+    }
+
+    #[test]
+    fn context_json_rejects_a_second_value_or_trailing_garbage() {
+        for json in ["{}{}", "{} null", "{} trailing", "{}\0", "{}\u{00a0}"] {
+            assert!(!context_json_is_accepted(json), "trailing data accepted");
+        }
+    }
+
+    #[test]
+    fn context_json_rejects_deeply_nested_values_below_the_byte_limit() {
+        let json = format!("{{\"key\":{}0{}}}", "[".repeat(500), "]".repeat(500));
+        assert!(!context_json_is_accepted(&json), "nested value accepted");
+    }
+
     #[test]
     fn n_a_context_that_is_not_canonical_base64_is_refused() {
         for spelling in ["not base64!", "eyJhIjoiYiJ9=", "eyJhIjoiYiJ", "  eyJhIjoiYiJ9"] {
@@ -396,7 +488,8 @@ mod tests {
             Err(ManagedRejection::ContextNotBase64)
         );
         // The direction that proves the ceiling is a ceiling and not a blanket refusal.
-        let at_the_limit = crate::sse::tests_support::base64_of(&vec![b'A'; MAX_CONTEXT_BYTES]);
+        let json = format!("{{\"k\":\"{}\"}}", "A".repeat(MAX_CONTEXT_BYTES - 8));
+        let at_the_limit = crate::sse::tests_support::base64_of(json.as_bytes());
         assert!(managed(Some("aws:kms"), None, Some(&at_the_limit), None).validate().is_ok());
     }
 

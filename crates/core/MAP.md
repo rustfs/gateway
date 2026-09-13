@@ -56,7 +56,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/error_resolution.rs` | Closed contextual error resolution and body policy. | A contextual refusal has the wrong code, status, extras or body policy. |
 | `src/fault.rs` | Closed error headers/details. | An error document needs a reviewed field. |
 | `src/cors/` | CORS rule and response primitives. | CORS semantics change. |
-| `src/sse/` | Server-side encryption proof and rejection types. | SSE headers or key handling change. |
+| `src/sse/` | Server-side encryption proof, bounded KMS context JSON validation and rejection types. | SSE headers or key handling change. |
 | `tests/route_table.rs` | Route-table positive/negative matrix. | Any route row changes. |
 | `tests/route_sizes.rs` | Independent compile-time size ceiling for the copied hot-path bucket. | The compiled router's bucket layout changes. |
 | `benches/route.rs` | Allocation gate and non-blocking timing record for compiled route lookup. | Routing hot-path cost changes. |

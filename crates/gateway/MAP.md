@@ -81,7 +81,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/governor_runtime.rs` | Limits run before expensive work and recover |
 | `tests/cors_runtime.rs` | Preflight and actual-response CORS behavior |
 | `tests/middleware.rs`, `tests/response_invariants.rs` | Filter seams, runtime correction metrics and malformed response refusal |
-| `tests/sse_runtime.rs` | TLS gate, key hygiene, multipart consistency |
+| `tests/sse_runtime.rs`, `tests/sse_context.rs` | TLS gate, key hygiene, multipart consistency and JSON context admission |
 | `tests/vhost_resolution.rs`, `tests/host_resolve_replay.rs` | Host boundary and fallback behavior; the `host_resolve` fuzz property over its committed seeds and 100,000 fixed-seed samples |
 | `tests/connection_teardown.rs`, `tests/self_held_http1.rs` | Connection intent and production self-held HTTP/1.1 wire controls |
 | `tests/payload_transport.rs` | Payload framing and cancellation observed through real HTTP/1 sockets |

@@ -1820,6 +1820,7 @@ dependencies = [
  "rustfs-gateway-stream",
  "rustfs-gateway-types",
  "rustfs-gateway-xml",
+ "serde",
  "serde_json",
  "subtle",
  "tokio",
