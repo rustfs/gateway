@@ -73,7 +73,8 @@ pub use logging::assert_bucket_logging_four_way;
 pub use notification::assert_notification_four_way;
 pub use object_lock::assert_object_lock_four_way;
 pub use provenance::{
-    PersistenceSource, PersistenceSourceError, PersistenceSourceReport, SourceReport, require_persistence_sources,
+    PersistenceSource, PersistenceSourceError, PersistenceSourceReport, SourceReport, build_persistence_source_report,
+    require_persistence_sources,
 };
 pub use public_access_block::assert_public_access_block_four_way;
 pub use replication::assert_replication_four_way;

@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 publish = false
+autotests = false
 
 [package.metadata.gateway]
 ring = 1
@@ -30,3 +31,7 @@ sha2 = { workspace = true }
 
 [dev-dependencies]
 zip = { version = "8.6.0", default-features = false }
+
+[[test]]
+name = "cli"
+path = "tests/cli.rs"

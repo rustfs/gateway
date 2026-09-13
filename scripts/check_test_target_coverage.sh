@@ -43,6 +43,7 @@ COVERED = {
     "crates/corpus": "check_test_target_coverage.sh",
     "crates/dialect-minio": "check_test_target_coverage.sh",
     "crates/gateway": "check_test_target_consolidation.sh",
+    "crates/goldens": "check_test_target_coverage.sh",
     "crates/http": "check_http_test_target_consolidation.sh",
     "crates/server": "check_server_test_target_consolidation.sh",
     "crates/sig": "check_sig_test_target_consolidation.sh",

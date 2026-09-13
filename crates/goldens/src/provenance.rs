@@ -159,7 +159,7 @@ pub struct SourceReport {
     pub witnessed_samples: usize,
 }
 
-/// A validated census of every approved persisted-metadata source.
+/// Validated persisted-metadata source registrations, with absent sources rendered explicitly.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistenceSourceReport {
     rows: Vec<SourceReport>,
@@ -185,6 +185,11 @@ impl PersistenceSourceReport {
                 .writer
                 .map_or_else(|| "writer=n/a".to_owned(), |(name, version)| format!("writer={name}@{version}"));
             output.push_str(&format!("{}: {writer} witnessed={}\n", row.source.slug(), row.witnessed_samples));
+        }
+        for source in PersistenceSource::ALL {
+            if !self.rows.iter().any(|row| row.source == source) {
+                output.push_str(&format!("{}: absent\n", source.slug()));
+            }
         }
         output
     }
@@ -274,6 +279,18 @@ impl PersistenceSourceError {
 
 impl std::error::Error for PersistenceSourceError {}
 
+/// Reports validated present sources and explicitly renders absent approved sources.
+///
+/// This is a coverage report, not a closure decision. Use [`require_persistence_sources`]
+/// when every approved source must be present.
+///
+/// # Errors
+///
+/// Returns any invalid registration or witness failure; absent sources remain visible in the report.
+pub fn build_persistence_source_report(corpus: &CorpusReport) -> Result<PersistenceSourceReport, PersistenceSourceError> {
+    source_report(SOURCE_REGISTRY, corpus)
+}
+
 /// Validates every approved persisted-metadata source against the built corpus.
 ///
 /// # Errors
@@ -290,6 +307,19 @@ fn validate_sources(
     registry: &[SourceRegistration],
     corpus: &CorpusReport,
 ) -> Result<PersistenceSourceReport, PersistenceSourceError> {
+    let report = source_report(registry, corpus)?;
+    for source in PersistenceSource::ALL {
+        if !report.rows.iter().any(|row| row.source == source) {
+            return Err(PersistenceSourceError::SourceAbsent(source));
+        }
+    }
+    Ok(report)
+}
+
+fn source_report(
+    registry: &[SourceRegistration],
+    corpus: &CorpusReport,
+) -> Result<PersistenceSourceReport, PersistenceSourceError> {
     let mut seen = BTreeSet::new();
     let mut rows = Vec::with_capacity(PersistenceSource::ALL.len());
     for registration in registry {
@@ -297,11 +327,6 @@ fn validate_sources(
             return Err(PersistenceSourceError::DuplicateSource(registration.source));
         }
         rows.push(validate_registration(registration, corpus)?);
-    }
-    for source in PersistenceSource::ALL {
-        if !seen.contains(&source) {
-            return Err(PersistenceSourceError::SourceAbsent(source));
-        }
     }
     rows.sort_by_key(|row| row.source);
     Ok(PersistenceSourceReport { rows })
