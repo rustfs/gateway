@@ -115,6 +115,9 @@ The backend reports no listing owner unless `FsBackend::with_owner` configures t
 single-tenant data root. ListObjects V1 and ListObjectVersions then report that owner on every object
 or version entry, including delete markers; ListObjectsV2 reports it only when `fetch-owner=true`.
 The XML response encoder escapes the configured id and display name when it writes them to the wire.
+ListObjectVersions resumes after a `key-marker` and, within that key, after a `version-id-marker`;
+a `version-id-marker` sent without a key marker is refused with `InvalidArgument` rather than
+answered with the first page.
 
 Ranged reads resolve through the exported `evaluate_range` contract, so a suffix range, a window
 that runs past the end, an unsatisfiable range, a multi-range header and `If-Range` all behave as

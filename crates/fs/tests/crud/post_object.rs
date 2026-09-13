@@ -141,3 +141,102 @@ async fn an_unstorable_metadata_field_is_refused_without_a_write() {
     let fetched = exchange(&service, signed(http::Method::GET, "/browser-refused/doc", Bytes::new())).await;
     assert_eq!(fetched.status(), 404);
 }
+
+// A signed browser form as minio-js and minio-java build it (rustfs/gateway#756): SigV4, an
+// expiration with milliseconds, and the bucket named by the URL and by a `$bucket` condition
+// rather than by a `bucket` form field.
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    let mut block = [0u8; 64];
+    block[..key.len()].copy_from_slice(key);
+    let mut inner = Sha256::new();
+    inner.update(block.map(|byte| byte ^ 0x36));
+    inner.update(data);
+    let mut outer = Sha256::new();
+    outer.update(block.map(|byte| byte ^ 0x5c));
+    outer.update(inner.finalize());
+    outer.finalize().into()
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let word = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |word, (index, byte)| word | u32::from(*byte) << (16 - 8 * index));
+        for index in 0..4 {
+            if index <= chunk.len() {
+                out.push(char::from(ALPHABET[(word >> (18 - 6 * index) & 0x3f) as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// The form fields of a policy that binds `bucket` and `key` by condition only.
+fn signed_policy_fields(bucket: &str, key: &str) -> Vec<(&'static str, String)> {
+    let credential = "AKIDEXAMPLE/20260102/us-east-1/s3/aws4_request";
+    let document = format!(
+        "{{\"expiration\":\"2026-01-02T04:04:05.000Z\",\"conditions\":[[\"eq\",\"$bucket\",\"{bucket}\"],\
+         [\"eq\",\"$key\",\"{key}\"],[\"eq\",\"$x-amz-date\",\"{SIGNED_AT}\"],\
+         [\"eq\",\"$x-amz-algorithm\",\"AWS4-HMAC-SHA256\"],[\"eq\",\"$x-amz-credential\",\"{credential}\"]]}}"
+    );
+    let policy = base64(document.as_bytes());
+    let mut signing_key = hmac_sha256(b"AWS4secret", b"20260102");
+    for part in [b"us-east-1".as_slice(), b"s3", b"aws4_request"] {
+        signing_key = hmac_sha256(&signing_key, part);
+    }
+    let signature = hmac_sha256(&signing_key, policy.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    vec![
+        ("x-amz-date", SIGNED_AT.to_owned()),
+        ("x-amz-algorithm", "AWS4-HMAC-SHA256".to_owned()),
+        ("x-amz-credential", credential.to_owned()),
+        ("policy", policy),
+        ("x-amz-signature", signature),
+    ]
+}
+
+fn signed_form(key: &str, fields: &[(&'static str, String)], file: &str) -> Bytes {
+    let borrowed = fields.iter().map(|(name, value)| (*name, value.as_str())).collect::<Vec<_>>();
+    form(key, &borrowed, file)
+}
+
+#[tokio::test]
+async fn a_signed_form_without_a_bucket_field_is_stored() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "signed-forms").await;
+    let fields = signed_policy_fields("signed-forms", "report.txt");
+    let posted = post(&service, "signed-forms", signed_form("report.txt", &fields, "signed by policy")).await;
+    assert_eq!(posted.status(), 204, "{}", String::from_utf8_lossy(posted.body()));
+
+    let fetched = exchange(&service, signed(http::Method::GET, "/signed-forms/report.txt", Bytes::new())).await;
+    assert_eq!(fetched.status(), 200, "{}", String::from_utf8_lossy(fetched.body()));
+    assert_eq!(fetched.body().as_ref(), b"signed by policy");
+}
+
+#[tokio::test]
+async fn n_a_signed_form_routed_to_another_bucket_writes_nothing() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "signed-forms").await;
+    create_bucket(&service, "other-forms").await;
+    let fields = signed_policy_fields("signed-forms", "report.txt");
+    let posted = post(&service, "other-forms", signed_form("report.txt", &fields, "must not land")).await;
+    assert!(
+        posted.status().is_client_error(),
+        "{}: {}",
+        posted.status(),
+        String::from_utf8_lossy(posted.body())
+    );
+
+    let fetched = exchange(&service, signed(http::Method::GET, "/other-forms/report.txt", Bytes::new())).await;
+    assert_eq!(fetched.status(), 404, "{}", String::from_utf8_lossy(fetched.body()));
+}

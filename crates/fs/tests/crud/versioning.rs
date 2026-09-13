@@ -405,3 +405,59 @@ async fn put_retires_a_safe_legacy_file_after_publishing_its_replacement() {
     assert_eq!(current.status(), 200);
     assert_eq!(current.body().as_ref(), b"replacement");
 }
+
+async fn list_versions(service: &S3Service, bucket: &str, query: &str) -> rustfs_gateway::WireResponse {
+    exchange(service, signed(http::Method::GET, &format!("/{bucket}?versions&{query}"), Bytes::new())).await
+}
+
+/// Negative — a version cursor sent without its key cursor is refused with `InvalidArgument`
+/// (`c-list-0034`), whether or not it names a real version: answering page one would repeat
+/// every entry the client believes it already has. Mint's `versioning` suite sends exactly this
+/// (rustfs/gateway#756).
+#[tokio::test]
+async fn n_a_version_marker_without_a_key_marker_is_refused() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "lone-version-marker").await;
+    assert_eq!(set_versioning(&service, "lone-version-marker", "Enabled").await.status(), 200);
+    let first = put(&service, "lone-version-marker", "key", b"one").await;
+    let first_id = header_text(&first, "x-amz-version-id").expect("a minted version").to_owned();
+    assert_eq!(put(&service, "lone-version-marker", "key", b"two").await.status(), 200);
+
+    // An empty key cursor names no key either.
+    for query in [
+        format!("version-id-marker={first_id}"),
+        "version-id-marker=test".to_owned(),
+        format!("key-marker=&version-id-marker={first_id}"),
+    ] {
+        let listed = list_versions(&service, "lone-version-marker", &query).await;
+        assert_eq!(listed.status(), 400, "{query}: {}", body(&listed));
+        assert!(body(&listed).contains("<Code>InvalidArgument</Code>"), "{query}: {}", body(&listed));
+    }
+}
+
+/// Positive — the key cursor and the version cursor together resume within the key, after the
+/// named version and not at the next key.
+#[tokio::test]
+async fn a_key_and_version_marker_resume_within_the_key() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "paired-version-marker").await;
+    assert_eq!(set_versioning(&service, "paired-version-marker", "Enabled").await.status(), 200);
+    let mut ids = Vec::new();
+    for content in [b"one".as_slice(), b"two", b"three"] {
+        let stored = exchange(
+            &service,
+            signed(http::Method::PUT, "/paired-version-marker/key", Bytes::copy_from_slice(content)),
+        )
+        .await;
+        ids.push(header_text(&stored, "x-amz-version-id").expect("a minted version").to_owned());
+    }
+
+    let resumed = list_versions(&service, "paired-version-marker", &format!("key-marker=key&version-id-marker={}", ids[2])).await;
+    assert_eq!(resumed.status(), 200, "{}", body(&resumed));
+    let text = body(&resumed);
+    assert!(!text.contains(&format!("<VersionId>{}</VersionId>", ids[2])), "{text}");
+    assert!(text.contains(&format!("<VersionId>{}</VersionId>", ids[1])), "{text}");
+    assert!(text.contains(&format!("<VersionId>{}</VersionId>", ids[0])), "{text}");
+}

@@ -38,10 +38,10 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/list_buckets.rs` | Bucket census order, owner, prefix/region filters, `max-buckets` paging, and cursor/page-size refusals. | Changing `ListBuckets`. |
 | `tests/crud/delete_objects.rs` | Batch deletion across versioning states, quiet mode, explicit versions, per-key errors, and whole-request refusals. | Changing `DeleteObjects` or single-key deletion. |
 | `tests/crud/write_attributes.rs` | `PutObject` tags and storage class, `CopyObject` class and tagging directive, and the bare copy-source `If-None-Match` refusal. | Changing what a write or copy stores besides bytes and metadata. |
-| `tests/crud/post_object.rs` | Anonymous form uploads stored and read back, versions reported, and storage refusals. | Changing POST Object storage. |
+| `tests/crud/post_object.rs` | Anonymous form uploads stored and read back, versions reported, storage refusals, and a SigV4-signed form without a `bucket` field bound to its routed bucket. | Changing POST Object storage or the signed-form path. |
 | `tests/crud/object_tagging.rs` | Restarted current/version tag operations and lifecycle filter consumption. | Changing object tags or tag-selected lifecycle expiration. |
 | `tests/fixtures/version-record-v0/**` | One version directory captured verbatim from the build that wrote eight-line records. | Proving this build still reads what the pre-metadata-section build wrote. |
-| `tests/crud/versioning.rs` | Enabled, suspended, owner reporting, restart, corruption, and symlink versioning evidence. | Changing versioned object behavior or persistence. |
+| `tests/crud/versioning.rs` | Enabled, suspended, owner reporting, restart, corruption, symlink, and version-cursor pairing evidence. | Changing versioned object behavior, persistence, or version-listing cursors. |
 
 ## Verify
 
