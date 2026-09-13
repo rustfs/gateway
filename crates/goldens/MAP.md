@@ -7,6 +7,9 @@ Agent entry point. File → responsibility → when you need to open it.
 | File | Responsibility | Read it when |
 | --- | --- | --- |
 | `src/lib.rs` | Runs fail-closed persistence compatibility assertions against independent old and new codecs. | Adding a configuration family or changing a D1-D5 assertion. |
+| `src/operation_diff.rs` | Test-only harness: one raw request through the real gateway route and codec and through the pinned s3s service, with every body read counted. | Adding an operation to the decode/encode diff or changing how either stack is driven. |
+| `src/operation_diff/put_object.rs` | PutObject decode diff: member-by-member zero diff, body read once and never before the handler, one-member mutations, and each known divergence named. | A PutObject request decodes differently on the two stacks, or the conversion changes. |
+| `src/operation_diff/put_object/encode.rs` | PutObject encode diff: same status, header lines and body from both stacks, and every uncarriable output refused by name. | A PutObject answer is written differently, or the output conversion changes. |
 | `src/acceptance_census.rs` | Binds the exact 39 P9-01 IDs to runtime or pinned external evidence without counting blockers as passing. | Auditing final case closure, blocker disposition, or census mutations. |
 | `src/corpus.rs` | Derives coverage from concrete traceable accepted/rejected samples without claiming aggregate completeness. | Wiring family-owned sample collections or changing corpus validation. |
 | `src/historical_writer.rs` | Validates six historical writers and runs every nonempty captured field through D1-D5 with digest deduplication. | Auditing source-(d′) admission or a persisted field from a failed request. |

@@ -59,11 +59,14 @@ pub mod secret;
 
 /// Temporary, feature-gated adapters to the pinned s3s persistence oracle.
 ///
-/// This module is deliberately the only s3s dependency surface in the protocol kernel. It exposes
-/// owned gateway-neutral values rather than s3s types, so consumers cannot spread the old DTOs.
-/// It invokes the old XML codec but owns no gateway XML behavior, golden assertion, or production
-/// persistence decision. Its upstream is pinned s3s revision `9c4690d8`; only
-/// `rustfs-gateway-goldens` consumes it.
+/// This module is deliberately the only s3s dependency surface in the protocol kernel. The
+/// persistence adapters expose owned gateway-neutral values rather than s3s types. The one
+/// exception is [`compat::put_object`], the single-operation migration seam: its whole point is to
+/// produce the s3s DTO a RustFS app body receives, so its signatures name s3s types, and it
+/// re-exports the pinned crate as [`compat::s3s`] so the oracle harness uses the same revision.
+/// It owns no gateway XML behavior, golden assertion, or production decision, and no production
+/// path calls it. Its upstream is pinned s3s revision `9c4690d8`; only `rustfs-gateway-goldens`
+/// consumes it.
 #[cfg(feature = "compat-s3s")]
 pub mod compat;
 

@@ -14,8 +14,10 @@
 
 //! Temporary adapters to the pinned s3s persistence oracle.
 //!
-//! Responsible for: invoking exact old persistence codecs and exposing family-scoped adapters.
-//! NOT responsible for: production XML behavior, golden assertions, or exposing s3s DTOs.
+//! Responsible for: invoking exact old persistence codecs, exposing family-scoped adapters, and the
+//! single-operation DTO conversion in [`put_object`], the only submodule whose API names s3s types.
+//! NOT responsible for: production XML behavior, golden assertions, or wiring any conversion into a
+//! request path.
 //! Upstream: pinned s3s revision `9c4690d8`. Downstream: `rustfs-gateway-goldens`; this module is
 //! deleted by P9-09.
 
@@ -45,7 +47,13 @@ use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 mod accelerate_payment;
 mod lifecycle;
 mod notification;
+pub mod put_object;
 mod replication;
+
+/// The pinned oracle crate, re-exported so a harness drives exactly the revision these adapters
+/// were written against. Kernel crates other than this one may not depend on s3s at all
+/// (`scripts/check_ring_boundaries.sh`), so this is the one route a test takes to it.
+pub use s3s;
 
 pub use accelerate_payment::{
     S3sAccelerateObservation, S3sRequestPaymentObservation, parse_s3s_accelerate, parse_s3s_request_payment,
