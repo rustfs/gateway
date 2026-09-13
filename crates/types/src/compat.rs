@@ -12,19 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Temporary adapters to the s3s persistence oracles that migration admission is measured against.
+//! Temporary adapters to the pinned s3s revisions: the persistence oracles migration admission is
+//! measured against, and the migration seam the RustFS ring-2 adapter converts through.
 //!
 //! Responsible for: invoking the exact old persistence codecs of every pinned s3s revision,
-//! selecting which revision answers, exposing family-scoped adapters over owned values, the
-//! single-operation DTO conversion in [`put_object`](crate::compat::put_object), and the
-//! request-context conversion in [`request_context`](crate::compat::request_context) — the only
-//! two submodules whose API names s3s types.
-//! NOT responsible for: production XML behavior, golden assertions, or wiring any conversion into a
-//! request path.
+//! selecting which revision answers, and exposing family-scoped adapters over owned values (feature
+//! `compat-s3s`); and the migration seam — the single-operation DTO conversions (`put_object`,
+//! `get_bucket_location`) and the request-context conversion (`request_context`) — compiled once
+//! per seam revision: [`s3s_f3e17541`](crate::compat::s3s_f3e17541), the revision RustFS main
+//! links (feature `compat-s3s-f3e17541`), and `s3s_9c4690d8`, the baseline oracle the goldens also
+//! measure (feature `compat-s3s`). The seam modules are the only ones whose API names s3s types.
+//! NOT responsible for: production XML behavior, golden assertions, or the RustFS side of any
+//! conversion (its extensions, its hooks, its call order).
 //! Upstream: the three s3s revisions named by [`OracleRevision`](crate::compat::OracleRevision).
-//! Downstream: `rustfs-gateway-goldens`; this module is deleted by P9-09.
+//! Downstream: `rustfs-gateway-goldens`; the RustFS ring-2 adapter (rustfs/backlog#1752). This
+//! module is deleted by P9-09.
 //!
-//! One adapter source, three compilations: `compat/oracle/*.rs` is compiled once per revision as
+//! # One seam source, one compilation per revision
+//!
+//! `compat/seam/*.rs` names s3s only as `super::s3s`, so each seam module below binds its own
+//! revision and the same source compiles against it. The DTO and request shapes the seam touches
+//! are identical in `9c4690d8` and `f3e17541` but for one member: `PutObjectInput.expires` is a
+//! parsed `Timestamp` in `9c4690d8` and the wire text in `f3e17541`. That difference is the
+//! `expires` hook each seam module defines, as `encryption_rule` is for the oracles; the file is
+//! never copied.
+//!
+//! # One adapter source, three compilations
+//!
+//! Only under `compat-s3s`: `compat/oracle/*.rs` is compiled once per revision as
 //! the `baseline`, `rollback` and `candidate` modules below, each binding its own `s3s`. The public
 //! functions dispatch on the revision [`with_oracle`](crate::compat::with_oracle) selected for the
 //! current thread. The default is
@@ -46,14 +61,76 @@ use crate::persistence::{
     ReplicationBehaviorProjection,
 };
 
-pub mod put_object;
-pub mod request_context;
+/// The migration seam against s3s `f3e17541`, the revision RustFS `main` links
+/// (`OracleRevision::Candidate`): what the RustFS ring-2 adapter converts through, and what the
+/// goldens decode, encode and context diffs measure a second time.
+///
+/// Its `s3s` is the crate RustFS itself names, unified by Cargo because this crate declares it
+/// with the same source, revision and version, so the converted values are the ones
+/// `impl s3s::S3 for FS` takes.
+#[cfg(feature = "compat-s3s-f3e17541")]
+#[path = "compat/seam"]
+pub mod s3s_f3e17541 {
+    /// The s3s revision every signature in this module names. Kernel crates other than this one
+    /// may not depend on s3s at all (`scripts/check_ring_boundaries.sh`), so this is the one route
+    /// a harness takes to it.
+    pub use ::s3s_candidate as s3s;
 
-/// The baseline oracle crate, re-exported so a harness drives exactly the revision
-/// [`put_object`] converts to. Kernel crates other than this one may not depend on s3s at all
-/// (`scripts/check_ring_boundaries.sh`), so this is the one route a test takes to it. The
-/// persistence adapters do not use it: each compiles against its own revision below.
-pub use ::s3s_baseline as s3s;
+    pub mod get_bucket_location;
+    pub mod put_object;
+    pub mod request_context;
+
+    /// `f3e17541` holds `PutObjectInput.expires` as the wire text, exactly as the gateway keeps it
+    /// (`q-timestamp-0005`), so every value crosses unchanged and nothing is refused.
+    #[allow(clippy::unnecessary_wraps)] // The signature is the one both revisions' hooks share.
+    fn expires(value: &str) -> Result<s3s::dto::Expires, super::ConversionError> {
+        Ok(value.to_owned())
+    }
+}
+
+/// The migration seam against the baseline oracle s3s `9c4690d8` (`OracleRevision::Baseline`),
+/// the revision every existing golden decode, encode and context proof was first measured
+/// against. Evidence only: no RustFS build that could adopt the gateway links it.
+#[cfg(feature = "compat-s3s")]
+#[path = "compat/seam"]
+#[allow(clippy::duplicate_mod)] // Deliberate: one seam source is compiled once per revision.
+pub mod s3s_9c4690d8 {
+    /// The s3s revision every signature in this module names.
+    pub use ::s3s_baseline as s3s;
+
+    pub mod get_bucket_location;
+    pub mod put_object;
+    pub mod request_context;
+
+    /// `9c4690d8` holds `PutObjectInput.expires` parsed as an HTTP-date, so the gateway's opaque
+    /// text is refused by member name when it is not one (rd-put-0004).
+    fn expires(value: &str) -> Result<s3s::dto::Expires, super::ConversionError> {
+        s3s::dto::Timestamp::parse(s3s::dto::TimestampFormat::HttpDate, value).map_err(|_| super::ConversionError {
+            field: "expires",
+            reason: "not an HTTP-date, and the s3s input holds this member parsed",
+        })
+    }
+}
+
+/// A value the target shape of a seam conversion cannot hold.
+///
+/// Carries the member and a fixed reason, never the value: one of the members is an SSE-C key, and
+/// another the caller's secret.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConversionError {
+    /// The member, named as on the side that could not represent it.
+    pub field: &'static str,
+    /// Why the value does not fit.
+    pub reason: &'static str,
+}
+
+impl fmt::Display for ConversionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.field, self.reason)
+    }
+}
+
+impl std::error::Error for ConversionError {}
 
 /// One s3s revision that persistence migration is admitted against.
 ///
@@ -278,6 +355,7 @@ pub struct CompatCodecError {
     message: String,
 }
 
+#[cfg(feature = "compat-s3s")]
 impl CompatCodecError {
     fn old_codec(error: impl fmt::Display) -> Self {
         Self {
@@ -303,6 +381,7 @@ impl fmt::Display for CompatCodecError {
 impl std::error::Error for CompatCodecError {}
 
 /// s3s `9c4690d8`, whose `ServerSideEncryptionRule` has no `BlockedEncryptionTypes` member.
+#[cfg(feature = "compat-s3s")]
 #[path = "compat/oracle"]
 mod baseline {
     use ::s3s_baseline as s3s;
@@ -345,6 +424,7 @@ mod baseline {
 
 /// s3s `bdcb6259`. Its `ServerSideEncryptionRule` gained `BlockedEncryptionTypes`, carried by the
 /// persisted structure since rustfs/gateway#740.
+#[cfg(feature = "compat-s3s")]
 #[path = "compat/oracle"]
 #[allow(clippy::duplicate_mod)] // Deliberate: one adapter source is compiled once per pinned revision.
 mod rollback {
@@ -393,6 +473,7 @@ mod rollback {
 }
 
 /// s3s `f3e17541`, with the same `BlockedEncryptionTypes` member as the rollback revision.
+#[cfg(feature = "compat-s3s")]
 #[path = "compat/oracle"]
 #[allow(clippy::duplicate_mod)] // Deliberate: one adapter source is compiled once per pinned revision.
 mod candidate {
@@ -442,6 +523,7 @@ mod candidate {
 
 /// Declares each public adapter once and routes it to the selected revision's compilation. The
 /// function names stay literal here so `grep parse_s3s_versioning` still finds the definition.
+#[cfg(feature = "compat-s3s")]
 macro_rules! dispatch {
     ($($(#[doc = $doc:literal])+ fn $name:ident($arg:ident: $input:ty) -> $output:ty;)+) => {$(
         $(#[doc = $doc])+
@@ -460,6 +542,7 @@ macro_rules! dispatch {
     )+};
 }
 
+#[cfg(feature = "compat-s3s")]
 dispatch! {
     /// Parses Versioning bytes with the selected s3s persistence decoder.
     fn parse_s3s_versioning(input: &[u8]) -> S3sVersioningObservation;
@@ -515,5 +598,5 @@ dispatch! {
     fn serialize_s3s_replication(value: &PersistedReplicationConfiguration) -> Vec<u8>;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "compat-s3s"))]
 mod tests;

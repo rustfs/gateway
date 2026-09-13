@@ -54,6 +54,36 @@ fn every_revision_is_the_one_the_manifest_pins() {
     );
 }
 
+/// RustFS main's own s3s declaration (rustfs/rustfs@64e0ac08 `Cargo.toml`), the crate the
+/// production seam must share with `impl s3s::S3 for FS`.
+const RUSTFS_MAIN_S3S: &str = r#"s3s = { git = "https://github.com/s3s-project/s3s.git", rev = "f3e17541f366696bf0cbaf380fcbd8b44c17eba4", version = "0.15.0", features = ["minio"] }"#;
+
+/// Cargo unifies two git dependencies only when their source, reference and version agree, so the
+/// candidate alias must spell exactly what RustFS main spells, and the production feature must pull
+/// in that alias and nothing from the oracle revisions.
+#[test]
+fn the_production_seam_links_the_very_s3s_rustfs_main_declares() {
+    let manifest = include_str!("../../Cargo.toml");
+    let ours = manifest
+        .lines()
+        .find_map(|line| line.strip_prefix(r#"s3s_candidate = { package = "s3s", "#))
+        .expect("the candidate alias is declared");
+    let theirs = RUSTFS_MAIN_S3S.strip_prefix("s3s = { ").expect("a RustFS dependency line");
+    assert_eq!(ours.strip_suffix(", optional = true }"), theirs.strip_suffix(" }"));
+    assert!(RUSTFS_MAIN_S3S.contains(OracleRevision::Candidate.revision()));
+    assert!(RUSTFS_MAIN_S3S.contains(OracleRevision::Candidate.repository()));
+    let feature = manifest
+        .lines()
+        .find(|line| line.starts_with("compat-s3s-f3e17541 = "))
+        .expect("the production feature is declared");
+    assert_eq!(feature, r#"compat-s3s-f3e17541 = ["dep:s3s_candidate", "dep:futures-core"]"#);
+    let everything = manifest
+        .lines()
+        .find(|line| line.starts_with("compat-s3s = "))
+        .expect("the oracle feature is declared");
+    assert!(everything.contains(r#""compat-s3s-f3e17541""#), "{everything}");
+}
+
 fn blocked_sse_c() -> PersistedBucketEncryptionConfiguration {
     PersistedBucketEncryptionConfiguration {
         rules: vec![PersistedBucketEncryptionRule {

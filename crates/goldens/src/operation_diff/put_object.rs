@@ -34,9 +34,9 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use proptest::prelude::*;
-use rustfs_gateway_types::compat::put_object::{GATEWAY_INPUT_MEMBERS, GATEWAY_OUTPUT_MEMBERS, input_to_s3s};
 use rustfs_gateway_types::{ChecksumAlgorithm, ChecksumSpec, ContentMd5, Timestamp, TimestampFormat, dto};
 
+use super::seam::put_object::{GATEWAY_INPUT_MEMBERS, GATEWAY_OUTPUT_MEMBERS, input_to_s3s};
 use super::{BodyProbe, BodyReads, RawRequest, announced_length, block_on, drain, gateway_decode, oracle, s3s_exchange};
 
 mod divergences;
@@ -355,8 +355,8 @@ fn accepted_output() -> oracle::PutObjectOutput {
     }
 }
 
-fn s3s_etag(value: &str) -> rustfs_gateway_types::compat::s3s::dto::ETag {
-    rustfs_gateway_types::compat::s3s::dto::ETag::Strong(value.to_owned())
+fn s3s_etag(value: &str) -> oracle::ETag {
+    oracle::ETag::Strong(value.to_owned())
 }
 
 // ── decode: the zero-diff claims ──────────────────────────────────────────────────────────────
@@ -671,7 +671,7 @@ proptest! {
 // ── the gateway half of the census ────────────────────────────────────────────────────────────
 
 /// The field-count ratchet for one generated DTO, read from the protected file.
-fn generated_field_count(type_name: &str) -> usize {
+pub(super) fn generated_field_count(type_name: &str) -> usize {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../generated/dto/field_counts.txt");
     let counts = std::fs::read_to_string(path).expect("the field-count ratchet is committed");
     counts

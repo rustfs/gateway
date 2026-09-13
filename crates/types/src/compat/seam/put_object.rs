@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The PutObject migration seam: a pure conversion between the gateway typed shapes and the pinned
-//! s3s DTO.
+//! The PutObject migration seam: a pure conversion between the gateway typed shapes and the s3s
+//! DTO of the revision this file is compiled against (`super::s3s`).
 //!
 //! Responsible for: turning a decoded gateway `PutObjectInput` into the s3s `PutObjectInput` a
 //! RustFS app body receives today; turning the s3s `PutObjectOutput` that body returns into the
@@ -21,10 +21,11 @@
 //! without reading a byte of it. A value one side cannot hold is a [`ConversionError`] naming the
 //! member, never a silent drop or a default.
 //! NOT responsible for: request context (`uri`, headers, extensions, credentials, region,
-//! trailers), routing, authentication, or any production call site. Nothing outside the goldens
-//! decode/encode diff calls it (rustfs/backlog#1762, rustfs/backlog#1752).
-//! Upstream: the generated dto and `rustfs-gateway-stream`. Downstream: the goldens diff; later the
-//! RustFS ring-2 adapter that pins this revision.
+//! trailers), routing, authentication, or choosing a revision: this one source is compiled once per
+//! seam revision in `compat.rs`.
+//! Upstream: the generated dto and `rustfs-gateway-stream`. Downstream: the goldens decode/encode
+//! diff under every seam revision (rustfs/backlog#1762), and the RustFS ring-2 adapter through the
+//! revision RustFS links (rustfs/backlog#1752).
 //!
 //! # Direction
 //!
@@ -32,7 +33,6 @@
 //! gateway decodes and encodes the wire, and the RustFS app body in between keeps its s3s
 //! signatures until it is ported.
 
-use core::fmt;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::sync::{Mutex, PoisonError};
@@ -42,6 +42,7 @@ use bytes::Bytes;
 use rustfs_gateway_stream::{ByteStream, PayloadRead, PayloadStream};
 use s3s::dto as oracle;
 
+use crate::compat::ConversionError;
 use crate::{ChecksumAlgorithm, ChecksumSpec, ETag, OpaqueString, Timestamp, dto};
 
 /// Every member of the gateway `PutObjectInput` that [`input_to_s3s`] maps.
@@ -105,25 +106,6 @@ pub const GATEWAY_OUTPUT_MEMBERS: &[&str] = &[
     "request_charged",
 ];
 
-/// A value the target shape cannot hold.
-///
-/// Carries the member and a fixed reason, never the value: one of the members is an SSE-C key.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConversionError {
-    /// The member, named as on the side that could not represent it.
-    pub field: &'static str,
-    /// Why the value does not fit.
-    pub reason: &'static str,
-}
-
-impl fmt::Display for ConversionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.field, self.reason)
-    }
-}
-
-impl std::error::Error for ConversionError {}
-
 /// Converts a decoded gateway input into the s3s input a RustFS app body receives.
 ///
 /// The body is moved, not read: the s3s input's body is the gateway's live stream behind an
@@ -132,9 +114,9 @@ impl std::error::Error for ConversionError {}
 /// # Errors
 ///
 /// [`ConversionError`] when a member the gateway kept as wire text is one the s3s input can only
-/// hold parsed — an `Expires` that is not an HTTP-date (the gateway keeps it opaque,
-/// `q-timestamp-0005`), an entity-tag condition the s3s grammar rejects — or an instant outside
-/// what s3s represents.
+/// hold parsed — an `Expires` that is not an HTTP-date, on a revision that holds `Expires` parsed
+/// (the gateway keeps it opaque, `q-timestamp-0005`; see the enclosing module's `expires` hook),
+/// an entity-tag condition the s3s grammar rejects — or an instant outside what s3s represents.
 pub fn input_to_s3s(input: dto::PutObjectInput) -> Result<oracle::PutObjectInput, ConversionError> {
     let checksum = input.checksum_spec;
     let checksum_value = |algorithm: ChecksumAlgorithm| {
@@ -142,7 +124,7 @@ pub fn input_to_s3s(input: dto::PutObjectInput) -> Result<oracle::PutObjectInput
             .filter(|spec| spec.algorithm() == algorithm)
             .map(|spec| spec.render_base64().to_owned())
     };
-    let expires = input.expires.map(|value| http_date("expires", value.as_str())).transpose()?;
+    let expires = input.expires.map(|value| super::expires(value.as_str())).transpose()?;
     let if_match = input.if_match.map(|value| etag_condition("if_match", &value)).transpose()?;
     let if_none_match = input
         .if_none_match
@@ -239,7 +221,7 @@ pub fn replica_input_to_s3s(input: dto::PutObjectInput, version_id: String) -> R
 /// tag, a checksum of an algorithm the gateway model lacks, more than one checksum, or a value that
 /// is not well formed for its member.
 pub fn output_from_s3s(output: oracle::PutObjectOutput) -> Result<dto::PutObjectOutput, ConversionError> {
-    // Exhaustive on purpose: this is the pinned oracle's struct, not a gateway DTO, and an oracle
+    // Exhaustive on purpose: this is the pinned s3s struct, not a gateway DTO, and an oracle
     // re-pin that adds a member must be a compile error here rather than a member silently dropped.
     let oracle::PutObjectOutput {
         bucket_key_enabled,
@@ -331,13 +313,6 @@ pub fn output_from_s3s(output: oracle::PutObjectOutput) -> Result<dto::PutObject
         bucket_key_enabled,
         size,
         request_charged: request_charged.map(|value| dto::RequestCharged::custom(value.as_str().to_owned())),
-    })
-}
-
-fn http_date(field: &'static str, value: &str) -> Result<oracle::Timestamp, ConversionError> {
-    oracle::Timestamp::parse(oracle::TimestampFormat::HttpDate, value).map_err(|_| ConversionError {
-        field,
-        reason: "not an HTTP-date, and the s3s input holds this member parsed",
     })
 }
 

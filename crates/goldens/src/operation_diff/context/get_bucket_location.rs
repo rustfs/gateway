@@ -18,15 +18,22 @@
 //! become an `s3s::S3Request<GetBucketLocationInput>` whose `uri`, `headers`, `extensions`,
 //! `credentials` and `region` — the five context members the M1 audit found missing from
 //! `Req<O>` — plus `method`, `service` and the trailer handle equal what the s3s service hands its
-//! handler, and that both stacks decode the same two input members from the same bytes.
+//! handler; that the seam's `get_bucket_location::input_to_s3s` turns the gateway's decoded input
+//! into the input s3s decodes from the same bytes; and that `output_from_s3s` keeps every
+//! constraint the RustFS body can answer.
 //! NOT responsible for: the RustFS extensions the app body then reads (`ReqInfo`,
 //! `RequestContext`, the server context slot), which the conversion never produces and the ring-2
-//! adapter must install; or a GetBucketLocation input conversion, which is two strings here.
-//! Upstream: the harness in `super`. Downstream: nothing.
+//! adapter must install; or the response bytes, which the gateway codec writes.
+//! Upstream: the harness in `super`; the seam revision bound two levels up. Downstream: nothing.
+
+use std::collections::BTreeSet;
 
 use rustfs_gateway_core::codec::{MetaView, OperationCodec, RequestBody};
 use rustfs_gateway_types::dto;
 
+use super::super::oracle;
+use super::super::put_object::generated_field_count;
+use super::super::seam::get_bucket_location::{GATEWAY_INPUT_MEMBERS, GATEWAY_OUTPUT_MEMBERS, input_to_s3s, output_from_s3s};
 use super::{
     ACCESS_KEY, BASE_DOMAIN, CapturedInput, Compared, ContextRequest, PATH_HOST, access_key, compare, differing_context,
     region_of,
@@ -40,18 +47,29 @@ fn compared(request: &ContextRequest) -> Compared {
     compared
 }
 
-/// Both decoded inputs, as `(bucket, expected_bucket_owner)`.
+/// The gateway's decoded input after the seam conversion, and the input s3s decoded, both as
+/// `(bucket, expected_bucket_owner)`.
 fn inputs(compared: &Compared) -> ((String, Option<String>), (String, Option<String>)) {
     let meta = MetaView::addressed(&compared.wire, compared.resolved.target, compared.resolved.bucket().cloned())
         .expect("the meta view the pipeline built");
     let gateway = dto::GetBucketLocation::decode(&meta, RequestBody::None).expect("the gateway codec decodes");
+    let converted = input_to_s3s(gateway);
     let CapturedInput::Location(oracle) = &compared.oracle.input else {
         panic!("s3s handed the request to PutObject");
     };
     (
-        (gateway.bucket.as_str().to_owned(), gateway.expected_bucket_owner.clone()),
+        (converted.bucket, converted.expected_bucket_owner),
         (oracle.bucket.clone(), oracle.expected_bucket_owner.clone()),
     )
+}
+
+fn constraint(value: Option<&'static str>) -> Option<String> {
+    let output = oracle::GetBucketLocationOutput {
+        location_constraint: value.map(|value| oracle::BucketLocationConstraint::from(value.to_owned())),
+    };
+    output_from_s3s(output)
+        .location_constraint
+        .map(|constraint| constraint.as_str().to_owned())
 }
 
 #[test]
@@ -101,4 +119,44 @@ fn a_signed_virtual_hosted_request_has_the_same_context_and_input() {
     let (gateway, oracle) = inputs(&compared);
     assert_eq!(gateway, oracle);
     assert_eq!(gateway.0, "photos");
+}
+
+/// RustFS answers `None` for a bucket in the default region; the gateway codec then writes the
+/// empty constraint, so the conversion must not invent one.
+#[test]
+fn n_an_absent_constraint_stays_absent() {
+    assert_eq!(constraint(None), None);
+}
+
+/// A RustFS operator names its own region, which need not be one the model lists; the conversion
+/// keeps the spelling rather than dropping or normalising it.
+#[test]
+fn n_a_region_the_model_does_not_list_keeps_its_spelling() {
+    assert_eq!(constraint(Some("rustfs-local-1")).as_deref(), Some("rustfs-local-1"));
+    assert_eq!(constraint(Some("")).as_deref(), Some(""));
+}
+
+#[test]
+fn a_listed_constraint_crosses_unchanged() {
+    for value in ["EU", "eu-west-1", "us-west-2"] {
+        assert_eq!(constraint(Some(value)).as_deref(), Some(value));
+    }
+}
+
+/// The gateway structs may not be destructured exhaustively (ADR-0004 P3), so the conversion
+/// declares its members and this pins the declaration to the generated struct.
+#[test]
+fn n_the_conversion_declares_every_gateway_member() {
+    for (type_name, members) in [
+        ("GetBucketLocationInput", GATEWAY_INPUT_MEMBERS),
+        ("GetBucketLocationOutput", GATEWAY_OUTPUT_MEMBERS),
+    ] {
+        let distinct: BTreeSet<&str> = members.iter().copied().collect();
+        assert_eq!(distinct.len(), members.len(), "{type_name}: a member is declared twice");
+        assert_eq!(
+            members.len(),
+            generated_field_count(type_name),
+            "{type_name}: the conversion is behind the model"
+        );
+    }
 }

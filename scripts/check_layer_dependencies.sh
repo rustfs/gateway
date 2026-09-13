@@ -358,6 +358,31 @@ for crate, (relative, source, document) in packages.items():
             nearby = lines[max(0, (feature_line or 0) - 4) : (feature_line or 0) + 1]
             if feature_line is None or not any(re.search(r"# DELETE BY:\s*\S+", line) for line in nearby):
                 violations.append((relative, (feature_line or 0) + 1, "compat-s3s lacks a nearby # DELETE BY: <milestone> marker"))
+            # A narrower feature may enable one s3s revision (the production seam), but only under
+            # the name of the revision it links, only as a part of compat-s3s, and only with the
+            # same expiry marker; otherwise a second feature would be a second, unreviewed s3s door.
+            s3s_revisions = {}
+            for _, dependency_table in tables(document):
+                for alias, declaration in dependency_table.items():
+                    package, merged = resolve(alias, declaration, workspace_dependencies)
+                    if package == "s3s" or package.startswith("s3s-"):
+                        s3s_revisions[alias] = str(merged.get("rev", ""))
+            umbrella = features.get("compat-s3s") or []
+            for name, members in features.items():
+                if name == "compat-s3s" or not isinstance(members, list):
+                    continue
+                enabled = [member[4:] for member in members if isinstance(member, str) and member.startswith("dep:") and member[4:] in s3s_revisions]
+                if not enabled:
+                    continue
+                line_index = next((index for index, line in enumerate(lines) if re.match(rf"^\s*{re.escape(name)}\s*=", line)), 0)
+                expected = {f"compat-s3s-{s3s_revisions[alias][:8]}" for alias in enabled}
+                if len(enabled) != 1 or name not in expected or len(s3s_revisions[enabled[0]]) < 8:
+                    violations.append((relative, line_index + 1, f"feature {name} enables {', '.join(enabled)} but is not compat-s3s-<rev8> of exactly one s3s revision"))
+                if name not in umbrella:
+                    violations.append((relative, line_index + 1, f"feature {name} enables s3s but compat-s3s does not include it"))
+                window = lines[max(0, line_index - 6) : line_index + 1]
+                if not any(re.search(r"# DELETE BY:\s*\S+", line) for line in window):
+                    violations.append((relative, line_index + 1, f"feature {name} lacks a nearby # DELETE BY: <milestone> marker"))
         types_feature_checked = True
 if not types_feature_checked:
     violations.append(("crates/types/Cargo.toml", 1, "rustfs-gateway-types package is missing"))

@@ -57,8 +57,8 @@ use rustfs_gateway_sig::{
     AmzDate, PayloadMode, RegionSet, RequestNow, SecurityFloor, SigService, SigV4Signer, SigningCredentials, SigningRequest,
     SigningScope,
 };
-use rustfs_gateway_types::compat::request_context::{GatewayRequestContext, Principal, VerifiedScope, request_to_s3s};
 
+use super::seam::request_context::{GatewayRequestContext, Principal, VerifiedScope, request_to_s3s};
 use super::{HOST, block_on, oracle, s3s};
 
 /// The one credential both stacks' stores hold.
@@ -275,7 +275,7 @@ struct Recorded {
 /// The RustFS adapter's half of the seam: an `s3s::S3Request` context built from nothing but the
 /// handler's request context.
 fn adapter_request(context: &RequestContextView) -> Result<s3s::S3Request<()>, String> {
-    let refused = |error: rustfs_gateway_types::compat::put_object::ConversionError| format!("conversion refused: {error}");
+    let refused = |error: rustfs_gateway_types::compat::ConversionError| format!("conversion refused: {error}");
     let principal = context
         .principal()
         .map(|principal| {

@@ -17,17 +17,18 @@
 //!
 //! Responsible for: turning a [`GatewayRequestContext`] — the facts the gateway holds once a
 //! request is accepted, resolved, authenticated and routed — into the context members of the
-//! pinned `s3s::S3Request<T>` (`method`, `uri`, `headers`, `extensions`, `credentials`, `region`,
-//! `service`, `trailing_headers`), around an input converted elsewhere. A fact the s3s request
-//! cannot hold is a [`ConversionError`] naming the member, never a default.
+//! `s3s::S3Request<T>` of the revision this file is compiled against (`method`, `uri`, `headers`,
+//! `extensions`, `credentials`, `region`, `service`, `trailing_headers`), around an input
+//! converted elsewhere. A fact the s3s request cannot hold is a [`ConversionError`] naming the
+//! member, never a default.
 //! NOT responsible for: gathering those facts. A handler reads every one of them from its request
 //! context (`Req::context`, ADR-0022) and copies them in — [`GatewayRequestContext::raw_headers`]
 //! for the header lines, [`Principal::from_handler`] for the principal and its handed-over secret —
-//! so an adapter needs no second source. Nor for the input members ([`super::put_object`]), any
-//! RustFS extension type, or any production call site: nothing outside the goldens context diff
-//! calls it yet (rustfs/backlog#1762, rustfs/backlog#1752).
-//! Upstream: the pinned s3s request type. Downstream: the goldens context diff; later the RustFS
-//! ring-2 adapter, which must add the RustFS extensions itself.
+//! so an adapter needs no second source. Nor for the input members ([`super::put_object`],
+//! [`super::get_bucket_location`]) or any RustFS extension type.
+//! Upstream: the s3s request type of the enclosing revision. Downstream: the goldens context diff
+//! under every seam revision (rustfs/backlog#1762), and the RustFS ring-2 adapter through the
+//! revision RustFS links (rustfs/backlog#1752), which must add the RustFS extensions itself.
 //!
 //! # Extensions
 //!
@@ -44,9 +45,9 @@ use s3s::S3Request;
 use s3s::auth::{Credentials, SecretKey};
 use s3s::region::Region;
 
-use super::put_object::ConversionError;
+use crate::compat::ConversionError;
 
-/// Every context member of the pinned `s3s::S3Request`, in declaration order.
+/// Every context member of this revision's `s3s::S3Request`, in declaration order.
 ///
 /// The goldens diff destructures the request with no `..` and pins its census to this list, so an
 /// s3s re-pin that adds a member fails to compile there instead of going uncompared.
@@ -158,7 +159,7 @@ impl GatewayRequestContext {
 
 /// Wraps `input` in the s3s request context `context` describes.
 ///
-/// The region follows the pinned s3s precedence: the verified signing region when there is one,
+/// The region follows the s3s precedence: the verified signing region when there is one,
 /// otherwise the region a virtual host named.
 ///
 /// # Errors
@@ -168,7 +169,7 @@ impl GatewayRequestContext {
 /// - `credentials`: the principal has an empty access key;
 /// - `region`: the chosen region is empty or outside the s3s region grammar (`[a-z0-9-]+`);
 /// - `service`: the verified service is empty;
-/// - `trailing_headers`: the request declared trailers. The pinned s3s trailer handle has no
+/// - `trailing_headers`: the request declared trailers. The s3s trailer handle has no
 ///   public constructor, so the trailers a gateway body ends with cannot be delivered where an app
 ///   body looks for them.
 pub fn request_to_s3s<T>(context: GatewayRequestContext, input: T) -> Result<S3Request<T>, ConversionError> {
