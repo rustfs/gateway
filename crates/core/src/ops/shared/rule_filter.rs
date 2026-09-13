@@ -28,8 +28,8 @@
 //! Upstream: `rustfs-gateway-types`' generated filter dto. Downstream: `shared::lifecycle` and
 //! `shared::replication`, the only callers, and through them the six member operations.
 //!
-//! Evidence: https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRuleFilter.html and
-//! https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRuleFilter.html — both types
+//! Evidence: <https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRuleFilter.html> and
+//! <https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRuleFilter.html> — both types
 //! take one condition directly and several only through `And`.
 //!
 //! # What is deliberately counted, not judged
