@@ -381,6 +381,14 @@ fn n_a_d5_diagnostic_names_key_id_presence_and_length_never_the_key_id() {
         assert!(!side.contains("must-never-be-logged"), "a KMS key id reached a D5 diagnostic: {side}");
         assert!(side.contains("aws:kms"), "the algorithm is still visible: {side}");
     }
-    assert!(failure.left.contains(&format!("Some(<redacted {} bytes>)", OLD_KEY.len())), "{}", failure.left);
-    assert!(failure.right.contains(&format!("Some(<redacted {} bytes>)", NEW_KEY.len())), "{}", failure.right);
+    assert!(
+        failure.left.contains(&format!("Some(<redacted {} bytes>)", OLD_KEY.len())),
+        "{}",
+        failure.left
+    );
+    assert!(
+        failure.right.contains(&format!("Some(<redacted {} bytes>)", NEW_KEY.len())),
+        "{}",
+        failure.right
+    );
 }

@@ -20,7 +20,9 @@
 
 use rustfs_gateway_xml::{XmlLimits, XmlNode, XmlWriter, parse_with_limits};
 
-use super::{PersistenceCodecError, optional_child, strip_inert_doctype};
+use core::fmt;
+
+use super::{PersistenceCodecError, RedactedKeyId, optional_child, strip_inert_doctype};
 
 /// The complete persisted Replication configuration.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -97,10 +99,22 @@ pub struct PersistedAccessControlTranslation {
 }
 
 /// KMS settings for replicated objects.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+///
+/// `Debug` is written by hand for the same reason as `PersistedEncryptionByDefault`: the replica
+/// KMS key id is a secret, so it renders as presence and length only.
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct PersistedEncryptionConfiguration {
     /// Replica KMS key identifier.
     pub replica_kms_key_id: Option<String>,
+}
+
+impl fmt::Debug for PersistedEncryptionConfiguration {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PersistedEncryptionConfiguration")
+            .field("replica_kms_key_id", &RedactedKeyId(self.replica_kms_key_id.as_deref()))
+            .finish()
+    }
 }
 
 /// Replication metrics settings.

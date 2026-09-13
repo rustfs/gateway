@@ -152,12 +152,57 @@ pub struct PersistedBlockedEncryptionTypes {
 }
 
 /// The persisted encryption defaults nested inside one rule.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+///
+/// `Debug` is written by hand: the KMS key identifier is a secret (it names the key a bucket's
+/// objects are encrypted under), and persisted values are rendered with `{:?}` by the migration
+/// goldens' diagnostics. It prints whether a key id is stored and how long it is, never its text.
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct PersistedEncryptionByDefault {
     /// Stored algorithm string, including values unknown to the current implementation.
     pub sse_algorithm: String,
     /// Optional KMS key identifier.
     pub kms_master_key_id: Option<String>,
+}
+
+impl fmt::Debug for PersistedEncryptionByDefault {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PersistedEncryptionByDefault")
+            .field("sse_algorithm", &self.sse_algorithm)
+            .field("kms_master_key_id", &RedactedKeyId(self.kms_master_key_id.as_deref()))
+            .finish()
+    }
+}
+
+/// The `Debug` stand-in for an optional stored KMS key identifier: `None`, or
+/// `Some(<redacted N bytes>)`. Presence and length keep a two-sided diagnostic readable (absent
+/// against present, or two ids of different length); the text itself never reaches the output.
+pub(crate) struct RedactedKeyId<'a>(pub(crate) Option<&'a str>);
+
+impl fmt::Debug for RedactedKeyId<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(key_id) => write!(formatter, "Some(<redacted {} bytes>)", key_id.len()),
+            None => formatter.write_str("None"),
+        }
+    }
+}
+
+/// `Debug` for one [`EncryptionRuleBehavior`] tuple with its KMS key id redacted by
+/// [`RedactedKeyId`]; every other decision renders exactly as the tuple's own `Debug` would.
+pub(crate) struct RedactedEncryptionRuleBehavior<'a>(pub(crate) &'a EncryptionRuleBehavior);
+
+impl fmt::Debug for RedactedEncryptionRuleBehavior<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (algorithm, key_id, bucket_key_enabled, blocked) = self.0;
+        formatter
+            .debug_tuple("")
+            .field(algorithm)
+            .field(&RedactedKeyId(key_id.as_deref()))
+            .field(bucket_key_enabled)
+            .field(blocked)
+            .finish()
+    }
 }
 
 /// The complete persisted Public Access Block configuration.

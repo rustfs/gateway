@@ -28,7 +28,7 @@ use crate::persistence::{
     PersistedEncryptionConfiguration, PersistedReplicationConfiguration, parse_bucket_encryption, parse_replication,
 };
 
-/// 44 bytes, and spelled so that no other part of any rendering can contain it by accident.
+/// Spelled so that no other part of any rendering can contain it by accident.
 const KEY_ID: &str = "arn:aws:kms:us-east-1:111122223333:key/SECRET";
 const REPLICA_KEY_ID: &str = "replica-kms-key-must-never-be-logged";
 
@@ -88,8 +88,9 @@ fn c_persist_n005_a_parsed_configuration_never_prints_its_nested_key_id() {
     for rendered in both_renderings(&parsed) {
         assert!(!rendered.contains(KEY_ID), "a nested bucket KMS key id reached Debug: {rendered}");
         assert!(rendered.contains("aws:kms"), "the algorithm is still visible: {rendered}");
-        assert!(rendered.contains("bucket_key_enabled: Some(true)"), "{rendered}");
     }
+    let rendered = format!("{parsed:?}");
+    assert!(rendered.contains("bucket_key_enabled: Some(true)"), "{rendered}");
 }
 
 #[test]
@@ -118,7 +119,10 @@ fn c_persist_n006_the_replica_kms_key_id_never_appears_in_debug() {
     let parsed: PersistedReplicationConfiguration =
         parse_replication(bytes.as_bytes()).expect("a stored replica KMS rule is readable");
     for rendered in both_renderings(&parsed) {
-        assert!(!rendered.contains(REPLICA_KEY_ID), "a nested replica KMS key id reached Debug: {rendered}");
+        assert!(
+            !rendered.contains(REPLICA_KEY_ID),
+            "a nested replica KMS key id reached Debug: {rendered}"
+        );
         assert!(rendered.contains("arn:aws:s3:::backup"), "the destination is still visible: {rendered}");
     }
 }
