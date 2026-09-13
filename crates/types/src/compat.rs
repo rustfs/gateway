@@ -21,14 +21,18 @@
 //! two submodules whose API names s3s types.
 //! NOT responsible for: production XML behavior, golden assertions, or wiring any conversion into a
 //! request path.
-//! Upstream: the three s3s revisions named by [`OracleRevision`]. Downstream:
-//! `rustfs-gateway-goldens`; this module is deleted by P9-09.
+//! Upstream: the three s3s revisions named by [`OracleRevision`](crate::compat::OracleRevision).
+//! Downstream: `rustfs-gateway-goldens`; this module is deleted by P9-09.
 //!
 //! One adapter source, three compilations: `compat/oracle/*.rs` is compiled once per revision as
 //! the `baseline`, `rollback` and `candidate` modules below, each binding its own `s3s`. The public
-//! functions dispatch on the revision [`with_oracle`] selected for the current thread. The default
-//! is [`OracleRevision::Baseline`], so a caller that never selects one measures exactly what it
-//! measured before the other revisions existed.
+//! functions dispatch on the revision [`with_oracle`](crate::compat::with_oracle) selected for the
+//! current thread. The default is
+//! [`OracleRevision::Baseline`](crate::compat::OracleRevision::Baseline), so a caller that never
+//! selects one measures exactly what it measured before the other revisions existed.
+//!
+//! These links spell the full path because rustdoc joins this inner doc with the outer `///` doc
+//! on `pub mod compat` in `lib.rs` and resolves the joined text from the crate root.
 
 use core::cell::Cell;
 use core::fmt;
