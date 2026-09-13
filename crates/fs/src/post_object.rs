@@ -53,11 +53,14 @@ fn form_metadata(fields: Vec<(String, String)>) -> Result<BTreeMap<String, Strin
 impl Handler<PostObject> for FsBackend {
     async fn call(&self, request: Req<PostObject>) -> HandlerResult<PostObject> {
         let input = request.into_input();
+        // Drained first: a refusal returned with the file unread would be reported as an abandoned
+        // body rather than as itself. Nothing is published until every refusal has had its turn.
+        let bytes = drain(Some(input.body)).await?;
         let attributes = ObjectAttributes {
             metadata: form_metadata(input.metadata)?,
             headers: ContentHeaders::from_request(None, None, None, None, input.content_type, None),
+            ..ObjectAttributes::default()
         };
-        let bytes = drain(Some(input.body)).await?;
         let e_tag = etag(&bytes)?;
         let published = self
             .publish_object(input.bucket.as_str(), input.key.as_str(), &bytes, &e_tag, &attributes)

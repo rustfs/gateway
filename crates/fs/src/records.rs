@@ -69,12 +69,20 @@ use super::storage_error;
 const METADATA_SECTION: &str = "meta/1";
 
 /// Everything a write stores beside an object version's bytes.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+///
+/// A multipart upload record persists only `metadata` and `headers`: `CreateMultipartUpload`'s
+/// storage class and tags are not carried to completion yet, so a completed upload publishes with
+/// the defaults for those two.
+#[derive(Clone, Debug, Default)]
 pub(super) struct ObjectAttributes {
     /// The `x-amz-meta-*` map, keyed by the lowercase suffix.
     pub(super) metadata: BTreeMap<String, String>,
     /// The standard representation headers.
     pub(super) headers: ContentHeaders,
+    /// The storage class the write named; `None` records `STANDARD`.
+    pub(super) storage_class: Option<StorageClass>,
+    /// The validated tag set the write carried, written beside the version atomically with it.
+    pub(super) tags: Vec<(String, String)>,
 }
 
 /// Refuses attributes this backend will not persist.

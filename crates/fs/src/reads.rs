@@ -60,6 +60,12 @@ pub(super) struct Representation {
     pub(super) metadata: std::collections::BTreeMap<String, String>,
     /// The representation headers stored with this version.
     pub(super) headers: ContentHeaders,
+    /// The version directory this representation was read from, or `None` for a plain object file.
+    ///
+    /// Carried so that `CopyObject` can read the source's tags under the default tagging
+    /// directive. The tags are not read here: a read of the object must not fail because its tag
+    /// document is unreadable (`n_corrupt_tag_authority_is_not_treated_as_an_empty_set`).
+    pub(super) directory: Option<std::path::PathBuf>,
 }
 
 /// The window a read serves, and the answer's status.
@@ -174,6 +180,7 @@ impl super::FsBackend {
                 version_id: (record.version_id != "null").then(|| record.version_id.clone()),
                 metadata: record.metadata.clone(),
                 headers: record.headers.clone(),
+                directory: Some(record.path.clone()),
             });
         }
         if version_id.is_some_and(|id| id != "null") {
@@ -190,6 +197,7 @@ impl super::FsBackend {
             // section, so the honest answer is the empty map rather than a guess.
             metadata: std::collections::BTreeMap::new(),
             headers: ContentHeaders::default(),
+            directory: None,
         })
     }
 }

@@ -16,9 +16,11 @@
 //!
 //! Responsible for: validating and atomically replacing one version's complete tag set, answering
 //! current or explicit-version reads, and removing tags without removing object bytes.
-//! NOT responsible for: bucket tags, version publication, lifecycle action timing, or tag headers on PUT.
+//! Also: reading and validating the packed `x-amz-tagging` header a `PutObject` or `CopyObject`
+//! carries, and the byte form those tags are published in beside a new version.
+//! NOT responsible for: bucket tags, version publication, or lifecycle action timing.
 //! Upstream: the shared tagging validator and filesystem version authority. Downstream: production
-//! object-tagging routes and lifecycle tag-filter evaluation.
+//! object-tagging routes, object publication, and lifecycle tag-filter evaluation.
 
 use std::io;
 use std::path::Path;
@@ -26,14 +28,45 @@ use std::sync::Arc;
 
 use rustfs_gateway::dto::{
     DeleteObjectTagging, DeleteObjectTaggingOutput, GetObjectTagging, GetObjectTaggingOutput, PutObjectTagging,
-    PutObjectTaggingOutput, Tagging,
+    PutObjectTaggingOutput, Tag, Tagging,
 };
 use rustfs_gateway::persistence::{parse_tagging_dto, serialize_tagging_dto};
-use rustfs_gateway::{ErrorCode, Handler, HandlerError, HandlerResult, Req, Resp, ServiceBuilder, TagScope, validate_tag_set};
+use rustfs_gateway::{
+    ErrorCode, Handler, HandlerError, HandlerResult, Req, Resp, ServiceBuilder, TagScope, parse_tagging_header, validate_tag_set,
+};
 
 use super::{FsBackend, storage_error};
 
-const TAGS_FILE: &str = "tags";
+pub(super) const TAGS_FILE: &str = "tags";
+
+/// Reads and validates the packed `x-amz-tagging` header a write carries.
+///
+/// The header is the same tag set the `?tagging` subresource carries as a document, so it passes
+/// the same object-scope validation before anything is written.
+///
+/// # Errors
+///
+/// The header grammar's refusals, and the object-scope tag-set refusals.
+pub(super) fn tags_from_header(header: Option<&str>) -> Result<Vec<(String, String)>, HandlerError> {
+    let pairs =
+        parse_tagging_header(header).map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
+    validate_tag_set(&pairs, TagScope::Object)
+        .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
+    Ok(pairs)
+}
+
+/// The persisted form of a tag set, identical to what `PutObjectTagging` writes.
+pub(super) fn serialize_tags(pairs: &[(String, String)]) -> impl AsRef<[u8]> {
+    serialize_tagging_dto(&Tagging {
+        tag_set: pairs
+            .iter()
+            .map(|(key, value)| Tag {
+                key: key.clone(),
+                value: value.clone(),
+            })
+            .collect(),
+    })
+}
 
 fn unsafe_tags() -> HandlerError {
     HandlerError::new(ErrorCode::INVALID_REQUEST, "the object tag path is not a safe regular file")

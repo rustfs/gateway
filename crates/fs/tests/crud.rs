@@ -79,6 +79,9 @@ mod delete_objects;
 #[path = "crud/post_object.rs"]
 mod post_object;
 
+#[path = "crud/write_attributes.rs"]
+mod write_attributes;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
