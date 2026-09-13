@@ -78,6 +78,8 @@ mod monomorphic;
 mod naming_policy;
 #[path = "object_lock_intent.rs"]
 mod object_lock_intent;
+#[path = "observer_panic.rs"]
+mod observer_panic;
 #[path = "operation_registry_hot_update.rs"]
 mod operation_registry_hot_update;
 #[path = "operation_registry_wire.rs"]

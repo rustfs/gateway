@@ -86,7 +86,21 @@ pub trait Observer: Send + Sync + 'static {
     /// It is called for a request that was rejected at acceptance too, where `operation` is `None`.
     /// An observer that only saw successful requests would be an audit trail with the interesting
     /// half missing.
+    ///
+    /// The service isolates callback panics: an event may be lost, but the ordinary response or
+    /// committed terminal document is still delivered unchanged. Ordinary panic payloads are
+    /// released. If a payload destructor itself panics, its secondary panic payload is deliberately
+    /// leaked to keep cleanup bounded and prevent another destructor panic escaping this boundary.
     fn on_response(&self, event: &RequestEvent<'_>);
+}
+
+pub(crate) fn observe_safely(observer: &dyn Observer, event: &RequestEvent<'_>) {
+    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer.on_response(event)))
+        && let Err(secondary) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload)))
+    {
+        // A second payload may have another panicking destructor; do not recurse on request work.
+        std::mem::forget(secondary);
+    }
 }
 
 impl<T: Observer + ?Sized> Observer for std::sync::Arc<T> {

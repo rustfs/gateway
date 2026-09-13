@@ -420,14 +420,15 @@ impl S3Service {
         let started_committed_work = crate::commit::start_pending(
             &mut response,
             Box::new(move |error| {
-                committed_observer.on_response(&RequestEvent {
+                let event = RequestEvent {
                     request_id: &event_request_id,
                     operation: event_operation,
                     status: event_status,
                     handler_deadline,
                     identity: event_identity.as_ref(),
                     error: error.as_ref(),
-                });
+                };
+                crate::ext::observe_safely(committed_observer.as_ref(), &event);
             }),
         );
         if !started_committed_work {
