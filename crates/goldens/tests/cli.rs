@@ -109,6 +109,10 @@ fn ordinary_report_shows_evidence_per_oracle_revision() {
     let text = String::from_utf8(output.stdout).expect("UTF-8 report");
     assert!(text.contains("P9-01 acceptance census: passed=39 blocked=0 total=39\n"), "{text}");
     assert!(text.contains("oracle admission: revisions=3 open-findings=2\n"), "{text}");
+    assert!(
+        text.contains("migration inventory: decided-refusals=1\nrefusal persisted-doctype decision=https://github.com/rustfs/gateway/issues/469 "),
+        "{text}"
+    );
     for (oracle, moved) in [
         ("baseline s3s@9c4690d8", 0),
         ("rollback s3s@bdcb6259", 1),

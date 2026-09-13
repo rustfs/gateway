@@ -322,7 +322,7 @@ fn observe(oracle: OracleRevision) -> Result<OracleObservation, OracleAdmissionE
             let kind = family.kind();
             for (bytes, sha256) in family.rejected_samples() {
                 rejected_reread += 1;
-                if new_reads(kind, bytes) {
+                if new_refusal(kind, bytes).is_none() {
                     return Err(OracleAdmissionError::NewDecoderRead {
                         oracle,
                         kind,
@@ -357,7 +357,8 @@ fn reading<T>(result: Result<T, CompatCodecError>) -> OldReading {
     }
 }
 
-fn old_reading(kind: ConfigKind, bytes: &[u8]) -> OldReading {
+/// What the selected old revision does with `bytes` as a `kind` document.
+pub(crate) fn old_reading(kind: ConfigKind, bytes: &[u8]) -> OldReading {
     match kind {
         ConfigKind::Accelerate => reading(parse_s3s_accelerate(bytes)),
         ConfigKind::Versioning => reading(parse_s3s_versioning(bytes)),
@@ -375,21 +376,27 @@ fn old_reading(kind: ConfigKind, bytes: &[u8]) -> OldReading {
     }
 }
 
-fn new_reads(kind: ConfigKind, bytes: &[u8]) -> bool {
+/// How the production decoder refuses `bytes` as a `kind` document, rendered with `Debug`, or
+/// `None` when it reads them.
+pub(crate) fn new_refusal(kind: ConfigKind, bytes: &[u8]) -> Option<String> {
+    fn refusal<T, E: fmt::Debug>(result: Result<T, E>) -> Option<String> {
+        result.err().map(|error| format!("{error:?}"))
+    }
+
     match kind {
-        ConfigKind::Accelerate => parse_accelerate(bytes).is_ok(),
-        ConfigKind::Versioning => parse_versioning(bytes).is_ok(),
-        ConfigKind::ObjectLock => parse_object_lock(bytes).is_ok(),
-        ConfigKind::Lifecycle => parse_lifecycle(bytes).is_ok(),
-        ConfigKind::BucketEncryption => parse_bucket_encryption(bytes).is_ok(),
-        ConfigKind::Notification => parse_notification(bytes).is_ok(),
-        ConfigKind::PublicAccessBlock => parse_public_access_block(bytes).is_ok(),
-        ConfigKind::RequestPayment => parse_request_payment(bytes).is_ok(),
-        ConfigKind::Cors => parse_cors(bytes).is_ok(),
-        ConfigKind::Tagging => parse_tagging(bytes).is_ok(),
-        ConfigKind::Logging => parse_bucket_logging(bytes).is_ok(),
-        ConfigKind::Website => parse_website(bytes).is_ok(),
-        ConfigKind::Replication => parse_replication(bytes).is_ok(),
+        ConfigKind::Accelerate => refusal(parse_accelerate(bytes)),
+        ConfigKind::Versioning => refusal(parse_versioning(bytes)),
+        ConfigKind::ObjectLock => refusal(parse_object_lock(bytes)),
+        ConfigKind::Lifecycle => refusal(parse_lifecycle(bytes)),
+        ConfigKind::BucketEncryption => refusal(parse_bucket_encryption(bytes)),
+        ConfigKind::Notification => refusal(parse_notification(bytes)),
+        ConfigKind::PublicAccessBlock => refusal(parse_public_access_block(bytes)),
+        ConfigKind::RequestPayment => refusal(parse_request_payment(bytes)),
+        ConfigKind::Cors => refusal(parse_cors(bytes)),
+        ConfigKind::Tagging => refusal(parse_tagging(bytes)),
+        ConfigKind::Logging => refusal(parse_bucket_logging(bytes)),
+        ConfigKind::Website => refusal(parse_website(bytes)),
+        ConfigKind::Replication => refusal(parse_replication(bytes)),
     }
 }
 
