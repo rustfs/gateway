@@ -293,11 +293,12 @@ fn authenticate(
     now: RequestNow,
 ) -> Result<Option<Principal>, String> {
     let view = WireView::new(headers, RawQuery::new(wire.query().as_str()));
-    // The gateway admits an anonymous caller only for an operation a deployment opted in for;
-    // RustFS admits every anonymous request to its access hook and decides there. The harness
-    // makes that opt-in explicitly so an anonymous request reaches the same point on both stacks.
-    let floor = OperationFloor::builtin(operation, SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
-    let sealed = match SecurityFloor::new().admit(view, &floor, now) {
+    // RustFS admits every anonymous request to its access hook and decides there. The gateway
+    // does the same when the floor delegates anonymous admission to the authorizer (ADR-0021),
+    // which is how the harness configures it: the operation's own floor stays the built-in one.
+    let floor = OperationFloor::builtin(operation, SigService::S3);
+    let security = SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report();
+    let sealed = match security.admit(view, &floor, now) {
         Ok(Admission::Anonymous(_)) => return Ok(None),
         Ok(Admission::Sealed(sealed)) => sealed,
         Ok(_) => return Err("the floor admitted a scheme this harness does not drive".to_owned()),

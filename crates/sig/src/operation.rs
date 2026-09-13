@@ -253,7 +253,9 @@ impl OperationFloor {
     /// The name is long because the obligation is real: an anonymously reachable operation must
     /// appear in the startup security-posture report, which is a log line and deliberately not an
     /// HTTP endpoint (an unauthenticated diagnostic endpoint is MinIO CVE-2023-28432).
-    /// [`OperationFloor::allows_anonymous`] is what that report reads.
+    /// [`crate::SecurityFloor::admits_anonymous`] is what that report reads. A deployment whose
+    /// `Authorizer` decides every anonymous request can delegate at service level instead, with
+    /// [`crate::SecurityFloor::delegate_anonymous_to_authorizer_after_listing_in_the_posture_report`].
     #[must_use]
     pub const fn allow_anonymous_after_listing_in_the_posture_report(mut self) -> Self {
         self.allowed_schemes.anonymous = true;
@@ -289,6 +291,29 @@ impl OperationFloor {
     pub const fn allows_anonymous(&self) -> bool {
         self.allowed_schemes.anonymous
     }
+
+    /// Whether this operation admits a request that presented nothing, under `policy`.
+    ///
+    /// Its own opt-in always counts. Under [`AnonymousPolicy::DelegateToAuthorizer`], so does
+    /// every non-privileged operation. A privileged one still has to opt in itself (ADR-0021).
+    #[must_use]
+    pub const fn admits_anonymous_under(&self, policy: AnonymousPolicy) -> bool {
+        self.allowed_schemes.anonymous || (matches!(policy, AnonymousPolicy::DelegateToAuthorizer) && !self.privileged)
+    }
+}
+
+/// Who decides a request that presented no credentials (ADR-0021).
+///
+/// The default is [`AnonymousPolicy::PerOperation`], and a floor nobody configured has it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum AnonymousPolicy {
+    /// Only an operation that called
+    /// [`OperationFloor::allow_anonymous_after_listing_in_the_posture_report`] admits one.
+    #[default]
+    PerOperation,
+    /// Every non-privileged operation admits one, and the `Authorizer` decides. A privileged
+    /// operation still has to opt in itself.
+    DelegateToAuthorizer,
 }
 
 /// Whether SigV2 presigned URLs are accepted at all.

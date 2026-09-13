@@ -26,9 +26,10 @@ use core::time::Duration;
 
 use http::header::{HeaderMap, HeaderName, HeaderValue};
 use rustfs_gateway_sig::{
-    Admission, AuthError, CredentialPresence, CtBytes, CustomAuthRequest, CustomAuthScheme, CustomSchemeRegistry, OperationFloor,
-    RawQuery, ReplayDecision, ReplayNonceStore, SchemeRegistrationError, SecurityFloor, SigService, Signature, SignatureVerifier,
-    Verdict, WireView, detect_aws_credential_marker, detect_credentials, enforce_no_duplicate_sig_params,
+    Admission, AnonymousPolicy, AuthError, CredentialPresence, CtBytes, CustomAuthRequest, CustomAuthScheme,
+    CustomSchemeRegistry, OperationFloor, RawQuery, ReplayDecision, ReplayNonceStore, SchemeRegistrationError, SchemeSlot,
+    SecurityFloor, SigFamily, SigService, Signature, SignatureVerifier, Verdict, WireView, detect_aws_credential_marker,
+    detect_credentials, enforce_no_duplicate_sig_params,
 };
 
 use crate::security_floor_fixtures::*;
@@ -563,4 +564,112 @@ fn c_sig_0375_floor_still_enforced_when_the_verifier_is_replaced() {
         0,
         "the replacement must not have been reached at all"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Anonymous admission delegated to the Authorizer (ADR-0021)
+// ---------------------------------------------------------------------------
+
+/// A built-in operation that never opted in to anonymous access.
+fn header_only_op() -> OperationFloor {
+    OperationFloor::builtin("ListBuckets", SigService::S3)
+}
+
+fn delegating() -> SecurityFloor {
+    SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
+}
+
+/// Negative — the default is per-operation. Nothing is delegated unless a deployment says so,
+/// and an operation that did not opt in refuses a request that presented nothing.
+#[test]
+fn anonymous_admission_is_per_operation_by_default() {
+    assert_eq!(AnonymousPolicy::default(), AnonymousPolicy::PerOperation);
+    assert_eq!(SecurityFloor::new().anonymous_policy(), AnonymousPolicy::PerOperation);
+    assert_eq!(SecurityFloor::default().anonymous_policy(), AnonymousPolicy::PerOperation);
+    let headers = header_map(&[]);
+    let view = WireView::new(&headers, RawQuery::new(""));
+    assert_eq!(
+        SecurityFloor::new().admit(view, &header_only_op(), now()).err(),
+        Some(AuthError::AccessDenied)
+    );
+    assert!(!SecurityFloor::new().admits_anonymous(&header_only_op()));
+}
+
+/// Positive — a delegating floor admits a request that presented nothing to a non-privileged
+/// operation that did not opt in; the evidence is still the presence record's.
+#[test]
+fn a_delegating_floor_admits_an_anonymous_request_to_a_non_privileged_operation() {
+    assert_eq!(delegating().anonymous_policy(), AnonymousPolicy::DelegateToAuthorizer);
+    let headers = header_map(&[]);
+    let view = WireView::new(&headers, RawQuery::new(""));
+    assert!(matches!(delegating().admit(view, &header_only_op(), now()), Ok(Admission::Anonymous(_))));
+    assert!(delegating().admits_anonymous(&header_only_op()));
+}
+
+/// Negative — delegation stops at the privileged surface: an operation marked privileged, or
+/// registered by a third party, still has to opt in itself. Delegation never narrows either: a
+/// privileged operation that did opt in stays reachable.
+#[test]
+fn a_delegating_floor_still_refuses_anonymous_on_a_privileged_operation() {
+    for operation in [
+        admin_op(),
+        OperationFloor::custom("example:Unlisted", SigService::S3),
+        header_only_op().mark_privileged(),
+    ] {
+        let headers = header_map(&[]);
+        let view = WireView::new(&headers, RawQuery::new(""));
+        assert_eq!(
+            delegating().admit(view, &operation, now()).err(),
+            Some(AuthError::AccessDenied),
+            "{}",
+            operation.name()
+        );
+        assert!(!delegating().admits_anonymous(&operation), "{}", operation.name());
+    }
+    let opted_in =
+        OperationFloor::custom("example:PublicPing", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
+    assert!(delegating().admits_anonymous(&opted_in));
+    assert!(SecurityFloor::new().admits_anonymous(&opted_in));
+}
+
+/// Negative — delegation widens the anonymous slot only. Presigned and POST-policy access keep
+/// the operation's own allow-list.
+#[test]
+fn a_delegating_floor_widens_no_other_scheme() {
+    let operation = header_only_op();
+    for slot in [SchemeSlot::Presigned, SchemeSlot::PostPolicy] {
+        assert_eq!(
+            delegating().enforce_scheme_allowed(&operation, slot, SigFamily::V4),
+            Err(AuthError::AccessDenied),
+            "{slot:?}"
+        );
+    }
+    assert_eq!(delegating().enforce_scheme_allowed(&operation, SchemeSlot::Header, SigFamily::V4), Ok(()));
+    assert_eq!(
+        delegating().enforce_scheme_allowed(&operation, SchemeSlot::Anonymous, SigFamily::V4),
+        Ok(())
+    );
+    assert_eq!(
+        SecurityFloor::new().enforce_scheme_allowed(&operation, SchemeSlot::Anonymous, SigFamily::V4),
+        Err(AuthError::AccessDenied)
+    );
+}
+
+/// Negative — delegation admits only a request that presented nothing. A malformed
+/// `Authorization` header is sealed for verification, and a lone security token or a lone query
+/// signature is refused; none of them becomes anonymous.
+#[test]
+fn a_delegating_floor_never_downgrades_presented_credentials() {
+    let malformed = header_map(&[("authorization", "AWS4-HMAC-SHA256 garbage"), ("x-amz-date", SIGNED_AT)]);
+    let view = WireView::new(&malformed, RawQuery::new(""));
+    assert!(matches!(delegating().admit(view, &header_only_op(), now()), Ok(Admission::Sealed(_))));
+    let token = header_map(&[("x-amz-security-token", "token")]);
+    let view = WireView::new(&token, RawQuery::new(""));
+    assert_eq!(
+        delegating().admit(view, &header_only_op(), now()).err(),
+        Some(AuthError::AuthorizationHeaderMalformed)
+    );
+    let empty = header_map(&[]);
+    let view = WireView::new(&empty, RawQuery::new("X-Amz-Signature=abc"));
+    assert!(!matches!(delegating().admit(view, &header_only_op(), now()), Ok(Admission::Anonymous(_))));
 }

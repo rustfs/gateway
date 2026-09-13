@@ -20,6 +20,8 @@
 
 mod support;
 
+#[path = "anonymous_delegation_runtime.rs"]
+mod anonymous_delegation_runtime;
 #[path = "assembly.rs"]
 mod assembly;
 #[path = "assembly_order.rs"]

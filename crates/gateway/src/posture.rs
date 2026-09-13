@@ -120,7 +120,9 @@ pub(crate) fn render_startup_posture<'a>(
     let anonymous_reachable_ops: BTreeSet<_> = operations
         .iter()
         .copied()
-        .filter(|operation| operation.allows_anonymous())
+        // The floor's own predicate, so the report cannot disagree with what the floor admits:
+        // under delegation every non-privileged operation is listed (ADR-0021).
+        .filter(|operation| floor.admits_anonymous(operation))
         .map(OperationFloor::name)
         .collect();
     let presigned_allowed_ops: BTreeSet<_> = operations
@@ -177,6 +179,30 @@ mod tests {
         assert_eq!(
             report,
             "SECURITY_POSTURE anonymous_reachable_ops=[PublicRead] custom_verifier=installed sigv2_policy=HeaderOnly presigned_allowed_ops=[GetObject] aws_signature_verifier=built-in"
+        );
+    }
+
+    /// Under delegation the list names every operation the floor now admits anonymously: each
+    /// non-privileged one, plus a privileged one only when it opted in itself (ADR-0021).
+    #[test]
+    fn a_delegating_floor_lists_every_non_privileged_operation_as_anonymously_reachable() {
+        let header_only = OperationFloor::builtin("PutObject", SigService::S3);
+        let privileged = OperationFloor::custom("example:Admin", SigService::S3);
+        let privileged_opted_in =
+            OperationFloor::custom("example:PublicPing", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
+        let operations = [&header_only, &privileged, &privileged_opted_in];
+        let floor = SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report();
+
+        let delegated = render_startup_posture(operations.into_iter(), &floor, false, false);
+        let per_operation = render_startup_posture(operations.into_iter(), &SecurityFloor::new(), false, false);
+
+        assert!(
+            delegated.starts_with("SECURITY_POSTURE anonymous_reachable_ops=[PutObject,example:PublicPing] "),
+            "{delegated}"
+        );
+        assert!(
+            per_operation.starts_with("SECURITY_POSTURE anonymous_reachable_ops=[example:PublicPing] "),
+            "{per_operation}"
         );
     }
 

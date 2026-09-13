@@ -213,6 +213,15 @@ The framework's half:
   no allow-all type in a normal build, and no example contains an unconditional allow. The
   `dangerous-allow-all-authorizer` feature exposes one only behind a deliberately verbose
   `DangerAck`; a service assembled with it prints a named start-up warning.
+- **Anonymous admission is per operation unless a deployment delegates it.** By default the
+  security floor admits a request that presented nothing only to an operation that opted in. Any
+  other operation refuses it before the authorizer is consulted.
+  `SecurityFloor::delegate_anonymous_to_authorizer_after_listing_in_the_posture_report`
+  (ADR-0021) admits it to every non-privileged operation instead. Every such request then reaches
+  the authorizer with no identity, and the authorizer alone decides.
+  Delegation never admits a request that presented a credential, never widens presigned or
+  POST-policy access, and never reaches a privileged operation that did not opt in itself. The
+  startup posture line lists every operation it makes reachable.
 
 Four things are **yours**:
 
