@@ -704,7 +704,6 @@ fn the_connection_verdict_branches_on_the_wire_bodys_extent() {
             decoded: 10,
         },
         ChunkReject::DecodedLengthOverflow { declared: 4 },
-        ChunkReject::ModeConfusion(rustfs_gateway_http::ModeConfusion::WireLengthMissing),
     ] {
         assert!(closes.must_close_connection(), "{closes:?}");
     }
@@ -713,6 +712,7 @@ fn the_connection_verdict_branches_on_the_wire_bodys_extent() {
         ChunkReject::MalformedChunkSize,
         ChunkReject::BadLineTerminator,
         ChunkReject::UnexpectedExtension,
+        ChunkReject::ModeConfusion(rustfs_gateway_http::ModeConfusion::DecodedLengthMissing),
         ChunkReject::ZeroSizedNonTerminalChunk,
         ChunkReject::ChunkMetaTooLong,
         ChunkReject::DecodedLengthUnderflow { declared: 8, actual: 4 },

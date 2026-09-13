@@ -20,10 +20,11 @@
 //! (`ingest_verify`).
 //! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
-//! 5 positive / 13 negative.
+//! 8 positive / 19 negative.
 
 use crate::support::ingest::{
-    FramingFixture, ScriptReader, declared_length, no_body_ceiling, no_observers, wire_framing_with_length,
+    FramingFixture, ScriptReader, declared_length, drain_pipeline, no_body_ceiling, no_observers, unsigned_body,
+    wire_framing_with_length,
 };
 use http::{HeaderMap, HeaderValue, Version, header::CONTENT_LENGTH, header::TRANSFER_ENCODING};
 use rustfs_gateway_http::{
@@ -158,17 +159,62 @@ fn unsigned_framing_still_requires_room_for_its_own_overhead() {
     assert_eq!(decoded_of(&framing, Some("1024"), 1034), Ok(Some(1024)));
 }
 
-/// Negative: `aws-chunked` layered inside `Transfer-Encoding: chunked` gives two independently
-/// declared ends, so rule C-7 has nothing to check the inner one against.
+/// Negative: `Transfer-Encoding: chunked` does not excuse the decoded length. With no
+/// `Content-Length` it is the only number the body is held to, so its absence is refused exactly
+/// as it is under a declared wire length (rustfs/gateway#750).
 #[test]
-fn a_framed_body_under_transfer_encoding_chunked_has_no_wire_length_to_check() {
+fn c_ing_0041_a_framed_body_under_transfer_encoding_chunked_without_a_decoded_length_is_refused() {
+    let framing = ChunkFraming::derive(&FramingFixture::streaming_unsigned_trailer()).expect("a consistent source");
+    assert_eq!(
+        validate_decoded_length(&framing, None, &transfer_chunked()),
+        Err(ChunkReject::ModeConfusion(ModeConfusion::DecodedLengthMissing))
+    );
+}
+
+/// Negative: the spelling rules do not relax when the transport ends the body. A decoded length
+/// that is the only ceiling has to be the one every parser reads the same way.
+#[test]
+fn a_malformed_decoded_length_under_transfer_encoding_chunked_is_refused() {
     let framing = ChunkFraming::derive(&FramingFixture::streaming_signed()).expect("a consistent source");
-    let mut headers = HeaderMap::new();
-    headers.insert(TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
-    let wire = Framing::classify(Version::HTTP_11, &headers, &Limits::default()).expect("chunked is well formed");
+    for spelling in ["+1024", "0x400", " 1024", "", "99999999999999999999"] {
+        assert_eq!(
+            validate_decoded_length(&framing, Some(spelling), &transfer_chunked()),
+            Err(ChunkReject::ModeConfusion(ModeConfusion::DecodedLengthMalformed)),
+            "spelling {spelling:?} must be refused"
+        );
+    }
+}
+
+/// Negative: an HTTP/1.1 framed body with neither `Content-Length` nor `Transfer-Encoding` has a
+/// zero-length body (RFC 9112 §6.3), and a decoded length cannot fit in zero wire bytes. Only a
+/// transport that delimits the body itself replaces the wire length with the decoded one.
+#[test]
+fn a_framed_http11_body_with_neither_length_header_is_still_refused() {
+    let framing = ChunkFraming::derive(&FramingFixture::streaming_signed()).expect("a consistent source");
+    let wire = Framing::classify(Version::HTTP_11, &HeaderMap::new(), &Limits::default()).expect("no body is well formed");
     assert_eq!(
         validate_decoded_length(&framing, Some("1024"), &wire),
-        Err(ChunkReject::ModeConfusion(ModeConfusion::WireLengthMissing))
+        Err(ChunkReject::ModeConfusion(ModeConfusion::DecodedLengthExceedsWireLength {
+            decoded: 1024,
+            wire: 0,
+        }))
+    );
+}
+
+/// Negative: an HTTP/2 request that does declare `Content-Length` is still held to rule C-7. The
+/// transport-delimited acceptance is for the absent header, not a way around a present one.
+#[test]
+fn an_http2_framed_body_that_declares_a_content_length_is_still_bound_by_it() {
+    let framing = ChunkFraming::derive(&FramingFixture::streaming_signed()).expect("a consistent source");
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_LENGTH, HeaderValue::from_static("1024"));
+    let wire = Framing::classify(Version::HTTP_2, &headers, &Limits::default()).expect("a declared length");
+    assert_eq!(
+        validate_decoded_length(&framing, Some("4096"), &wire),
+        Err(ChunkReject::ModeConfusion(ModeConfusion::DecodedLengthExceedsWireLength {
+            decoded: 4096,
+            wire: 1024,
+        }))
     );
 }
 
@@ -249,4 +295,123 @@ fn the_wire_body_ceiling_still_applies_to_a_framed_upload() {
         ..no_body_ceiling()
     };
     assert!(Framing::classify(Version::HTTP_11, &headers, &limits).is_err());
+}
+
+// ── a body the transport ends (rustfs/gateway#750) ──────────────────────────────────────────────
+
+/// `Transfer-Encoding: chunked` and no `Content-Length`: the shape botocore sends for a trailer
+/// upload over TLS.
+fn transfer_chunked() -> Framing {
+    let mut headers = HeaderMap::new();
+    headers.insert(TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+    Framing::classify(Version::HTTP_11, &headers, &Limits::default()).expect("chunked is well formed")
+}
+
+/// An HTTP/2 head with no `Content-Length`: the stream's `END_STREAM` ends the body (RFC 9113
+/// §8.1), so there is no wire length to hold a decoded length against either.
+fn http2_without_a_length() -> Framing {
+    Framing::classify(Version::HTTP_2, &HeaderMap::new(), &Limits::default()).expect("an HTTP/2 head")
+}
+
+/// Positive: `aws-chunked` inside `Transfer-Encoding: chunked` is accepted with the declared
+/// decoded length, which AWS makes mandatory for every streaming upload precisely because the
+/// encoded length may be absent. That number becomes the ceiling the decoder holds the body to.
+#[test]
+fn c_ing_0006_a_framed_body_under_transfer_encoding_chunked_takes_its_decoded_length() {
+    let framing = ChunkFraming::derive(&FramingFixture::streaming_unsigned_trailer()).expect("a consistent source");
+    let decoded = validate_decoded_length(&framing, Some("1024"), &transfer_chunked());
+    assert_eq!(decoded.map(|length| length.map(rustfs_gateway_http::DecodedLength::get)), Ok(Some(1024)));
+}
+
+/// Positive: the same over HTTP/2 without `Content-Length`, signed or not, empty or not.
+#[test]
+fn a_framed_body_on_http2_without_a_content_length_takes_its_decoded_length() {
+    for fixture in [FramingFixture::streaming_signed(), FramingFixture::streaming_unsigned()] {
+        let framing = ChunkFraming::derive(&fixture).expect("a consistent source");
+        for (header, expected) in [("1024", 1024), ("0", 0)] {
+            let decoded = validate_decoded_length(&framing, Some(header), &http2_without_a_length());
+            assert_eq!(
+                decoded.map(|length| length.map(rustfs_gateway_http::DecodedLength::get)),
+                Ok(Some(expected))
+            );
+        }
+    }
+}
+
+/// A pipeline over unsigned framing whose decoded length was validated against a
+/// `Transfer-Encoding: chunked` head — so no wire length stands behind it.
+fn transport_delimited_pipeline(body: Vec<u8>, declared: u64, limits: ChunkLimits) -> IngestPipeline<ScriptReader> {
+    let framing = ChunkFraming::derive(&FramingFixture::streaming_unsigned()).expect("a consistent source");
+    let declared = validate_decoded_length(&framing, Some(&declared.to_string()), &transfer_chunked())
+        .expect("head-level checks pass without a wire length")
+        .expect("a framed body always yields a decoded length");
+    IngestPipeline::new(
+        ScriptReader::new(body, 4096),
+        framing,
+        declared,
+        None,
+        no_observers(),
+        limits,
+        IngestPolicy::default(),
+    )
+    .expect("an unsigned pipeline without a signer is well formed")
+}
+
+/// Positive: a transport-delimited body of exactly its decoded length arrives whole and may be
+/// committed.
+#[test]
+fn a_transport_delimited_body_of_exactly_its_decoded_length_is_delivered() {
+    let payload = vec![b'p'; 512];
+    let mut pipeline = transport_delimited_pipeline(unsigned_body(&[&payload, &payload]), 1024, ChunkLimits::default());
+    let delivered = drain_pipeline(&mut pipeline, 4096).map(|bytes| bytes.len());
+    assert_eq!(delivered.ok(), Some(1024));
+    assert_eq!(pipeline.decoded_bytes(), 1024);
+    assert!(pipeline.commit_allowed());
+}
+
+/// Negative: with no wire length the decoded length is the ceiling, so the first byte past it is
+/// refused and the counter never passes the declaration.
+#[test]
+fn a_transport_delimited_body_longer_than_its_decoded_length_is_refused() {
+    let payload = vec![b'p'; 512];
+    let body = unsigned_body(&[&payload, &payload, &payload]);
+    let mut pipeline = transport_delimited_pipeline(body, 1024, ChunkLimits::default());
+    let _ = drain_pipeline(&mut pipeline, 4096).expect_err("the third chunk is over the declaration");
+    assert_eq!(pipeline.reject(), Some(ChunkReject::DecodedLengthOverflow { declared: 1024 }));
+    assert_eq!(pipeline.decoded_bytes(), 1024);
+    assert!(!pipeline.commit_allowed());
+}
+
+/// Negative: and a short body is refused at the terminal chunk rather than committed short.
+#[test]
+fn a_transport_delimited_body_shorter_than_its_decoded_length_is_refused() {
+    let payload = vec![b'p'; 1023];
+    let mut pipeline = transport_delimited_pipeline(unsigned_body(&[&payload]), 1024, ChunkLimits::default());
+    let _ = drain_pipeline(&mut pipeline, 4096).expect_err("one byte short");
+    assert_eq!(
+        pipeline.reject(),
+        Some(ChunkReject::DecodedLengthUnderflow {
+            declared: 1024,
+            actual: 1023
+        })
+    );
+    assert!(!pipeline.commit_allowed());
+}
+
+/// Negative: the chunk-count ceiling is derived from the decoded length, so it still bounds a
+/// micro-chunk flood when there is no wire length to bound it.
+#[test]
+fn the_chunk_count_ceiling_still_bounds_a_transport_delimited_body() {
+    let mut body = Vec::new();
+    for _ in 0..4096 {
+        body.extend_from_slice(b"1\r\nx\r\n");
+    }
+    body.extend_from_slice(b"0\r\n\r\n");
+    let mut pipeline = transport_delimited_pipeline(body, 4096, ChunkLimits::default());
+    let _ = drain_pipeline(&mut pipeline, 4096).expect_err("a flood of one-byte chunks");
+    assert!(
+        matches!(pipeline.reject(), Some(ChunkReject::TooManyChunks { .. })),
+        "got {:?}",
+        pipeline.reject()
+    );
 }

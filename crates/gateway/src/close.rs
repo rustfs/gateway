@@ -349,8 +349,12 @@ mod tests {
             ConnectionIntent::Close
         );
         assert_eq!(
-            after_chunk_reject(&ChunkReject::ModeConfusion(ModeConfusion::WireLengthMissing)),
+            after_chunk_reject(&ChunkReject::DecodedLengthOverflow { declared: 4 }),
             ConnectionIntent::Close
+        );
+        assert_eq!(
+            after_chunk_reject(&ChunkReject::ModeConfusion(ModeConfusion::DecodedLengthMissing)),
+            ConnectionIntent::MayKeepAlive
         );
         assert_eq!(after_chunk_reject(&ChunkReject::LeadingZeros), ConnectionIntent::MayKeepAlive);
         assert_eq!(after_chunk_reject(&ChunkReject::BadLineTerminator), ConnectionIntent::MayKeepAlive);

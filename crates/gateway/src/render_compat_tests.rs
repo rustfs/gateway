@@ -76,8 +76,11 @@ fn the_chunk_flag_reaches_the_response_and_branches() {
     assert!(!syntax.must_close_connection());
     assert!(!announces_close(&syntax));
 
-    let no_length = from_chunk_reject(ChunkReject::ModeConfusion(ModeConfusion::WireLengthMissing));
-    assert!(no_length.must_close_connection());
+    let overflow = from_chunk_reject(ChunkReject::DecodedLengthOverflow { declared: 4 });
+    assert!(overflow.must_close_connection());
+
+    let no_decoded_length = from_chunk_reject(ChunkReject::ModeConfusion(ModeConfusion::DecodedLengthMissing));
+    assert!(!no_decoded_length.must_close_connection());
 }
 
 #[test]

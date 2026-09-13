@@ -132,6 +132,8 @@ mod sigv2_runtime;
 mod sse_runtime;
 #[path = "streaming_request.rs"]
 mod streaming_request;
+#[path = "streaming_without_length.rs"]
+mod streaming_without_length;
 #[path = "tagging_reachability.rs"]
 mod tagging_reachability;
 #[path = "throughput_request.rs"]

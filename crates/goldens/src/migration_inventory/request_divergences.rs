@@ -152,15 +152,21 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 14] = [
     RequestDivergence {
         id: "rd-put-0003",
         operation: "PutObject",
-        request: "no Content-Length",
-        aws: "answers 411 MissingContentLength",
+        request: "no Content-Length on a plain body (Transfer-Encoding: chunked included)",
+        aws: "answers 411 MissingContentLength; an aws-chunked upload may omit Content-Length under a transfer coding \
+              and states the object size in x-amz-decoded-content-length, mandatory in every streaming mode (sigv4-streaming)",
         aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html",
-        s3s: "takes the length from an exact body size hint (the in-process fixture has one); over a chunked transport it stays absent",
-        gateway: "411 MissingContentLength (q-length-0007)",
-        client_impact: "over a real chunked transport RustFS already refuses a PUT with no length (400 UnexpectedContent), so the client \
-                        sees the AWS code rather than a new refusal; framed streaming without Content-Length is decided separately",
+        s3s: "takes the length from an exact body size hint (the in-process fixture has one); over a chunked transport it stays absent. \
+              A STREAMING-* body needs x-amz-decoded-content-length instead, holds the decoded count to it and reports it as the length",
+        gateway: "411 MissingContentLength for a plain body (q-length-0007). An aws-chunked body under Transfer-Encoding: chunked or \
+                  HTTP/2 without Content-Length is accepted with its decoded length as the only ceiling, refused on any \
+                  decoded-count mismatch, refused without the decoded length, and decoded with ContentLength = the decoded length \
+                  (rustfs/gateway#750)",
+        client_impact: "over a real chunked transport RustFS already refuses a plain PUT with no length (400 UnexpectedContent), so the \
+                        client sees the AWS code rather than a new refusal; botocore's trailer upload over TLS (chunked, no \
+                        Content-Length) is accepted as RustFS accepts it",
         ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::Open("https://github.com/rustfs/gateway/issues/750"),
+        follow_up: DivergenceFollowUp::Landed("c-chunked-0002"),
         test_file: PUT_DECODE,
         test: "a_put_without_content_length_is_refused_by_the_gateway_and_backfilled_by_s3s",
     },

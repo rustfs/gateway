@@ -58,7 +58,8 @@
 //! decoder counts what it produces and fails the moment it diverges from
 //! `x-amz-decoded-content-length`, which [`rustfs_gateway_http::validate_decoded_length`] has
 //! already cross-checked against `Content-Length` *before the first byte is read*. So the decoded
-//! size is pinned by the head, not policed by a budget.
+//! size is pinned by the head, not policed by a budget — and alone, when the transport ends the body
+//! (rustfs/gateway#750). It is also what `ContentLength` reads ([`framed_object_length`]).
 //!
 //! # Trailer commit boundary
 //!
@@ -69,7 +70,7 @@
 
 use bytes::{Bytes, BytesMut};
 use http::HeaderMap;
-use rustfs_gateway_core::{HandlerError, ResponseKind};
+use rustfs_gateway_core::{HandlerError, MetaView, ResponseKind};
 use rustfs_gateway_http::{
     BodyDigests, ChecksumVerified, ChunkFraming, ChunkLimits, ChunkReject, ChunkScope, ChunkSeed, ChunkSigner, DecodedLength,
     Framing, IngestPipeline, IngestPolicy, PayloadFramingSource, TrailerDeclaration, validate_decoded_length,
@@ -209,8 +210,7 @@ impl ChunkIngest {
             None
         };
 
-        let header = headers.get(DECODED_LENGTH_HEADER).and_then(|value| value.to_str().ok());
-        let declared = validate_decoded_length(&framing, header, wire)
+        let declared = validate_decoded_length(&framing, decoded_length_header(headers), wire)
             .map_err(from_chunk_reject)?
             .ok_or_else(|| {
                 from_chunk_reject(ChunkReject::ModeConfusion(rustfs_gateway_http::ModeConfusion::DecodedLengthMissing))
@@ -292,6 +292,33 @@ impl ChunkIngest {
     }
 }
 
+/// What `ContentLength` reads for a framed body: the decoded length, which is the object's size
+/// where `Content-Length` counts the framing or is absent. [`ChunkIngest::prepare`]'s own verdict
+/// from the same head; `None` for an unframed mode or any head `prepare` refuses before decode.
+pub(crate) fn framed_object_length(payload: &PayloadMode, headers: &HeaderMap, wire: &Framing) -> Option<u64> {
+    let framing = ChunkFraming::derive(&FramingOf(payload))
+        .ok()
+        .filter(ChunkFraming::is_framed)?;
+    let declared = validate_decoded_length(&framing, decoded_length_header(headers), wire).ok()??;
+    Some(declared.get())
+}
+
+/// The head the codec decodes a framed body from: `meta` with `content-length` answered by
+/// [`framed_object_length`] (rustfs/gateway#750); `None` leaves `meta` as it stands.
+pub(crate) fn framed_meta<'a>(
+    meta: &MetaView<'a>,
+    payload: Option<&PayloadMode>,
+    headers: &HeaderMap,
+    wire: &Framing,
+) -> Option<MetaView<'a>> {
+    framed_object_length(payload?, headers, wire).map(|length| meta.with_framed_content_length(length))
+}
+
+/// `x-amz-decoded-content-length` as text, for [`validate_decoded_length`] to judge.
+fn decoded_length_header(headers: &HeaderMap) -> Option<&str> {
+    headers.get(DECODED_LENGTH_HEADER).and_then(|value| value.to_str().ok())
+}
+
 /// Builds the chunk signer from what the authenticator published and the signature the client
 /// presented.
 ///
@@ -371,6 +398,10 @@ pub(crate) fn presented_signature_hex(headers: &HeaderMap, query: &str) -> Optio
     None
 }
 
+#[cfg(test)]
+#[path = "chunked_length_tests.rs"]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod length_tests;
 #[cfg(test)]
 #[path = "chunked_trailer_tests.rs"]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
@@ -754,26 +785,5 @@ mod tests {
             .expect_err("the chunk signature is not the one the chain derives");
         assert_eq!(error.status(), http::StatusCode::FORBIDDEN);
         assert!(error.must_close_connection(), "an unverified peer's connection does not survive");
-    }
-
-    /// Negative — a framed body that declares no decoded length is refused at the head, before a
-    /// byte is read. Without the header the decoder has nothing to check the arriving length
-    /// against, which is the state every length check exists to avoid.
-    #[tokio::test]
-    async fn a_framed_body_without_a_decoded_length_is_refused_at_the_head() {
-        let wire = wire_length(4096);
-        let error = ChunkIngest::prepare(
-            &PayloadMode::StreamingSigned {
-                trailer: rustfs_gateway_sig::TrailerSet::None,
-            },
-            &HeaderMap::new(),
-            &wire,
-            &ChunkSink::new(),
-            None,
-            ChunkLimits::default(),
-        )
-        .err()
-        .expect("no decoded length");
-        assert_eq!(error.status(), http::StatusCode::BAD_REQUEST);
     }
 }

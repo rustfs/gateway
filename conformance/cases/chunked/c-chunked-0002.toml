@@ -1,0 +1,72 @@
+# c-chunked-0002 — aws-chunked upload framed by Transfer-Encoding: chunked with no Content-Length.
+#
+# Schema dimensions exercised: framed upload without a wire length, response status.
+
+[case]
+id = "c-chunked-0002"
+schema_version = 1
+title = "A streaming upload under Transfer-Encoding chunked with a decoded length and no Content-Length is stored"
+rationale = """
+botocore sends every trailer-checksum upload over TLS this way: it deletes Content-Length, sets \
+Transfer-Encoding chunked and aws-chunked, and states the object size only in \
+x-amz-decoded-content-length. AWS allows the missing Content-Length under a transfer coding and \
+makes the decoded length mandatory for exactly that reason, and s3s accepts the shape, so a server \
+that answers it with a framing refusal fails the most common Python client on its default path. \
+The decoded length is then the ceiling the decoder holds the body to, which c-chunked-0003 \
+exercises from the other side."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["streaming", "chunked", "wire-bytes"]
+timeout_ms = 10000
+quirks = []
+applies_to = { http_versions = ["http/1.1"], tls = "any" }
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-streaming.html"
+summary = "Content-Length may be omitted when a transfer coding is used, and the decoded length names the object size."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/boto/botocore/blob/45d607480126f3ebd2f505c863b2805122f56ab2/botocore/httpchecksum.py#L452-L490"
+summary = "botocore's trailer path sets chunked transfer and aws-chunked and removes Content-Length."
+kind = "other"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/blob/87686db11dcf8c4cdff2a2c16cd1246693afe070/crates/s3s/src/ops/signature.rs#L819-L850"
+summary = "s3s requires only the decoded length for a streaming payload and never consults Content-Length there."
+kind = "other"
+
+[[setup.buckets]]
+name = "conf-chunked"
+
+[[setup.objects]]
+bucket = "conf-chunked"
+key = "chunked-no-length"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-chunked/chunked-no-length"
+
+[request.headers]
+"content-encoding" = "aws-chunked"
+"transfer-encoding" = "chunked"
+"x-amz-decoded-content-length" = "11"
+
+[request.sign]
+mode = "sigv4_streaming"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+payload_hash = "streaming"
+
+[[request.chunks]]
+utf8 = "hello"
+
+[[request.chunks]]
+utf8 = " world"
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
