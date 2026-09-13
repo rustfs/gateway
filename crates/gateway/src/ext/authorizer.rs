@@ -37,7 +37,7 @@
 //! answered to a caller whose identity is known but whose permission is not, and a refusal that
 //! explained which condition failed would let that caller map the policy one request at a time.
 
-use rustfs_gateway_core::{BoxFuture, ResourceIdentity, ResourceShape};
+use rustfs_gateway_core::{BoxFuture, ResourceIdentity, ResourceShape, Subject};
 use rustfs_gateway_sig::{Identity, RequestNow, VerifiedScope};
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
@@ -179,6 +179,12 @@ pub struct AuthzRequest<'a> {
     pub identity: Option<&'a Identity>,
     /// Whether the bucket name came from the host or the path.
     pub target_origin: TargetOrigin,
+    /// Whose account the request acts on, when the operation declares a subject rule (ADR-0025);
+    /// `None` otherwise. Decoded once, before authentication, and handed unchanged to both stages
+    /// and to the handler. Whether a named subject is the caller, or one of the caller's service
+    /// accounts, is this authorizer's decision: only it can look that up. The facade never asks
+    /// about a subject for an anonymous caller.
+    pub subject: Option<&'a Subject>,
 }
 
 impl AuthzRequest<'_> {
@@ -458,6 +464,7 @@ mod tests {
             route_key: None,
             identity,
             target_origin: TargetOrigin::Path,
+            subject: None,
         }
     }
 

@@ -648,6 +648,7 @@ if (
     fail("crates/gateway integration target must use the active harness without required features")
 
 gateway_modules = (
+    "action_rules_runtime",
     "anonymous_delegation_runtime",
     "assembly",
     "assembly_order",

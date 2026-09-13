@@ -80,6 +80,7 @@ second copy is a second thing to keep in sync.
 | 0022 | A typed, read-only request context on handler requests | Accepted |
 | 0023 | An opt-in any-region signing scope for RustFS clients | Accepted |
 | 0024 | Dialect path-prefix claims, path templates, alias rows, a per-operation caller secret and service-level operations | Accepted |
+| 0025 | Action rules, subject rules and bound buckets for RustFS's custom-auth admin routes | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

@@ -65,6 +65,7 @@ use rustfs_gateway_http::{HeaderView, WireRequest};
 use rustfs_gateway_sig::{Identity, SecretBytes, SigFamily, SigIdentity, SigLocation, SigService, Verdict, VerifiedScope};
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
+use crate::authz::Subject;
 use crate::route::PathParams;
 
 /// How the request named its bucket, as the facade's host resolver decided it.
@@ -271,6 +272,7 @@ pub struct RequestContextView {
     headers: HeaderMap,
     principal: Option<RequestPrincipal>,
     path_params: PathParams,
+    subject: Option<Subject>,
 }
 
 impl RequestContextView {
@@ -322,6 +324,7 @@ impl RequestContextView {
             headers,
             principal,
             path_params: PathParams::none(),
+            subject: None,
         })
     }
 
@@ -332,6 +335,14 @@ impl RequestContextView {
     #[must_use]
     pub fn with_path_params(mut self, path_params: PathParams) -> Self {
         self.path_params = path_params;
+        self
+    }
+
+    /// This context, with the subject both authorizer stages judged (ADR-0025). The facade calls
+    /// it once, for an operation whose requirement declares a subject rule.
+    #[must_use]
+    pub fn with_subject(mut self, subject: Option<Subject>) -> Self {
+        self.subject = subject;
         self
     }
 
@@ -356,6 +367,7 @@ impl RequestContextView {
             headers: HeaderMap::new(),
             principal: None,
             path_params: PathParams::none(),
+            subject: None,
         }
     }
 
@@ -439,6 +451,14 @@ impl RequestContextView {
     pub const fn path_params(&self) -> &PathParams {
         &self.path_params
     }
+
+    /// The account the request acts on, exactly as both authorizer stages were asked about it;
+    /// `None` for an operation that declares no subject rule (ADR-0025). A handler acts on this
+    /// value and never parses the query for it a second time.
+    #[must_use]
+    pub const fn subject(&self) -> Option<&Subject> {
+        self.subject.as_ref()
+    }
 }
 
 /// Prints the header names only: a value may be a signature, a session token or an SSE-C key.
@@ -465,6 +485,7 @@ impl fmt::Debug for RequestContextView {
             .field("header_names", &HeaderNames(&self.headers))
             .field("principal", &self.principal)
             .field("path_params", &self.path_params)
+            .field("subject", &self.subject)
             .finish()
     }
 }

@@ -1,0 +1,11 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+  --> tests/compile_fail/authz_subject_name_forged.rs:25:28
+   |
+25 |     let _ = Subject::Named(SubjectName(Box::from("root")));
+   |                            ^^^^^^^^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> src/authz/rule.rs
+   |
+   | pub struct SubjectName(Box<str>);
+   |                        ^^^^^^^^ private field

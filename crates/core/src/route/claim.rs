@@ -458,6 +458,21 @@ impl PathTemplate {
         Ok(PathParams { values })
     }
 
+    /// The raw, still-encoded segment `name` matched in `raw_path`, or `None` when the path does
+    /// not match or the template has no such parameter. For a bound bucket (ADR-0025), whose
+    /// label must meet the S3 rules undecoded.
+    #[must_use]
+    pub fn raw_value<'p>(&self, raw_path: &'p str, name: &str) -> Option<&'p str> {
+        if !self.matches(raw_path) {
+            return None;
+        }
+        let rest = raw_path.strip_prefix('/').unwrap_or(raw_path);
+        self.segments
+            .iter()
+            .zip(rest.split('/'))
+            .find_map(|(segment, raw)| matches!(segment, Segment::Parameter(parameter) if *parameter == name).then_some(raw))
+    }
+
     /// A path both templates match, or `None` when no path does.
     pub(super) fn overlap_path(&self, other: &Self) -> Option<String> {
         if self.segments.len() != other.segments.len() {
