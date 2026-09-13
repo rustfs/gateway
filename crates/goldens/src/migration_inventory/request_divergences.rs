@@ -262,13 +262,14 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 14] = [
         aws: "HTTP allows obs-text octets in a field value; S3 ignores headers it does not define",
         aws_evidence: "https://www.rfc-editor.org/rfc/rfc9110#section-5.5",
         s3s: "passes the raw value to the handler",
-        gateway: "the text header view skips it, so the converted request lacks it",
+        gateway: "the text header view still skips it, but the handler request context publishes every accepted line (iter_raw, \
+                  ADR-0022), so a request an adapter converts from the handler context carries it byte for byte: zero diff",
         client_impact: "RustFS reads raw headers directly (MIME fallback, SSE-C fallback, replication and x-rustfs-* controls); \
-                        an adapter built on the text view would lose such values without a refusal",
+                        the production adapter must build its header map from the handler context, never from the text view",
         ruling: DivergenceRuling::AlignS3s,
-        follow_up: DivergenceFollowUp::Open(ADAPTER_SEAM),
+        follow_up: DivergenceFollowUp::Open(M1_ADAPTER),
         test_file: PUT_CONTEXT,
-        test: "divergence_a_non_utf8_header_value_reaches_only_the_s3s_handler",
+        test: "divergence_a_non_utf8_header_value_reaches_both_handlers",
     },
     RequestDivergence {
         id: "rd-ctx-0003",

@@ -123,6 +123,7 @@ impl std::error::Error for Unavailable {}
 pub struct AuthenticationOutcome {
     verdict: Verdict,
     scope_rejection: Option<ScopeRejection>,
+    caller_secret: Option<rustfs_gateway_sig::SecretBytes>,
 }
 
 impl AuthenticationOutcome {
@@ -132,7 +133,19 @@ impl AuthenticationOutcome {
         Self {
             verdict,
             scope_rejection: None,
+            caller_secret: None,
         }
+    }
+
+    /// Attaches the secret this authenticator's own credential lookup returned for the principal it
+    /// authenticated; the handler reads it as `RequestPrincipal::secret_key_from_authenticator_lookup`
+    /// (ADR-0022). The pipeline hands it on only with an `Authenticated` verdict. Attach one only
+    /// when the deployment asked for it, as [`SigV4Authenticator::hand_caller_secret_to_handlers`]
+    /// does.
+    #[must_use]
+    pub fn with_caller_secret(mut self, secret: rustfs_gateway_sig::SecretBytes) -> Self {
+        self.caller_secret = Some(secret);
+        self
     }
 
     /// Borrows the exact verdict produced by the authenticator.
@@ -145,11 +158,20 @@ impl AuthenticationOutcome {
         Self {
             verdict: Verdict::reject(AuthError::AuthorizationHeaderMalformed),
             scope_rejection: Some(scope_rejection),
+            caller_secret: None,
         }
     }
 
-    pub(crate) fn into_parts(self) -> (Verdict, Option<ScopeRejection>) {
-        (self.verdict, self.scope_rejection)
+    /// An authenticated outcome, carrying the looked-up secret when the authenticator hands it on.
+    pub(super) fn authenticated(verdict: Verdict, caller_secret: Option<rustfs_gateway_sig::SecretBytes>) -> Self {
+        Self {
+            caller_secret,
+            ..Self::ordinary(verdict)
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (Verdict, Option<ScopeRejection>, Option<rustfs_gateway_sig::SecretBytes>) {
+        (self.verdict, self.scope_rejection, self.caller_secret)
     }
 }
 
@@ -446,7 +468,13 @@ pub struct SigV4Authenticator {
     /// would be two of each, kept in step by hand.
     pub(super) credentials: Arc<GuardedCredentialProvider>,
     regions: RegionSet,
+    /// Whether a successful lookup's secret is handed to the handler (ADR-0022). Off by default;
+    /// `pub(super)` so the SigV2 half honours the same switch.
+    pub(super) hand_secret: bool,
 }
+
+/// An authenticated verdict, and the looked-up secret when the authenticator hands it on.
+pub(super) type VerifiedWithSecret = (Verdict, Option<rustfs_gateway_sig::SecretBytes>);
 
 impl core::fmt::Debug for SigV4Authenticator {
     /// Hand-written: a credential provider is not required to be `Debug`, and requiring it would
@@ -455,6 +483,7 @@ impl core::fmt::Debug for SigV4Authenticator {
         f.debug_struct("SigV4Authenticator")
             .field("regions", &self.regions)
             .field("credential_guard", self.credentials.config())
+            .field("hands_caller_secret_to_handlers", &self.hand_secret)
             .finish()
     }
 }
@@ -470,6 +499,7 @@ impl SigV4Authenticator {
         Self {
             credentials: Arc::new(GuardedCredentialProvider::new(credentials)),
             regions,
+            hand_secret: false,
         }
     }
 
@@ -483,12 +513,28 @@ impl SigV4Authenticator {
         Self {
             credentials: Arc::new(GuardedCredentialProvider::with_config(credentials, config)),
             regions,
+            hand_secret: false,
         }
+    }
+
+    /// Hands the secret this authenticator's own credential lookup returned for an authenticated
+    /// principal to the handler, as `RequestPrincipal::secret_key_from_authenticator_lookup`
+    /// (ADR-0022).
+    ///
+    /// Off by default, and meant for a backend that genuinely needs the secret: one that decrypts
+    /// a payload the client encrypted with it, or an adapter filling s3s's
+    /// `Credentials::secret_key`. The secret travels only after the signature matched and the
+    /// credential was admitted; a rejected or anonymous request never carries one, and no lookup
+    /// happens that verification did not already make.
+    #[must_use]
+    pub fn hand_caller_secret_to_handlers(mut self) -> Self {
+        self.hand_secret = true;
+        self
     }
 
     async fn verify(&self, request: &Authentication<'_>) -> Result<AuthenticationOutcome, Unavailable> {
         match self.try_verify(request).await {
-            Ok(Some(verdict)) => Ok(AuthenticationOutcome::ordinary(verdict)),
+            Ok(Some((verdict, secret))) => Ok(AuthenticationOutcome::authenticated(verdict, secret)),
             Ok(None) => Err(Unavailable),
             Err(VerificationFailure::Ordinary(error)) => Ok(AuthenticationOutcome::ordinary(Verdict::reject(error))),
             Err(VerificationFailure::Scope(scope_rejection)) => Ok(AuthenticationOutcome::scope_rejected(scope_rejection)),
@@ -496,7 +542,7 @@ impl SigV4Authenticator {
     }
 
     /// `Ok(None)` is the store outage; every other outcome is a verdict or a rejection.
-    async fn try_verify(&self, request: &Authentication<'_>) -> Result<Option<Verdict>, VerificationFailure> {
+    async fn try_verify(&self, request: &Authentication<'_>) -> Result<Option<VerifiedWithSecret>, VerificationFailure> {
         let sealed = request.sealed();
         let view = sealed.view();
         let location = sealed.marker().location();
@@ -639,12 +685,11 @@ impl SigV4Authenticator {
         // The scope published is the one `enforce_scope` produced above and the signing key was
         // derived from — not a re-parse of the header and not a configured region, so a verdict
         // cannot name a region other than the one the signature is valid under (ADR-0020).
-        Ok(Some(Verdict::authenticated_in_scope(
-            credentials.identity().clone(),
-            scheme,
-            verified,
-            proof,
-        )))
+        // The secret is the one this lookup returned and the signature was just verified with,
+        // copied only when the deployment asked for the hand-off (ADR-0022).
+        let secret = self.hand_secret.then(|| credentials.secret().clone_secret());
+        let verdict = Verdict::authenticated_in_scope(credentials.identity().clone(), scheme, verified, proof);
+        Ok(Some((verdict, secret)))
     }
 }
 

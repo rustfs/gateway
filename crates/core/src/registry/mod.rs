@@ -540,7 +540,8 @@ impl Registry {
     ///
     /// This convenience preserves the consuming type-state transition for typed integrations that
     /// have no second-stage policy decisions to supply. Operations with derived resources must use
-    /// the erased decode/resource/authorize path.
+    /// the erased decode/resource/authorize path. No request was accepted or authenticated, so the
+    /// handler receives [`crate::RequestContextView::detached`]: anonymous, with no header line.
     ///
     /// # Errors
     ///
@@ -556,7 +557,9 @@ impl Registry {
     {
         let decoded = crate::authz::prepare_input::<O>(input).map_err(|_| crate::Denied::indeterminate())?;
         let authorized = crate::authz::authorize_input(decoded, |_| crate::Decision::Indeterminate)?;
-        Ok(self.handlers.invoke(authorized, sse))
+        Ok(self
+            .handlers
+            .invoke(authorized, sse, crate::RequestContextView::detached(O::NAME)))
     }
 
     /// How many operations are registered.

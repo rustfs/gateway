@@ -298,6 +298,32 @@ fn an_empty_access_key_is_refused_by_name() {
     );
 }
 
+/// An authenticated handler context whose authenticator did not hand the caller's secret over
+/// cannot become s3s credentials: the conversion refuses by name rather than inventing a secret.
+#[test]
+fn a_principal_without_a_handed_off_secret_is_refused_by_name() {
+    let refused = Principal::from_handler(ACCESS_KEY, None, None).expect_err("no secret to carry");
+    assert_eq!(refused.field, "credentials");
+}
+
+/// A secret that is not UTF-8 has no s3s spelling; refused by name, never lossily converted.
+#[test]
+fn a_secret_that_is_not_utf8_is_refused_by_name() {
+    let refused = Principal::from_handler(ACCESS_KEY, Some(b"\xff\xfe"), None).expect_err("no s3s spelling");
+    assert_eq!(refused.field, "credentials");
+}
+
+/// A signed request through a service whose authenticator keeps the secret to itself (the
+/// default) reaches the handler, and the adapter then refuses to build s3s credentials.
+#[test]
+fn a_signed_request_without_the_secret_hand_off_is_refused_by_name() {
+    let request = ContextRequest::put(PATH_HOST, "/photos/a.jpg", b"hello")
+        .signed("us-east-1")
+        .without_secret_hand_off();
+    let refusal = compare(&request).map(|_| ()).expect_err("the conversion refuses");
+    assert!(refusal.contains("credentials"), "{refusal}");
+}
+
 #[test]
 fn a_path_that_is_not_origin_form_is_refused_by_name() {
     for raw_path in ["photos/a.jpg", "/photos/a b.jpg"] {
@@ -358,21 +384,28 @@ fn divergence_a_regional_virtual_host_names_a_different_bucket_and_region() {
     assert_eq!(differing_context(&compared.converted, &compared.oracle), ["region"]);
 }
 
-/// A field value that is not UTF-8 (here one Latin-1 byte, as some proxies write) reaches the s3s
-/// handler; the gateway's header view skips it (s3s#597 rule), so the converted request lacks it.
+/// A field value that is not UTF-8 (here one Latin-1 byte, as some proxies write). The gateway's
+/// text view still skips it (s3s#597 rule), but the handler context publishes every accepted line
+/// through `iter_raw` (ADR-0022), so the request an adapter converts from the handler context
+/// carries it byte for byte, exactly as the s3s handler receives it.
 ///
 /// Ruling: `rd-ctx-0002`
 #[test]
-fn divergence_a_non_utf8_header_value_reaches_only_the_s3s_handler() {
+fn divergence_a_non_utf8_header_value_reaches_both_handlers() {
     let request = ContextRequest::put(PATH_HOST, "/photos/a.jpg", b"hello").header("x-proxy-note", b"caf\xe9");
     let compared = compared(&request);
 
-    assert!(compared.converted.headers.get("x-proxy-note").is_none());
+    let expected = Some(&b"caf\xe9"[..]);
     assert_eq!(
-        compared.oracle.headers.get("x-proxy-note").map(http::HeaderValue::as_bytes),
-        Some(&b"caf\xe9"[..])
+        compared
+            .converted
+            .headers
+            .get("x-proxy-note")
+            .map(http::HeaderValue::as_bytes),
+        expected
     );
-    assert_eq!(differing_context(&compared.converted, &compared.oracle), ["headers"]);
+    assert_eq!(compared.oracle.headers.get("x-proxy-note").map(http::HeaderValue::as_bytes), expected);
+    assert_eq!(differing_context(&compared.converted, &compared.oracle), NONE);
 }
 
 /// A transport layer's extension (RustFS installs its `RemoteAddr` and `RequestContext` this way)
@@ -414,7 +447,7 @@ fn divergence_an_empty_query_marker_is_kept_only_by_s3s() {
     let oracle = exchange.oracle.expect("s3s reaches its handler");
 
     assert_eq!(oracle.uri.query(), Some(""));
-    let converted = request_to_s3s(exchange.gateway.context, ()).expect("a representable context");
+    let converted = exchange.gateway.converted.expect("a representable context");
     assert_eq!(converted.uri.query(), None);
     assert_eq!(differing_context(&converted, &oracle), ["uri"]);
 }

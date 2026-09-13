@@ -133,14 +133,17 @@ impl SigV4Authenticator {
     /// ladder.
     pub(super) async fn verify_sigv2(&self, request: &SigV2Authentication<'_>) -> Result<AuthenticationOutcome, Unavailable> {
         match self.try_verify_sigv2(request).await {
-            Ok(Some(verdict)) => Ok(AuthenticationOutcome::ordinary(verdict)),
+            Ok(Some((verdict, secret))) => Ok(AuthenticationOutcome::authenticated(verdict, secret)),
             Ok(None) => Err(Unavailable),
             Err(error) => Ok(AuthenticationOutcome::ordinary(Verdict::reject(error))),
         }
     }
 
     /// `Ok(None)` is the store outage; every other outcome is a verdict or a rejection.
-    async fn try_verify_sigv2(&self, request: &SigV2Authentication<'_>) -> Result<Option<Verdict>, AuthError> {
+    async fn try_verify_sigv2(
+        &self,
+        request: &SigV2Authentication<'_>,
+    ) -> Result<Option<super::authenticator::VerifiedWithSecret>, AuthError> {
         let sealed = request.sealed();
         let view = sealed.view();
         let resolved = self.credentials.lookup(sealed.access_key_id()).await;
@@ -231,7 +234,9 @@ impl SigV4Authenticator {
             SigV2Mode::HeaderAuth => AuthScheme::sigv2_header(identity_axis, sealed.expected_service()),
             _ => return Err(AuthError::AuthorizationHeaderMalformed),
         };
-        Ok(Some(Verdict::authenticated(credentials.identity().clone(), scheme, proof)))
+        // As the SigV4 half: the secret this lookup returned, only when the hand-off is on (ADR-0022).
+        let secret = self.hand_secret.then(|| credentials.secret().clone_secret());
+        Ok(Some((Verdict::authenticated(credentials.identity().clone(), scheme, proof), secret)))
     }
 }
 

@@ -38,13 +38,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
 use http::{Method, Request};
-use rustfs_gateway_core::dispatch::NOT_REGISTERED_MESSAGE;
 use rustfs_gateway_core::handler::{Handler, HandlerError, HandlerResult, Req, Resp};
 use rustfs_gateway_core::op::{AuthRequirement, HasOperation, Operation, ResourceShape};
 use rustfs_gateway_core::registry::{
     BuildError, HandlerDeadlineClass, MissingHandlers, OperationSet, OperationSpec, Registry, RegistryError, RouterBuilder,
 };
 use rustfs_gateway_core::route::{Predicate, TargetKind};
+use rustfs_gateway_core::{RequestContextView as Context, dispatch::NOT_REGISTERED_MESSAGE};
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::ErrorCode;
@@ -854,7 +854,7 @@ fn an_erased_call_with_the_wrong_payload_is_an_error_not_a_panic() {
     let call = router
         .registry()
         .handlers()
-        .invoke_erased("PutObject", wrong, sse_proof())
+        .invoke_erased("PutObject", wrong, sse_proof(), Context::detached("PutObject"))
         .expect("PutObject is registered");
     let error = block_on(call).expect_err("the payload is another operation's");
     assert_eq!(error.code(), &ErrorCode::INTERNAL_ERROR);
@@ -865,7 +865,7 @@ fn an_erased_call_with_the_wrong_payload_is_an_error_not_a_panic() {
 fn an_erased_call_for_an_unregistered_operation_finds_nothing() {
     let router = RouterBuilder::new().build().expect("an empty backend still builds");
     let handlers = router.registry().handlers();
-    let call = handlers.invoke_erased("PutObject", erased_get_bucket_location(), sse_proof());
+    let call = handlers.invoke_erased("PutObject", erased_get_bucket_location(), sse_proof(), Context::detached("PutObject"));
     assert!(call.is_none());
     assert!(handlers.is_empty());
 }

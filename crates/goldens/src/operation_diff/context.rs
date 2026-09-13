@@ -15,25 +15,27 @@
 //! Harness for the request-context diff against the pinned s3s oracle.
 //!
 //! Responsible for: building one raw request — optionally SigV4-signed by the gateway's client
-//! signer, optionally addressed to a virtual host — and sending the same bytes through (a) the
-//! gateway's real acceptance, host resolution, route table, security floor and SigV4
-//! authenticator, from whose results it assembles a `GatewayRequestContext`, and (b) the pinned
-//! s3s service with the matching auth and host configuration, whose handler records the
-//! `S3Request` it was handed. Then comparing every context member of the two requests.
+//! signer, optionally addressed to a virtual host — and sending the same bytes through (a) a real
+//! assembled gateway service whose backend, like the RustFS ring-2 adapter, turns its handler's
+//! request context into an `s3s::S3Request` context and records it, and (b) the pinned s3s service
+//! with the matching auth and host configuration, whose handler records the `S3Request` it was
+//! handed. Then comparing every context member of the two requests.
 //! NOT responsible for: the input members (the sibling decode diff), body consumption, RustFS
 //! extensions, or production wiring. Only exists under `cfg(test)` (rustfs/backlog#1762, second
 //! slice; rustfs/backlog#1752).
-//! Upstream: `rustfs-gateway` (authenticator, host resolvers), `rustfs-gateway-sig` (floor, scope,
-//! signer), `rustfs-gateway-core` (route table, meta view), `compat::request_context`.
+//! Upstream: `rustfs-gateway` (service assembly, authenticator, host resolvers, the handler request
+//! context), `rustfs-gateway-sig` (floor, signer), `compat::request_context`.
 //! Downstream: the per-operation context proofs beside it.
 //!
-//! # What the gateway side assembles, and from where
+//! # What the gateway side reads, and from where
 //!
-//! Every value comes from a gateway component that already computed it for this request: the
-//! method, raw path and raw query from `WireRequest`; the headers from its text view (the wire
-//! layer publishes no header map); the host region from the resolver; the principal and the
-//! verified credential scope from the authenticator's verdict, which carries the scope the
-//! signature was verified under (ADR-0020) — nothing here re-runs a signature-crate check.
+//! Every context value comes from `Req::context()` inside the gateway handler (ADR-0022), and from
+//! nothing else — the same single source the RustFS adapter has: the method and raw target, every
+//! accepted header line through `iter_raw` (so an unrelated value that is not UTF-8 crosses
+//! unchanged), the host region from the routed addressing, and the principal, its verified scope
+//! and the secret the authenticator handed over. Nothing here re-runs a signature check or looks a
+//! secret up a second time. The accepted `WireRequest` and the host classification are still built
+//! beside the service, for the input decode the GetBucketLocation proof compares.
 
 mod get_bucket_location;
 mod put_object;
@@ -44,20 +46,20 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, Uri};
+use rustfs_gateway::dto;
 use rustfs_gateway::{
-    Addressing, Authentication, Authenticator, Credentials, HostQuery, HostResolver, PathStyleOnly, ResolvedHost,
-    SigV4Authenticator, StaticCredentials, VirtualHostStyle,
+    Authorizer, AuthzRequest, BoxFuture, CallerSecretKey, Credentials, Decision, Handler, HandlerContext, HandlerResult,
+    HostQuery, HostResolver, InputAuthzRequest, InputDecisions, PathStyleOnly, Req, RequestContext, RequestContextView,
+    ResolvedHost, Resp, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, VirtualHostStyle,
 };
-use rustfs_gateway_core::codec::MetaView;
-use rustfs_gateway_core::route::RouteRequestParts;
 use rustfs_gateway_http::{Limits, RawHost, WireRequest};
 use rustfs_gateway_sig::{
-    Admission, AmzDate, OperationFloor, PayloadMode, RawQuery, RegionSet, RequestNow, SecurityFloor, SigService, SigV4Signer,
-    SigningCredentials, SigningRequest, SigningScope, TrailerSet, WireView,
+    AmzDate, PayloadMode, RegionSet, RequestNow, SecurityFloor, SigService, SigV4Signer, SigningCredentials, SigningRequest,
+    SigningScope,
 };
 use rustfs_gateway_types::compat::request_context::{GatewayRequestContext, Principal, VerifiedScope, request_to_s3s};
 
-use super::{HOST, block_on, oracle, route_table, s3s};
+use super::{HOST, block_on, oracle, s3s};
 
 /// The one credential both stacks' stores hold.
 pub(crate) const ACCESS_KEY: &str = "AKIDCONTEXTDIFF";
@@ -89,6 +91,8 @@ pub(crate) struct ContextRequest {
     transport_extension: bool,
     absolute_form: bool,
     empty_query_marker: bool,
+    /// Whether the gateway authenticator hands the caller's secret to the handler (ADR-0022).
+    secret_hand_off: bool,
 }
 
 impl ContextRequest {
@@ -105,6 +109,7 @@ impl ContextRequest {
             transport_extension: false,
             absolute_form: false,
             empty_query_marker: false,
+            secret_hand_off: true,
         }
     }
 
@@ -127,6 +132,12 @@ impl ContextRequest {
     /// Tells both stacks about [`BASE_DOMAIN`].
     pub(crate) fn virtual_hosted(mut self) -> Self {
         self.virtual_hosting = true;
+        self
+    }
+
+    /// Leaves the gateway authenticator at its default, which keeps the caller's secret to itself.
+    pub(crate) fn without_secret_hand_off(mut self) -> Self {
+        self.secret_hand_off = false;
         self
     }
 
@@ -237,38 +248,176 @@ fn amz_date(unix: i64) -> String {
 
 // ── the gateway side ──────────────────────────────────────────────────────────────────────────
 
-/// What the gateway pipeline knows about one request once it is routed and authenticated.
+/// What the gateway handler saw, and what it converted that into.
 pub(crate) struct GatewaySide {
-    /// The operation the route table chose.
+    /// The operation the handler was registered for, from its request context.
     pub(crate) operation: &'static str,
-    /// The facts the context conversion takes.
-    pub(crate) context: GatewayRequestContext,
-    /// The bucket the one meta view decided, from the host or the path.
+    /// The s3s request context the handler built from its request context alone, or why not.
+    pub(crate) converted: Result<s3s::S3Request<()>, String>,
+    /// The bucket the handler's request context names.
     pub(crate) bucket: Option<String>,
-    /// The key the one meta view decided.
+    /// The key the handler's request context names.
     pub(crate) key: Option<String>,
     /// The accepted request, for an input decode.
     pub(crate) wire: WireRequest<()>,
-    /// The host classification the meta view was built from.
+    /// The host classification, for an input decode.
     pub(crate) resolved: ResolvedHost,
 }
 
-fn authenticator() -> SigV4Authenticator {
-    let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("a valid fixture credential");
-    SigV4Authenticator::new(
-        Arc::new(StaticCredentials::new().with(credentials)),
-        RegionSet::new(REGIONS).expect("a non-empty region set"),
-    )
+/// What one handler call recorded.
+struct Recorded {
+    operation: &'static str,
+    converted: Result<s3s::S3Request<()>, String>,
+    bucket: Option<String>,
+    key: Option<String>,
 }
 
-/// The secret the shared store holds for `access_key` — the same store the authenticator and the
-/// s3s auth were built from.
-fn stored_secret(access_key: &str) -> Result<s3s::auth::SecretKey, String> {
-    if access_key == ACCESS_KEY {
-        Ok(SECRET_KEY.into())
-    } else {
-        Err(format!("no stored credential for {access_key}"))
+/// The RustFS adapter's half of the seam: an `s3s::S3Request` context built from nothing but the
+/// handler's request context.
+fn adapter_request(context: &RequestContextView) -> Result<s3s::S3Request<()>, String> {
+    let refused = |error: rustfs_gateway_types::compat::put_object::ConversionError| format!("conversion refused: {error}");
+    let principal = context
+        .principal()
+        .map(|principal| {
+            let scope = principal.verified_scope().map(|scope| VerifiedScope {
+                region: scope.region().to_owned(),
+                service: scope.service().to_owned(),
+            });
+            let secret = principal
+                .secret_key_from_authenticator_lookup()
+                .map(CallerSecretKey::expose_secret);
+            Principal::from_handler(principal.access_key_id(), secret, scope)
+        })
+        .transpose()
+        .map_err(refused)?;
+    let gateway = GatewayRequestContext {
+        method: context.method().clone(),
+        raw_path: context.raw_path().to_owned(),
+        raw_query: context.raw_query().to_owned(),
+        headers: GatewayRequestContext::raw_headers(context.headers().iter_raw()),
+        principal,
+        host_region: context.addressing().host_region().map(str::to_owned),
+        declares_trailers: context
+            .headers()
+            .get_bytes(&HeaderName::from_static("x-amz-trailer"))
+            .is_some(),
+    };
+    request_to_s3s(gateway, ()).map_err(refused)
+}
+
+/// A gateway backend that records, for the one call it gets, what [`adapter_request`] made of the
+/// handler's request context.
+struct AdapterBackend {
+    recorded: Arc<Mutex<Option<Recorded>>>,
+}
+
+impl AdapterBackend {
+    fn record(&self, context: &RequestContextView) {
+        let recorded = Recorded {
+            operation: context.operation(),
+            converted: adapter_request(context),
+            bucket: context.bucket().map(|bucket| bucket.as_str().to_owned()),
+            key: context.key().map(|key| key.as_str().to_owned()),
+        };
+        if let Ok(mut slot) = self.recorded.lock() {
+            *slot = Some(recorded);
+        }
     }
+}
+
+impl Handler<dto::PutObject> for AdapterBackend {
+    async fn call(&self, request: Req<dto::PutObject>) -> HandlerResult<dto::PutObject> {
+        self.record(request.context());
+        Ok(Resp::new(dto::PutObjectOutput::default()))
+    }
+
+    async fn call_with_context(&self, request: Req<dto::PutObject>, _context: HandlerContext) -> HandlerResult<dto::PutObject> {
+        self.record(request.context());
+        Ok(Resp::new(dto::PutObjectOutput::default()))
+    }
+}
+
+impl Handler<dto::GetBucketLocation> for AdapterBackend {
+    async fn call(&self, request: Req<dto::GetBucketLocation>) -> HandlerResult<dto::GetBucketLocation> {
+        self.record(request.context());
+        Ok(Resp::new(dto::GetBucketLocationOutput::default()))
+    }
+
+    async fn call_with_context(
+        &self,
+        request: Req<dto::GetBucketLocation>,
+        _context: HandlerContext,
+    ) -> HandlerResult<dto::GetBucketLocation> {
+        self.record(request.context());
+        Ok(Resp::new(dto::GetBucketLocationOutput::default()))
+    }
+}
+
+/// Allows both stages: this diff is about what a handler sees, not about policy. RustFS's own
+/// access check is the ring-2 authorizer's.
+struct AllowEveryStage;
+
+impl Authorizer for AllowEveryStage {
+    fn authorize_route<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        _request: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
+        Box::pin(async { Decision::Allow })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        let decisions = request.decide_all(Decision::Allow, |_| Decision::Allow);
+        Box::pin(async move { decisions })
+    }
+}
+
+/// The account that owns every fixture bucket.
+pub(crate) const BUCKET_OWNER: &str = "111122223333";
+
+/// Answers [`BUCKET_OWNER`] for every bucket. The gateway checks `x-amz-expected-bucket-owner` at
+/// route authorization, before the handler, where RustFS checks it inside its own handler; a
+/// deployment whose owner lookup agrees is the one in which both stacks reach their handler.
+struct FixtureOwner;
+
+impl rustfs_gateway::BucketOwnerSource for FixtureOwner {
+    fn owner<'a>(
+        &'a self,
+        _bucket: &'a rustfs_gateway_types::BucketName,
+    ) -> BoxFuture<'a, Result<Arc<str>, rustfs_gateway::BucketOwnerError>> {
+        Box::pin(async { Ok(Arc::from(BUCKET_OWNER)) })
+    }
+}
+
+/// The assembled gateway: the built-in SigV4 authenticator over the shared credential, the
+/// virtual-host resolver when the request is virtual-hosted, [`FixtureOwner`], and anonymous
+/// admission delegated to the authorizer (ADR-0021), because RustFS admits every anonymous request
+/// to its access hook.
+fn gateway_service(request: &ContextRequest, recorded: &Arc<Mutex<Option<Recorded>>>) -> Result<S3Service, String> {
+    let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credential: {error:?}"))?;
+    let regions = RegionSet::new(REGIONS).map_err(|error| format!("regions: {error:?}"))?;
+    let mut authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions);
+    if request.secret_hand_off {
+        authenticator = authenticator.hand_caller_secret_to_handlers();
+    }
+    let backend = Arc::new(AdapterBackend {
+        recorded: Arc::clone(recorded),
+    });
+    let mut builder = ServiceBuilder::new()
+        .authenticator(authenticator)
+        .authorizer(AllowEveryStage)
+        .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
+        .bucket_owner_source(FixtureOwner)
+        .register::<dto::PutObject, _>(Arc::clone(&backend))
+        .register::<dto::GetBucketLocation, _>(backend);
+    if request.virtual_hosting {
+        builder = builder.host_resolver(VirtualHostStyle::new([BASE_DOMAIN]).map_err(|error| format!("base domain: {error:?}"))?);
+    }
+    builder.build().map_err(|error| format!("assembly: {error:?}"))
 }
 
 fn resolve(request: &ContextRequest, wire: &WireRequest<()>) -> Result<ResolvedHost, String> {
@@ -285,119 +434,39 @@ fn resolve(request: &ContextRequest, wire: &WireRequest<()>) -> Result<ResolvedH
     }
 }
 
-/// Runs the security floor and, for a sealed request, the built-in SigV4 authenticator.
-fn authenticate(
-    wire: &WireRequest<()>,
-    headers: &HeaderMap,
-    operation: &'static str,
-    now: RequestNow,
-) -> Result<Option<Principal>, String> {
-    let view = WireView::new(headers, RawQuery::new(wire.query().as_str()));
-    // RustFS admits every anonymous request to its access hook and decides there. The gateway
-    // does the same when the floor delegates anonymous admission to the authorizer (ADR-0021),
-    // which is how the harness configures it: the operation's own floor stays the built-in one.
-    let floor = OperationFloor::builtin(operation, SigService::S3);
-    let security = SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report();
-    let sealed = match security.admit(view, &floor, now) {
-        Ok(Admission::Anonymous(_)) => return Ok(None),
-        Ok(Admission::Sealed(sealed)) => sealed,
-        Ok(_) => return Err("the floor admitted a scheme this harness does not drive".to_owned()),
-        Err(error) => return Err(format!("floor refusal: {error:?}")),
-    };
-    let token = header_text(headers, "x-amz-content-sha256")?;
-    let payload = PayloadMode::parse(token, TrailerSet::None).map_err(|error| format!("payload mode: {error:?}"))?;
-    let question = Authentication::new(
-        &sealed,
-        wire.method(),
-        wire.raw_path().as_str(),
-        wire.host().raw_for_signing(),
-        &payload,
-        wire.framing().declared_length(),
-    );
-    let outcome = block_on(authenticator().authenticate(&question)).map_err(|_| "credential store outage".to_owned())?;
-    let identity = outcome
-        .verdict()
-        .identity()
-        .ok_or_else(|| format!("authentication refused: {:?}", outcome.verdict().rejection()))?;
-    // The scope the signature was verified under, from the verdict itself (ADR-0020). Required: a
-    // SigV4 verdict without one is a gateway defect, not a request with no region.
-    let verified = outcome
-        .verdict()
-        .verified_scope()
-        .ok_or_else(|| "the SigV4 verdict carries no verified scope".to_owned())?;
-    Ok(Some(Principal {
-        access_key: identity.access_key_id().to_owned(),
-        secret_key: stored_secret(identity.access_key_id())?,
-        scope: Some(VerifiedScope {
-            region: verified.region().to_owned(),
-            service: verified.service().to_owned(),
-        }),
-    }))
-}
-
-fn header_text<'h>(headers: &'h HeaderMap, name: &str) -> Result<&'h str, String> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| format!("the signed fixture has no readable {name}"))
-}
-
-/// Accepts, resolves, routes and authenticates `request` as the gateway pipeline does, and
-/// assembles the context the conversion takes from what those stages produced.
+/// Sends `request` through the assembled gateway and returns what its handler saw.
 ///
 /// # Errors
 ///
-/// The stage that refused, and why.
-pub(crate) fn gateway_side(request: &ContextRequest, headers: &HeaderMap, now: RequestNow) -> Result<GatewaySide, String> {
+/// The stage that refused, and why. A refusal before the handler comes back with its status.
+pub(crate) fn gateway_side(request: &ContextRequest, headers: &HeaderMap) -> Result<GatewaySide, String> {
     let head = request
         .http_head(headers)
         .body(())
         .map_err(|error| format!("fixture head: {error}"))?;
     let wire = WireRequest::accept(head, &Limits::default()).map_err(|error| format!("wire refusal: {error:?}"))?;
     let resolved = resolve(request, &wire)?;
-    let operation = route_table()
-        .resolve(&RouteRequestParts {
-            method: wire.method(),
-            path: wire.raw_path().as_str(),
-            target: resolved.target,
-            host_class: resolved.host_class,
-            arn_form: resolved.arn_form,
-            query: wire.query(),
-            headers: wire.headers(),
-        })
-        .map(|entry| entry.op_name)
-        .ok_or_else(|| "the route table names no operation".to_owned())?;
-    let (bucket, key) = {
-        let meta = MetaView::addressed(&wire, resolved.target, resolved.bucket().cloned())
-            .map_err(|error| format!("meta view: {}", error.code().as_str()))?;
-        (
-            meta.bucket().map(|bucket| bucket.as_str().to_owned()),
-            meta.key().map(|key| key.as_str().to_owned()),
-        )
-    };
-    let principal = authenticate(&wire, headers, operation, now)?;
-    let mut readable = HeaderMap::new();
-    for (name, text) in wire.headers().iter_text() {
-        let value = HeaderValue::from_bytes(text.as_bytes()).map_err(|error| error.to_string())?;
-        readable.append(name.clone(), value);
-    }
-    let host_region = match &resolved.addressing {
-        Addressing::VirtualHosted { region, .. } => region.as_deref().map(str::to_owned),
-        Addressing::Path => None,
-    };
-    let declares_trailers = wire.headers().get_bytes(&HeaderName::from_static("x-amz-trailer")).is_some();
-    let context = GatewayRequestContext {
-        method: wire.method().clone(),
-        raw_path: wire.raw_path().as_str().to_owned(),
-        raw_query: wire.query().as_str().to_owned(),
-        headers: readable,
-        principal,
-        host_region,
-        declares_trailers,
-    };
+
+    let recorded = Arc::new(Mutex::new(None));
+    let service = gateway_service(request, &recorded)?;
+    let http_request = request
+        .http_head(headers)
+        .body(request.body.clone())
+        .map_err(|error| format!("fixture head: {error}"))?;
+    let status = block_on(service.call_bytes(http_request)).status().as_u16();
+    let Recorded {
+        operation,
+        converted,
+        bucket,
+        key,
+    } = recorded
+        .lock()
+        .map_err(|_| "the recording slot is poisoned".to_owned())?
+        .take()
+        .ok_or_else(|| format!("the gateway refused before its handler with status {status}"))?;
     Ok(GatewaySide {
         operation,
-        context,
+        converted,
         bucket,
         key,
         wire,
@@ -496,7 +565,7 @@ pub(crate) fn s3s_side(request: &ContextRequest, headers: &HeaderMap) -> Result<
 
 // ── both ──────────────────────────────────────────────────────────────────────────────────────
 
-/// One request through both stacks, before any conversion.
+/// One request through both stacks.
 pub(crate) struct Exchange {
     pub(crate) gateway: GatewaySide,
     pub(crate) oracle_status: u16,
@@ -511,7 +580,7 @@ pub(crate) struct Exchange {
 pub(crate) fn exchange(request: &ContextRequest) -> Result<Exchange, String> {
     let now = RequestNow::capture();
     let headers = request.wire_headers(now)?;
-    let gateway = gateway_side(request, &headers, now)?;
+    let gateway = gateway_side(request, &headers)?;
     let (oracle_status, oracle) = s3s_side(request, &headers)?;
     Ok(Exchange {
         gateway,
@@ -520,7 +589,7 @@ pub(crate) fn exchange(request: &ContextRequest) -> Result<Exchange, String> {
     })
 }
 
-/// Both requests, once the gateway side has gone through the context conversion.
+/// Both requests, once the gateway handler has built its s3s context.
 pub(crate) struct Compared {
     pub(crate) operation: &'static str,
     pub(crate) converted: s3s::S3Request<()>,
@@ -531,7 +600,8 @@ pub(crate) struct Compared {
     pub(crate) resolved: ResolvedHost,
 }
 
-/// [`exchange`], then the conversion, requiring both stacks to have reached their handler.
+/// [`exchange`], requiring both stacks to have reached their handler and the gateway handler's
+/// conversion to have succeeded.
 ///
 /// # Errors
 ///
@@ -542,16 +612,16 @@ pub(crate) fn compare(request: &ContextRequest) -> Result<Compared, String> {
         oracle_status,
         oracle,
     } = exchange(request)?;
-    let oracle = oracle.ok_or_else(|| format!("s3s refused before its handler with status {oracle_status}"))?;
     let GatewaySide {
         operation,
-        context,
+        converted,
         bucket,
         key,
         wire,
         resolved,
     } = gateway;
-    let converted = request_to_s3s(context, ()).map_err(|error| format!("conversion refused: {error}"))?;
+    let converted = converted?;
+    let oracle = oracle.ok_or_else(|| format!("s3s refused before its handler with status {oracle_status}"))?;
     Ok(Compared {
         operation,
         converted,

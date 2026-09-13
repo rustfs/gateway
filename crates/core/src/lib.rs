@@ -110,6 +110,7 @@ pub mod handler;
 pub mod op;
 pub mod ops;
 pub mod registry;
+mod request_context;
 pub mod route;
 pub mod sse;
 mod static_dispatch;
@@ -146,6 +147,9 @@ pub use crate::registry::{
     ErasedResources, ErasedResponse, HandlerDeadlineClass, HandlerTable, Invocation, MissingHandlers, OperationSet,
     OperationSpec, ParamKind, Registry, RegistryError, RequiredParam, RouterBuilder, WireEntry, check_required,
     erase_authorized_handler,
+};
+pub use crate::request_context::{
+    Addressed, AddressingStyle, AuthenticatedScheme, CallerSecretKey, RequestContextView, RequestPrincipal,
 };
 pub use crate::route::{
     ArnForm, CompileError, CompiledRouter, Explanation, HostClass, OpId, Predicate, RequestShape, RouteBuildError, RouteEntry,

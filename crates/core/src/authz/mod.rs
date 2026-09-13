@@ -432,10 +432,11 @@ impl<O: Operation> Authorized<O> {
         &self.read
     }
 
-    /// Consumes the proof into the request shape a handler receives.
+    /// Consumes the proof into the request shape a handler receives, with the SSE proof and the
+    /// request context the pipeline produced for this same request (ADR-0017, ADR-0022).
     #[must_use]
-    pub fn into_request(self, sse: crate::SseEnforced) -> crate::Req<O> {
-        crate::Req::from_authorized(self, sse)
+    pub fn into_request(self, sse: crate::SseEnforced, context: crate::RequestContextView) -> crate::Req<O> {
+        crate::Req::from_authorized(self, sse, context)
     }
 
     pub(crate) fn into_parts(self) -> (O::Input, O::DerivedResources, AuthorizedRead) {
