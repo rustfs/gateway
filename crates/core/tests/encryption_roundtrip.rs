@@ -288,25 +288,20 @@ fn a_key_id_of_awkward_text_comes_back_unchanged() {
     );
 }
 
-/// An element this release does not know is skipped, not refused (`q-enc-0006`): the stored
-/// configuration is re-parsed on every future release, and a decoder that got stricter here would
-/// silently turn default encryption off with no symptom until objects land unencrypted.
+/// An element this release does not know is refused, not skipped (`q-enc-0006`). This is request
+/// XML for a security configuration, so ADR-0007's `allow-registered` policy applies: a skipped
+/// setting would be a 200 for a protection the gateway never stored. Stored bytes are a separate
+/// boundary — the persistence codec still reads them (`security_request_policy.rs`).
 #[test]
-fn an_unknown_element_beside_a_known_rule_is_skipped_not_refused() {
+fn n_an_unknown_element_beside_a_known_rule_is_refused() {
     let document = "<ServerSideEncryptionConfiguration><Rule>\
                     <ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm>\
                     </ApplyServerSideEncryptionByDefault><FutureMember>x</FutureMember></Rule>\
                     </ServerSideEncryptionConfiguration>";
 
-    let decoded = decode_write(document).expect("an unknown element is lenient, not a parse failure");
+    let error = decode_write(document).expect_err("an unknown security setting never reaches the handler");
 
-    assert_eq!(
-        decoded.rules[0]
-            .apply_server_side_encryption_by_default
-            .as_ref()
-            .map(|action| action.sse_algorithm.as_str()),
-        Some("AES256")
-    );
+    assert_eq!(error.code().as_str(), "MalformedXML");
 }
 
 // ── negative: the shapes that must never be stored ───────────────────────────────────────────
@@ -315,10 +310,10 @@ fn an_unknown_element_beside_a_known_rule_is_skipped_not_refused() {
 /// it survived, the round-trip property could be satisfied by a codec pair that had agreed on the
 /// wrapper and nothing would stand between the wrapper and a release.
 ///
-/// The wrapper is not an element the schema knows, so the lenient policy (`q-enc-0006`) skips it
-/// — and skipping it takes the only rule in the document with it, which is precisely why a
-/// wrapper makes an SDK read zero rules. The decoder refuses at that point, naming the member it
-/// found nothing for.
+/// The wrapper is not an element the schema knows, so the `allow-registered` policy
+/// (`q-enc-0006`) refuses it at the root, before the rule list is consulted. Under a skipping
+/// policy the wrapper would take the only rule with it and the refusal would instead name the
+/// empty `Rules` member; the `None` below is what separates the two layers.
 #[test]
 fn n_a_wrapped_rule_list_hides_every_rule_from_the_decoder() {
     let document = "<ServerSideEncryptionConfiguration><Rules><Rule>\
@@ -330,8 +325,8 @@ fn n_a_wrapped_rule_list_hides_every_rule_from_the_decoder() {
     assert_eq!(error.code().as_str(), "MalformedXML");
     assert_eq!(
         error.member(),
-        Some("Rules"),
-        "the refusal names the member that has no entry, which is the whole rule list"
+        None,
+        "the unknown-element guard refuses the wrapper before any member is read"
     );
 }
 

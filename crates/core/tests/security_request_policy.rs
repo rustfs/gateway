@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Responsible for: security XML request decoders rejecting unregistered children.
-//! NOT responsible for: persisted metadata reads, signature validation, or storage enforcement.
-//! Upstream: generated operation codecs. Downstream: security configuration handlers.
+//! Responsible for: security XML request decoders rejecting unregistered children, and the
+//! boundary beside them — the same bytes stay readable through the persisted-metadata codecs.
+//! NOT responsible for: the persisted codecs' own rules, signature validation, or storage
+//! enforcement.
+//! Upstream: generated operation codecs and `rustfs_gateway_types::persistence`. Downstream:
+//! security configuration handlers and metadata consumers.
 
 use bytes::Bytes;
 use http::Request;
@@ -132,4 +135,53 @@ fn n_a_security_request_refuses_unknown_encryption_rule() {
 #[test]
 fn n_a_security_request_refuses_unknown_encryption_default() {
     refuses_unknown("encryption", Some("ApplyServerSideEncryptionByDefault"));
+}
+
+/// The request refusal must not leak into the persisted boundary (ADR-0007): a document already
+/// stored with an element this release does not know is still read, with every known field, by
+/// the metadata codec — a stricter reader there would turn WORM, default encryption or the public
+/// access block off. Each document is first shown to be refused on the request path, so the pair
+/// proves the two policies differ on the same bytes.
+fn with_unknown_root(operation: &str) -> String {
+    let document = DOCUMENTS
+        .iter()
+        .find(|(name, _)| *name == operation)
+        .expect("known fixture")
+        .1;
+    let end = document.rfind("</").expect("known fixture root");
+    let document = format!("{}<FutureSetting>true</FutureSetting>{}", &document[..end], &document[end..]);
+    assert!(decode(operation, &document).is_err(), "{operation} is refused on the request path");
+    document
+}
+
+#[test]
+fn persisted_lock_bytes_with_an_unknown_root_element_stay_readable() {
+    let stored = rustfs_gateway_types::persistence::parse_object_lock_dto(with_unknown_root("object-lock").as_bytes())
+        .expect("stored WORM metadata stays readable");
+    assert_eq!(stored.object_lock_enabled.as_ref().map(dto::ObjectLockEnabled::as_str), Some("Enabled"));
+    let retention = stored
+        .rule
+        .and_then(|rule| rule.default_retention)
+        .expect("the rule survives");
+    assert_eq!(retention.mode.as_ref().map(dto::Mode::as_str), Some("GOVERNANCE"));
+    assert_eq!(retention.days, Some(1));
+}
+
+#[test]
+fn persisted_encryption_bytes_with_an_unknown_root_element_stay_readable() {
+    let stored = rustfs_gateway_types::persistence::parse_bucket_encryption_dto(with_unknown_root("encryption").as_bytes())
+        .expect("stored default encryption stays readable");
+    let algorithm = stored.rules[0]
+        .apply_server_side_encryption_by_default
+        .as_ref()
+        .map(|default| default.sse_algorithm.as_str().to_owned());
+    assert_eq!(algorithm.as_deref(), Some("AES256"));
+}
+
+#[test]
+fn persisted_public_access_bytes_with_an_unknown_root_element_stay_readable() {
+    let stored =
+        rustfs_gateway_types::persistence::parse_public_access_block_dto(with_unknown_root("publicAccessBlock").as_bytes())
+            .expect("stored public access block stays readable");
+    assert_eq!(stored.block_public_acls, Some(true));
 }
