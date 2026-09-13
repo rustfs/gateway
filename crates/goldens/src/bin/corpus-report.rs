@@ -31,7 +31,8 @@ use std::fmt;
 
 use rustfs_gateway_goldens::{
     CorpusCoverageError, CorpusReport, build_acceptance_census, build_migration_inventory, build_oracle_admission,
-    build_persistence_corpus_report, build_persistence_source_report, require_acceptance_closure, require_oracle_admission,
+    build_persistence_corpus_report, build_persistence_source_report, build_request_divergences, require_acceptance_closure,
+    require_oracle_admission,
 };
 
 /// Ordinary coverage report: zero while the evidence is valid, even with blockers still open.
@@ -46,26 +47,35 @@ fn run(
             let sources = build_persistence_source_report(&report).map_err(|error| format!("source census failed: {error}"))?;
             let acceptance = build_acceptance_census().map_err(|error| format!("acceptance census failed: {error}"))?;
             let inventory = build_migration_inventory().map_err(|error| format!("migration inventory failed: {error}"))?;
+            let divergences = build_request_divergences().map_err(|error| format!("request divergences failed: {error}"))?;
             let admission = build_oracle_admission().map_err(|error| format!("oracle admission failed: {error}"))?;
             Ok(format!(
-                "{}{}{}{}{}",
+                "{}{}{}{}{}{}",
                 report.render(),
                 sources.render(),
                 acceptance.render(),
                 inventory.render(),
+                divergences.render(),
                 admission.render()
             ))
         });
     emit(result, "corpus report", stdout, stderr)
 }
 
-/// The strict verdict: the closed P9-01 census, a valid migration inventory, and admission under
-/// every pinned s3s revision.
+/// The strict verdict: the closed P9-01 census, a valid migration inventory and request-divergence
+/// register, and admission under every pinned s3s revision.
 fn strict_closure() -> Result<String, String> {
     let census = require_acceptance_closure().map_err(|error| error.to_string())?;
     let inventory = build_migration_inventory().map_err(|error| error.to_string())?;
+    let divergences = build_request_divergences().map_err(|error| error.to_string())?;
     let admission = require_oracle_admission().map_err(|error| error.to_string())?;
-    Ok(format!("{}{}{}", census.render(), inventory.render(), admission.render()))
+    Ok(format!(
+        "{}{}{}{}",
+        census.render(),
+        inventory.render(),
+        divergences.render(),
+        admission.render()
+    ))
 }
 
 /// Strict migration closure: zero only when `check` returns a closed census.

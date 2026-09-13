@@ -454,6 +454,58 @@ fn c_wire_0045_a_metadata_key_that_is_not_a_token_is_rejected() {
 }
 
 #[test]
+fn a_repeated_metadata_name_is_refused_rather_than_resolved() {
+    let request = put(vec![
+        (name("x-amz-meta-q"), raw_value(b"a")),
+        (name("x-amz-meta-q"), raw_value(b"b")),
+    ]);
+    let refusal = accept(request).err();
+    assert_eq!(refusal, Some(WireReject::DuplicateMetadataHeader(name("x-amz-meta-q"))));
+    assert_eq!(
+        refusal.map(|refusal| (refusal.to_status(), refusal.error_code().as_str().to_owned())),
+        Some((http::StatusCode::BAD_REQUEST, "InvalidRequest".to_owned()))
+    );
+}
+
+#[test]
+fn a_metadata_name_repeated_in_another_case_is_the_same_key_and_is_refused() {
+    // Field names are case-insensitive, and so are the keys AWS stores (lowercased): these two
+    // lines name one key, and keeping either value would silently discard the other.
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/bucket/key")
+        .header(HOST, "b.example.com")
+        .header("X-Amz-Meta-Q", "a")
+        .header("x-amz-meta-q", "b")
+        .body("")
+        .expect("valid fixture request");
+    assert_eq!(accept(request).err(), Some(WireReject::DuplicateMetadataHeader(name("x-amz-meta-q"))));
+}
+
+#[test]
+fn a_repeated_metadata_name_is_refused_even_with_equal_values() {
+    let request = put(vec![
+        (name("x-amz-meta-q"), raw_value(b"same")),
+        (name("x-amz-meta-other"), raw_value(b"x")),
+        (name("x-amz-meta-q"), raw_value(b"same")),
+    ]);
+    assert_eq!(accept(request).err(), Some(WireReject::DuplicateMetadataHeader(name("x-amz-meta-q"))));
+}
+
+#[test]
+fn distinct_metadata_names_and_a_repeated_unrelated_header_are_accepted() {
+    // The control for the three refusals above: the rule is one value per metadata key, not "no
+    // header may repeat" and not "at most one metadata header".
+    let request = put(vec![
+        (name("x-amz-meta-a"), raw_value(b"1")),
+        (name("x-amz-meta-b"), raw_value(b"2")),
+        (name("x-proxy-hop"), raw_value(b"one")),
+        (name("x-proxy-hop"), raw_value(b"two")),
+    ]);
+    assert!(accept(request).is_ok());
+}
+
+#[test]
 fn a_control_character_in_a_field_value_is_refused_by_both_gates() {
     // The `http` crate refuses to build such a value at all, which is the first gate.
     assert!(http::HeaderValue::from_bytes(b"a\x01b").is_err());

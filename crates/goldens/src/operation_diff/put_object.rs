@@ -18,8 +18,9 @@
 //! becomes — through `compat::put_object` — the same s3s input the s3s service decodes from the
 //! same bytes, member by member; that the body crosses as the one live stream, unread until the
 //! handler reads it; and that one s3s output encodes to the same status, header lines and body on
-//! both stacks. Every divergence between the stacks this file knows of is a named test that says
-//! what each side does, so none of them hides inside a generator that was narrowed around it.
+//! both stacks. Every divergence between the stacks this file knows of is a named test in
+//! `divergences` that says what each side does and carries its ruling id, so none of them hides
+//! inside a generator that was narrowed around it.
 //! NOT responsible for: request context, authentication, error-document parity, or any other
 //! operation. Upstream: the harness in `super`. Downstream: nothing.
 //!
@@ -38,6 +39,7 @@ use rustfs_gateway_types::{ChecksumAlgorithm, ChecksumSpec, ContentMd5, Timestam
 
 use super::{BodyProbe, BodyReads, RawRequest, announced_length, block_on, drain, gateway_decode, oracle, s3s_exchange};
 
+mod divergences;
 mod encode;
 
 // ── the member diff ───────────────────────────────────────────────────────────────────────────
@@ -549,109 +551,6 @@ fn trailers_the_s3s_body_cannot_carry_fail_the_handler_instead_of_vanishing() {
     let converted = input_to_s3s(input).expect("the members convert");
     let error = drain(converted.body.expect("PutObject always carries its body")).expect_err("a dropped trailer is lost data");
     assert!(error.contains("trailer"), "{error}");
-}
-
-// ── decode: the known divergences, named ──────────────────────────────────────────────────────
-
-/// The gateway answers a PUT without `Content-Length` with the dedicated 411 code
-/// (`q-length-0007`); the pinned s3s back-fills the length from the body it can measure and hands
-/// the request to its handler. This is a behavioral difference a migration must decide, not a
-/// conversion gap: no gateway input exists for the conversion to run on.
-#[test]
-fn a_put_without_content_length_is_refused_by_the_gateway_and_backfilled_by_s3s() {
-    let request = RawRequest::put(TARGET, BODY, 5).without("content-length");
-    let refusal = run_decode(&request, &request, convert).refused();
-    assert_eq!(
-        refusal,
-        Refusal {
-            gateway: Err("MissingContentLength".to_owned()),
-            conversion: Ok(()),
-            oracle: Ok(()),
-        }
-    );
-}
-
-#[test]
-fn an_expires_that_is_not_a_date_is_kept_by_the_gateway_and_refused_by_s3s() {
-    let request = full_request().replace("expires", "never");
-    let refusal = run_decode(&request, &request, convert).refused();
-    assert_eq!(refusal.gateway, Ok(()), "the gateway keeps Expires opaque (q-timestamp-0005)");
-    assert!(matches!(refusal.oracle, Err((400, _))), "{refusal:?}");
-    let probe = Arc::new(BodyProbe::default());
-    let error = input_to_s3s(gateway_decode(&request, &probe).expect("accepted"))
-        .expect_err("an s3s input cannot hold a non-date Expires");
-    assert_eq!(error.field, "expires");
-}
-
-#[test]
-fn two_checksum_headers_are_refused_by_the_gateway_and_kept_by_s3s() {
-    let request = full_request().with("x-amz-checksum-sha256", "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=");
-    let refusal = run_decode(&request, &request, convert).refused();
-    assert!(refusal.gateway.is_err(), "q-checksum-0006: more than one checksum header is a hard error");
-    assert_eq!(refusal.oracle, Ok(()));
-}
-
-#[test]
-fn a_checksum_algorithm_the_gateway_does_not_know_is_a_member_diff() {
-    let request = RawRequest::put(TARGET, BODY, 5).with("x-amz-checksum-sha512", "AAAA");
-    let observed = run_decode(&request, &request, convert);
-    match observed {
-        Decoded::Compared(diff) => assert_eq!(diff.differing, ["checksum_sha512"]),
-        Decoded::Refused(refusal) => assert!(refusal.gateway.is_err() && refusal.oracle.is_ok(), "{refusal:?}"),
-    }
-}
-
-/// `q-content-0008`: the gateway decoder fills an absent `Content-Type` with the S3 default, so the
-/// converted input says `binary/octet-stream` where s3s says nothing. The conversion cannot undo
-/// it — the gateway input no longer records whether the client sent the header — so the migration
-/// has to decide which answer the RustFS app body gets.
-#[test]
-fn an_absent_content_type_is_defaulted_by_the_gateway_and_left_absent_by_s3s() {
-    let request = RawRequest::put(TARGET, BODY, 5);
-    let diff = run_decode(&request, &request, convert).compared();
-    assert_eq!(diff.differing, ["content_type"]);
-    let probe = Arc::new(BodyProbe::default());
-    let converted = input_to_s3s(gateway_decode(&request, &probe).expect("accepted")).expect("converts");
-    assert_eq!(converted.content_type.as_deref(), Some("binary/octet-stream"));
-}
-
-/// The gateway binds the algorithm to `x-amz-sdk-checksum-algorithm`, the header the SDKs send;
-/// the pinned s3s reads `x-amz-checksum-algorithm` (or infers it from `x-amz-trailer`) and so hands
-/// its handler no algorithm for the same request.
-#[test]
-fn the_sdk_checksum_algorithm_header_is_read_by_the_gateway_and_not_by_s3s() {
-    let request = put(TARGET, BODY, 5)
-        .with("x-amz-sdk-checksum-algorithm", "CRC32")
-        .with("x-amz-checksum-crc32", "NhCmhg==");
-    let diff = run_decode(&request, &request, convert).compared();
-    assert_eq!(diff.differing, ["checksum_algorithm"]);
-}
-
-#[test]
-fn the_minio_version_id_query_on_a_put_is_seen_by_s3s_only() {
-    let request = RawRequest {
-        target: format!("{TARGET}?versionId=v1"),
-        ..put(TARGET, BODY, 5)
-    };
-    let diff = run_decode(&request, &request, convert).compared();
-    assert_eq!(diff.differing, ["version_id"], "the gateway model has no PutObject versionId member");
-}
-
-/// The gateway's object-key floor refuses a `..` path segment before anything is stored; the
-/// pinned s3s hands its handler the key `..` unchanged. Found by the decode property, which
-/// therefore never draws a dot-only segment.
-#[test]
-fn a_dot_dot_key_segment_is_refused_by_the_gateway_and_kept_by_s3s() {
-    let request = put("/photos/..", BODY, 5);
-    let refusal = run_decode(&request, &request, convert).refused();
-    assert_eq!(
-        refusal,
-        Refusal {
-            gateway: Err("InvalidArgument".to_owned()),
-            conversion: Ok(()),
-            oracle: Ok(()),
-        }
-    );
 }
 
 // ── decode: the property ──────────────────────────────────────────────────────────────────────

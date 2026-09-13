@@ -31,7 +31,7 @@ use rustfs_gateway_types::compat::request_context::{
     GatewayRequestContext, Principal, S3S_CONTEXT_MEMBERS, VerifiedScope, request_to_s3s,
 };
 
-use super::super::{BodyProbe, RawRequest, gateway_decode, oracle, s3s, s3s_exchange};
+use super::super::{BodyProbe, BodyReads, RawRequest, gateway_decode, oracle, s3s, s3s_exchange};
 use super::{
     ACCESS_KEY, BASE_DOMAIN, COMPARED_MEMBERS, CapturedInput, Compared, ContextRequest, PATH_HOST, TransportMarker, access_key,
     compare, differing_context, exchange, region_of,
@@ -343,6 +343,8 @@ fn a_verified_region_takes_precedence_over_the_host_region() {
 /// `photos.s3.eu-west-1.example.test`: the gateway resolver reads bucket `photos` and host region
 /// `eu-west-1`; the pinned s3s `MultiDomain` strips only the base domain, so its bucket is the
 /// whole prefix and it reports no region.
+///
+/// Ruling: `rd-ctx-0001`
 #[test]
 fn divergence_a_regional_virtual_host_names_a_different_bucket_and_region() {
     let host = format!("photos.s3.eu-west-1.{BASE_DOMAIN}");
@@ -358,6 +360,8 @@ fn divergence_a_regional_virtual_host_names_a_different_bucket_and_region() {
 
 /// A field value that is not UTF-8 (here one Latin-1 byte, as some proxies write) reaches the s3s
 /// handler; the gateway's header view skips it (s3s#597 rule), so the converted request lacks it.
+///
+/// Ruling: `rd-ctx-0002`
 #[test]
 fn divergence_a_non_utf8_header_value_reaches_only_the_s3s_handler() {
     let request = ContextRequest::put(PATH_HOST, "/photos/a.jpg", b"hello").header("x-proxy-note", b"caf\xe9");
@@ -373,6 +377,8 @@ fn divergence_a_non_utf8_header_value_reaches_only_the_s3s_handler() {
 
 /// A transport layer's extension (RustFS installs its `RemoteAddr` and `RequestContext` this way)
 /// reaches the s3s handler; the gateway's wire request keeps no extension bag.
+///
+/// Ruling: `rd-ctx-0003`
 #[test]
 fn divergence_a_transport_extension_reaches_only_the_s3s_handler() {
     let request = ContextRequest::put(PATH_HOST, "/photos/a.jpg", b"hello").with_transport_extension();
@@ -385,6 +391,8 @@ fn divergence_a_transport_extension_reaches_only_the_s3s_handler() {
 
 /// An absolute-form target: s3s hands its handler the URI as it arrived, authority included; the
 /// gateway keeps the raw path and query only.
+///
+/// Ruling: `rd-ctx-0004`
 #[test]
 fn divergence_an_absolute_form_target_keeps_its_authority_only_on_s3s() {
     let request = ContextRequest::put(PATH_HOST, "/photos/a.jpg", b"hello").absolute_form();
@@ -397,6 +405,8 @@ fn divergence_an_absolute_form_target_keeps_its_authority_only_on_s3s() {
 }
 
 /// A bare `?`: s3s keeps an empty query, the gateway's query view cannot tell it from none.
+///
+/// Ruling: `rd-ctx-0005`
 #[test]
 fn divergence_an_empty_query_marker_is_kept_only_by_s3s() {
     let request = ContextRequest::put(PATH_HOST, "/photos/a.jpg", b"hello").empty_query_marker();
@@ -409,20 +419,26 @@ fn divergence_an_empty_query_marker_is_kept_only_by_s3s() {
     assert_eq!(differing_context(&converted, &oracle), ["uri"]);
 }
 
-/// Two `x-amz-meta-q` lines. The gateway decodes the request and its metadata holds only the
-/// **last** line — the first value is dropped without a refusal; the pinned s3s refuses a repeated
-/// single-valued header with `InvalidRequest` before any handler runs. Found by the
+/// Two lines for one `x-amz-meta-q` key, the second spelled in another case. Until
+/// `rd-ctx-0006` the gateway decoded the request and kept only the **last** line, dropping the
+/// first value without a refusal. Both stacks now refuse it with `400 InvalidRequest` before any
+/// handler runs: the gateway at wire acceptance, s3s in its metadata parser. Found by the
 /// generated-request property below, whose metadata names are distinct because this test names
 /// the case.
+///
+/// Ruling: `rd-ctx-0006`
 #[test]
-fn divergence_repeated_metadata_lines_keep_the_last_on_the_gateway_and_are_refused_by_s3s() {
+fn divergence_repeated_metadata_lines_are_refused_by_both_stacks() {
     let request = RawRequest::put("/photos/a.jpg", b"hello", 5)
         .with("x-amz-meta-q", "a")
-        .with("x-amz-meta-q", "b");
+        .with("X-Amz-Meta-Q", "b");
 
-    let gateway = gateway_decode(&request, &Arc::new(BodyProbe::default())).expect("the gateway decodes");
-    assert_eq!(gateway.metadata.get("q").map(String::as_str), Some("b"));
-    assert_eq!(gateway.metadata.len(), 1);
+    let probe = Arc::new(BodyProbe::default());
+    let refusal = gateway_decode(&request, &probe).expect_err("the gateway refuses a repeated metadata key");
+    assert_eq!(refusal, "wire refusal: DuplicateMetadataHeader(\"x-amz-meta-q\")");
+    let wire = rustfs_gateway_http::WireReject::DuplicateMetadataHeader(http::HeaderName::from_static("x-amz-meta-q"));
+    assert_eq!((wire.to_status().as_u16(), wire.error_code().as_str()), (400, "InvalidRequest"));
+    assert_eq!(probe.reads(), BodyReads::default(), "the refused body was read");
 
     let exchange =
         s3s_exchange(&request, &Arc::new(BodyProbe::default()), oracle::PutObjectOutput::default()).expect("s3s answers");
@@ -435,7 +451,8 @@ fn divergence_repeated_metadata_lines_keep_the_last_on_the_gateway_and_are_refus
 
 fn generated_request() -> impl Strategy<Value = ContextRequest> {
     let segment = "[a-z0-9]{1,8}";
-    // Distinct names: a repeated metadata name is the named divergence above, not a context one.
+    // Distinct names: a repeated metadata name is refused by both stacks (the named test above),
+    // so it is not a context comparison.
     let meta = proptest::collection::btree_map("[a-z]{1,6}", "[A-Za-z0-9._-]{0,12}", 0..4);
     (
         proptest::collection::vec(segment, 1..4),
