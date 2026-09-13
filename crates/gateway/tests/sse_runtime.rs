@@ -709,5 +709,5 @@ async fn n_the_same_request_without_the_removing_filter_is_still_refused() {
     assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
 }
 
-#[path = "sse_context.rs"]
+#[path = "sse_runtime/context.rs"]
 mod context;

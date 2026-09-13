@@ -391,7 +391,7 @@ mod tests {
     fn context_json_accepts_string_pairs_unicode_escapes_and_whitespace() {
         for json in [
             r#"{"key":"value","empty":""}"#,
-            r#"{"emoji":"\ud83d\udd11","\u0061":"雪"}"#,
+            r#"{"emoji":"\ud83d\udd11","\u0061":"éΩ"}"#,
             " \r\n\t{} ",
         ] {
             assert!(context_json_is_accepted(json), "valid context refused");
