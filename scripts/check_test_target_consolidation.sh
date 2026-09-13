@@ -209,6 +209,7 @@ core_modules = (
     "notification_roundtrip",
     "operation_spec_semver",
     "params_and_dispatch",
+    "policy_json_replay",
     "post_object",
     "precondition_range",
     "purity_guard",

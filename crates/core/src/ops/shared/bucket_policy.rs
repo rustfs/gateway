@@ -39,12 +39,22 @@
 //! counter and never recurses: a recursive validator would be the denial of service it is meant to
 //! refuse.
 //!
+//! "Is JSON" means what the strict reader that loads the stored document means by it — RustFS
+//! reads a bucket policy with `serde_json` into typed, `deny_unknown_fields` structures — and not
+//! merely balanced brackets: member names are strings and unique within their object, every
+//! escape and number is one JSON has, and every number is a finite double. A scanner laxer than
+//! that reader would store `{"Effect":"Allow","Effect":"Deny"}`, which one later reader takes as
+//! an allow, another as a deny, and a typed one refuses outright. The `policy_json` fuzz property
+//! (`fuzz/support/policy_json.rs`) holds this scanner to that reader in both directions.
+//!
 //! # No refusal ever repeats the document
 //!
 //! A policy names principals, account ids, role ARNs and resource paths. Every reason below is a
 //! compile-time constant with no offset, no excerpt and no length in it: an error that said *where*
 //! the syntax broke would let a caller who may not read the policy back reconstruct it one probe at
 //! a time.
+
+use std::collections::BTreeSet;
 
 use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::dto::PublicAccessBlockConfiguration;
@@ -67,7 +77,10 @@ pub const MAX_POLICY_DEPTH: usize = 100;
 pub enum PolicyRejection {
     /// The body is larger than [`MAX_POLICY_BYTES`].
     TooLarge,
-    /// The body is not syntactically valid JSON.
+    /// The body is not a JSON document a strict reader accepts: broken syntax, a member name that
+    /// is not a string, an escape or number JSON does not have, an unpaired surrogate escape, a
+    /// number no IEEE double can hold, or one name used twice in one object (I-JSON, RFC 7493).
+    /// Every one of these is a document the reader behind the gateway would refuse to load.
     NotJson,
     /// The body nests deeper than [`MAX_POLICY_DEPTH`].
     TooDeep,
@@ -150,149 +163,264 @@ enum Container {
 }
 
 /// One frame of the scanner's explicit stack.
-#[derive(Clone, Copy, PartialEq, Eq)]
 enum Frame {
-    /// Inside `{ }`.
-    Object,
+    /// Inside `{ }`, with every member name read so far, decoded, so that two spellings of one
+    /// name (`"Effect"` and `"\u0045ffect"`) are one name.
+    Object(BTreeSet<Vec<u8>>),
     /// Inside `[ ]`.
     Array,
 }
 
-/// Walks the bytes once, checking JSON syntax and depth without recursion.
+/// What the scanner is allowed to see next. Spelling the grammar out as states is what keeps
+/// `{"a" "b"}`, `{"a"}`, `{"a":1:2}`, `{1:2}` and `[1,,2]` from passing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Expect {
+    /// Any value: the document's first token, or after `:` or an array's `,`.
+    Value,
+    /// A value or the `]` of an empty array.
+    ValueOrClose,
+    /// A member name or the `}` of an empty object.
+    NameOrClose,
+    /// A member name: after an object's `,`, where a `}` would be a trailing comma.
+    Name,
+    /// The `:` after a member name.
+    Colon,
+    /// A `,` or the close of the innermost container.
+    CommaOrClose,
+    /// Nothing: the document is complete and only whitespace may follow.
+    End,
+}
+
+/// The four whitespace bytes JSON allows between tokens. Not `u8::is_ascii_whitespace`, which also
+/// admits form feed: a document ending in `\x0C` is not JSON to any strict reader.
+const fn is_json_whitespace(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r')
+}
+
+/// Walks the bytes once, checking JSON syntax, member-name uniqueness and depth without recursion.
 ///
 /// Iterative on purpose: the input is caller-controlled and a recursive descent over it would turn
 /// [`MAX_POLICY_DEPTH`] into a promise the stack has to keep. Here the depth is `stack.len()` and
-/// exceeding it is a refusal, not a crash.
+/// exceeding it is a refusal, not a crash. The first rule broken, reading left to right, is the
+/// one reported: a document that nests too deep before its syntax breaks is `TooDeep`.
 fn scan(bytes: &[u8]) -> Result<Container, PolicyRejection> {
     let mut stack: Vec<Frame> = Vec::new();
     let mut index = 0usize;
-    let mut top: Option<Container> = None;
-    // What the scanner is allowed to see next. A JSON document is a small state machine and
-    // spelling it out is what keeps `{"a" "b"}` and `[1,,2]` from passing.
-    let mut expect_value = true;
-    let mut after_value = false;
+    let mut top = Container::Other;
+    let mut expect = Expect::Value;
 
-    while index < bytes.len() {
-        let Some(&byte) = bytes.get(index) else { break };
-        match byte {
-            b' ' | b'\t' | b'\n' | b'\r' => {
-                index = index.saturating_add(1);
-            }
-            b'{' | b'[' => {
-                if !expect_value {
-                    return Err(PolicyRejection::NotJson);
-                }
-                if stack.is_empty() {
-                    top = Some(if byte == b'{' { Container::Object } else { Container::Other });
+    while let Some(&byte) = bytes.get(index) {
+        if is_json_whitespace(byte) {
+            index = index.saturating_add(1);
+            continue;
+        }
+        match (expect, byte) {
+            (Expect::Value | Expect::ValueOrClose, b'{' | b'[') => {
+                if stack.is_empty() && byte == b'{' {
+                    top = Container::Object;
                 }
                 if stack.len() >= MAX_POLICY_DEPTH {
                     return Err(PolicyRejection::TooDeep);
                 }
-                stack.push(if byte == b'{' { Frame::Object } else { Frame::Array });
-                expect_value = byte == b'[';
-                after_value = false;
+                if byte == b'{' {
+                    stack.push(Frame::Object(BTreeSet::new()));
+                    expect = Expect::NameOrClose;
+                } else {
+                    stack.push(Frame::Array);
+                    expect = Expect::ValueOrClose;
+                }
                 index = index.saturating_add(1);
             }
-            b'}' | b']' => {
-                let wanted = if byte == b'}' { Frame::Object } else { Frame::Array };
-                match stack.pop() {
-                    Some(frame) if frame == wanted => {}
+            (Expect::ValueOrClose | Expect::CommaOrClose, b']') | (Expect::NameOrClose | Expect::CommaOrClose, b'}') => {
+                match (stack.pop(), byte) {
+                    (Some(Frame::Array), b']') | (Some(Frame::Object(_)), b'}') => {}
                     _ => return Err(PolicyRejection::NotJson),
                 }
-                // A closing brace after a comma is a trailing comma, which JSON does not allow.
-                if expect_value && after_value {
-                    return Err(PolicyRejection::NotJson);
-                }
-                expect_value = false;
-                after_value = true;
+                expect = after_value(&stack);
                 index = index.saturating_add(1);
             }
-            b'"' => {
-                index = string_end(bytes, index)?;
-                expect_value = false;
-                after_value = true;
+            (Expect::Value | Expect::ValueOrClose, b'"') => {
+                index = string_end(bytes, index, None)?;
+                expect = after_value(&stack);
             }
-            b':' => {
-                if !matches!(stack.last(), Some(Frame::Object)) || !after_value {
-                    return Err(PolicyRejection::NotJson);
-                }
-                expect_value = true;
-                after_value = false;
-                index = index.saturating_add(1);
-            }
-            b',' => {
-                if stack.is_empty() || !after_value {
-                    return Err(PolicyRejection::NotJson);
-                }
-                expect_value = true;
-                after_value = true;
-                index = index.saturating_add(1);
-            }
-            _ => {
-                if !expect_value {
-                    return Err(PolicyRejection::NotJson);
-                }
-                if stack.is_empty() {
-                    top = Some(Container::Other);
-                }
+            (Expect::Value | Expect::ValueOrClose, _) => {
                 index = scalar_end(bytes, index)?;
-                expect_value = false;
-                after_value = true;
+                expect = after_value(&stack);
             }
-        }
-        if stack.is_empty() && after_value {
-            // The document is complete; only whitespace may follow.
-            let rest = bytes.get(index..).unwrap_or_default();
-            if rest.iter().any(|b| !b.is_ascii_whitespace()) {
-                return Err(PolicyRejection::NotJson);
+            (Expect::NameOrClose | Expect::Name, b'"') => {
+                let mut name = Vec::new();
+                index = string_end(bytes, index, Some(&mut name))?;
+                let Some(Frame::Object(names)) = stack.last_mut() else {
+                    return Err(PolicyRejection::NotJson);
+                };
+                // Two members with one name are read differently by different readers — the first
+                // wins in some, the last in others, and a typed reader such as RustFS's refuses
+                // the document. Storing it would let the gateway, the backend and every later
+                // reader disagree about what the policy says.
+                if !names.insert(name) {
+                    return Err(PolicyRejection::NotJson);
+                }
+                expect = Expect::Colon;
             }
-            break;
+            (Expect::Colon, b':') => {
+                expect = Expect::Value;
+                index = index.saturating_add(1);
+            }
+            (Expect::CommaOrClose, b',') => {
+                expect = match stack.last() {
+                    Some(Frame::Object(_)) => Expect::Name,
+                    Some(Frame::Array) => Expect::Value,
+                    None => return Err(PolicyRejection::NotJson),
+                };
+                index = index.saturating_add(1);
+            }
+            _ => return Err(PolicyRejection::NotJson),
         }
     }
-    if !stack.is_empty() {
-        return Err(PolicyRejection::NotJson);
+    if expect == Expect::End {
+        Ok(top)
+    } else {
+        Err(PolicyRejection::NotJson)
     }
-    top.ok_or(PolicyRejection::NotJson)
 }
 
-/// The index just past a JSON string starting at `start`.
-fn string_end(bytes: &[u8], start: usize) -> Result<usize, PolicyRejection> {
+/// What may follow a complete value inside `stack`.
+fn after_value(stack: &[Frame]) -> Expect {
+    if stack.is_empty() { Expect::End } else { Expect::CommaOrClose }
+}
+
+/// The index just past a JSON string starting at `start`, writing the decoded bytes to `decoded`
+/// when the caller needs them (a member name) and only validating otherwise.
+fn string_end(bytes: &[u8], start: usize, mut decoded: Option<&mut Vec<u8>>) -> Result<usize, PolicyRejection> {
     let mut index = start.saturating_add(1);
     while let Some(&byte) = bytes.get(index) {
         match byte {
-            b'\\' => index = index.saturating_add(2),
             b'"' => return Ok(index.saturating_add(1)),
+            b'\\' => {
+                let escape = bytes.get(index.saturating_add(1)).copied().ok_or(PolicyRejection::NotJson)?;
+                index = index.saturating_add(2);
+                let character = match escape {
+                    b'"' => '"',
+                    b'\\' => '\\',
+                    b'/' => '/',
+                    b'b' => '\u{8}',
+                    b'f' => '\u{c}',
+                    b'n' => '\n',
+                    b'r' => '\r',
+                    b't' => '\t',
+                    b'u' => {
+                        let (character, next) = unicode_escape(bytes, index)?;
+                        index = next;
+                        character
+                    }
+                    // `\x`, `\'`, `\0`: escapes JSON does not have.
+                    _ => return Err(PolicyRejection::NotJson),
+                };
+                if let Some(out) = decoded.as_deref_mut() {
+                    let mut buffer = [0u8; 4];
+                    out.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+                }
+            }
             // A raw control character inside a string is not JSON. Refusing it here keeps a
             // document that a stricter reader would reject from being stored by a laxer one.
             0x00..=0x1f => return Err(PolicyRejection::NotJson),
-            _ => index = index.saturating_add(1),
+            _ => {
+                if let Some(out) = decoded.as_deref_mut() {
+                    out.push(byte);
+                }
+                index = index.saturating_add(1);
+            }
         }
     }
     Err(PolicyRejection::NotJson)
 }
 
+/// The character a `\uXXXX` escape whose hex digits start at `start` names, and the index past it.
+///
+/// A high surrogate must be followed at once by a `\u` low surrogate, and a low surrogate may not
+/// stand alone: an unpaired one names no character, and strict readers refuse it.
+fn unicode_escape(bytes: &[u8], start: usize) -> Result<(char, usize), PolicyRejection> {
+    let high = hex4(bytes, start)?;
+    let next = start.saturating_add(4);
+    match high {
+        0xd800..=0xdbff => {
+            if bytes.get(next..next.saturating_add(2)) != Some(&b"\\u"[..]) {
+                return Err(PolicyRejection::NotJson);
+            }
+            let low = hex4(bytes, next.saturating_add(2))?;
+            if !(0xdc00..=0xdfff).contains(&low) {
+                return Err(PolicyRejection::NotJson);
+            }
+            let scalar = 0x1_0000 + ((high - 0xd800) << 10) + (low - 0xdc00);
+            let character = char::from_u32(scalar).ok_or(PolicyRejection::NotJson)?;
+            Ok((character, next.saturating_add(6)))
+        }
+        0xdc00..=0xdfff => Err(PolicyRejection::NotJson),
+        _ => Ok((char::from_u32(high).ok_or(PolicyRejection::NotJson)?, next)),
+    }
+}
+
+/// Four hex digits starting at `start`, as a code unit.
+fn hex4(bytes: &[u8], start: usize) -> Result<u32, PolicyRejection> {
+    let digits = bytes.get(start..start.saturating_add(4)).ok_or(PolicyRejection::NotJson)?;
+    digits.iter().try_fold(0u32, |unit, &digit| {
+        let value = char::from(digit).to_digit(16).ok_or(PolicyRejection::NotJson)?;
+        Ok((unit << 4) | value)
+    })
+}
+
 /// The index just past a `true`, `false`, `null` or number starting at `start`.
+///
+/// A number follows JSON's grammar exactly — `-? (0 | [1-9][0-9]*) (.[0-9]+)? ([eE][+-]?[0-9]+)?`
+/// — and must name a finite IEEE double. `01`, `1.`, `.5`, `+1` and `1.2.3` are not numbers, and
+/// `1e400` is one no double holds: the reader RustFS stores the document for refuses it as out of
+/// range, so the bucket would hold a policy it cannot load.
 fn scalar_end(bytes: &[u8], start: usize) -> Result<usize, PolicyRejection> {
     for literal in [&b"true"[..], &b"false"[..], &b"null"[..]] {
         if bytes.get(start..start.saturating_add(literal.len())) == Some(literal) {
             return Ok(start.saturating_add(literal.len()));
         }
     }
-    let mut index = start;
-    let mut digits = 0usize;
-    while let Some(&byte) = bytes.get(index) {
-        match byte {
-            b'0'..=b'9' => {
-                digits = digits.saturating_add(1);
-                index = index.saturating_add(1);
-            }
-            b'-' | b'+' | b'.' | b'e' | b'E' => index = index.saturating_add(1),
-            _ => break,
+    let digit_run = |from: usize| {
+        let mut end = from;
+        while bytes.get(end).is_some_and(u8::is_ascii_digit) {
+            end = end.saturating_add(1);
         }
+        end
+    };
+    let mut index = start;
+    if bytes.get(index) == Some(&b'-') {
+        index = index.saturating_add(1);
     }
-    if digits == 0 {
-        Err(PolicyRejection::NotJson)
-    } else {
-        Ok(index)
+    match bytes.get(index) {
+        Some(b'0') => index = index.saturating_add(1),
+        Some(b'1'..=b'9') => index = digit_run(index),
+        _ => return Err(PolicyRejection::NotJson),
+    }
+    if bytes.get(index) == Some(&b'.') {
+        let end = digit_run(index.saturating_add(1));
+        if end == index.saturating_add(1) {
+            return Err(PolicyRejection::NotJson);
+        }
+        index = end;
+    }
+    if matches!(bytes.get(index), Some(b'e' | b'E')) {
+        index = index.saturating_add(1);
+        if matches!(bytes.get(index), Some(b'+' | b'-')) {
+            index = index.saturating_add(1);
+        }
+        let end = digit_run(index);
+        if end == index {
+            return Err(PolicyRejection::NotJson);
+        }
+        index = end;
+    }
+    let text = bytes
+        .get(start..index)
+        .and_then(|number| core::str::from_utf8(number).ok())
+        .ok_or(PolicyRejection::NotJson)?;
+    match text.parse::<f64>() {
+        Ok(value) if value.is_finite() => Ok(index),
+        _ => Err(PolicyRejection::NotJson),
     }
 }

@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Proves that CORS selects its deliberately lenient persisted-runtime policy and that Lifecycle
+# Proves that the bucket configuration family keeps its graded write policies (rustfs/backlog#1728,
+# ADR-0007): the security configurations refuse what is not registered on the write path —
+# PutPublicAccessBlock through its generated allow-registered element guard, PutBucketPolicy through
+# the strict, duplicate-aware JSON check every write is gated on — while their persisted reads stay
+# lenient, and the six persisted switch configurations (versioning, website, notification,
+# accelerate, logging, requestPayment) stay lenient on the write path too, because a stricter
+# decoder there silently turns the setting off.
+#
+# Also proves that CORS selects its deliberately lenient persisted-runtime policy and that Lifecycle
 # keeps two deliberately different XML policies:
 # the generic HTTP codec is lenient when no dialect is selected, while the
 # persisted MinIO dialect accepts only its registered field and blocks a
@@ -134,5 +142,129 @@ for name in [
     if name not in tests:
         fail(f"the executable lifecycle policy matrix lost {name}")
 
-print("check_codec_policy: CORS leniency and selected/unselected Lifecycle XML policies are bound")
+# --- The bucket configuration family: security writes allow-registered, persisted reads and the
+# persisted switch configurations lenient (rustfs/backlog#1728, ADR-0007). ---------------------
+
+def quirk_record(overlay_text: str, quirk_id: str) -> str:
+    found = [
+        record
+        for record in re.findall(r'\[\[quirk\]\]\n(.*?)(?=\n\[\[quirk\]\]|\Z)', overlay_text, re.DOTALL)
+        if re.search(rf'^id\s*=\s*"{re.escape(quirk_id)}"$', record, re.MULTILINE)
+    ]
+    if len(found) != 1:
+        fail(f"the overlay must declare {quirk_id} exactly once")
+    return found[0]
+
+
+pab_rule = quirk_record(source("model/overlays/quirks/bucket-policy.toml"), "q-pab-0005")
+for pattern, message in [
+    (r'^mutation_dimension\s*=\s*"unknown_element_policy"$', "q-pab-0005 no longer governs the unknown-element policy"),
+    (r'^codec_value\s*=\s*"reject"$', "PutPublicAccessBlock's write path is no longer allow-registered (q-pab-0005)"),
+    (r'^target\s*=\s*"PutPublicAccessBlock"$', "q-pab-0005 no longer targets PutPublicAccessBlock"),
+    (r'^cases\s*=\s*\["c-bucketconfig-0061"\]$', "q-pab-0005 is not bound to its refusal case"),
+]:
+    require(pattern, pab_rule, message)
+require(
+    r'^codec_value = "reject"$',
+    source("spec/quirks/q-pab-0005.toml"),
+    "the generated rule table no longer records q-pab-0005 as reject",
+)
+require(
+    r'^quirks = \[[^\]]*"q-pab-0005"[^\]]*\]$',
+    source("spec/operations/PutPublicAccessBlock.toml"),
+    "PutPublicAccessBlock no longer carries q-pab-0005",
+)
+
+UNKNOWN_GUARD = 'return Err(CodecError::malformed_xml("the body contains an unknown element"));'
+require(
+    r'let known = \[\s*"BlockPublicAcls",\s*"IgnorePublicAcls",\s*"BlockPublicPolicy",\s*"RestrictPublicBuckets",\s*\];\s*'
+    r'if node\.children\.iter\(\)\.any\(\|child\| !known\.contains\(&child\.name\.as_str\(\)\)\) \{\s*'
+    + re.escape(UNKNOWN_GUARD),
+    source("generated/codec/ops/put_public_access_block.rs"),
+    "the generated PutPublicAccessBlock decoder no longer refuses an unregistered element",
+)
+refusal_case = source("conformance/cases/bucketconfig/c-bucketconfig-0061.toml")
+require(r'^quirks = \["q-pab-0005"\]$', refusal_case, "c-bucketconfig-0061 no longer binds q-pab-0005")
+require(r'^status = 400$\s*(?:\n.*?)*?^code = "MalformedXML"$', refusal_case, "c-bucketconfig-0061 no longer expects 400 MalformedXML")
+
+persisted = source("crates/types/src/persistence.rs")
+reader = re.search(
+    r'pub fn parse_public_access_block\(input: &\[u8\]\) -> Result<PersistedPublicAccessBlockConfiguration, PersistenceCodecError> \{\n(.*?)\n\}\n',
+    persisted,
+    re.DOTALL,
+)
+if reader is None:
+    fail("cannot locate the persisted PublicAccessBlock reader")
+if 'parse_persistence_root(input, "PublicAccessBlockConfiguration")' not in reader.group(1):
+    fail("the persisted PublicAccessBlock reader no longer reads its root")
+if "children" in reader.group(1) or "nknown" in reader.group(1):
+    fail("the persisted PublicAccessBlock reader inspects unknown children; persisted reads stay lenient (ADR-0007)")
+boundary = source("crates/core/tests/security_request_policy.rs")
+for name in [
+    "n_a_security_request_refuses_unknown_public_access_root",
+    "persisted_public_access_bytes_with_an_unknown_root_element_stay_readable",
+]:
+    if f"fn {name}()" not in boundary:
+        fail(f"the executable PublicAccessBlock write/read boundary lost {name}")
+
+policy_codec = source("generated/codec/ops/put_bucket_policy.rs")
+for needle, message in [
+    ("value::require_integrity(request)?;", "the PutBucketPolicy decoder no longer requires an integrity claim"),
+    ("value::verify_body_digest(request, raw_body.as_ref())?;", "the PutBucketPolicy decoder no longer verifies the body digest"),
+    ('input.policy = value::text_payload(raw_body.as_ref(), "Policy")?;', "the PutBucketPolicy body is no longer carried as one text payload"),
+]:
+    if needle not in policy_codec:
+        fail(message)
+policy_check = source("crates/core/src/ops/shared/bucket_policy.rs")
+require(
+    r'if !names\.insert\(name\) \{\s*return Err\(PolicyRejection::NotJson\);',
+    policy_check,
+    "the bucket policy check no longer refuses a repeated member name",
+)
+fixture = source("crates/conformance/src/fixture.rs")
+require(
+    r'fn put_bucket_policy\(&self, input: &dto::PutBucketPolicyInput\)[^{]*\{[^}]*validate_policy\(&input\.policy\)[^}]*fixture\.set_policy\(',
+    fixture,
+    "the PutBucketPolicy handler no longer gates the write on validate_policy",
+)
+policy_read = re.search(r'fn get_bucket_policy\(&self, input: &dto::GetBucketPolicyInput\)[^{]*\{([^}]*)\}', fixture)
+if policy_read is None:
+    fail("cannot locate the GetBucketPolicy handler")
+if "validate_policy" in policy_read.group(1):
+    fail("the GetBucketPolicy read validates the stored document; persisted reads stay lenient")
+if "fn a_member_name_repeated_under_an_escaped_spelling_is_refused()" not in source("crates/core/tests/policy_json_replay.rs"):
+    fail("the policy_json replay lost its repeated-name refusal")
+
+LENIENT_WRITES = {
+    "PutBucketVersioning": "put_bucket_versioning",
+    "PutBucketWebsite": "put_bucket_website",
+    "PutBucketNotificationConfiguration": "put_bucket_notification_configuration",
+    "PutBucketAccelerateConfiguration": "put_bucket_accelerate_configuration",
+    "PutBucketLogging": "put_bucket_logging",
+    "PutBucketRequestPayment": "put_bucket_request_payment",
+}
+for operation, stem in LENIENT_WRITES.items():
+    codec = source(f"generated/codec/ops/{stem}.rs")
+    if not re.search(r"^fn read_", codec, re.MULTILINE):
+        fail(f"{operation}'s generated decoder no longer reads an XML document; the lenient check would be vacuous")
+    if UNKNOWN_GUARD.removeprefix("return ").removesuffix(";") in codec:
+        fail(f"{operation}'s generated decoder refuses unknown elements; persisted configuration writes stay lenient")
+overlays = root / "model/overlays/quirks"
+if not overlays.is_dir():
+    fail("required input is missing: model/overlays/quirks")
+for overlay in sorted(overlays.glob("*.toml")):
+    for record in re.findall(r'\[\[quirk\]\]\n(.*?)(?=\n\[\[quirk\]\]|\Z)', overlay.read_text(encoding="utf-8"), re.DOTALL):
+        target = re.search(r'^target\s*=\s*"([^".]+)', record, re.MULTILINE)
+        if (
+            target is not None
+            and target.group(1) in LENIENT_WRITES
+            and re.search(r'^mutation_dimension\s*=\s*"unknown_element_policy"$', record, re.MULTILINE)
+            and not re.search(r'^codec_value\s*=\s*"skip"$', record, re.MULTILINE)
+        ):
+            fail(f"{overlay.relative_to(root)} makes {target.group(1)} stricter than lenient")
+
+print(
+    "check_codec_policy: bucket configuration write grading, CORS leniency and "
+    "selected/unselected Lifecycle XML policies are bound"
+)
 PY

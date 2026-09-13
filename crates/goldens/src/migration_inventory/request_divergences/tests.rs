@@ -19,18 +19,19 @@
 //! names that test, and every entry names a test that carries its id — plus refusing each kind of
 //! malformed entry by name.
 //! NOT responsible for: whether a divergence still diverges (the pinned tests observe that).
-//! Upstream: `super`, and the two test files it pins. Downstream: nothing.
+//! Upstream: `super`, and the four test files it pins. Downstream: nothing.
 
 use super::{
-    DivergenceFollowUp, DivergenceRuling, LOCATION_CONTEXT, PUT_CONTEXT, PUT_DECODE, REQUEST_DIVERGENCES, RequestDivergence,
-    RequestDivergenceError, build_request_divergences, check_register,
+    CONFIG_DECODE, DivergenceFollowUp, DivergenceRuling, LOCATION_CONTEXT, PUT_CONTEXT, PUT_DECODE, REQUEST_DIVERGENCES,
+    RequestDivergence, RequestDivergenceError, build_request_divergences, check_register,
 };
 
 /// The pinned test files, as source, keyed the way register entries name them.
-const PINNED_SOURCES: [(&str, &str); 3] = [
+const PINNED_SOURCES: [(&str, &str); 4] = [
     (PUT_DECODE, include_str!("../../operation_diff/put_object/divergences.rs")),
     (PUT_CONTEXT, include_str!("../../operation_diff/context/put_object.rs")),
     (LOCATION_CONTEXT, include_str!("../../operation_diff/context/get_bucket_location.rs")),
+    (CONFIG_DECODE, include_str!("../../operation_diff/put_bucket_versioning.rs")),
 ];
 
 /// One `#[test]` function read out of a source file.
@@ -146,11 +147,11 @@ fn every_pinned_divergence_test_has_a_ruling_and_every_ruling_a_test() {
 #[test]
 fn the_register_is_valid_and_renders_every_ruling() {
     let report = build_request_divergences();
-    assert_eq!(report.as_ref().map(|report| report.entries().len()), Ok(18));
+    assert_eq!(report.as_ref().map(|report| report.entries().len()), Ok(19));
     let rendered = report.map(|report| report.render()).unwrap_or_default();
     assert!(
         rendered.starts_with(
-            "request divergences: rulings=18 keep-gateway=9 align-s3s=4 align-aws=2 rustfs-profile=3 open-follow-ups=3 landed=8\n"
+            "request divergences: rulings=19 keep-gateway=10 align-s3s=4 align-aws=2 rustfs-profile=3 open-follow-ups=3 landed=9\n"
         ),
         "{rendered}"
     );
@@ -235,7 +236,14 @@ fn a_marked_test_outside_a_named_section_still_binds() {
 
 #[test]
 fn n_a_malformed_id_is_refused() {
-    for id in ["rd-put-1", "rd-get-0001", "put-0001", "rd-put-00a1"] {
+    for id in [
+        "rd-put-1",
+        "rd-get-0001",
+        "put-0001",
+        "rd-put-00a1",
+        "rd-cfg-1",
+        "rd-cfg-00a1",
+    ] {
         assert_eq!(
             check_register(&[entry(id, PUT_DECODE, "t")]),
             Err(RequestDivergenceError::MalformedId(id)),

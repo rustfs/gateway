@@ -73,4 +73,5 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/security_request_policy.rs` | Unknown-element refusal for every security configuration PUT (allow-registered write policy). | A security PUT starts accepting, or stops refusing, an unregistered element. |
 | `tests/purity_guard.rs` | Source-shape guards for pre-auth code. | Add public/core routing code. |
 | `tests/xml_parse_replay.rs` | Replays `fuzz/seeds/xml_parse/` and 40,000 fixed-seed samples through the `xml_parse` property over `rustfs-gateway-xml`'s bounded reader. | Change an XML ceiling or refusal, or add a minimised fuzz regression seed. |
+| `tests/policy_json_replay.rs` | Replays `fuzz/seeds/policy_json/` and 20,000 fixed-seed samples through the `policy_json` property: the `PutBucketPolicy` codec and `validate_policy` held to a strict duplicate-aware JSON reader. | Change a bucket policy check or ceiling, or add a minimised fuzz regression seed. |
 | `tests/golden/route-table.txt` | Protected ordered route table. | Never edit without the Breaking Change process. |

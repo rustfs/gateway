@@ -43,6 +43,7 @@ mod s3s_9c4690d8 {
     use harness::*;
 
     mod context;
+    mod put_bucket_versioning;
     mod put_object;
 }
 
@@ -64,5 +65,6 @@ pub(crate) mod s3s_f3e17541 {
     use harness::*;
 
     pub(crate) mod context;
+    mod put_bucket_versioning;
     mod put_object;
 }

@@ -23,7 +23,8 @@
 //! NOT responsible for: observing the divergences (the named tests in `operation_diff` drive both
 //! stacks), persisted-byte refusals (the parent module), or implementing a follow-up.
 //! Upstream: the named tests in `operation_diff/put_object/divergences.rs`,
-//! `operation_diff/context/put_object.rs` and `operation_diff/context/get_bucket_location.rs`.
+//! `operation_diff/context/put_object.rs`, `operation_diff/context/get_bucket_location.rs` and
+//! `operation_diff/put_bucket_versioning.rs`.
 //! Downstream: `corpus-report`, and the RustFS adapter work
 //! of rustfs/backlog#1752.
 //!
@@ -80,7 +81,9 @@ pub enum DivergenceFollowUp {
 /// One pinned divergence and its ruling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequestDivergence {
-    /// Stable id, `rd-<put|ctx|loc>-NNNN`; the pinned test's doc carries it as `Ruling: `id``.
+    /// Stable id, `rd-<put|ctx|loc|cfg>-NNNN` — the PutObject decode, a request context, the
+    /// GetBucketLocation context, or a bucket configuration write; the pinned test's doc carries it
+    /// as `Ruling: `id``.
     pub id: &'static str,
     /// Operation the request addresses.
     pub operation: &'static str,
@@ -109,9 +112,10 @@ pub struct RequestDivergence {
 const PUT_DECODE: &str = "operation_diff/put_object/divergences.rs";
 const PUT_CONTEXT: &str = "operation_diff/context/put_object.rs";
 const LOCATION_CONTEXT: &str = "operation_diff/context/get_bucket_location.rs";
+const CONFIG_DECODE: &str = "operation_diff/put_bucket_versioning.rs";
 
 /// The files whose named-divergence sections the register is checked against.
-const PINNED_TEST_FILES: [&str; 3] = [PUT_DECODE, PUT_CONTEXT, LOCATION_CONTEXT];
+const PINNED_TEST_FILES: [&str; 4] = [PUT_DECODE, PUT_CONTEXT, LOCATION_CONTEXT, CONFIG_DECODE];
 
 const API_PUT_OBJECT: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html";
 const API_GET_BUCKET_LOCATION: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html";
@@ -120,7 +124,7 @@ const M1_ADAPTER: &str = "https://github.com/rustfs/backlog/issues/1752";
 const ADAPTER_SEAM: &str = "https://github.com/rustfs/gateway/issues/753";
 
 /// Every decided request divergence.
-pub const REQUEST_DIVERGENCES: [RequestDivergence; 18] = [
+pub const REQUEST_DIVERGENCES: [RequestDivergence; 19] = [
     RequestDivergence {
         id: "rd-put-0001",
         operation: "PutObject",
@@ -418,12 +422,32 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 18] = [
         test_file: LOCATION_CONTEXT,
         test: "a_scope_region_the_gateway_does_not_serve_is_verified_only_under_the_rustfs_profile",
     },
+    RequestDivergence {
+        id: "rd-cfg-0001",
+        operation: "PutBucketVersioning",
+        request: "a body that is the bare text Enabled instead of a VersioningConfiguration document (the MinIO body literal)",
+        aws: "the request body is the VersioningConfiguration XML document that carries Status",
+        aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html",
+        s3s: "built with its minio feature, as RustFS builds it, reads a body whose ASCII-trimmed bytes are exactly Enabled as \
+              Status Enabled (http::take_body_literal) and hands it to the handler; every other body, a bare Suspended \
+              included, is read as XML and refused",
+        gateway: "400 MalformedXML before the handler: body_literal is false for this operation, so the body must be the \
+                  document (c-bucketconfig-0060, decided in rustfs/gateway#715)",
+        client_impact: "a client sending the bare literal gets 400 where RustFS answered 200 and turned versioning on. None has \
+                        been found: minio-go and mc marshal the XML document, MinIO's own server reads the body only as XML, \
+                        and s3s-project/s3s#612 names no client. If one appears, the literal is added through overlay, IR \
+                        and codec, never as a handler branch",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::Landed("c-bucketconfig-0060"),
+        test_file: CONFIG_DECODE,
+        test: "a_bare_enabled_versioning_body_is_refused_by_the_gateway_and_accepted_by_s3s",
+    },
 ];
 
 /// A register entry that does not hold as written.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RequestDivergenceError {
-    /// The id is not `rd-<put|ctx>-NNNN`.
+    /// The id is not `rd-<put|ctx|cfg>-NNNN`.
     MalformedId(&'static str),
     /// Two entries share an id.
     DuplicateId(&'static str),
@@ -447,7 +471,7 @@ pub enum RequestDivergenceError {
 impl fmt::Display for RequestDivergenceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MalformedId(id) => write!(formatter, "{id} is not an rd-<put|ctx|loc>-NNNN id"),
+            Self::MalformedId(id) => write!(formatter, "{id} is not an rd-<put|ctx|loc|cfg>-NNNN id"),
             Self::DuplicateId(id) => write!(formatter, "{id} appears twice"),
             Self::MissingText { id, field } => write!(formatter, "{id} leaves {field} empty"),
             Self::EvidenceNotUrl(id) => write!(formatter, "{id} cites AWS evidence that is not a URL"),
@@ -566,7 +590,7 @@ fn check_register(entries: &[RequestDivergence]) -> Result<(), RequestDivergence
 }
 
 fn well_formed_id(id: &str) -> bool {
-    let Some(number) = ["rd-put-", "rd-ctx-", "rd-loc-"]
+    let Some(number) = ["rd-put-", "rd-ctx-", "rd-loc-", "rd-cfg-"]
         .iter()
         .find_map(|prefix| id.strip_prefix(prefix))
     else {

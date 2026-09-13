@@ -14230,7 +14230,9 @@ expect_fail check_cors_credentials_exclusive.sh \
 # registered field, while the unselected generic HTTP codec keeps skipping vendor elements. These
 # mutations attack both directions and the protected record joining them. CORS separately selects
 # Lenient at its persisted-runtime entry point; its mutation proves the guard watches that
-# production choice rather than only Lifecycle's dialect path.
+# production choice rather than only Lifecycle's dialect path. The bucket configuration family's
+# write grading (security writes allow-registered, persisted reads and switch writes lenient) has
+# its own group below.
 # -----------------------------------------------------------------------------
 
 mut_codec_policy_runtime_cors_made_strict() {
@@ -14322,6 +14324,146 @@ PYEOF
 expect_fail check_codec_policy.sh \
     'the protected lifecycle dialect contract leaving its deterministic id' \
     mut_codec_policy_contract_renamed
+
+# The bucket configuration family's grading (rustfs/backlog#1728, ADR-0007): each mutation moves one
+# write or read path to the other side of allow-registered / lenient, or cuts the evidence binding
+# them, and the guard must refuse every one.
+
+mut_codec_policy_pab_guard_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("generated/codec/ops/put_public_access_block.rs")
+text = path.read_text()
+old = '    if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {\n        return Err(CodecError::malformed_xml("the body contains an unknown element"));\n    }\n'
+if text.count(old) != 1:
+    raise SystemExit("public access block guard mutation anchor is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the generated PutPublicAccessBlock decoder skipping unregistered elements' \
+    mut_codec_policy_pab_guard_removed
+
+mut_codec_policy_pab_rule_made_lenient() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("model/overlays/quirks/bucket-policy.toml")
+text = path.read_text()
+old = 'mutation_dimension = "unknown_element_policy"\ncodec_value = "reject"\ntarget = "PutPublicAccessBlock"\n'
+if text.count(old) != 1:
+    raise SystemExit("public access block rule mutation anchor is not unique")
+path.write_text(text.replace(old, old.replace('"reject"', '"skip"'), 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the PutPublicAccessBlock write rule flipped from reject to skip' \
+    mut_codec_policy_pab_rule_made_lenient
+
+mut_codec_policy_pab_case_unbound() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/bucketconfig/c-bucketconfig-0061.toml")
+text = path.read_text()
+old = 'quirks = ["q-pab-0005"]\n'
+if text.count(old) != 1:
+    raise SystemExit("public access block case mutation anchor is not unique")
+path.write_text(text.replace(old, "quirks = []\n", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the public access block refusal case losing its rule binding' \
+    mut_codec_policy_pab_case_unbound
+
+mut_codec_policy_persisted_pab_made_strict() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/types/src/persistence.rs")
+text = path.read_text()
+old = '    let root = parse_persistence_root(input, "PublicAccessBlockConfiguration")?;\n'
+if text.count(old) != 1:
+    raise SystemExit("persisted public access block mutation anchor is not unique")
+strict = old + '    if root.children.iter().any(|child| child.name == "FutureSetting") {\n        return Err(PersistenceCodecError::InvalidBoolean);\n    }\n'
+path.write_text(text.replace(old, strict, 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the persisted PublicAccessBlock reader refusing an unknown element' \
+    mut_codec_policy_persisted_pab_made_strict
+
+mut_codec_policy_policy_gate_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/conformance/src/fixture.rs")
+text = path.read_text()
+old = "        validate_policy(&input.policy).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;\n"
+if text.count(old) != 1:
+    raise SystemExit("policy gate mutation anchor is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'a PutBucketPolicy write stored without the policy check' \
+    mut_codec_policy_policy_gate_removed
+
+mut_codec_policy_repeated_name_admitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/ops/shared/bucket_policy.rs")
+text = path.read_text()
+old = "                if !names.insert(name) {\n                    return Err(PolicyRejection::NotJson);\n                }\n"
+if text.count(old) != 1:
+    raise SystemExit("repeated policy name mutation anchor is not unique")
+path.write_text(text.replace(old, "                names.insert(name);\n", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the policy check admitting a repeated member name' \
+    mut_codec_policy_repeated_name_admitted
+
+mut_codec_policy_versioning_made_strict() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("generated/codec/ops/put_bucket_versioning.rs")
+path.write_text(
+    path.read_text()
+    + '\nfn refuse_unknown() -> Result<(), CodecError> {\n    Err(CodecError::malformed_xml("the body contains an unknown element"))\n}\n'
+)
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the persisted versioning write refusing unknown elements' \
+    mut_codec_policy_versioning_made_strict
+
+mut_codec_policy_website_rule_made_reject() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("model/overlays/quirks/bucket-website.toml")
+path.write_text(
+    path.read_text()
+    + '\n[[quirk]]\nid = "q-web-9999"\nkind = "security_unknown_elements"\nclassification = "mutable"\n'
+    + 'mutation_dimension = "unknown_element_policy"\ncodec_value = "reject"\ntarget = "PutBucketWebsite"\n'
+    + 'summary = "A stricter website write."\ncases = []\n'
+)
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'an overlay rule making the persisted website write strict' \
+    mut_codec_policy_website_rule_made_reject
+
+mut_codec_policy_persisted_boundary_test_lost() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/security_request_policy.rs")
+text = path.read_text()
+old = "fn persisted_public_access_bytes_with_an_unknown_root_element_stay_readable()"
+if text.count(old) != 1:
+    raise SystemExit("persisted boundary test mutation anchor is not unique")
+path.write_text(text.replace(old, "fn persisted_public_access_bytes_renamed()", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the executable persisted PublicAccessBlock boundary disappearing' \
+    mut_codec_policy_persisted_boundary_test_lost
 
 # -----------------------------------------------------------------------------
 # check_no_minio_source.sh
