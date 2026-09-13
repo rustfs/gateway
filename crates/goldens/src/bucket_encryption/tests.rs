@@ -368,3 +368,19 @@ fn wrong_family_label_fails_before_sse_codec_observation() {
     let failure = assert_four_way(&codec, &invalid).expect_err("mislabeled SSE sample must fail closed");
     assert_eq!(failure.direction, Direction::Input);
 }
+
+#[test]
+fn n_a_d5_diagnostic_names_key_id_presence_and_length_never_the_key_id() {
+    const OLD_KEY: &str = "old-kms-key-must-never-be-logged";
+    const NEW_KEY: &str = "arn:aws:kms:us-east-1:111122223333:key/new-must-never-be-logged";
+    let projection = |key: &str| BucketEncryptionBehaviorProjection {
+        rules: vec![(Some("aws:kms".to_owned()), Some(key.to_owned()), Some(true), None)],
+    };
+    let failure = value_failure(Direction::D5Behavior, &projection(OLD_KEY), &projection(NEW_KEY));
+    for side in [&failure.left, &failure.right] {
+        assert!(!side.contains("must-never-be-logged"), "a KMS key id reached a D5 diagnostic: {side}");
+        assert!(side.contains("aws:kms"), "the algorithm is still visible: {side}");
+    }
+    assert!(failure.left.contains(&format!("Some(<redacted {} bytes>)", OLD_KEY.len())), "{}", failure.left);
+    assert!(failure.right.contains(&format!("Some(<redacted {} bytes>)", NEW_KEY.len())), "{}", failure.right);
+}
