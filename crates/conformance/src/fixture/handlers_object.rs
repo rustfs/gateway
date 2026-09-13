@@ -20,6 +20,19 @@
 
 use super::*;
 
+impl Stub {
+    /// The bucket's stored `BlockedEncryptionTypes` applied to one object write: a write that
+    /// presented an SSE-C key to a bucket that blocks SSE-C is refused with `403 AccessDenied`
+    /// before anything is stored. The decision is the facade's shared rule; this only supplies the
+    /// stored document. A bucket that does not exist has no document, so the handler's own
+    /// `NoSuchBucket` still answers.
+    fn refuse_blocked_encryption_type(&self, bucket: &str, sse: &SseEnforced) -> Result<(), HandlerError> {
+        let fixture = self.borrow()?;
+        refuse_blocked_encryption_type(fixture.encryption(bucket), sse)
+            .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason().to_owned()))
+    }
+}
+
 impl Handler<dto::GetObject> for Stub {
     fn call(&self, request: Req<dto::GetObject>) -> impl core::future::Future<Output = HandlerResult<dto::GetObject>> + Send {
         let outcome = self.get_object(request.input());
@@ -73,10 +86,13 @@ impl Handler<dto::HeadObject> for Stub {
 
 impl Handler<dto::CopyObject> for Stub {
     fn call(&self, request: Req<dto::CopyObject>) -> impl core::future::Future<Output = HandlerResult<dto::CopyObject>> + Send {
-        let outcome = match request.resources().source().resolve(request.read_proof()) {
-            Some(resolved) => self.copy_object_with_source(request.input(), CopySource::from_resolved(&resolved)),
-            None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
-        };
+        // The target's key is the write the bucket may block; the copy source's key only reads.
+        let outcome = self
+            .refuse_blocked_encryption_type(request.input().bucket.as_str(), request.sse())
+            .and_then(|()| match request.resources().source().resolve(request.read_proof()) {
+                Some(resolved) => self.copy_object_with_source(request.input(), CopySource::from_resolved(&resolved)),
+                None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
+            });
         async move { outcome }
     }
 
@@ -85,10 +101,12 @@ impl Handler<dto::CopyObject> for Stub {
         request: Req<dto::CopyObject>,
         _context: rustfs_gateway::HandlerContext,
     ) -> impl core::future::Future<Output = HandlerResult<dto::CopyObject>> + Send {
-        let outcome = match request.resources().source().resolve(request.read_proof()) {
-            Some(resolved) => self.copy_object_with_source(request.input(), CopySource::from_resolved(&resolved)),
-            None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
-        };
+        let outcome = self
+            .refuse_blocked_encryption_type(request.input().bucket.as_str(), request.sse())
+            .and_then(|()| match request.resources().source().resolve(request.read_proof()) {
+                Some(resolved) => self.copy_object_with_source(request.input(), CopySource::from_resolved(&resolved)),
+                None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
+            });
         async move { outcome }
     }
 }
@@ -378,7 +396,10 @@ impl Handler<dto::CreateMultipartUpload> for Stub {
         &self,
         request: Req<dto::CreateMultipartUpload>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::CreateMultipartUpload>> + Send {
-        let outcome = self.create_multipart_upload(request.input());
+        // Refused at initiation, so no SSE-C upload exists for its parts to join.
+        let outcome = self
+            .refuse_blocked_encryption_type(request.input().bucket.as_str(), request.sse())
+            .and_then(|()| self.create_multipart_upload(request.input()));
         async move { outcome }
     }
 
@@ -387,7 +408,9 @@ impl Handler<dto::CreateMultipartUpload> for Stub {
         request: Req<dto::CreateMultipartUpload>,
         _context: rustfs_gateway::HandlerContext,
     ) -> impl core::future::Future<Output = HandlerResult<dto::CreateMultipartUpload>> + Send {
-        let outcome = self.create_multipart_upload(request.input());
+        let outcome = self
+            .refuse_blocked_encryption_type(request.input().bucket.as_str(), request.sse())
+            .and_then(|()| self.create_multipart_upload(request.input()));
         async move { outcome }
     }
 }
@@ -537,9 +560,10 @@ impl Handler<dto::ListObjectVersions> for Stub {
 
 impl Handler<dto::PutObject> for Stub {
     fn call(&self, request: Req<dto::PutObject>) -> impl core::future::Future<Output = HandlerResult<dto::PutObject>> + Send {
+        let blocked = self.refuse_blocked_encryption_type(request.input().bucket.as_str(), request.sse());
         let state = Arc::clone(&self.state);
         let input = request.into_input();
-        async move { put_object(&state, input).await }
+        async move { put_object(&state, input, blocked).await }
     }
 
     fn call_with_context(
@@ -547,9 +571,10 @@ impl Handler<dto::PutObject> for Stub {
         request: Req<dto::PutObject>,
         _context: rustfs_gateway::HandlerContext,
     ) -> impl core::future::Future<Output = HandlerResult<dto::PutObject>> + Send {
+        let blocked = self.refuse_blocked_encryption_type(request.input().bucket.as_str(), request.sse());
         let state = Arc::clone(&self.state);
         let input = request.into_input();
-        async move { put_object(&state, input).await }
+        async move { put_object(&state, input, blocked).await }
     }
 }
 

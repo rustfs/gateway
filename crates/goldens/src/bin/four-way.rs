@@ -33,7 +33,17 @@ fn render(report: &FourWayRunReport) -> String {
         report.families.len()
     );
     for family in &report.families {
-        output.push_str(&format!("{}: samples={}\n", family.kind.report_name(), family.sample_count));
+        output.push_str(&format!("{}: samples={}", family.kind.report_name(), family.sample_count));
+        if family.widened > 0 {
+            output.push_str(&format!(" widened={}", family.widened));
+        }
+        output.push('\n');
+    }
+    if report.widened_count > 0 {
+        output.push_str(&format!(
+            "widened: {} samples written by a later pinned s3s revision are refused by the selected one and read by the production decoder\n",
+            report.widened_count
+        ));
     }
     output
 }

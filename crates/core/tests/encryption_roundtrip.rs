@@ -163,16 +163,14 @@ fn by_default() -> impl Strategy<Value = dto::ServerSideEncryptionByDefault> {
     })
 }
 
-/// One of the documented blocked-encryption-type spellings. The list is a plain member, not a
-/// closed set the codec enforces, so a repeated entry is exercised too (`blocked_encryption_types`
-/// below allows duplicates).
+/// One of the documented blocked-encryption-type spellings: `NONE` and `SSE-C`, the only two the
+/// API reference lists for this wrapper. The generated enumeration is shared with other shapes
+/// and also spells `AES256` and the KMS algorithms, which the codec reads but
+/// `validate_encryption` refuses here (rustfs/gateway#740, `c-encryption-0027`), so they belong to
+/// the family's own unit tests and not to this generator of legal documents. A repeated entry is
+/// still exercised (`blocked_encryption_types` below allows duplicates).
 fn encryption_type() -> impl Strategy<Value = dto::EncryptionType> {
-    prop_oneof![
-        Just(dto::EncryptionType::NONE),
-        Just(dto::EncryptionType::SSE_C),
-        Just(dto::EncryptionType::AES256),
-        Just(dto::EncryptionType::AWS_KMS),
-    ]
+    prop_oneof![Just(dto::EncryptionType::NONE), Just(dto::EncryptionType::SSE_C)]
 }
 
 fn blocked_encryption_types() -> impl Strategy<Value = dto::BlockedEncryptionTypes> {

@@ -104,10 +104,15 @@ pub struct PersistedBucketEncryptionConfiguration {
     pub rules: Vec<PersistedBucketEncryptionRule>,
 }
 
+/// The runtime-relevant decisions of one stored encryption rule: default algorithm, default KMS
+/// key, bucket-key switch, and the encryption types the rule blocks for new writes (`None` when
+/// the rule carries no `BlockedEncryptionTypes`).
+pub type EncryptionRuleBehavior = (Option<String>, Option<String>, Option<bool>, Option<Vec<String>>);
+
 impl PersistedBucketEncryptionConfiguration {
     /// Runtime-relevant default-encryption decisions, one tuple per stored rule.
     #[must_use]
-    pub fn encryption_behavior(&self) -> Vec<(Option<String>, Option<String>, Option<bool>)> {
+    pub fn encryption_behavior(&self) -> Vec<EncryptionRuleBehavior> {
         self.rules
             .iter()
             .map(|rule| {
@@ -116,6 +121,9 @@ impl PersistedBucketEncryptionConfiguration {
                     default.map(|value| value.sse_algorithm.clone()),
                     default.and_then(|value| value.kms_master_key_id.clone()),
                     rule.bucket_key_enabled,
+                    rule.blocked_encryption_types
+                        .as_ref()
+                        .map(|blocked| blocked.encryption_types.clone()),
                 )
             })
             .collect()
@@ -129,6 +137,18 @@ pub struct PersistedBucketEncryptionRule {
     pub apply_server_side_encryption_by_default: Option<PersistedEncryptionByDefault>,
     /// Whether the rule enables an S3 bucket key.
     pub bucket_key_enabled: Option<bool>,
+    /// Encryption types new object writes may not use, as written by s3s `bdcb6259` and later
+    /// (RustFS 1.0.0-rc.6 and `main`). Carried rather than skipped: dropping it would silently
+    /// unblock SSE-C for a bucket whose owner blocked it (rustfs/gateway#740).
+    pub blocked_encryption_types: Option<PersistedBlockedEncryptionTypes>,
+}
+
+/// The persisted `BlockedEncryptionTypes` wrapper of one encryption rule.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PersistedBlockedEncryptionTypes {
+    /// Flattened `EncryptionType` entries in stored order, including values unknown to this
+    /// release; an empty list is an explicit empty wrapper.
+    pub encryption_types: Vec<String>,
 }
 
 /// The persisted encryption defaults nested inside one rule.
@@ -519,14 +539,44 @@ pub fn parse_bucket_encryption(input: &[u8]) -> Result<PersistedBucketEncryption
 fn parse_bucket_encryption_rule(
     rule: &rustfs_gateway_xml::XmlNode,
 ) -> Result<PersistedBucketEncryptionRule, PersistenceCodecError> {
-    reject_unknown_encryption_children(rule, &["ApplyServerSideEncryptionByDefault", "BucketKeyEnabled"])?;
+    reject_unknown_encryption_children(
+        rule,
+        &[
+            "ApplyServerSideEncryptionByDefault",
+            "BucketKeyEnabled",
+            "BlockedEncryptionTypes",
+        ],
+    )?;
     let apply_server_side_encryption_by_default = optional_child(rule, "ApplyServerSideEncryptionByDefault")?
         .map(parse_encryption_by_default)
+        .transpose()?;
+    let blocked_encryption_types = optional_child(rule, "BlockedEncryptionTypes")?
+        .map(parse_blocked_encryption_types)
         .transpose()?;
     Ok(PersistedBucketEncryptionRule {
         apply_server_side_encryption_by_default,
         bucket_key_enabled: optional_bool_child(rule, "BucketKeyEnabled")?,
+        blocked_encryption_types,
     })
+}
+
+/// Reads the wrapper the way s3s `bdcb6259`/`f3e17541` do: only flattened `EncryptionType`
+/// children, each kept as its stored text, and anything else refused.
+fn parse_blocked_encryption_types(
+    blocked: &rustfs_gateway_xml::XmlNode,
+) -> Result<PersistedBlockedEncryptionTypes, PersistenceCodecError> {
+    reject_unknown_encryption_children(blocked, &["EncryptionType"])?;
+    let encryption_types = blocked
+        .children_named("EncryptionType")
+        .map(|entry| {
+            if entry.children.is_empty() {
+                Ok(entry.text.clone())
+            } else {
+                Err(PersistenceCodecError::UnexpectedScalarElement)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(PersistedBlockedEncryptionTypes { encryption_types })
 }
 
 fn parse_encryption_by_default(
@@ -565,6 +615,15 @@ pub fn serialize_bucket_encryption(value: &PersistedBucketEncryptionConfiguratio
                 writer.element("KMSMasterKeyID", key_id);
             }
             writer.element("SSEAlgorithm", &default.sse_algorithm);
+            writer.close();
+        }
+        // s3s writes the rule's members alphabetically, so the wrapper sits between the default
+        // action and the bucket-key switch.
+        if let Some(blocked) = rule.blocked_encryption_types.as_ref() {
+            writer.open("BlockedEncryptionTypes", None);
+            for encryption_type in &blocked.encryption_types {
+                writer.element("EncryptionType", encryption_type);
+            }
             writer.close();
         }
         if let Some(enabled) = rule.bucket_key_enabled {

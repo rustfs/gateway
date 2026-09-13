@@ -1,0 +1,64 @@
+[case]
+id = "c-encryption-0026"
+schema_version = 1
+title = "A bucket that blocks SSE-C still accepts an unencrypted write and an SSE-S3 write"
+rationale = """
+Blocking SSE-C blocks writes that carry a customer-provided key, and nothing else. An implementation that refused every write to a bucket with a BlockedEncryptionTypes wrapper would pass every SSE-C refusal test while breaking the bucket for all other clients, so this is the half of the rule a refusal alone cannot prove. The refusal itself needs an SSE-C request that reaches the backend, which only a TLS transport delivers: this runner is always cleartext, where the transport gate answers 400 first (c-ssec-0001). That half lives in crates/conformance/tests/encryption_blocked_types.rs."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["encryption", "sse"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/blocking-unblocking-s3-c-encryption-gpb.html"
+summary = "Blocking SSE-C on a general purpose bucket rejects only writes that specify SSE-C; other writes and reads of existing objects continue."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[[exchanges]]
+name = "block-sse-c"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "0LvETHq2V2xykcrGAD4gGw==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "unencrypted-write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-encryption/plain.txt"
+headers = { "content-md5" = "vHLdn34djSTW90pkAC7+gg==" }
+body = { utf8 = "plain object" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "sse-s3-write"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-encryption/managed.txt"
+headers = { "content-md5" = "vHLdn34djSTW90pkAC7+gg==", "x-amz-server-side-encryption" = "AES256" }
+body = { utf8 = "plain object" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"

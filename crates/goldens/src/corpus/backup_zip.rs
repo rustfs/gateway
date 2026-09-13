@@ -170,10 +170,12 @@ fn validate_backup_archive(bytes: &[u8], cases: &[BackupCase]) -> Result<(), Bac
 fn prove_backup_compatibility() -> Result<BackupCompatibilityReport, BackupArchiveError> {
     let four_way = run_four_way_all().map_err(|error| BackupArchiveError::FourWay(error.to_string()))?;
     let cases = collect_backup_cases()?;
-    if cases.len() != four_way.sample_count {
+    // Every accepted sample is either run through D1-D5 or, under a revision that predates it,
+    // measured as a widening; the archive must hold exactly that set.
+    if cases.len() != four_way.sample_count + four_way.widened_count {
         return Err(BackupArchiveError::SampleCountMismatch {
             corpus: cases.len(),
-            four_way: four_way.sample_count,
+            four_way: four_way.sample_count + four_way.widened_count,
         });
     }
     let archive = write_backup_archive(&cases)?;
@@ -193,8 +195,10 @@ fn prove_backup_compatibility() -> Result<BackupCompatibilityReport, BackupArchi
         return Err(BackupArchiveError::MissingUnknownElementSample);
     }
     Ok(BackupCompatibilityReport {
+        // The production decoder reads every archived sample; rollback readability is claimed only
+        // for the samples the selected revision proved through D1-D5, never for its widenings.
         old_to_new_samples: cases.len(),
-        new_to_old_samples: cases.len(),
+        new_to_old_samples: four_way.sample_count,
         unknown_element_samples,
         family_count: four_way.families.len(),
         archive_size: archive.len(),
@@ -213,7 +217,9 @@ mod tests {
     #[test]
     fn g_zip_001_old_archive_is_new_readable_and_byte_exact() {
         let report = prove_backup_compatibility().expect("old backup bytes remain new-readable");
-        assert_eq!(report.old_to_new_samples, 206);
+        // 206 samples every revision reads plus the two `BlockedEncryptionTypes` samples only the
+        // rollback and candidate revisions write (rustfs/gateway#740).
+        assert_eq!(report.old_to_new_samples, 208);
         assert_eq!(report.family_count, 13);
     }
 

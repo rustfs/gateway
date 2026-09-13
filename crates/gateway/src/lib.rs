@@ -302,8 +302,15 @@ pub use rustfs_gateway_core::ops::shared::lifecycle::{
 // constant on purpose: `KMSMasterKeyID` is a sensitive member, and a backend that composed its
 // own refusal from the document's bytes would copy a key identifier into an error body
 // (`q-enc-0009`).
+//
+// `refuse_blocked_encryption_type` is the stored document's one run-time rule, and it is the
+// backend's to call: the framework holds no bucket state, so only the backend that stored a
+// `BlockedEncryptionTypes` can refuse the write it blocks. It takes the framework's `SseEnforced`
+// proof rather than the decoded headers, so a backend cannot answer from a field the gate did not
+// validate.
 pub use rustfs_gateway_core::ops::shared::encryption::{
-    EncryptionRejection, encryption_delete_absent_succeeds, validate_encryption,
+    EncryptionRejection, blocks_customer_keys, encryption_delete_absent_succeeds, refuse_blocked_encryption_type,
+    validate_encryption,
 };
 
 // The **run-time** half of server-side encryption, which the document contract above deliberately

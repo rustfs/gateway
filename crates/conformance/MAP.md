@@ -63,6 +63,7 @@ ADRs; this map only selects files.
 | `src/external_junit_tests.rs` | Independently parses external CLI JUnit reports and tests write failures. | The external CLI reporting composition changes. |
 | `src/report.rs` | Verdicts, the baseline table, and human/JSON/JUnit reports. | A verdict is rendered, grouped or compared against the baseline wrongly. |
 | `tests/corpus.rs` | Corpus-wide invariants and the whole-corpus baseline gate. | A case has no baseline row, or the corpus regressed against it. |
+| `tests/encryption_blocked_types.rs` | The SSE-C `BlockedEncryptionTypes` refusal over a declared TLS transport, which the cleartext corpus cannot reach, in both directions. | Changing how the fixture enforces a bucket's blocked encryption types. |
 | `src/lint.rs` | Corpus conventions beyond the JSON schema. | Case naming or evidence lint fails. |
 | `tests/` | Process and corpus integration contracts. | Change runner behavior or CLI output. |
 | `../../conformance/cases/**` | Executable S3 behavior cases. | Add or diagnose one protocol behavior. |

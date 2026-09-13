@@ -178,8 +178,8 @@ pub struct S3sObjectLockObservation {
 pub struct S3sBucketEncryptionObservation {
     /// Complete parsed persistence structure.
     pub structure: PersistedBucketEncryptionConfiguration,
-    /// Runtime-relevant algorithm, KMS key, and bucket-key decisions per stored rule.
-    pub behavior: Vec<(Option<String>, Option<String>, Option<bool>)>,
+    /// Runtime-relevant algorithm, KMS key, bucket-key and blocked-type decisions per stored rule.
+    pub behavior: Vec<crate::persistence::EncryptionRuleBehavior>,
 }
 
 /// One old-codec Public Access Block observation before either side is normalized.
@@ -276,32 +276,21 @@ pub struct S3sReplicationObservation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompatCodecError {
     message: String,
-    unrepresented_member: Option<&'static str>,
 }
 
 impl CompatCodecError {
     fn old_codec(error: impl fmt::Display) -> Self {
         Self {
             message: format!("pinned s3s persistence codec failed: {error}"),
-            unrepresented_member: None,
         }
     }
 
-    fn unrepresented(member: &'static str) -> Self {
+    /// The selected revision's DTO has no field for a persisted member the value carries, so its
+    /// writer cannot produce those bytes. Refused rather than written without the member.
+    fn unwritable(member: &'static str) -> Self {
         Self {
-            message: format!("pinned s3s persistence codec read member {member}, which no persisted structure can carry"),
-            unrepresented_member: Some(member),
+            message: format!("pinned s3s revision has no {member} member to write"),
         }
-    }
-
-    /// The member the old codec read but no persisted structure can carry, when that is why the
-    /// adapter failed.
-    ///
-    /// `Some` reports an old *acceptance*: the selected revision read the document. It is never
-    /// an old refusal, and counting it as one would hide the very divergence it names.
-    #[must_use]
-    pub const fn unrepresented_member(&self) -> Option<&'static str> {
-        self.unrepresented_member
     }
 }
 
@@ -327,28 +316,40 @@ mod baseline {
 
     pub(super) use self::{accelerate_payment::*, bucket_configs::*, lifecycle::*, notification::*, replication::*};
 
+    /// This revision has no `BlockedEncryptionTypes` field, so a value carrying one cannot be
+    /// written by it; refusing keeps a D2/D3 measurement from passing on bytes without the block.
     fn encryption_rule(
         apply: Option<ServerSideEncryptionByDefault>,
+        blocked: Option<Vec<String>>,
         bucket_key_enabled: Option<bool>,
-    ) -> ServerSideEncryptionRule {
-        ServerSideEncryptionRule {
+    ) -> Result<ServerSideEncryptionRule, super::CompatCodecError> {
+        if blocked.is_some() {
+            return Err(super::CompatCodecError::unwritable("BlockedEncryptionTypes"));
+        }
+        Ok(ServerSideEncryptionRule {
             apply_server_side_encryption_by_default: apply,
             bucket_key_enabled,
-        }
+        })
     }
 
-    fn unrepresented_encryption_rule_member(_rule: &ServerSideEncryptionRule) -> Option<&'static str> {
-        None
+    fn split_encryption_rule(rule: ServerSideEncryptionRule) -> EncryptionRuleParts {
+        let ServerSideEncryptionRule {
+            apply_server_side_encryption_by_default,
+            bucket_key_enabled,
+        } = rule;
+        (apply_server_side_encryption_by_default, None, bucket_key_enabled)
     }
+
+    type EncryptionRuleParts = (Option<ServerSideEncryptionByDefault>, Option<Vec<String>>, Option<bool>);
 }
 
-/// s3s `bdcb6259`. Its `ServerSideEncryptionRule` gained `BlockedEncryptionTypes`, which the
-/// persisted Bucket Encryption structure cannot carry.
+/// s3s `bdcb6259`. Its `ServerSideEncryptionRule` gained `BlockedEncryptionTypes`, carried by the
+/// persisted structure since rustfs/gateway#740.
 #[path = "compat/oracle"]
 #[allow(clippy::duplicate_mod)] // Deliberate: one adapter source is compiled once per pinned revision.
 mod rollback {
     use ::s3s_rollback as s3s;
-    use s3s::dto::{ServerSideEncryptionByDefault, ServerSideEncryptionRule};
+    use s3s::dto::{BlockedEncryptionTypes, EncryptionType, ServerSideEncryptionByDefault, ServerSideEncryptionRule};
 
     mod accelerate_payment;
     mod bucket_configs;
@@ -360,18 +361,35 @@ mod rollback {
 
     fn encryption_rule(
         apply: Option<ServerSideEncryptionByDefault>,
+        blocked: Option<Vec<String>>,
         bucket_key_enabled: Option<bool>,
-    ) -> ServerSideEncryptionRule {
-        ServerSideEncryptionRule {
+    ) -> Result<ServerSideEncryptionRule, super::CompatCodecError> {
+        Ok(ServerSideEncryptionRule {
             apply_server_side_encryption_by_default: apply,
-            blocked_encryption_types: None,
+            blocked_encryption_types: blocked.map(|entries| BlockedEncryptionTypes {
+                encryption_type: (!entries.is_empty()).then(|| entries.into_iter().map(EncryptionType::from).collect()),
+            }),
             bucket_key_enabled,
-        }
+        })
     }
 
-    fn unrepresented_encryption_rule_member(rule: &ServerSideEncryptionRule) -> Option<&'static str> {
-        rule.blocked_encryption_types.as_ref().map(|_| "BlockedEncryptionTypes")
+    fn split_encryption_rule(rule: ServerSideEncryptionRule) -> EncryptionRuleParts {
+        let ServerSideEncryptionRule {
+            apply_server_side_encryption_by_default,
+            blocked_encryption_types,
+            bucket_key_enabled,
+        } = rule;
+        let blocked = blocked_encryption_types.map(|BlockedEncryptionTypes { encryption_type }| {
+            encryption_type
+                .unwrap_or_default()
+                .iter()
+                .map(|entry| entry.as_str().to_owned())
+                .collect()
+        });
+        (apply_server_side_encryption_by_default, blocked, bucket_key_enabled)
     }
+
+    type EncryptionRuleParts = (Option<ServerSideEncryptionByDefault>, Option<Vec<String>>, Option<bool>);
 }
 
 /// s3s `f3e17541`, with the same `BlockedEncryptionTypes` member as the rollback revision.
@@ -379,7 +397,7 @@ mod rollback {
 #[allow(clippy::duplicate_mod)] // Deliberate: one adapter source is compiled once per pinned revision.
 mod candidate {
     use ::s3s_candidate as s3s;
-    use s3s::dto::{ServerSideEncryptionByDefault, ServerSideEncryptionRule};
+    use s3s::dto::{BlockedEncryptionTypes, EncryptionType, ServerSideEncryptionByDefault, ServerSideEncryptionRule};
 
     mod accelerate_payment;
     mod bucket_configs;
@@ -391,18 +409,35 @@ mod candidate {
 
     fn encryption_rule(
         apply: Option<ServerSideEncryptionByDefault>,
+        blocked: Option<Vec<String>>,
         bucket_key_enabled: Option<bool>,
-    ) -> ServerSideEncryptionRule {
-        ServerSideEncryptionRule {
+    ) -> Result<ServerSideEncryptionRule, super::CompatCodecError> {
+        Ok(ServerSideEncryptionRule {
             apply_server_side_encryption_by_default: apply,
-            blocked_encryption_types: None,
+            blocked_encryption_types: blocked.map(|entries| BlockedEncryptionTypes {
+                encryption_type: (!entries.is_empty()).then(|| entries.into_iter().map(EncryptionType::from).collect()),
+            }),
             bucket_key_enabled,
-        }
+        })
     }
 
-    fn unrepresented_encryption_rule_member(rule: &ServerSideEncryptionRule) -> Option<&'static str> {
-        rule.blocked_encryption_types.as_ref().map(|_| "BlockedEncryptionTypes")
+    fn split_encryption_rule(rule: ServerSideEncryptionRule) -> EncryptionRuleParts {
+        let ServerSideEncryptionRule {
+            apply_server_side_encryption_by_default,
+            blocked_encryption_types,
+            bucket_key_enabled,
+        } = rule;
+        let blocked = blocked_encryption_types.map(|BlockedEncryptionTypes { encryption_type }| {
+            encryption_type
+                .unwrap_or_default()
+                .iter()
+                .map(|entry| entry.as_str().to_owned())
+                .collect()
+        });
+        (apply_server_side_encryption_by_default, blocked, bucket_key_enabled)
     }
+
+    type EncryptionRuleParts = (Option<ServerSideEncryptionByDefault>, Option<Vec<String>>, Option<bool>);
 }
 
 /// Declares each public adapter once and routes it to the selected revision's compilation. The

@@ -1,0 +1,50 @@
+[case]
+id = "c-encryption-0025"
+schema_version = 1
+title = "An explicit NONE in BlockedEncryptionTypes is stored beside a default action and read back"
+rationale = """
+NONE is the documented way to say that a bucket blocks no encryption type. It is a stored statement, distinct from a document that never mentions the wrapper, so the read must return it rather than normalizing it away. Pairing it with an AES256 default action checks that the wrapper is carried next to the rule's other members, not only in a rule that holds nothing else, which c-encryption-0011 already covers. The runtime meaning, that NONE lets an SSE-C write through, is asserted over a TLS transport in crates/conformance/tests/encryption_blocked_types.rs."""
+polarity = "positive"
+operation = "PutBucketEncryption"
+tags = ["encryption", "xml", "sse"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_BlockedEncryptionTypes.html"
+summary = "EncryptionType inside BlockedEncryptionTypes takes the values NONE or SSE-C, and the wrapper is a member of a bucket's default encryption rule."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[[exchanges]]
+name = "put-explicit-none"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "F6EOmqLQrn84dRNbDV/KPg==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BlockedEncryptionTypes><EncryptionType>NONE</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-encryption?encryption"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<SSEAlgorithm>AES256</SSEAlgorithm>", "<BlockedEncryptionTypes><EncryptionType>NONE</EncryptionType></BlockedEncryptionTypes>"]

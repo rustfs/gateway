@@ -25,6 +25,12 @@
 //! and the production decoder both refuse. A later revision that reads such a sample makes the
 //! production decoder stricter than that revision, which is a D4 gap for exactly the builds an
 //! operator migrates from or rolls back to.
+//!
+//! The accepted corpus has one per-revision rule. A sample first written by a later revision
+//! (today: `Rule/BlockedEncryptionTypes`, s3s `bdcb6259` and later, rustfs/gateway#740) runs
+//! D1-D5 under that revision and every later one, and is measured as a widening under an earlier
+//! one. Every revision must account for the same samples, and each must widen exactly the samples
+//! it predates — so a selector stuck on the baseline cannot pass as a later revision.
 
 use core::fmt;
 
@@ -39,28 +45,22 @@ use rustfs_gateway_types::persistence::{
     parse_public_access_block, parse_replication, parse_request_payment, parse_versioning, parse_website,
 };
 
-use crate::{ConfigKind, FourWayRunError, FourWayRunReport, all_family_corpus_evidence, run_four_way_all};
+use crate::{ConfigKind, FourWayRunError, FourWayRunReport, all_family_corpus_evidence, bucket_encryption, run_four_way_all};
 
 /// Every refusal boundary known to move under a non-baseline revision. Each entry is a finding
 /// with a tracking issue, not an exemption: while one is listed, strict admission stays held.
-const FINDINGS: [OracleFinding; 1] = [OracleFinding {
-    id: "bucket-encryption-blocked-encryption-types",
-    revisions: &[OracleRevision::Rollback, OracleRevision::Candidate],
-    kind: ConfigKind::BucketEncryption,
-    sha256: "62ea2d1b74fd4d569e03ee5b6f5e7131e22d2e3d857707fbd89bd55f3683bf47",
-    old: OldReading::ReadUnrepresented("BlockedEncryptionTypes"),
-    tracking: "https://github.com/rustfs/gateway/issues/740",
-}];
+///
+/// Empty since rustfs/gateway#740 made the production decoder carry `BlockedEncryptionTypes`:
+/// its witness moved from the rejected corpus to the revision-scoped accepted samples.
+const FINDINGS: [OracleFinding; 0] = [];
 
 /// What the selected old revision did with one rejected corpus sample.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OldReading {
     /// The old codec refused the bytes, as the rejected corpus requires.
     Refused,
-    /// The old codec read the bytes into a structure the adapter could project.
+    /// The old codec read the bytes.
     Read,
-    /// The old codec read the bytes, including a member no persisted structure can carry.
-    ReadUnrepresented(&'static str),
 }
 
 impl fmt::Display for OldReading {
@@ -68,7 +68,6 @@ impl fmt::Display for OldReading {
         match self {
             Self::Refused => formatter.write_str("refuses"),
             Self::Read => formatter.write_str("reads"),
-            Self::ReadUnrepresented(member) => write!(formatter, "reads unrepresented member {member}"),
         }
     }
 }
@@ -144,10 +143,11 @@ impl OracleAdmissionReport {
         );
         for observation in &self.observations {
             output.push_str(&format!(
-                "oracle {} build={}: d1-d5 samples={} families={} rejected-reread={} moved-refusals={}\n",
+                "oracle {} build={}: d1-d5 samples={} widened={} families={} rejected-reread={} moved-refusals={}\n",
                 observation.oracle,
                 observation.oracle.rustfs_build(),
                 observation.four_way.sample_count,
+                observation.four_way.widened_count,
                 observation.four_way.families.len(),
                 observation.rejected_reread,
                 observation.divergences.len(),
@@ -204,6 +204,18 @@ pub enum OracleAdmissionError {
         /// Per-family counts under `oracle`.
         found: Vec<(ConfigKind, usize)>,
     },
+    /// A revision widened a different number of samples in a family than it predates: a widening
+    /// counted as a D1-D5 pass, or a revision measured with another revision's codec.
+    WideningDrift {
+        /// Revision whose widening count differs.
+        oracle: OracleRevision,
+        /// Family whose count differs.
+        kind: ConfigKind,
+        /// Revision-scoped samples of the family the revision predates.
+        expected: usize,
+        /// Samples the revision widened.
+        found: usize,
+    },
     /// A moved refusal boundary no finding registers.
     UnregisteredDivergence {
         /// Revision that read the sample.
@@ -247,6 +259,16 @@ impl fmt::Display for OracleAdmissionError {
             Self::SampleCountDrift { oracle, expected, found } => {
                 write!(formatter, "{oracle} executed D1-D5 counts {found:?}, baseline executed {expected:?}")
             }
+            Self::WideningDrift {
+                oracle,
+                kind,
+                expected,
+                found,
+            } => write!(
+                formatter,
+                "{oracle} widened {found} {} samples, but predates exactly {expected}",
+                kind.report_name()
+            ),
             Self::UnregisteredDivergence { oracle, divergence } => write!(
                 formatter,
                 "{oracle} {} rejected {} sample {} and no finding registers it",
@@ -351,9 +373,7 @@ fn observe(oracle: OracleRevision) -> Result<OracleObservation, OracleAdmissionE
 fn reading<T>(result: Result<T, CompatCodecError>) -> OldReading {
     match result {
         Ok(_) => OldReading::Read,
-        Err(error) => error
-            .unrepresented_member()
-            .map_or(OldReading::Refused, OldReading::ReadUnrepresented),
+        Err(_) => OldReading::Refused,
     }
 }
 
@@ -400,12 +420,29 @@ pub(crate) fn new_refusal(kind: ConfigKind, bytes: &[u8]) -> Option<String> {
     }
 }
 
+/// Every accepted sample a revision accounted for, per family: run through D1-D5 or widened.
 fn family_counts(report: &FourWayRunReport) -> Vec<(ConfigKind, usize)> {
     report
         .families
         .iter()
-        .map(|family| (family.kind, family.sample_count))
+        .map(|family| (family.kind, family.sample_count + family.widened))
         .collect()
+}
+
+/// The per-revision rule: a revision widens exactly the revision-scoped samples it predates.
+fn widening_drift(observation: &OracleObservation) -> Option<OracleAdmissionError> {
+    observation.four_way.families.iter().find_map(|family| {
+        let expected = match family.kind {
+            ConfigKind::BucketEncryption => bucket_encryption::widened_under(observation.oracle),
+            _ => 0,
+        };
+        (family.widened != expected).then_some(OracleAdmissionError::WideningDrift {
+            oracle: observation.oracle,
+            kind: family.kind,
+            expected,
+            found: family.widened,
+        })
+    })
 }
 
 /// Validates observations against a registry, separate from observation so every rejection can be
@@ -430,6 +467,9 @@ fn validate(
         let found = family_counts(&observation.four_way);
         if found != expected {
             return Err(OracleAdmissionError::SampleCountDrift { oracle, expected, found });
+        }
+        if let Some(drift) = widening_drift(observation) {
+            return Err(drift);
         }
         for divergence in &observation.divergences {
             let finding = registry
