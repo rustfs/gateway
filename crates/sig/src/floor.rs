@@ -51,8 +51,10 @@
 //! 3. **The AWS credential marker.** Decides sealed-versus-custom, and nothing else.
 //! 4. **The scheme allow-list**, so a presigned request aimed at an admin operation is refused
 //!    before its timestamp is even read.
-//! 5. **Clock skew**, on whichever of the three paths carried the timestamp.
-//! 6. **Presigned expiry**, which needs the receipt step 5 produced.
+//! 5. **Clock skew**, on whichever of the three paths carried the timestamp: both bounds for a
+//!    header or POST-policy signature, the future bound for a presigned URL.
+//! 6. **Presigned expiry**, which needs the receipt step 5 produced, and is a presigned URL's
+//!    past bound (rustfs/gateway#723; see [`crate::clock`]).
 //!
 //! The scope cross-check ([`enforce_scope`]) is step 7 and runs inside the SigV4 verifier, because
 //! it needs the parsed credential. It is still unconditional: it is the only way to obtain the
@@ -62,7 +64,9 @@ use core::fmt;
 
 use http::HeaderMap;
 
-use crate::clock::{ClockChecked, PresignExpiry, RequestNow, SkewWindow, enforce_clock_skew, enforce_expiry};
+use crate::clock::{
+    ClockChecked, PresignExpiry, RequestNow, SkewWindow, enforce_clock_skew, enforce_expiry, enforce_presigned_clock_skew,
+};
 use crate::mode::{
     STREAMING_ECDSA, STREAMING_ECDSA_TRAILER, STREAMING_SIGNED, STREAMING_SIGNED_TRAILER, STREAMING_UNSIGNED_TRAILER,
 };
@@ -573,10 +577,16 @@ impl SecurityFloor {
 
         // 5. H1 — clock skew, on whichever path carried the timestamp.
         let signed_at = self.signed_timestamp(&view, marker.location())?;
-        let clock = enforce_clock_skew(&signed_at, now, self.skew)?;
+        let presigned = marker.location().is_presigned();
+        let clock = if presigned {
+            enforce_presigned_clock_skew(&signed_at, now, self.skew)?
+        } else {
+            enforce_clock_skew(&signed_at, now, self.skew)?
+        };
 
-        // 6. H2 — the presigned lifetime, from the receipt step 5 produced.
-        let expiry = if marker.location().is_presigned() {
+        // 6. H2 — the presigned lifetime, from the receipt step 5 produced; for a presigned URL
+        // this is the past bound, so it runs on every receipt `enforce_presigned_clock_skew` made.
+        let expiry = if presigned {
             Some(enforce_presign_expiry(&view, clock)?)
         } else {
             None

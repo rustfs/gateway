@@ -17,8 +17,8 @@
 //! Responsible for: [`RequestNow`] (the per-request snapshot), [`RequestClock`] and
 //! [`SystemClock`] (where a snapshot comes from), [`SkewWindow`] (the accepted distance between
 //! the signed timestamp and that snapshot, capped at fifteen minutes), [`enforce_clock_skew`] and
-//! the [`ClockChecked`] receipt it produces, and [`enforce_expiry`] — the checked arithmetic
-//! behind a presigned URL's lifetime.
+//! its presigned counterpart `enforce_presigned_clock_skew`, the [`ClockChecked`] receipt both
+//! produce, and [`enforce_expiry`] — the checked arithmetic behind a presigned URL's lifetime.
 //! NOT responsible for: reading `X-Amz-Expires` off the wire (that is [`crate::floor`], because it
 //! is a query-parsing rule), deciding which operations accept a presigned request (also
 //! [`crate::floor`]), or verifying any signature.
@@ -40,6 +40,18 @@
 //! window; it may not widen it. A configurable "24 hours of skew" is indistinguishable from no
 //! replay window at all for every captured request, and the whole point of this module is that a
 //! deployment cannot switch the floor off through configuration.
+//!
+//! # Why a presigned URL's past bound is its lifetime, not the window
+//!
+//! A header-signed request has no signed lifetime, so the window's past bound is the only thing
+//! that stops a captured one being replayed; it gets both bounds. A presigned URL signs its own
+//! lifetime: it is valid from `X-Amz-Date` for `X-Amz-Expires` seconds, at most seven days, and a
+//! URL shared at 09:00 for a day is meant to work at 17:00. S3, MinIO (black-box probe) and the s3s
+//! revision RustFS runs all accept it, and refusing it was rustfs/gateway#723. So the presigned
+//! path keeps the window's future bound — a URL dated beyond it would start working at a time of
+//! the signer's choosing — and takes its past bound from [`enforce_expiry`], whose ceiling is a
+//! constant no configuration reaches. `enforce_presigned_clock_skew` is crate-private, and
+//! [`crate::floor`] runs the expiry check on its receipt before the receipt leaves the floor.
 
 use core::time::Duration;
 
@@ -227,10 +239,12 @@ impl ClockChecked {
     }
 }
 
-/// H1 — the clock-skew window, on every signing path.
+/// H1 — the clock-skew window, both bounds: the header and POST-policy signing paths.
 ///
 /// The caller passes the snapshot, so the header path, the presigned path and the POST-policy path
 /// are all judged against one present. There is no variant of this function that takes a clock.
+/// The presigned path uses `enforce_presigned_clock_skew`, which keeps the future bound and leaves
+/// the past bound to the URL's signed lifetime (see the module documentation).
 ///
 /// # Errors
 ///
@@ -240,15 +254,39 @@ impl ClockChecked {
 /// outside any window, and answering anything else would mean deciding a comparison that
 /// overflowed.
 pub fn enforce_clock_skew(signed_at: &AmzDate, now: RequestNow, window: SkewWindow) -> Result<ClockChecked, AuthError> {
+    check_skew(signed_at, now, Some(window.past()), window.future())
+}
+
+/// H1 on the presigned path — the future bound only.
+///
+/// Crate-private because the receipt it returns has had no past bound applied: a caller outside
+/// [`crate::floor`] could otherwise obtain a [`ClockChecked`] for a URL of any age. The floor is
+/// the only caller, and it passes the receipt straight to [`enforce_expiry`], which refuses any
+/// URL older than its lifetime and any lifetime longer than seven days.
+///
+/// # Errors
+///
+/// [`AuthError::RequestTimeTooSkewed`] when the timestamp is further in the future than
+/// [`SkewWindow::future`], or when the distance is not representable.
+pub(crate) fn enforce_presigned_clock_skew(
+    signed_at: &AmzDate,
+    now: RequestNow,
+    window: SkewWindow,
+) -> Result<ClockChecked, AuthError> {
+    check_skew(signed_at, now, None, window.future())
+}
+
+/// The one comparison both H1 entry points run. `past: None` means no past bound here.
+fn check_skew(signed_at: &AmzDate, now: RequestNow, past: Option<Duration>, future: Duration) -> Result<ClockChecked, AuthError> {
     let signed_at_unix = unix_seconds(signed_at).ok_or(AuthError::RequestTimeTooSkewed)?;
     let delta = now
         .unix_seconds()
         .checked_sub(signed_at_unix)
         .ok_or(AuthError::RequestTimeTooSkewed)?;
 
-    let past = i64::try_from(window.past().as_secs()).unwrap_or(i64::MAX);
-    let future = i64::try_from(window.future().as_secs()).unwrap_or(i64::MAX);
-    if delta > past || delta < -future {
+    let too_old = past.is_some_and(|past| delta > i64::try_from(past.as_secs()).unwrap_or(i64::MAX));
+    let future = i64::try_from(future.as_secs()).unwrap_or(i64::MAX);
+    if too_old || delta < -future {
         return Err(AuthError::RequestTimeTooSkewed);
     }
     Ok(ClockChecked {
