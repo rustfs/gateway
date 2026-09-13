@@ -13694,11 +13694,12 @@ expect_fail check_runner_raw_bytes.sh \
 # -----------------------------------------------------------------------------
 
 mut_async_compile_fixture_in_runtime() {
-    cp crates/gateway/tests/compile_fail/c_host_0018_async_resolver.rs \
-        crates/gateway/src/c_host_0018_async_resolver.rs
+    cp crates/gateway/tests/compile_fail/host_resolver_async.rs \
+        crates/gateway/src/host_resolver_async.rs
 }
 expect_fail check_resolver_pure.sh \
-    'the compile-fail async resolver copied into runtime source' mut_async_compile_fixture_in_runtime
+    'the compile-fail async resolver copied into runtime source' mut_async_compile_fixture_in_runtime \
+    'HostResolver::resolve may not be async'
 
 mut_async_resolver() {
     perl -0pi -e 's/    fn resolve\(&self, query: &HostQuery/    async fn resolve(&self, query: &HostQuery/' \

@@ -235,9 +235,9 @@ async fn a_presigned_put_with_a_changed_host_is_refused_before_the_handler() {
     assert_eq!(calls.put_commits.load(Ordering::SeqCst), 0);
 }
 
-/// Positive — c-host-0017: a non-default port survives the real presigned admission path.
+/// Positive — s3s#438: a non-default port survives the real presigned admission path.
 #[tokio::test]
-async fn c_host_0017_a_presigned_non_default_port_reaches_put_object() {
+async fn a_presigned_non_default_port_reaches_put_object() {
     let (service, calls) = service_at(support::SIGNED_AT_UNIX_SECONDS);
     let request = presigned_request_on_host(
         http::Method::PUT,
@@ -253,9 +253,10 @@ async fn c_host_0017_a_presigned_non_default_port_reaches_put_object() {
     assert_eq!(calls.put_commits.load(Ordering::SeqCst), 1);
 }
 
-/// Negative — one presigned URL cannot become valid for another port or host spelling.
+/// Negative — one presigned URL cannot become valid for another port or host spelling: the
+/// canonical request signs the raw bytes, never the normalised host the resolver matches on.
 #[tokio::test]
-async fn c_host_0016_a_presigned_port_or_case_change_never_reaches_put_object() {
+async fn a_presigned_url_holds_only_for_its_signed_host_spelling() {
     for changed_host in [
         "s3.example.com",
         "s3.example.com:9001",

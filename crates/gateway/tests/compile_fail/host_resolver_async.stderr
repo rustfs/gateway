@@ -1,5 +1,5 @@
 error[E0053]: method `resolve` has an incompatible type for trait
-  --> tests/compile_fail/c_host_0018_async_resolver.rs:24:56
+  --> tests/compile_fail/host_resolver_async.rs:24:56
    |
 24 |     async fn resolve(&self, _query: &HostQuery<'_>) -> ResolvedHost {
    |                                                        ^^^^^^^^^^^^ expected `ResolvedHost`, found future

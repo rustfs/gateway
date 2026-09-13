@@ -12,53 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Responsible for: arbitrary raw host acceptance and virtual-host label-boundary invariants.
-//! NOT responsible for: authentication, routing, bucket existence or request bodies.
-//! Upstream: libFuzzer and the request-head acceptance boundary.
-//! Downstream: the public HostResolver implementation and its path-style fallback.
+//! Fuzzes virtual-host resolution with arbitrary `Host` bytes, methods and paths.
+//!
+//! Responsible for: the libFuzzer entry point for the `host_resolve` property.
+//! NOT responsible for: the property itself, or the fixed-seed replay that runs it on stable.
+//! Upstream: libFuzzer bytes; seed it from `fuzz/seeds/host_resolve/`, listed after a writable
+//! corpus directory so new inputs never land among the committed seeds:
+//! `cargo +nightly fuzz run host_resolve fuzz/corpus/host_resolve fuzz/seeds/host_resolve`.
+//! Downstream: `rustfs_gateway::VirtualHostStyle` and `MetaView`, through
+//! `fuzz/support/host_resolve.rs`.
 
 #![no_main]
 
-use http::{HeaderValue, Request, Uri, header::HOST};
+#[path = "../support/host_resolve.rs"]
+mod host_resolve;
+
 use libfuzzer_sys::fuzz_target;
-use rustfs_gateway::{Addressing, HostQuery, HostResolver, Limits, VirtualHostStyle, WireRequest};
-use rustfs_gateway_types::BucketName;
-use std::sync::LazyLock;
 
-const DOMAINS: [&str; 2] = ["mys3.com", "s3.example.com"];
-static RESOLVER: LazyLock<VirtualHostStyle> =
-    LazyLock::new(|| VirtualHostStyle::new(DOMAINS).unwrap_or_else(|error| panic!("fixed fuzz domains are invalid: {error}")));
-
-fuzz_target!(|raw: &[u8]| {
-    // Invalid wire bytes cannot construct a HostQuery. Exercise that boundary before resolving.
-    let Ok(value) = HeaderValue::from_bytes(raw) else {
-        return;
-    };
-    let mut request = Request::new(());
-    *request.uri_mut() = Uri::from_static("/bucket/key");
-    request.headers_mut().insert(HOST, value);
-    let Ok(accepted) = WireRequest::accept(request, &Limits::default()) else {
-        return;
-    };
-    let host = accepted.host().host_without_port();
-    // An independent label comparison, not the resolver's byte-offset/suffix algorithm.
-    let has_domain_labels = DOMAINS
-        .iter()
-        .any(|domain| host.rsplit('.').take(domain.split('.').count()).eq(domain.rsplit('.')));
-    let resolved = RESOLVER.resolve(&HostQuery {
-        host: accepted.host(),
-        path: accepted.raw_path().as_str(),
-        method: accepted.method(),
-    });
-    if !has_domain_labels {
-        assert_eq!(resolved.addressing, Addressing::Path);
-    }
-    // The opposite control prevents a resolver that always returns Path from looking correct.
-    if let Some((label, rest)) = host.split_once('.')
-        && DOMAINS.contains(&rest)
-        && let Ok(bucket) = BucketName::new(label)
-    {
-        assert_eq!(resolved.bucket().map(BucketName::as_str), Some(bucket.as_str()));
-    }
-    assert_eq!(accepted.host().raw_for_signing().as_str().as_bytes(), raw);
+fuzz_target!(|input: &[u8]| {
+    let _ = host_resolve::check(input);
 });

@@ -22,8 +22,9 @@
 //! NOT responsible for: how the effective host is determined (`rustfs-gateway-http` did that once
 //! at acceptance), what the canonical request signs (`rustfs-gateway-sig`, over
 //! `EffectiveHost::raw_for_signing`), or whether the named bucket exists.
-//! Upstream: the facade's `VirtualHostStyle`, `PathStyleOnly` and `MetaView`. Downstream: nothing;
-//! this is a leaf test.
+//! Upstream: the facade's `VirtualHostStyle`, `PathStyleOnly` and `MetaView`, and — for the one
+//! end-to-end test at the bottom — the assembled service. Downstream: nothing; this is a leaf test.
+//! The fuzz property over arbitrary hosts is `tests/host_resolve_replay.rs`.
 //!
 //! # Why a resolution test rather than a response test
 //!
@@ -34,10 +35,17 @@
 //! region label was carried rather than dropped, that a diagnostic was raised and then not acted
 //! on. Those are asserted here, on the value the resolver returns.
 
+use std::sync::{Arc, Mutex};
+
+use bytes::Bytes;
+use http_body_util::BodyExt as _;
 use rustfs_gateway::{
-    Addressing, DomainError, HostQuery, HostResolver, Limits, MetaView, PathStyleOnly, ResolvedHost, TargetKind, TargetOrigin,
-    VhostHint, VirtualHostStyle, WireRequest,
+    Addressing, AuthzAuditEvent, AuthzAuditSink, DomainError, Handler, HandlerError, HandlerResult, HostQuery, HostResolver,
+    Limits, MetaView, PathStyleOnly, Req, ResolvedHost, Resp, TargetKind, TargetOrigin, VhostHint, VirtualHostStyle, WireRequest,
+    dto,
 };
+
+use crate::support;
 
 /// The two base domains most cases below are configured with.
 fn two_domains() -> VirtualHostStyle {
@@ -63,100 +71,6 @@ fn resolve(resolver: &dyn HostResolver, host: &str, method: &str, path: &str) ->
 /// The bucket a host named, or `None` when the request is path-style.
 fn bucket_of(resolved: &ResolvedHost) -> Option<String> {
     resolved.bucket().map(|bucket| bucket.as_str().to_owned())
-}
-
-/// A fixed sequence makes a failed sample reproducible without weakening the input space.
-fn next_host_sample(state: &mut u64) -> u64 {
-    *state ^= *state << 13;
-    *state ^= *state >> 7;
-    *state ^= *state << 17;
-    *state
-}
-
-#[test]
-fn c_host_0032_fifty_thousand_suffix_collisions_remain_path_style() {
-    let resolver = two_domains();
-    let mut state = 0x6c61_6265_6c73_7566;
-    for _ in 0..50_000 {
-        let label = next_host_sample(&mut state);
-        let domain = if label & 1 == 0 { "mys3.com" } else { "s3.example.com" };
-        let host = format!("bucket-{label:x}{domain}");
-        let resolved = resolve(&resolver, &host, "GET", "/bucket/key");
-        assert_eq!(resolved.addressing, Addressing::Path, "host {host}");
-    }
-}
-
-#[test]
-fn c_host_0032_fifty_thousand_foreign_suffixes_remain_path_style() {
-    let resolver = two_domains();
-    let mut state = 0x666f_7265_6967_6e73;
-    for _ in 0..50_000 {
-        let label = next_host_sample(&mut state);
-        let domain = if label & 1 == 0 { "mys3.com" } else { "s3.example.com" };
-        let host = format!("bucket-{label:x}.{domain}.outside-{label:x}.net");
-        let resolved = resolve(&resolver, &host, "GET", "/bucket/key");
-        assert_eq!(resolved.addressing, Addressing::Path, "host {host}");
-    }
-}
-
-#[test]
-fn generated_matching_hosts_still_name_their_own_bucket() {
-    let resolver = two_domains();
-    let mut state = 0x706f_7369_7469_7665;
-    for _ in 0..10_000 {
-        let label = next_host_sample(&mut state);
-        let bucket = format!("bucket-{label:x}");
-        let domain = if label & 1 == 0 { "mys3.com" } else { "s3.example.com" };
-        let host = format!("{}.{domain}.:9000", bucket.to_ascii_uppercase());
-        let resolved = resolve(&resolver, &host, "GET", "/key");
-        assert_eq!(bucket_of(&resolved).as_deref(), Some(bucket.as_str()), "host {host}");
-    }
-}
-
-#[test]
-fn c_host_0031_one_hundred_thousand_raw_hosts_preserve_signing_bytes() {
-    let resolver = two_domains();
-    let mut state = 0x7261_772d_686f_7374;
-    let mut accepted_count = 0;
-    let mut rejected_count = 0;
-    for sample in 0..100_000 {
-        let value = next_host_sample(&mut state);
-        let raw = match sample % 5 {
-            0 => format!("BUCKET-{value:x}.MYS3.COM.:9000").into_bytes(),
-            1 => format!("bucket-{value:x}mys3.com").into_bytes(),
-            2 => b"[2001:db8::1]:9000".to_vec(),
-            3 => vec![b'.'; (value as usize % 1024) + 1],
-            _ => (0..value % 1024).map(|_| next_host_sample(&mut state) as u8).collect(),
-        };
-        let Ok(header) = http::HeaderValue::from_bytes(&raw) else {
-            rejected_count += 1;
-            continue;
-        };
-        let mut request = http::Request::new(());
-        *request.uri_mut() = http::Uri::from_static("/bucket/key");
-        request.headers_mut().insert(http::header::HOST, header);
-        let Ok(accepted) = WireRequest::accept(request, &Limits::default()) else {
-            rejected_count += 1;
-            continue;
-        };
-        accepted_count += 1;
-        let host = accepted.host().host_without_port();
-        let has_domain_labels = ["mys3.com", "s3.example.com"].iter().any(|domain| {
-            // Compare complete labels independently of the production byte-offset matcher.
-            host.rsplit('.').take(domain.split('.').count()).eq(domain.rsplit('.'))
-        });
-        let resolved = resolver.resolve(&HostQuery {
-            host: accepted.host(),
-            path: accepted.raw_path().as_str(),
-            method: accepted.method(),
-        });
-        if !has_domain_labels {
-            assert_eq!(resolved.addressing, Addressing::Path, "raw host {raw:?}");
-        }
-        assert_eq!(accepted.host().raw_for_signing().as_str().as_bytes(), raw);
-    }
-    assert!(accepted_count >= 60_000, "the resolver must receive the accepted host shapes");
-    assert!(rejected_count > 0, "the sample must also exercise the acceptance boundary");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -549,4 +463,136 @@ fn n_the_origin_cannot_disagree_with_the_addressing() {
     assert_eq!(vhost.origin(), TargetOrigin::Host);
     assert_eq!(path.addressing, Addressing::Path);
     assert_eq!(path.origin(), TargetOrigin::Path);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The single source, through the assembled service.
+// ---------------------------------------------------------------------------------------------
+
+/// Every `(bucket, key)` the service handed to authorisation and to the handler.
+#[derive(Default)]
+struct Seen {
+    authorised: Mutex<Vec<(String, Option<String>, Option<String>, TargetOrigin)>>,
+    handled: Mutex<Vec<(String, String)>>,
+}
+
+impl AuthzAuditSink for Seen {
+    fn on_decision(&self, event: &AuthzAuditEvent<'_>) {
+        let owned = |bucket: Option<&rustfs_gateway::BucketName>, key: Option<&rustfs_gateway::ObjectKey>| {
+            (
+                format!("{:?}", event.stage),
+                bucket.map(|bucket| bucket.as_str().to_owned()),
+                key.map(|key| key.as_str().to_owned()),
+                event.target_origin,
+            )
+        };
+        let mut authorised = self.authorised.lock().expect("not poisoned");
+        authorised.push(owned(event.bucket, event.key));
+        for resource in event.resources {
+            authorised.push(owned(resource.bucket, resource.key));
+            authorised.push(owned(resource.route_bucket, resource.route_key));
+        }
+    }
+}
+
+impl Handler<dto::PutObject> for Seen {
+    fn call(&self, request: Req<dto::PutObject>) -> impl core::future::Future<Output = HandlerResult<dto::PutObject>> + Send {
+        let input = request.into_input();
+        self.handled
+            .lock()
+            .expect("not poisoned")
+            .push((input.bucket.as_str().to_owned(), input.key.as_str().to_owned()));
+        let body = input.body;
+        async move {
+            if let Some(body) = body {
+                let mut body = body.into_body();
+                while let Some(frame) = body.frame().await {
+                    frame.map_err(|_| HandlerError::internal_error("the request body stream failed"))?;
+                }
+            }
+            Ok(Resp::new(dto::PutObjectOutput::default()))
+        }
+    }
+}
+
+/// `PUT /victim-bucket/key`, header-signed over the raw bytes of `host`.
+fn signed_put(host: &str) -> http::Request<Bytes> {
+    use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
+    use sha2::{Digest as _, Sha256};
+
+    let body = Bytes::from_static(b"x");
+    let payload = PayloadMode::ExactSha256(Sha256::digest(&body).into());
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, http::HeaderValue::from_str(host).expect("a host header"));
+    headers.insert(
+        http::HeaderName::from_static("x-amz-content-sha256"),
+        http::HeaderValue::from_str(payload.canonical_payload_token().as_str()).expect("a payload declaration"),
+    );
+    let raw = rustfs_gateway_http::RawHost::from_host_header(host.as_bytes()).expect("an acceptable host");
+    let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("a SigV4 stamp");
+    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
+    let mut signer = SigV4Signer::new(SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials"), scope);
+    let signing = SigningRequest::new(&http::Method::PUT, "/victim-bucket/key", "", &headers, &raw, payload, stamp)
+        .with_wire_content_length(body.len() as u64);
+    let signed = signer.sign_headers(&signing).expect("a signable request");
+    let mut builder = http::Request::builder()
+        .method(http::Method::PUT)
+        .uri("/victim-bucket/key")
+        .header(http::header::CONTENT_LENGTH, body.len());
+    for (name, value) in signed.headers() {
+        builder = builder.header(name, value);
+    }
+    builder.body(body).expect("the fixture request is well formed")
+}
+
+/// Sends a signed `PUT /victim-bucket/key` to `host` and returns what every stage acted on.
+async fn put_through_the_service(host: &str) -> (http::StatusCode, String, Arc<Seen>) {
+    let seen = Arc::new(Seen::default());
+    let service = support::wired_at_signed_time()
+        .host_resolver(two_domains())
+        .authz_audit(Arc::clone(&seen))
+        .register::<dto::PutObject, _>(Arc::clone(&seen))
+        .build()
+        .expect("a complete PutObject assembly");
+    let response = support::exchange_wire(&service, signed_put(host)).await;
+    let body = String::from_utf8_lossy(response.body()).into_owned();
+    (response.status(), body, seen)
+}
+
+/// The P6-04 lesson, end to end: a host can name a bucket, so a stage that still took the bucket
+/// from the first path segment would authorise one tenant's bucket and write another's. On
+/// `owner-bucket`'s host, `PUT /victim-bucket/key` is `victim-bucket/key` in `owner-bucket` at
+/// the route stage, the input stage and the handler alike.
+#[tokio::test]
+async fn n_no_stage_of_the_service_reads_a_bucket_out_of_a_virtual_hosted_path() {
+    let (status, body, seen) = put_through_the_service("owner-bucket.s3.example.com").await;
+    assert_eq!(status, http::StatusCode::OK, "{body}");
+    assert_eq!(
+        seen.handled.lock().expect("not poisoned").as_slice(),
+        [("owner-bucket".to_owned(), "victim-bucket/key".to_owned())]
+    );
+    let authorised = seen.authorised.lock().expect("not poisoned").clone();
+    let stages: std::collections::BTreeSet<&str> = authorised.iter().map(|(stage, ..)| stage.as_str()).collect();
+    assert_eq!(stages.len(), 2, "both authorisation stages must have been audited: {authorised:?}");
+    for (stage, bucket, key, origin) in &authorised {
+        assert_eq!(bucket.as_deref(), Some("owner-bucket"), "{stage} was asked about another bucket");
+        assert_eq!(key.as_deref(), Some("victim-bucket/key"), "{stage} was asked about another key");
+        assert_eq!(*origin, TargetOrigin::Host, "{stage}");
+    }
+
+    // The control: the same request on the bare endpoint is path style, so every stage acts on
+    // `victim-bucket` and `key`. Without it, a service that ignored the path entirely would pass.
+    let (status, body, seen) = put_through_the_service("s3.example.com").await;
+    assert_eq!(status, http::StatusCode::OK, "{body}");
+    assert_eq!(
+        seen.handled.lock().expect("not poisoned").as_slice(),
+        [("victim-bucket".to_owned(), "key".to_owned())]
+    );
+    let authorised = seen.authorised.lock().expect("not poisoned").clone();
+    assert!(!authorised.is_empty());
+    for (stage, bucket, key, origin) in &authorised {
+        assert_eq!(bucket.as_deref(), Some("victim-bucket"), "{stage}");
+        assert_eq!(key.as_deref(), Some("key"), "{stage}");
+        assert_eq!(*origin, TargetOrigin::Path, "{stage}");
+    }
 }

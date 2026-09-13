@@ -105,7 +105,7 @@ for file in "${sources[@]}"; do
     [[ "$file" == "$TRAIT_FILE" ]] && continue
     # This exact trybuild fixture must fail compilation; it is not a runtime resolver.
     # The self-test copies it into src/ to prove discovery still rejects the same code there.
-    [[ "$file" == 'crates/gateway/tests/compile_fail/c_host_0018_async_resolver.rs' ]] && continue
+    [[ "$file" == 'crates/gateway/tests/compile_fail/host_resolver_async.rs' ]] && continue
     if grep -qE '^[ \t]*impl([ \t]*<[^>]*>)?[ \t]+HostResolver[ \t]+for[ \t]+' "$file"; then
         guarded+=("$file")
         impl_count=$((impl_count + 1))
