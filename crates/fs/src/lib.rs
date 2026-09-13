@@ -767,15 +767,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             ..CompleteMultipartUploadOutput::default()
         };
         if let Some(checksum) = completed_checksum {
-            let rendered = checksum.render_base64().to_owned();
-            match checksum.algorithm() {
-                rustfs_gateway::ChecksumAlgorithm::Crc32 => output.checksum_crc32 = Some(rendered),
-                rustfs_gateway::ChecksumAlgorithm::Crc32c => output.checksum_crc32c = Some(rendered),
-                rustfs_gateway::ChecksumAlgorithm::Crc64Nvme => output.checksum_crc64nvme = Some(rendered),
-                rustfs_gateway::ChecksumAlgorithm::Sha1 => output.checksum_sha1 = Some(rendered),
-                rustfs_gateway::ChecksumAlgorithm::Sha256 => output.checksum_sha256 = Some(rendered),
-                _ => return Err(storage_error()),
-            }
+            uploads::render_completed_checksum(&mut output, checksum)?;
         }
         Ok(Resp::new(output))
     }

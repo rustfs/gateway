@@ -1214,7 +1214,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -3473,7 +3473,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: false
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -3521,7 +3521,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -3583,7 +3583,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -3635,7 +3635,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -3690,7 +3690,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -3756,7 +3756,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -3866,7 +3866,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -3912,7 +3912,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -3984,7 +3984,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4032,7 +4032,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4081,7 +4081,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4130,7 +4130,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4185,7 +4185,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: false
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4237,7 +4237,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4309,7 +4309,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: false
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 ### PutObjectLegalHold
 
@@ -4346,7 +4346,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4398,7 +4398,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4452,7 +4452,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4506,7 +4506,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4555,7 +4555,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: true
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4636,7 +4636,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: false
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 
@@ -4772,7 +4772,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: false
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Body shapes**
 
@@ -4815,7 +4815,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Checksums**
 
 - required before the handler runs: false
-- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`
+- request algorithms: `CRC32`, `CRC32C`, `CRC64NVME`, `SHA1`, `SHA256`, `SHA512`, `MD5`, `XXHASH64`, `XXHASH3`, `XXHASH128`
 
 **Quirks**
 

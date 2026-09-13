@@ -150,7 +150,7 @@ fn the_register_is_valid_and_renders_every_ruling() {
     let rendered = report.map(|report| report.render()).unwrap_or_default();
     assert!(
         rendered.starts_with(
-            "request divergences: rulings=18 keep-gateway=9 align-s3s=4 align-aws=2 rustfs-profile=3 open-follow-ups=4 landed=7\n"
+            "request divergences: rulings=18 keep-gateway=9 align-s3s=4 align-aws=2 rustfs-profile=3 open-follow-ups=3 landed=8\n"
         ),
         "{rendered}"
     );

@@ -1,0 +1,61 @@
+# c-checksum-0010 — a XXHash64 checksum that is not the digest of the body.
+
+[case]
+id = "c-checksum-0010"
+schema_version = 1
+title = "An XXHash64 write whose checksum disagrees with its body is refused and not stored"
+rationale = """
+Accepting the XXHash64 header is only half the change: a store that parses the value and never \
+compares it answers 200 to a corrupted upload and then serves the corruption under the caller's own \
+digest. The value here is well formed and of the right width, so the refusal can only come from the \
+comparison, and it must carry the checksum-specific code."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["checksum", "error-shape", "security"]
+timeout_ms = 10000
+quirks = ["q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://aws.amazon.com/about-aws/whats-new/2026/04/s3-five-additional-checksum-algorithms/"
+summary = "S3 added MD5, XXHash3, XXHash64, XXHash128 and SHA-512 checksums and validates a supplied value against the upload before storing it."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "Lists the ten checksum algorithms an upload may name, and states that a supplied checksum that does not match fails the upload."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-checksum"
+
+[[setup.objects]]
+bucket = "conf-checksum"
+key = "mismatch/xxhash64"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-checksum/mismatch/xxhash64"
+headers = { "content-type" = "text/plain", "x-amz-checksum-xxhash64" = "AAAAAAAAAAA=" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+headers_absent = ["etag", "x-amz-version-id", "x-amz-checksum-xxhash64"]
+connection_after = "open"
+
+[expect.error]
+code = "XAmzContentChecksumMismatch"
+request_id_present = true
+
+[expect.request_progress]
+body_fully_sent = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>XAmzContentChecksumMismatch</Code>"]

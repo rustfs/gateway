@@ -127,26 +127,50 @@ fn two_checksum_headers_are_refused_by_the_gateway_and_kept_by_s3s() {
     assert_eq!(refusal.oracle, Ok(()));
 }
 
-/// A checksum algorithm the pinned gateway model predates (SHA-512 here; MD5 and the XXHash family
-/// are the same case): the gateway refuses the header as an unknown algorithm rather than dropping
-/// the claim, and s3s hands it to its handler.
+/// The five checksum algorithms S3 added in 2026-04 (SHA-512, MD5, XXHash64, XXHash3, XXHash128):
+/// each header, carrying the true digest of `BODY`, is accepted by both stacks and handed to the
+/// handler as the same member, so the RustFS app body verifies and stores it as it does today.
 ///
 /// Ruling: `rd-put-0006`
 #[test]
-fn a_checksum_algorithm_the_gateway_model_predates_is_refused_by_the_gateway_and_kept_by_s3s() {
-    let request = RawRequest::put(TARGET, BODY, 5).with("x-amz-checksum-sha512", "AAAA");
-    let refusal = match run_decode(&request, &request, convert) {
-        Decoded::Refused(refusal) => refusal,
-        Decoded::Compared(diff) => panic!("the gateway accepted an algorithm it has no member for: {:?}", diff.differing),
-    };
-    assert_eq!(
-        refusal,
-        Refusal {
-            gateway: Err("InvalidRequest".to_owned()),
-            conversion: Ok(()),
-            oracle: Ok(()),
-        }
-    );
+fn a_checksum_algorithm_added_in_2026_04_is_handed_over_by_both_stacks() {
+    // base64 of each algorithm's digest of `hello`; the XXHash values are big-endian.
+    const ADDED: &[(&str, &str, &str)] = &[
+        (
+            "x-amz-checksum-sha512",
+            "checksum_sha512",
+            "m3HSJL1i83hdltRq0+o9czGb+8KJDKra4t/3JRlnPKcjI8PZm6XBHXx6zG4UuMXaDEZjR1wuXDre9G9zvN7AQw==",
+        ),
+        ("x-amz-checksum-md5", "checksum_md5", "XUFAKrxLKna5cZ2REBfFkg=="),
+        ("x-amz-checksum-xxhash64", "checksum_xxhash64", "JseCfYifbaM="),
+        ("x-amz-checksum-xxhash3", "checksum_xxhash3", "lVXoVVxi3P0="),
+        ("x-amz-checksum-xxhash128", "checksum_xxhash128", "tenBrQcbPn/Hec+qXlI4GA=="),
+    ];
+    let probe = Arc::new(BodyProbe::default());
+    for (header, member, value) in ADDED {
+        let request = RawRequest::put(TARGET, BODY, 5).with(header, value);
+        let diff = match run_decode(&request, &request, convert) {
+            Decoded::Compared(diff) => diff,
+            Decoded::Refused(refusal) => panic!("{header}: both stacks must accept the added algorithm: {refusal:?}"),
+        };
+        assert!(diff.differing.is_empty(), "{header}: {:?}", diff.differing);
+        let converted = input_to_s3s(gateway_decode(&request, &probe).expect("accepted")).expect("converts");
+        let handed = match *member {
+            "checksum_sha512" => converted.checksum_sha512,
+            "checksum_md5" => converted.checksum_md5,
+            "checksum_xxhash64" => converted.checksum_xxhash64,
+            "checksum_xxhash3" => converted.checksum_xxhash3,
+            _ => converted.checksum_xxhash128,
+        };
+        assert_eq!(handed.as_deref(), Some(*value), "{header} reaches the app body as {member}");
+    }
+
+    // The control: a SHA-512 header whose value is a SHA-256's width is still refused by the
+    // gateway, so the agreement above is a checked value and not an unvalidated pass-through.
+    let wrong_width =
+        RawRequest::put(TARGET, BODY, 5).with("x-amz-checksum-sha512", "LPJNul+wow4m6DsqxbninhsWHlwfp0JecwQzYpOLmCQ=");
+    let refusal = run_decode(&wrong_width, &wrong_width, convert).refused();
+    assert!(refusal.gateway.is_err(), "a value of the wrong width is not a SHA-512");
 }
 
 /// `q-content-0008`: an absent `Content-Type` decodes to no type on both stacks, so the RustFS app

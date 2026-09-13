@@ -237,10 +237,10 @@ pub(super) fn payload_spec(fields: &[Field], ov: &PayloadOverlay, operation: &st
 
 /// The request checksum algorithms an operation accepts, read off `aws.protocols#httpChecksum`.
 ///
-/// The model's algorithm enum is wider than the IR's closed set (it already carries SHA512, MD5
-/// and three XXHASH variants), so anything the IR cannot name is filtered out here rather than
-/// failing the run — the IR's five are a deliberate subset, and widening it is an IR-FREEZE
-/// decision, not a codegen one.
+/// The IR names all ten algorithms of the pinned model (rustfs/gateway#751 widened it from five).
+/// A spelling it cannot name is still filtered out here rather than failing the run, so a model
+/// re-pin that adds an eleventh shows up as a missing algorithm in the spec diff, and widening the
+/// IR stays an IR-FREEZE decision rather than a codegen one.
 pub(super) fn model_request_algorithms(model: &Model, op: &Value) -> Vec<ChecksumAlgo> {
     let Some(trait_value) = trait_of(op, "aws.protocols#httpChecksum") else {
         return Vec::new();

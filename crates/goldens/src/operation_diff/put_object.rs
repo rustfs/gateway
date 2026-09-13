@@ -584,10 +584,15 @@ fn instant(format: TimestampFormat, millis: bool) -> impl Strategy<Value = Strin
 }
 
 fn checksum() -> impl Strategy<Value = (ChecksumAlgorithm, String)> {
-    (proptest::sample::select(ChecksumAlgorithm::ALL), any::<[u8; 32]>()).prop_map(|(algo, bytes)| {
-        let spec = ChecksumSpec::from_digest(algo, &bytes[..algo.digest_len()]).expect("the width is the algorithm's");
-        (algo, spec.render_base64().to_owned())
-    })
+    // 64 bytes: the widest digest, SHA-512; every algorithm takes a prefix of its own width.
+    (
+        proptest::sample::select(ChecksumAlgorithm::ALL),
+        proptest::collection::vec(any::<u8>(), 64),
+    )
+        .prop_map(|(algo, bytes)| {
+            let spec = ChecksumSpec::from_digest(algo, &bytes[..algo.digest_len()]).expect("the width is the algorithm's");
+            (algo, spec.render_base64().to_owned())
+        })
 }
 
 prop_compose! {

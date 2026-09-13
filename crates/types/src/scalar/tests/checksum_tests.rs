@@ -286,3 +286,123 @@ fn c_cks_0011_the_streaming_md5_reproduces_the_one_shot_digest() {
     let expected: [u8; 16] = Md5::digest(b"hello world").into();
     assert_eq!(running.finish(), expected, "a split feed must digest what one feed digests");
 }
+
+// ---------------------------------------------------------------------------------------------
+// The five algorithms S3 added in 2026-04 (rustfs/gateway#751, ruling rd-put-0006)
+// ---------------------------------------------------------------------------------------------
+
+/// Wire name, header name, and hex digest of `abc`. SHA-512 and MD5 are the FIPS 180-4 and RFC 1321
+/// vectors; the three XXHash values are XXH64 (seed 0), XXH3-64 and XXH3-128 in big-endian byte
+/// order, and were checked against two independent implementations (twox-hash and xxhash-rust).
+const ADDED_2026_04: &[(&str, &str, &str)] = &[
+    (
+        "SHA512",
+        "x-amz-checksum-sha512",
+        "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
+    ),
+    ("MD5", "x-amz-checksum-md5", "900150983cd24fb0d6963f7d28e17f72"),
+    ("XXHASH64", "x-amz-checksum-xxhash64", "44bc2cf5ad770999"),
+    ("XXHASH3", "x-amz-checksum-xxhash3", "78af5f94892f3950"),
+    ("XXHASH128", "x-amz-checksum-xxhash128", "06b05ab6733a618578af5f94892f3950"),
+];
+
+fn added(wire: &str) -> ChecksumAlgorithm {
+    ChecksumAlgorithm::from_wire_name(wire).unwrap_or_else(|| panic!("{wire} is an S3 checksum algorithm"))
+}
+
+/// Positive — each added algorithm is named by its header and wire spelling and produces the
+/// published digest of `abc` at its own width.
+#[test]
+fn the_algorithms_added_in_2026_04_match_their_published_vectors() {
+    for (wire, header, abc) in ADDED_2026_04 {
+        let algo = added(wire);
+        assert_eq!(ChecksumAlgorithm::from_header_name(header), Some(algo), "{header}");
+        assert_eq!(algo.header_name(), *header);
+        assert_eq!(hex::encode(digest_of(algo, b"abc")), *abc, "{wire}");
+        assert_eq!(algo.digest_len() * 2, abc.len(), "{wire} width");
+        assert!(ChecksumAlgorithm::ALL.contains(&algo), "{wire} is iterated with the rest");
+    }
+}
+
+/// Positive — the XXHash family against the reference implementation's empty-input values, which
+/// is where a wrong seed or a wrong variant (XXH3 for XXH64) shows first.
+#[test]
+fn the_xxhash_family_matches_the_published_empty_input_values() {
+    assert_eq!(hex::encode(digest_of(added("XXHASH64"), b"")), "ef46db3751d8e999");
+    assert_eq!(hex::encode(digest_of(added("XXHASH3"), b"")), "2d06800538d394c2");
+    assert_eq!(hex::encode(digest_of(added("XXHASH128"), b"")), "99aa06d3014798d86001c324468d497f");
+}
+
+/// Positive — the widest value S3 can send, a composite SHA-512 at the part limit, fits the packed
+/// spec inline and reads back as the 64-byte digest it carries.
+#[test]
+fn a_composite_sha512_at_the_part_limit_fits_the_packed_spec() {
+    let value = format!("{}==-10000", "A".repeat(86));
+    let spec = ChecksumSpec::parse_header("x-amz-checksum-sha512", &value).expect("88 base64 bytes and a part count");
+    assert_eq!(spec.checksum_type(), ChecksumType::Composite);
+    assert_eq!(spec.part_count(), Some(10_000));
+    assert_eq!(spec.render_base64(), value);
+    assert_eq!(spec.digest().expect("valid").as_bytes(), [0u8; 64]);
+    assert!(size_of::<ChecksumSpec>() <= 96, "the widest value must not grow the packed spec");
+}
+
+/// Negative — a value of another algorithm's width is refused under each added header, rather than
+/// being read as an unknown algorithm or accepted.
+#[test]
+fn an_added_algorithm_refuses_a_value_of_the_wrong_width() {
+    // Four bytes (a CRC32) and thirty-two bytes (a SHA-256): neither is the width of any of the five.
+    for value in ["AAAAAA==", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="] {
+        for (_, header, _) in ADDED_2026_04 {
+            assert_eq!(
+                ChecksumSpec::parse_header(header, value),
+                Err(ChecksumError::InvalidChecksumValue),
+                "{header}: {value}"
+            );
+        }
+    }
+}
+
+/// Negative — a computed digest of the wrong width is refused on the way in.
+#[test]
+fn an_added_algorithm_refuses_a_digest_of_the_wrong_width() {
+    for (wire, _, _) in ADDED_2026_04 {
+        let algo = added(wire);
+        assert_eq!(
+            ChecksumSpec::from_digest(algo, &vec![0u8; algo.digest_len() + 1]),
+            Err(ChecksumError::InvalidChecksumValue),
+            "{wire}"
+        );
+    }
+}
+
+/// Negative — none of the five is a CRC, so none composes into a full-object checksum.
+#[test]
+fn the_added_algorithms_are_not_combinable_as_full_object() {
+    for (wire, _, _) in ADDED_2026_04 {
+        let algo = added(wire);
+        assert!(!algo.is_crc(), "{wire}");
+        assert!(algo.crc_acceleration_target().is_none(), "{wire}");
+        let part = ChecksumSpec::from_digest(algo, &vec![0u8; algo.digest_len()]).expect("right width");
+        assert_eq!(
+            ChecksumSpec::combine_full_object(&[(part, 1), (part, 1)]),
+            Err(ChecksumError::NotCombinable),
+            "{wire}"
+        );
+    }
+}
+
+/// Negative — near-miss spellings are not algorithms: the header set is exactly the ten S3 names.
+#[test]
+fn a_near_miss_spelling_of_an_added_algorithm_is_not_an_algorithm() {
+    for header in [
+        "x-amz-checksum-sha-512",
+        "x-amz-checksum-xxhash",
+        "x-amz-checksum-xxh3",
+        "x-amz-checksum-xxh128",
+    ] {
+        assert_eq!(ChecksumAlgorithm::from_header_name(header), None, "{header}");
+    }
+    for wire in ["SHA-512", "XXH3", "XXH64", "XXHASH"] {
+        assert_eq!(ChecksumAlgorithm::from_wire_name(wire), None, "{wire}");
+    }
+}
