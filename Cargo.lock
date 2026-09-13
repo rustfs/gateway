@@ -1864,8 +1864,15 @@ dependencies = [
 name = "rustfs-gateway-goldens"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "futures-core",
  "hex",
+ "http",
+ "proptest",
+ "rustfs-gateway-core",
  "rustfs-gateway-corpus",
+ "rustfs-gateway-http",
+ "rustfs-gateway-stream",
  "rustfs-gateway-types",
  "serde",
  "serde_json",
@@ -1968,6 +1975,7 @@ version = "0.19.0+aws.2026-08-04"
 dependencies = [
  "bytes",
  "crc-fast",
+ "futures-core",
  "hex",
  "http",
  "md-5",

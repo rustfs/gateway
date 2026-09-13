@@ -18,7 +18,8 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `../dialect-minio/src/lib.rs` | Clean-room concrete `DelMarkerExpiration` registration consuming the generic lifecycle extension point. | Reviewing the first real runtime extension consumer without putting a vendor type in this crate. |
 | `src/cors_tagging.rs` | Persisted CORS and Tagging codecs plus runtime behavior projections. | Changing stored CORS rules, tag sets, or their migration evidence. |
 | `src/persistence/notification.rs` | Full Notification persistence structure, old-order writer, bounded parser, and routing decisions. | Changing Notification metadata compatibility or event-routing semantics. |
-| `src/compat.rs` | Milestone-bounded adapters to the pinned-s3s persistence oracle for the implemented families. | Auditing old-read or rollback behavior for D1-D5. |
+| `src/compat.rs` | Milestone-bounded adapters to the pinned-s3s persistence oracle for the implemented families, plus the re-export of that pinned crate. | Auditing old-read or rollback behavior for D1-D5. |
+| `src/compat/put_object.rs` | Pure PutObject conversion: gateway input to s3s input, s3s output to gateway output, live body moved unread; not wired into any request path. | Auditing the single-operation migration seam or a member the goldens decode/encode diff names. |
 | `src/compat/accelerate_payment.rs` | Independent pinned-s3s observations for Accelerate and Request Payment. | Auditing the old side of either family’s D1-D5 evidence. |
 | `src/compat/lifecycle.rs` | Pinned-s3s Lifecycle translation and decision observation. | Auditing Lifecycle D1-D5 against the old codec. |
 | `src/compat/notification.rs` | Independent pinned-s3s Notification structure and routing observations. | Auditing Notification D1-D5 against the old codec. |

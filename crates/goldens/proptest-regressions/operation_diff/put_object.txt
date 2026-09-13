@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5a7b3397af2a48c6879e273f7ae52b4e3357b3ae869ef3c3ec21286c5177ff36 # shrinks to request = RawRequest { target: "/aaa/..", headers: [("content-length", "0"), ("content-type", "text/plain")], chunks: [], trailers: [], fail_after_first_chunk: false }

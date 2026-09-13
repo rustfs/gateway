@@ -40,6 +40,12 @@ mod logging;
 mod minio_migration;
 mod notification;
 mod object_lock;
+// Test-only: the single-operation decode/encode diff against the pinned s3s service. It links the
+// gateway runtime through dev-dependencies, so it must never become part of the library proper.
+// Its assertions report a fixture the test wrote itself, where a panic is the failure report.
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod operation_diff;
 mod provenance;
 mod public_access_block;
 mod replication;

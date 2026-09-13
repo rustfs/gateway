@@ -41,6 +41,9 @@ percent-encoding = { workspace = true }
 sha2 = { workspace = true }
 unicode-normalization = { workspace = true }
 s3s = { git = "https://github.com/rustfs/s3s.git", rev = "9c4690d8e73fc8d184031a19b2c4539ebc77d180", version = "0.15.0", features = ["minio"], optional = true }
+# Only for `compat::put_object`: the s3s streaming body is a `futures_core::Stream`, so moving the
+# live gateway body into it without buffering needs the trait. Never enabled without `compat-s3s`.
+futures-core = { workspace = true, optional = true }
 
 # Pinned here rather than inherited, and each line states why. Hoisting them into
 # `[workspace.dependencies]` is a root-manifest change and belongs to whoever owns that file.
@@ -65,4 +68,4 @@ serde_json = { workspace = true }
 # it to float would make a golden compare two moving targets.
 # DELETE BY: P9-09 removes this dependency and compatibility module after the last migration.
 # see ADR-0004: version carries +aws.<model-date> once the model is pinned
-compat-s3s = ["dep:s3s"]
+compat-s3s = ["dep:s3s", "dep:futures-core"]
