@@ -65,6 +65,7 @@ pub struct Req {
     raw_query: String,
     index: QueryIndex,
     headers: HeaderMap,
+    host_named_bucket: bool,
 }
 
 impl Req {
@@ -95,7 +96,15 @@ impl Req {
             raw_query: query.to_owned(),
             index: QueryIndex::parse(query, &Limits::default()).expect("fixture query is acceptable"),
             headers: HeaderMap::new(),
+            host_named_bucket: false,
         }
+    }
+
+    /// The host named the bucket, so the whole path is an object key (virtual-hosted style).
+    #[must_use]
+    pub fn virtual_hosted(mut self) -> Self {
+        self.host_named_bucket = true;
+        self
     }
 
     /// Overrides the target the resolver would have computed.
@@ -142,6 +151,7 @@ impl Req {
             arn_form: self.arn_form,
             query: QueryView::new(&self.raw_query, &self.index),
             headers: HeaderView::new(&self.headers),
+            host_named_bucket: self.host_named_bucket,
         }
     }
 

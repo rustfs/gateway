@@ -149,6 +149,7 @@ fn an_undeclared_shadowing_route_is_refused() {
     static OVERLAY: DialectOverlay = DialectOverlay {
         name: "example-shadow-test",
         vendor: "example",
+        claims: &[],
         operations: &[OverlayRow {
             name: "example:Ping",
             precedence: 10,

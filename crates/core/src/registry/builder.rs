@@ -49,7 +49,10 @@ use crate::op::{Operation, is_standard_operation_name};
 use crate::registry::Registry;
 use crate::registry::opset::{MissingHandlers, OperationSet};
 use crate::registry::reject::RegistryError;
-use crate::route::{RouteEntry, RouteTable, SHADOWING, ShadowingDecl, ShadowingDecls, generated_entries};
+use crate::route::{
+    ClaimedEntry, ClaimedTable, InstalledClaim, Predicate, RouteBuildError, RouteEntry, RouteTable, SHADOWING, ShadowingDecl,
+    ShadowingDecls, generated_entries,
+};
 
 /// Why a router refused to be built.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,6 +132,13 @@ pub struct RouterBuilder {
     dialect_entries: Vec<RouteEntry>,
     /// One group per installed dialect, folded onto [`SHADOWING`] at build time.
     shadowing: Vec<&'static [ShadowingDecl]>,
+    /// Every path-prefix claim an installed dialect brought (ADR-0024).
+    claims: Vec<InstalledClaim>,
+    /// Every claimed row, alias rows included.
+    claimed_entries: Vec<ClaimedEntry>,
+    /// The declarations between claimed rows. Checked by the claimed table, never by the S3 table:
+    /// a claimed row is not in it.
+    claimed_shadowing: Vec<&'static [ShadowingDecl]>,
     errors: Vec<RegistryError>,
 }
 
@@ -201,12 +211,27 @@ impl RouterBuilder {
     /// with no handler answers `501`, which is the correct answer for an operation a backend has
     /// not implemented, and making installation implicit is the link-time collection ADR-0003
     /// bans.
+    ///
+    /// A dialect's path-prefix claims and claimed rows (ADR-0024) go to the claimed table, which the
+    /// router asks before the S3 table. Their declarations go with them.
     #[must_use]
     pub fn dialect(mut self, dialect: &Dialect) -> Self {
         for operation in dialect.operations() {
             self.dialect_entries.push(operation.entry().clone());
             if !operation.shadows().is_empty() {
                 self.shadowing.push(operation.shadows());
+            }
+        }
+        for claim in dialect.claims() {
+            self.claims.push(InstalledClaim {
+                dialect: dialect.name(),
+                claim: *claim,
+            });
+        }
+        for operation in dialect.claimed_operations() {
+            self.claimed_entries.extend(operation.entries().iter().cloned());
+            if !operation.shadows().is_empty() {
+                self.claimed_shadowing.push(operation.shadows());
             }
         }
         self
@@ -257,11 +282,32 @@ impl RouterBuilder {
         let mut entries = generated_entries().map_err(RouterBuildError::from)?;
         entries.extend(self.dialect_entries.iter().cloned());
         entries.extend(self.entries.into_iter().filter(|entry| !self.dialect_entries.contains(entry)));
+        // A path literal inside a claim is a row S3 routing never reaches. Refused before the S3
+        // table is built, because the overlaps it would report are the symptom, not the cause.
+        for entry in &entries {
+            for predicate in entry.selector.predicates() {
+                if let Predicate::PathLiteral(path) = predicate
+                    && let Some(installed) = self.claims.iter().find(|installed| installed.claim.covers(path))
+                {
+                    return Err(RouterBuildError::from(RouteBuildError::RowInsideClaim {
+                        op_name: entry.op_name,
+                        claim: installed.claim.prefix,
+                    })
+                    .into());
+                }
+            }
+        }
         let mut shadowing: ShadowingDecls = SHADOWING;
         for group in self.shadowing {
             shadowing = shadowing.and(group);
         }
         let table = RouteTable::build(entries, &shadowing).map_err(RouterBuildError::from)?;
-        Ok(Router::new(table, self.registry)?)
+        let mut claimed_shadowing = ShadowingDecls::NONE;
+        for group in self.claimed_shadowing {
+            claimed_shadowing = claimed_shadowing.and(group);
+        }
+        let claims =
+            ClaimedTable::build(self.claims, self.claimed_entries, &claimed_shadowing).map_err(RouterBuildError::from)?;
+        Ok(Router::with_claims(table, claims, self.registry)?)
     }
 }

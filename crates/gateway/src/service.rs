@@ -135,7 +135,6 @@ use rustfs_gateway_types::{ErrorCode, NamePolicy};
 use crate::clock::{Clock, ClockPosture, MonotonicClock, MonotonicNow};
 use crate::close::ConnectionIntent;
 use crate::config::{ConfigSnapshot, ConfigStore};
-use crate::dispatch::target_of;
 use crate::ext::{
     AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, AuthzAuditEvent, AuthzRequest, AuthzStage,
     BucketOwnerSource, CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, Governor, GovernorRequest, HostQuery,
@@ -155,6 +154,7 @@ use crate::render::{
 };
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
+use crate::routed_facts::RoutedFacts;
 use crate::trace::{RequestTrace, TraceSource};
 use crate::{response::into_response, routing::RuntimeAssembly};
 
@@ -190,6 +190,8 @@ pub(crate) struct Inner {
     pub(crate) sse: SseConfig,
     pub(crate) response_body_corrections: AtomicU64,
     pub(crate) temporary_redirect_targets: Arc<[RedirectTarget]>,
+    /// Whether a handed-over caller secret reaches every operation, not only opted-in ones (ADR-0024).
+    pub(crate) caller_secret_every_operation: bool,
 }
 
 struct AuthorizedRoute {
@@ -558,6 +560,7 @@ impl S3Service {
             arn_form: resolved.arn_form,
             query: wire.query(),
             headers: wire.headers(),
+            host_named_bucket: resolved.bucket().is_some(),
         }) {
             Ok(dispatched) => dispatched,
             // The one place a `VhostHint` is rendered. It replaces the message of the generic
@@ -579,7 +582,14 @@ impl S3Service {
             }
         };
         let operation = dispatched.spec.name;
-        let target = target_of(dispatched.entry);
+        // Service-level addressing, the operation's own secret opt-in, and a claimed row's typed
+        // values, decided once from the routed row and before anything is authenticated (ADR-0024).
+        let facts = match RoutedFacts::of(&dispatched, wire.raw_path().as_str()) {
+            Ok(facts) => facts,
+            Err(refusal) => return outcome.refuse(from_codec(refusal, response_kind)),
+        };
+        let (service_level, target, hands_caller_secret) = (facts.service_level, facts.target, facts.hands_caller_secret);
+        let path_params = facts.path_params;
         outcome.operation = Some(operation);
 
         let Some(op) = mode.entry(operation) else {
@@ -601,7 +611,8 @@ impl S3Service {
         // and the signature below reads the raw path; everything after this line reads `meta` and
         // is never handed the path to parse again.
         let vhost_bucket = crate::ext::vhost_signing_bucket(&resolved);
-        let meta = match MetaView::addressed_with(&wire, target, resolved.bucket().cloned(), &self.inner.names) {
+        let host_bucket = if service_level { None } else { resolved.bucket().cloned() };
+        let meta = match MetaView::addressed_with(&wire, target, host_bucket, &self.inner.names) {
             Ok(meta) => meta,
             Err(error) => return outcome.refuse(from_codec(error, response_kind)),
         };
@@ -783,6 +794,9 @@ impl S3Service {
         };
         // H4's run-time half: a receipt minted for another request cannot be attached to this one.
         let (verdict, scope_rejection, caller_secret) = authentication.into_parts();
+        // Zeroized on drop: an operation outside the assembly's secret scope never holds the key
+        // past this line (ADR-0024).
+        let caller_secret = caller_secret.filter(|_| hands_caller_secret || self.inner.caller_secret_every_operation);
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
         if let Some(error) = verdict.rejection() {
             if error == AuthError::AuthorizationHeaderMalformed {
@@ -1167,7 +1181,8 @@ impl S3Service {
             let config = config.with_missing_object_visibility(visibility).authorized();
             let map = |error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive);
             let sse = config.sse().cloned().map_err(map)?;
-            let context = RequestContextView::from_pipeline(operation, input_wire, addressed, input_verdict, caller_secret);
+            let context = RequestContextView::from_pipeline(operation, input_wire, addressed, input_verdict, caller_secret)
+                .map(|context| context.with_path_params(path_params));
             let context = context.ok_or_else(|| map(HandlerError::internal_error("a rejected request reached its handler")))?;
             Ok((decisions, config, sse, context))
         };
@@ -1223,7 +1238,7 @@ impl S3Service {
                 into_response(encoded)
             }
             StaticDispatchOutcome::Committed { status, response } => {
-                let host_bucket = resolved.bucket().cloned();
+                let host_bucket = if service_level { None } else { resolved.bucket().cloned() };
                 let names = self.inner.names.clone();
                 let trace = *outcome.trace;
                 drop(meta);

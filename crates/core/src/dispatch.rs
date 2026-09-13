@@ -47,8 +47,8 @@
 use crate::error::PreAuthError;
 use crate::registry::{OperationSpec, Registry, check_required};
 use crate::route::{
-    CompileError, CompiledRouter, RouteBuildError, RouteEntry, RouteRequestParts, RouteTable, RowError, SHADOWING,
-    generated_entries,
+    ClaimLookup, ClaimedEntry, ClaimedTable, CompileError, CompiledRouter, RouteBuildError, RouteEntry, RouteRequestParts,
+    RouteTable, RowError, SHADOWING, generated_entries,
 };
 
 /// The message a request that names no operation receives.
@@ -62,6 +62,14 @@ pub const NO_ROUTE_MESSAGE: &str = "This request does not name any S3 operation.
 /// The message a routed but unhandled operation receives.
 pub const NOT_REGISTERED_MESSAGE: &str = "This operation is defined by S3 but is not handled by this backend.";
 
+/// The message a request inside a dialect's path-prefix claim receives when no claimed row accepts
+/// it (ADR-0024).
+///
+/// Separate from [`NO_ROUTE_MESSAGE`] because the cause and the fix differ: the request is not a
+/// misaddressed S3 request, it is inside a namespace S3 routing never considers.
+pub const NO_CLAIMED_ROUTE_MESSAGE: &str = "This request is inside a path prefix an installed dialect claims, and names none of the \
+     operations that dialect serves there.";
+
 /// A request that has been routed, registered and validated.
 #[derive(Clone, Copy, Debug)]
 pub struct Dispatch<'a> {
@@ -69,6 +77,9 @@ pub struct Dispatch<'a> {
     pub entry: &'a RouteEntry,
     /// The registered operation.
     pub spec: &'a OperationSpec,
+    /// The claimed row that accepted the request, when a dialect's path-prefix claim covered it;
+    /// `None` for an S3-table row. Its template is what path parameters are extracted with.
+    pub claimed: Option<&'a ClaimedEntry>,
 }
 
 /// Why a router could not be built.
@@ -112,16 +123,17 @@ impl From<CompileError> for RouterBuildError {
     }
 }
 
-/// The route table, its compiled form, and the operations this backend handles.
+/// The route table, its compiled form, the claimed rows, and the operations this backend handles.
 #[derive(Clone, Debug)]
 pub struct Router {
     table: RouteTable,
     compiled: CompiledRouter,
+    claims: ClaimedTable,
     registry: Registry,
 }
 
 impl Router {
-    /// Builds a router over an already-built table.
+    /// Builds a router over an already-built table, with no path-prefix claim.
     ///
     /// Not `async`, and it takes no store, connection or repository — see the invariant in
     /// [`crate::route`].
@@ -130,12 +142,28 @@ impl Router {
     ///
     /// [`RouterBuildError::Compile`] when the table cannot be compiled.
     pub fn new(table: RouteTable, registry: Registry) -> Result<Self, RouterBuildError> {
+        Self::with_claims(table, ClaimedTable::default(), registry)
+    }
+
+    /// Builds a router over an already-built S3 table and an already-built claimed table.
+    ///
+    /// # Errors
+    ///
+    /// [`RouterBuildError::Compile`] when the S3 table cannot be compiled.
+    pub fn with_claims(table: RouteTable, claims: ClaimedTable, registry: Registry) -> Result<Self, RouterBuildError> {
         let compiled = CompiledRouter::compile(&table)?;
         Ok(Self {
             table,
             compiled,
+            claims,
             registry,
         })
+    }
+
+    /// The path-prefix claims and the rows inside them.
+    #[must_use]
+    pub fn claims(&self) -> &ClaimedTable {
+        &self.claims
     }
 
     /// Builds a router over the generated route table and its shadowing declarations.
@@ -168,19 +196,29 @@ impl Router {
         &self.registry
     }
 
-    /// Which operation this request names, answered from the compiled table.
+    /// Which operation this request names: the claimed row when a path-prefix claim covers the
+    /// request, and otherwise the compiled S3 table's answer. A request inside a claim that no
+    /// claimed row accepts names nothing; it is never handed to the S3 table.
     ///
     /// Not `async`, holds nothing, allocates nothing.
     #[must_use]
     pub fn resolve(&self, request: &RouteRequestParts<'_>) -> Option<&RouteEntry> {
-        let op = self.compiled.resolve(request)?;
-        self.table.entries().get(usize::from(op))
+        match self.claims.lookup(request) {
+            ClaimLookup::Outside => {
+                let op = self.compiled.resolve(request)?;
+                self.table.entries().get(usize::from(op))
+            }
+            ClaimLookup::Inside { entry, .. } => entry.map(ClaimedEntry::entry),
+        }
     }
 
-    /// The same answer from the readable table. Kept as the reference implementation.
+    /// The same answer from the readable S3 table. Kept as the reference implementation.
     #[must_use]
     pub fn resolve_readable(&self, request: &RouteRequestParts<'_>) -> Option<&RouteEntry> {
-        self.table.resolve(request)
+        match self.claims.lookup(request) {
+            ClaimLookup::Outside => self.table.resolve(request),
+            ClaimLookup::Inside { entry, .. } => entry.map(ClaimedEntry::entry),
+        }
     }
 
     /// Routes, checks registration, then checks required parameters.
@@ -188,16 +226,32 @@ impl Router {
     /// # Errors
     ///
     /// [`PreAuthError`]: `501` with [`NO_ROUTE_MESSAGE`] when nothing matched, `501` with
-    /// [`NOT_REGISTERED_MESSAGE`] when the operation is not handled here, and otherwise the
-    /// operation's own code for the first missing required parameter.
+    /// [`NO_CLAIMED_ROUTE_MESSAGE`] when a claim covers the request and no claimed row accepts it,
+    /// `501` with [`NOT_REGISTERED_MESSAGE`] when the operation is not handled here, and otherwise
+    /// the operation's own code for the first missing required parameter.
     pub fn dispatch(&self, request: &RouteRequestParts<'_>) -> Result<Dispatch<'_>, PreAuthError> {
-        let Some(entry) = self.resolve(request) else {
-            return Err(PreAuthError::not_implemented(NO_ROUTE_MESSAGE));
+        let (entry, claimed) = match self.claims.lookup(request) {
+            ClaimLookup::Outside => {
+                let entry = self
+                    .compiled
+                    .resolve(request)
+                    .and_then(|op| self.table.entries().get(usize::from(op)));
+                let Some(entry) = entry else {
+                    return Err(PreAuthError::not_implemented(NO_ROUTE_MESSAGE));
+                };
+                (entry, None)
+            }
+            ClaimLookup::Inside {
+                entry: Some(claimed), ..
+            } => (claimed.entry(), Some(claimed)),
+            ClaimLookup::Inside { entry: None, .. } => {
+                return Err(PreAuthError::not_implemented(NO_CLAIMED_ROUTE_MESSAGE));
+            }
         };
         let Some(spec) = self.registry.get(entry.op_name) else {
             return Err(PreAuthError::not_implemented(NOT_REGISTERED_MESSAGE).about(entry.op_name));
         };
         check_required(spec, request)?;
-        Ok(Dispatch { entry, spec })
+        Ok(Dispatch { entry, spec, claimed })
     }
 }

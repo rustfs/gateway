@@ -63,10 +63,11 @@ use crate::ext::{
     Governor, GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoBucketOwner, NoCors, NoObserver, NoPolicy, Observer,
     OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
 };
-use crate::posture::{SecurityPosture, log_startup_posture};
+use crate::posture::{SecurityPosture, log_dialect_posture, log_startup_posture};
 use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 
 mod assembly_update;
+mod secret_scope;
 pub use self::assembly_update::AssemblyUpdate;
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
@@ -114,6 +115,8 @@ pub struct ServiceBuilder {
     config: ConfigStore,
     authorizer: Option<Arc<dyn Authorizer>>,
     dangerous_allow_all_authorizer: bool,
+    /// ADR-0024: a handed-over caller secret reaches every operation, not only opted-in ones.
+    caller_secret_every_operation: bool,
     authenticator: Option<Arc<dyn Authenticator>>,
     custom_signature_verifier: Option<Arc<dyn SignatureVerifier>>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -176,6 +179,7 @@ impl ServiceBuilder {
             )))),
             authorizer: None,
             dangerous_allow_all_authorizer: false,
+            caller_secret_every_operation: false,
             authenticator: None,
             custom_signature_verifier: None,
             #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -651,6 +655,7 @@ impl ServiceBuilder {
             custom_signature_verifier,
             dangerously_replaced_signature_verifier,
         );
+        log_dialect_posture(&routing.router, self.caller_secret_every_operation);
         let governor: Arc<dyn Governor> = match self.governor {
             Some(user) => Arc::new(LayeredGovernor::new(framework_governor, user)),
             None => Arc::new(framework_governor),
@@ -693,6 +698,7 @@ impl ServiceBuilder {
             sse: self.sse,
             response_body_corrections: std::sync::atomic::AtomicU64::new(0),
             temporary_redirect_targets: Arc::from(self.temporary_redirect_targets),
+            caller_secret_every_operation: self.caller_secret_every_operation,
         }))
     }
 

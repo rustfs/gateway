@@ -94,6 +94,7 @@ pub(crate) fn route(args: &[String]) -> ExitCode {
         arn_form: resolved.arn_form,
         query: wire.query(),
         headers: wire.headers(),
+        host_named_bucket: false,
     };
     let explanation = table.explain(&request);
     let candidates = candidates(&table, &request);

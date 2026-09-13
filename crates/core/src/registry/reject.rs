@@ -55,6 +55,14 @@ pub enum RegistryError {
         /// The name registered twice.
         name: &'static str,
     },
+    /// A standard operation whose spec opts in to receiving the caller's secret (ADR-0024).
+    ///
+    /// No AWS operation needs the key to serve a request, so a standard spec that asks for it is a
+    /// secret travelling to every handler of that operation for nothing.
+    StandardOperationReceivesCallerSecret {
+        /// The operation.
+        name: &'static str,
+    },
     /// A required parameter declares a code that cannot be raised before authentication.
     ///
     /// Checked once, here, so that the per-request path has no failure mode of its own.
@@ -129,6 +137,7 @@ impl RegistryError {
     pub const fn operation(&self) -> &'static str {
         match self {
             Self::Duplicate { name }
+            | Self::StandardOperationReceivesCallerSecret { name }
             | Self::UnusableMissingError { name, .. }
             | Self::MissingAuthRequirement { name }
             | Self::MissingHandlerDeadlineClass { name }
@@ -146,6 +155,11 @@ impl fmt::Display for RegistryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Duplicate { name } => write!(f, "{name} is registered twice"),
+            Self::StandardOperationReceivesCallerSecret { name } => write!(
+                f,
+                "{name} is a standard operation and opts in to receiving the caller's secret; no AWS \
+                 operation needs the key to serve a request"
+            ),
             Self::UnusableMissingError { name, param, source } => {
                 write!(f, "{name}: required parameter {param:?} declares an unusable code: {source}")
             }
@@ -200,6 +214,10 @@ pub(crate) fn check_operation<O: Operation>() -> Result<(), RegistryError> {
     }
 
     if O::ORIGIN.is_standard() {
+        // First, so it holds for every standard-origin operation, whether or not the table has it.
+        if spec.receives_caller_secret() {
+            return Err(RegistryError::StandardOperationReceivesCallerSecret { name });
+        }
         if !is_standard_operation_name(name) {
             return Err(RegistryError::UnknownStandardOperation { name });
         }
@@ -319,6 +337,59 @@ mod tests {
     fn a_standard_operation_the_route_table_does_not_have_is_refused() {
         assert_eq!(
             check_operation::<NotInTheTable>(),
+            Err(RegistryError::UnknownStandardOperation {
+                name: "WriteGetObjectResponse"
+            })
+        );
+    }
+
+    /// [`NotInTheTable`] again, with a spec that opts in to the caller's secret, and without.
+    ///
+    /// The same rowless name, so the negative control fails for the other, already-pinned reason
+    /// and the difference between the two answers is the opt-in alone.
+    struct SecretHungry<const OPTED_IN: bool>;
+
+    static SECRET_HUNGRY_SPEC: OperationSpec = OperationSpec::builder("WriteGetObjectResponse", 200, None)
+        .handler_deadline_class(HandlerDeadlineClass::Standard)
+        .required_params(&[])
+        .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+        .hand_caller_secret_to_handler()
+        .build();
+
+    impl<const OPTED_IN: bool> Operation for SecretHungry<OPTED_IN> {
+        const NAME: &'static str = "WriteGetObjectResponse";
+        const ORIGIN: OperationOrigin = OperationOrigin::Standard(StandardOperation::TOKEN);
+        type Input = ();
+        type Output = ();
+        type DerivedResources = crate::NoDerived;
+
+        fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
+            Ok(crate::NoDerived)
+        }
+
+        fn seal_derived_input(_input: &mut Self::Input) {}
+
+        fn spec() -> &'static OperationSpec {
+            if OPTED_IN { &SECRET_HUNGRY_SPEC } else { &SPEC }
+        }
+
+        fn floor() -> &'static OperationFloor {
+            &FLOOR
+        }
+    }
+
+    /// Negative -- a standard operation may not opt in to the caller's secret (ADR-0024): the
+    /// opt-in is refused as such, and without it the same operation is refused only for its name.
+    #[test]
+    fn a_standard_operation_that_opts_in_to_the_caller_secret_is_refused() {
+        assert_eq!(
+            check_operation::<SecretHungry<true>>(),
+            Err(RegistryError::StandardOperationReceivesCallerSecret {
+                name: "WriteGetObjectResponse"
+            })
+        );
+        assert_eq!(
+            check_operation::<SecretHungry<false>>(),
             Err(RegistryError::UnknownStandardOperation {
                 name: "WriteGetObjectResponse"
             })

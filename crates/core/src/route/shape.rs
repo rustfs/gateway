@@ -136,6 +136,7 @@ impl MaterialisedShape<'_> {
             arn_form: self.shape.arn_form,
             query: QueryView::new(&self.raw_query, &self.index),
             headers: HeaderView::new(&self.headers),
+            host_named_bucket: false,
         }
     }
 }

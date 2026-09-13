@@ -69,6 +69,7 @@ static SHADOW_PREDICATES: &[Predicate] = &[Predicate::Method(Method::PUT), Predi
 static SHADOW_OVERLAY: DialectOverlay = DialectOverlay {
     name: "registry-hot-update-test",
     vendor: "example",
+    claims: &[],
     operations: &[OverlayRow {
         name: "example:ShadowObject",
         precedence: 800,

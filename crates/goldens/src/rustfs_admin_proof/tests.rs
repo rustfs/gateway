@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The P10-01 proof: three RustFS admin routes as extension operations, below and through the
-//! assembled service.
+//! The P10-01 proof: four RustFS admin routes as extension operations, below and through the
+//! assembled service (ADR-0024).
 //!
-//! Responsible for: the operations' actions agreeing with the recorded inventory; routing with and
-//! without the admin rows, every declared overlap being necessary and no undeclared one passing;
-//! and, through a real assembled service, SigV4 before the authorizer, the admin action at the
-//! authorizer, the caller's secret reaching a handler only when the authenticator hands it over,
-//! and every refusal happening before a handler runs.
+//! Responsible for: the operations and their rows agreeing with the recorded inventory, aliases
+//! included; routing with and without the dialect, the claims owing no declaration while every
+//! declaration of the S3-shaped row stays necessary; and, through a real assembled service, SigV4
+//! before the authorizer, the admin action with no bucket at the authorizer, typed path values in
+//! the handler, the caller's secret reaching only the operation that opted in, and every refusal
+//! happening before a handler runs.
 //! NOT responsible for: the rows themselves (`rustfs_admin_proof.rs`), RustFS behaviour behind the
 //! handlers, or the inventory's own validation.
 //! Upstream: the parent module, `operation_diff::context`'s signer, the recorded inventory.
@@ -31,17 +32,19 @@ use rustfs_gateway_core::dialect::{Dialect, DialectOverlay, DialectRoute, Overla
 use rustfs_gateway_core::op::{Operation, ResourceShape};
 use rustfs_gateway_core::registry::RouterBuilder;
 use rustfs_gateway_core::route::{HostClass, Predicate, RouteRequestParts, ShadowingDecl, TargetKind};
-use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_sig::RequestNow;
+use rustfs_gateway_http::{Limits, RawHost, WireRequest};
+use rustfs_gateway_sig::{
+    AmzDate, PayloadMode, RequestNow, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope,
+};
 
 use super::{
     ADD_SERVICE_ACCOUNT, ADD_SERVICE_ACCOUNT_ACTION, ADD_SERVICE_ACCOUNT_ALIAS, ADD_SERVICE_ACCOUNT_PATH,
-    ADD_SERVICE_ACCOUNT_SHADOWS, AddServiceAccount, Assembled, AuthzCall, Options, REPLICATION_METRICS_ACTION,
-    REPLICATION_METRICS_QUERY, REPLICATION_METRICS_SHADOWS, REPLICATION_METRICS_V2, ReplicationMetricsV2, SERVER_INFO,
-    SERVER_INFO_ACTION, SERVER_INFO_PATH, SERVER_INFO_SHADOWS, ServerInfo, Shadows, admin_dialect, admin_dialect_with, assemble,
-    open, seal,
+    ADD_SERVICE_ACCOUNT_ROWS, AddServiceAccount, Assembled, AuthzCall, CLAIMS, GET_TIER, GET_TIER_ACTION, GET_TIER_ROWS,
+    GET_TIER_TEMPLATE, GetTier, Options, REPLICATION_METRICS_ACTION, REPLICATION_METRICS_QUERY, REPLICATION_METRICS_SHADOWS,
+    REPLICATION_METRICS_V2, ReplicationMetricsV2, SERVER_INFO, SERVER_INFO_ACTION, SERVER_INFO_ALIAS, SERVER_INFO_PATH,
+    SERVER_INFO_ROWS, ServerInfo, admin_dialect, admin_dialect_with, assemble, open, seal,
 };
-use crate::operation_diff::s3s_f3e17541::context::{ACCESS_KEY, ContextRequest, PATH_HOST, SECRET_KEY};
+use crate::operation_diff::s3s_f3e17541::context::{ACCESS_KEY, ContextRequest, PATH_HOST, SECRET_KEY, amz_date};
 use crate::operation_diff::s3s_f3e17541::harness::block_on;
 use crate::{RouteMethod, rustfs_admin_route_inventory};
 
@@ -90,13 +93,15 @@ fn routed(dialect: Option<&Dialect>, method: &str, target: &str) -> Option<&'sta
         arn_form: None,
         query: wire.query(),
         headers: wire.headers(),
+        host_named_bucket: false,
     };
     router.resolve(&parts).map(|entry| entry.op_name)
 }
 
-/// Why the table refuses the admin rows with `shadows`.
-fn table_refusal(shadows: Shadows) -> String {
-    let dialect = admin_dialect_with(shadows).expect("the record and the declarations still agree");
+/// Why the table refuses the admin dialect with `replication_metrics` as the S3-shaped row's
+/// declarations.
+fn table_refusal(replication_metrics: &'static [ShadowingDecl]) -> String {
+    let dialect = admin_dialect_with(replication_metrics).expect("the record and the declarations still agree");
     match RouterBuilder::new().dialect(&dialect).build() {
         Ok(_) => panic!("the table built"),
         Err(error) => format!("{error:?}"),
@@ -120,13 +125,7 @@ impl Answer {
     }
 }
 
-fn send_with(assembled: &Assembled, request: &ContextRequest, edit: impl FnOnce(&mut http::HeaderMap)) -> Answer {
-    let mut headers = request.wire_headers(RequestNow::capture()).expect("fixture headers");
-    edit(&mut headers);
-    let http_request = request
-        .http_head(&headers)
-        .body(request.body.clone())
-        .expect("a fixture request");
+fn answer(assembled: &Assembled, http_request: Request<bytes::Bytes>) -> Answer {
     let response = block_on(assembled.service.call_bytes(http_request));
     let collected = block_on(rustfs_gateway::collect(response)).expect("an in-memory body");
     Answer {
@@ -141,6 +140,16 @@ fn send_with(assembled: &Assembled, request: &ContextRequest, edit: impl FnOnce(
     }
 }
 
+fn send_with(assembled: &Assembled, request: &ContextRequest, edit: impl FnOnce(&mut http::HeaderMap)) -> Answer {
+    let mut headers = request.wire_headers(RequestNow::capture()).expect("fixture headers");
+    edit(&mut headers);
+    let http_request = request
+        .http_head(&headers)
+        .body(request.body.clone())
+        .expect("a fixture request");
+    answer(assembled, http_request)
+}
+
 fn send(assembled: &Assembled, request: &ContextRequest) -> Answer {
     send_with(assembled, request, |_| {})
 }
@@ -149,13 +158,37 @@ fn server_info() -> ContextRequest {
     ContextRequest::get(PATH_HOST, SERVER_INFO_PATH, "")
 }
 
-fn add_service_account(sealed_under: &[u8]) -> ContextRequest {
+fn add_service_account_at(path: &str, sealed_under: &[u8]) -> ContextRequest {
     let asked = format!("{{\"accessKey\":\"{CREATED}\"}}");
-    ContextRequest::put(PATH_HOST, ADD_SERVICE_ACCOUNT_ALIAS, &seal(sealed_under, asked.as_bytes()))
+    ContextRequest::put(PATH_HOST, path, &seal(sealed_under, asked.as_bytes()))
+}
+
+fn add_service_account(sealed_under: &[u8]) -> ContextRequest {
+    add_service_account_at(ADD_SERVICE_ACCOUNT_ALIAS, sealed_under)
 }
 
 fn metrics(query: &str) -> ContextRequest {
     ContextRequest::get(PATH_HOST, "/photos", query)
+}
+
+/// `GET path`, presigned in the query with the shared credential, now.
+fn presigned(path: &str) -> Request<bytes::Bytes> {
+    let stamp = AmzDate::parse(&amz_date(RequestNow::capture().unix_seconds())).expect("a stamp");
+    let scope = SigningScope::new(stamp.day(), REGION, SigService::S3).expect("a scope");
+    let credentials = SigningCredentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("credentials");
+    let mut signer = SigV4Signer::new(credentials, scope);
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, HeaderValue::from_str(PATH_HOST).expect("a host"));
+    let host = RawHost::from_host_header(PATH_HOST.as_bytes()).expect("an acceptable host");
+    let signing = SigningRequest::new(&Method::GET, path, "", &headers, &host, PayloadMode::Unsigned, stamp);
+    let signed = signer.presign(&signing, 900).expect("a presignable request");
+    let mut builder = Request::builder()
+        .method(Method::GET)
+        .uri(format!("{path}?{}", signed.query()));
+    for (name, value) in signed.headers() {
+        builder = builder.header(name, value);
+    }
+    builder.body(bytes::Bytes::new()).expect("a request")
 }
 
 fn only(action: &'static str) -> impl Fn(&AuthzRequest<'_>) -> bool + Send + Sync + 'static {
@@ -174,14 +207,18 @@ fn assert_refused_before_the_handler(assembled: &Assembled, answer: &Answer, sta
 
 // ── the rows and the inventory ────────────────────────────────────────────────────────────────
 
-/// Positive — each operation declares the action and path the inventory records for its route,
-/// and each is privileged and header-signed only.
+/// Positive — each operation declares the action the inventory records; each claimed operation's
+/// first row is the recorded path and its second is the recorded MinIO alias; only the operation
+/// whose body RustFS seals opts in to the secret; every floor is privileged and header-signed only.
 #[test]
 fn the_proof_operations_declare_what_the_inventory_records() {
     let inventory = rustfs_admin_route_inventory().expect("the recorded inventory validates");
     let info = inventory.route(RouteMethod::Get, SERVER_INFO_PATH).expect("a recorded route");
     let add = inventory
         .route(RouteMethod::Put, ADD_SERVICE_ACCOUNT_PATH)
+        .expect("a recorded route");
+    let tier = inventory
+        .route(RouteMethod::Get, GET_TIER_TEMPLATE)
         .expect("a recorded route");
     let metrics = inventory
         .extension_route("ReplicationExtRoute::MetricsV2")
@@ -190,15 +227,42 @@ fn the_proof_operations_declare_what_the_inventory_records() {
     let action = |spec: &'static rustfs_gateway_core::registry::OperationSpec| spec.auth.expect("an action").action;
     assert_eq!(info.iam_action_wire.as_deref(), Some(action(ServerInfo::spec())));
     assert_eq!(add.iam_action_wire.as_deref(), Some(action(AddServiceAccount::spec())));
+    assert_eq!(tier.iam_action_wire.as_deref(), Some(action(GetTier::spec())));
     assert_eq!(metrics.iam_action_wire, action(ReplicationMetricsV2::spec()));
-    assert!(add.minio_admin_alias && add.caller_secret_body.needs_caller_secret());
+    assert_eq!(tier.path_params, ["tier"]);
+    for (route, rows) in [
+        (info, SERVER_INFO_ROWS),
+        (add, ADD_SERVICE_ACCOUNT_ROWS),
+        (tier, GET_TIER_ROWS),
+    ] {
+        assert!(route.minio_admin_alias, "{}", route.path);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].template, route.path);
+        assert_eq!(
+            rows[1].template.strip_prefix("/minio/admin"),
+            route.path.strip_prefix("/rustfs/admin"),
+            "{}",
+            route.path
+        );
+    }
     assert_eq!(
-        ADD_SERVICE_ACCOUNT_ALIAS.strip_prefix("/minio/admin"),
-        ADD_SERVICE_ACCOUNT_PATH.strip_prefix("/rustfs/admin")
+        CLAIMS.iter().map(|claim| claim.prefix).collect::<Vec<_>>(),
+        ["/rustfs/admin", "/minio/admin"]
     );
+    assert!(add.caller_secret_body.needs_caller_secret() && AddServiceAccount::spec().receives_caller_secret());
+    for (route, spec) in [(info, ServerInfo::spec()), (tier, GetTier::spec())] {
+        assert!(!route.caller_secret_body.needs_caller_secret());
+        assert!(!spec.receives_caller_secret(), "{}", spec.name);
+    }
+    assert!(!ReplicationMetricsV2::spec().receives_caller_secret());
     assert_eq!(metrics.query_discriminator.key, REPLICATION_METRICS_QUERY.0);
     assert_eq!(metrics.query_discriminator.rule, format!("equals:{}", REPLICATION_METRICS_QUERY.1));
-    for floor in [ServerInfo::floor(), AddServiceAccount::floor(), ReplicationMetricsV2::floor()] {
+    for floor in [
+        ServerInfo::floor(),
+        AddServiceAccount::floor(),
+        GetTier::floor(),
+        ReplicationMetricsV2::floor(),
+    ] {
         assert!(floor.privileged());
         assert!(!floor.allowed_schemes().allows_anonymous());
         assert!(!floor.allowed_schemes().allows_presigned());
@@ -207,19 +271,25 @@ fn the_proof_operations_declare_what_the_inventory_records() {
 
 // ── routing ───────────────────────────────────────────────────────────────────────────────────
 
-/// Positive — each admin request reaches its extension operation once the rows are installed.
+/// Positive — every canonical row, every alias and the S3-shaped row reach their operation.
 #[test]
 fn each_admin_request_reaches_its_extension_operation() {
     let dialect = admin_dialect();
-    assert_eq!(routed(Some(&dialect), "GET", SERVER_INFO_PATH), Some(SERVER_INFO));
-    assert_eq!(routed(Some(&dialect), "PUT", ADD_SERVICE_ACCOUNT_ALIAS), Some(ADD_SERVICE_ACCOUNT));
-    assert_eq!(
-        routed(Some(&dialect), "GET", "/photos?replication-metrics=2"),
-        Some(REPLICATION_METRICS_V2)
-    );
+    for (method, target, expected) in [
+        ("GET", SERVER_INFO_PATH, SERVER_INFO),
+        ("GET", SERVER_INFO_ALIAS, SERVER_INFO),
+        ("PUT", ADD_SERVICE_ACCOUNT_PATH, ADD_SERVICE_ACCOUNT),
+        ("PUT", ADD_SERVICE_ACCOUNT_ALIAS, ADD_SERVICE_ACCOUNT),
+        ("GET", "/rustfs/admin/v3/tier/WARM", GET_TIER),
+        ("GET", "/minio/admin/v3/tier/WARM", GET_TIER),
+        ("GET", "/photos?replication-metrics=2", REPLICATION_METRICS_V2),
+    ] {
+        assert_eq!(routed(Some(&dialect), method, target), Some(expected), "{method} {target}");
+    }
 }
 
-/// Positive — like RustFS's router, a row answers every query on its path and value.
+/// Positive — like RustFS's router, a claimed row answers every query on its path, and the
+/// S3-shaped row every query carrying its value.
 #[test]
 fn the_admin_rows_answer_every_query_on_their_path_as_rustfs_does() {
     let dialect = admin_dialect();
@@ -239,93 +309,137 @@ fn the_admin_rows_answer_every_query_on_their_path_as_rustfs_does() {
 fn n_without_the_rows_the_admin_requests_are_ordinary_s3_requests() {
     assert_eq!(routed(None, "GET", SERVER_INFO_PATH), Some("GetObject"));
     assert_eq!(routed(None, "PUT", ADD_SERVICE_ACCOUNT_ALIAS), Some("PutObject"));
+    assert_eq!(routed(None, "GET", "/rustfs/admin/v3/tier/WARM"), Some("GetObject"));
     assert_eq!(routed(None, "GET", "/photos?replication-metrics=2"), Some("ListObjects"));
 }
 
-/// Negative — installing the rows moves no request that is not exactly theirs.
+/// Negative — outside the two claims, installing the dialect moves no request that is not
+/// exactly the S3-shaped row's: each routes as it does with no dialect at all.
 #[test]
-fn n_the_admin_rows_leave_every_s3_neighbour_where_it_was() {
+fn n_outside_the_claims_every_s3_neighbour_stays_where_it_was() {
     let dialect = admin_dialect();
-    for (method, target, expected) in [
-        ("GET", "/photos/a.png", "GetObject"),
-        ("GET", "/rustfs/other.txt", "GetObject"),
-        ("GET", "/rustfs/admin/v3/infox", "GetObject"),
-        ("GET", "/rustfs/admin/v3", "GetObject"),
-        ("PUT", SERVER_INFO_PATH, "PutObject"),
-        ("GET", ADD_SERVICE_ACCOUNT_ALIAS, "GetObject"),
-        // One route row per operation: the canonical path is a second row this slice does not add.
-        ("PUT", ADD_SERVICE_ACCOUNT_PATH, "PutObject"),
-        ("GET", "/photos?replication-metrics=1", "ListObjects"),
-        ("GET", "/photos?replication-metrics", "ListObjects"),
-        ("GET", "/photos?location", "GetBucketLocation"),
-        ("GET", "/photos?list-type=2", "ListObjectsV2"),
-        ("PUT", "/photos?replication-metrics=2", "CreateBucket"),
+    for (method, target) in [
+        ("GET", "/photos/a.png"),
+        ("GET", "/rustfs"),
+        ("PUT", "/rustfs"),
+        ("GET", "/rustfs?location"),
+        ("GET", "/rustfs/other.txt"),
+        ("GET", "/rustfs/adminx/v3/info"),
+        ("GET", "/rustfs/%61dmin/v3/info"),
+        ("GET", "/minio/admin.txt"),
+        ("GET", "/photos/rustfs/admin/v3/info"),
+        ("GET", "/photos?replication-metrics=1"),
+        ("GET", "/photos?replication-metrics"),
+        ("GET", "/photos?location"),
+        ("GET", "/photos?list-type=2"),
+        ("PUT", "/photos?replication-metrics=2"),
     ] {
-        assert_eq!(routed(Some(&dialect), method, target), Some(expected), "{method} {target}");
+        let without = routed(None, method, target);
+        assert!(without.is_some(), "{method} {target} is an S3 request");
+        assert_eq!(routed(Some(&dialect), method, target), without, "{method} {target}");
     }
 }
 
-/// Negative — every declared overlap is necessary: dropping any one of them is a start-up
-/// refusal naming exactly that pair, so the declarations are neither padded nor short.
+/// Negative — inside a claim, a request no claimed row accepts names no operation: it never falls
+/// through to `GetObject` or `PutObject`, and a template never matches across a segment.
 #[test]
-fn n_every_declared_overlap_is_necessary() {
-    let mut checked = 0;
-    for (name, declarations) in [
-        ("server_info", SERVER_INFO_SHADOWS),
-        ("add_service_account", ADD_SERVICE_ACCOUNT_SHADOWS),
-        ("replication_metrics", REPLICATION_METRICS_SHADOWS),
+fn n_inside_the_claims_an_unmatched_request_names_no_operation() {
+    let dialect = admin_dialect();
+    for (method, target) in [
+        ("GET", "/rustfs/admin/v3/infox"),
+        ("GET", "/rustfs/admin/v3"),
+        ("GET", "/rustfs/admin"),
+        ("PUT", SERVER_INFO_PATH),
+        ("GET", ADD_SERVICE_ACCOUNT_ALIAS),
+        ("DELETE", SERVER_INFO_ALIAS),
+        ("GET", "/rustfs/admin/v3/tier/WARM/extra"),
+        ("GET", "/rustfs/admin/v3/tier/a%2Fb"),
+        ("GET", "/rustfs/admin/v3/tier/"),
+        ("GET", "/minio/admin/v3/tier/%2e%2e"),
     ] {
-        for index in 0..declarations.len() {
-            let mut kept = declarations.to_vec();
-            let dropped = kept.remove(index);
-            let mut shadows = Shadows::DECLARED;
-            match name {
-                "server_info" => shadows.server_info = leaked(kept),
-                "add_service_account" => shadows.add_service_account = leaked(kept),
-                _ => shadows.replication_metrics = leaked(kept),
-            }
-            let refusal = table_refusal(shadows);
-            assert!(refusal.contains("UndeclaredShadowing"), "{refusal}");
-            assert!(
-                refusal.contains(dropped.winner) && refusal.contains(dropped.shadowed),
-                "dropping {} over {} was refused for another pair: {refusal}",
-                dropped.winner,
-                dropped.shadowed
-            );
-            checked += 1;
-        }
+        assert_eq!(routed(Some(&dialect), method, target), None, "{method} {target}");
     }
-    assert_eq!(
-        checked,
-        SERVER_INFO_SHADOWS.len() + ADD_SERVICE_ACCOUNT_SHADOWS.len() + REPLICATION_METRICS_SHADOWS.len()
-    );
 }
 
-/// Negative — a declaration over a row the admin row cannot overlap is refused as stale.
+/// Negative — the claimed rows owe no declaration, and every one of the S3-shaped row's 34 is
+/// still necessary: dropping any one is a start-up refusal naming exactly that pair.
+#[test]
+fn n_only_the_s3_shaped_row_declares_and_every_declaration_is_necessary() {
+    let dialect = admin_dialect();
+    let claimed: usize = dialect
+        .claimed_operations()
+        .iter()
+        .map(|operation| operation.shadows().len())
+        .sum();
+    assert_eq!(claimed, 0);
+    assert_eq!(REPLICATION_METRICS_SHADOWS.len(), 34);
+    for index in 0..REPLICATION_METRICS_SHADOWS.len() {
+        let mut kept = REPLICATION_METRICS_SHADOWS.to_vec();
+        let dropped = kept.remove(index);
+        let refusal = table_refusal(leaked(kept));
+        assert!(refusal.contains("UndeclaredShadowing"), "{refusal}");
+        assert!(
+            refusal.contains(dropped.winner) && refusal.contains(dropped.shadowed),
+            "dropping {} over {} was refused for another pair: {refusal}",
+            dropped.winner,
+            dropped.shadowed
+        );
+    }
+}
+
+/// Negative — a declaration over a row the S3-shaped row cannot overlap is refused as stale.
 #[test]
 fn n_a_declaration_over_a_row_that_does_not_overlap_is_refused() {
-    let mut declarations = SERVER_INFO_SHADOWS.to_vec();
+    let mut declarations = REPLICATION_METRICS_SHADOWS.to_vec();
     declarations.push(ShadowingDecl {
-        winner: SERVER_INFO,
+        winner: REPLICATION_METRICS_V2,
         shadowed: "PutObject",
         reason: "a GET row cannot hide a PUT row",
         evidence: &["https://github.com/rustfs/backlog/issues/1744"],
     });
-    let mut shadows = Shadows::DECLARED;
-    shadows.server_info = leaked(declarations);
-    let refusal = table_refusal(shadows);
+    let refusal = table_refusal(leaked(declarations));
     assert!(refusal.contains("StaleShadowing") && refusal.contains("PutObject"), "{refusal}");
 }
 
-/// Negative — a path literal does not make an admin row disjoint from the object rows: with no
-/// declarations the row is refused. `docs/dialects.md` says a path-literal admin row "overlaps
-/// nothing"; the lattice treats path and target as independent dimensions, so it overlaps every
-/// standard row in its method-and-target cell.
+static PATH_LITERAL_SELECTOR: &[Predicate] = &[
+    Predicate::Method(Method::GET),
+    Predicate::Target(TargetKind::Object),
+    Predicate::PathLiteral(SERVER_INFO_PATH),
+];
+
+static PATH_LITERAL_OVERLAY: DialectOverlay = DialectOverlay {
+    name: "rustfs-admin-path-literal",
+    vendor: "rustfs",
+    claims: &[],
+    operations: &[OverlayRow {
+        name: SERVER_INFO,
+        precedence: 60,
+        selector: "Method(GET) ∧ Target(Object) ∧ PathLiteral(\"/rustfs/admin/v3/info\")",
+        action: SERVER_INFO_ACTION,
+        resource: ResourceShape::Service,
+        success_status: 200,
+        anonymous: false,
+        evidence: &["https://github.com/rustfs/backlog/issues/1744"],
+    }],
+};
+
+/// Negative — the #778 spelling, kept as the measurement the claim replaced: a path literal does
+/// not make an admin row disjoint from the object rows, and with no declaration it is refused.
 #[test]
 fn n_a_path_literal_alone_does_not_make_an_admin_row_disjoint() {
-    let mut shadows = Shadows::DECLARED;
-    shadows.server_info = &[];
-    let refusal = table_refusal(shadows);
+    let dialect = Dialect::assemble(&PATH_LITERAL_OVERLAY)
+        .declare::<ServerInfo>(DialectRoute {
+            precedence: 60,
+            selector: PATH_LITERAL_SELECTOR,
+            path_shape: SERVER_INFO_PATH,
+            shadows: &[],
+        })
+        .build()
+        .expect("the record and the declaration agree");
+    let refusal = match RouterBuilder::new().dialect(&dialect).build() {
+        Ok(_) => panic!("the table built"),
+        Err(error) => format!("{error:?}"),
+    };
     assert!(refusal.contains("UndeclaredShadowing") && refusal.contains(SERVER_INFO), "{refusal}");
 }
 
@@ -338,6 +452,7 @@ static SERVICE_TARGET_SELECTOR: &[Predicate] = &[
 static SERVICE_TARGET_OVERLAY: DialectOverlay = DialectOverlay {
     name: "rustfs-admin-service-target",
     vendor: "rustfs",
+    claims: &[],
     operations: &[OverlayRow {
         name: SERVER_INFO,
         precedence: 60,
@@ -385,33 +500,72 @@ fn n_the_service_target_spelling_that_owes_fewer_declarations_routes_nothing() {
 // ── authentication and authorisation through the assembled service ────────────────────────────
 
 /// Positive — a signed admin read is authenticated, then authorised once at the route stage with
-/// its admin action and the signer's identity, and only then handled.
+/// its admin action and the signer's identity, and no bucket: it is a service-level operation, so
+/// the path-style `rustfs` never reaches the authorizer (ADR-0024).
 #[test]
-fn a_signed_admin_read_is_authorised_with_its_admin_action() {
-    let assembled = assemble(NO_HAND_OFF, only(SERVER_INFO_ACTION));
-    let answer = send(&assembled, &server_info().signed(REGION));
-    assert_eq!(answer.status, 200, "{}", answer.text());
-    assert_eq!(answer.content_type.as_deref(), Some("application/json"));
-    assert!(answer.text().contains("\"online\""), "{}", answer.text());
+fn a_signed_admin_read_is_authorised_with_its_admin_action_and_no_bucket() {
+    for path in [SERVER_INFO_PATH, SERVER_INFO_ALIAS] {
+        let assembled = assemble(NO_HAND_OFF, only(SERVER_INFO_ACTION));
+        let answer = send(&assembled, &ContextRequest::get(PATH_HOST, path, "").signed(REGION));
+        assert_eq!(answer.status, 200, "{path}: {}", answer.text());
+        assert_eq!(answer.content_type.as_deref(), Some("application/json"));
+        assert!(answer.text().contains("\"online\""), "{}", answer.text());
 
-    let calls = assembled.calls();
-    let routes = route_calls(&calls);
-    assert_eq!(routes.len(), 1, "{calls:?}");
-    assert_eq!(routes[0].operation, SERVER_INFO);
-    assert_eq!(routes[0].action, SERVER_INFO_ACTION);
-    assert_eq!(routes[0].caller.as_deref(), Some(ACCESS_KEY));
-    assert!(calls.iter().all(|call| call.caller.as_deref() == Some(ACCESS_KEY)), "{calls:?}");
-    // Measured, and owed by the ring-2 authorizer: a path-style admin path still parses as bucket
-    // `rustfs`, so a service-shaped admin action is asked about with that bucket beside it. The
-    // authorizer must decide admin actions without consulting a bucket policy for it.
-    assert_eq!(routes[0].bucket.as_deref(), Some("rustfs"));
+        let calls = assembled.calls();
+        let routes = route_calls(&calls);
+        assert_eq!(routes.len(), 1, "{calls:?}");
+        assert_eq!(routes[0].operation, SERVER_INFO);
+        assert_eq!(routes[0].action, SERVER_INFO_ACTION);
+        assert_eq!(routes[0].caller.as_deref(), Some(ACCESS_KEY));
+        for call in &calls {
+            assert_eq!(call.caller.as_deref(), Some(ACCESS_KEY), "{call:?}");
+            assert_eq!((call.bucket.as_deref(), call.key.as_deref()), (None, None), "{call:?}");
+        }
 
-    let seen = assembled.backend.seen();
-    assert_eq!(seen.len(), 1);
-    assert_eq!(seen[0].operation, SERVER_INFO);
-    assert_eq!(seen[0].caller.as_deref(), Some(ACCESS_KEY));
-    assert_eq!(seen[0].raw_path, SERVER_INFO_PATH);
-    assert!(!seen[0].holds_secret);
+        let seen = assembled.backend.seen();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].operation, SERVER_INFO);
+        assert_eq!(seen[0].caller.as_deref(), Some(ACCESS_KEY));
+        assert_eq!(seen[0].raw_path, path);
+        assert_eq!((seen[0].bucket.as_deref(), seen[0].key.as_deref()), (None, None));
+        assert!(!seen[0].holds_secret);
+    }
+}
+
+/// Positive — the templated read is authorised under its own action, and its handler reads the
+/// tier from the typed path values, at the canonical row and at the alias.
+#[test]
+fn the_templated_read_hands_its_typed_value_to_the_handler() {
+    for (path, tier) in [
+        ("/rustfs/admin/v3/tier/WARM", "WARM"),
+        ("/minio/admin/v3/tier/cold%2Dtier", "cold-tier"),
+    ] {
+        let assembled = assemble(NO_HAND_OFF, only(GET_TIER_ACTION));
+        let answer = send(&assembled, &ContextRequest::get(PATH_HOST, path, "").signed(REGION));
+        assert_eq!(answer.status, 200, "{path}: {}", answer.text());
+        assert!(answer.text().contains(&format!("\"tier\":\"{tier}\"")), "{}", answer.text());
+        let routes = route_calls(&assembled.calls()).into_iter().cloned().collect::<Vec<_>>();
+        assert_eq!(routes.len(), 1);
+        assert_eq!((routes[0].operation.as_str(), routes[0].bucket.as_deref()), (GET_TIER, None));
+        let seen = assembled.backend.seen();
+        assert_eq!(seen[0].params, [("tier".to_owned(), tier.to_owned())]);
+    }
+}
+
+/// Negative — inside a claim, a request no row accepts is refused before the authorizer and
+/// before any handler; it is not served as the object it would name in S3.
+#[test]
+fn n_an_unmatched_claimed_request_is_refused_before_the_authorizer() {
+    let assembled = assemble(HAND_OFF, |_| true);
+    for (path, query) in [
+        ("/rustfs/admin/v3/infox", ""),
+        ("/rustfs/admin/v3/tier/a%2Fb", ""),
+        ("/minio/admin/v3/tier/WARM/extra", ""),
+    ] {
+        let answer = send(&assembled, &ContextRequest::get(PATH_HOST, path, query).signed(REGION));
+        assert_refused_before_the_handler(&assembled, &answer, 501);
+    }
+    assert!(assembled.calls().is_empty(), "{:?}", assembled.calls());
 }
 
 /// Negative — an unsigned admin request is refused before the authorizer, even when anonymous
@@ -429,11 +583,25 @@ fn n_an_anonymous_admin_request_is_refused_before_the_authorizer() {
     for request in [
         server_info(),
         add_service_account(SECRET_KEY.as_bytes()),
+        ContextRequest::get(PATH_HOST, "/rustfs/admin/v3/tier/WARM", ""),
         metrics("replication-metrics=2"),
     ] {
         let answer = send(&assembled, &request);
         assert_refused_before_the_handler(&assembled, &answer, 403);
         assert!(answer.text().contains("<Code>AccessDenied</Code>"), "{}", answer.text());
+    }
+    assert!(assembled.calls().is_empty(), "{:?}", assembled.calls());
+}
+
+/// Negative — a presigned admin request is refused before the authorizer: the custom floor admits
+/// header signatures only, and no admin operation here opts in to presigning (ADR-0024).
+#[test]
+fn n_a_presigned_admin_request_is_refused_before_the_authorizer() {
+    let assembled = assemble(HAND_OFF, |_| true);
+    for path in [SERVER_INFO_PATH, SERVER_INFO_ALIAS, "/rustfs/admin/v3/tier/WARM"] {
+        let answer = answer(&assembled, presigned(path));
+        assert_refused_before_the_handler(&assembled, &answer, 403);
+        assert!(answer.text().contains("<Code>AccessDenied</Code>"), "{path}: {}", answer.text());
     }
     assert!(assembled.calls().is_empty(), "{:?}", assembled.calls());
 }
@@ -468,13 +636,14 @@ fn n_an_s3_only_caller_reaches_s3_but_no_admin_operation() {
     );
 }
 
-/// Negative — an authorizer that denies everything refuses all three before any handler.
+/// Negative — an authorizer that denies everything refuses all four before any handler.
 #[test]
 fn n_a_deny_everything_authorizer_refuses_every_admin_operation() {
     let assembled = assemble(HAND_OFF, |_| false);
     for request in [
         server_info(),
         add_service_account(SECRET_KEY.as_bytes()),
+        ContextRequest::get(PATH_HOST, "/rustfs/admin/v3/tier/WARM", ""),
         metrics("replication-metrics=2"),
     ] {
         let answer = send(&assembled, &request.signed(REGION));
@@ -484,7 +653,7 @@ fn n_a_deny_everything_authorizer_refuses_every_admin_operation() {
         .iter()
         .map(|call| call.operation.clone())
         .collect::<Vec<_>>();
-    assert_eq!(operations, [SERVER_INFO, ADD_SERVICE_ACCOUNT, REPLICATION_METRICS_V2]);
+    assert_eq!(operations, [SERVER_INFO, ADD_SERVICE_ACCOUNT, GET_TIER, REPLICATION_METRICS_V2]);
 }
 
 /// Negative — a signature that does not verify never reaches the authorizer or a handler.
@@ -507,21 +676,25 @@ fn n_a_tampered_signature_never_reaches_the_authorizer() {
 
 // ── the caller's secret ───────────────────────────────────────────────────────────────────────
 
-/// Positive — with the hand-off, the sealed write opens under the caller's secret, is answered
-/// sealed under the same key, and the secret never prints through the context.
+/// Positive — with the hand-off, the sealed write opens under the caller's secret at the alias and
+/// at the canonical row, is answered sealed under the same key, and the secret never prints
+/// through the context.
 #[test]
 fn with_the_hand_off_the_sealed_write_opens_under_the_callers_secret() {
-    let assembled = assemble(HAND_OFF, only(ADD_SERVICE_ACCOUNT_ACTION));
-    let answer = send(&assembled, &add_service_account(SECRET_KEY.as_bytes()).signed(REGION));
-    assert_eq!(answer.status, 200, "{}", answer.text());
-    assert_eq!(answer.content_type.as_deref(), Some("application/octet-stream"));
-    let opened = open(SECRET_KEY.as_bytes(), &answer.body).expect("the answer is sealed under the caller's key");
-    assert!(String::from_utf8_lossy(&opened).contains(CREATED));
-    assert!(open(b"another-key", &answer.body).is_none());
-    assert_eq!(assembled.backend.created(), [CREATED]);
-    let seen = assembled.backend.seen();
-    assert!(seen[0].holds_secret && seen[0].secret_is_the_callers);
-    assert!(!seen[0].context_debug_shows_secret);
+    for path in [ADD_SERVICE_ACCOUNT_ALIAS, ADD_SERVICE_ACCOUNT_PATH] {
+        let assembled = assemble(HAND_OFF, only(ADD_SERVICE_ACCOUNT_ACTION));
+        let answer = send(&assembled, &add_service_account_at(path, SECRET_KEY.as_bytes()).signed(REGION));
+        assert_eq!(answer.status, 200, "{path}: {}", answer.text());
+        assert_eq!(answer.content_type.as_deref(), Some("application/octet-stream"));
+        let opened = open(SECRET_KEY.as_bytes(), &answer.body).expect("the answer is sealed under the caller's key");
+        assert!(String::from_utf8_lossy(&opened).contains(CREATED));
+        assert!(open(b"another-key", &answer.body).is_none());
+        assert_eq!(assembled.backend.created(), [CREATED]);
+        let seen = assembled.backend.seen();
+        assert!(seen[0].holds_secret && seen[0].secret_is_the_callers);
+        assert!(!seen[0].context_debug_shows_secret);
+        assert_eq!(route_calls(&assembled.calls())[0].bucket, None);
+    }
 }
 
 /// Negative — without the hand-off the handler holds no secret and fails closed: nothing is
@@ -548,23 +721,32 @@ fn n_a_body_sealed_under_another_key_is_refused() {
     assert!(assembled.backend.created().is_empty());
 }
 
-/// Positive, and a measured limit — the hand-off is the authenticator's, not the operation's: once
-/// on, every handler in the assembly holds the caller's secret, including a read that never needs
-/// it. It still never prints through the context.
+/// Negative — the hand-off is per operation now (ADR-0024): with the authenticator's switch on,
+/// the reads that never opted in hold no secret — the gap #778 measured is closed.
 #[test]
-fn a_handed_off_secret_reaches_every_handler_of_the_assembly() {
+fn n_a_handed_off_secret_reaches_only_the_operation_that_opted_in() {
     let assembled = assemble(HAND_OFF, |_| true);
-    let answer = send(&assembled, &server_info().signed(REGION));
-    assert_eq!(answer.status, 200, "{}", answer.text());
+    for request in [
+        server_info(),
+        ContextRequest::get(PATH_HOST, "/rustfs/admin/v3/tier/WARM", ""),
+        metrics("replication-metrics=2"),
+        ContextRequest::get(PATH_HOST, "/photos/a.png", ""),
+    ] {
+        let answer = send(&assembled, &request.signed(REGION));
+        assert_eq!(answer.status, 200, "{}", answer.text());
+    }
     let seen = assembled.backend.seen();
-    assert!(seen[0].holds_secret && seen[0].secret_is_the_callers);
-    assert!(!seen[0].context_debug_shows_secret);
+    assert_eq!(seen.len(), 4);
+    for handed in &seen {
+        assert!(!handed.holds_secret, "{handed:?}");
+        assert!(!handed.context_debug_shows_secret, "{handed:?}");
+    }
 }
 
 // ── the query-discriminated read and its S3 neighbours ────────────────────────────────────────
 
 /// Positive — the query-discriminated read is authorised on its bucket with the S3 action RustFS
-/// checks for it.
+/// checks for it: it declares a bucket resource, so the bucket stays.
 #[test]
 fn the_query_discriminated_read_is_authorised_on_its_bucket() {
     let assembled = assemble(NO_HAND_OFF, only(REPLICATION_METRICS_ACTION));
@@ -589,20 +771,27 @@ fn n_another_value_of_the_key_is_an_ordinary_listing() {
 }
 
 /// Negative — S3 requests in the same assembly are routed and authorised as S3, including a key
-/// in a bucket named like the admin prefix.
+/// in a bucket named like the admin prefix and a key beside the claim in that bucket.
 #[test]
 fn n_s3_requests_beside_the_admin_rows_are_authorised_as_s3() {
     let assembled = assemble(NO_HAND_OFF, |_| true);
-    for (path, bucket) in [("/photos/a.png", "photos"), ("/rustfs/other.txt", "rustfs")] {
+    for (path, bucket, key) in [
+        ("/photos/a.png", "photos", "a.png"),
+        ("/rustfs/other.txt", "rustfs", "other.txt"),
+        ("/minio/adminx/v3/info", "minio", "adminx/v3/info"),
+    ] {
         let answer = send(&assembled, &ContextRequest::get(PATH_HOST, path, "").signed(REGION));
         assert_eq!(answer.status, 200, "{path}: {}", answer.text());
         let seen = assembled.backend.seen();
         let last = seen.last().expect("a handler ran");
-        assert_eq!((last.operation, last.bucket.as_deref()), ("GetObject", Some(bucket)));
+        assert_eq!(
+            (last.operation, last.bucket.as_deref(), last.key.as_deref()),
+            ("GetObject", Some(bucket), Some(key))
+        );
     }
     let actions = route_calls(&assembled.calls())
         .iter()
         .map(|call| call.action.clone())
         .collect::<Vec<_>>();
-    assert_eq!(actions, ["s3:GetObject", "s3:GetObject"]);
+    assert_eq!(actions, ["s3:GetObject", "s3:GetObject", "s3:GetObject"]);
 }

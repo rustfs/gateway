@@ -52,7 +52,7 @@
 //! describes.
 
 use crate::op::ResourceShape;
-use crate::route::HostClass;
+use crate::route::{HostClass, PathClaim};
 
 /// The endpoint families a dialect may not put an operation on.
 ///
@@ -130,6 +130,13 @@ pub struct DialectOverlay {
     pub vendor: &'static str,
     /// One row per operation this dialect adds.
     pub operations: &'static [OverlayRow],
+    /// The path prefixes this dialect takes away from S3 routing (ADR-0024), each with its reason
+    /// and its evidence. Empty for a dialect that only adds S3-table rows.
+    ///
+    /// Recorded here, beside the operations, because a claim is the widest thing a dialect can
+    /// change: every path-style request under the prefix stops being S3. A claimed operation's row
+    /// must sit inside one of these, and a claim no row uses is refused.
+    pub claims: &'static [PathClaim],
 }
 
 impl DialectOverlay {

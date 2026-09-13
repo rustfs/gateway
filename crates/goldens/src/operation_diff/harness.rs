@@ -306,6 +306,7 @@ pub(crate) fn gateway_decode(
         arn_form: None,
         query: wire.query(),
         headers: wire.headers(),
+        host_named_bucket: false,
     };
     match route_table().resolve(&parts).map(|entry| entry.op_name) {
         Some("PutObject") => {}
@@ -339,6 +340,7 @@ pub(crate) fn gateway_decode_replica(
         arn_form: None,
         query: wire.query(),
         headers: wire.headers(),
+        host_named_bucket: false,
     };
     let dialect = replication_dialect().map_err(|errors| format!("the dialect was refused: {errors:?}"))?;
     let router = rustfs_gateway_core::registry::RouterBuilder::new()

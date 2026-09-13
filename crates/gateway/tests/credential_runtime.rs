@@ -115,6 +115,7 @@ static PREDICATES: &[Predicate] = &[
 static CRED_PROBE_OVERLAY: DialectOverlay = DialectOverlay {
     name: "example-credential-test",
     vendor: "example",
+    claims: &[],
     operations: &[OverlayRow {
         name: "example:CredProbe",
         precedence: 52,

@@ -18,7 +18,8 @@
 //! `Req::context()` carries the verified principal, the verified scope, the routed bucket and key,
 //! the raw target and every accepted header line; that an anonymous request carries neither a
 //! principal nor a scope; that the caller's secret reaches a handler only when the authenticator
-//! was told to hand it over; and that no `Debug` rendering of the request shows a secret.
+//! was told to hand it over and the operation opted in (ADR-0024); and that no `Debug` rendering of
+//! the request shows a secret.
 //! NOT responsible for: how the verdict or the scope is produced (`src/ext/authenticator_tests.rs`,
 //! `verified_scope_runtime`), or the compile-time read-only guarantees (the `compile_fail`
 //! doctests on `rustfs_gateway_core::RequestContextView`).
@@ -36,9 +37,15 @@ use rustfs_gateway::sig::{
 };
 use rustfs_gateway::{
     AddressingStyle, Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Handler, HandlerContext, HandlerResult,
-    InputAuthzRequest, InputDecisions, RegionSet, Req, RequestContext, Resp, S3Service, ServiceBuilder, SessionBinding,
-    SigV4Authenticator, StaticCredentials,
+    InputAuthzRequest, InputDecisions, RegionSet, Req, RequestContext, RequestContextView, Resp, S3Service, ServiceBuilder,
+    SessionBinding, SigV4Authenticator, StaticCredentials,
 };
+use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
+use rustfs_gateway_core::{
+    AuthRequirement, ClaimedRoute, ClaimedRow, Dialect, DialectOverlay, HandlerDeadlineClass, Operation, OperationSpec,
+    OverlayRow, PathClaim, Predicate, ResourceShape,
+};
+use rustfs_gateway_sig::OperationFloor;
 
 use crate::support::{self, SIGNED_AT_STAMP, exchange};
 
@@ -76,8 +83,7 @@ struct Recorder {
 }
 
 impl Recorder {
-    fn record(&self, request: &Req<HeadObject>) {
-        let context = request.context();
+    fn record(&self, context: &RequestContextView, debug_request: String) {
         let principal = context.principal();
         let seen = Seen {
             operation: context.operation().to_owned(),
@@ -111,7 +117,7 @@ impl Recorder {
                 .map(|(name, value)| (name.as_str().to_owned(), value.as_bytes().to_vec()))
                 .collect(),
             debug_context: format!("{context:?}"),
-            debug_request: format!("{request:?}"),
+            debug_request,
             debug_secret: format!("{:?}", principal.and_then(|principal| principal.secret_key_from_authenticator_lookup())),
         };
         self.seen.lock().expect("not poisoned").push(seen);
@@ -124,13 +130,117 @@ impl Recorder {
 
 impl Handler<HeadObject> for Recorder {
     async fn call(&self, request: Req<HeadObject>) -> HandlerResult<HeadObject> {
-        self.record(&request);
+        self.record(request.context(), format!("{request:?}"));
         Ok(Resp::new(HeadObjectOutput::default()))
     }
 
     async fn call_with_context(&self, request: Req<HeadObject>, _context: HandlerContext) -> HandlerResult<HeadObject> {
-        self.record(&request);
+        self.record(request.context(), format!("{request:?}"));
         Ok(Resp::new(HeadObjectOutput::default()))
+    }
+}
+
+// ── an operation that opts in to the caller's secret ───────────────────────────────────────────
+//
+// The authenticator's switch is necessary and not sufficient (ADR-0024): a handed-off secret
+// reaches only an operation whose spec calls `hand_caller_secret_to_handler`, and no standard
+// operation may. So the secret's own guarantees are measured through this vendor probe, served
+// on a claimed row, while `HeadObject` beside it pins that a standard operation never holds one.
+
+/// `HEAD /example/admin/probe`, whose spec opts in to the caller's secret.
+struct SecretProbe;
+
+const PROBE: &str = "example:SecretProbe";
+const PROBE_PATH: &str = "/example/admin/probe";
+const PROBE_EVIDENCE: &[&str] = &["https://github.com/rustfs/backlog/issues/1744"];
+
+static SECRET_PROBE_SPEC: OperationSpec = OperationSpec::builder(PROBE, 200, None)
+    .handler_deadline_class(HandlerDeadlineClass::Standard)
+    .required_params(&[])
+    .auth(AuthRequirement::new(PROBE, ResourceShape::Service))
+    .hand_caller_secret_to_handler()
+    .build();
+
+static SECRET_PROBE_FLOOR: OperationFloor = OperationFloor::custom(PROBE, SigService::S3);
+
+impl Operation for SecretProbe {
+    const NAME: &'static str = PROBE;
+    type Input = ();
+    type Output = ();
+    type DerivedResources = rustfs_gateway_core::NoDerived;
+
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
+    }
+
+    fn seal_derived_input(_input: &mut Self::Input) {}
+
+    fn spec() -> &'static OperationSpec {
+        &SECRET_PROBE_SPEC
+    }
+
+    fn floor() -> &'static OperationFloor {
+        &SECRET_PROBE_FLOOR
+    }
+}
+
+impl OperationCodec for SecretProbe {
+    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
+
+    fn decode(_request: &MetaView<'_>, _body: RequestBody) -> Result<(), CodecError> {
+        Ok(())
+    }
+
+    fn encode(_output: (), _request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
+        Ok(EncodedResponse::of(status))
+    }
+}
+
+static PROBE_ROWS: &[ClaimedRow] = &[ClaimedRow {
+    template: PROBE_PATH,
+    selector: &[Predicate::Method(http::Method::HEAD)],
+}];
+
+static PROBE_OVERLAY: DialectOverlay = DialectOverlay {
+    name: "example-probe",
+    vendor: "example",
+    operations: &[OverlayRow {
+        name: PROBE,
+        precedence: 10,
+        selector: "PathTemplate(\"/example/admin/probe\") ∧ Method(HEAD)",
+        action: PROBE,
+        resource: ResourceShape::Service,
+        success_status: 200,
+        anonymous: false,
+        evidence: PROBE_EVIDENCE,
+    }],
+    claims: &[PathClaim {
+        prefix: "/example/admin",
+        reason: "The probe's vendor serves its admin surface here, ahead of S3.",
+        evidence: PROBE_EVIDENCE,
+    }],
+};
+
+fn probe_dialect() -> Dialect {
+    Dialect::assemble(&PROBE_OVERLAY)
+        .declare_claimed::<SecretProbe>(ClaimedRoute {
+            precedence: 10,
+            rows: PROBE_ROWS,
+            shadows: &[],
+        })
+        .build()
+        .expect("the probe's record and declaration agree")
+}
+
+impl Handler<SecretProbe> for Recorder {
+    async fn call(&self, request: Req<SecretProbe>) -> HandlerResult<SecretProbe> {
+        self.record(request.context(), format!("{request:?}"));
+        Ok(Resp::new(()))
+    }
+
+    async fn call_with_context(&self, request: Req<SecretProbe>, _context: HandlerContext) -> HandlerResult<SecretProbe> {
+        self.record(request.context(), format!("{request:?}"));
+        Ok(Resp::new(()))
     }
 }
 
@@ -161,10 +271,13 @@ impl Authorizer for AllowEveryStage {
 enum Setup {
     /// The built-in default: the secret stays inside the authenticator.
     Default,
-    /// The authenticator hands the secret it looked up to the handler.
+    /// The authenticator hands the secret over and the assembly widens it to every handler.
     HandOff,
     /// As `HandOff`, with a temporary credential bound to [`SESSION_TOKEN`].
     HandOffSession,
+    /// The authenticator hands the secret over and the assembly keeps ADR-0024's default scope:
+    /// only operations that opted in.
+    HandOffOptedIn,
 }
 
 /// Serves `HeadObject` in two regions whose sorted first is `eu-west-1`, while every fixture signs
@@ -182,7 +295,7 @@ fn service(recorder: &Arc<Recorder>, setup: Setup) -> S3Service {
     if !matches!(setup, Setup::Default) {
         authenticator = authenticator.hand_caller_secret_to_handlers();
     }
-    ServiceBuilder::new()
+    let builder = ServiceBuilder::new()
         .authenticator(authenticator)
         .authorizer(AllowEveryStage)
         .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
@@ -190,9 +303,15 @@ fn service(recorder: &Arc<Recorder>, setup: Setup) -> S3Service {
             support::fixed_clock(),
             rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
+        .dialect(&probe_dialect())
         .register::<HeadObject, _>(Arc::clone(recorder))
-        .build()
-        .expect("a complete assembly")
+        .register::<SecretProbe, _>(Arc::clone(recorder));
+    let builder = if matches!(setup, Setup::HandOff | Setup::HandOffSession) {
+        builder.hand_caller_secret_to_every_operation_after_listing_in_the_posture_report()
+    } else {
+        builder
+    };
+    builder.build().expect("a complete assembly")
 }
 
 /// A `HEAD` of `target`, header-signed at the fixture clock with `secret`, carrying `extra`.
@@ -281,10 +400,12 @@ async fn a_signed_request_reaches_the_handler_with_its_verified_context() {
     assert_eq!(header(&seen, "authorization").len(), 1, "the signed lines are headers the handler sees");
 }
 
-/// Positive — with the hand-off, the secret is exactly the one the credential store answered with.
+/// Positive — with the hand-off, an operation that opted in holds exactly the secret the credential
+/// store answered with.
 #[tokio::test]
 async fn a_handed_off_secret_is_the_one_the_credential_store_holds() {
-    let seen = one_seen(Setup::HandOff, signed("/photos/a.jpg", &[], SECRET)).await;
+    let seen = one_seen(Setup::HandOff, signed(PROBE_PATH, &[], SECRET)).await;
+    assert_eq!(seen.operation, PROBE);
     let secret = seen.secret.expect("the authenticator handed the secret over");
     assert!(same_secret(&secret, SECRET));
 }
@@ -312,12 +433,46 @@ async fn an_anonymous_request_has_no_principal_no_scope_and_no_secret() {
     assert_eq!((seen.bucket.as_deref(), seen.key.as_deref()), (Some("photos"), Some("a.jpg")));
 }
 
-/// Negative — by default the secret stays inside the authenticator.
+/// Negative — by default the secret stays inside the authenticator, even for an operation that
+/// opted in to it: the operation's opt-in is not the deployment's.
 #[tokio::test]
 async fn by_default_no_secret_reaches_the_handler() {
-    let seen = one_seen(Setup::Default, signed("/photos/a.jpg", &[], SECRET)).await;
+    for target in ["/photos/a.jpg", PROBE_PATH] {
+        let seen = one_seen(Setup::Default, signed(target, &[], SECRET)).await;
+        assert_eq!(seen.access_key.as_deref(), Some(ACCESS_KEY), "{target}");
+        assert_eq!(seen.secret, None, "{target}");
+    }
+}
+
+/// Negative — the opted-in hand-off does not reach a standard operation: `HeadObject` never opted
+/// in, and no standard operation may (ADR-0024).
+#[tokio::test]
+async fn n_a_standard_operation_never_receives_the_secret_under_the_opted_in_scope() {
+    let seen = one_seen(Setup::HandOffOptedIn, signed("/photos/a.jpg", &[], SECRET)).await;
+    assert_eq!(seen.operation, "HeadObject");
     assert_eq!(seen.access_key.as_deref(), Some(ACCESS_KEY));
     assert_eq!(seen.secret, None);
+    assert!(seen.debug_context.contains("<not handed over>"), "{}", seen.debug_context);
+}
+
+/// Positive — the opted-in scope hands the secret to the operation that opted in, exactly as the
+/// store holds it.
+#[tokio::test]
+async fn the_opted_in_scope_hands_the_secret_to_the_operation_that_opted_in() {
+    let seen = one_seen(Setup::HandOffOptedIn, signed(PROBE_PATH, &[], SECRET)).await;
+    assert_eq!(seen.operation, PROBE);
+    let secret = seen.secret.expect("the operation opted in");
+    assert!(same_secret(&secret, SECRET));
+}
+
+/// Positive — ADR-0022's every-operation scope, kept for an adapter that must fill s3s's
+/// credential, still hands the secret to a standard operation.
+#[tokio::test]
+async fn the_every_operation_scope_hands_the_secret_to_a_standard_operation() {
+    let seen = one_seen(Setup::HandOff, signed("/photos/a.jpg", &[], SECRET)).await;
+    assert_eq!(seen.operation, "HeadObject");
+    let secret = seen.secret.expect("the every-operation scope hands it to every handler");
+    assert!(same_secret(&secret, SECRET));
 }
 
 /// Negative — neither the context's nor the whole request's `Debug` shows the secret, the session
@@ -326,7 +481,7 @@ async fn by_default_no_secret_reaches_the_handler() {
 #[tokio::test]
 async fn debug_of_the_request_and_its_context_shows_no_secret() {
     let request = signed(
-        "/photos/a.jpg?versionId=v1",
+        "/example/admin/probe?versionId=v1",
         &[("x-amz-security-token", SESSION_TOKEN.as_bytes())],
         SECRET,
     );

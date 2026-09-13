@@ -110,6 +110,7 @@ static REPORT_SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
 static OVERLAY: DialectOverlay = DialectOverlay {
     name: "acme",
     vendor: "acme",
+    claims: &[],
     operations: &[OverlayRow {
         name: "acme:HeadObjectReport",
         precedence: REPORT_PRECEDENCE,
@@ -497,6 +498,7 @@ fn a_declaration_with_no_overlay_row_is_refused() {
     static EMPTY: DialectOverlay = DialectOverlay {
         name: "acme",
         vendor: "acme",
+        claims: &[],
         operations: &[],
     };
     let result = Dialect::assemble(&EMPTY).declare::<HeadObjectReport>(report_route()).build();
@@ -630,6 +632,7 @@ fn an_overlay_row_with_no_evidence_is_refused() {
     static UNSOURCED: DialectOverlay = DialectOverlay {
         name: "acme",
         vendor: "acme",
+        claims: &[],
         operations: &[OverlayRow {
             name: "acme:HeadObjectReport",
             precedence: REPORT_PRECEDENCE,
@@ -681,6 +684,7 @@ fn an_acknowledgement_for_an_operation_that_is_not_anonymous_is_refused() {
     static STALE: DialectOverlay = DialectOverlay {
         name: "acme",
         vendor: "acme",
+        claims: &[],
         operations: &[OverlayRow {
             name: "acme:HeadObjectReport",
             precedence: REPORT_PRECEDENCE,
@@ -821,6 +825,7 @@ fn moving_the_dialect_row_behind_the_row_it_shadows_is_refused() {
     static MOVED_OVERLAY: DialectOverlay = DialectOverlay {
         name: "acme",
         vendor: "acme",
+        claims: &[],
         operations: &[OverlayRow {
             name: "acme:HeadObjectReport",
             precedence: 960,

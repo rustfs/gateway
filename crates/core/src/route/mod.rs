@@ -25,6 +25,8 @@
 //!   lattice.rs   can two selectors be satisfied at once — a decision, not a comparison
 //!   shape.rs     the concrete request a conflict is reported with
 //!   table.rs     the ordered table, the build-time refusals, the readable matcher
+//!   claim.rs     a dialect's path-prefix claims, path templates and their typed values
+//!   claimed.rs   the claimed rows, asked before the S3 table and never beside it
 //!   shadowing.rs the reviewed record of who wins across precedences, from the route overlay
 //!   mask.rs      every routing query key as one bit, derived from the table itself
 //!   compiled.rs  the same table as an array index
@@ -41,6 +43,8 @@
 //! closed `enum` rather than a boxed callback for the same reason — the property is checkable by
 //! reading one file, and `crates/core/tests/purity_guard.rs` checks it over the source.
 
+mod claim;
+mod claimed;
 mod compiled;
 mod explain;
 mod generated;
@@ -51,6 +55,9 @@ mod shadowing;
 mod shape;
 mod table;
 
+pub use self::claim::{ClaimRejection, PathClaim, PathParamError, PathParams, PathTemplate, TemplateRejection};
+pub(crate) use self::claimed::claimed_selector_fault;
+pub use self::claimed::{ClaimLookup, ClaimedEntry, ClaimedTable, InstalledClaim, render_claimed_row};
 pub use self::compiled::{CompiledRouter, OpId, RouteBucket};
 pub use self::explain::{Explained, Explanation};
 pub use self::generated::{ROUTES, RoutePredicate, RouteRow, RowError, generated_entries, row_of};

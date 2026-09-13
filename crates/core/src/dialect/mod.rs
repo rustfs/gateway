@@ -26,7 +26,8 @@
 //! [`crate::registry::RouterBuilder::dialect`].
 //!
 //! ```text
-//!   overlay.rs  the reviewed record: name, precedence, selector, spec, evidence
+//!   overlay.rs  the reviewed record: name, precedence, selector, spec, evidence, claims
+//!   claimed.rs  operations served inside the dialect's own path-prefix claims (ADR-0024)
 //!   mod.rs      assembly: the record checked against the code, or a list of refusals
 //! ```
 //!
@@ -53,16 +54,20 @@
 //! because a route with no handler is a legitimate state — it answers `501`, which is what a
 //! backend that has not implemented an operation should say.
 
+mod claimed;
 mod overlay;
 
 use std::collections::BTreeSet;
 use std::fmt;
 
+pub use self::claimed::{ClaimedOperation, ClaimedRoute, ClaimedRow, render_claimed_rows};
 pub use self::overlay::{DialectOverlay, OverlayRow, RESERVED_HOST_CLASSES, vendor_of};
 
 use crate::op::{Operation, ResourceShape};
 use crate::registry::{RegistryError, reject};
-use crate::route::{HostClass, Predicate, RouteEntry, RouteSelector, ShadowingDecl, render_selector};
+use crate::route::{
+    ClaimRejection, HostClass, PathClaim, Predicate, RouteEntry, RouteSelector, ShadowingDecl, TemplateRejection, render_selector,
+};
 
 /// Where a dialect wants its operation in the ordered table, and what that choice hides.
 ///
@@ -213,6 +218,79 @@ pub enum DialectError {
         /// The face it claimed.
         class: HostClass,
     },
+    /// A path-prefix claim the claim rules refuse (ADR-0024); among them, a claim shallower than two
+    /// segments, which would take a whole bucket away from S3.
+    RefusedClaim {
+        /// The dialect name.
+        dialect: &'static str,
+        /// The prefix as written.
+        prefix: &'static str,
+        /// The rule it breaks.
+        rejection: ClaimRejection,
+    },
+    /// Two claims of one dialect could cover one path.
+    OverlappingClaims {
+        /// The dialect name.
+        dialect: &'static str,
+        /// The first prefix.
+        first: &'static str,
+        /// The second prefix.
+        second: &'static str,
+    },
+    /// A claim no claimed row is inside: it would take its namespace away from S3 to answer
+    /// nothing.
+    UnusedClaim {
+        /// The dialect name.
+        dialect: &'static str,
+        /// The prefix.
+        prefix: &'static str,
+    },
+    /// A claimed route with no row.
+    EmptyClaimedRoute {
+        /// The operation.
+        name: &'static str,
+    },
+    /// A claimed row whose template the template grammar refuses.
+    MalformedTemplate {
+        /// The operation.
+        name: &'static str,
+        /// The template as written.
+        template: &'static str,
+        /// The rule it breaks.
+        rejection: TemplateRejection,
+    },
+    /// A claimed row outside every claim of its own dialect.
+    TemplateOutsideClaims {
+        /// The operation.
+        name: &'static str,
+        /// The template as written.
+        template: &'static str,
+    },
+    /// A claimed row whose selector restates what the claim decides, or names other than one
+    /// method.
+    ClaimedRowSelector {
+        /// The operation.
+        name: &'static str,
+        /// The row's template.
+        template: &'static str,
+        /// Why.
+        why: &'static str,
+    },
+    /// The same claimed row twice in one route.
+    DuplicateClaimedRow {
+        /// The operation.
+        name: &'static str,
+        /// The row's template.
+        template: &'static str,
+    },
+    /// A claimed operation declaring a bucket or object resource: inside a claim the path names
+    /// neither, so the authorizer would be asked about a resource nothing supplies.
+    ClaimedOperationNamesAResource {
+        /// The operation.
+        name: &'static str,
+        /// What it declares.
+        resource: ResourceShape,
+    },
 }
 
 impl DialectError {
@@ -235,8 +313,17 @@ impl DialectError {
             | Self::AnonymousNotAcknowledged { name }
             | Self::StaleAnonymousAcknowledgement { name }
             | Self::EmptySelector { name }
-            | Self::ReservedHostClass { name, .. } => Some(name),
-            Self::ForeignShadowing { .. } => None,
+            | Self::ReservedHostClass { name, .. }
+            | Self::EmptyClaimedRoute { name }
+            | Self::MalformedTemplate { name, .. }
+            | Self::TemplateOutsideClaims { name, .. }
+            | Self::ClaimedRowSelector { name, .. }
+            | Self::DuplicateClaimedRow { name, .. }
+            | Self::ClaimedOperationNamesAResource { name, .. } => Some(name),
+            Self::ForeignShadowing { .. }
+            | Self::RefusedClaim { .. }
+            | Self::OverlappingClaims { .. }
+            | Self::UnusedClaim { .. } => None,
         }
     }
 }
@@ -318,6 +405,41 @@ impl fmt::Display for DialectError {
                  without the checks",
                 class.as_str()
             ),
+            Self::RefusedClaim {
+                dialect,
+                prefix,
+                rejection,
+            } => write!(f, "the dialect {dialect} claims {prefix:?}, which is refused: {rejection}"),
+            Self::OverlappingClaims { dialect, first, second } => write!(
+                f,
+                "the dialect {dialect} claims both {first:?} and {second:?}, which could cover one path"
+            ),
+            Self::UnusedClaim { dialect, prefix } => write!(
+                f,
+                "the dialect {dialect} claims {prefix:?} and serves no row inside it; the claim would take the \
+                 namespace away from S3 to answer nothing"
+            ),
+            Self::EmptyClaimedRoute { name } => write!(f, "{name} is declared as a claimed route with no row"),
+            Self::MalformedTemplate {
+                name,
+                template,
+                rejection,
+            } => write!(f, "{name} has the claimed row {template:?}, which is refused: {rejection}"),
+            Self::TemplateOutsideClaims { name, template } => write!(
+                f,
+                "{name} has the claimed row {template:?}, which starts with none of its dialect's claims"
+            ),
+            Self::ClaimedRowSelector { name, template, why } => {
+                write!(f, "{name} has the claimed row {template:?}, whose selector is refused: {why}")
+            }
+            Self::DuplicateClaimedRow { name, template } => {
+                write!(f, "{name} declares the claimed row {template:?} twice")
+            }
+            Self::ClaimedOperationNamesAResource { name, resource } => write!(
+                f,
+                "{name} is served inside a claim and declares a {resource:?} resource; inside a claim the path \
+                 names no bucket or key, so a claimed operation is service-level"
+            ),
         }
     }
 }
@@ -367,10 +489,15 @@ impl DialectOperation {
 pub struct Dialect {
     name: &'static str,
     operations: Vec<DialectOperation>,
+    claims: &'static [PathClaim],
+    claimed: Vec<ClaimedOperation>,
 }
 
 impl Dialect {
     /// Begins assembling the dialect this overlay describes.
+    ///
+    /// The overlay's claims are checked here: each against the claim rules, and each pair for
+    /// whether they could cover one path.
     #[must_use]
     pub fn assemble(overlay: &'static DialectOverlay) -> DialectBuilder {
         let mut errors = Vec::new();
@@ -380,12 +507,44 @@ impl Dialect {
                 vendor: overlay.vendor,
             });
         }
+        for (index, claim) in overlay.claims.iter().enumerate() {
+            if let Some(rejection) = claim.rejection() {
+                errors.push(DialectError::RefusedClaim {
+                    dialect: overlay.name,
+                    prefix: claim.prefix,
+                    rejection,
+                });
+            }
+            for later in overlay.claims.iter().skip(index.saturating_add(1)) {
+                if claim.overlaps(later) {
+                    errors.push(DialectError::OverlappingClaims {
+                        dialect: overlay.name,
+                        first: claim.prefix,
+                        second: later.prefix,
+                    });
+                }
+            }
+        }
         DialectBuilder {
             overlay,
             operations: Vec::new(),
+            claimed: Vec::new(),
             attempted: BTreeSet::new(),
+            used_claims: BTreeSet::new(),
             errors,
         }
+    }
+
+    /// The path prefixes this dialect claims away from S3 routing.
+    #[must_use]
+    pub const fn claims(&self) -> &'static [PathClaim] {
+        self.claims
+    }
+
+    /// The operations it serves inside those claims, in declaration order.
+    #[must_use]
+    pub fn claimed_operations(&self) -> &[ClaimedOperation] {
+        &self.claimed
     }
 
     /// The dialect's name, as a start-up report prints it.
@@ -394,15 +553,19 @@ impl Dialect {
         self.name
     }
 
-    /// The operations it contributes, in declaration order.
+    /// The operations it contributes to the S3 table, in declaration order.
     #[must_use]
     pub fn operations(&self) -> &[DialectOperation] {
         &self.operations
     }
 
-    /// Their names, in declaration order. For a start-up report and for assertions.
+    /// Every operation name it contributes, S3-table rows first and then claimed routes, each in
+    /// declaration order. For a start-up report and for assertions.
     pub fn operation_names(&self) -> impl Iterator<Item = &'static str> {
-        self.operations.iter().map(DialectOperation::name)
+        self.operations
+            .iter()
+            .map(DialectOperation::name)
+            .chain(self.claimed.iter().map(ClaimedOperation::name))
     }
 }
 
@@ -416,6 +579,11 @@ impl Dialect {
 pub struct DialectBuilder {
     overlay: &'static DialectOverlay,
     operations: Vec<DialectOperation>,
+    /// Accepted claimed routes (`claimed`).
+    claimed: Vec<ClaimedOperation>,
+    /// Every claim prefix some row's template sits inside, accepted or not, so that a rejected row
+    /// does not also report its claim as unused.
+    used_claims: BTreeSet<&'static str>,
     /// Every name `declare` was called with, accepted or not.
     ///
     /// Separate from the accepted list so that one rejected declaration is one refusal.
@@ -460,7 +628,7 @@ impl DialectBuilder {
     /// dialect owns, then the overlay row and the five facts it restates.
     fn check<O: Operation>(&mut self, route: &DialectRoute) {
         let name = O::NAME;
-        if self.operations.iter().any(|declared| declared.name == name) {
+        if self.is_declared(name) {
             self.errors.push(DialectError::DeclaredTwice { name });
             return;
         }
@@ -490,30 +658,43 @@ impl DialectBuilder {
             }
         }
 
+        self.check_record::<O>(route.precedence, render_selector(&RouteSelector::new(route.selector)));
+    }
+
+    /// Whether an S3-table row or a claimed route already declares this name.
+    fn is_declared(&self, name: &str) -> bool {
+        self.operations.iter().any(|declared| declared.name == name)
+            || self.claimed.iter().any(|declared| declared.name() == name)
+    }
+
+    /// The overlay row and the five facts it restates, for a declaration of either kind:
+    /// `declared_selector` is the rendered selector for an S3-table row and the rendered rows for
+    /// a claimed route. Returns whether every check passed.
+    fn check_record<O: Operation>(&mut self, precedence: u16, declared_selector: String) -> bool {
+        let name = O::NAME;
         let Some(row) = self.overlay.row(name) else {
             self.errors.push(DialectError::NotInOverlay { name });
-            return;
+            return false;
         };
         if row.evidence.is_empty() {
             self.errors.push(DialectError::UnsourcedOperation { name });
-            return;
+            return false;
         }
-        if row.precedence != route.precedence {
+        if row.precedence != precedence {
             self.errors.push(DialectError::PrecedenceMismatch {
                 name,
-                declared: route.precedence,
+                declared: precedence,
                 overlay: row.precedence,
             });
-            return;
+            return false;
         }
-        let declared_selector = render_selector(&RouteSelector::new(route.selector));
         if declared_selector != row.selector {
             self.errors.push(DialectError::SelectorMismatch {
                 name,
                 declared: declared_selector,
                 overlay: row.selector,
             });
-            return;
+            return false;
         }
 
         let spec = O::spec();
@@ -523,7 +704,7 @@ impl DialectBuilder {
                 declared: spec.success_status,
                 overlay: row.success_status,
             });
-            return;
+            return false;
         }
         // `check_operation` has already refused a spec with no action, so this is not the missing
         // case; it is the case where the row and a present action disagree.
@@ -534,7 +715,7 @@ impl DialectBuilder {
                     declared: auth.action,
                     overlay: row.action,
                 });
-                return;
+                return false;
             }
             if auth.resource != row.resource {
                 self.errors.push(DialectError::ResourceMismatch {
@@ -542,14 +723,20 @@ impl DialectBuilder {
                     declared: auth.resource,
                     overlay: row.resource,
                 });
-                return;
+                return false;
             }
         }
 
         match (O::floor().allows_anonymous(), row.anonymous) {
-            (true, false) => self.errors.push(DialectError::AnonymousNotAcknowledged { name }),
-            (false, true) => self.errors.push(DialectError::StaleAnonymousAcknowledgement { name }),
-            (true, true) | (false, false) => {}
+            (true, false) => {
+                self.errors.push(DialectError::AnonymousNotAcknowledged { name });
+                false
+            }
+            (false, true) => {
+                self.errors.push(DialectError::StaleAnonymousAcknowledgement { name });
+                false
+            }
+            (true, true) | (false, false) => true,
         }
     }
 
@@ -567,24 +754,42 @@ impl DialectBuilder {
                 self.errors.push(DialectError::DeclaredNowhere { name: row.name });
             }
         }
+        for claim in self.overlay.claims {
+            if !self.used_claims.contains(claim.prefix) {
+                self.errors.push(DialectError::UnusedClaim {
+                    dialect: self.overlay.name,
+                    prefix: claim.prefix,
+                });
+            }
+        }
         // Checked here rather than in `declare`, because a dialect's second operation is a
         // legitimate party to the first one's declaration and is not known yet at that point.
-        let mine: BTreeSet<&'static str> = self.operations.iter().map(|operation| operation.name).collect();
-        for operation in &self.operations {
-            for decl in operation.shadows {
-                if !mine.contains(decl.winner) && !mine.contains(decl.shadowed) {
-                    self.errors.push(DialectError::ForeignShadowing {
-                        dialect: self.overlay.name,
-                        winner: decl.winner,
-                        shadowed: decl.shadowed,
-                    });
-                }
+        let mine: BTreeSet<&'static str> = self
+            .operations
+            .iter()
+            .map(|operation| operation.name)
+            .chain(self.claimed.iter().map(ClaimedOperation::name))
+            .collect();
+        let declarations = self
+            .operations
+            .iter()
+            .flat_map(|operation| operation.shadows)
+            .chain(self.claimed.iter().flat_map(ClaimedOperation::shadows));
+        for decl in declarations {
+            if !mine.contains(decl.winner) && !mine.contains(decl.shadowed) {
+                self.errors.push(DialectError::ForeignShadowing {
+                    dialect: self.overlay.name,
+                    winner: decl.winner,
+                    shadowed: decl.shadowed,
+                });
             }
         }
         if self.errors.is_empty() {
             Ok(Dialect {
                 name: self.overlay.name,
                 operations: self.operations,
+                claims: self.overlay.claims,
+                claimed: self.claimed,
             })
         } else {
             Err(self.errors)

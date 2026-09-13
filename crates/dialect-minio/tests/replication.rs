@@ -66,6 +66,7 @@ fn routed(installed: bool, method: &str, target: &str, headers: &[(&str, &str)])
         arn_form: None,
         query: wire.query(),
         headers: wire.headers(),
+        host_named_bucket: false,
     };
     router.resolve(&parts).map(|entry| entry.op_name)
 }
