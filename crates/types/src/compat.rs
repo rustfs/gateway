@@ -251,12 +251,30 @@ pub struct S3sObjectLockObservation {
 }
 
 /// One old-codec Bucket Encryption observation before either side is normalized.
-#[derive(Clone, Debug, Eq, PartialEq)]
+///
+/// `Debug` is written by hand so the KMS key id in `behavior` is redacted like the one in
+/// `structure`; the goldens render this observation with `{:?}` when an old parse succeeds.
+#[derive(Clone, Eq, PartialEq)]
 pub struct S3sBucketEncryptionObservation {
     /// Complete parsed persistence structure.
     pub structure: PersistedBucketEncryptionConfiguration,
     /// Runtime-relevant algorithm, KMS key, bucket-key and blocked-type decisions per stored rule.
     pub behavior: Vec<crate::persistence::EncryptionRuleBehavior>,
+}
+
+impl fmt::Debug for S3sBucketEncryptionObservation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let behavior: Vec<_> = self
+            .behavior
+            .iter()
+            .map(crate::persistence::RedactedEncryptionRuleBehavior)
+            .collect();
+        formatter
+            .debug_struct("S3sBucketEncryptionObservation")
+            .field("structure", &self.structure)
+            .field("behavior", &behavior)
+            .finish()
+    }
 }
 
 /// One old-codec Public Access Block observation before either side is normalized.

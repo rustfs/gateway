@@ -21,3 +21,4 @@
 //! Upstream: `crate::ops` and `crate::dto`. Downstream: nothing.
 
 mod dto_tests;
+mod persisted_debug_tests;

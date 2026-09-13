@@ -32,9 +32,44 @@ use crate::{
     value_failure,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 struct BucketEncryptionBehaviorProjection {
     rules: Vec<EncryptionRuleBehavior>,
+}
+
+/// A D5 failure prints both projections with `{:?}`. The KMS key id in each tuple is a secret, so
+/// it renders as presence and byte length (`Some(<redacted N bytes>)`), as the persisted types do;
+/// every other decision renders as the tuple's own `Debug` would.
+impl std::fmt::Debug for BucketEncryptionBehaviorProjection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct KeyId<'a>(Option<&'a str>);
+        impl std::fmt::Debug for KeyId<'_> {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self.0 {
+                    Some(key_id) => write!(formatter, "Some(<redacted {} bytes>)", key_id.len()),
+                    None => formatter.write_str("None"),
+                }
+            }
+        }
+        struct Rule<'a>(&'a EncryptionRuleBehavior);
+        impl std::fmt::Debug for Rule<'_> {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let (algorithm, key_id, bucket_key_enabled, blocked) = self.0;
+                formatter
+                    .debug_tuple("")
+                    .field(algorithm)
+                    .field(&KeyId(key_id.as_deref()))
+                    .field(bucket_key_enabled)
+                    .field(blocked)
+                    .finish()
+            }
+        }
+        let rules: Vec<_> = self.rules.iter().map(Rule).collect();
+        formatter
+            .debug_struct("BucketEncryptionBehaviorProjection")
+            .field("rules", &rules)
+            .finish()
+    }
 }
 
 /// Runs pinned-s3s versus gateway persistence Bucket Encryption evidence.
