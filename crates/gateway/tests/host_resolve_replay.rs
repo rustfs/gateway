@@ -335,15 +335,18 @@ impl Sampler {
     }
 }
 
-/// The label-boundary property, one hundred thousand times: every sample runs under every assertion
-/// in `fuzz/support/host_resolve.rs`. The counts at the end are the other half — a sampler that
+/// Samples per shard. Four shards of this many make the one hundred thousand, and they run on
+/// separate test threads so the crate's 30-second verification loop pays for a quarter of them.
+const SHARD_SAMPLES: u32 = 25_000;
+
+/// The label-boundary property over one shard: every sample runs under every assertion in
+/// `fuzz/support/host_resolve.rs`. The counts at the end are the other half — a sampler that
 /// drifted into producing only refusals, or only path-style hosts, would pass every assertion
 /// above while testing nothing.
-#[test]
-fn one_hundred_thousand_fixed_seed_samples_hold_the_host_property() {
-    let mut sampler = Sampler(0x686f_7374_2d72_6573);
+fn hold_the_host_property_over_a_shard(seed: u64) {
+    let mut sampler = Sampler(seed);
     let (mut refused, mut path_style, mut virtual_hosted, mut hinted, mut split) = (0u32, 0u32, 0u32, 0u32, 0u32);
-    for _ in 0..100_000 {
+    for _ in 0..SHARD_SAMPLES {
         let input = sampler.sample();
         match check(&input).expect("every sample carries the case header") {
             Outcome::NotAccepted => refused += 1,
@@ -362,9 +365,36 @@ fn one_hundred_thousand_fixed_seed_samples_hold_the_host_property() {
             }
         }
     }
-    assert!(refused >= 5_000, "only {refused} samples exercised the acceptance boundary");
-    assert!(path_style >= 30_000, "only {path_style} samples resolved path style");
-    assert!(virtual_hosted >= 10_000, "only {virtual_hosted} samples named a bucket");
-    assert!(hinted >= 200, "only {hinted} samples earned the hint");
-    assert!(split >= 5_000, "only {split} virtual-hosted samples compared a key");
+    assert!(
+        refused >= 1_250,
+        "seed {seed:#x}: only {refused} samples exercised the acceptance boundary"
+    );
+    assert!(path_style >= 7_500, "seed {seed:#x}: only {path_style} samples resolved path style");
+    assert!(virtual_hosted >= 2_500, "seed {seed:#x}: only {virtual_hosted} samples named a bucket");
+    assert!(hinted >= 50, "seed {seed:#x}: only {hinted} samples earned the hint");
+    assert!(split >= 1_250, "seed {seed:#x}: only {split} virtual-hosted samples compared a key");
+}
+
+/// One hundred thousand fixed-seed samples, the first of four shards.
+#[test]
+fn fixed_seed_samples_hold_the_host_property_shard_1_of_4() {
+    hold_the_host_property_over_a_shard(0x686f_7374_2d72_6573);
+}
+
+/// One hundred thousand fixed-seed samples, the second of four shards.
+#[test]
+fn fixed_seed_samples_hold_the_host_property_shard_2_of_4() {
+    hold_the_host_property_over_a_shard(0x6c61_6265_6c73_7566);
+}
+
+/// One hundred thousand fixed-seed samples, the third of four shards.
+#[test]
+fn fixed_seed_samples_hold_the_host_property_shard_3_of_4() {
+    hold_the_host_property_over_a_shard(0x666f_7265_6967_6e73);
+}
+
+/// One hundred thousand fixed-seed samples, the fourth of four shards.
+#[test]
+fn fixed_seed_samples_hold_the_host_property_shard_4_of_4() {
+    hold_the_host_property_over_a_shard(0x7261_772d_686f_7374);
 }
