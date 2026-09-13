@@ -10,8 +10,12 @@ set -euo pipefail
 #   1. One operation per file.
 #      Every `crates/core/src/ops/<stem>.rs` declares exactly one
 #      `impl Operation`, its type's snake_case name is the file stem, and
-#      `ops/mod.rs` mounts it. No other file under `crates/*/src/**` declares
-#      one, and no `ops/shared/**` module does.
+#      `ops/mod.rs` mounts it. Every `crates/dialect-*/src/ops/<stem>.rs` is
+#      held to the same three facts against its own `ops/mod.rs`: a dialect
+#      crate registers extension operations as first-class Operations
+#      (rustfs/gateway#769's `minio:PutObjectReplica`), so it is in scope, not
+#      exempted. No other file under `crates/*/src/**` declares one, and no
+#      `ops/shared/**` module does.
 #
 #   2. The `//! Shares:` declaration agrees with the use graph and with the
 #      `//! Members:` list on the other end — in both directions, for both.
@@ -19,7 +23,8 @@ set -euo pipefail
 #      Lifecycle and replication must also call their shared Filter grammar from
 #      production code; comments, literals and test helpers do not establish it.
 #
-#   3. The 800-line ceiling over the ops tree, with no allowance escape.
+#   3. The 800-line ceiling over the ops tree, with no allowance escape. A
+#      dialect ops tree carries the same ceiling.
 #
 # WHY
 #   Rule 1 is not about `grep`. It is the unit of parallel edit conflict: two
@@ -304,6 +309,13 @@ op_stems = {path.stem for path in op_files}
 mod_text = mask(mod_file.read_text())
 mounted = set(re.findall(r"^\s*pub mod\s+([a-z_][a-z0-9_]*)\s*;", mod_text, re.M))
 
+# Dialect crates keep their operations in `src/ops/`, one per file, mounted by
+# that tree's own `mod.rs` — the core rule, one directory over. A dialect crate
+# with no operations has no ops tree and nothing to check.
+dialect_ops_dirs = sorted(
+    path for path in pathlib.Path("crates").glob("dialect-*/src/ops") if path.is_dir()
+)
+
 # -- Rule 1 -------------------------------------------------------------------
 
 for path in op_files:
@@ -336,6 +348,39 @@ for path in op_files:
             file=sys.stderr,
         )
 
+for dialect_ops in dialect_ops_dirs:
+    dialect_mod = dialect_ops / "mod.rs"
+    if not dialect_mod.exists():
+        fail(f"{dialect_ops}: a dialect ops tree has no mod.rs, so nothing compiles it")
+        continue
+    dialect_mounted = set(
+        re.findall(r"^\s*pub mod\s+([a-z_][a-z0-9_]*)\s*;", mask(dialect_mod.read_text()), re.M)
+    )
+    for path in sorted(dialect_ops.rglob("*.rs")):
+        if path.name == "mod.rs":
+            continue
+        impls = operation_impls(path.read_text())
+        if len(impls) != 1:
+            fail(
+                f"{path}: declares {len(impls)} `impl Operation`, and an operation module "
+                f"declares exactly one"
+            )
+            if len(impls) > 1:
+                print(
+                    f"    Found: {', '.join(impls)}. Two operations in one file is the git "
+                    f"conflict the rule exists to prevent; give the second one its own file.",
+                    file=sys.stderr,
+                )
+        elif snake(impls[0]) != path.stem:
+            fail(
+                f"{path}: operation name and file name disagree: `{impls[0]}` belongs in "
+                f"{dialect_ops / (snake(impls[0]) + '.rs')}"
+            )
+        if path.parent != dialect_ops or path.stem not in dialect_mounted:
+            fail(
+                f"{path}: no `pub mod` in {dialect_mod} mounts it, so nothing compiles it"
+            )
+
 for path in sorted(shared_dir.rglob("*.rs")):
     impls = operation_impls(path.read_text())
     if impls:
@@ -347,6 +392,8 @@ for path in sorted(shared_dir.rglob("*.rs")):
 for crate_src in sorted(pathlib.Path("crates").glob("*/src")):
     for path in sorted(crate_src.rglob("*.rs")):
         if ops_dir in path.parents or shared_dir in path.parents:
+            continue
+        if any(dialect_ops in path.parents for dialect_ops in dialect_ops_dirs):
             continue
         if "generated" in path.parts:
             continue
@@ -523,7 +570,7 @@ for family in ("lifecycle", "replication"):
 
 # -- Rule 3 -------------------------------------------------------------------
 
-for path in sorted(ops_dir.rglob("*.rs")):
+for path in sorted([*ops_dir.rglob("*.rs"), *(p for d in dialect_ops_dirs for p in d.rglob("*.rs"))]):
     lines = len(path.read_text().splitlines())
     if lines > CEILING:
         fail(f"{path}: {lines} lines, over the {CEILING}-line ceiling")
@@ -538,7 +585,9 @@ for line in allowances.read_text().splitlines():
     if not entry:
         continue
     path = entry.split()[0]
-    if path == str(ops_dir) or path.startswith(f"{ops_dir}/"):
+    if path == str(ops_dir) or path.startswith(f"{ops_dir}/") or any(
+        path == str(d) or path.startswith(f"{d}/") for d in dialect_ops_dirs
+    ):
         fail(
             f"{allowances}: names {path}; the ops tree has no ceiling exemption"
         )

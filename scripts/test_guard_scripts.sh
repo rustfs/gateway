@@ -11545,6 +11545,68 @@ expect_guard_pass check_op_file_shape.sh \
     'the same operation impl inside a #[cfg(test)] module' \
     mut_op_shape_impl_in_test_module
 
+# Dialect crates register extension operations as first-class Operations (rustfs/gateway#769's
+# `minio:PutObjectReplica`), so `crates/dialect-*/src/ops` is held to the same shape, not exempted.
+mut_op_shape_dialect_second_operation() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/dialect-minio/src/ops/put_object_replica.rs")
+if "impl Operation for PutObjectReplica" not in p.read_text():
+    raise SystemExit("missing mutation subject: the dialect replica operation file")
+p.write_text(p.read_text() + "\nimpl Operation for PutObjectReplicaAgain {}\n")
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a second operation moving into a dialect operation file' \
+    'declares 2 `impl Operation`' \
+    mut_op_shape_dialect_second_operation
+
+mut_op_shape_dialect_impl_outside_ops() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/dialect-minio/src/replication.rs")
+if "pub fn replication_dialect" not in p.read_text():
+    raise SystemExit("missing mutation subject: the replication dialect module")
+p.write_text(p.read_text() + "\nimpl Operation for SmuggledReplica {}\n")
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a dialect operation declared outside its ops tree' \
+    'declares `impl Operation` outside the ops tree' \
+    mut_op_shape_dialect_impl_outside_ops
+
+mut_op_shape_dialect_unmounted() {
+    python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("crates/dialect-minio/src/ops/mod.rs")
+text = p.read_text()
+if text.count("pub mod put_object_replica;\n") != 1:
+    raise SystemExit("missing mutation subject: the dialect ops mount")
+p.write_text(text.replace("pub mod put_object_replica;\n", "", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a dialect operation file no ops/mod.rs mounts' \
+    'no `pub mod`' \
+    mut_op_shape_dialect_unmounted
+
+mut_op_shape_dialect_misnamed() {
+    python3 - <<'PYEOF'
+import pathlib
+ops = pathlib.Path("crates/dialect-minio/src/ops")
+source = ops / "put_object_replica.rs"
+mount = ops / "mod.rs"
+if not source.exists() or mount.read_text().count("pub mod put_object_replica;\n") != 1:
+    raise SystemExit("missing mutation subject: the dialect replica operation file")
+source.rename(ops / "replica.rs")
+mount.write_text(mount.read_text().replace("pub mod put_object_replica;\n", "pub mod replica;\n", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'a dialect operation whose file stem is not its snake_case name' \
+    'operation name and file name disagree' \
+    mut_op_shape_dialect_misnamed
+
 # rustfs/gateway#240. The same smuggled operation, behind a `#[cfg(test)]` item
 # that never opens a brace — the `#[path] mod tests;` split this repository uses
 # when a file crosses 800 lines. `cfg_test_spans` used to search ahead for the
