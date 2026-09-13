@@ -1,0 +1,52 @@
+# c-sig-0592 — a presigned URL dated too far in the future is refused.
+
+[case]
+id = "c-sig-0592"
+schema_version = 1
+title = "A presigned URL stamped thirty minutes ahead is refused despite a one-day lifetime"
+rationale = """
+Only the past bound of a presigned URL moves from the skew window to its lifetime. The future bound \
+stays: a URL dated beyond the skew window would be a credential that starts working at a time of \
+the signer's choosing, however long a lifetime it claims."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["signature", "sigv4", "presigned", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/723"
+summary = "A MinIO black-box probe refused presigned GETs dated sixteen and thirty minutes ahead and accepted one dated ten minutes ahead."
+kind = "observed"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/616"
+summary = "The s3s presigned path bounds only how far X-Amz-Date may lie in the future and leaves the past to the expiry check."
+kind = "s3s-pr"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:34:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "presigned-lifetime.txt"
+content_type = "text/plain"
+body = { utf8 = "not yet" }
+
+[request]
+method = "GET"
+target = "/conf-sig/presigned-lifetime.txt"
+headers = {}
+sign = { mode = "presigned_v4", service = "s3", region = "us-east-1", credential = "valid", expires_s = 86400 }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+
+[expect.error]
+code = "RequestTimeTooSkewed"

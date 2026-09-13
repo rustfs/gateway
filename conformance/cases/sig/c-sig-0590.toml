@@ -1,0 +1,53 @@
+# c-sig-0590 — an unexpired presigned URL older than the skew window is accepted.
+
+[case]
+id = "c-sig-0590"
+schema_version = 1
+title = "A presigned URL signed two hours ago with a one-day lifetime is accepted"
+rationale = """
+A presigned URL's lifetime starts at X-Amz-Date and lasts X-Amz-Expires seconds, so its age is \
+bounded by that lifetime rather than by the fifteen-minute clock-skew window that header-signed \
+requests are held to. Refusing it breaks every share link used more than fifteen minutes after it \
+was made; mint minio-js presignedGetObject with requestDate:StartOfDay is exactly this request."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["signature", "sigv4", "presigned", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html"
+summary = "AWS measures a SigV4 presigned URL's validity from X-Amz-Date for X-Amz-Expires seconds, at most seven days."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/723"
+summary = "A MinIO black-box probe and the s3s revision RustFS pins both accepted a presigned GET signed two hours earlier with a one-day lifetime."
+kind = "observed"
+
+[clock]
+fixed = "2026-01-02T05:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "presigned-lifetime.txt"
+content_type = "text/plain"
+body = { utf8 = "still valid" }
+
+[request]
+method = "GET"
+target = "/conf-sig/presigned-lifetime.txt"
+headers = {}
+sign = { mode = "presigned_v4", service = "s3", region = "us-east-1", credential = "valid", expires_s = 86400 }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+exact_utf8 = "still valid"

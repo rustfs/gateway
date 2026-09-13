@@ -319,6 +319,16 @@ the AWS-compatible scheme, not evidence that the gateway failed to authenticate 
 coordination cost of a strongly consistent write on the authentication path. The framework does
 not install a replay store by default, and never exposes replay state through an HTTP endpoint.
 
+A presigned URL's validity window is its signed lifetime, not the clock-skew window. The skew
+window (fifteen minutes, narrowable, never widenable) holds both bounds for a header-signed or
+POST-policy request, which carries no signed lifetime. For a SigV4 presigned URL it holds only
+the future bound: a URL dated more than the window ahead is `RequestTimeTooSkewed`, so no URL
+starts working at a time of the signer's choosing. Its past bound is `X-Amz-Date` plus
+`X-Amz-Expires` (`AccessDenied`, "expired"), and `X-Amz-Expires` stays capped at seven days.
+Narrowing the skew window does not shorten a presigned lifetime. This matches S3, a black-box
+probe of MinIO, and the s3s revision RustFS runs (rustfs/gateway#723); `c-sig-0309`, `c-sig-0310`,
+`c-sig-0336`..`c-sig-0339` and `c-sig-0590`..`c-sig-0593` hold each boundary.
+
 `CredentialProvider` is the only extension point on the **unauthenticated** path: anybody who can
 reach the port can make the gateway call it, and what it returns is a long-term secret. The
 framework's half:

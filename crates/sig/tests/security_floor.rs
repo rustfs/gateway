@@ -15,7 +15,9 @@
 //! The security-floor time and scope cases (`c-sig-0301` .. `c-sig-0347`).
 //!
 //! Responsible for: the positive admissions, the clock-skew window on all three signing paths
-//! (H1), the presigned expiry rules (H2), and the credential-scope cross-check (H5).
+//! (H1) — both bounds on the header and POST-policy paths, the future bound on the presigned path,
+//! whose past bound is its lifetime (`c-sig-0309`, `c-sig-0310`, `c-sig-0336` .. `c-sig-0339`) —
+//! the presigned expiry rules (H2), and the credential-scope cross-check (H5).
 //! NOT responsible for: the presented-credential rule, the duplicate-parameter rule, the
 //! privileged surface and the sealed boundary — those are `tests/security_floor_schemes.rs`; nor
 //! the `compile_fail` cases, which are rustdoc examples on `clock`, `scope`, `derive`, `verdict`
@@ -231,6 +233,123 @@ fn c_sig_0334_the_skew_window_cannot_be_widened_past_the_ceiling() {
     // Narrowing is allowed; widening is not.
     let narrow = SkewWindow::new(Duration::from_secs(60), Duration::from_secs(60));
     assert_eq!(narrow.past(), Duration::from_secs(60));
+}
+
+// ---------------------------------------------------------------------------
+// H1 and H2 together — a presigned URL's past bound is its lifetime (rustfs/gateway#723)
+// ---------------------------------------------------------------------------
+
+const HOUR: i64 = 3_600;
+
+fn presigned_admission(expires: &str, now: RequestNow, floor: &SecurityFloor) -> Result<(), AuthError> {
+    let query = presigned_query(SIGNED_AT, expires);
+    let headers = HeaderMap::new();
+    match floor.admit(WireView::new(&headers, RawQuery::new(&query)), &s3_object_op(), now)? {
+        Admission::Sealed(sealed) => {
+            // The receipt names the instants that were judged, whatever the outcome was.
+            assert_eq!(sealed.clock().signed_at().as_str(), SIGNED_AT);
+            assert_eq!(sealed.clock().now(), now);
+            let expiry = sealed.expiry().expect("a presigned request has an expiry");
+            let lifetime = i64::try_from(expiry.expires_in_seconds()).expect("inside the seven-day ceiling");
+            assert_eq!(expiry.expires_at_unix_seconds(), SIGNED_AT_UNIX + lifetime);
+            Ok(())
+        }
+        other => panic!("expected a sealed AWS admission, got {other:?}"),
+    }
+}
+
+fn at(offset: i64) -> RequestNow {
+    RequestNow::from_unix_seconds(SIGNED_AT_UNIX + offset)
+}
+
+/// Positive — c-sig-0309: a presigned URL used two hours after it was signed, inside its 24-hour
+/// lifetime, is admitted. Its past bound is `X-Amz-Expires`, not the skew window: the lifetime
+/// starts at `X-Amz-Date`, and S3, MinIO and the s3s revision RustFS runs all accept this request.
+/// It is mint minio-js's `presignedGetObject … requestDate:StartOfDay` step.
+#[test]
+fn c_sig_0309_an_unexpired_presigned_url_older_than_the_skew_window_is_admitted() {
+    assert_eq!(presigned_admission("86400", at(2 * HOUR), &SecurityFloor::default()), Ok(()));
+    // Sixteen minutes old is the smallest age the window alone would have refused.
+    assert_eq!(presigned_admission("3600", at(16 * 60), &SecurityFloor::default()), Ok(()));
+}
+
+/// Positive — c-sig-0310: a seven-day URL is admitted on its last second, and a deployment that
+/// narrowed the skew window has not shortened a presigned lifetime: the window bounds clock
+/// disagreement, and a URL's age is not a clock disagreement.
+#[test]
+fn c_sig_0310_the_presigned_lifetime_runs_to_its_last_second() {
+    let ceiling = MAX_PRESIGNED_EXPIRY_SECONDS.to_string();
+    let last_second = at(i64::try_from(MAX_PRESIGNED_EXPIRY_SECONDS).expect("fits"));
+    assert_eq!(presigned_admission(&ceiling, last_second, &SecurityFloor::default()), Ok(()));
+    let narrowed = SecurityFloor::default().with_skew_window(SkewWindow::new(Duration::from_secs(60), Duration::from_secs(60)));
+    assert_eq!(presigned_admission("3600", at(HOUR), &narrowed), Ok(()));
+}
+
+/// Negative — c-sig-0336: a presigned URL past its lifetime is refused as expired, from the
+/// boundary second on, even when it is also far outside the skew window. The answer is
+/// `RequestExpired` (`AccessDenied`, as on S3 and MinIO), never `RequestTimeTooSkewed`: the past
+/// bound of a presigned URL is its lifetime.
+#[test]
+fn c_sig_0336_a_presigned_url_past_its_lifetime_is_expired_not_skewed() {
+    let floor = SecurityFloor::default();
+    assert_eq!(presigned_admission("3600", at(HOUR), &floor), Ok(()));
+    assert_eq!(presigned_admission("3600", at(HOUR + 1), &floor), Err(AuthError::RequestExpired));
+    let error = presigned_admission("3600", at(2 * HOUR), &floor);
+    assert_eq!(error, Err(AuthError::RequestExpired));
+    assert_eq!(error.expect_err("an error").code(), "AccessDenied");
+}
+
+/// Negative — c-sig-0337: the future bound still applies to a presigned URL. Stamped more than
+/// fifteen minutes ahead it is refused whatever lifetime it claims, and a narrowed future window
+/// narrows it. Otherwise a URL dated next week would be a credential that starts working on a day
+/// of the signer's choosing, which S3 and MinIO both refuse.
+#[test]
+fn c_sig_0337_a_presigned_url_stamped_too_far_ahead_is_skewed() {
+    let floor = SecurityFloor::default();
+    assert_eq!(presigned_admission("604800", at(-900), &floor), Ok(()));
+    assert_eq!(presigned_admission("604800", at(-901), &floor), Err(AuthError::RequestTimeTooSkewed));
+    assert_eq!(presigned_admission("604800", at(-30 * 60), &floor), Err(AuthError::RequestTimeTooSkewed));
+    let narrowed = SecurityFloor::default().with_skew_window(SkewWindow::new(Duration::from_secs(900), Duration::from_secs(60)));
+    assert_eq!(presigned_admission("3600", at(-60), &narrowed), Ok(()));
+    assert_eq!(presigned_admission("3600", at(-61), &narrowed), Err(AuthError::RequestTimeTooSkewed));
+}
+
+/// Negative — c-sig-0338: the exemption belongs to the presigned path alone. A header-signed
+/// request sixteen minutes or two hours old is still refused by the skew window, and an
+/// `X-Amz-Expires` in its query string buys it nothing: the query carries no signature, so the
+/// request is not a presigned URL.
+#[test]
+fn c_sig_0338_a_stale_header_signature_is_skewed_whatever_its_query_says() {
+    let headers = signed_headers(SIGNED_AT);
+    for query in ["", "X-Amz-Expires=86400", "X-Amz-Expires=86400&X-Amz-Date=20150830T123600Z"] {
+        for age in [16 * 60, 2 * HOUR] {
+            let view = WireView::new(&headers, RawQuery::new(query));
+            assert_eq!(
+                SecurityFloor::default().admit(view, &s3_object_op(), at(age)).err(),
+                Some(AuthError::RequestTimeTooSkewed),
+                "query {query:?}, age {age}s"
+            );
+        }
+    }
+}
+
+/// Negative — c-sig-0339: the seven-day ceiling is intact. The longest lifetime there is ends
+/// seven days after `X-Amz-Date`, and a longer one is refused as a parameter error however
+/// recently the URL was signed.
+#[test]
+fn c_sig_0339_the_seven_day_ceiling_still_bounds_the_past() {
+    let floor = SecurityFloor::default();
+    let ceiling = MAX_PRESIGNED_EXPIRY_SECONDS.to_string();
+    let past_ceiling = at(i64::try_from(MAX_PRESIGNED_EXPIRY_SECONDS).expect("fits") + 1);
+    assert_eq!(presigned_admission(&ceiling, past_ceiling, &floor), Err(AuthError::RequestExpired));
+    assert_eq!(
+        presigned_admission("604801", at(2 * HOUR), &floor),
+        Err(AuthError::AuthorizationQueryParametersError)
+    );
+    assert_eq!(
+        presigned_admission("604801", at(0), &floor),
+        Err(AuthError::AuthorizationQueryParametersError)
+    );
 }
 
 // ---------------------------------------------------------------------------

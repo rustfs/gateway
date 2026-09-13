@@ -1,0 +1,52 @@
+# c-sig-0593 — a header-signed request keeps the full skew window.
+
+[case]
+id = "c-sig-0593"
+schema_version = 1
+title = "A header-signed request signed two hours ago is refused as skewed"
+rationale = """
+The presigned lifetime exemption is scoped to the presigned path. A header-signed request has no \
+signed lifetime, so the skew window is its only replay bound and must still refuse one that is two \
+hours old, exactly as for the presigned URL that is accepted at the same age."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["signature", "sigv4", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/616"
+summary = "The skew window was extended to header authentication, so a stale header signature is refused."
+kind = "s3s-pr"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/723"
+summary = "A MinIO black-box probe answered 403 RequestTimeTooSkewed for header-signed GETs two hours and sixteen minutes old."
+kind = "observed"
+
+[clock]
+fixed = "2026-01-02T05:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "header-stale.txt"
+content_type = "text/plain"
+body = { utf8 = "stale" }
+
+[request]
+method = "GET"
+target = "/conf-sig/header-stale.txt"
+headers = {}
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 403
+connection_after = "open"
+
+[expect.error]
+code = "RequestTimeTooSkewed"

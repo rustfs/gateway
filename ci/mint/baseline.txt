@@ -43,7 +43,17 @@
 #   means the SUT answered what the S3 contract requires and the suite expects MinIO behaviour;
 #   those counts stay unless the pin moves.
 #
-# generation: 1
+# GENERATION 2 (rustfs/gateway#723)
+#   Presigned URLs are now valid for their whole signed lifetime, which fixes minio-js
+#   `presignedGetObject … requestDate:StartOfDay` (-1). The suite then reaches its two
+#   `presignedPostPolicy` steps, which mocha-steps had skipped while that step failed. Both
+#   fail with 501 NotImplemented, because the fs backend registers no POST Object operation
+#   (+2), rustfs/gateway#721. Measured by a local run of the pinned minio-js suite on
+#   2026-09-13 against a release compat-sut from the rustfs/gateway#723 branch: 133 PASS,
+#   29 FAIL, and every other failure matches generation 1 by function and error. Net
+#   minio-js 28 -> 29.
+#
+# generation: 2
 .minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 the pinned image ships no .NET test binary, so its runner writes no record at all
 aws-sdk-go-v2 excluded https://github.com/rustfs/gateway/issues/718 HeadObject omits Content-Type, and the suite panics before writing its first record
 aws-sdk-java-v2 excluded https://github.com/rustfs/gateway/issues/719 every test returns without a record unless ENABLE_HTTPS=1, and the SUT serves plaintext only
@@ -60,7 +70,7 @@ mc excluded https://github.com/rustfs/gateway/issues/720 its runner prints a lin
 minio-go 0
 #   listBuckets(): rustfs/gateway#721. listenBucketNotification(): a MinIO-only API.
 minio-java 2
-#   28 failures, by cause:
+#   29 failures, by cause:
 #   10  PutBucketVersioning sent without Content-MD5 (4 setBucketVersioning, 2 "Enable Versioning
 #       on Bucket", 1 "Enable versioning", 3 `before all` hooks that enable it). The pinned model
 #       marks the operation http_checksum_required (spec/operations/PutBucketVersioning.toml), so
@@ -73,12 +83,12 @@ minio-java 2
 #       SUT held no connection during the stall (sampled twice), so the callback never finished.
 #       Likely the same missing Content-Type, rustfs/gateway#718.
 #    1  copyObject with setMatchETagExcept(<source etag>) was not refused, rustfs/gateway#722.
-#    1  presignedGetObject dated at the start of the day: 403 from the skew window,
-#       rustfs/gateway#723.
+#    2  presignedPostPolicy (both steps): the browser POST is answered 501 NotImplemented
+#       because the fs backend registers no POST Object operation, rustfs/gateway#721.
 #    1  putObjectRetention: object lock, rustfs/backlog#1726 (P5-11).
 #    1  selectObjectContent: SelectObjectContent, rustfs/backlog#1730 (P5-15).
 #    2  listenBucketNotification and extensions.listObjectsV2WithMetadata: MinIO-only APIs.
-minio-js 28
+minio-js 29
 #   content-type test: GetObject/HeadObject return no Content-Type, rustfs/gateway#718.
 minio-py 1
 #   test_sync_list_objects: `rb --recursive` needs DeleteObjects, rustfs/gateway#721.

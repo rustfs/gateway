@@ -6,7 +6,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 |---|---|---|
 | `src/lib.rs` | Public signature state machine and generated policy wiring. | Start here for an authentication task or a missing signature-policy consumer. |
 | `src/canonical.rs` | Canonical request construction. | A signature differs despite the same request. |
-| `src/clock.rs` | Single request-time snapshot and skew policy. | Header, query, and POST-policy paths disagree about time. |
+| `src/clock.rs` | Single request-time snapshot, skew policy, and why a presigned URL's past bound is its lifetime. | Header, query, and POST-policy paths disagree about time. |
 | `src/codec.rs` | Authorization wire parsing and rendering helpers. | Header authentication syntax is decoded incorrectly. |
 | `src/derive.rs` | Verified scope and signing-key derivation. | An unchecked credential scope reaches HMAC derivation. |
 | `src/floor.rs` | H1-H6 unconditional admission checks, and the SigV2 admission branch. | A verifier or authentication scheme appears able to bypass the security floor. |

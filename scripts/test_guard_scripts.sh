@@ -13087,6 +13087,27 @@ target.write_text(text.replace(old, new, 1))
 PYEOF
 }
 
+# mint_generation [path]: the generation the baseline carries. Read from the file and never
+# spelled in a case: a subject naming a generation value stops matching the first time the
+# reviewed baseline raises it (generation 2, rustfs/gateway#723).
+mint_generation() {
+    local line pattern='^# generation: ([0-9]+)$'
+    while IFS= read -r line; do
+        if [[ "$line" =~ $pattern ]]; then
+            printf '%s\n' "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    done <"${1:-ci/mint/baseline.txt}"
+    return 1
+}
+# An unreadable header leaves a value no subject matches, so every case below fails loudly.
+MINT_GENERATION="$(mint_generation "${REPO_ROOT}/ci/mint/baseline.txt")" || MINT_GENERATION="unreadable"
+
+# mint_set_generation <n>: rewrites the sandbox baseline's header, whatever it says now.
+mint_set_generation() {
+    mint_mutate ci/mint/baseline.txt "# generation: $(mint_generation)" "# generation: $1"
+}
+
 MINT_REPORT=ci/mint/report.py
 
 mut_mint_report_counts_na_as_failure() {
@@ -13435,26 +13456,26 @@ expect_fail check_mint_baseline.sh 'a mint count raised without raising the gene
 
 mut_mint_baseline_raised_with_generation() {
     mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\nminio-go 3\n'
-    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 2'
+    mint_set_generation "$((MINT_GENERATION + 1))"
 }
 expect_guard_pass check_mint_baseline.sh 'a mint count raised in the change that raises the generation by one' \
     mut_mint_baseline_raised_with_generation
 
 mut_mint_baseline_generation_jumped() {
     mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\nminio-go 3\n'
-    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 3'
+    mint_set_generation "$((MINT_GENERATION + 2))"
 }
 expect_fail check_mint_baseline.sh 'a mint generation jumped to bank room for later increases' \
-    mut_mint_baseline_generation_jumped 'the generation jumped 1 -> 3'
+    mut_mint_baseline_generation_jumped "the generation jumped ${MINT_GENERATION} -> $((MINT_GENERATION + 2))"
 
 mut_mint_baseline_generation_backwards() {
-    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 2'
+    mint_set_generation "$((MINT_GENERATION + 1))"
     git add ci/mint/baseline.txt
-    git -c user.name=t -c user.email=t@t commit -qm 'mint baseline generation 2'
-    mint_mutate ci/mint/baseline.txt '# generation: 2' '# generation: 1'
+    git -c user.name=t -c user.email=t@t commit -qm 'mint baseline generation raised'
+    mint_set_generation "$MINT_GENERATION"
 }
 expect_fail check_mint_baseline.sh 'a mint generation moved backwards' \
-    mut_mint_baseline_generation_backwards 'the generation went backwards, 2 -> 1'
+    mut_mint_baseline_generation_backwards "the generation went backwards, $((MINT_GENERATION + 1)) -> ${MINT_GENERATION}"
 
 mut_mint_baseline_drops_an_sdk() {
     mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\n'
@@ -13487,7 +13508,7 @@ expect_fail check_mint_baseline.sh 'a counted mint SDK excluded without raising 
 
 mut_mint_baseline_excludes_with_generation() {
     mut_mint_baseline_excludes_without_generation
-    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 2'
+    mint_set_generation "$((MINT_GENERATION + 1))"
 }
 expect_guard_pass check_mint_baseline.sh 'a mint SDK excluded in the change that raises the generation by one' \
     mut_mint_baseline_excludes_with_generation
@@ -13527,13 +13548,13 @@ expect_fail check_mint_baseline.sh 'an excluded mint SDK that also carries a cou
 mut_mint_baseline_excludes_outside_census() {
     mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' \
         '\nminio-go 0\naws-sdk-rust excluded https://github.com/rustfs/gateway/issues/718 an SDK the pinned image never runs\n'
-    mint_mutate ci/mint/baseline.txt '# generation: 1' '# generation: 2'
+    mint_set_generation "$((MINT_GENERATION + 1))"
 }
 expect_fail check_mint_baseline.sh 'a mint exclusion for an SDK outside the pinned census' \
     mut_mint_baseline_excludes_outside_census 'lines for SDKs the runner does not run [aws-sdk-rust]'
 
 mut_mint_baseline_header_removed() {
-    mint_mutate ci/mint/baseline.txt '# generation: 1\n' ''
+    mint_mutate ci/mint/baseline.txt "# generation: ${MINT_GENERATION}\n" ''
 }
 expect_fail check_mint_baseline.sh 'the mint baseline generation header removed' \
     mut_mint_baseline_header_removed 'no `# generation: <n>` header'

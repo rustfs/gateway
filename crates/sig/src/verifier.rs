@@ -508,6 +508,11 @@ pub enum ReplayDecision {
 /// replay within the validity window is the scheme's own semantics rather than a defect. A
 /// deployment that needs single use provides a store; it is buying a shared, strongly consistent
 /// write on the authentication path, which is a real cost and a real availability risk.
+///
+/// A store must remember a fingerprint until the URL expires (`SealedAws::expiry`), not for the
+/// clock-skew window. A presigned URL is admitted for its whole signed lifetime, up to seven days
+/// (rustfs/gateway#723), so a store that forgets after fifteen minutes admits the replay it exists
+/// to refuse.
 pub trait ReplayNonceStore {
     /// Records a fingerprint and reports whether it had been seen.
     fn record_first_use(&self, fingerprint: ReplayFingerprint) -> ReplayDecision;
