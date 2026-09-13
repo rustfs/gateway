@@ -37,6 +37,40 @@ for snapshot_entry in 286 303; do
         || fail 'each request entry must allowlist exactly one assembly snapshot load'
 done
 
+# Every write to the one ConfigStore is an rcu except the single complete replacement. A settings
+# update and a registry update that each load, then store, can overwrite each other; no test can
+# force that interleaving deterministically, so the write primitive itself is what is checked.
+python3 - "$ROOT_DIR" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+root = Path(sys.argv[1])
+# Receivers holding the store: Inner.config, ServiceBuilder.config, ConfigHandle.store; plus UFCS.
+writes = re.compile(r"(?:\b(?:config|store)\s*\.\s*|\bArcSwap(?:Any)?\s*::\s*)(store|swap|compare_and_swap|rcu)\s*\(")
+found = {}
+for path in sorted((root / "crates/gateway/src").rglob("*.rs")):
+    relative = path.relative_to(root).as_posix()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.lstrip().startswith("//"):
+            continue
+        for match in writes.finditer(line):
+            key = (relative, match.group(1))
+            found[key] = found.get(key, 0) + 1
+expected = {
+    ("crates/gateway/src/builder.rs", "rcu"): 1,
+    ("crates/gateway/src/config.rs", "rcu"): 1,
+    ("crates/gateway/src/service/update.rs", "rcu"): 2,
+    ("crates/gateway/src/service/update.rs", "store"): 1,
+}
+if found != expected:
+    raise SystemExit(
+        "check_config_load_once: every ConfigStore write except the one complete replacement must be an rcu, "
+        f"so concurrent partial updates cannot overwrite each other; expected {sorted(expected.items())}, "
+        f"found {sorted(found.items())}"
+    )
+PY
+
 stages="$(grep -oE '\.(wire|targeted|routed|governed|meta_auth|route_authorized|guarded|decoded|authorized)\(' \
     "${SOURCE_ROOT}/service.rs" | tr -d '.(')"
 expected_stages="$(printf '%s\n' wire targeted routed governed meta_auth route_authorized guarded decoded authorized)"

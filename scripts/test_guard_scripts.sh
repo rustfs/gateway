@@ -15368,7 +15368,7 @@ expect_authz_fail_minimal() {
         crates/gateway/examples/custom_authorizer.rs
         crates/gateway/examples/minimal.rs
         crates/gateway/tests/assembly.rs
-        crates/gateway/tests/assembly_snapshot.rs
+        crates/gateway/tests/assembly_snapshot/authz_hot_update.rs
         crates/gateway/tests/authz_consumption.rs
         crates/gateway/tests/authz_contract.rs
         crates/gateway/tests/authz_contract/oracle.rs
@@ -18008,6 +18008,43 @@ PYEOF
 }
 expect_fail check_config_load_once.sh \
     'a real request path dropping the decoded snapshot stage' mut_config_snapshot_stage_deleted
+
+# Same-line load-then-store rewrites keep every file:line in the load allowlist, so only the
+# write-primitive rule can see that a partial update may now overwrite a concurrent one.
+mut_settings_update_load_then_store() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/config.rs")
+text = path.read_text()
+subject = "        self.store.rcu(|current| {\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing mutation subject: the settings update's rcu")
+path.write_text(text.replace(subject, "        let current = self.store.load_full(); self.store.store({\n", 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a settings update that loads then stores and can overwrite a concurrent registry update' \
+    mut_settings_update_load_then_store \
+    'every ConfigStore write except the one complete replacement must be an rcu'
+
+mut_registry_update_ufcs_store() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service/update.rs")
+text = path.read_text()
+subject = "        self.inner.config.rcu(|current| {\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing mutation subject: the registry update's rcu")
+replacement = "        let current = self.inner.config.load_full(); arc_swap::ArcSwapAny::store(&self.inner.config, {\n"
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a registry update storing through UFCS and able to overwrite a concurrent settings update' \
+    mut_registry_update_ufcs_store \
+    'every ConfigStore write except the one complete replacement must be an rcu'
 
 mut_tsan_instrumentation_deleted() {
     python3 - <<'PYEOF'
