@@ -152,34 +152,45 @@ where
             .into_inner()
             .downcast::<Authorized<O>>()
             .map_err(|_| mismatch::<O>())?;
-        let request = authorized.into_request(sse, request_context);
         match context {
-            Some(context) => dispatch_with_context::<O, B>(implementation, request, context).await,
-            None => dispatch::<O, B>(implementation, request).await,
+            Some(context) => dispatch_with_context::<O, B>(implementation, *authorized, sse, request_context, context).await,
+            None => dispatch::<O, B>(implementation, *authorized, sse, request_context).await,
         }
     })
 }
 
 /// The only typed transition from authorization into a backend call.
-async fn dispatch<O, B>(implementation: Arc<B>, request: crate::Req<O>) -> Result<ErasedResponse, HandlerError>
+///
+/// It consumes the authorization proof itself; the SSE proof and, since ADR-0022, the request
+/// context are the only other inputs, and `Req<O>` is built here, never before.
+async fn dispatch<O, B>(
+    implementation: Arc<B>,
+    authorized: Authorized<O>,
+    sse: SseEnforced,
+    request_context: RequestContextView,
+) -> Result<ErasedResponse, HandlerError>
 where
     O: Operation,
     B: Handler<O>,
 {
-    let response = implementation.call(request).await?;
+    let response = implementation.call(authorized.into_request(sse, request_context)).await?;
     Ok(Box::new(response) as ErasedResponse)
 }
 
 async fn dispatch_with_context<O, B>(
     implementation: Arc<B>,
-    request: crate::Req<O>,
+    authorized: Authorized<O>,
+    sse: SseEnforced,
+    request_context: RequestContextView,
     context: HandlerContext,
 ) -> Result<ErasedResponse, HandlerError>
 where
     O: Operation,
     B: Handler<O>,
 {
-    let response = implementation.call_with_context(request, context).await?;
+    let response = implementation
+        .call_with_context(authorized.into_request(sse, request_context), context)
+        .await?;
     Ok(Box::new(response) as ErasedResponse)
 }
 
