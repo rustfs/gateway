@@ -17,9 +17,9 @@
 //! Responsible for: sending one raw request through the real gateway route table and generated
 //! codec and, separately, through the pinned s3s service; returning both decoded inputs and both
 //! encoded responses in a comparable form; and counting every read of either copy of the body.
-//! NOT responsible for: authentication, request context (`uri`, headers, extensions, credentials,
-//! region), RustFS storage, or production wiring. This module only exists under `cfg(test)`
-//! (rustfs/backlog#1762, first slice).
+//! NOT responsible for: authentication or request context (`uri`, headers, extensions, credentials,
+//! region), which the `context` submodule drives separately; RustFS storage; or production
+//! wiring. This module only exists under `cfg(test)` (rustfs/backlog#1762).
 //! Upstream: `rustfs-gateway-core` routing and codecs, `rustfs_gateway_types::compat`. Downstream:
 //! the per-operation proofs beside it.
 //!
@@ -30,6 +30,7 @@
 //! implementation that records the input it was handed. No authentication is configured on either
 //! side, so the requests are anonymous and nothing here depends on a signature.
 
+mod context;
 mod put_object;
 
 use std::collections::{BTreeMap, VecDeque};

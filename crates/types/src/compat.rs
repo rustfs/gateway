@@ -15,8 +15,9 @@
 //! Temporary adapters to the s3s persistence oracles that migration admission is measured against.
 //!
 //! Responsible for: invoking the exact old persistence codecs of every pinned s3s revision,
-//! selecting which revision answers, exposing family-scoped adapters over owned values, and the
-//! single-operation DTO conversion in [`put_object`], the only submodule whose API names s3s types.
+//! selecting which revision answers, exposing family-scoped adapters over owned values, the
+//! single-operation DTO conversion in [`put_object`], and the request-context conversion in
+//! [`request_context`] — the only two submodules whose API names s3s types.
 //! NOT responsible for: production XML behavior, golden assertions, or wiring any conversion into a
 //! request path.
 //! Upstream: the three s3s revisions named by [`OracleRevision`]. Downstream:
@@ -41,6 +42,7 @@ use crate::persistence::{
 };
 
 pub mod put_object;
+pub mod request_context;
 
 /// The baseline oracle crate, re-exported so a harness drives exactly the revision
 /// [`put_object`] converts to. Kernel crates other than this one may not depend on s3s at all
