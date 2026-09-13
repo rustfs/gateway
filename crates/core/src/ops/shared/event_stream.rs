@@ -183,7 +183,7 @@ pub fn encode_event(kind: EventKind, payload: &[u8], out: &mut Vec<u8>) -> Resul
 /// [`EventKind::End`] is *not* sent, because the error is itself terminal.
 /// The code and message occupy `:error-code` and `:error-message` string headers; the frame
 /// carries no payload.
-/// https://docs.aws.amazon.com/AmazonS3/latest/developerguide/RESTSelectObjectAppendix.html
+/// <https://docs.aws.amazon.com/AmazonS3/latest/developerguide/RESTSelectObjectAppendix.html>
 ///
 /// # Errors
 ///
