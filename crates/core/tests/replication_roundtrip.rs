@@ -618,7 +618,7 @@ fn mix_schema_versions(rule: &mut dto::ReplicationRule, choice: u8) -> Replicati
                 ReplicationRejection::DeleteMarkerReplicationMissingWithFilter
             }
         }
-    } else if choice % 2 == 0 {
+    } else if choice.is_multiple_of(2) {
         rule.priority = Some(1);
         ReplicationRejection::PriorityOnLegacyRule
     } else {

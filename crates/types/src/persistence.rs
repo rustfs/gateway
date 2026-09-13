@@ -191,8 +191,13 @@ impl fmt::Debug for RedactedKeyId<'_> {
 
 /// `Debug` for one [`EncryptionRuleBehavior`] tuple with its KMS key id redacted by
 /// [`RedactedKeyId`]; every other decision renders exactly as the tuple's own `Debug` would.
+///
+/// Its only caller is `crate::compat`, so it is compiled under the same features: ungated it is
+/// dead code in every build without them, which `-D warnings` refuses.
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
 pub(crate) struct RedactedEncryptionRuleBehavior<'a>(pub(crate) &'a EncryptionRuleBehavior);
 
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
 impl fmt::Debug for RedactedEncryptionRuleBehavior<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (algorithm, key_id, bucket_key_enabled, blocked) = self.0;

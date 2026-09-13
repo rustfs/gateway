@@ -23,9 +23,11 @@
 
 #[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
 use crate::compat::S3sBucketEncryptionObservation;
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
+use crate::persistence::{PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule};
 use crate::persistence::{
-    PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedEncryptionByDefault,
-    PersistedEncryptionConfiguration, PersistedReplicationConfiguration, parse_bucket_encryption, parse_replication,
+    PersistedEncryptionByDefault, PersistedEncryptionConfiguration, PersistedReplicationConfiguration, parse_bucket_encryption,
+    parse_replication,
 };
 
 /// Spelled so that no other part of any rendering can contain it by accident.
