@@ -46,6 +46,7 @@ mod object_lock;
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod operation_diff;
+mod oracle_admission;
 mod provenance;
 mod public_access_block;
 mod replication;
@@ -79,6 +80,10 @@ pub use lifecycle::assert_lifecycle_four_way;
 pub use logging::assert_bucket_logging_four_way;
 pub use notification::assert_notification_four_way;
 pub use object_lock::assert_object_lock_four_way;
+pub use oracle_admission::{
+    OldReading, OracleAdmissionError, OracleAdmissionReport, OracleDivergence, OracleFinding, OracleObservation,
+    build_oracle_admission, require_oracle_admission,
+};
 pub use provenance::{
     PersistenceSource, PersistenceSourceError, PersistenceSourceReport, SourceReport, build_persistence_source_report,
     require_persistence_sources,

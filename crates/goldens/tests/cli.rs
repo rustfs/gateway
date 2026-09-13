@@ -78,19 +78,49 @@ fn corpus_report_lists_every_approved_source_and_historical_writer() {
     assert!(!text.contains("approved persisted-metadata source absent"), "{text}");
 }
 
-/// Every source is present and no case is blocked, so strict closure exits zero and prints the
-/// fully passed census on standard output.
+/// Every source is present and no P9-01 case is blocked, but strict closure also requires admission
+/// under every pinned s3s revision, and rustfs/gateway#740 holds it under the rollback and the
+/// candidate revision. The process exits nonzero, names both, and prints nothing on standard output.
 #[test]
-fn strict_closure_succeeds_on_the_real_evidence() {
+fn strict_closure_is_held_by_the_open_oracle_finding() {
     let output = Command::new(env!("CARGO_BIN_EXE_corpus-report"))
         .arg("--require-closure")
         .output()
         .expect("run strict closure");
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    let diagnostic = String::from_utf8(output.stderr).expect("UTF-8 diagnostic");
+    assert_eq!(
+        diagnostic,
+        "migration closure failed: oracle admission held by 2 open findings: \
+         rollback s3s@bdcb6259 bucket-encryption-blocked-encryption-types (https://github.com/rustfs/gateway/issues/740) \
+         candidate s3s@f3e17541 bucket-encryption-blocked-encryption-types (https://github.com/rustfs/gateway/issues/740)\n"
+    );
+}
+
+/// The ordinary report shows every revision's D1-D5 and refusal evidence without failing on the
+/// open finding, exactly as it shows blocked census rows.
+#[test]
+fn ordinary_report_shows_evidence_per_oracle_revision() {
+    let output = Command::new(env!("CARGO_BIN_EXE_corpus-report"))
+        .output()
+        .expect("run corpus report");
     assert_eq!(output.status.code(), Some(0), "{output:?}");
-    assert!(output.stderr.is_empty(), "{output:?}");
-    let census = String::from_utf8(output.stdout).expect("UTF-8 census");
-    assert!(census.starts_with("P9-01 acceptance census: passed=39 blocked=0 total=39\n"), "{census}");
-    assert!(!census.contains("blocked issue="), "{census}");
+    let text = String::from_utf8(output.stdout).expect("UTF-8 report");
+    assert!(text.contains("P9-01 acceptance census: passed=39 blocked=0 total=39\n"), "{text}");
+    assert!(text.contains("oracle admission: revisions=3 open-findings=2\n"), "{text}");
+    for (oracle, moved) in [
+        ("baseline s3s@9c4690d8", 0),
+        ("rollback s3s@bdcb6259", 1),
+        ("candidate s3s@f3e17541", 1),
+    ] {
+        let line = text
+            .lines()
+            .find(|line| line.starts_with(&format!("oracle {oracle} build=")))
+            .unwrap_or_else(|| panic!("missing {oracle} in {text}"));
+        assert!(line.contains(" families=13 "), "{line}");
+        assert!(line.ends_with(&format!(" moved-refusals={moved}")), "{line}");
+    }
 }
 
 #[test]

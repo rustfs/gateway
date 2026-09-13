@@ -37,6 +37,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::sync::{Mutex, PoisonError};
 
+use super::s3s;
 use bytes::Bytes;
 use rustfs_gateway_stream::{ByteStream, PayloadRead, PayloadStream};
 use s3s::dto as oracle;

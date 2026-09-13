@@ -16,31 +16,22 @@
 //!
 //! Responsible for: translating pinned-s3s Lifecycle XML observations into owned persistence
 //! structures and decisions. NOT responsible for: production parsing, policy validation, or golden
-//! assertions. Upstream: pinned s3s revision `9c4690d8`. Downstream: the compat facade.
+//! assertions. Upstream: the s3s revision bound by the enclosing oracle instance. Downstream: the compat facade.
 
+use super::s3s::dto::{
+    AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, DelMarkerExpiration, ExpirationStatus, LifecycleExpiration,
+    LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter, NoncurrentVersionExpiration, NoncurrentVersionTransition, Tag,
+    Timestamp, TimestampFormat, Transition, TransitionStorageClass,
+};
+use super::s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::persistence::{
     PersistedAbortIncompleteMultipartUpload, PersistedDelMarkerExpiration, PersistedLifecycleAnd,
     PersistedLifecycleConfiguration, PersistedLifecycleExpiration, PersistedLifecycleFilter, PersistedLifecycleRule,
     PersistedLifecycleTag, PersistedNoncurrentVersionExpiration, PersistedNoncurrentVersionTransition, PersistedTransition,
 };
 use rustfs_gateway_xml::XmlWriter;
-use s3s::dto::{
-    AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, DelMarkerExpiration, ExpirationStatus, LifecycleExpiration,
-    LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter, NoncurrentVersionExpiration, NoncurrentVersionTransition, Tag,
-    Timestamp, TimestampFormat, Transition, TransitionStorageClass,
-};
-use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::CompatCodecError;
-
-/// One old-codec Lifecycle observation before either side is normalized.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct S3sLifecycleObservation {
-    /// Complete parsed persistence structure.
-    pub structure: PersistedLifecycleConfiguration,
-    /// Enabled decisions computed directly from the pinned old rule statuses.
-    pub rule_enabled: Vec<bool>,
-}
+use crate::compat::{CompatCodecError, S3sLifecycleObservation};
 
 /// Parses Lifecycle bytes with the pinned s3s persistence decoder.
 ///
@@ -48,7 +39,7 @@ pub struct S3sLifecycleObservation {
 ///
 /// Returns [`CompatCodecError`] when s3s rejects the document, a timestamp cannot be rendered,
 /// or trailing input remains.
-pub fn parse_s3s_lifecycle(input: &[u8]) -> Result<S3sLifecycleObservation, CompatCodecError> {
+pub(crate) fn parse_s3s_lifecycle(input: &[u8]) -> Result<S3sLifecycleObservation, CompatCodecError> {
     let mut deserializer = Deserializer::new(input);
     let value = BucketLifecycleConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
     deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
@@ -68,7 +59,7 @@ pub fn parse_s3s_lifecycle(input: &[u8]) -> Result<S3sLifecycleObservation, Comp
 /// # Errors
 ///
 /// Returns [`CompatCodecError`] when a timestamp is not old-readable or s3s cannot render the value.
-pub fn serialize_s3s_lifecycle(value: &PersistedLifecycleConfiguration) -> Result<Vec<u8>, CompatCodecError> {
+pub(crate) fn serialize_s3s_lifecycle(value: &PersistedLifecycleConfiguration) -> Result<Vec<u8>, CompatCodecError> {
     let old_value = BucketLifecycleConfiguration {
         expiry_updated_at: value.expiry_updated_at.as_deref().map(parse_s3s_timestamp).transpose()?,
         rules: value.rules.iter().map(to_s3s_rule).collect::<Result<_, _>>()?,

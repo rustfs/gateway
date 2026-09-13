@@ -18,37 +18,19 @@
 //! decisions. NOT responsible for: production parsing or HTTP behavior. Upstream: pinned s3s.
 //! Downstream: persistence goldens; deleted with the compat surface by P9-09.
 
-use s3s::dto::{AccelerateConfiguration, BucketAccelerateStatus, Payer, RequestPaymentConfiguration};
-use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
+use super::s3s::dto::{AccelerateConfiguration, BucketAccelerateStatus, Payer, RequestPaymentConfiguration};
+use super::s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::persistence::{PersistedAccelerateConfiguration, PersistedRequestPaymentConfiguration};
 
-use super::CompatCodecError;
-
-/// One old-codec Accelerate observation before normalization.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct S3sAccelerateObservation {
-    /// Complete parsed persistence structure.
-    pub structure: PersistedAccelerateConfiguration,
-    /// Whether pinned old behavior enables acceleration.
-    pub enabled: bool,
-}
-
-/// One old-codec Request Payment observation before normalization.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct S3sRequestPaymentObservation {
-    /// Complete parsed persistence structure.
-    pub structure: PersistedRequestPaymentConfiguration,
-    /// Whether pinned old behavior enables requester pays.
-    pub requester_pays: bool,
-}
+use crate::compat::{CompatCodecError, S3sAccelerateObservation, S3sRequestPaymentObservation};
 
 /// Parses Accelerate bytes with the pinned old persistence decoder.
 ///
 /// # Errors
 ///
 /// Returns [`CompatCodecError`] when the old decoder rejects the document or trailing bytes.
-pub fn parse_s3s_accelerate(input: &[u8]) -> Result<S3sAccelerateObservation, CompatCodecError> {
+pub(crate) fn parse_s3s_accelerate(input: &[u8]) -> Result<S3sAccelerateObservation, CompatCodecError> {
     let mut deserializer = Deserializer::new(input);
     let value = AccelerateConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
     deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
@@ -64,7 +46,7 @@ pub fn parse_s3s_accelerate(input: &[u8]) -> Result<S3sAccelerateObservation, Co
 /// # Errors
 ///
 /// Returns [`CompatCodecError`] when the old encoder refuses the value.
-pub fn serialize_s3s_accelerate(value: &PersistedAccelerateConfiguration) -> Result<Vec<u8>, CompatCodecError> {
+pub(crate) fn serialize_s3s_accelerate(value: &PersistedAccelerateConfiguration) -> Result<Vec<u8>, CompatCodecError> {
     let old_value = AccelerateConfiguration {
         status: value.status.clone().map(BucketAccelerateStatus::from),
     };
@@ -76,7 +58,7 @@ pub fn serialize_s3s_accelerate(value: &PersistedAccelerateConfiguration) -> Res
 /// # Errors
 ///
 /// Returns [`CompatCodecError`] when the old decoder rejects the document or trailing bytes.
-pub fn parse_s3s_request_payment(input: &[u8]) -> Result<S3sRequestPaymentObservation, CompatCodecError> {
+pub(crate) fn parse_s3s_request_payment(input: &[u8]) -> Result<S3sRequestPaymentObservation, CompatCodecError> {
     let mut deserializer = Deserializer::new(input);
     let value = RequestPaymentConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
     deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
@@ -92,7 +74,7 @@ pub fn parse_s3s_request_payment(input: &[u8]) -> Result<S3sRequestPaymentObserv
 /// # Errors
 ///
 /// Returns [`CompatCodecError`] when the old encoder refuses the value.
-pub fn serialize_s3s_request_payment(value: &PersistedRequestPaymentConfiguration) -> Result<Vec<u8>, CompatCodecError> {
+pub(crate) fn serialize_s3s_request_payment(value: &PersistedRequestPaymentConfiguration) -> Result<Vec<u8>, CompatCodecError> {
     let old_value = RequestPaymentConfiguration {
         payer: Payer::from(value.payer.clone()),
     };

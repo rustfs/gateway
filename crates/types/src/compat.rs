@@ -12,56 +12,137 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Temporary adapters to the pinned s3s persistence oracle.
+//! Temporary adapters to the s3s persistence oracles that migration admission is measured against.
 //!
-//! Responsible for: invoking exact old persistence codecs, exposing family-scoped adapters, and the
+//! Responsible for: invoking the exact old persistence codecs of every pinned s3s revision,
+//! selecting which revision answers, exposing family-scoped adapters over owned values, and the
 //! single-operation DTO conversion in [`put_object`], the only submodule whose API names s3s types.
 //! NOT responsible for: production XML behavior, golden assertions, or wiring any conversion into a
 //! request path.
-//! Upstream: pinned s3s revision `9c4690d8`. Downstream: `rustfs-gateway-goldens`; this module is
-//! deleted by P9-09.
+//! Upstream: the three s3s revisions named by [`OracleRevision`]. Downstream:
+//! `rustfs-gateway-goldens`; this module is deleted by P9-09.
+//!
+//! One adapter source, three compilations: `compat/oracle/*.rs` is compiled once per revision as
+//! the `baseline`, `rollback` and `candidate` modules below, each binding its own `s3s`. The public
+//! functions dispatch on the revision [`with_oracle`] selected for the current thread. The default
+//! is [`OracleRevision::Baseline`], so a caller that never selects one measures exactly what it
+//! measured before the other revisions existed.
 
+use core::cell::Cell;
 use core::fmt;
 
-use crate::cors_tagging::{
-    CorsBehaviorProjection, PersistedCorsConfiguration, PersistedCorsRule, PersistedTag, PersistedTagging,
-};
+use crate::cors_tagging::{CorsBehaviorProjection, PersistedCorsConfiguration, PersistedTagging};
 use crate::persistence::{
-    PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedBucketLoggingStatus,
-    PersistedDefaultRetention, PersistedEncryptionByDefault, PersistedErrorDocument, PersistedGrantee, PersistedIndexDocument,
-    PersistedLoggingEnabled, PersistedLoggingGrant, PersistedObjectLockConfiguration, PersistedObjectLockRule,
-    PersistedPublicAccessBlockConfiguration, PersistedRedirect, PersistedRedirectAllRequestsTo, PersistedRoutingRule,
-    PersistedRoutingRuleCondition, PersistedTargetObjectKeyFormat, PersistedVersioningConfiguration,
-    PersistedWebsiteConfiguration,
+    NotificationBehaviorProjection, PersistedAccelerateConfiguration, PersistedBucketEncryptionConfiguration,
+    PersistedBucketLoggingStatus, PersistedLifecycleConfiguration, PersistedNotificationConfiguration,
+    PersistedObjectLockConfiguration, PersistedPublicAccessBlockConfiguration, PersistedReplicationConfiguration,
+    PersistedRequestPaymentConfiguration, PersistedVersioningConfiguration, PersistedWebsiteConfiguration,
+    ReplicationBehaviorProjection,
 };
-use s3s::dto::{
-    BucketLoggingStatus, BucketLogsPermission, BucketVersioningStatus, CORSConfiguration, CORSRule, Condition, DefaultRetention,
-    ErrorDocument, ExcludedPrefix, Grantee, IndexDocument, LoggingEnabled, MFADelete, ObjectLockConfiguration, ObjectLockEnabled,
-    ObjectLockRetentionMode, ObjectLockRule, PartitionDateSource, PartitionedPrefix, Protocol, PublicAccessBlockConfiguration,
-    Redirect, RedirectAllRequestsTo, RoutingRule, ServerSideEncryption, ServerSideEncryptionByDefault,
-    ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SimplePrefix, Tag, Tagging, TargetGrant, TargetObjectKeyFormat,
-    Type, VersioningConfiguration, WebsiteConfiguration,
-};
-use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 
-mod accelerate_payment;
-mod lifecycle;
-mod notification;
 pub mod put_object;
-mod replication;
 
-/// The pinned oracle crate, re-exported so a harness drives exactly the revision these adapters
-/// were written against. Kernel crates other than this one may not depend on s3s at all
-/// (`scripts/check_ring_boundaries.sh`), so this is the one route a test takes to it.
-pub use s3s;
+/// The baseline oracle crate, re-exported so a harness drives exactly the revision
+/// [`put_object`] converts to. Kernel crates other than this one may not depend on s3s at all
+/// (`scripts/check_ring_boundaries.sh`), so this is the one route a test takes to it. The
+/// persistence adapters do not use it: each compiles against its own revision below.
+pub use ::s3s_baseline as s3s;
 
-pub use accelerate_payment::{
-    S3sAccelerateObservation, S3sRequestPaymentObservation, parse_s3s_accelerate, parse_s3s_request_payment,
-    serialize_s3s_accelerate, serialize_s3s_request_payment,
-};
-pub use lifecycle::{S3sLifecycleObservation, parse_s3s_lifecycle, serialize_s3s_lifecycle};
-pub use notification::{S3sNotificationObservation, parse_s3s_notification, serialize_s3s_notification};
-pub use replication::{S3sReplicationObservation, parse_s3s_replication, serialize_s3s_replication};
+/// One s3s revision that persistence migration is admitted against.
+///
+/// Each variant is the revision a real RustFS build links, read from that build's `Cargo.lock`,
+/// and all three are compiled from the same adapter source. The variant names the role the
+/// revision plays in admission; [`OracleRevision::rustfs_build`] names the build.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum OracleRevision {
+    /// The original P9-01 oracle. Every golden digest and pinned old-refusal boundary in the
+    /// corpus was first measured against it.
+    Baseline,
+    /// The latest RustFS release: the build an operator rolls back to.
+    Rollback,
+    /// RustFS `main`: the production build the gateway migration is a candidate for.
+    Candidate,
+}
+
+impl OracleRevision {
+    /// Every admitted revision, baseline first.
+    pub const ALL: [Self; 3] = [Self::Baseline, Self::Rollback, Self::Candidate];
+
+    /// Stable report label for the role this revision plays in admission.
+    #[must_use]
+    pub const fn role(self) -> &'static str {
+        match self {
+            Self::Baseline => "baseline",
+            Self::Rollback => "rollback",
+            Self::Candidate => "candidate",
+        }
+    }
+
+    /// Git repository the revision is fetched from, exactly as this crate's manifest names it.
+    #[must_use]
+    pub const fn repository(self) -> &'static str {
+        match self {
+            Self::Baseline | Self::Rollback => "https://github.com/rustfs/s3s.git",
+            Self::Candidate => "https://github.com/s3s-project/s3s.git",
+        }
+    }
+
+    /// Full s3s commit, identical to the `rev` this crate's manifest pins for the revision.
+    #[must_use]
+    pub const fn revision(self) -> &'static str {
+        match self {
+            Self::Baseline => "9c4690d8e73fc8d184031a19b2c4539ebc77d180",
+            Self::Rollback => "bdcb6259339c41369f9f1c60e3a42b5ab8da607b",
+            Self::Candidate => "f3e17541f366696bf0cbaf380fcbd8b44c17eba4",
+        }
+    }
+
+    /// The RustFS build whose `Cargo.lock` pins this revision.
+    #[must_use]
+    pub const fn rustfs_build(self) -> &'static str {
+        match self {
+            Self::Baseline => "rustfs/rustfs@436a1be899e90e67d7c4aa81def70d39fe1748d5 (1.0.0-rc.5-preview.2)",
+            Self::Rollback => "rustfs/rustfs@5cd58319ed6148ed7f09f2a4d0b4e46e429f043a (1.0.0-rc.6)",
+            Self::Candidate => "rustfs/rustfs@cc29b03a05e61d0c713266aa12ad6a470ecdf9f9 (main)",
+        }
+    }
+}
+
+impl fmt::Display for OracleRevision {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let short = self.revision().get(..8).unwrap_or(self.revision());
+        write!(formatter, "{} s3s@{short}", self.role())
+    }
+}
+
+thread_local! {
+    static SELECTED: Cell<OracleRevision> = const { Cell::new(OracleRevision::Baseline) };
+}
+
+/// The revision every adapter in this module answers from on the current thread.
+#[must_use]
+pub fn selected_oracle() -> OracleRevision {
+    SELECTED.with(Cell::get)
+}
+
+/// Runs `measure` with every adapter in this module answering from `oracle`, then restores the
+/// previous selection, also when `measure` panics.
+///
+/// The selection belongs to the current thread: work `measure` hands to another thread is
+/// measured against the baseline. Nothing in the golden harness spawns a thread; a harness that
+/// starts to must select the revision on that thread as well.
+pub fn with_oracle<T>(oracle: OracleRevision, measure: impl FnOnce() -> T) -> T {
+    struct Restore(OracleRevision);
+
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SELECTED.with(|selected| selected.set(self.0));
+        }
+    }
+
+    let _restore = Restore(SELECTED.with(|selected| selected.replace(oracle)));
+    measure()
+}
 
 /// One old-codec observation before the golden harness normalizes either side.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -139,17 +220,81 @@ pub struct S3sWebsiteObservation {
     pub behavior: PersistedWebsiteConfiguration,
 }
 
-/// Failure raised by the pinned old persistence codec.
+/// One old-codec Accelerate observation before normalization.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3sAccelerateObservation {
+    /// Complete parsed persistence structure.
+    pub structure: PersistedAccelerateConfiguration,
+    /// Whether pinned old behavior enables acceleration.
+    pub enabled: bool,
+}
+
+/// One old-codec Request Payment observation before normalization.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3sRequestPaymentObservation {
+    /// Complete parsed persistence structure.
+    pub structure: PersistedRequestPaymentConfiguration,
+    /// Whether pinned old behavior enables requester pays.
+    pub requester_pays: bool,
+}
+
+/// One old-codec Lifecycle observation before either side is normalized.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3sLifecycleObservation {
+    /// Complete parsed persistence structure.
+    pub structure: PersistedLifecycleConfiguration,
+    /// Enabled decisions computed directly from the pinned old rule statuses.
+    pub rule_enabled: Vec<bool>,
+}
+
+/// One old-codec Notification observation before normalization.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3sNotificationObservation {
+    /// Complete parsed persistence structure.
+    pub structure: PersistedNotificationConfiguration,
+    /// Complete routing decisions projected directly from the old DTO.
+    pub behavior: NotificationBehaviorProjection,
+}
+
+/// Independent old-codec Replication observation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct S3sReplicationObservation {
+    /// Complete parsed persistence structure.
+    pub structure: PersistedReplicationConfiguration,
+    /// Runtime-relevant rule projection made from the old DTO.
+    pub behavior: ReplicationBehaviorProjection,
+}
+
+/// Failure raised by an old persistence codec, or by projecting what it read.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompatCodecError {
     message: String,
+    unrepresented_member: Option<&'static str>,
 }
 
 impl CompatCodecError {
     fn old_codec(error: impl fmt::Display) -> Self {
         Self {
             message: format!("pinned s3s persistence codec failed: {error}"),
+            unrepresented_member: None,
         }
+    }
+
+    fn unrepresented(member: &'static str) -> Self {
+        Self {
+            message: format!("pinned s3s persistence codec read member {member}, which no persisted structure can carry"),
+            unrepresented_member: Some(member),
+        }
+    }
+
+    /// The member the old codec read but no persisted structure can carry, when that is why the
+    /// adapter failed.
+    ///
+    /// `Some` reports an old *acceptance*: the selected revision read the document. It is never
+    /// an old refusal, and counting it as one would hide the very divergence it names.
+    #[must_use]
+    pub const fn unrepresented_member(&self) -> Option<&'static str> {
+        self.unrepresented_member
     }
 }
 
@@ -161,498 +306,172 @@ impl fmt::Display for CompatCodecError {
 
 impl std::error::Error for CompatCodecError {}
 
-/// Parses Versioning bytes with the pinned s3s persistence decoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
-pub fn parse_s3s_versioning(input: &[u8]) -> Result<S3sVersioningObservation, CompatCodecError> {
-    let mut deserializer = Deserializer::new(input);
-    let value = VersioningConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
-    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
-    let versioning_status = value.status.as_ref().map(|status| status.as_str().to_owned());
-    let mfa_delete = value.mfa_delete.as_ref().map(|status| status.as_str().to_owned());
-    Ok(S3sVersioningObservation {
-        versioning_enabled: value
-            .status
-            .as_ref()
-            .is_some_and(|status| status.as_str() == BucketVersioningStatus::ENABLED),
-        versioning_status: versioning_status.clone(),
-        mfa_delete: mfa_delete.clone(),
-        structure: PersistedVersioningConfiguration {
-            status: versioning_status,
-            mfa_delete,
-            exclude_folders: value.exclude_folders,
-            excluded_prefixes: value
-                .excluded_prefixes
-                .map(|prefixes| prefixes.into_iter().map(|prefix| prefix.prefix).collect()),
-        },
-    })
+/// s3s `9c4690d8`, whose `ServerSideEncryptionRule` has no `BlockedEncryptionTypes` member.
+#[path = "compat/oracle"]
+mod baseline {
+    use ::s3s_baseline as s3s;
+    use s3s::dto::{ServerSideEncryptionByDefault, ServerSideEncryptionRule};
+
+    mod accelerate_payment;
+    mod bucket_configs;
+    mod lifecycle;
+    mod notification;
+    mod replication;
+
+    pub(super) use self::{accelerate_payment::*, bucket_configs::*, lifecycle::*, notification::*, replication::*};
+
+    fn encryption_rule(
+        apply: Option<ServerSideEncryptionByDefault>,
+        bucket_key_enabled: Option<bool>,
+    ) -> ServerSideEncryptionRule {
+        ServerSideEncryptionRule {
+            apply_server_side_encryption_by_default: apply,
+            bucket_key_enabled,
+        }
+    }
+
+    fn unrepresented_encryption_rule_member(_rule: &ServerSideEncryptionRule) -> Option<&'static str> {
+        None
+    }
 }
 
-/// Serializes a Versioning value with the pinned s3s persistence encoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s cannot render the value.
-pub fn serialize_s3s_versioning(value: &PersistedVersioningConfiguration) -> Result<Vec<u8>, CompatCodecError> {
-    #[allow(clippy::needless_update)] // Keep a default tail for the generated old DTO.
-    let old_value = VersioningConfiguration {
-        exclude_folders: value.exclude_folders,
-        excluded_prefixes: value
-            .excluded_prefixes
-            .clone()
-            .map(|prefixes| prefixes.into_iter().map(|prefix| ExcludedPrefix { prefix }).collect()),
-        status: value.status.clone().map(BucketVersioningStatus::from),
-        mfa_delete: value.mfa_delete.clone().map(MFADelete::from),
-        ..VersioningConfiguration::default()
-    };
-    let mut output = Vec::with_capacity(256);
-    let mut serializer = Serializer::new(&mut output);
-    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
-    Ok(output)
+/// s3s `bdcb6259`. Its `ServerSideEncryptionRule` gained `BlockedEncryptionTypes`, which the
+/// persisted Bucket Encryption structure cannot carry.
+#[path = "compat/oracle"]
+#[allow(clippy::duplicate_mod)] // Deliberate: one adapter source is compiled once per pinned revision.
+mod rollback {
+    use ::s3s_rollback as s3s;
+    use s3s::dto::{ServerSideEncryptionByDefault, ServerSideEncryptionRule};
+
+    mod accelerate_payment;
+    mod bucket_configs;
+    mod lifecycle;
+    mod notification;
+    mod replication;
+
+    pub(super) use self::{accelerate_payment::*, bucket_configs::*, lifecycle::*, notification::*, replication::*};
+
+    fn encryption_rule(
+        apply: Option<ServerSideEncryptionByDefault>,
+        bucket_key_enabled: Option<bool>,
+    ) -> ServerSideEncryptionRule {
+        ServerSideEncryptionRule {
+            apply_server_side_encryption_by_default: apply,
+            blocked_encryption_types: None,
+            bucket_key_enabled,
+        }
+    }
+
+    fn unrepresented_encryption_rule_member(rule: &ServerSideEncryptionRule) -> Option<&'static str> {
+        rule.blocked_encryption_types.as_ref().map(|_| "BlockedEncryptionTypes")
+    }
 }
 
-/// Parses Object Lock bytes with the pinned s3s persistence decoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
-pub fn parse_s3s_object_lock(input: &[u8]) -> Result<S3sObjectLockObservation, CompatCodecError> {
-    let mut deserializer = Deserializer::new(input);
-    let value = ObjectLockConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
-    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
-    let object_lock_enabled = value.object_lock_enabled.as_ref().map(|enabled| enabled.as_str().to_owned());
-    Ok(S3sObjectLockObservation {
-        object_lock_enabled: object_lock_enabled.as_deref() == Some(ObjectLockEnabled::ENABLED),
-        structure: PersistedObjectLockConfiguration {
-            object_lock_enabled,
-            rule: value.rule.map(|rule| PersistedObjectLockRule {
-                default_retention: rule.default_retention.map(|retention| PersistedDefaultRetention {
-                    mode: retention.mode.map(|mode| mode.as_str().to_owned()),
-                    days: retention.days,
-                    years: retention.years,
-                }),
-            }),
-        },
-    })
+/// s3s `f3e17541`, with the same `BlockedEncryptionTypes` member as the rollback revision.
+#[path = "compat/oracle"]
+#[allow(clippy::duplicate_mod)] // Deliberate: one adapter source is compiled once per pinned revision.
+mod candidate {
+    use ::s3s_candidate as s3s;
+    use s3s::dto::{ServerSideEncryptionByDefault, ServerSideEncryptionRule};
+
+    mod accelerate_payment;
+    mod bucket_configs;
+    mod lifecycle;
+    mod notification;
+    mod replication;
+
+    pub(super) use self::{accelerate_payment::*, bucket_configs::*, lifecycle::*, notification::*, replication::*};
+
+    fn encryption_rule(
+        apply: Option<ServerSideEncryptionByDefault>,
+        bucket_key_enabled: Option<bool>,
+    ) -> ServerSideEncryptionRule {
+        ServerSideEncryptionRule {
+            apply_server_side_encryption_by_default: apply,
+            blocked_encryption_types: None,
+            bucket_key_enabled,
+        }
+    }
+
+    fn unrepresented_encryption_rule_member(rule: &ServerSideEncryptionRule) -> Option<&'static str> {
+        rule.blocked_encryption_types.as_ref().map(|_| "BlockedEncryptionTypes")
+    }
 }
 
-/// Serializes an Object Lock value with the pinned s3s persistence encoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s cannot render the value.
-pub fn serialize_s3s_object_lock(value: &PersistedObjectLockConfiguration) -> Result<Vec<u8>, CompatCodecError> {
-    #[allow(clippy::needless_update)] // Keep a default tail for the generated old DTO.
-    let old_value = ObjectLockConfiguration {
-        object_lock_enabled: value.object_lock_enabled.clone().map(ObjectLockEnabled::from),
-        rule: value.rule.clone().map(|rule| ObjectLockRule {
-            default_retention: rule.default_retention.map(|retention| DefaultRetention {
-                mode: retention.mode.map(ObjectLockRetentionMode::from),
-                days: retention.days,
-                years: retention.years,
-                ..DefaultRetention::default()
-            }),
-            ..ObjectLockRule::default()
-        }),
-        ..ObjectLockConfiguration::default()
-    };
-    let mut output = Vec::with_capacity(256);
-    let mut serializer = Serializer::new(&mut output);
-    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
-    Ok(output)
+/// Declares each public adapter once and routes it to the selected revision's compilation. The
+/// function names stay literal here so `grep parse_s3s_versioning` still finds the definition.
+macro_rules! dispatch {
+    ($($(#[doc = $doc:literal])+ fn $name:ident($arg:ident: $input:ty) -> $output:ty;)+) => {$(
+        $(#[doc = $doc])+
+        ///
+        /// # Errors
+        ///
+        /// Returns [`CompatCodecError`] when the selected revision refuses the input, or when it
+        /// read a member no persisted structure can carry.
+        pub fn $name($arg: $input) -> Result<$output, CompatCodecError> {
+            match selected_oracle() {
+                OracleRevision::Baseline => baseline::$name($arg),
+                OracleRevision::Rollback => rollback::$name($arg),
+                OracleRevision::Candidate => candidate::$name($arg),
+            }
+        }
+    )+};
 }
 
-/// Parses Bucket Encryption bytes with the pinned s3s persistence decoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
-pub fn parse_s3s_bucket_encryption(input: &[u8]) -> Result<S3sBucketEncryptionObservation, CompatCodecError> {
-    let mut deserializer = Deserializer::new(input);
-    let value = ServerSideEncryptionConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
-    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
-    let behavior = value
-        .rules
-        .iter()
-        .map(|rule| {
-            let default = rule.apply_server_side_encryption_by_default.as_ref();
-            (
-                default.map(|value| value.sse_algorithm.as_str().to_owned()),
-                default.and_then(|value| value.kms_master_key_id.clone()),
-                rule.bucket_key_enabled,
-            )
-        })
-        .collect();
-    let rules = value
-        .rules
-        .into_iter()
-        .map(|rule| PersistedBucketEncryptionRule {
-            apply_server_side_encryption_by_default: rule.apply_server_side_encryption_by_default.map(|default| {
-                PersistedEncryptionByDefault {
-                    sse_algorithm: default.sse_algorithm.as_str().to_owned(),
-                    kms_master_key_id: default.kms_master_key_id,
-                }
-            }),
-            bucket_key_enabled: rule.bucket_key_enabled,
-        })
-        .collect::<Vec<_>>();
-    let structure = PersistedBucketEncryptionConfiguration { rules };
-    Ok(S3sBucketEncryptionObservation { structure, behavior })
+dispatch! {
+    /// Parses Versioning bytes with the selected s3s persistence decoder.
+    fn parse_s3s_versioning(input: &[u8]) -> S3sVersioningObservation;
+    /// Serializes a Versioning value with the selected s3s persistence encoder.
+    fn serialize_s3s_versioning(value: &PersistedVersioningConfiguration) -> Vec<u8>;
+    /// Parses Object Lock bytes with the selected s3s persistence decoder.
+    fn parse_s3s_object_lock(input: &[u8]) -> S3sObjectLockObservation;
+    /// Serializes an Object Lock value with the selected s3s persistence encoder.
+    fn serialize_s3s_object_lock(value: &PersistedObjectLockConfiguration) -> Vec<u8>;
+    /// Parses Bucket Encryption bytes with the selected s3s persistence decoder.
+    fn parse_s3s_bucket_encryption(input: &[u8]) -> S3sBucketEncryptionObservation;
+    /// Serializes a Bucket Encryption value with the selected s3s persistence encoder.
+    fn serialize_s3s_bucket_encryption(value: &PersistedBucketEncryptionConfiguration) -> Vec<u8>;
+    /// Parses CORS bytes with the selected s3s persistence decoder.
+    fn parse_s3s_cors(input: &[u8]) -> S3sCorsObservation;
+    /// Serializes CORS with the selected s3s persistence encoder.
+    fn serialize_s3s_cors(value: &PersistedCorsConfiguration) -> Vec<u8>;
+    /// Parses Public Access Block bytes with the selected s3s persistence decoder.
+    fn parse_s3s_public_access_block(input: &[u8]) -> S3sPublicAccessBlockObservation;
+    /// Serializes a Public Access Block value with the selected s3s persistence encoder.
+    fn serialize_s3s_public_access_block(value: &PersistedPublicAccessBlockConfiguration) -> Vec<u8>;
+    /// Parses Tagging bytes with the selected s3s persistence decoder.
+    fn parse_s3s_tagging(input: &[u8]) -> S3sTaggingObservation;
+    /// Serializes Tagging with the selected s3s persistence encoder.
+    fn serialize_s3s_tagging(value: &PersistedTagging) -> Vec<u8>;
+    /// Parses Bucket Logging bytes with the selected s3s persistence decoder.
+    fn parse_s3s_bucket_logging(input: &[u8]) -> S3sBucketLoggingObservation;
+    /// Serializes a Bucket Logging value with the selected s3s persistence encoder.
+    fn serialize_s3s_bucket_logging(value: &PersistedBucketLoggingStatus) -> Vec<u8>;
+    /// Parses Website bytes with the selected s3s persistence decoder.
+    fn parse_s3s_website(input: &[u8]) -> S3sWebsiteObservation;
+    /// Serializes a Website value with the selected s3s persistence encoder.
+    fn serialize_s3s_website(value: &PersistedWebsiteConfiguration) -> Vec<u8>;
+    /// Parses Accelerate bytes with the selected s3s persistence decoder.
+    fn parse_s3s_accelerate(input: &[u8]) -> S3sAccelerateObservation;
+    /// Serializes an Accelerate value with the selected s3s persistence encoder.
+    fn serialize_s3s_accelerate(value: &PersistedAccelerateConfiguration) -> Vec<u8>;
+    /// Parses Request Payment bytes with the selected s3s persistence decoder.
+    fn parse_s3s_request_payment(input: &[u8]) -> S3sRequestPaymentObservation;
+    /// Serializes a Request Payment value with the selected s3s persistence encoder.
+    fn serialize_s3s_request_payment(value: &PersistedRequestPaymentConfiguration) -> Vec<u8>;
+    /// Parses Lifecycle bytes with the selected s3s persistence decoder.
+    fn parse_s3s_lifecycle(input: &[u8]) -> S3sLifecycleObservation;
+    /// Serializes a Lifecycle value with the selected s3s persistence encoder.
+    fn serialize_s3s_lifecycle(value: &PersistedLifecycleConfiguration) -> Vec<u8>;
+    /// Parses Notification bytes with the selected s3s persistence decoder.
+    fn parse_s3s_notification(input: &[u8]) -> S3sNotificationObservation;
+    /// Serializes a Notification value with the selected s3s persistence encoder.
+    fn serialize_s3s_notification(value: &PersistedNotificationConfiguration) -> Vec<u8>;
+    /// Parses Replication bytes with the selected s3s persistence decoder.
+    fn parse_s3s_replication(input: &[u8]) -> S3sReplicationObservation;
+    /// Serializes a Replication value with the selected s3s persistence encoder.
+    fn serialize_s3s_replication(value: &PersistedReplicationConfiguration) -> Vec<u8>;
 }
 
-/// Serializes a Bucket Encryption value with the pinned s3s persistence encoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s cannot render the value.
-pub fn serialize_s3s_bucket_encryption(value: &PersistedBucketEncryptionConfiguration) -> Result<Vec<u8>, CompatCodecError> {
-    let old_value = ServerSideEncryptionConfiguration {
-        rules: value
-            .rules
-            .iter()
-            .map(|rule| ServerSideEncryptionRule {
-                apply_server_side_encryption_by_default: rule.apply_server_side_encryption_by_default.as_ref().map(|default| {
-                    ServerSideEncryptionByDefault {
-                        kms_master_key_id: default.kms_master_key_id.clone(),
-                        sse_algorithm: ServerSideEncryption::from(default.sse_algorithm.clone()),
-                    }
-                }),
-                bucket_key_enabled: rule.bucket_key_enabled,
-            })
-            .collect(),
-    };
-    let mut output = Vec::with_capacity(256);
-    let mut serializer = Serializer::new(&mut output);
-    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
-    Ok(output)
-}
-
-/// Parses CORS bytes with the pinned s3s persistence decoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
-pub fn parse_s3s_cors(input: &[u8]) -> Result<S3sCorsObservation, CompatCodecError> {
-    let mut deserializer = Deserializer::new(input);
-    let value = CORSConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
-    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
-    let behavior = value
-        .cors_rules
-        .iter()
-        .map(|rule| {
-            (
-                rule.allowed_origins.clone(),
-                rule.allowed_methods.clone(),
-                rule.allowed_headers.clone(),
-                rule.expose_headers.clone(),
-                rule.max_age_seconds,
-            )
-        })
-        .collect();
-    let structure = PersistedCorsConfiguration {
-        cors_rules: value
-            .cors_rules
-            .into_iter()
-            .map(|rule| PersistedCorsRule {
-                allowed_headers: rule.allowed_headers,
-                allowed_methods: rule.allowed_methods,
-                allowed_origins: rule.allowed_origins,
-                expose_headers: rule.expose_headers,
-                id: rule.id,
-                max_age_seconds: rule.max_age_seconds,
-            })
-            .collect(),
-    };
-    Ok(S3sCorsObservation { structure, behavior })
-}
-
-/// Serializes CORS with the pinned s3s persistence encoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s cannot render the value.
-pub fn serialize_s3s_cors(value: &PersistedCorsConfiguration) -> Result<Vec<u8>, CompatCodecError> {
-    #[allow(clippy::needless_update)] // Keep a default tail for the generated old DTO.
-    let old_value = CORSConfiguration {
-        cors_rules: value
-            .cors_rules
-            .clone()
-            .into_iter()
-            .map(|rule| CORSRule {
-                allowed_headers: rule.allowed_headers,
-                allowed_methods: rule.allowed_methods,
-                allowed_origins: rule.allowed_origins,
-                expose_headers: rule.expose_headers,
-                id: rule.id,
-                max_age_seconds: rule.max_age_seconds,
-                ..CORSRule::default()
-            })
-            .collect(),
-        ..CORSConfiguration::default()
-    };
-    let mut output = Vec::with_capacity(512);
-    let mut serializer = Serializer::new(&mut output);
-    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
-    Ok(output)
-}
-
-/// Parses Public Access Block bytes with the pinned s3s persistence decoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
-pub fn parse_s3s_public_access_block(input: &[u8]) -> Result<S3sPublicAccessBlockObservation, CompatCodecError> {
-    let mut deserializer = Deserializer::new(input);
-    let value = PublicAccessBlockConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
-    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
-    let behavior = (
-        value.block_public_acls.unwrap_or(false),
-        value.ignore_public_acls.unwrap_or(false),
-        value.block_public_policy.unwrap_or(false),
-        value.restrict_public_buckets.unwrap_or(false),
-    );
-    let structure = PersistedPublicAccessBlockConfiguration {
-        block_public_acls: value.block_public_acls,
-        ignore_public_acls: value.ignore_public_acls,
-        block_public_policy: value.block_public_policy,
-        restrict_public_buckets: value.restrict_public_buckets,
-    };
-    Ok(S3sPublicAccessBlockObservation { structure, behavior })
-}
-
-/// Serializes a Public Access Block value with the pinned s3s persistence encoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s cannot render the value.
-pub fn serialize_s3s_public_access_block(value: &PersistedPublicAccessBlockConfiguration) -> Result<Vec<u8>, CompatCodecError> {
-    let old_value = PublicAccessBlockConfiguration {
-        block_public_acls: value.block_public_acls,
-        ignore_public_acls: value.ignore_public_acls,
-        block_public_policy: value.block_public_policy,
-        restrict_public_buckets: value.restrict_public_buckets,
-    };
-    let mut output = Vec::with_capacity(256);
-    let mut serializer = Serializer::new(&mut output);
-    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
-    Ok(output)
-}
-
-/// Parses Tagging bytes with the pinned s3s persistence decoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
-pub fn parse_s3s_tagging(input: &[u8]) -> Result<S3sTaggingObservation, CompatCodecError> {
-    let mut deserializer = Deserializer::new(input);
-    let value = Tagging::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
-    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
-    let tags = value.tag_set.iter().map(|tag| (tag.key.clone(), tag.value.clone())).collect();
-    let structure = PersistedTagging {
-        tag_set: value
-            .tag_set
-            .into_iter()
-            .map(|tag| PersistedTag {
-                key: tag.key,
-                value: tag.value,
-            })
-            .collect(),
-    };
-    Ok(S3sTaggingObservation { structure, tags })
-}
-
-/// Serializes Tagging with the pinned s3s persistence encoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s cannot render the value.
-pub fn serialize_s3s_tagging(value: &PersistedTagging) -> Result<Vec<u8>, CompatCodecError> {
-    #[allow(clippy::needless_update)] // Keep a default tail for the generated old DTO.
-    let old_value = Tagging {
-        tag_set: value
-            .tag_set
-            .clone()
-            .into_iter()
-            .map(|tag| Tag {
-                key: tag.key,
-                value: tag.value,
-                ..Tag::default()
-            })
-            .collect(),
-        ..Tagging::default()
-    };
-    let mut output = Vec::with_capacity(512);
-    let mut serializer = Serializer::new(&mut output);
-    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
-    Ok(output)
-}
-
-/// Parses Bucket Logging bytes with the pinned s3s persistence decoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
-pub fn parse_s3s_bucket_logging(input: &[u8]) -> Result<S3sBucketLoggingObservation, CompatCodecError> {
-    let mut deserializer = Deserializer::new(input);
-    let value = BucketLoggingStatus::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
-    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
-    let logging_enabled = value.logging_enabled.map(|logging| PersistedLoggingEnabled {
-        target_bucket: logging.target_bucket,
-        target_grants: logging.target_grants.map(|grants| {
-            grants
-                .into_iter()
-                .map(|grant| PersistedLoggingGrant {
-                    grantee: grant.grantee.map(|grantee| PersistedGrantee {
-                        display_name: grantee.display_name,
-                        email_address: grantee.email_address,
-                        id: grantee.id,
-                        grantee_type: grantee.type_.as_str().to_owned(),
-                        uri: grantee.uri,
-                    }),
-                    permission: grant.permission.map(|value| value.as_str().to_owned()),
-                })
-                .collect()
-        }),
-        target_object_key_format: logging.target_object_key_format.map(|format| PersistedTargetObjectKeyFormat {
-            partition_date_source: format
-                .partitioned_prefix
-                .map(|partitioned| partitioned.partition_date_source.map(|value| value.as_str().to_owned())),
-            simple_prefix: format.simple_prefix.is_some(),
-        }),
-        target_prefix: logging.target_prefix,
-    });
-    Ok(S3sBucketLoggingObservation {
-        structure: PersistedBucketLoggingStatus {
-            logging_enabled: logging_enabled.clone(),
-        },
-        behavior: logging_enabled,
-    })
-}
-
-/// Parses Website bytes with the pinned s3s persistence decoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
-pub fn parse_s3s_website(input: &[u8]) -> Result<S3sWebsiteObservation, CompatCodecError> {
-    let mut deserializer = Deserializer::new(input);
-    let value = WebsiteConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
-    deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
-    let structure = PersistedWebsiteConfiguration {
-        error_document: value
-            .error_document
-            .map(|document| PersistedErrorDocument { key: document.key }),
-        index_document: value
-            .index_document
-            .map(|document| PersistedIndexDocument { suffix: document.suffix }),
-        redirect_all_requests_to: value.redirect_all_requests_to.map(|redirect| PersistedRedirectAllRequestsTo {
-            host_name: redirect.host_name,
-            protocol: redirect.protocol.map(|value| value.as_str().to_owned()),
-        }),
-        routing_rules: value.routing_rules.map(|rules| {
-            rules
-                .into_iter()
-                .map(|rule| PersistedRoutingRule {
-                    condition: rule.condition.map(|condition| PersistedRoutingRuleCondition {
-                        http_error_code_returned_equals: condition.http_error_code_returned_equals,
-                        key_prefix_equals: condition.key_prefix_equals,
-                    }),
-                    redirect: PersistedRedirect {
-                        host_name: rule.redirect.host_name,
-                        http_redirect_code: rule.redirect.http_redirect_code,
-                        protocol: rule.redirect.protocol.map(|value| value.as_str().to_owned()),
-                        replace_key_prefix_with: rule.redirect.replace_key_prefix_with,
-                        replace_key_with: rule.redirect.replace_key_with,
-                    },
-                })
-                .collect()
-        }),
-    };
-    Ok(S3sWebsiteObservation {
-        structure: structure.clone(),
-        behavior: structure,
-    })
-}
-
-/// Serializes a Bucket Logging value with the pinned s3s persistence encoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s cannot render the value.
-pub fn serialize_s3s_bucket_logging(value: &PersistedBucketLoggingStatus) -> Result<Vec<u8>, CompatCodecError> {
-    let old_value = BucketLoggingStatus {
-        logging_enabled: value.logging_enabled.as_ref().map(|logging| LoggingEnabled {
-            target_bucket: logging.target_bucket.clone(),
-            target_grants: logging.target_grants.as_ref().map(|grants| {
-                grants
-                    .iter()
-                    .map(|grant| TargetGrant {
-                        grantee: grant.grantee.as_ref().map(|grantee| Grantee {
-                            display_name: grantee.display_name.clone(),
-                            email_address: grantee.email_address.clone(),
-                            id: grantee.id.clone(),
-                            type_: Type::from(grantee.grantee_type.clone()),
-                            uri: grantee.uri.clone(),
-                        }),
-                        permission: grant.permission.clone().map(BucketLogsPermission::from),
-                    })
-                    .collect()
-            }),
-            target_object_key_format: logging.target_object_key_format.as_ref().map(|format| TargetObjectKeyFormat {
-                partitioned_prefix: format.partition_date_source.as_ref().map(|source| PartitionedPrefix {
-                    partition_date_source: source.clone().map(PartitionDateSource::from),
-                }),
-                simple_prefix: format.simple_prefix.then(SimplePrefix::default),
-            }),
-            target_prefix: logging.target_prefix.clone(),
-        }),
-    };
-    let mut output = Vec::with_capacity(512);
-    let mut serializer = Serializer::new(&mut output);
-    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
-    Ok(output)
-}
-
-/// Serializes a Website value with the pinned s3s persistence encoder.
-///
-/// # Errors
-///
-/// Returns [`CompatCodecError`] when s3s cannot render the value.
-pub fn serialize_s3s_website(value: &PersistedWebsiteConfiguration) -> Result<Vec<u8>, CompatCodecError> {
-    let old_value = WebsiteConfiguration {
-        error_document: value.error_document.as_ref().map(|document| ErrorDocument {
-            key: document.key.clone(),
-        }),
-        index_document: value.index_document.as_ref().map(|document| IndexDocument {
-            suffix: document.suffix.clone(),
-        }),
-        redirect_all_requests_to: value.redirect_all_requests_to.as_ref().map(|redirect| RedirectAllRequestsTo {
-            host_name: redirect.host_name.clone(),
-            protocol: redirect.protocol.clone().map(Protocol::from),
-        }),
-        routing_rules: value.routing_rules.as_ref().map(|rules| {
-            rules
-                .iter()
-                .map(|rule| RoutingRule {
-                    condition: rule.condition.as_ref().map(|condition| Condition {
-                        http_error_code_returned_equals: condition.http_error_code_returned_equals.clone(),
-                        key_prefix_equals: condition.key_prefix_equals.clone(),
-                    }),
-                    redirect: Redirect {
-                        host_name: rule.redirect.host_name.clone(),
-                        http_redirect_code: rule.redirect.http_redirect_code.clone(),
-                        protocol: rule.redirect.protocol.clone().map(Protocol::from),
-                        replace_key_prefix_with: rule.redirect.replace_key_prefix_with.clone(),
-                        replace_key_with: rule.redirect.replace_key_with.clone(),
-                    },
-                })
-                .collect()
-        }),
-    };
-    let mut output = Vec::with_capacity(512);
-    let mut serializer = Serializer::new(&mut output);
-    old_value.serialize(&mut serializer).map_err(CompatCodecError::old_codec)?;
-    Ok(output)
-}
+#[cfg(test)]
+mod tests;

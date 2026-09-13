@@ -1983,7 +1983,9 @@ dependencies = [
  "proptest",
  "rustfs-gateway-stream",
  "rustfs-gateway-xml",
- "s3s",
+ "s3s 0.15.0 (git+https://github.com/rustfs/s3s.git?rev=9c4690d8e73fc8d184031a19b2c4539ebc77d180)",
+ "s3s 0.15.0 (git+https://github.com/rustfs/s3s.git?rev=bdcb6259339c41369f9f1c60e3a42b5ab8da607b)",
+ "s3s 0.15.0 (git+https://github.com/s3s-project/s3s.git?rev=f3e17541f366696bf0cbaf380fcbd8b44c17eba4)",
  "serde_json",
  "sha1",
  "sha2",
@@ -2112,8 +2114,8 @@ dependencies = [
  "pin-project-lite",
  "quick-xml 0.42.0",
  "regex",
- "s3s-sigv2",
- "s3s-sigv4",
+ "s3s-sigv2 0.16.0-alpha.1 (git+https://github.com/rustfs/s3s.git?rev=9c4690d8e73fc8d184031a19b2c4539ebc77d180)",
+ "s3s-sigv4 0.16.0-alpha.1 (git+https://github.com/rustfs/s3s.git?rev=9c4690d8e73fc8d184031a19b2c4539ebc77d180)",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -2136,11 +2138,171 @@ dependencies = [
 ]
 
 [[package]]
+name = "s3s"
+version = "0.15.0"
+source = "git+https://github.com/rustfs/s3s.git?rev=bdcb6259339c41369f9f1c60e3a42b5ab8da607b#bdcb6259339c41369f9f1c60e3a42b5ab8da607b"
+dependencies = [
+ "arc-swap",
+ "arrayvec",
+ "async-trait",
+ "atoi",
+ "base64-simd",
+ "bytes",
+ "bytestring",
+ "cfg-if",
+ "chrono",
+ "crc-fast",
+ "futures",
+ "hex-simd",
+ "hmac",
+ "http",
+ "http-body",
+ "http-body-util",
+ "httparse",
+ "hyper",
+ "itoa",
+ "jiff",
+ "md-5",
+ "memchr",
+ "mime",
+ "nom 8.0.0",
+ "numeric_cast",
+ "phf",
+ "pin-project-lite",
+ "quick-xml 0.42.0",
+ "regex",
+ "s3s-rfc2047 0.16.0-alpha.1 (git+https://github.com/rustfs/s3s.git?rev=bdcb6259339c41369f9f1c60e3a42b5ab8da607b)",
+ "s3s-sigv2 0.16.0-alpha.1 (git+https://github.com/rustfs/s3s.git?rev=bdcb6259339c41369f9f1c60e3a42b5ab8da607b)",
+ "s3s-sigv4 0.16.0-alpha.1 (git+https://github.com/rustfs/s3s.git?rev=bdcb6259339c41369f9f1c60e3a42b5ab8da607b)",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sha1",
+ "sha2",
+ "smallvec",
+ "std-next",
+ "subtle",
+ "sync_wrapper",
+ "thiserror",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "transform-stream",
+ "url",
+ "urlencoding",
+ "xxhash-rust",
+ "zeroize",
+]
+
+[[package]]
+name = "s3s"
+version = "0.15.0"
+source = "git+https://github.com/s3s-project/s3s.git?rev=f3e17541f366696bf0cbaf380fcbd8b44c17eba4#f3e17541f366696bf0cbaf380fcbd8b44c17eba4"
+dependencies = [
+ "arc-swap",
+ "arrayvec",
+ "async-trait",
+ "atoi",
+ "base64-simd",
+ "bytes",
+ "bytestring",
+ "cfg-if",
+ "chrono",
+ "crc-fast",
+ "futures",
+ "hex-simd",
+ "hmac",
+ "http",
+ "http-body",
+ "http-body-util",
+ "httparse",
+ "hyper",
+ "itoa",
+ "jiff",
+ "md-5",
+ "memchr",
+ "mime",
+ "nom 8.0.0",
+ "numeric_cast",
+ "phf",
+ "pin-project-lite",
+ "quick-xml 0.42.0",
+ "regex",
+ "s3s-rfc2047 0.16.0-alpha.1 (git+https://github.com/s3s-project/s3s.git?rev=f3e17541f366696bf0cbaf380fcbd8b44c17eba4)",
+ "s3s-sigv2 0.16.0-alpha.1 (git+https://github.com/s3s-project/s3s.git?rev=f3e17541f366696bf0cbaf380fcbd8b44c17eba4)",
+ "s3s-sigv4 0.16.0-alpha.1 (git+https://github.com/s3s-project/s3s.git?rev=f3e17541f366696bf0cbaf380fcbd8b44c17eba4)",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sha1",
+ "sha2",
+ "smallvec",
+ "std-next",
+ "subtle",
+ "sync_wrapper",
+ "thiserror",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+ "transform-stream",
+ "url",
+ "urlencoding",
+ "xxhash-rust",
+ "zeroize",
+]
+
+[[package]]
+name = "s3s-rfc2047"
+version = "0.16.0-alpha.1"
+source = "git+https://github.com/rustfs/s3s.git?rev=bdcb6259339c41369f9f1c60e3a42b5ab8da607b#bdcb6259339c41369f9f1c60e3a42b5ab8da607b"
+dependencies = [
+ "base64-simd",
+ "thiserror",
+]
+
+[[package]]
+name = "s3s-rfc2047"
+version = "0.16.0-alpha.1"
+source = "git+https://github.com/s3s-project/s3s.git?rev=f3e17541f366696bf0cbaf380fcbd8b44c17eba4#f3e17541f366696bf0cbaf380fcbd8b44c17eba4"
+dependencies = [
+ "base64-simd",
+ "thiserror",
+]
+
+[[package]]
 name = "s3s-sigv2"
 version = "0.16.0-alpha.1"
 source = "git+https://github.com/rustfs/s3s.git?rev=9c4690d8e73fc8d184031a19b2c4539ebc77d180#9c4690d8e73fc8d184031a19b2c4539ebc77d180"
 dependencies = [
  "jiff",
+ "thiserror",
+]
+
+[[package]]
+name = "s3s-sigv2"
+version = "0.16.0-alpha.1"
+source = "git+https://github.com/rustfs/s3s.git?rev=bdcb6259339c41369f9f1c60e3a42b5ab8da607b#bdcb6259339c41369f9f1c60e3a42b5ab8da607b"
+dependencies = [
+ "base64-simd",
+ "hmac",
+ "jiff",
+ "sha1",
+ "smallvec",
+ "thiserror",
+]
+
+[[package]]
+name = "s3s-sigv2"
+version = "0.16.0-alpha.1"
+source = "git+https://github.com/s3s-project/s3s.git?rev=f3e17541f366696bf0cbaf380fcbd8b44c17eba4#f3e17541f366696bf0cbaf380fcbd8b44c17eba4"
+dependencies = [
+ "base64-simd",
+ "hmac",
+ "jiff",
+ "sha1",
+ "smallvec",
  "thiserror",
 ]
 
@@ -2157,6 +2319,44 @@ dependencies = [
  "serde",
  "smallvec",
  "thiserror",
+]
+
+[[package]]
+name = "s3s-sigv4"
+version = "0.16.0-alpha.1"
+source = "git+https://github.com/rustfs/s3s.git?rev=bdcb6259339c41369f9f1c60e3a42b5ab8da607b#bdcb6259339c41369f9f1c60e3a42b5ab8da607b"
+dependencies = [
+ "arrayvec",
+ "base64-simd",
+ "hex-simd",
+ "hmac",
+ "jiff",
+ "nom 8.0.0",
+ "serde",
+ "sha2",
+ "smallvec",
+ "std-next",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
+name = "s3s-sigv4"
+version = "0.16.0-alpha.1"
+source = "git+https://github.com/s3s-project/s3s.git?rev=f3e17541f366696bf0cbaf380fcbd8b44c17eba4#f3e17541f366696bf0cbaf380fcbd8b44c17eba4"
+dependencies = [
+ "arrayvec",
+ "base64-simd",
+ "hex-simd",
+ "hmac",
+ "jiff",
+ "nom 8.0.0",
+ "serde",
+ "sha2",
+ "smallvec",
+ "std-next",
+ "thiserror",
+ "zeroize",
 ]
 
 [[package]]
