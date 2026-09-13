@@ -1,9 +1,9 @@
 [case]
 id = "c-lock-0042"
 schema_version = 1
-title = "A legal hold placed on a named version stays on that version after a newer one is written"
+title = "A legal hold placed on an older version by id lands on that version, not on the current one"
 rationale = """
-The legal-hold twin of c-lock-0040. A hold is a per-version legal state, so a newer write must neither inherit it nor erase it: the held version still answers ON and the newer one answers that no hold was ever placed on it."""
+The legal-hold twin of c-lock-0040, in the other order: the newer version is written first, so when the hold names the older version by id the two are different objects. A hold that landed on the current version instead would read back ON for the version nobody held and 404 for the one that was, which on a compliance surface is a hold on the wrong data. The held version answers ON and the current one answers that no hold was ever placed on it."""
 polarity = "positive"
 operation = "GetObjectLegalHold"
 tags = ["object-lock", "versions"]
@@ -50,21 +50,6 @@ connection_after = "open"
 first = { header = "x-amz-version-id" }
 
 [[exchanges]]
-name = "hold-the-first-version-by-id"
-
-[exchanges.request]
-method = "PUT"
-target = "/conf-lock-versions/doc.txt?legal-hold&versionId=${capture.first}"
-headers = { "content-type" = "application/xml", "content-md5" = "oK1+ndJbG6HuGA87LDxznw==" }
-body = { utf8 = '<LegalHold><Status>ON</Status></LegalHold>' }
-sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
-
-[exchanges.expect]
-kind = "response"
-status = 200
-connection_after = "open"
-
-[[exchanges]]
 name = "write-a-newer-version"
 
 [exchanges.request]
@@ -81,6 +66,21 @@ connection_after = "open"
 
 [exchanges.expect.capture]
 second = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "hold-the-first-version-by-id"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock-versions/doc.txt?legal-hold&versionId=${capture.first}"
+headers = { "content-type" = "application/xml", "content-md5" = "oK1+ndJbG6HuGA87LDxznw==" }
+body = { utf8 = '<LegalHold><Status>ON</Status></LegalHold>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
 
 [[exchanges]]
 name = "the-first-version-is-still-held"
