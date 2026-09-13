@@ -15,7 +15,8 @@
 //! Responsible for: the full gate's shared-deadline, stage-ordering, descendant-cleanup, and
 //! stage-attribution controls. NOT responsible for: process-supervisor internals, which
 //! `process/tests.rs` owns. Upstream: `full_gate`. Downstream: real shell children timed by a
-//! scripted clock, so no control depends on how fast a loaded host runs them.
+//! scripted clock, each control in its own test process, so no control depends on how fast a
+//! loaded host runs them or adds a holder to the supervisor lock the process controls queue on.
 
 use std::fs;
 use std::path::PathBuf;
@@ -26,6 +27,29 @@ use std::time::SystemTime;
 use super::*;
 
 const BUDGET: Duration = Duration::from_secs(600);
+const ISOLATED_CONTROL: &str = "GATEWAY_FULL_GATE_CONTROL";
+
+/// Runs a control in its own test process.
+///
+/// The supervisor serialises every batch in a process behind one lock, and the process-supervisor
+/// controls in this binary wait on it under real-time deadlines as short as a second
+/// (rustfs/gateway#455, #497). A child process has a lock of its own, so these controls never
+/// lengthen that queue. The child must report the one control it ran: a filter that matched
+/// nothing would otherwise pass here.
+fn isolated(name: &str, control: impl FnOnce()) {
+    if std::env::var(ISOLATED_CONTROL).as_deref() == Ok(name) {
+        control();
+        return;
+    }
+    let output = Command::new(std::env::current_exe().expect("test executable must be available"))
+        .args([format!("verify::full_gate::tests::{name}"), "--exact".to_owned()])
+        .env(ISOLATED_CONTROL, name)
+        .output()
+        .expect("the isolated control must start");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}{}", String::from_utf8_lossy(&output.stderr));
+    assert!(stdout.contains("test result: ok. 1 passed"), "the isolated control did not run: {stdout}");
+}
 
 struct Fixture(PathBuf);
 
@@ -149,130 +173,145 @@ fn cancelled(run: &GateRun) -> Vec<usize> {
 
 #[test]
 fn every_stage_runs_and_a_stage_starts_all_its_commands_before_awaiting_one() {
-    let fixture = Fixture::new("stages");
-    let clock = ScriptedClock::frozen();
-    let barrier = |own: &str, peer: &str| {
-        format!(
-            "test -f build || exit 1; touch {own}; for _ in $(seq 1 1000); do test -f {peer} && exit 0; sleep 0.01; done; exit 1"
-        )
-    };
-    let stages = [
-        stage("build", vec![shell("touch build", "build")]),
-        stage(
-            "tests",
-            vec![
-                shell(&barrier("first", "second"), "first"),
-                shell(&barrier("second", "first"), "second"),
-            ],
-        ),
-    ];
+    isolated("every_stage_runs_and_a_stage_starts_all_its_commands_before_awaiting_one", || {
+        let fixture = Fixture::new("stages");
+        let clock = ScriptedClock::frozen();
+        let barrier = |own: &str, peer: &str| {
+            format!(
+                "test -f build || exit 1; touch {own}; for _ in $(seq 1 1000); do test -f {peer} && exit 0; sleep 0.01; done; exit 1"
+            )
+        };
+        let stages = [
+            stage("build", vec![shell("touch build", "build")]),
+            stage(
+                "tests",
+                vec![
+                    shell(&barrier("first", "second"), "first"),
+                    shell(&barrier("second", "first"), "second"),
+                ],
+            ),
+        ];
 
-    let run = run_stages(&stages, &fixture.0, BUDGET, &|| clock.now());
+        let run = run_stages(&stages, &fixture.0, BUDGET, &|| clock.now());
 
-    assert!(
-        succeeded(&run.batch) && run.batch.results.len() == 2,
-        "the second stage's commands did not both run to success"
-    );
-    assert_eq!(run.stage, 1, "the gate stopped before its last stage");
-    assert_eq!(run.finished, [Duration::ZERO], "the finished build was not measured by the gate's clock");
-    assert_eq!(run.elapsed, Duration::ZERO, "the gate was not measured by its clock");
+        assert!(
+            succeeded(&run.batch) && run.batch.results.len() == 2,
+            "the second stage's commands did not both run to success"
+        );
+        assert_eq!(run.stage, 1, "the gate stopped before its last stage");
+        assert_eq!(run.finished, [Duration::ZERO], "the finished build was not measured by the gate's clock");
+        assert_eq!(run.elapsed, Duration::ZERO, "the gate was not measured by its clock");
+    });
 }
 
 #[test]
 fn an_expired_gate_starts_no_stage() {
-    let fixture = Fixture::new("expired");
-    let clock = ScriptedClock::ahead_of_the_real_clock();
-    let stages = [
-        stage("build", vec![shell("touch build", "build")]),
-        stage("tests", vec![shell("touch tests", "tests")]),
-    ];
+    isolated("an_expired_gate_starts_no_stage", || {
+        let fixture = Fixture::new("expired");
+        let clock = ScriptedClock::ahead_of_the_real_clock();
+        let stages = [
+            stage("build", vec![shell("touch build", "build")]),
+            stage("tests", vec![shell("touch tests", "tests")]),
+        ];
 
-    let run = run_stages(&stages, &fixture.0, Duration::ZERO, &|| clock.now());
+        let run = run_stages(&stages, &fixture.0, Duration::ZERO, &|| clock.now());
 
-    assert!(run.batch.timed_out, "an expired gate was not reported as timed out");
-    assert_eq!(run.stage, 0, "an expired gate blamed a later stage");
-    assert!(run.finished.is_empty(), "an expired gate reported a finished stage");
-    assert!(!fixture.path("build").exists(), "an expired gate started its first stage");
-    assert!(!fixture.path("tests").exists(), "an expired gate started a later stage");
+        assert!(run.batch.timed_out, "an expired gate was not reported as timed out");
+        assert_eq!(run.stage, 0, "an expired gate blamed a later stage");
+        assert!(run.finished.is_empty(), "an expired gate reported a finished stage");
+        // A command that was started is either killed on the supervisor's first poll or has already
+        // succeeded, so an empty cancellation list is what proves nothing was started.
+        assert!(cancelled(&run).is_empty(), "an expired gate started a command and killed it");
+        assert!(!fixture.path("build").exists(), "an expired gate started its first stage");
+        assert!(!fixture.path("tests").exists(), "an expired gate started a later stage");
+    });
 }
 
 #[test]
 fn a_deadline_in_the_first_stage_kills_its_process_group_and_starts_no_later_stage() {
-    let fixture = Fixture::new("first-stage");
-    let clock = ScriptedClock::moved_by(vec![(fixture.path("expire"), BUDGET * 2)]);
-    let stages = [
-        stage("build", vec![shell(&held_descendant("expire"), "build")]),
-        stage("tests", vec![shell("touch tests", "tests")]),
-    ];
+    isolated("a_deadline_in_the_first_stage_kills_its_process_group_and_starts_no_later_stage", || {
+        let fixture = Fixture::new("first-stage");
+        let clock = ScriptedClock::moved_by(vec![(fixture.path("expire"), BUDGET * 2)]);
+        let stages = [
+            stage("build", vec![shell(&held_descendant("expire"), "build")]),
+            stage("tests", vec![shell("touch tests", "tests")]),
+        ];
 
-    let run = run_stages(&stages, &fixture.0, BUDGET, &|| clock.now());
+        let run = run_stages(&stages, &fixture.0, BUDGET, &|| clock.now());
 
-    assert!(run.batch.timed_out, "the build ran on past the gate's deadline");
-    assert_eq!(run.stage, 0, "the deadline was blamed on a stage that never started");
-    assert_eq!(cancelled(&run), [0], "the killed build step was not reported");
-    assert!(run.finished.is_empty(), "a killed stage was reported as finished");
-    assert!(!fixture.path("tests").exists(), "a later stage started after the deadline");
-    assert_descendant_was_killed(&fixture);
+        assert!(run.batch.timed_out, "the build ran on past the gate's deadline");
+        assert_eq!(run.stage, 0, "the deadline was blamed on a stage that never started");
+        assert_eq!(cancelled(&run), [0], "the killed build step was not reported");
+        assert!(run.finished.is_empty(), "a killed stage was reported as finished");
+        assert!(!fixture.path("tests").exists(), "a later stage started after the deadline");
+        assert_descendant_was_killed(&fixture);
+    });
 }
 
 #[test]
 fn a_deadline_in_a_later_stage_kills_that_stage_s_process_group() {
-    let fixture = Fixture::new("later-stage");
-    let clock = ScriptedClock::moved_by(vec![(fixture.path("expire"), BUDGET * 2)]);
-    let stages = [
-        stage("build", vec![shell("touch build", "build")]),
-        stage("tests", vec![shell(&held_descendant("expire"), "tests")]),
-    ];
+    isolated("a_deadline_in_a_later_stage_kills_that_stage_s_process_group", || {
+        let fixture = Fixture::new("later-stage");
+        let clock = ScriptedClock::moved_by(vec![(fixture.path("expire"), BUDGET * 2)]);
+        let stages = [
+            stage("build", vec![shell("touch build", "build")]),
+            stage("tests", vec![shell(&held_descendant("expire"), "tests")]),
+        ];
 
-    let run = run_stages(&stages, &fixture.0, BUDGET, &|| clock.now());
+        let run = run_stages(&stages, &fixture.0, BUDGET, &|| clock.now());
 
-    assert!(run.batch.timed_out, "the later stage ran on past the gate's deadline");
-    assert_eq!(run.stage, 1, "the deadline was blamed on the stage that had finished");
-    assert_eq!(cancelled(&run), [0], "the killed step was not reported against its own stage");
-    assert_eq!(run.finished.len(), 1, "the finished build was not measured");
-    assert_descendant_was_killed(&fixture);
+        assert!(run.batch.timed_out, "the later stage ran on past the gate's deadline");
+        assert_eq!(run.stage, 1, "the deadline was blamed on the stage that had finished");
+        assert_eq!(cancelled(&run), [0], "the killed step was not reported against its own stage");
+        assert_eq!(run.finished.len(), 1, "the finished build was not measured");
+        assert_descendant_was_killed(&fixture);
+    });
 }
 
 #[test]
 fn time_spent_in_an_earlier_stage_is_not_given_back_to_a_later_one() {
-    let fixture = Fixture::new("shared-deadline");
-    let spent = BUDGET - Duration::from_secs(10);
-    let late = BUDGET + Duration::from_secs(10);
-    let clock = ScriptedClock::moved_by(vec![(fixture.path("spent"), spent), (fixture.path("late"), late)]);
-    let stages = [
-        stage("build", vec![shell("touch spent", "build")]),
-        stage("tests", vec![shell(&held_descendant("late"), "tests")]),
-    ];
+    isolated("time_spent_in_an_earlier_stage_is_not_given_back_to_a_later_one", || {
+        let fixture = Fixture::new("shared-deadline");
+        let spent = BUDGET - Duration::from_secs(10);
+        let late = BUDGET + Duration::from_secs(10);
+        let clock = ScriptedClock::moved_by(vec![(fixture.path("spent"), spent), (fixture.path("late"), late)]);
+        let stages = [
+            stage("build", vec![shell("touch spent", "build")]),
+            stage("tests", vec![shell(&held_descendant("late"), "tests")]),
+        ];
 
-    let run = run_stages(&stages, &fixture.0, BUDGET, &|| clock.now());
+        let run = run_stages(&stages, &fixture.0, BUDGET, &|| clock.now());
 
-    // A deadline renewed for the later stage, or extended by what the build took, is still
-    // hundreds of seconds away when the clock reads `late`.
-    assert!(run.batch.timed_out, "the later stage was given back the build's time");
-    assert_eq!(run.stage, 1, "the deadline was blamed on the stage that had finished");
-    assert_eq!(run.finished, [spent], "the build's time is not what the gate's clock measured");
-    assert_eq!(run.elapsed, late, "the gate's time is not what its clock measured when it stopped");
-    assert_descendant_was_killed(&fixture);
+        // A deadline renewed for the later stage, or extended by what the build took, is still
+        // hundreds of seconds away when the clock reads `late`.
+        assert!(run.batch.timed_out, "the later stage was given back the build's time");
+        assert_eq!(run.stage, 1, "the deadline was blamed on the stage that had finished");
+        assert_eq!(run.finished, [spent], "the build's time is not what the gate's clock measured");
+        assert_eq!(run.elapsed, late, "the gate's time is not what its clock measured when it stopped");
+        assert_descendant_was_killed(&fixture);
+    });
 }
 
 #[test]
 fn a_failed_stage_starts_no_later_stage() {
-    let fixture = Fixture::new("failed-stage");
-    let clock = ScriptedClock::frozen();
-    let stages = [
-        stage("build", vec![shell("printf build-error >&2; exit 7", "build")]),
-        stage("tests", vec![shell("touch tests", "tests")]),
-    ];
+    isolated("a_failed_stage_starts_no_later_stage", || {
+        let fixture = Fixture::new("failed-stage");
+        let clock = ScriptedClock::frozen();
+        let stages = [
+            stage("build", vec![shell("printf build-error >&2; exit 7", "build")]),
+            stage("tests", vec![shell("touch tests", "tests")]),
+        ];
 
-    let run = run_stages(&stages, &fixture.0, BUDGET, &|| clock.now());
+        let run = run_stages(&stages, &fixture.0, BUDGET, &|| clock.now());
 
-    assert!(!run.batch.timed_out, "a failed build was reported as a timeout");
-    assert_eq!(run.stage, 0, "the failure was blamed on a stage that never started");
-    assert_eq!(run.batch.results.len(), 1);
-    let output = run.batch.results[0].1.as_ref().expect("the build must have run");
-    assert_eq!(output.status.code(), Some(7));
-    assert_eq!(output.stderr, b"build-error", "the failed build's diagnostics were lost");
-    assert!(!fixture.path("tests").exists(), "a later stage ran after the build failed");
+        assert!(!run.batch.timed_out, "a failed build was reported as a timeout");
+        assert_eq!(run.stage, 0, "the failure was blamed on a stage that never started");
+        assert_eq!(run.batch.results.len(), 1);
+        let output = run.batch.results[0].1.as_ref().expect("the build must have run");
+        assert_eq!(output.status.code(), Some(7));
+        assert_eq!(output.stderr, b"build-error", "the failed build's diagnostics were lost");
+        assert!(!fixture.path("tests").exists(), "a later stage ran after the build failed");
+    });
 }
 
 fn timed_out_run(stage: usize, finished: Vec<Duration>, elapsed: Duration) -> GateRun {
