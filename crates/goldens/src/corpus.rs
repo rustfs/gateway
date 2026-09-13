@@ -220,6 +220,13 @@ impl FamilyCorpusEvidence {
         Ok(())
     }
 
+    /// Every sample as `(bytes, origin, accepted)`, for audits that span both polarities.
+    pub(crate) fn samples(&self) -> impl Iterator<Item = (&[u8], &SampleOrigin, bool)> {
+        self.cases
+            .iter()
+            .map(|case| (case.bytes.as_slice(), &case.origin, case.disposition == CorpusDisposition::Accepted))
+    }
+
     /// Rejected samples as `(bytes, sha256)`, so they can be re-read under another oracle revision.
     pub(crate) fn rejected_samples(&self) -> impl Iterator<Item = (&[u8], &str)> {
         self.cases

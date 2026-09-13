@@ -37,6 +37,7 @@ mod four_way;
 mod historical_writer;
 mod lifecycle;
 mod logging;
+mod migration_inventory;
 mod minio_migration;
 mod notification;
 mod object_lock;
@@ -78,6 +79,9 @@ pub use cors::assert_cors_four_way;
 pub use four_way::{FourWayFamilyReport, FourWayRunError, FourWayRunReport, run_four_way_all, run_four_way_core_shard};
 pub use lifecycle::assert_lifecycle_four_way;
 pub use logging::assert_bucket_logging_four_way;
+pub use migration_inventory::{
+    DoctypeForm, DoctypeWitness, MigrationInventoryError, MigrationInventoryReport, build_migration_inventory,
+};
 pub use notification::assert_notification_four_way;
 pub use object_lock::assert_object_lock_four_way;
 pub use oracle_admission::{

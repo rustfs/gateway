@@ -41,6 +41,21 @@ Strict mode names one reason at a time: while a source is absent it reports
 `ApprovedSourceAbsent`, even if every other row passed; once all sources are present it
 reports `ClosureBlocked` with every remaining blocked case. Status zero requires both to clear.
 
+## Decided refusals
+
+Some persisted bytes are read by every admitted s3s revision and refused by the production
+decoders on purpose. `src/migration_inventory.rs` re-proves each such decision on every run and
+prints it in the report. A decided refusal does not hold closure, but a stale or broken one fails
+the report.
+
+- **`persisted-doctype` (rustfs/gateway#469).** All three revisions skip any document type
+  declaration (internal subset, `SYSTEM`/`PUBLIC`, wrong root name, lowercase). The production
+  decoders refuse each of them with `Xml(DocTypeDeclaration)`, except the inert `<!DOCTYPE Root>`
+  that Accelerate, Request Payment, Notification and Replication already tolerate. No serializer
+  emits a declaration and no writer sample carries one. The one ingress is an operator-supplied
+  bucket-metadata import archive, which RustFS stores verbatim, so such a configuration fails
+  closed after migration until it is put again through the S3 API.
+
 ## Resolving a blocker
 
 Blockers are cleared by evidence, never by editing the verdict:
