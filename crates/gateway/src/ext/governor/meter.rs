@@ -123,6 +123,13 @@ impl Meter {
         }
     }
 
+    /// Transfers the victim's current balance with at least one request's debt.
+    pub(super) fn after_eviction(mut self, rate: Rate, now: MonotonicNow) -> Self {
+        self.refill(rate, now);
+        self.millitokens = self.millitokens.min(rate.capacity().saturating_sub(COST));
+        self
+    }
+
     /// Credits the time since the last reading, up to the capacity.
     ///
     /// Capped, because an idle meter is not a savings account: a bucket nobody touched for a week
