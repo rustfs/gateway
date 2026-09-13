@@ -42,6 +42,13 @@
 //!   same reason. An object that reads back without the metadata it was stored with, and no error,
 //!   is data loss wearing the costume of a successful read.
 //!
+//! The stored representation headers — `Content-Type`, `Content-Encoding`, `Content-Disposition`,
+//! `Content-Language`, `Cache-Control`, and `Expires` — are a second optional section,
+//! `headers/1 <count>`, after the metadata section when both are present, with one
+//! `<header name> <hex value>` line per stored header in a fixed order. The same two properties
+//! hold for it: an object carrying none of them is still the eight-line form, and an older reader
+//! refuses a record that carries some rather than answering it without them (rustfs/gateway#718).
+//!
 //! Every refusal below carries its own sentence rather than one shared "storage failed", because
 //! the point of failing closed is that whoever reads the log can tell a half-written record apart
 //! from one written by a build this one does not understand.
@@ -52,10 +59,33 @@ use std::path::PathBuf;
 use rustfs_gateway::dto::StorageClass;
 use rustfs_gateway::{ErrorCode, HandlerError};
 
+use super::content_headers::{
+    CONTENT_HEADERS_SECTION, ContentHeaders, decode_content_header_entries, encode_content_headers_section,
+    validate_content_headers,
+};
 use super::storage_error;
 
 /// The name and version of the trailing section that carries user metadata.
 const METADATA_SECTION: &str = "meta/1";
+
+/// Everything a write stores beside an object version's bytes.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(super) struct ObjectAttributes {
+    /// The `x-amz-meta-*` map, keyed by the lowercase suffix.
+    pub(super) metadata: BTreeMap<String, String>,
+    /// The standard representation headers.
+    pub(super) headers: ContentHeaders,
+}
+
+/// Refuses attributes this backend will not persist.
+///
+/// # Errors
+///
+/// The refusals of [`validate_user_metadata`] and [`validate_content_headers`].
+pub(super) fn validate_attributes(attributes: &ObjectAttributes) -> Result<(), HandlerError> {
+    validate_user_metadata(&attributes.metadata)?;
+    validate_content_headers(&attributes.headers)
+}
 
 /// The prefix a stored key becomes on the wire, spelled here because it is not reachable.
 ///
@@ -101,6 +131,7 @@ pub(super) struct VersionRecord {
     pub(super) size: i64,
     pub(super) storage_class: StorageClass,
     pub(super) metadata: BTreeMap<String, String>,
+    pub(super) headers: ContentHeaders,
 }
 
 /// Refuses a metadata pair this backend could store but could never hand back.
@@ -182,30 +213,73 @@ pub(super) fn encode_metadata_section(metadata: &BTreeMap<String, String>) -> St
     section
 }
 
-/// Reads the trailing metadata section out of a record's remaining lines.
+/// Renders every trailing section a record or an upload carries, in their fixed order.
 ///
-/// Absence is an empty map — that is the eight-line form. Presence is `meta/1 <count>` and exactly
-/// `count` pair lines, with nothing after them.
+/// An object with neither user metadata nor stored representation headers renders nothing, so its
+/// record stays the eight-line form every earlier build wrote.
+pub(super) fn encode_trailing_sections(attributes: &ObjectAttributes) -> String {
+    let mut sections = encode_metadata_section(&attributes.metadata);
+    sections.push_str(&encode_content_headers_section(&attributes.headers));
+    sections
+}
+
+fn section_header(line: &str) -> Result<(&str, &str), HandlerError> {
+    line.split_once(' ')
+        .ok_or_else(|| HandlerError::internal_error("the persisted record carries a trailing section without a name and length"))
+}
+
+/// Reads every trailing section out of a record's remaining lines.
+///
+/// Absence is an empty map and no stored headers — that is the eight-line form. The sections are
+/// `meta/1` and then `headers/1`, each optional, each at most once, in that order, with nothing
+/// after them.
 ///
 /// # Errors
 ///
-/// A distinct diagnosis for each way the section can be wrong: an unknown section name, a
-/// malformed header, a declared count the file does not contain, a pair that is not two hex
-/// fields, a key or value this backend would refuse to store, and a repeated key.
-pub(super) fn decode_metadata_section(lines: &mut std::str::Lines<'_>) -> Result<BTreeMap<String, String>, HandlerError> {
-    let Some(header) = lines.next() else {
-        return Ok(BTreeMap::new());
+/// A distinct diagnosis for each way a section can be wrong: an unknown section name, a malformed
+/// header, a declared count the file does not contain, an entry that is not a name and a hex
+/// value, a value this backend would refuse to store, a repeated or out-of-order entry, and lines
+/// after the last section.
+pub(super) fn decode_trailing_sections(
+    lines: &mut std::str::Lines<'_>,
+) -> Result<(BTreeMap<String, String>, ContentHeaders), HandlerError> {
+    let mut next = lines.next();
+    let mut metadata = BTreeMap::new();
+    let mut after_metadata = false;
+    if let Some(line) = next {
+        let (name, count) = section_header(line)?;
+        if name == METADATA_SECTION {
+            metadata = decode_metadata_entries(lines, count)?;
+            after_metadata = true;
+            next = lines.next();
+        }
+    }
+    let Some(line) = next else {
+        return Ok((metadata, ContentHeaders::default()));
     };
-    let Some((name, count)) = header.split_once(' ') else {
-        return Err(HandlerError::internal_error(
-            "the persisted record carries a trailing section without a name and length",
-        ));
+    let headers = match section_header(line) {
+        Ok((CONTENT_HEADERS_SECTION, count)) => decode_content_header_entries(lines, count)?,
+        _ if after_metadata => {
+            return Err(HandlerError::internal_error(
+                "the persisted metadata section is followed by lines this build cannot read",
+            ));
+        }
+        Err(error) => return Err(error),
+        Ok(_) => {
+            return Err(HandlerError::internal_error(
+                "the persisted record carries a trailing section this build does not understand",
+            ));
+        }
     };
-    if name != METADATA_SECTION {
+    if lines.next().is_some() {
         return Err(HandlerError::internal_error(
-            "the persisted record carries a trailing section this build does not understand",
+            "the persisted representation-header section is followed by lines this build cannot read",
         ));
     }
+    Ok((metadata, headers))
+}
+
+fn decode_metadata_entries(lines: &mut std::str::Lines<'_>, count: &str) -> Result<BTreeMap<String, String>, HandlerError> {
     let count = count
         .parse::<usize>()
         .map_err(|_| HandlerError::internal_error("the persisted metadata section does not declare a decimal entry count"))?;
@@ -226,11 +300,6 @@ pub(super) fn decode_metadata_section(lines: &mut std::str::Lines<'_>) -> Result
         if metadata.insert(key, value).is_some() {
             return Err(HandlerError::internal_error("the persisted metadata section repeats a key"));
         }
-    }
-    if lines.next().is_some() {
-        return Err(HandlerError::internal_error(
-            "the persisted metadata section is followed by lines this build cannot read",
-        ));
     }
     validate_user_metadata(&metadata)
         .map_err(|_| HandlerError::internal_error("the persisted metadata section exceeds the size this backend stores"))?;
@@ -253,7 +322,7 @@ pub(super) fn encode_version_record(record: &VersionRecord) -> String {
         record.size,
         hex::encode(record.storage_class.as_str()),
         encode_metadata_section(&record.metadata),
-    )
+    ) + &encode_content_headers_section(&record.headers)
 }
 
 /// Parses one version record's bytes, pairing them with the directory they came from.
@@ -290,7 +359,7 @@ pub(super) fn decode_version_record(path: PathBuf, encoded: &str) -> Result<Vers
             .and_then(super::transitions::persisted_storage_class)
             .ok_or_else(storage_error)?,
     };
-    let metadata = decode_metadata_section(&mut lines)?;
+    let (metadata, headers) = decode_trailing_sections(&mut lines)?;
     if version_id.is_empty() {
         return Err(storage_error());
     }
@@ -305,17 +374,19 @@ pub(super) fn decode_version_record(path: PathBuf, encoded: &str) -> Result<Vers
         size,
         storage_class,
         metadata,
+        headers,
     })
 }
 
 /// Decodes one hex-encoded UTF-8 field.
-fn decode_hex_text(value: &str) -> Option<String> {
+pub(super) fn decode_hex_text(value: &str) -> Option<String> {
     String::from_utf8(hex::decode(value).ok()?).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::content_headers::DEFAULT_CONTENT_TYPE;
 
     fn pairs(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
         entries
@@ -336,11 +407,127 @@ mod tests {
             size: 12,
             storage_class: StorageClass::STANDARD,
             metadata,
+            headers: ContentHeaders::default(),
         }
     }
 
     fn decode_section(text: &str) -> Result<BTreeMap<String, String>, HandlerError> {
-        decode_metadata_section(&mut text.lines())
+        decode_trailing_sections(&mut text.lines()).map(|(metadata, _)| metadata)
+    }
+
+    fn decode_headers(text: &str) -> Result<ContentHeaders, HandlerError> {
+        decode_trailing_sections(&mut text.lines()).map(|(_, headers)| headers)
+    }
+
+    fn typed() -> ContentHeaders {
+        ContentHeaders {
+            content_type: Some("text/plain".to_owned()),
+            cache_control: Some("max-age=60".to_owned()),
+            ..ContentHeaders::default()
+        }
+    }
+
+    /// Positive — stored representation headers round-trip after the metadata section.
+    #[test]
+    fn representation_headers_round_trip_after_metadata() {
+        let mut stored = record(pairs(&[("mtime", "1")]));
+        stored.headers = typed();
+        let encoded = encode_version_record(&stored);
+        assert_eq!(encoded.lines().nth(8), Some("meta/1 1"));
+        assert_eq!(encoded.lines().nth(10), Some("headers/1 2"));
+        let decoded = decode_version_record(PathBuf::from("/nonexistent"), &encoded).expect("a round-tripped record");
+        assert_eq!(decoded.headers, typed());
+        assert_eq!(decoded.metadata, pairs(&[("mtime", "1")]));
+    }
+
+    /// Positive — the headers section stands alone when the object carries no user metadata.
+    #[test]
+    fn representation_headers_stand_alone_without_metadata() {
+        let mut stored = record(BTreeMap::new());
+        stored.headers = typed();
+        let encoded = encode_version_record(&stored);
+        assert_eq!(encoded.lines().nth(8), Some("headers/1 2"));
+        let decoded = decode_version_record(PathBuf::from("/nonexistent"), &encoded).expect("a round-tripped record");
+        assert_eq!(decoded.headers, typed());
+        assert!(decoded.metadata.is_empty());
+    }
+
+    /// Negative — the model's default media type is not stored, so an untyped write keeps the
+    /// eight-line form, and a read still answers the default.
+    #[test]
+    fn the_default_content_type_is_not_stored() {
+        let headers = ContentHeaders::from_request(None, None, None, None, Some(DEFAULT_CONTENT_TYPE.to_owned()), None);
+        assert_eq!(headers, ContentHeaders::default());
+        assert_eq!(headers.served_content_type(), DEFAULT_CONTENT_TYPE);
+        let mut stored = record(BTreeMap::new());
+        stored.headers = headers;
+        assert_eq!(encode_version_record(&stored).lines().count(), 8);
+    }
+
+    /// Negative — an unknown header name is refused rather than dropped.
+    #[test]
+    fn an_unknown_persisted_header_name_is_refused() {
+        let error = decode_headers(&format!("headers/1 1\nx-amz-acl {}\n", hex::encode("private")))
+            .expect_err("an unknown name is refused");
+        assert_eq!(error.message(), "a persisted representation header is not a known name and a hex value");
+    }
+
+    /// Negative — a repeated or reordered header entry is refused.
+    #[test]
+    fn a_reordered_persisted_header_is_refused() {
+        let value = hex::encode("x");
+        let error = decode_headers(&format!("headers/1 2\ncontent-type {value}\ncache-control {value}\n"))
+            .expect_err("a reordered entry is refused");
+        assert_eq!(
+            error.message(),
+            "the persisted representation-header section repeats or reorders an entry"
+        );
+        let error = decode_headers(&format!("headers/1 2\ncontent-type {value}\ncontent-type {value}\n"))
+            .expect_err("a repeated entry is refused");
+        assert_eq!(
+            error.message(),
+            "the persisted representation-header section repeats or reorders an entry"
+        );
+    }
+
+    /// Negative — a truncated headers section and lines after it are both refused.
+    #[test]
+    fn a_truncated_or_trailed_headers_section_is_refused() {
+        let error = decode_headers("headers/1 1\n").expect_err("a truncated section is refused");
+        assert_eq!(
+            error.message(),
+            "the persisted representation-header section declares more entries than it holds"
+        );
+        let error = decode_headers(&format!("headers/1 1\ncontent-type {}\nmeta/1 0\n", hex::encode("a/b")))
+            .expect_err("a section after the headers is refused");
+        assert_eq!(
+            error.message(),
+            "the persisted representation-header section is followed by lines this build cannot read"
+        );
+    }
+
+    /// Negative — a header value that could never be answered is refused on read and on write.
+    #[test]
+    fn an_unreturnable_header_value_is_refused() {
+        let error = decode_headers(&format!("headers/1 1\ncontent-type {}\n", hex::encode("a\r\nb")))
+            .expect_err("a control character is refused");
+        assert_eq!(error.message(), "a persisted representation header cannot be returned as a header");
+        let headers = ContentHeaders {
+            content_type: Some("a\nb".to_owned()),
+            ..ContentHeaders::default()
+        };
+        let error = validate_content_headers(&headers).expect_err("an unstorable value is refused");
+        assert_eq!(error.code(), &ErrorCode::INVALID_REQUEST);
+    }
+
+    /// Negative — a count that is not decimal is refused by name.
+    #[test]
+    fn a_headers_section_without_a_decimal_count_is_refused() {
+        let error = decode_headers("headers/1 two\n").expect_err("a non-decimal count is refused");
+        assert_eq!(
+            error.message(),
+            "the persisted representation-header section does not declare a decimal entry count"
+        );
     }
 
     /// Positive — an object without metadata keeps the exact eight-line form earlier builds wrote.

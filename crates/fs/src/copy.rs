@@ -28,6 +28,7 @@ use rustfs_gateway::{
 };
 
 use super::reads::Representation;
+use super::records::ObjectAttributes;
 use super::versioning::PublishedObject;
 use super::{FsBackend, etag};
 
@@ -88,11 +89,11 @@ async fn publish(
     backend: &FsBackend,
     input: &CopyObjectInput,
     source: &Representation,
-    metadata: &std::collections::BTreeMap<String, String>,
+    attributes: &ObjectAttributes,
 ) -> Result<(PublishedObject, ETag), HandlerError> {
     let e_tag = etag(&source.bytes)?;
     let published = backend
-        .publish_object(input.bucket.as_str(), input.key.as_str(), &source.bytes, &e_tag, metadata)
+        .publish_object(input.bucket.as_str(), input.key.as_str(), &source.bytes, &e_tag, attributes)
         .await?;
     Ok((published, e_tag))
 }
@@ -113,20 +114,28 @@ impl Handler<CopyObject> for FsBackend {
         if let Some(rejection) = self_copy.rejection() {
             return Err(HandlerError::new(rejection.code().clone(), rejection.reason()));
         }
-        let metadata = match metadata_source {
-            MetadataSource::FromSource => &source_representation.metadata,
-            MetadataSource::FromRequest => &input.metadata,
+        // The directive decides the representation headers together with the user metadata: S3
+        // copies both from the source under COPY and rebuilds both from the request under REPLACE.
+        let attributes = match metadata_source {
+            MetadataSource::FromSource => ObjectAttributes {
+                metadata: source_representation.metadata.clone(),
+                headers: source_representation.headers.clone(),
+            },
+            MetadataSource::FromRequest => ObjectAttributes {
+                metadata: input.metadata.clone(),
+                headers: request_content_headers!(input),
+            },
         };
 
         let guard_before_write = copy_source_guards_before_target_write();
         let mut result = if guard_before_write {
             None
         } else {
-            Some(publish(self, &input, &source_representation, metadata).await?)
+            Some(publish(self, &input, &source_representation, &attributes).await?)
         };
         guard_source(&input, &source_representation, Timestamp::from_secs(self.clock.now().unix_seconds()))?;
         if result.is_none() {
-            result = Some(publish(self, &input, &source_representation, metadata).await?);
+            result = Some(publish(self, &input, &source_representation, &attributes).await?);
         }
         let Some((published, e_tag)) = result else {
             return Err(HandlerError::internal_error("the copy destination was not published"));

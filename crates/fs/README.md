@@ -4,7 +4,8 @@
 to prove that the public `Handler` and `ServiceBuilder` APIs are sufficient to assemble a real S3
 service without a private adapter.
 
-This bounded implementation supports bucket and version-aware object CRUD, `CopyObject`, plus `ListObjects` and
+This bounded implementation supports bucket and version-aware object CRUD, `ListBuckets`,
+`DeleteObjects`, browser `POST` Object uploads, `CopyObject`, plus `ListObjects` and
 `ListObjectsV2`, `ListMultipartUploads`, `GetBucketLocation`,
 `GetBucketVersioning`, `PutBucketVersioning`, `ListObjectVersions`, `CreateMultipartUpload`,
 `UploadPart`, `ListParts`, `CompleteMultipartUpload`, `AbortMultipartUpload`, and lifecycle
@@ -50,6 +51,22 @@ completion's own headers change nothing. Keys are stored in the lowercase form t
 produced and refused rather than normalised a second time, values are stored RFC 2047-decoded and
 re-encoded on the way out, and the combined key and value size is capped at 2 KB — the figure AWS
 documents for user metadata — measured against the stored form.
+
+The standard representation headers a write carries — `Content-Type`, `Content-Encoding`,
+`Content-Disposition`, `Content-Language`, `Cache-Control`, and `Expires` — are stored with the
+version in a second optional trailing section, `headers/1 <count>`, and answered by `GET` and `HEAD`
+on the current and on an explicit version. An object stored with no `Content-Type` answers
+`binary/octet-stream`, the model's default, which is therefore not stored; an object carrying none
+of these headers keeps the eight-line record form. Multipart takes them from
+`CreateMultipartUpload`, `CopyObject` copies them under `COPY` and rebuilds them from the request
+under `REPLACE`, and a browser `POST` stores the media type the form pipeline hands over.
+
+`ListBuckets` answers every bucket under the single-tenant data root in byte order, with the
+configured owner, a prefix filter, a region filter, and `max-buckets` pages resumed by a minted
+opaque cursor. `DeleteObjects` runs every authorized key through the same single-key deletion
+`DeleteObject` uses and reports each key exactly once, as deleted or as an error; quiet mode reports
+only the errors. A browser `POST` Object upload is stored through the same publication as
+`PutObject`, with its `x-amz-meta-*` form fields.
 
 `CopyObject` resolves its source only through the framework's derived-resource authorization proof.
 It selects current or explicit-version bytes before opening the destination, applies the shared

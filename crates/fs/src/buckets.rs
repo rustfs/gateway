@@ -33,16 +33,123 @@
 //! assembled rather than when a client asks.
 
 use std::io;
+use std::time::UNIX_EPOCH;
 
 use rustfs_gateway::dto::{
-    CreateBucket, CreateBucketOutput, DeleteBucket, DeleteBucketOutput, GetBucketLocation, GetBucketLocationOutput, HeadBucket,
-    HeadBucketOutput, LocationConstraint,
+    Bucket, CreateBucket, CreateBucketOutput, DeleteBucket, DeleteBucketOutput, GetBucketLocation, GetBucketLocationOutput,
+    HeadBucket, HeadBucketOutput, ListBuckets, ListBucketsOutput, LocationConstraint,
 };
 use rustfs_gateway::{
-    ErrorCode, Handler, HandlerError, HandlerResult, REGION_MATCH_POLICY, Req, Resp, US_EAST_1, resolve_location_constraint,
+    BucketName, CursorSpec, ErrorCode, Handler, HandlerError, HandlerResult, REGION_MATCH_POLICY, Req, Resp, Timestamp,
+    US_EAST_1, resolve_location_constraint,
 };
+use sha2::{Digest as _, Sha256};
 
 use super::{FsBackend, OBJECTS_DIR, UPLOADS_DIR, VERSIONS_DIR, lifecycle, storage_error, versioning};
+
+/// The cursor `ListBuckets` pages with: a value this backend minted, never a bucket name.
+const BUCKET_CURSOR: CursorSpec = CursorSpec::opaque("continuation-token");
+
+/// The largest page `max-buckets` may ask for.
+const MAX_BUCKETS_PER_PAGE: i32 = 10_000;
+
+fn bucket_cursor(prefix: &str, bucket: &str) -> String {
+    hex::encode(Sha256::digest(format!("fs-list-buckets\0{prefix}\0{bucket}").as_bytes()))
+}
+
+fn bucket_cursor_error() -> HandlerError {
+    HandlerError::new(
+        ErrorCode::INVALID_ARGUMENT,
+        "the continuation token does not name a position in this bucket listing",
+    )
+}
+
+impl FsBackend {
+    /// When the bucket's directory came into being, which is when `CreateBucket` made it.
+    ///
+    /// The filesystem's birth time is used where the platform keeps one, and the modification time
+    /// otherwise; the directory's own entries are created with it, so the two agree for a bucket
+    /// this backend made.
+    async fn bucket_creation_date(&self, bucket: &str) -> Result<Timestamp, HandlerError> {
+        let metadata = tokio::fs::symlink_metadata(self.bucket_path(bucket))
+            .await
+            .map_err(|_| storage_error())?;
+        let created = metadata
+            .created()
+            .or_else(|_| metadata.modified())
+            .map_err(|_| storage_error())?;
+        let seconds = created
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .and_then(|duration| i64::try_from(duration.as_secs()).ok())
+            .unwrap_or_default();
+        Ok(Timestamp::from_secs(seconds))
+    }
+}
+
+impl Handler<ListBuckets> for FsBackend {
+    /// Every bucket under the data root, in byte order, filtered and paged as the request asks.
+    ///
+    /// The data root is single-tenant, so every bucket in it is the configured owner's. A
+    /// `bucket-region` filter naming any region but the one this backend serves matches nothing.
+    async fn call(&self, request: Req<ListBuckets>) -> HandlerResult<ListBuckets> {
+        let input = request.into_input();
+        let prefix = input.prefix.clone().unwrap_or_default();
+        let page_size = match input.max_buckets {
+            None => usize::MAX,
+            Some(requested) if (1..=MAX_BUCKETS_PER_PAGE).contains(&requested) => {
+                usize::try_from(requested).map_err(|_| storage_error())?
+            }
+            Some(_) => {
+                return Err(HandlerError::new(
+                    ErrorCode::INVALID_ARGUMENT,
+                    "max-buckets must be an integer between 1 and 10000",
+                ));
+            }
+        };
+        let in_region = input.bucket_region.as_deref().is_none_or(|region| region == self.region());
+        let mut names = if in_region {
+            self.lifecycle_buckets().await?
+        } else {
+            Vec::new()
+        };
+        names.retain(|name| name.starts_with(prefix.as_str()));
+        let start = match input.continuation_token.as_ref() {
+            None => 0,
+            Some(token) => {
+                let accepted = BUCKET_CURSOR.accept(token.as_str()).map_err(|_| bucket_cursor_error())?;
+                names
+                    .iter()
+                    .position(|name| bucket_cursor(&prefix, name) == accepted)
+                    .map(|index| index + 1)
+                    .ok_or_else(bucket_cursor_error)?
+            }
+        };
+        let available = names.len().saturating_sub(start);
+        let page_len = available.min(page_size);
+        let page = &names[start..start + page_len];
+        let continuation_token = (available > page_len)
+            .then(|| page.last().map(|name| bucket_cursor(&prefix, name)))
+            .flatten()
+            .map(Into::into);
+        let mut buckets = Vec::with_capacity(page.len());
+        for name in page {
+            buckets.push(Bucket {
+                name: BucketName::new(name.clone()).map_err(|_| storage_error())?,
+                creation_date: self.bucket_creation_date(name).await?,
+                ..Bucket::default()
+            });
+        }
+        Ok(Resp::new(ListBucketsOutput {
+            buckets,
+            // The model makes the listing's owner element mandatory, so an unconfigured owner is
+            // answered as an owner with no id rather than an omitted element.
+            owner: self.reported_owner().cloned().unwrap_or_default(),
+            continuation_token,
+            prefix: input.prefix,
+        }))
+    }
+}
 
 impl Handler<CreateBucket> for FsBackend {
     async fn call(&self, request: Req<CreateBucket>) -> HandlerResult<CreateBucket> {

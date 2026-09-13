@@ -37,7 +37,9 @@ use rustfs_gateway::{
 };
 use sha2::{Digest as _, Sha256};
 
-use super::records::{RecordKind, VersionRecord, decode_version_record, encode_version_record, validate_user_metadata};
+use super::records::{
+    ObjectAttributes, RecordKind, VersionRecord, decode_version_record, encode_version_record, validate_attributes,
+};
 use super::{FsBackend, drain, etag, no_such_key, storage_error};
 
 pub(super) const STATUS_FILE: &str = "versioning-status";
@@ -75,10 +77,11 @@ pub(super) struct PublishedObject {
 }
 
 impl FsBackend {
-    /// Publishes one object's bytes and the user metadata that must outlive them.
+    /// Publishes one object's bytes and the attributes — user metadata and representation headers —
+    /// that must outlive them.
     ///
-    /// The metadata is validated **before** the version lock is taken and before any byte is
-    /// written: a pair this backend could not hand back on a later `GET` must fail the request,
+    /// The attributes are validated **before** the version lock is taken and before any byte is
+    /// written: a value this backend could not hand back on a later `GET` must fail the request,
     /// not become an object whose metadata quietly disappears.
     pub(super) async fn publish_object(
         &self,
@@ -86,9 +89,9 @@ impl FsBackend {
         key: &str,
         bytes: &[u8],
         e_tag: &ETag,
-        metadata: &BTreeMap<String, String>,
+        attributes: &ObjectAttributes,
     ) -> Result<PublishedObject, HandlerError> {
-        validate_user_metadata(metadata)?;
+        validate_attributes(attributes)?;
         let _guard = self.version_lock.lock().await;
         let state = self.versioning_state(bucket).await?;
         let existing = self.version_records(bucket).await?;
@@ -103,7 +106,7 @@ impl FsBackend {
             None
         };
         let record = self
-            .publish_version(bucket, key, version_id, Some(bytes), Some(e_tag), metadata)
+            .publish_version(bucket, key, version_id, Some(bytes), Some(e_tag), attributes)
             .await?;
         if version_id.is_some() {
             self.remove_null_versions(
@@ -241,12 +244,12 @@ impl FsBackend {
                 Ok(None)
             }
             VersioningState::Enabled => self
-                .publish_version(bucket, key, None, None, None, &BTreeMap::new())
+                .publish_version(bucket, key, None, None, None, &ObjectAttributes::default())
                 .await
                 .map(Some),
             VersioningState::Suspended => {
                 let marker = self
-                    .publish_version(bucket, key, Some("null"), None, None, &BTreeMap::new())
+                    .publish_version(bucket, key, Some("null"), None, None, &ObjectAttributes::default())
                     .await?;
                 self.remove_null_versions(
                     &records
@@ -358,7 +361,7 @@ impl FsBackend {
         version_id: Option<&str>,
         body: Option<&[u8]>,
         e_tag: Option<&ETag>,
-        metadata: &BTreeMap<String, String>,
+        attributes: &ObjectAttributes,
     ) -> Result<VersionRecord, HandlerError> {
         let held = self.version_records(bucket).await?;
         let sequence = self.next_version_sequence(bucket, &held).await?;
@@ -402,7 +405,8 @@ impl FsBackend {
                 e_tag: tag,
                 size,
                 storage_class: StorageClass::STANDARD,
-                metadata: metadata.clone(),
+                metadata: attributes.metadata.clone(),
+                headers: attributes.headers.clone(),
             });
             tokio::fs::write(temporary.join(RECORD_FILE), record).await?;
             tokio::fs::rename(&temporary, &destination).await
@@ -547,10 +551,14 @@ impl Handler<GetBucketVersioning> for FsBackend {
 impl Handler<PutObject> for FsBackend {
     async fn call(&self, request: Req<PutObject>) -> HandlerResult<PutObject> {
         let input = request.into_input();
+        let attributes = ObjectAttributes {
+            headers: request_content_headers!(input),
+            metadata: input.metadata,
+        };
         let bytes = drain(input.body).await?;
         let e_tag = etag(&bytes)?;
         let published = self
-            .publish_object(input.bucket.as_str(), input.key.as_str(), &bytes, &e_tag, &input.metadata)
+            .publish_object(input.bucket.as_str(), input.key.as_str(), &bytes, &e_tag, &attributes)
             .await?;
         Ok(Resp::new(PutObjectOutput {
             size: Some(published.size),
@@ -561,35 +569,52 @@ impl Handler<PutObject> for FsBackend {
     }
 }
 
-impl Handler<DeleteObject> for FsBackend {
-    async fn call(&self, request: Req<DeleteObject>) -> HandlerResult<DeleteObject> {
-        let input = request.input();
+impl FsBackend {
+    /// Deletes one key, or one explicit version of it, under the bucket's versioning state.
+    ///
+    /// This is the one deletion both `DeleteObject` and every entry of a `DeleteObjects` batch run,
+    /// so a key removed singly and a key removed in a batch cannot diverge in what they leave
+    /// behind or report.
+    pub(super) async fn delete_object_version(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+    ) -> Result<DeleteObjectOutput, HandlerError> {
         let _guard = self.version_lock.lock().await;
-        let state = self.versioning_state(input.bucket.as_str()).await?;
-        let records = self.version_records(input.bucket.as_str()).await?;
-        if let Some(version_id) = input.version_id.as_ref() {
-            if let Some(record) = explicit_for_key(&records, input.key.as_str(), version_id.as_str()) {
+        let state = self.versioning_state(bucket).await?;
+        let records = self.version_records(bucket).await?;
+        if let Some(version_id) = version_id {
+            if let Some(record) = explicit_for_key(&records, key, version_id) {
                 let delete_marker = matches!(record.kind, RecordKind::DeleteMarker);
                 tokio::fs::remove_dir_all(&record.path).await.map_err(|_| storage_error())?;
-                return Ok(Resp::new(DeleteObjectOutput {
+                return Ok(DeleteObjectOutput {
                     delete_marker: Some(delete_marker),
                     version_id: Some(record.version_id.clone()),
                     ..DeleteObjectOutput::default()
-                }));
+                });
             }
-            if version_id.as_str() == "null" {
-                self.remove_legacy_object(input.bucket.as_str(), input.key.as_str()).await?;
+            if version_id == "null" {
+                self.remove_legacy_object(bucket, key).await?;
             }
-            return Ok(Resp::new(DeleteObjectOutput::default()));
+            return Ok(DeleteObjectOutput::default());
         }
-        let marker = self
-            .delete_current_locked(input.bucket.as_str(), input.key.as_str(), state, records)
-            .await?;
-        Ok(Resp::new(DeleteObjectOutput {
+        let marker = self.delete_current_locked(bucket, key, state, records).await?;
+        Ok(DeleteObjectOutput {
             delete_marker: marker.as_ref().map(|_| true),
             version_id: marker.map(|record| record.version_id),
             ..DeleteObjectOutput::default()
-        }))
+        })
+    }
+}
+
+impl Handler<DeleteObject> for FsBackend {
+    async fn call(&self, request: Req<DeleteObject>) -> HandlerResult<DeleteObject> {
+        let input = request.input();
+        let output = self
+            .delete_object_version(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())
+            .await?;
+        Ok(Resp::new(output))
     }
 }
 
