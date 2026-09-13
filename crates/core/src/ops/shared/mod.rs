@@ -53,6 +53,7 @@ pub mod part_table;
 pub mod precondition;
 pub mod replication;
 pub mod restore;
+pub(crate) mod rule_filter;
 pub mod select;
 pub mod tagging;
 pub mod upload_id;

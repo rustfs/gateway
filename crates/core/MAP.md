@@ -32,6 +32,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/ops/rename_object.rs` | Reserves the directory-bucket rename contract independently of backend registration. | A rename request routes to PutObject or declares the wrong authorization floor. |
 | `src/ops/update_object_encryption.rs` | Reserves an object encryption update independently of destructive object replacement. | An encryption update routes to PutObject or declares the wrong authorization floor. |
 | `src/ops/shared/` | Explicit cross-operation protocol logic. | A list/copy/conditional/ACL/checksum rule affects several operations. |
+| `src/ops/shared/rule_filter.rs` | The one rule `<Filter>`/`<And>` grammar lifecycle and replication both call, with each family's member set. | Either family's Filter or And acceptance changes. |
 | `src/route/mod.rs` | Routing module map and pre-auth invariant. | Start a routing task. |
 | `src/route/selector.rs` | Route predicates and entries. | Add or interpret a predicate. |
 | `src/route/lattice.rs` | Selector overlap/refinement decision. | A conflict or shadowing decision is wrong. |
@@ -66,5 +67,6 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/precondition_range.rs` | Conditional/range behavior matrix. | Precondition logic changes. |
 | `tests/range_part_table.rs` | Part-number window resolution and its refusals. | A `partNumber` read serves the wrong bytes or the wrong count. |
 | `tests/error_resolution.rs` | P1-04 contextual error outcome matrix. | Change error masking, status, extras or body suppression. |
+| `tests/rule_filter_boundaries.rs` | Filter boundaries both consumers of the shared grammar still answer, side by side. | A lifecycle or replication Filter refusal changes. |
 | `tests/purity_guard.rs` | Source-shape guards for pre-auth code. | Add public/core routing code. |
 | `tests/golden/route-table.txt` | Protected ordered route table. | Never edit without the Breaking Change process. |

@@ -119,6 +119,9 @@ mod route_sizes;
 #[path = "route_table.rs"]
 mod route_table;
 
+#[path = "rule_filter_boundaries.rs"]
+mod rule_filter_boundaries;
+
 #[path = "select_restore_roundtrip.rs"]
 mod select_restore_roundtrip;
 

@@ -24,7 +24,8 @@
 //! or transitioning its storage class is the storage backend's scanner, never a route row here.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: lifecycle. The document's validation rules live in
+//! Shares: lifecycle, rule_filter.
+//! The family validator uses `shared::rule_filter` for Filter grammar. The document's validation rules live in
 //! [`shared::lifecycle`](super::shared::lifecycle), reached by backends through the facade; this
 //! file only states the read's spec.
 //!

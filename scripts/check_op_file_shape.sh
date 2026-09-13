@@ -16,6 +16,9 @@ set -euo pipefail
 #   2. The `//! Shares:` declaration agrees with the use graph and with the
 #      `//! Members:` list on the other end — in both directions, for both.
 #
+#      Lifecycle and replication must also call their shared Filter grammar from
+#      production code; comments, literals and test helpers do not establish it.
+#
 #   3. The 800-line ceiling over the ops tree, with no allowance escape.
 #
 # WHY
@@ -489,6 +492,34 @@ for module in sorted(members):
                 f"{shared_dir / (module + '.rs')}: `Members:` names `{stem}`, whose "
                 f"`//! Shares:` line does not name `{module}` back"
             )
+
+# Both DTO families must call the same production filter grammar. Unlike the
+# operation-to-family documentation links above, this is an executable edge.
+filter_authority = shared_dir / "rule_filter.rs"
+if not filter_authority.is_file():
+    fail(f"{filter_authority}: shared filter authority is missing")
+for family in ("lifecycle", "replication"):
+    path = shared_dir / (family + ".rs")
+    if not path.is_file():
+        fail(f"{path}: shared filter consumer is missing")
+        continue
+    code = mask(path.read_text())
+    for start, end in reversed(cfg_test_spans(code)):
+        code = code[:start] + " " * (end - start) + code[end:]
+    if re.search(r"\bfn\s+validate_filter\s*\(", code):
+        fail(f"{path}: filter grammar belongs to shared::rule_filter")
+    # A private copy under any other name still has to read the members it
+    # counts; `And`, its tags and the size bounds are Filter-only members, so
+    # production code in a family module has no other reason to touch them.
+    if member := re.search(
+        r"\.\s*(and|tags|object_size_greater_than|object_size_less_than)\b", code
+    ):
+        fail(
+            f"{path}: reads the Filter member `{member.group(1)}`; the filter grammar "
+            f"belongs to shared::rule_filter"
+        )
+    if not re.search(rf"\brule_filter\s*::\s*{family}\s*\(", code):
+        fail(f"{path}: must call shared::rule_filter::{family} from production code")
 
 # -- Rule 3 -------------------------------------------------------------------
 

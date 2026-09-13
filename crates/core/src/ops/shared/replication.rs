@@ -19,10 +19,11 @@
 //!
 //! Responsible for: the semantic rules of a `ReplicationConfiguration` document — the V1/V2
 //! schema-version exclusivity of a rule (a `Filter` demands `Priority` and
-//! `DeleteMarkerReplication` beside it; a legacy rule carries neither), the filter's
-//! one-direct-child grammar and the two-condition floor of `<And>`, the thousand-rule cap, and
-//! the bounds and uniqueness of `ID` — held once so that every backend refuses the same
-//! documents with the same codes.
+//! `DeleteMarkerReplication` beside it; a legacy rule carries neither), the thousand-rule cap,
+//! and the bounds and uniqueness of `ID` — held once so that every backend refuses the same
+//! documents with the same codes. The filter's one-direct-child grammar and the two-condition
+//! floor of `<And>` are `shared::rule_filter`'s, the one authority lifecycle uses too; this
+//! module maps its refusal onto the family's codes.
 //! NOT responsible for: decoding the document (the generated codec, which is deliberately
 //! lenient about unknown elements — `q-repl-0005`), storing it, or **executing** it. Evaluating
 //! a rule against an object write, assuming the Role, moving bytes between sites and producing
@@ -55,8 +56,10 @@
 //! stored document echoes both on the read — that is the documented GET behaviour — but an
 //! error message never does.
 
+use super::rule_filter;
+
 use rustfs_gateway_types::ErrorCode;
-use rustfs_gateway_types::dto::{ReplicationConfiguration, ReplicationRule, ReplicationRuleFilter};
+use rustfs_gateway_types::dto::{ReplicationConfiguration, ReplicationRule};
 
 /// The most rules one bucket's configuration may carry: AWS's published, non-adjustable cap.
 pub const MAX_REPLICATION_RULES: usize = 1000;
@@ -219,24 +222,13 @@ fn validate_rule(rule: &ReplicationRule) -> Result<(), ReplicationRejection> {
         return Err(ReplicationRejection::IdTooLong);
     }
     classify_rule(rule)?;
+    // The filter's grammar is `shared::rule_filter`'s; an empty `<Filter/>` passes there, as AWS's
+    // documented spelling for "every object" (`q-repl-0007`).
     if let Some(filter) = &rule.filter {
-        validate_filter(filter)?;
-    }
-    Ok(())
-}
-
-fn validate_filter(filter: &ReplicationRuleFilter) -> Result<(), ReplicationRejection> {
-    // An empty `<Filter/>` passes: it is AWS's documented spelling for "every object", exactly
-    // as it is in the lifecycle family (`q-repl-0007`).
-    let children = usize::from(filter.prefix.is_some()) + usize::from(filter.tag.is_some()) + usize::from(filter.and.is_some());
-    if children > 1 {
-        return Err(ReplicationRejection::FilterNotExclusive);
-    }
-    if let Some(and) = &filter.and {
-        let conditions = usize::from(and.prefix.is_some()) + and.tags.len();
-        if conditions < 2 {
-            return Err(ReplicationRejection::AndBelowTwoConditions);
-        }
+        rule_filter::replication(filter).map_err(|reason| match reason {
+            rule_filter::Rejection::FilterNotExclusive => ReplicationRejection::FilterNotExclusive,
+            rule_filter::Rejection::AndBelowTwoConditions => ReplicationRejection::AndBelowTwoConditions,
+        })?;
     }
     Ok(())
 }
@@ -247,7 +239,8 @@ fn validate_filter(filter: &ReplicationRuleFilter) -> Result<(), ReplicationReje
 mod tests {
     use super::*;
     use rustfs_gateway_types::dto::{
-        DeleteMarkerReplication, Destination, EncryptionConfiguration, ReplicationRuleAndOperator, Status, Tag,
+        DeleteMarkerReplication, Destination, EncryptionConfiguration, ReplicationRuleAndOperator, ReplicationRuleFilter, Status,
+        Tag,
     };
 
     /// A plausible destination and key/account pair for the negative cases; asserted absent from
