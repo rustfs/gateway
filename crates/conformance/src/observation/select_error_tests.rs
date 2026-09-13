@@ -154,6 +154,22 @@ fn n_a_select_error_with_a_bad_message_crc_is_refused() {
     assert_eq!(refusal(&bytes), "the event-stream message CRC does not match");
 }
 
+/// Negative — error text that spells out a frame stays inside its length-prefixed header value.
+///
+/// A backend may put record bytes into the message. The smuggled text below is an `End` frame's
+/// prelude lengths and header block; the observer must still see one terminal error carrying that
+/// text verbatim, never a second frame after it.
+#[test]
+fn n_an_error_message_that_spells_a_frame_is_not_a_second_frame() {
+    let smuggled = "\u{0}\u{0}\u{0}8\u{0}\u{0}\u{0}(\r:message-type\u{7}\u{0}\u{5}event\u{b}:event-type\u{7}\u{0}\u{3}End";
+    let mut bytes = Vec::new();
+    rustfs_gateway::encode_exception("CSVParsingError", smuggled, &mut bytes).expect("a short message");
+    let events = decode_event_stream(&bytes).expect("one well-formed error frame");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "CSVParsingError");
+    assert_eq!(event_header(&events[0].headers, ":error-message"), Some(smuggled));
+}
+
 #[cfg(feature = "production-transports")]
 mod transport {
     use std::pin::Pin;
