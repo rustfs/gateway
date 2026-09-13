@@ -35,11 +35,11 @@ use core::fmt;
 use crate::cors_tagging::{CorsTaggingCodecError, PersistedTag, PersistedTagging, parse_tagging, serialize_tagging};
 
 use super::{
-    PersistedAccelerateConfiguration, PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule,
-    PersistedEncryptionByDefault, PersistedPublicAccessBlockConfiguration, PersistedRequestPaymentConfiguration,
-    PersistedVersioningConfiguration, PersistenceCodecError, parse_accelerate, parse_bucket_encryption,
-    parse_public_access_block, parse_request_payment, parse_versioning, serialize_accelerate, serialize_bucket_encryption,
-    serialize_public_access_block, serialize_request_payment, serialize_versioning,
+    PersistedAccelerateConfiguration, PersistedBlockedEncryptionTypes, PersistedBucketEncryptionConfiguration,
+    PersistedBucketEncryptionRule, PersistedEncryptionByDefault, PersistedPublicAccessBlockConfiguration,
+    PersistedRequestPaymentConfiguration, PersistedVersioningConfiguration, PersistenceCodecError, parse_accelerate,
+    parse_bucket_encryption, parse_public_access_block, parse_request_payment, parse_versioning, serialize_accelerate,
+    serialize_bucket_encryption, serialize_public_access_block, serialize_request_payment, serialize_versioning,
 };
 
 /// A generated DTO cannot be represented by the historical persistence shape.
@@ -214,9 +214,8 @@ pub fn serialize_request_payment_dto(value: &crate::dto::RequestPaymentConfigura
 
 /// Parses persisted Bucket Encryption bytes directly into the generated HTTP DTO.
 ///
-/// The historical format has no `BlockedEncryptionTypes` member, so decoded rules leave that
-/// generated DTO field absent. The opposite direction refuses a present member instead of
-/// silently dropping it.
+/// `BlockedEncryptionTypes` is carried entry for entry, so a bucket whose owner blocked SSE-C
+/// stays blocked after migration (rustfs/gateway#740).
 ///
 /// # Errors
 ///
@@ -236,7 +235,15 @@ pub fn parse_bucket_encryption_dto(input: &[u8]) -> Result<crate::dto::ServerSid
                     }
                 }),
                 bucket_key_enabled: rule.bucket_key_enabled,
-                blocked_encryption_types: None,
+                blocked_encryption_types: rule
+                    .blocked_encryption_types
+                    .map(|blocked| crate::dto::BlockedEncryptionTypes {
+                        encryption_type: blocked
+                            .encryption_types
+                            .into_iter()
+                            .map(crate::dto::EncryptionType::custom)
+                            .collect(),
+                    }),
             })
             .collect(),
     })
@@ -246,32 +253,34 @@ pub fn parse_bucket_encryption_dto(input: &[u8]) -> Result<crate::dto::ServerSid
 ///
 /// # Errors
 ///
-/// Returns [`PersistenceBridgeError::UnsupportedMember`] when a rule carries
-/// `BlockedEncryptionTypes`, because the historical persistence shape has no lossless slot for
-/// that wrapper.
+/// None today; the `Result` is kept so a future DTO member with no persisted slot is refused
+/// rather than dropped.
 pub fn serialize_bucket_encryption_dto(
     value: &crate::dto::ServerSideEncryptionConfiguration,
 ) -> Result<Vec<u8>, PersistenceBridgeError> {
     let rules = value
         .rules
         .iter()
-        .map(|rule| {
-            if rule.blocked_encryption_types.is_some() {
-                return Err(PersistenceBridgeError::UnsupportedMember(
-                    "ServerSideEncryptionRule.BlockedEncryptionTypes",
-                ));
-            }
-            Ok(PersistedBucketEncryptionRule {
-                apply_server_side_encryption_by_default: rule.apply_server_side_encryption_by_default.as_ref().map(|default| {
-                    PersistedEncryptionByDefault {
-                        sse_algorithm: default.sse_algorithm.as_str().to_owned(),
-                        kms_master_key_id: default.kms_master_key_id.clone(),
-                    }
+        .map(|rule| PersistedBucketEncryptionRule {
+            apply_server_side_encryption_by_default: rule.apply_server_side_encryption_by_default.as_ref().map(|default| {
+                PersistedEncryptionByDefault {
+                    sse_algorithm: default.sse_algorithm.as_str().to_owned(),
+                    kms_master_key_id: default.kms_master_key_id.clone(),
+                }
+            }),
+            bucket_key_enabled: rule.bucket_key_enabled,
+            blocked_encryption_types: rule
+                .blocked_encryption_types
+                .as_ref()
+                .map(|blocked| PersistedBlockedEncryptionTypes {
+                    encryption_types: blocked
+                        .encryption_type
+                        .iter()
+                        .map(|entry| entry.as_str().to_owned())
+                        .collect(),
                 }),
-                bucket_key_enabled: rule.bucket_key_enabled,
-            })
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect();
     Ok(serialize_bucket_encryption(&PersistedBucketEncryptionConfiguration { rules }))
 }
 
@@ -313,9 +322,9 @@ pub fn serialize_public_access_block_dto(value: &crate::dto::PublicAccessBlockCo
 #[cfg(test)]
 mod tests {
     use crate::dto::{
-        AccelerateConfiguration, BlockedEncryptionTypes, Payer, PublicAccessBlockConfiguration, RequestPaymentConfiguration,
-        ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule, SseAlgorithm, Tag, Tagging,
-        VersioningConfiguration,
+        AccelerateConfiguration, BlockedEncryptionTypes, EncryptionType, Payer, PublicAccessBlockConfiguration,
+        RequestPaymentConfiguration, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration, ServerSideEncryptionRule,
+        SseAlgorithm, Tag, Tagging, VersioningConfiguration,
     };
 
     use super::{
@@ -615,21 +624,95 @@ mod tests {
         );
     }
 
+    /// rustfs/gateway#740: the wrapper RustFS rc.6 and `main` persist survives both directions, in
+    /// the s3s member order, entry for entry. An empty wrapper stays a present wrapper, because
+    /// "blocks nothing, explicitly" and "never configured" are different stored states.
     #[test]
-    fn bucket_encryption_dto_bridge_refuses_a_member_the_persistence_shape_cannot_hold() {
-        let dto = ServerSideEncryptionConfiguration {
-            rules: vec![ServerSideEncryptionRule {
-                blocked_encryption_types: Some(BlockedEncryptionTypes {
-                    encryption_type: Vec::new(),
-                }),
-                ..ServerSideEncryptionRule::default()
-            }],
-        };
+    fn bucket_encryption_dto_bridge_carries_blocked_encryption_types_losslessly() {
+        for (blocked, wire) in [
+            (
+                vec![EncryptionType::SSE_C],
+                "<BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes>",
+            ),
+            (
+                vec![EncryptionType::NONE, EncryptionType::SSE_C],
+                "<BlockedEncryptionTypes><EncryptionType>NONE</EncryptionType><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes>",
+            ),
+            (Vec::new(), "<BlockedEncryptionTypes></BlockedEncryptionTypes>"),
+        ] {
+            let dto = ServerSideEncryptionConfiguration {
+                rules: vec![ServerSideEncryptionRule {
+                    apply_server_side_encryption_by_default: Some(ServerSideEncryptionByDefault {
+                        sse_algorithm: SseAlgorithm::AES256,
+                        kms_master_key_id: None,
+                    }),
+                    bucket_key_enabled: Some(false),
+                    blocked_encryption_types: Some(BlockedEncryptionTypes {
+                        encryption_type: blocked.clone(),
+                    }),
+                }],
+            };
+            let bytes = serialize_bucket_encryption_dto(&dto).expect("the wrapper has a persisted slot");
+            let expected = format!(
+                "<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault>{wire}<BucketKeyEnabled>false</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>"
+            );
+            assert_eq!(String::from_utf8_lossy(&bytes), expected);
+            let parsed = parse_bucket_encryption_dto(&bytes).expect("the bridge reads its own persistence bytes");
+            let entries = parsed.rules[0]
+                .blocked_encryption_types
+                .as_ref()
+                .expect("the wrapper stays present")
+                .encryption_type
+                .iter()
+                .map(EncryptionType::as_str)
+                .collect::<Vec<_>>();
+            assert_eq!(entries, blocked.iter().map(EncryptionType::as_str).collect::<Vec<_>>(), "{wire}");
+            assert_eq!(parsed.rules[0].bucket_key_enabled, Some(false));
+            assert_eq!(
+                serialize_bucket_encryption_dto(&parsed).expect("the parsed DTO writes back"),
+                bytes,
+                "{wire}"
+            );
+        }
+    }
 
-        assert_eq!(
-            serialize_bucket_encryption_dto(&dto).expect_err("an unsupported wrapper must not be dropped"),
-            PersistenceBridgeError::UnsupportedMember("ServerSideEncryptionRule.BlockedEncryptionTypes")
-        );
+    #[test]
+    fn n_the_rustfs_rc6_blocked_sse_c_witness_decodes_as_blocked_not_as_absent() {
+        let parsed = parse_bucket_encryption_dto(
+            b"<ServerSideEncryptionConfiguration><Rule><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>",
+        )
+        .expect("the persisted #740 witness is readable");
+        let blocked = parsed.rules[0]
+            .blocked_encryption_types
+            .as_ref()
+            .expect("skipping the wrapper would silently unblock SSE-C");
+        assert_eq!(blocked.encryption_type.len(), 1);
+        assert_eq!(blocked.encryption_type[0].as_str(), "SSE-C");
+    }
+
+    #[test]
+    fn n_the_blocked_wrapper_refuses_foreign_children_duplicates_and_nested_values() {
+        for (document, error) in [
+            (
+                "<Rule><BlockedEncryptionTypes><Future>x</Future></BlockedEncryptionTypes></Rule>",
+                PersistenceCodecError::UnexpectedBucketEncryptionElement,
+            ),
+            (
+                "<Rule><BlockedEncryptionTypes></BlockedEncryptionTypes><BlockedEncryptionTypes></BlockedEncryptionTypes></Rule>",
+                PersistenceCodecError::DuplicateField,
+            ),
+            (
+                "<Rule><BlockedEncryptionTypes><EncryptionType><X>SSE-C</X></EncryptionType></BlockedEncryptionTypes></Rule>",
+                PersistenceCodecError::UnexpectedScalarElement,
+            ),
+        ] {
+            let bytes = format!("<ServerSideEncryptionConfiguration>{document}</ServerSideEncryptionConfiguration>");
+            assert_eq!(
+                parse_bucket_encryption_dto(bytes.as_bytes()).expect_err("the wrapper is refused"),
+                error,
+                "{document}"
+            );
+        }
     }
 
     #[test]

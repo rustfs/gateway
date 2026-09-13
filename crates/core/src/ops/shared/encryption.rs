@@ -18,10 +18,13 @@
 //! Members: DeleteBucketEncryption, GetBucketEncryption, PutBucketEncryption
 //!
 //! Responsible for: the semantic rules of a `ServerSideEncryptionConfiguration` document — the
-//! closed `SSEAlgorithm` value set and the KMS-key-id/algorithm agreement rule — held once so
-//! that every backend refuses the same documents with the same codes.
+//! closed `SSEAlgorithm` value set, the KMS-key-id/algorithm agreement rule and the documented
+//! `NONE | SSE-C` set of `BlockedEncryptionTypes` — held once so that every backend refuses the
+//! same documents with the same codes; and the document's one run-time rule,
+//! [`refuse_blocked_encryption_type`], which the backend holding the document calls on every
+//! object write (rustfs/gateway#740).
 //! NOT responsible for: decoding the document (the generated codec, which refuses unknown
-//! request elements — `q-enc-0006`), storing it, or **applying** it. Whether an
+//! request elements — `q-enc-0006`), storing it, or **applying** its default action. Whether an
 //! object write is actually encrypted with the configured default, how object-level SSE headers
 //! override it, and every other runtime half of SSE — the TLS gate on customer-provided keys,
 //! key/key-MD5 agreement, multipart header consistency — is task P6-06's, with the operations
@@ -52,8 +55,9 @@
 //! documented GET behaviour — but an error message never does.
 
 use rustfs_gateway_types::ErrorCode;
-use rustfs_gateway_types::dto::ServerSideEncryptionConfiguration;
+use rustfs_gateway_types::dto::{EncryptionType, ServerSideEncryptionConfiguration};
 
+use crate::SseEnforced;
 use crate::contracts::{
     DeleteAbsentPolicy, ENCRYPTION_ALGORITHMS, ENCRYPTION_DELETE_ABSENT_POLICY, ENCRYPTION_ERROR_SECRET_FLOW_POLICY,
     ENCRYPTION_KMS_KEY_ALGORITHMS, ENCRYPTION_RULE_MAX, EncryptionErrorSecretFlowPolicy,
@@ -76,6 +80,14 @@ pub enum EncryptionRejection {
     KmsKeyWithoutKmsAlgorithmWithValue(String),
     /// The configuration carries more rules than the current contract permits.
     TooManyRules,
+    /// An object write uses an encryption type the bucket's stored document blocks. AWS answers
+    /// `403 AccessDenied` for a PutObject, CopyObject, PostObject, multipart or replication write
+    /// that names SSE-C while the bucket blocks it.
+    EncryptionTypeBlocked,
+    /// A `BlockedEncryptionTypes` entry outside the documented `NONE | SSE-C`. The generated enum
+    /// is shared with other shapes and also spells `AES256` and the KMS algorithms, but a stored
+    /// block no write path can enforce is a promise nothing keeps, so the write refuses it.
+    EncryptionTypeUnknown,
 }
 
 impl EncryptionRejection {
@@ -84,11 +96,13 @@ impl EncryptionRejection {
     pub const fn code(&self) -> ErrorCode {
         match self {
             // A schema violation: the member's value set is closed and the document is outside it.
-            EncryptionRejection::AlgorithmUnknown => ErrorCode::MALFORMED_XML,
+            EncryptionRejection::AlgorithmUnknown | EncryptionRejection::EncryptionTypeUnknown => ErrorCode::MALFORMED_XML,
             // A cross-member constraint on otherwise well-formed values.
             EncryptionRejection::KmsKeyWithoutKmsAlgorithm
             | EncryptionRejection::KmsKeyWithoutKmsAlgorithmWithValue(_)
             | EncryptionRejection::TooManyRules => ErrorCode::INVALID_ARGUMENT,
+            // Documented as a 403 AccessDenied: the caller is not allowed this write on this bucket.
+            EncryptionRejection::EncryptionTypeBlocked => ErrorCode::ACCESS_DENIED,
         }
     }
 
@@ -109,6 +123,10 @@ impl EncryptionRejection {
                 "KMSMasterKeyID can only be used when SSEAlgorithm is aws:kms or aws:kms:dsse"
             }
             EncryptionRejection::TooManyRules => "The encryption configuration carries too many rules",
+            EncryptionRejection::EncryptionTypeBlocked => {
+                "The bucket's default encryption configuration blocks writes that use SSE-C"
+            }
+            EncryptionRejection::EncryptionTypeUnknown => "EncryptionType in BlockedEncryptionTypes must be NONE or SSE-C",
         }
     }
 
@@ -156,6 +174,51 @@ pub fn validate_encryption(configuration: &ServerSideEncryptionConfiguration) ->
                 return Err(EncryptionRejection::kms_key_without_kms_algorithm(key_id));
             }
         }
+        if let Some(blocked) = &rule.blocked_encryption_types
+            && blocked
+                .encryption_type
+                .iter()
+                .any(|entry| ![EncryptionType::NONE.as_str(), EncryptionType::SSE_C.as_str()].contains(&entry.as_str()))
+        {
+            return Err(EncryptionRejection::EncryptionTypeUnknown);
+        }
+    }
+    Ok(())
+}
+
+/// Whether any stored rule blocks SSE-C for new object writes.
+///
+/// Only the exact `SSE-C` spelling blocks. `NONE` is the documented explicit "block nothing", and
+/// an entry this release does not know names no request it could refuse. A rule listing both
+/// `NONE` and `SSE-C` blocks: a document that names SSE-C as blocked is never read as permission.
+#[must_use]
+pub fn blocks_customer_keys(configuration: &ServerSideEncryptionConfiguration) -> bool {
+    configuration
+        .rules
+        .iter()
+        .filter_map(|rule| rule.blocked_encryption_types.as_ref())
+        .flat_map(|blocked| &blocked.encryption_type)
+        .any(|entry| entry.as_str() == EncryptionType::SSE_C.as_str())
+}
+
+/// The stored document's one run-time rule, for the backend that holds the document.
+///
+/// A write whose request presented a customer-provided key for the object it writes — the
+/// framework's [`SseEnforced`] proof, never a decoded header — into a bucket whose document blocks
+/// SSE-C is refused. The framework holds no bucket state, so the backend calls this before it
+/// stores anything, for every object write that can carry SSE-C: PutObject, CopyObject (the
+/// target's key, not the copy source's), PostObject and CreateMultipartUpload. Reads are never
+/// refused: AWS keeps objects already written with SSE-C readable.
+///
+/// # Errors
+///
+/// [`EncryptionRejection::EncryptionTypeBlocked`], which renders `403 AccessDenied`.
+pub fn refuse_blocked_encryption_type(
+    configuration: Option<&ServerSideEncryptionConfiguration>,
+    sse: &SseEnforced,
+) -> Result<(), EncryptionRejection> {
+    if sse.customer_key_fingerprint().is_some() && configuration.is_some_and(blocks_customer_keys) {
+        return Err(EncryptionRejection::EncryptionTypeBlocked);
     }
     Ok(())
 }
@@ -302,5 +365,148 @@ mod tests {
         );
         assert_eq!(ErrorCode::MALFORMED_XML.default_status().as_u16(), 400);
         assert_eq!(ErrorCode::INVALID_ARGUMENT.default_status().as_u16(), 400);
+    }
+
+    // ── the blocked-encryption-type run-time rule (rustfs/gateway#740) ─────────────────────────
+
+    use rustfs_gateway_http::{Limits, WireRequest};
+    use rustfs_gateway_types::dto::BlockedEncryptionTypes;
+
+    use crate::TargetKind;
+    use crate::codec::MetaView;
+    use crate::sse::{SseConfig, TransportSecurity, enforce};
+
+    /// The framework's proof for a request over TLS, with or without the customer-key trio.
+    fn proof(customer_key: bool) -> SseEnforced {
+        let mut builder = http::Request::builder()
+            .method("PUT")
+            .uri("http://host.invalid/bucket/object")
+            .header("host", "host.invalid");
+        if customer_key {
+            builder = builder
+                .header("x-amz-server-side-encryption-customer-algorithm", "AES256")
+                .header(
+                    "x-amz-server-side-encryption-customer-key",
+                    "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                )
+                .header("x-amz-server-side-encryption-customer-key-md5", "tP/LI3N87DFaSk0aoqYgzg==");
+        }
+        let request = builder.body(()).expect("a well-formed fixture request");
+        let accepted = WireRequest::accept(request, &Limits::default()).expect("an acceptable fixture request");
+        let view = MetaView::of(&accepted, TargetKind::Object).expect("the path names an object");
+        let Ok(proof) = enforce(&view, TransportSecurity::Encrypted, &SseConfig::strict()) else {
+            panic!("a well-formed trio over TLS passes the gate");
+        };
+        assert_eq!(proof.customer_key_fingerprint().is_some(), customer_key);
+        proof
+    }
+
+    fn blocking(entries: &[EncryptionType]) -> ServerSideEncryptionConfiguration {
+        config(vec![ServerSideEncryptionRule {
+            blocked_encryption_types: Some(BlockedEncryptionTypes {
+                encryption_type: entries.to_vec(),
+            }),
+            ..ServerSideEncryptionRule::default()
+        }])
+    }
+
+    #[test]
+    fn a_write_without_a_customer_key_is_never_refused_by_a_block() {
+        let blocked = blocking(&[EncryptionType::SSE_C]);
+        assert_eq!(refuse_blocked_encryption_type(Some(&blocked), &proof(false)), Ok(()));
+    }
+
+    #[test]
+    fn a_customer_key_is_served_where_the_bucket_blocks_nothing() {
+        // `NONE` is the documented explicit unblock, an empty wrapper blocks nothing, and a bucket
+        // with no document has no block: all three serve the same SSE-C write.
+        let sse = proof(true);
+        for document in [
+            Some(blocking(&[EncryptionType::NONE])),
+            Some(blocking(&[])),
+            Some(config(vec![rule(SseAlgorithm::AES256, None)])),
+            None,
+        ] {
+            assert_eq!(refuse_blocked_encryption_type(document.as_ref(), &sse), Ok(()), "{document:?}");
+        }
+    }
+
+    #[test]
+    fn n_a_customer_key_write_into_an_sse_c_blocked_bucket_is_access_denied() {
+        let rejection = refuse_blocked_encryption_type(Some(&blocking(&[EncryptionType::SSE_C])), &proof(true))
+            .expect_err("AWS refuses an SSE-C write to a bucket that blocks SSE-C");
+        assert_eq!(rejection, EncryptionRejection::EncryptionTypeBlocked);
+        assert_eq!(rejection.code(), ErrorCode::ACCESS_DENIED);
+        assert_eq!(rejection.code().default_status().as_u16(), 403);
+    }
+
+    #[test]
+    fn n_a_block_in_any_rule_or_beside_none_still_blocks() {
+        let sse = proof(true);
+        let beside_none = blocking(&[EncryptionType::NONE, EncryptionType::SSE_C]);
+        let second_rule = config(vec![
+            rule(SseAlgorithm::AES256, None),
+            blocking(&[EncryptionType::SSE_C]).rules.remove(0),
+        ]);
+        for document in [beside_none, second_rule] {
+            assert_eq!(
+                refuse_blocked_encryption_type(Some(&document), &sse),
+                Err(EncryptionRejection::EncryptionTypeBlocked),
+                "{document:?}"
+            );
+        }
+    }
+
+    /// `c-encryption-0027`/`0028`: the wrapper takes `NONE | SSE-C` only. A value the shared
+    /// enumeration spells but this wrapper does not document is refused like an out-of-set
+    /// algorithm, and the two documented ones — alone, together, repeated, or an empty wrapper —
+    /// pass.
+    #[test]
+    fn n_a_blocked_type_outside_none_and_sse_c_is_refused_as_malformed_xml() {
+        for spelling in ["AES256", "aws:kms", "aws:kms:dsse", "aws:fsx", "SSE-KMS", "sse-c", ""] {
+            let document = blocking(&[EncryptionType::SSE_C, EncryptionType::custom(spelling)]);
+            assert_eq!(
+                validate_encryption(&document),
+                Err(EncryptionRejection::EncryptionTypeUnknown),
+                "{spelling:?}"
+            );
+        }
+        assert_eq!(EncryptionRejection::EncryptionTypeUnknown.code(), ErrorCode::MALFORMED_XML);
+        for entries in [
+            vec![EncryptionType::NONE],
+            vec![EncryptionType::SSE_C],
+            vec![EncryptionType::NONE, EncryptionType::SSE_C, EncryptionType::SSE_C],
+            Vec::new(),
+        ] {
+            assert_eq!(validate_encryption(&blocking(&entries)), Ok(()), "{entries:?}");
+        }
+    }
+
+    #[test]
+    fn n_only_the_exact_sse_c_spelling_blocks() {
+        for spelling in ["sse-c", "SSE_C", "SSEC", "AES256"] {
+            assert!(!blocks_customer_keys(&blocking(&[EncryptionType::custom(spelling)])), "{spelling}");
+        }
+        assert!(blocks_customer_keys(&blocking(&[EncryptionType::custom("SSE-C")])));
+    }
+
+    /// The migration end of the chain: the exact bytes RustFS rc.6 and `main` persist, decoded by
+    /// the production persistence bridge, still refuse the write they block.
+    #[test]
+    fn n_the_persisted_rc6_witness_still_blocks_after_migration() {
+        let stored = rustfs_gateway_types::persistence::parse_bucket_encryption_dto(
+            b"<ServerSideEncryptionConfiguration><Rule><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>",
+        )
+        .expect("the persisted witness is readable");
+        assert_eq!(
+            refuse_blocked_encryption_type(Some(&stored), &proof(true)),
+            Err(EncryptionRejection::EncryptionTypeBlocked)
+        );
+        assert!(!rejection_mentions_key(&EncryptionRejection::EncryptionTypeBlocked));
+    }
+
+    fn rejection_mentions_key(rejection: &EncryptionRejection) -> bool {
+        let reason = rejection.reason();
+        reason.contains("AAECAw") || reason.contains("tP/LI3")
     }
 }

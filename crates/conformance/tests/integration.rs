@@ -28,6 +28,8 @@ mod copy_family;
 mod corpus;
 #[path = "domain_wiring.rs"]
 mod domain_wiring;
+#[path = "encryption_blocked_types.rs"]
+mod encryption_blocked_types;
 #[path = "lifecycle_family.rs"]
 mod lifecycle_family;
 #[path = "list_family.rs"]

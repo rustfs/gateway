@@ -303,6 +303,7 @@ conformance_modules = (
     "copy_family",
     "corpus",
     "domain_wiring",
+    "encryption_blocked_types",
     "lifecycle_family",
     "list_family",
     "multipart_family",

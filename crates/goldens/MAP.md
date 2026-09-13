@@ -41,7 +41,8 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/lifecycle/source_b.rs` | Registers the byte-exact Lifecycle sample captured through the live source-(b) client path. | Auditing the boto3-to-RustFS persistence provenance for Lifecycle. |
 | `src/notification.rs` | Binds Notification codecs, full routing decisions, traceable samples, parser boundaries, and D1-D5 mutations. | Auditing Notification persistence compatibility. |
 | `src/notification/corpus_cases/source_a.rs` | Pins RustFS repository Notification fixture bytes, aliases, old-oracle classification, and provenance. | Registering or auditing Notification source-(a) census rows. |
-| `src/bucket_encryption.rs` | Binds Bucket Encryption codecs, algorithm/KMS/bucket-key behavior, traceable samples, and mutations. | Auditing default-encryption persistence compatibility. |
+| `src/bucket_encryption.rs` | Binds Bucket Encryption codecs, algorithm/KMS/bucket-key/blocked-type behavior and traceable samples, including the revision-scoped `BlockedEncryptionTypes` samples (D1-D5 under rollback/candidate, widenings under the baseline). | Auditing default-encryption persistence compatibility or the per-revision rule (rustfs/gateway#740). |
+| `src/bucket_encryption/tests.rs` | Proves every Bucket Encryption sample, the per-revision widening rule, and that each direction goes red under a broken codec. | Verifying Bucket Encryption evidence fails closed. |
 | `src/public_access_block.rs` | Binds Public Access Block codecs, four-switch behavior, traceable samples, and mutations. | Auditing public-access persistence compatibility. |
 | `src/cors.rs` | Binds CORS production/oracle codecs, full runtime projection, samples, parser boundaries, and mutations. | Auditing CORS persistence compatibility. |
 | `src/tagging.rs` | Binds Tagging production/oracle codecs, complete tag projection, samples, parser boundaries, and mutations. | Auditing Tagging persistence compatibility. |

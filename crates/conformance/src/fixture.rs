@@ -118,16 +118,16 @@ use rustfs_gateway::{
     FailedCondition, GranteeType, Handler, HandlerError, HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey,
     ObjectValidators, Operation, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY,
     RangeDecision, RangeSelectors, RecordedUpload, RegionLabel, RegionSet, Req, RequestKind, ResolvedUploadId,
-    ResourceVisibility, Resp, RestoreState, RestoreStatus, TagScope, TaggingRejection, Timestamp, UploadIdClaim,
+    ResourceVisibility, Resp, RestoreState, RestoreStatus, SseEnforced, TagScope, TaggingRejection, Timestamp, UploadIdClaim,
     canonicalize_grantee, collect, completion_failure_retains_upload, conditional_write_guards_before_mutation,
     copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, copy_target_uses_source_validators,
     encryption_delete_absent_succeeds, evaluate, evaluate_range, format_optional_restore_status,
     object_lock_requires_enabled_bucket, parse_conditional_etag, parse_tagging_header, permanent_redirect_for,
-    resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint, resolve_part, resolve_upload,
-    select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate, validate_cors, validate_encryption,
-    validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging, validate_notification,
-    validate_policy, validate_public_access_block, validate_replication, validate_request_payment, validate_restore,
-    validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
+    refuse_blocked_encryption_type, resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint,
+    resolve_part, resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate,
+    validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
+    validate_notification, validate_policy, validate_public_access_block, validate_replication, validate_request_payment,
+    validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
 mod committed;

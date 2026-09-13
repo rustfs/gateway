@@ -19,21 +19,22 @@
 //! Upstream: pinned-s3s observations and gateway persistence codecs. Downstream: migration gates.
 
 use rustfs_gateway_types::compat::{
-    S3sBucketEncryptionObservation, parse_s3s_bucket_encryption, serialize_s3s_bucket_encryption,
+    OracleRevision, S3sBucketEncryptionObservation, parse_s3s_bucket_encryption, selected_oracle, serialize_s3s_bucket_encryption,
 };
 use rustfs_gateway_types::persistence::{
-    PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedEncryptionByDefault, parse_bucket_encryption,
-    serialize_bucket_encryption,
+    EncryptionRuleBehavior, PersistedBlockedEncryptionTypes, PersistedBucketEncryptionConfiguration,
+    PersistedBucketEncryptionRule, PersistedEncryptionByDefault, parse_bucket_encryption, serialize_bucket_encryption,
 };
 
 use crate::{
-    ConfigKind, CorpusCaseEvidence, CorpusCoverageError, CorpusVariant, FamilyCorpusEvidence, FourWayCodec, GoldenFailure,
-    GoldenSample, RejectedGoldenSample, SampleOrigin, assert_four_way,
+    ConfigKind, CorpusCaseEvidence, CorpusCoverageError, CorpusVariant, Direction, FamilyCorpusEvidence, FourWayCodec,
+    GoldenFailure, GoldenSample, RejectedGoldenSample, SampleOrigin, assert_four_way, byte_failure, validate_sample,
+    value_failure,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct BucketEncryptionBehaviorProjection {
-    rules: Vec<(Option<String>, Option<String>, Option<bool>)>,
+    rules: Vec<EncryptionRuleBehavior>,
 }
 
 /// Runs pinned-s3s versus gateway persistence Bucket Encryption evidence.
@@ -53,6 +54,93 @@ pub(crate) fn run_bucket_encryption_corpus_four_way() -> Result<usize, GoldenFai
         assert_bucket_encryption_four_way(sample)?;
     }
     Ok(cases.len())
+}
+
+/// Whether `selected` is `since` or a later pinned revision, in [`OracleRevision::ALL`] order.
+fn reached(selected: OracleRevision, since: OracleRevision) -> bool {
+    let position = |oracle| OracleRevision::ALL.iter().position(|candidate| *candidate == oracle);
+    position(selected) >= position(since)
+}
+
+/// Accepted samples the given revision predates: each is measured under it as a widening rather
+/// than through D1-D5.
+pub(crate) fn widened_under(oracle: OracleRevision) -> usize {
+    revision_scoped_accepted_samples()
+        .iter()
+        .filter(|(since, _, _)| !reached(oracle, *since))
+        .count()
+}
+
+/// Runs the revision-scoped accepted samples under the selected revision, returning how many ran
+/// through D1-D5 and how many were measured as widenings.
+///
+/// A sample first written by a later revision runs the full D1-D5 under that revision and every
+/// later one. Under an earlier revision D1-D5 is impossible by construction — that revision's
+/// codec has no member for the bytes — so it is measured for exactly what holds instead: the old
+/// codec refuses the bytes and cannot write the value, and the production codec reads the value
+/// and writes the exact bytes. Counting that as a D1-D5 pass would fake one.
+///
+/// # Errors
+///
+/// Returns the first D1-D5 or widening failure.
+pub(crate) fn run_revision_scoped_four_way() -> Result<(usize, usize), GoldenFailure> {
+    let selected = selected_oracle();
+    let (mut executed, mut widened) = (0, 0);
+    for (since, sample, _) in revision_scoped_accepted_samples() {
+        if reached(selected, since) {
+            assert_bucket_encryption_four_way(&sample)?;
+            executed += 1;
+        } else {
+            assert_widening(&BucketEncryptionCodec, &sample)?;
+            widened += 1;
+        }
+    }
+    Ok((executed, widened))
+}
+
+/// The widening assertion for a revision that predates `sample`.
+fn assert_widening<C>(codec: &C, sample: &GoldenSample<C::Value>) -> Result<(), GoldenFailure>
+where
+    C: FourWayCodec,
+{
+    validate_sample(C::KIND, sample)?;
+    if let Ok(read) = codec.old_parse(&sample.bytes) {
+        return Err(GoldenFailure {
+            direction: Direction::D1CompatibleRead,
+            offset: None,
+            left: format!("the selected revision read the sample: {read:?}"),
+            right: "a sample the selected revision reads must run D1-D5, not count as a widening".to_owned(),
+        });
+    }
+    let new_parsed = codec.new_parse(&sample.bytes).map_err(|error| GoldenFailure {
+        direction: Direction::D4NotStricter,
+        offset: None,
+        left: "the production decoder must read what a later pinned revision writes".to_owned(),
+        right: error,
+    })?;
+    let expected = codec.expected_structure(&sample.value);
+    let observed = codec.new_structure(&new_parsed);
+    if observed != expected {
+        return Err(value_failure(Direction::D1CompatibleRead, &expected, &observed));
+    }
+    let new_bytes = codec.new_serialize(&sample.value).map_err(|error| GoldenFailure {
+        direction: Direction::D2ByteWrite,
+        offset: None,
+        left: "the production writer must reproduce the later revision's bytes".to_owned(),
+        right: error,
+    })?;
+    if new_bytes != sample.bytes {
+        return Err(byte_failure(Direction::D2ByteWrite, &sample.bytes, &new_bytes));
+    }
+    if let Ok(bytes) = codec.old_serialize(&sample.value) {
+        return Err(GoldenFailure {
+            direction: Direction::D2ByteWrite,
+            offset: None,
+            left: String::from_utf8_lossy(&bytes).into_owned(),
+            right: "the selected revision wrote a value it has no member for, so it dropped one".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -129,6 +217,7 @@ fn rule(default: Option<PersistedEncryptionByDefault>, bucket_key_enabled: Optio
     PersistedBucketEncryptionRule {
         apply_server_side_encryption_by_default: default,
         bucket_key_enabled,
+        blocked_encryption_types: None,
     }
 }
 
@@ -287,13 +376,70 @@ fn bucket_encryption_accepted_samples() -> Vec<(GoldenSample<PersistedBucketEncr
     cases
 }
 
+/// The `BlockedEncryptionTypes` witness RustFS rc.6 and `main` persist verbatim from a client's
+/// `PutBucketEncryption` (rustfs/gateway#740).
+const BLOCKED_SSE_C: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>";
+/// Every Rule member at once, in the order s3s `bdcb6259` writes them, so D2 pins the member order.
+const BLOCKED_FULL_ORDER: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BlockedEncryptionTypes><EncryptionType>NONE</EncryptionType><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>";
+
+fn blocked_rule(
+    default: Option<PersistedEncryptionByDefault>,
+    entries: &[&str],
+    bucket_key_enabled: Option<bool>,
+) -> PersistedBucketEncryptionRule {
+    PersistedBucketEncryptionRule {
+        blocked_encryption_types: Some(PersistedBlockedEncryptionTypes {
+            encryption_types: entries.iter().map(|entry| (*entry).to_owned()).collect(),
+        }),
+        ..rule(default, bucket_key_enabled)
+    }
+}
+
+/// Accepted samples first written by a later pinned revision than the baseline, with that
+/// revision. Their producer is the revision that writes them, never the baseline, which refuses
+/// them.
+fn revision_scoped_accepted_samples()
+-> Vec<(OracleRevision, GoldenSample<PersistedBucketEncryptionConfiguration>, Vec<CorpusVariant>)> {
+    let since = OracleRevision::Rollback;
+    let scoped = |bytes: &[u8], sha256: &str, value, notes: &str| {
+        let mut sample = sample(bytes, sha256, value, notes);
+        sample.origin.version = format!("s3s@{}", since.revision());
+        sample
+    };
+    vec![
+        (
+            since,
+            scoped(
+                BLOCKED_SSE_C,
+                "62ea2d1b74fd4d569e03ee5b6f5e7131e22d2e3d857707fbd89bd55f3683bf47",
+                configuration(vec![blocked_rule(None, &["SSE-C"], None)]),
+                "SSE-C blocked for new writes, as RustFS rc.6 and main persist it (rustfs/gateway#740)",
+            ),
+            vec![CorpusVariant::Canonical],
+        ),
+        (
+            since,
+            scoped(
+                BLOCKED_FULL_ORDER,
+                "5067c9c583024151846c619b64219a26f3764bfb631efc05c34666908a9b378b",
+                configuration(vec![blocked_rule(
+                    Some(encryption_default("AES256", None)),
+                    &["NONE", "SSE-C"],
+                    Some(true),
+                )]),
+                "every Rule member in the s3s member order with a repeated flattened EncryptionType",
+            ),
+            vec![CorpusVariant::Canonical],
+        ),
+    ]
+}
+
 fn bucket_encryption_rejected_samples() -> Vec<(RejectedGoldenSample, Vec<CorpusVariant>)> {
     let raw = [
         (b"<ServerSideEncryptionConfiguration></ServerSideEncryptionConfiguration>".to_vec(), "f569568f0add3b5707c9b51dfeb88b84adc8f06e90d235374b80d5075c0c699a", "missing Rule", CorpusVariant::MissingField),
         (b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".to_vec(), "9be376a461453226ac09b3bc7ef2945155701ca14d08443b09aa0a136ae852f0", "missing SSEAlgorithm", CorpusVariant::MissingField),
         (b"<ServerSideEncryptionConfiguration><Rule><Future>v</Future></Rule></ServerSideEncryptionConfiguration>".to_vec(), "742b9b08e46369ad19d5046e0ffa3eb5cd0986e003b1fdbccb2e455e78cce8cb", "unknown Rule child", CorpusVariant::UnknownNested),
         (b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><Future>v</Future><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".to_vec(), "ec967c0d49c6c11e097d36dc0850f66e6b529ef3f0433ca45f8c206467d6eac9", "unknown default child", CorpusVariant::UnknownNested),
-        (b"<ServerSideEncryptionConfiguration><Rule><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>".to_vec(), "62ea2d1b74fd4d569e03ee5b6f5e7131e22d2e3d857707fbd89bd55f3683bf47", "newer blocked-encryption extension", CorpusVariant::UnknownNested),
         (b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".to_vec(), "ab9086097aec1f918804bb9ad609858a7809292bbc0556279d3b09894716012e", "duplicate ApplyServerSideEncryptionByDefault", CorpusVariant::DuplicateField),
         (b"<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>true</BucketKeyEnabled><BucketKeyEnabled>false</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>".to_vec(), "f09965caedc03a774e49df45e33a0254bbbe3b1c1c66f17b8db2d9d43400c48d", "duplicate BucketKeyEnabled", CorpusVariant::DuplicateField),
         (b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm><SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>".to_vec(), "951efa211513b57224418c667d84415a431f9a2e1cf6bf6e263ba3cc935a5327", "duplicate SSEAlgorithm", CorpusVariant::DuplicateField),
@@ -321,6 +467,9 @@ pub(crate) fn bucket_encryption_corpus_evidence() -> Result<FamilyCorpusEvidence
     for (sample, variants) in bucket_encryption_accepted_samples() {
         cases.push(CorpusCaseEvidence::accepted(&sample, &variants)?);
     }
+    for (_, sample, variants) in revision_scoped_accepted_samples() {
+        cases.push(CorpusCaseEvidence::accepted(&sample, &variants)?);
+    }
     for (sample, variants) in bucket_encryption_rejected_samples() {
         cases.push(CorpusCaseEvidence::rejected(&sample, &variants)?);
     }
@@ -343,258 +492,4 @@ pub(crate) fn bucket_encryption_corpus_evidence() -> Result<FamilyCorpusEvidence
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{Direction, build_corpus_report};
-
-    #[test]
-    fn family_owned_corpus_evidence_is_built_from_the_shared_case_objects() {
-        let evidence = bucket_encryption_corpus_evidence().expect("SSE corpus evidence is traceable");
-        build_corpus_report(&[ConfigKind::BucketEncryption], &[evidence])
-            .expect("SSE corpus coverage is derived from the shared cases");
-    }
-
-    fn base_sample() -> GoldenSample<PersistedBucketEncryptionConfiguration> {
-        bucket_encryption_accepted_samples()
-            .into_iter()
-            .find_map(|(sample, variants)| variants.contains(&CorpusVariant::Namespace).then_some(sample))
-            .expect("SSE matrix carries its namespace control")
-    }
-
-    #[test]
-    fn bucket_encryption_sample_matrix_passes_all_five_directions() {
-        for (case, _) in bucket_encryption_accepted_samples() {
-            if let Err(error) = assert_bucket_encryption_four_way(&case) {
-                panic!("Bucket Encryption sample failed ({}): {error}", case.notes);
-            }
-        }
-    }
-
-    #[test]
-    fn required_sse_wrappers_match_the_pinned_old_refusals() {
-        for (case, _) in bucket_encryption_rejected_samples()
-            .into_iter()
-            .filter(|(_, variants)| variants.contains(&CorpusVariant::MissingField))
-        {
-            assert!(
-                BucketEncryptionCodec.old_parse(&case.bytes).is_err(),
-                "old parser accepted {}",
-                case.notes
-            );
-            assert!(
-                BucketEncryptionCodec.new_parse(&case.bytes).is_err(),
-                "new parser accepted {}",
-                case.notes
-            );
-        }
-    }
-
-    #[test]
-    fn nested_unknown_sse_content_matches_the_old_refusal_boundary() {
-        for (case, _) in bucket_encryption_rejected_samples()
-            .into_iter()
-            .filter(|(_, variants)| variants.contains(&CorpusVariant::UnknownNested))
-        {
-            assert!(
-                BucketEncryptionCodec.old_parse(&case.bytes).is_err(),
-                "old parser accepted {}",
-                case.notes
-            );
-            assert!(
-                BucketEncryptionCodec.new_parse(&case.bytes).is_err(),
-                "new parser accepted {}",
-                case.notes
-            );
-        }
-    }
-
-    #[test]
-    fn every_duplicate_sse_scalar_or_wrapper_is_rejected_by_both_parsers() {
-        for (case, _) in bucket_encryption_rejected_samples()
-            .into_iter()
-            .filter(|(_, variants)| variants.contains(&CorpusVariant::DuplicateField))
-        {
-            assert!(
-                BucketEncryptionCodec.old_parse(&case.bytes).is_err(),
-                "old parser accepted {}",
-                case.notes
-            );
-            assert!(
-                BucketEncryptionCodec.new_parse(&case.bytes).is_err(),
-                "new parser accepted {}",
-                case.notes
-            );
-        }
-    }
-
-    #[test]
-    fn bucket_key_boolean_lexemes_match_the_old_oracle() {
-        for (case, _) in bucket_key_accepted_samples() {
-            let expected = case.value.rules[0].bucket_key_enabled;
-            let old = BucketEncryptionCodec
-                .old_parse(&case.bytes)
-                .expect("old accepts observed boolean lexeme");
-            let new = BucketEncryptionCodec
-                .new_parse(&case.bytes)
-                .expect("new accepts observed boolean lexeme");
-            assert_eq!(old.structure.rules[0].bucket_key_enabled, expected);
-            assert_eq!(new.rules[0].bucket_key_enabled, expected);
-        }
-        for (case, _) in bucket_encryption_rejected_samples()
-            .into_iter()
-            .filter(|(_, variants)| variants.contains(&CorpusVariant::UnknownScalar))
-        {
-            assert!(BucketEncryptionCodec.old_parse(&case.bytes).is_err(), "old accepted {}", case.notes);
-            assert!(BucketEncryptionCodec.new_parse(&case.bytes).is_err(), "new accepted {}", case.notes);
-        }
-    }
-
-    #[test]
-    fn full_sse_value_keeps_the_old_byte_order() {
-        let value = configuration(vec![rule(Some(encryption_default("aws:kms", Some("kms-key"))), Some(true))]);
-        let old = BucketEncryptionCodec
-            .old_serialize(&value)
-            .expect("old serializer accepts full SSE value");
-        let new = BucketEncryptionCodec
-            .new_serialize(&value)
-            .expect("new serializer accepts full SSE value");
-        assert_eq!(old, new);
-        assert_eq!(old, KMS_BUCKET_KEY);
-    }
-
-    struct Mutant {
-        old_byte_drift: bool,
-        reject_new_output_in_old: bool,
-        reject_historical_in_new: bool,
-        new_structure_drift: bool,
-        new_behavior_drift: bool,
-        panic_on_old_parse: bool,
-    }
-
-    impl FourWayCodec for Mutant {
-        const KIND: ConfigKind = ConfigKind::BucketEncryption;
-
-        type Value = PersistedBucketEncryptionConfiguration;
-        type OldParsed = S3sBucketEncryptionObservation;
-        type NewParsed = PersistedBucketEncryptionConfiguration;
-        type Structure = PersistedBucketEncryptionConfiguration;
-        type Behavior = BucketEncryptionBehaviorProjection;
-
-        fn old_parse(&self, bytes: &[u8]) -> Result<Self::OldParsed, String> {
-            assert!(!self.panic_on_old_parse, "SSE codec observation must not run");
-            let canonical = BucketEncryptionCodec.new_serialize(&configuration(vec![rule(None, None)]))?;
-            if self.reject_new_output_in_old && bytes == canonical {
-                return Err("mutation: rollback parser rejects new SSE output".to_owned());
-            }
-            BucketEncryptionCodec.old_parse(bytes)
-        }
-
-        fn new_parse(&self, bytes: &[u8]) -> Result<Self::NewParsed, String> {
-            if self.reject_historical_in_new && bytes == NAMESPACE {
-                return Err("mutation: new SSE parser is stricter".to_owned());
-            }
-            let mut parsed = BucketEncryptionCodec.new_parse(bytes)?;
-            if self.new_structure_drift {
-                parsed.rules.clear();
-            }
-            Ok(parsed)
-        }
-
-        fn old_structure(&self, value: &Self::OldParsed) -> Self::Structure {
-            BucketEncryptionCodec.old_structure(value)
-        }
-
-        fn new_structure(&self, value: &Self::NewParsed) -> Self::Structure {
-            BucketEncryptionCodec.new_structure(value)
-        }
-
-        fn expected_structure(&self, value: &Self::Value) -> Self::Structure {
-            BucketEncryptionCodec.expected_structure(value)
-        }
-
-        fn old_serialize(&self, value: &Self::Value) -> Result<Vec<u8>, String> {
-            let mut bytes = BucketEncryptionCodec.old_serialize(value)?;
-            if self.old_byte_drift {
-                bytes.push(b' ');
-            }
-            Ok(bytes)
-        }
-
-        fn new_serialize(&self, value: &Self::Value) -> Result<Vec<u8>, String> {
-            BucketEncryptionCodec.new_serialize(value)
-        }
-
-        fn old_behavior(&self, value: &Self::OldParsed) -> Self::Behavior {
-            BucketEncryptionCodec.old_behavior(value)
-        }
-
-        fn new_behavior(&self, value: &Self::NewParsed) -> Self::Behavior {
-            let mut projection = BucketEncryptionCodec.new_behavior(value);
-            if self.new_behavior_drift {
-                projection.rules.push((Some("mutation".to_owned()), None, None));
-            }
-            projection
-        }
-    }
-
-    fn mutant() -> Mutant {
-        Mutant {
-            old_byte_drift: false,
-            reject_new_output_in_old: false,
-            reject_historical_in_new: false,
-            new_structure_drift: false,
-            new_behavior_drift: false,
-            panic_on_old_parse: false,
-        }
-    }
-
-    #[test]
-    fn d1_detects_sse_structure_drift() {
-        let mut codec = mutant();
-        codec.new_structure_drift = true;
-        let failure = assert_four_way(&codec, &base_sample()).expect_err("D1 must compare SSE structures");
-        assert_eq!(failure.direction, Direction::D1CompatibleRead);
-    }
-
-    #[test]
-    fn d2_detects_sse_byte_drift() {
-        let mut codec = mutant();
-        codec.old_byte_drift = true;
-        let failure = assert_four_way(&codec, &base_sample()).expect_err("D2 must compare SSE bytes");
-        assert_eq!(failure.direction, Direction::D2ByteWrite);
-    }
-
-    #[test]
-    fn d3_detects_sse_rollback_refusal() {
-        let mut codec = mutant();
-        codec.reject_new_output_in_old = true;
-        let failure = assert_four_way(&codec, &base_sample()).expect_err("D3 must prove SSE rollback reads");
-        assert_eq!(failure.direction, Direction::D3RollbackRead);
-    }
-
-    #[test]
-    fn d4_detects_a_stricter_sse_parser() {
-        let mut codec = mutant();
-        codec.reject_historical_in_new = true;
-        let failure = assert_four_way(&codec, &base_sample()).expect_err("D4 must preserve old-readable SSE");
-        assert_eq!(failure.direction, Direction::D4NotStricter);
-    }
-
-    #[test]
-    fn d5_detects_sse_behavior_drift() {
-        let mut codec = mutant();
-        codec.new_behavior_drift = true;
-        let failure = assert_four_way(&codec, &base_sample()).expect_err("D5 must compare SSE decisions");
-        assert_eq!(failure.direction, Direction::D5Behavior);
-    }
-
-    #[test]
-    fn wrong_family_label_fails_before_sse_codec_observation() {
-        let mut invalid = base_sample();
-        invalid.kind = ConfigKind::PublicAccessBlock;
-        let mut codec = mutant();
-        codec.panic_on_old_parse = true;
-        let failure = assert_four_way(&codec, &invalid).expect_err("mislabeled SSE sample must fail closed");
-        assert_eq!(failure.direction, Direction::Input);
-    }
-}
+mod tests;

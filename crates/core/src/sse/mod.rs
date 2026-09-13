@@ -280,6 +280,12 @@ const fn managed_reason(managed: &ManagedRejection) -> &'static str {
         ManagedRejection::Document(crate::ops::shared::encryption::EncryptionRejection::TooManyRules) => {
             "the encryption configuration carries too many rules"
         }
+        // Neither is reachable from a one-rule header document, which names no blocked type; the
+        // arms exist so the sentence stays constant if that ever changes.
+        ManagedRejection::Document(
+            crate::ops::shared::encryption::EncryptionRejection::EncryptionTypeBlocked
+            | crate::ops::shared::encryption::EncryptionRejection::EncryptionTypeUnknown,
+        ) => "the bucket's default encryption configuration does not allow this encryption type",
         ManagedRejection::KmsQualifierWithoutKmsAlgorithm => {
             "an encryption context or bucket-key switch is only valid with aws:kms or aws:kms:dsse"
         }

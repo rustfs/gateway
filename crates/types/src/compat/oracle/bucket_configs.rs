@@ -35,11 +35,11 @@ use crate::compat::{
 };
 use crate::cors_tagging::{PersistedCorsConfiguration, PersistedCorsRule, PersistedTag, PersistedTagging};
 use crate::persistence::{
-    PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedBucketLoggingStatus,
-    PersistedDefaultRetention, PersistedEncryptionByDefault, PersistedErrorDocument, PersistedGrantee, PersistedIndexDocument,
-    PersistedLoggingEnabled, PersistedLoggingGrant, PersistedObjectLockConfiguration, PersistedObjectLockRule,
-    PersistedPublicAccessBlockConfiguration, PersistedRedirect, PersistedRedirectAllRequestsTo, PersistedRoutingRule,
-    PersistedRoutingRuleCondition, PersistedTargetObjectKeyFormat, PersistedVersioningConfiguration,
+    PersistedBlockedEncryptionTypes, PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule,
+    PersistedBucketLoggingStatus, PersistedDefaultRetention, PersistedEncryptionByDefault, PersistedErrorDocument,
+    PersistedGrantee, PersistedIndexDocument, PersistedLoggingEnabled, PersistedLoggingGrant, PersistedObjectLockConfiguration,
+    PersistedObjectLockRule, PersistedPublicAccessBlockConfiguration, PersistedRedirect, PersistedRedirectAllRequestsTo,
+    PersistedRoutingRule, PersistedRoutingRuleCondition, PersistedTargetObjectKeyFormat, PersistedVersioningConfiguration,
     PersistedWebsiteConfiguration,
 };
 
@@ -155,35 +155,29 @@ pub(crate) fn parse_s3s_bucket_encryption(input: &[u8]) -> Result<S3sBucketEncry
     let mut deserializer = Deserializer::new(input);
     let value = ServerSideEncryptionConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
     deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
-    // A newer revision may read a Rule member the persisted structure has no field for. Dropping it
-    // would report an old acceptance as a narrower document; refusing would report it as an old
-    // refusal. Both would hide the divergence, so the member is named instead.
-    if let Some(member) = value.rules.iter().find_map(super::unrepresented_encryption_rule_member) {
-        return Err(CompatCodecError::unrepresented(member));
-    }
-    let behavior = value
-        .rules
+    // Each revision splits its own Rule with an exhaustive destructure, so a revision that grows
+    // another member stops compiling here instead of dropping it.
+    let split = value.rules.into_iter().map(super::split_encryption_rule).collect::<Vec<_>>();
+    let behavior = split
         .iter()
-        .map(|rule| {
-            let default = rule.apply_server_side_encryption_by_default.as_ref();
+        .map(|(default, blocked, bucket_key_enabled)| {
             (
-                default.map(|value| value.sse_algorithm.as_str().to_owned()),
-                default.and_then(|value| value.kms_master_key_id.clone()),
-                rule.bucket_key_enabled,
+                default.as_ref().map(|value| value.sse_algorithm.as_str().to_owned()),
+                default.as_ref().and_then(|value| value.kms_master_key_id.clone()),
+                *bucket_key_enabled,
+                blocked.clone(),
             )
         })
         .collect();
-    let rules = value
-        .rules
+    let rules = split
         .into_iter()
-        .map(|rule| PersistedBucketEncryptionRule {
-            apply_server_side_encryption_by_default: rule.apply_server_side_encryption_by_default.map(|default| {
-                PersistedEncryptionByDefault {
-                    sse_algorithm: default.sse_algorithm.as_str().to_owned(),
-                    kms_master_key_id: default.kms_master_key_id,
-                }
+        .map(|(default, blocked, bucket_key_enabled)| PersistedBucketEncryptionRule {
+            apply_server_side_encryption_by_default: default.map(|default| PersistedEncryptionByDefault {
+                sse_algorithm: default.sse_algorithm.as_str().to_owned(),
+                kms_master_key_id: default.kms_master_key_id,
             }),
-            bucket_key_enabled: rule.bucket_key_enabled,
+            bucket_key_enabled,
+            blocked_encryption_types: blocked.map(|encryption_types| PersistedBlockedEncryptionTypes { encryption_types }),
         })
         .collect::<Vec<_>>();
     let structure = PersistedBucketEncryptionConfiguration { rules };
@@ -210,10 +204,13 @@ pub(crate) fn serialize_s3s_bucket_encryption(
                             kms_master_key_id: default.kms_master_key_id.clone(),
                             sse_algorithm: ServerSideEncryption::from(default.sse_algorithm.clone()),
                         }),
+                    rule.blocked_encryption_types
+                        .as_ref()
+                        .map(|blocked| blocked.encryption_types.clone()),
                     rule.bucket_key_enabled,
                 )
             })
-            .collect(),
+            .collect::<Result<_, _>>()?,
     };
     let mut output = Vec::with_capacity(256);
     let mut serializer = Serializer::new(&mut output);

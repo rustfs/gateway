@@ -22,7 +22,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::*;
-use crate::persistence::{PersistedBucketEncryptionRule, PersistedEncryptionByDefault};
+use crate::persistence::{PersistedBlockedEncryptionTypes, PersistedBucketEncryptionRule, PersistedEncryptionByDefault};
 
 /// A Rule member s3s `bdcb6259` and later read and `9c4690d8` refuses as an unknown child.
 const BLOCKED_SSE_C: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>";
@@ -54,16 +54,37 @@ fn every_revision_is_the_one_the_manifest_pins() {
     );
 }
 
+fn blocked_sse_c() -> PersistedBucketEncryptionConfiguration {
+    PersistedBucketEncryptionConfiguration {
+        rules: vec![PersistedBucketEncryptionRule {
+            blocked_encryption_types: Some(PersistedBlockedEncryptionTypes {
+                encryption_types: vec!["SSE-C".to_owned()],
+            }),
+            ..PersistedBucketEncryptionRule::default()
+        }],
+    }
+}
+
+/// rustfs/gateway#740: the rollback and candidate revisions read the member into the persisted
+/// structure, and the baseline still refuses it as an unknown `Rule` child.
 #[test]
 fn only_revisions_with_the_newer_member_read_blocked_encryption_types() {
     assert_eq!(selected_oracle(), OracleRevision::Baseline);
-    let baseline = parse_s3s_bucket_encryption(BLOCKED_SSE_C).expect_err("s3s 9c4690d8 refuses the unknown Rule child");
-    assert_eq!(baseline.unrepresented_member(), None, "{baseline}");
+    parse_s3s_bucket_encryption(BLOCKED_SSE_C).expect_err("s3s 9c4690d8 refuses the unknown Rule child");
     for oracle in [OracleRevision::Rollback, OracleRevision::Candidate] {
-        let error = with_oracle(oracle, || parse_s3s_bucket_encryption(BLOCKED_SSE_C))
-            .expect_err("a member the persisted structure cannot carry is never dropped");
-        assert_eq!(error.unrepresented_member(), Some("BlockedEncryptionTypes"), "{oracle}: {error}");
+        let read = with_oracle(oracle, || parse_s3s_bucket_encryption(BLOCKED_SSE_C)).expect("the newer revisions read it");
+        assert_eq!(read.structure, blocked_sse_c(), "{oracle}: the member is carried, never dropped");
+        assert_eq!(read.behavior, [(None, None, None, Some(vec!["SSE-C".to_owned()]))], "{oracle}");
+        let written = with_oracle(oracle, || serialize_s3s_bucket_encryption(&blocked_sse_c())).expect("and write it");
+        assert_eq!(written, BLOCKED_SSE_C, "{oracle}");
     }
+}
+
+/// The baseline has no field for the member, so its writer refuses rather than dropping the block.
+#[test]
+fn n_the_baseline_writer_refuses_a_block_it_cannot_carry() {
+    let error = serialize_s3s_bucket_encryption(&blocked_sse_c()).expect_err("dropping the block would unblock SSE-C");
+    assert!(error.to_string().contains("BlockedEncryptionTypes"), "{error}");
 }
 
 #[test]
@@ -75,6 +96,7 @@ fn every_revision_writes_and_reads_the_same_bucket_encryption_bytes() {
                 kms_master_key_id: Some("key".to_owned()),
             }),
             bucket_key_enabled: Some(true),
+            blocked_encryption_types: None,
         }],
     };
     let written = OracleRevision::ALL

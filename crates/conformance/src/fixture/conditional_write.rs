@@ -190,9 +190,17 @@ impl ConditionalRaceCoordinator {
     }
 }
 
-pub(super) async fn put_object(state: &Arc<Mutex<Fixture>>, input: dto::PutObjectInput) -> HandlerResult<dto::PutObject> {
+/// `blocked` is the bucket's `BlockedEncryptionTypes` verdict for this request, decided by the
+/// handler from the framework's SSE proof. It is applied after the body is drained, like every
+/// other refusal here, so a refused write still consumes exactly the body it framed.
+pub(super) async fn put_object(
+    state: &Arc<Mutex<Fixture>>,
+    input: dto::PutObjectInput,
+    blocked: Result<(), HandlerError>,
+) -> HandlerResult<dto::PutObject> {
     let bytes = drain(input.body).await?;
     require_content_md5(input.content_md5.as_deref(), &bytes)?;
+    blocked?;
     let (now, existing, generation, conditional_races) = {
         let fixture = state
             .lock()

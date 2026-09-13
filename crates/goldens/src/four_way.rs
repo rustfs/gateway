@@ -51,6 +51,9 @@ pub struct FourWayFamilyReport {
     pub kind: ConfigKind,
     /// Number of concrete accepted samples that ran through all five directions.
     pub sample_count: usize,
+    /// Accepted samples first written by a later pinned revision than the selected one, measured
+    /// as widenings (old refuses, production reads and writes them exactly) instead of D1-D5.
+    pub widened: usize,
 }
 
 /// Aggregate observations from a fail-closed four-way run.
@@ -60,6 +63,8 @@ pub struct FourWayRunReport {
     pub families: Vec<FourWayFamilyReport>,
     /// Total concrete samples executed through D1-D5.
     pub sample_count: usize,
+    /// Total samples measured as widenings under the selected revision.
+    pub widened_count: usize,
 }
 
 /// First family-scoped failure observed by an aggregate four-way run.
@@ -101,10 +106,38 @@ pub fn run_four_way_core_shard() -> Result<FourWayRunReport, FourWayRunError> {
     let mut families = Vec::with_capacity(runners.len());
     for (kind, runner) in runners {
         let sample_count = runner().map_err(|failure| FourWayRunError { kind, failure })?;
-        families.push(FourWayFamilyReport { kind, sample_count });
+        families.push(FourWayFamilyReport {
+            kind,
+            sample_count,
+            widened: 0,
+        });
     }
+    // The revision-scoped samples: D1-D5 under a revision that writes them, a widening under one
+    // that predates them.
+    let kind = ConfigKind::BucketEncryption;
+    let (executed, widened) =
+        bucket_encryption::run_revision_scoped_four_way().map_err(|failure| FourWayRunError { kind, failure })?;
+    let family = families
+        .iter_mut()
+        .find(|family| family.kind == kind)
+        .ok_or_else(|| FourWayRunError {
+            kind,
+            failure: GoldenFailure {
+                direction: crate::Direction::Input,
+                offset: None,
+                left: "registered core-shard family".to_owned(),
+                right: format!("{kind:?}"),
+            },
+        })?;
+    family.sample_count += executed;
+    family.widened += widened;
     let sample_count = families.iter().map(|family| family.sample_count).sum();
-    Ok(FourWayRunReport { families, sample_count })
+    let widened_count = families.iter().map(|family| family.widened).sum();
+    Ok(FourWayRunReport {
+        families,
+        sample_count,
+        widened_count,
+    })
 }
 
 /// Executes all thirteen persisted XML families against every concrete accepted sample.
@@ -126,7 +159,11 @@ pub fn run_four_way_all() -> Result<FourWayRunReport, FourWayRunError> {
     for (kind, runner) in runners {
         let sample_count = runner().map_err(|failure| FourWayRunError { kind, failure })?;
         report.sample_count += sample_count;
-        report.families.push(FourWayFamilyReport { kind, sample_count });
+        report.families.push(FourWayFamilyReport {
+            kind,
+            sample_count,
+            widened: 0,
+        });
     }
     for (kind, sample_count) in minio_migration::run().map_err(|(kind, failure)| FourWayRunError { kind, failure })? {
         let family = report
@@ -176,7 +213,10 @@ mod tests {
     fn core_shard_executes_seven_real_families() {
         let report = run_four_way_core_shard().expect("all core persistence samples pass D1-D5");
         assert_eq!(report.families.len(), 7);
+        // Under the baseline selection: the two `BlockedEncryptionTypes` samples it predates are
+        // widened, not counted as D1-D5 passes (rustfs/gateway#740).
         assert_eq!(report.sample_count, 91);
+        assert_eq!(report.widened_count, 2);
         assert_eq!(
             report.sample_count,
             report.families.iter().map(|family| family.sample_count).sum::<usize>()

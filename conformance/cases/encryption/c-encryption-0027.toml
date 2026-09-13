@@ -1,0 +1,55 @@
+[case]
+id = "c-encryption-0027"
+schema_version = 1
+title = "A BlockedEncryptionTypes entry outside NONE and SSE-C is refused as MalformedXML and nothing is stored"
+rationale = """
+The generated EncryptionType enumeration is shared with other shapes and also spells AES256 and the KMS algorithms, so the decoder alone accepts AES256 here. The documented values for this wrapper are only NONE and SSE-C, and the runtime enforces only SSE-C, so storing an AES256 block would record a restriction that no write path applies. The write is refused the way an out-of-set SSEAlgorithm is (c-encryption-0018). The follow-up read shows that no document was stored, so the refusal cannot be a 400 that stored the block anyway."""
+polarity = "negative"
+operation = "PutBucketEncryption"
+tags = ["encryption", "xml", "sse"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_BlockedEncryptionTypes.html"
+summary = "The EncryptionType member of BlockedEncryptionTypes lists NONE and SSE-C as its only valid values."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-encryption"
+
+[[exchanges]]
+name = "put-undocumented-type"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-encryption?encryption"
+headers = { "content-type" = "application/xml", "content-md5" = "FnH3iW8YnPJ/+UnbDhg8AA==" }
+body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><BlockedEncryptionTypes><EncryptionType>AES256</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[[exchanges]]
+name = "nothing-stored"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-encryption?encryption"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "ServerSideEncryptionConfigurationNotFoundError"
+request_id_present = true
