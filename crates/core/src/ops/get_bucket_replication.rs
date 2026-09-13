@@ -24,7 +24,8 @@
 //! P5-01, with the object read encoders) are the replication engine's, never a route row here.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: replication. The document's validation rules live in
+//! Shares: replication, rule_filter.
+//! The family validator uses `shared::rule_filter` for Filter grammar. The document's validation rules live in
 //! [`shared::replication`](super::shared::replication), reached by backends through the facade;
 //! this file only states the read's spec.
 //!

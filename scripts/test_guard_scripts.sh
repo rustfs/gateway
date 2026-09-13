@@ -11810,6 +11810,64 @@ expect_fail_with_diagnostic check_op_file_shape.sh \
     'the ops tree has no ceiling exemption' \
     mut_op_shape_ceiling_allowance
 
+# The lifecycle and replication validators must share their filter grammar.
+# A doc link alone cannot establish the production call between these modules.
+mut_rule_filter_local_copy() {
+    python3 - "$RULE_FILTER_FAMILY" <<'PYEOF'
+from pathlib import Path
+import sys
+p = Path("crates/core/src/ops/shared") / (sys.argv[1] + ".rs")
+p.write_text(p.read_text() + "\nfn validate_filter() {}\n")
+PYEOF
+}
+
+mut_rule_filter_call_only_in_comment() {
+    python3 - "$RULE_FILTER_FAMILY" <<'PYEOF'
+from pathlib import Path
+import sys
+p = Path("crates/core/src/ops/shared") / (sys.argv[1] + ".rs")
+text = p.read_text()
+if "rule_filter::validate(" not in text:
+    raise SystemExit("shared filter call mutation subject is missing")
+p.write_text(text.replace("rule_filter::validate(", "independent_filter(")
+    + '\n// rule_filter::validate(children, conditions)\n'
+    + 'const _: &str = r#"rule_filter::validate(children, conditions)"#;\n'
+    + '#[cfg(test)]\nfn filter_probe() { rule_filter::validate(0, None); }\n')
+PYEOF
+}
+
+for RULE_FILTER_FAMILY in lifecycle replication; do
+    expect_fail_with_diagnostic check_op_file_shape.sh \
+        "$RULE_FILTER_FAMILY restoring a private filter validator" \
+        'filter grammar belongs to shared::rule_filter' \
+        mut_rule_filter_local_copy
+    expect_fail_with_diagnostic check_op_file_shape.sh \
+        "$RULE_FILTER_FAMILY keeping only comments, strings and a test-only shared call" \
+        'must call shared::rule_filter from production code' \
+        mut_rule_filter_call_only_in_comment
+done
+
+mut_rule_filter_removed() {
+    rm crates/core/src/ops/shared/rule_filter.rs
+}
+expect_fail_with_diagnostic check_op_file_shape.sh \
+    'the shared filter authority disappearing' \
+    'shared filter authority is missing' \
+    mut_rule_filter_removed
+
+mut_rule_filter_code_mentions() {
+    cat >> crates/core/src/ops/shared/lifecycle.rs <<'RUST'
+
+// fn validate_filter() is intentionally only prose.
+const _: &str = r#"fn validate_filter() {}"#;
+#[cfg(test)]
+mod filter_probe { fn validate_filter() {} }
+RUST
+}
+expect_guard_pass check_op_file_shape.sh \
+    'non-production mentions of an old filter validator' \
+    mut_rule_filter_code_mentions
+
 # -- The guard's own inputs ----------------------------------------------------
 
 # `[[ -d x ]] || exit 0` is right for an input that may not exist yet and wrong

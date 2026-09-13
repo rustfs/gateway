@@ -27,7 +27,8 @@
 //! passed through untouched (`q-repl-0013`); its meaning is the storage backend's question.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: replication.
+//! Shares: replication, rule_filter.
+//! The family validator uses `shared::rule_filter` for Filter grammar.
 //!
 //! # What the decoder refuses, and what it deliberately does not
 //!

@@ -22,7 +22,8 @@
 //! model's output is `smithy.api#Unit`.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: replication. The family's document rules live in
+//! Shares: replication, rule_filter.
+//! The family validator uses `shared::rule_filter` for Filter grammar. The family's document rules live in
 //! [`shared::replication`](super::shared::replication); this operation carries no document, and
 //! is listed so a change to the family's contract knows all three members.
 //!

@@ -55,8 +55,10 @@
 //! stored document echoes both on the read — that is the documented GET behaviour — but an
 //! error message never does.
 
+use super::rule_filter;
+
 use rustfs_gateway_types::ErrorCode;
-use rustfs_gateway_types::dto::{ReplicationConfiguration, ReplicationRule, ReplicationRuleFilter};
+use rustfs_gateway_types::dto::{ReplicationConfiguration, ReplicationRule};
 
 /// The most rules one bucket's configuration may carry: AWS's published, non-adjustable cap.
 pub const MAX_REPLICATION_RULES: usize = 1000;
@@ -220,23 +222,16 @@ fn validate_rule(rule: &ReplicationRule) -> Result<(), ReplicationRejection> {
     }
     classify_rule(rule)?;
     if let Some(filter) = &rule.filter {
-        validate_filter(filter)?;
-    }
-    Ok(())
-}
-
-fn validate_filter(filter: &ReplicationRuleFilter) -> Result<(), ReplicationRejection> {
-    // An empty `<Filter/>` passes: it is AWS's documented spelling for "every object", exactly
-    // as it is in the lifecycle family (`q-repl-0007`).
-    let children = usize::from(filter.prefix.is_some()) + usize::from(filter.tag.is_some()) + usize::from(filter.and.is_some());
-    if children > 1 {
-        return Err(ReplicationRejection::FilterNotExclusive);
-    }
-    if let Some(and) = &filter.and {
-        let conditions = usize::from(and.prefix.is_some()) + and.tags.len();
-        if conditions < 2 {
-            return Err(ReplicationRejection::AndBelowTwoConditions);
-        }
+        let children =
+            usize::from(filter.prefix.is_some()) + usize::from(filter.tag.is_some()) + usize::from(filter.and.is_some());
+        let conditions = filter
+            .and
+            .as_ref()
+            .map(|and| usize::from(and.prefix.is_some()) + and.tags.len());
+        rule_filter::validate(children, conditions).map_err(|reason| match reason {
+            rule_filter::Rejection::FilterNotExclusive => ReplicationRejection::FilterNotExclusive,
+            rule_filter::Rejection::AndBelowTwoConditions => ReplicationRejection::AndBelowTwoConditions,
+        })?;
     }
     Ok(())
 }
@@ -247,7 +242,8 @@ fn validate_filter(filter: &ReplicationRuleFilter) -> Result<(), ReplicationReje
 mod tests {
     use super::*;
     use rustfs_gateway_types::dto::{
-        DeleteMarkerReplication, Destination, EncryptionConfiguration, ReplicationRuleAndOperator, Status, Tag,
+        DeleteMarkerReplication, Destination, EncryptionConfiguration, ReplicationRuleAndOperator, ReplicationRuleFilter, Status,
+        Tag,
     };
 
     /// A plausible destination and key/account pair for the negative cases; asserted absent from

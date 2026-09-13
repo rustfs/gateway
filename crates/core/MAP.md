@@ -11,6 +11,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/lib.rs` | Module wiring and public re-exports. | Start here for a core task. |
 | `src/op.rs` | Operation identity, origin and authorization requirements. | Add an operation or inspect standard-name rules. |
 | `src/ops/*.rs` | Exactly one `impl Operation` per AWS operation. | Change one operation's static contract. |
+| `src/ops/shared/rule_filter.rs` | Shared lifecycle/replication filter cardinality. | Either family changes its Filter or And grammar. |
 | `src/ops/delete_object_annotation.rs` | Reserves annotation deletion independently of destructive object deletion. | An annotation DELETE routes to DeleteObject or declares the wrong authorization floor. |
 | `src/ops/get_object_annotation.rs` | Reserves a named annotation read independently of the parent object body. | A named annotation GET routes to GetObject or declares the wrong authorization floor. |
 | `src/ops/put_object_annotation.rs` | Reserves annotation payload writes independently of parent object replacement. | An annotation PUT routes to PutObject or loses its required streaming body. |

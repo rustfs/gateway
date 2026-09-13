@@ -45,7 +45,9 @@
 //! offending value is named by position in the caller's own document, not repeated into the
 //! response.
 
-use rustfs_gateway_types::dto::{BucketLifecycleConfiguration, LifecycleRule, LifecycleRuleFilter};
+use super::rule_filter;
+
+use rustfs_gateway_types::dto::{BucketLifecycleConfiguration, LifecycleRule};
 use rustfs_gateway_types::{ErrorCode, Timestamp};
 
 /// The most rules one bucket's configuration may carry: AWS's published cap.
@@ -164,7 +166,21 @@ fn validate_rule(rule: &LifecycleRule) -> Result<(), LifecycleRejection> {
         return Err(LifecycleRejection::ScopeMissing);
     }
     if let Some(filter) = &rule.filter {
-        validate_filter(filter)?;
+        let children = usize::from(filter.prefix.is_some())
+            + usize::from(filter.tag.is_some())
+            + usize::from(filter.object_size_greater_than.is_some())
+            + usize::from(filter.object_size_less_than.is_some())
+            + usize::from(filter.and.is_some());
+        let conditions = filter.and.as_ref().map(|and| {
+            usize::from(and.prefix.is_some())
+                + and.tags.len()
+                + usize::from(and.object_size_greater_than.is_some())
+                + usize::from(and.object_size_less_than.is_some())
+        });
+        rule_filter::validate(children, conditions).map_err(|reason| match reason {
+            rule_filter::Rejection::FilterNotExclusive => LifecycleRejection::FilterNotExclusive,
+            rule_filter::Rejection::AndBelowTwoConditions => LifecycleRejection::AndBelowTwoConditions,
+        })?;
     }
     if let Some(expiration) = &rule.expiration {
         let named = usize::from(expiration.days.is_some())
@@ -194,27 +210,6 @@ fn validate_rule(rule: &LifecycleRule) -> Result<(), LifecycleRejection> {
     Ok(())
 }
 
-fn validate_filter(filter: &LifecycleRuleFilter) -> Result<(), LifecycleRejection> {
-    let children = usize::from(filter.prefix.is_some())
-        + usize::from(filter.tag.is_some())
-        + usize::from(filter.object_size_greater_than.is_some())
-        + usize::from(filter.object_size_less_than.is_some())
-        + usize::from(filter.and.is_some());
-    if children > 1 {
-        return Err(LifecycleRejection::FilterNotExclusive);
-    }
-    if let Some(and) = &filter.and {
-        let conditions = usize::from(and.prefix.is_some())
-            + and.tags.len()
-            + usize::from(and.object_size_greater_than.is_some())
-            + usize::from(and.object_size_less_than.is_some());
-        if conditions < 2 {
-            return Err(LifecycleRejection::AndBelowTwoConditions);
-        }
-    }
-    Ok(())
-}
-
 /// Whether the instant is exactly midnight UTC, to the nanosecond.
 ///
 /// `rem_euclid` rather than `%`: an instant before 1970 has negative seconds, and a negative
@@ -228,7 +223,9 @@ fn is_midnight_utc(date: Timestamp) -> bool {
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rustfs_gateway_types::dto::{LifecycleExpiration, LifecycleRuleAndOperator, Status, Tag, Transition};
+    use rustfs_gateway_types::dto::{
+        LifecycleExpiration, LifecycleRuleAndOperator, LifecycleRuleFilter, Status, Tag, Transition,
+    };
 
     /// 2030-01-01T00:00:00Z.
     const MIDNIGHT: i64 = 1_893_456_000;
