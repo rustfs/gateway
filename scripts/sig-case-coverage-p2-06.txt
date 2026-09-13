@@ -63,7 +63,7 @@ c-sig-0579|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0579_an_unkno
 c-sig-0580|negative|crates/sig/tests/sig_v2.rs|fn c_sig_0580_the_access_key_id_obeys_the_shared_identity_rule|assert!(parse_authorization(&over).is_err());
 c-sig-0581|negative|crates/gateway/tests/sigv2_runtime.rs|fn c_sig_0581_an_authenticator_without_a_sigv2_override_refuses|assert_eq!(reached.load(Ordering::SeqCst), 0)
 c-sig-0582|positive|conformance/cases/sig/c-sig-0582.toml|mode = "sigv2_header"|status = 200
-c-sig-0583|negative|conformance/cases/sig/c-sig-0583.toml|credential = "wrong_secret"|code = "InvalidAccessKeyId"
+c-sig-0583|negative|conformance/cases/sig/c-sig-0583.toml|credential = "wrong_secret"|code = "SignatureDoesNotMatch"
 c-sig-0584|negative|conformance/cases/sig/c-sig-0584.toml|credential = "unknown_access_key"|code = "InvalidAccessKeyId"
 c-sig-0585|negative|crates/sig/tests/sig_v2_admission.rs|fn c_sig_0585_a_wrong_sigv2_post_policy_signature_is_refused|assert_eq!(
 c-sig-0586|positive|crates/gateway/src/ext/authenticator_tests.rs|fn c_sig_0586_sigv2_post_policy_reaches_the_builtin_authenticator|assert_eq!(scheme.location, SigLocation::FormField)
