@@ -68,5 +68,6 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/range_part_table.rs` | Part-number window resolution and its refusals. | A `partNumber` read serves the wrong bytes or the wrong count. |
 | `tests/error_resolution.rs` | P1-04 contextual error outcome matrix. | Change error masking, status, extras or body suppression. |
 | `tests/rule_filter_boundaries.rs` | Filter boundaries both consumers of the shared grammar still answer, side by side. | A lifecycle or replication Filter refusal changes. |
+| `tests/security_request_policy.rs` | Unknown-element refusal for every security configuration PUT (allow-registered write policy). | A security PUT starts accepting, or stops refusing, an unregistered element. |
 | `tests/purity_guard.rs` | Source-shape guards for pre-auth code. | Add public/core routing code. |
 | `tests/golden/route-table.txt` | Protected ordered route table. | Never edit without the Breaking Change process. |

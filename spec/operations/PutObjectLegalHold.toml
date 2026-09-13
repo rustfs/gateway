@@ -11,7 +11,7 @@ precedence = 540
 success_status = 200
 alt_success_statuses = []
 predicates = ["Method PUT", "Target Object", "QueryPresent ?legal-hold"]
-quirks = ["q-lock-0005", "q-lock-0006", "q-lock-0007", "q-lock-0011", "q-lock-0015"]
+quirks = ["q-lock-0005", "q-lock-0006", "q-lock-0007", "q-lock-0011", "q-lock-0014", "q-lock-0015"]
 
 [auth]
 requirement = "Required"

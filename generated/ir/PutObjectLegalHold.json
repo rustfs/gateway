@@ -175,7 +175,7 @@
             },
   "derived_resources": [],
   "head_mirrors": null,
-  "quirk_refs": ["q-lock-0005", "q-lock-0006", "q-lock-0007", "q-lock-0011", "q-lock-0015"],
+  "quirk_refs": ["q-lock-0005", "q-lock-0006", "q-lock-0007", "q-lock-0011", "q-lock-0014", "q-lock-0015"],
   "quirks": [
               {
                 "id": "q-lock-0005",
@@ -232,6 +232,25 @@
                               }
                             ],
                 "cases": ["c-lock-0022", "c-lock-0007"]
+              },
+              {
+                "id": "q-lock-0014",
+                "kind": "security_unknown_elements",
+                "target": "PutObjectLockConfiguration",
+                "summary": "Unknown HTTP security-configuration elements are refused before the handler; persisted metadata decoding remains a separate compatibility boundary.",
+                "evidence": [
+                              {
+                                "kind": "other",
+                                "ref": "https://github.com/rustfs/gateway/blob/50adc72e/docs/adr/ADR-0007-ext-field-codec.md",
+                                "summary": "Security request configuration rejects unknown unregistered fields; persisted reads have a separate policy."
+                              },
+                              {
+                                "kind": "other",
+                                "ref": "https://github.com/rustfs/gateway/blob/50adc72e/docs/adr/0018-dialect-vtables-stand-after-adr-0010.md",
+                                "summary": "The accepted amendment retains ADR-0007's codec policy while changing only request-carrier layout."
+                              }
+                            ],
+                "cases": ["c-lock-0010"]
               },
               {
                 "id": "q-lock-0015",

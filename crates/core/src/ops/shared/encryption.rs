@@ -20,8 +20,8 @@
 //! Responsible for: the semantic rules of a `ServerSideEncryptionConfiguration` document — the
 //! closed `SSEAlgorithm` value set and the KMS-key-id/algorithm agreement rule — held once so
 //! that every backend refuses the same documents with the same codes.
-//! NOT responsible for: decoding the document (the generated codec, which is deliberately
-//! lenient about unknown elements — `q-enc-0006`), storing it, or **applying** it. Whether an
+//! NOT responsible for: decoding the document (the generated codec, which refuses unknown
+//! request elements — `q-enc-0006`), storing it, or **applying** it. Whether an
 //! object write is actually encrypted with the configured default, how object-level SSE headers
 //! override it, and every other runtime half of SSE — the TLS gate on customer-provided keys,
 //! key/key-MD5 agreement, multipart header consistency — is task P6-06's, with the operations
@@ -32,15 +32,16 @@
 //!
 //! # Why the write is stricter than the lifecycle family's, and no stricter than that
 //!
-//! Two pressures pull in opposite directions. A stored configuration is re-parsed by every
-//! future release, and RustFS's persistence fails open — a configuration that stops parsing is
-//! downgraded to "no configuration", which silently turns default encryption off. That argues
-//! for leniency, and it is why unknown elements and extra rules pass (`q-enc-0006`,
-//! `q-enc-0008`). But this is a *security* configuration: accepting an `SSEAlgorithm` nothing
-//! can apply stores a promise no encryption path can keep, and the client that wrote it walks
-//! away believing its data is protected. So the two checks below refuse exactly what AWS
-//! documents as impossible — an out-of-set algorithm, a KMS key id beside a non-KMS algorithm
-//! (`q-enc-0007`, `q-enc-0005`) — and nothing else.
+//! Two boundaries answer two different questions. A *stored* configuration is re-parsed by every
+//! future release, and a reader that got stricter would silently turn default encryption off, so
+//! persisted bytes are read by `rustfs_gateway_types::persistence`, which stays lenient about
+//! unknown root elements. A *request* is the client asking for a protection now, and a setting
+//! the gateway cannot store must not come back as a 200: the generated request codec refuses
+//! unknown elements before this module runs (`q-enc-0006`, ADR-0007 `allow-registered`). What is
+//! left here is semantic: accepting an `SSEAlgorithm` nothing can apply stores a promise no
+//! encryption path can keep. So the two checks below refuse exactly what AWS documents as
+//! impossible — an out-of-set algorithm, a KMS key id beside a non-KMS algorithm (`q-enc-0007`,
+//! `q-enc-0005`) — and nothing else; extra rules still pass (`q-enc-0008`).
 //!
 //! # The refusal messages are constant, and the key id never appears in one
 //!
@@ -130,7 +131,8 @@ pub const fn encryption_delete_absent_succeeds() -> bool {
 /// Checks a decoded document against the family's semantic rules, first refusal wins.
 ///
 /// Deliberately no stricter than AWS's documented refusals: an element this release does not
-/// know is skipped by the decoder (`q-enc-0006`), a multi-rule document passes (`q-enc-0008`),
+/// know never gets here because the decoder refuses it (`q-enc-0006`), a multi-rule document
+/// passes (`q-enc-0008`),
 /// and a rule that names no `ApplyServerSideEncryptionByDefault` at all passes because the model
 /// makes the member optional. Rules are checked in document order and members in the order the
 /// wire carries them, so the same document is refused for the same reason on every backend.

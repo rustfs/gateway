@@ -196,3 +196,23 @@ cases   = ["c-bucketconfig-0021", "c-bucketconfig-0055"]
   kind    = "aws-doc"
   ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html"
   summary = "The request reference declares all four settings as optional booleans, and the read reference beside it shows them rendered in lower case."
+
+[[quirk]]
+id = "q-pab-0005"
+kind = "security_unknown_elements"
+classification = "mutable"
+mutation_dimension = "unknown_element_policy"
+codec_value = "reject"
+target = "PutPublicAccessBlock"
+summary = "Unknown HTTP public-access settings are refused before the handler; persisted metadata decoding remains separate."
+cases = ["c-bucketconfig-0061"]
+
+  [[quirk.evidence]]
+  kind = "other"
+  ref = "https://github.com/rustfs/gateway/blob/50adc72e/docs/adr/ADR-0007-ext-field-codec.md"
+  summary = "Security request configuration rejects unknown unregistered fields; persisted reads have a separate policy."
+
+  [[quirk.evidence]]
+  kind = "other"
+  ref = "https://github.com/rustfs/gateway/blob/50adc72e/docs/adr/0018-dialect-vtables-stand-after-adr-0010.md"
+  summary = "The accepted amendment retains ADR-0007's codec policy while changing only request-carrier layout."

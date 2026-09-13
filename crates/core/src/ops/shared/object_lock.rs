@@ -22,9 +22,9 @@
 //! `LegalHold` documents — the closed `Mode`, `Status` and `ObjectLockEnabled` value sets, the
 //! `Days`/`Years` mutex and its ≥1 floor, and the future-only `RetainUntilDate` — held once so
 //! that every backend refuses the same documents with the same codes.
-//! NOT responsible for: decoding the documents (the generated codecs, which are deliberately
-//! lenient about unknown elements — `q-lock-0014` — and already refuse an empty body, a wrong
-//! root and an unreadable timestamp); storing them; or **enforcing** them. Whether a delete or
+//! NOT responsible for: decoding the documents (the generated codecs, which refuse unknown
+//! request elements — `q-lock-0014` — and already refuse an empty body, a wrong root and an
+//! unreadable timestamp); storing them; or **enforcing** them. Whether a delete or
 //! overwrite of a protected object is refused, whether a COMPLIANCE retention may be shortened,
 //! and what `x-amz-bypass-governance-retention` actually bypasses are the storage side's
 //! decisions — this module's whole contribution is that the intent reaching that code is exactly
@@ -33,17 +33,19 @@
 //! which re-exports every item here for backends; the `crates/conformance` fixture is the first
 //! caller.
 //!
-//! # Why the value sets are closed here and the member sets are not
+//! # Why the value sets are closed here, and where the member sets are closed
 //!
 //! This is the one family with a legal-compliance meaning, and both failure directions are
 //! expensive. Accepting a `Mode` or `Status` outside the documented sets stores a protection
 //! promise no enforcement path can read — a client that wrote `ARCHIVE` walks away believing
-//! its data is locked. But a stored WORM document is re-parsed by every future release, and a
-//! decoder that got *stricter* would downgrade the document to "none", silently unlocking data
-//! a regulation told somebody to keep. So the checks below refuse exactly what AWS documents as
-//! impossible — an out-of-set enum value, both periods at once, a period under one, a
-//! retain-until instant already in the past — and nothing else: an unknown element is skipped,
-//! a `Retention` carrying only a `Mode` or only a date passes, and a configuration with no
+//! its data is locked. The member sets are closed one layer earlier: the request codecs refuse
+//! an unknown element (`q-lock-0014`, ADR-0007 `allow-registered`), because a skipped WORM
+//! setting is a 200 for a lock nobody stored. A stored WORM document is a different boundary —
+//! a reader that got *stricter* would downgrade it to "none", silently unlocking data — and is
+//! read by `rustfs_gateway_types::persistence`, not by these codecs. So the checks below refuse
+//! exactly what AWS documents as impossible — an out-of-set enum value, both periods at once, a
+//! period under one, a retain-until instant already in the past — and nothing else: a
+//! `Retention` carrying only a `Mode` or only a date passes, and a configuration with no
 //! `ObjectLockEnabled` passes, because the model marks every member optional and AWS documents
 //! no refusal for those shapes.
 //!

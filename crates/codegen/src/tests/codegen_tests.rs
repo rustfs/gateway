@@ -381,36 +381,88 @@ fn opaque_expiration_values_are_a_typed_codegen_decision() {
     assert_eq!(quirk.matches("current = \"OpaqueString\"").count(), 5);
 }
 
+/// ADR-0007 splits request XML into two policies: ordinary documents skip an unknown element,
+/// security configurations refuse it. Each row below is flipped to the *other* policy and
+/// re-emitted, so the test sees the guard appear on the lenient rows and disappear from the strict
+/// ones — a generator stuck on either answer fails one half.
 #[test]
 fn unknown_xml_element_policy_reaches_the_generated_reader() {
     use rustfs_gateway_model::{CodecValue, UnknownElementPolicyValue};
-    let mut artifacts = artifacts();
-    for id in ["q-acl-0006", "q-enc-0006", "q-lock-0014", "q-select-0007"] {
-        let (_, quirk) = artifacts
-            .files
-            .iter()
-            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
-            .expect("the unknown-element policy is generated as mutable data");
-        assert!(quirk.contains("codec_value = \"skip\""), "{id}");
-        artifacts.codec_rules.get_mut(id).expect("the codec rule exists").current =
-            CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Reject);
-    }
-    let files = crate::emit::codec::emit(
-        &artifacts.operations,
-        &artifacts.codec_rules,
-        &artifacts.error_codes,
-        Path::new("generated"),
-    )
-    .expect("the mutated codec renders in memory");
-    let emitted = |suffix: &str| {
+    const GUARD: &str = "the body contains an unknown element";
+    const LENIENT: &[(&str, &str)] = &[("q-acl-0006", "codec/ops/put_bucket_acl.rs")];
+    const STRICT: &[(&str, &[&str])] = &[
+        ("q-enc-0006", &["codec/ops/put_bucket_encryption.rs"]),
+        (
+            "q-lock-0014",
+            &[
+                "codec/ops/put_object_lock_configuration.rs",
+                "codec/ops/put_object_retention.rs",
+                "codec/ops/put_object_legal_hold.rs",
+            ],
+        ),
+        ("q-pab-0005", &["codec/ops/put_public_access_block.rs"]),
+    ];
+    fn emitted<'a>(files: &'a [(PathBuf, String)], suffix: &str) -> &'a str {
         files
             .iter()
             .find(|(path, _)| path.to_string_lossy().ends_with(suffix))
-            .map(|(_, body)| body)
+            .map(|(_, body)| body.as_str())
             .expect("the operation codec exists")
+    }
+    let mut artifacts = artifacts();
+    let quirk = |artifacts: &crate::Artifacts, id: &str| -> String {
+        artifacts
+            .files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy().ends_with(&format!("spec/quirks/{id}.toml")))
+            .map(|(_, body)| body.clone())
+            .expect("the unknown-element policy is generated as mutable data")
     };
-    assert!(emitted("codec/ops/put_bucket_acl.rs").contains("the body contains an unknown element"));
-    assert!(emitted("codec/ops/select_object_content.rs").contains("if root.children.iter().any(|child|"));
+    let emit = |artifacts: &crate::Artifacts| {
+        crate::emit::codec::emit(
+            &artifacts.operations,
+            &artifacts.codec_rules,
+            &artifacts.error_codes,
+            Path::new("generated"),
+        )
+        .expect("the codec renders in memory")
+    };
+
+    let current = emit(&artifacts);
+    for (id, file) in LENIENT {
+        assert!(quirk(&artifacts, id).contains("codec_value = \"skip\""), "{id}");
+        assert!(!emitted(&current, file).contains(GUARD), "{id} is lenient today");
+    }
+    for (id, files) in STRICT {
+        assert!(quirk(&artifacts, id).contains("codec_value = \"reject\""), "{id}");
+        for file in *files {
+            assert!(emitted(&current, file).contains(GUARD), "{id} guards {file}");
+        }
+    }
+
+    for (id, _) in LENIENT {
+        artifacts.codec_rules.get_mut(*id).expect("the codec rule exists").current =
+            CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Reject);
+    }
+    artifacts
+        .codec_rules
+        .get_mut("q-select-0007")
+        .expect("the codec rule exists")
+        .current = CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Reject);
+    for (id, _) in STRICT {
+        artifacts.codec_rules.get_mut(*id).expect("the codec rule exists").current =
+            CodecValue::UnknownElementPolicy(UnknownElementPolicyValue::Skip);
+    }
+    let flipped = emit(&artifacts);
+    for (id, file) in LENIENT {
+        assert!(emitted(&flipped, file).contains(GUARD), "{id} flipped to reject");
+    }
+    assert!(emitted(&flipped, "codec/ops/select_object_content.rs").contains("if root.children.iter().any(|child|"));
+    for (id, files) in STRICT {
+        for file in *files {
+            assert!(!emitted(&flipped, file).contains(GUARD), "{id} flipped to skip still guards {file}");
+        }
+    }
 }
 
 #[test]

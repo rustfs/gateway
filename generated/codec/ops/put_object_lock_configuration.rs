@@ -98,6 +98,10 @@ impl OperationCodec for dto::PutObjectLockConfiguration {
 /// body and a bare one decode identically.
 fn read_default_retention(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::DefaultRetention, CodecError> {
     let mut shape = dto::DefaultRetention { ..Default::default() };
+    let known = ["Mode", "Days", "Years"];
+    if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {
+        return Err(CodecError::malformed_xml("the body contains an unknown element"));
+    }
     if let Some(raw) = node.child_text("Mode") {
         shape.mode = Some(dto::Mode::custom(raw.to_owned()));
     }
@@ -115,6 +119,10 @@ fn read_default_retention(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Def
 /// body and a bare one decode identically.
 fn read_object_lock_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ObjectLockConfiguration, CodecError> {
     let mut shape = dto::ObjectLockConfiguration { ..Default::default() };
+    let known = ["ObjectLockEnabled", "Rule"];
+    if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {
+        return Err(CodecError::malformed_xml("the body contains an unknown element"));
+    }
     if let Some(raw) = node.child_text("ObjectLockEnabled") {
         shape.object_lock_enabled = Some(dto::ObjectLockEnabled::custom(raw.to_owned()));
     }
@@ -129,6 +137,10 @@ fn read_object_lock_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<
 /// body and a bare one decode identically.
 fn read_object_lock_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ObjectLockRule, CodecError> {
     let mut shape = dto::ObjectLockRule { ..Default::default() };
+    let known = ["DefaultRetention"];
+    if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {
+        return Err(CodecError::malformed_xml("the body contains an unknown element"));
+    }
     if let Some(child) = node.child("DefaultRetention") {
         shape.default_retention = Some(read_default_retention(child)?);
     }

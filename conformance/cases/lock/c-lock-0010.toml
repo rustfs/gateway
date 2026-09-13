@@ -1,27 +1,42 @@
 [case]
 id = "c-lock-0010"
 schema_version = 1
-title = "An unknown element in a lock document is skipped, and does not reappear on the read"
+title = "An unknown lock setting is refused without replacing the existing configuration"
 rationale = """
-A stored WORM document is re-parsed by every future release, and a decoder that refused what it did not recognise would turn a lock configuration into no configuration the day AWS adds a member — data silently unlocked, with nothing failing visibly. The element is skipped rather than kept: the read-back golden proves the document came out without it, so the leniency never becomes an invisible round trip of unvalidated bytes."""
-polarity = "positive"
+Security HTTP writes must not silently discard a setting the caller expects to enforce. Establish a known configuration, refuse an unknown field, then read the original configuration. Persisted metadata compatibility is tested separately; this request path must not inherit its leniency."""
+polarity = "negative"
 operation = "PutObjectLockConfiguration"
 tags = ["object-lock", "xml", "wire-bytes"]
 timeout_ms = 10000
 quirks = ["q-lock-0014"]
 
 [[case.evidence]]
-url = "https://github.com/s3s-project/s3s/issues/613"
-summary = "AWS ignores unknown elements in request XML, and upstream had to relax its decoder to match."
-kind = "s3s-issue"
+url = "https://github.com/rustfs/gateway/blob/50adc72e/docs/adr/ADR-0007-ext-field-codec.md"
+summary = "The security request policy rejects unknown unregistered fields while persisted reads retain their separate compatibility boundary."
+kind = "other"
 
 [[case.evidence]]
-url = "https://github.com/s3s-project/s3s/pull/617"
-summary = "The upstream change that makes unknown request elements a skip rather than an error."
-kind = "s3s-pr"
+url = "https://github.com/rustfs/gateway/blob/50adc72e/docs/adr/0018-dialect-vtables-stand-after-adr-0010.md"
+summary = "The accepted amendment retains ADR-0007's security codec policy independently of request-carrier layout."
+kind = "other"
 
 [[setup.buckets]]
 name = "conf-lock"
+
+[[exchanges]]
+name = "establish-known-configuration"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lock?object-lock"
+headers = { "content-type" = "application/xml", "content-md5" = "M6IrJ1mNjBusWYSlmQa7qg==" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>1</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
 
 [[exchanges]]
 name = "put-with-unknown-element"
@@ -29,14 +44,18 @@ name = "put-with-unknown-element"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock?object-lock"
-headers = { "content-type" = "application/xml", "content-md5" = "3JcGZWcPK5yleqhyJMU+Qg==" }
-body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><FutureMember>x</FutureMember><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>1</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
+headers = { "content-type" = "application/xml", "content-md5" = "dztdqSK2mBgefSwTsVPCmQ==" }
+body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><FutureMember>x</FutureMember><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>30</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [exchanges.expect]
 kind = "response"
-status = 200
+status = 400
 connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
 
 [[exchanges]]
 name = "read-back"
@@ -53,4 +72,4 @@ connection_after = "open"
 
 [exchanges.expect.body]
 golden = "goldens/c-lock-0010.xml"
-not_contains_utf8 = ["FutureMember"]
+not_contains_utf8 = ["FutureMember", "COMPLIANCE"]

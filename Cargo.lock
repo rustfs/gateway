@@ -1807,7 +1807,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-core"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "bytes",
  "dhat",

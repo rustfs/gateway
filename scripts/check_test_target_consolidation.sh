@@ -220,6 +220,7 @@ core_modules = (
     "route_sizes",
     "route_table",
     "rule_filter_boundaries",
+    "security_request_policy",
     "select_restore_roundtrip",
     "static_dispatch",
     "tagging_contract",

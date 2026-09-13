@@ -342,7 +342,7 @@ cases = "c-tagging-0004,c-tagging-0009,c-tagging-0011,c-tagging-0013,c-tagging-0
 
 [[operation]]
 name = "PutPublicAccessBlock"
-cases = "c-bucketconfig-0020,c-bucketconfig-0040"
+cases = "c-bucketconfig-0020,c-bucketconfig-0040,c-bucketconfig-0061"
 
 [[operation]]
 name = "RenameObject"

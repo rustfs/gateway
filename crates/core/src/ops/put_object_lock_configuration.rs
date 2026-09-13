@@ -33,10 +33,9 @@
 //!
 //! The decoder refuses a body that is not XML, a wrong root, and — because the overlay promotes
 //! the payload to required — an absent or empty body, as `MalformedXML` (`q-lock-0007`): a
-//! silently-defaulted lock configuration is a compliance answer nobody gave. It does **not**
-//! refuse an element it does not know (`q-lock-0014`): a stored WORM document is re-parsed by
-//! every future release, and a decoder that got stricter would downgrade the document to none,
-//! silently unlocking data. The `x-amz-bucket-object-lock-token` header is decoded and carried;
+//! silently-defaulted lock configuration is a compliance answer nobody gave. Unknown request
+//! elements are refused before the handler (`q-lock-0014`). Persisted WORM metadata uses separate
+//! compatibility codecs. The `x-amz-bucket-object-lock-token` header is decoded and carried;
 //! what a governance token authorises is enforcement, and enforcement is not this family's.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
