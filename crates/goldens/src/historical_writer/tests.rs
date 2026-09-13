@@ -138,6 +138,16 @@ fn n_nonempty_export_cannot_be_marked_empty() {
     assert!(validate(&mutant).is_err());
 }
 
+/// The recorded size is checked on its own, not only through the digest: a receipt whose digest
+/// is right but whose size is wrong is a wrong receipt.
+#[test]
+fn n_misrecorded_raw_size_fails_closed() {
+    let mut mutant = captures().unwrap();
+    let row = mutant[0].configurations.iter_mut().find(|row| row.raw_size > 0).unwrap();
+    row.raw_size += 1;
+    assert!(validate(&mutant).is_err());
+}
+
 #[test]
 fn n_changed_source_is_not_admitted() {
     let mut mutant = captures().unwrap();
