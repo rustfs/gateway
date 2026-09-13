@@ -33,7 +33,64 @@ fn all_observed_nonempty_exports_run_d1_to_d5() {
     );
     let mut families = crate::base_family_corpus_evidence().expect("the existing corpus builds");
     let counts = append(&mut families).expect("every nonempty persisted observation passes D1-D5");
-    assert!(counts.iter().map(|(_, count)| count).sum::<usize>() > 0);
+    // 28 distinct kind/digest pairs; 7 of them are bytes the corpus already holds from another
+    // source and count as aliases, so 21 are new samples.
+    assert_eq!(
+        counts
+            .iter()
+            .filter(|(_, count)| *count > 0)
+            .map(|(kind, count)| (kind.report_name(), *count))
+            .collect::<Vec<_>>(),
+        EXPECTED_ADDED.to_vec()
+    );
+    assert_eq!(counts.iter().map(|(_, count)| count).sum::<usize>(), 21);
+}
+
+/// Per-family samples the historical matrix adds to the corpus, in `ConfigKind::ALL` order.
+const EXPECTED_ADDED: [(&str, usize); 8] = [
+    ("object-lock", 2),
+    ("lifecycle", 6),
+    ("cors", 1),
+    ("tagging", 2),
+    ("notification", 2),
+    ("logging", 3),
+    ("website", 1),
+    ("replication", 4),
+];
+
+/// A persisted field is compatibility input whatever the request that wrote it returned. RustFS
+/// answered its Notification write with 400 or 500 on all four versions and still stored the XML.
+#[test]
+fn exports_from_refused_requests_still_enter_the_corpus() {
+    const REFUSED_NOTIFICATION: &str = "3be21775e812a918e38a43271cc35ebec41a9c2d3abcfb3e2127273394c09ee3";
+    let captures = captures().unwrap();
+    let statuses = captures
+        .iter()
+        .flat_map(|capture| &capture.configurations)
+        .filter(|row| row.raw_sha256 == REFUSED_NOTIFICATION)
+        .map(|row| row.api_status)
+        .collect::<Vec<_>>();
+    assert_eq!(statuses, [500, 400, 500, 400]);
+    let mut families = crate::base_family_corpus_evidence().unwrap();
+    assert!(!holds(&families, REFUSED_NOTIFICATION));
+    append(&mut families).unwrap();
+    assert!(holds(&families, REFUSED_NOTIFICATION));
+}
+
+fn holds(families: &[FamilyCorpusEvidence], digest: &str) -> bool {
+    families
+        .iter()
+        .flat_map(FamilyCorpusEvidence::source_a_registrations)
+        .any(|(_, sha256, accepted)| accepted && sha256 == digest)
+}
+
+#[test]
+fn n_edited_manifest_bytes_fail_closed() {
+    let edited = MANIFEST.replacen("\"stop_exit_code\": 0", "\"stop_exit_code\":  0", 1);
+    assert_ne!(edited, MANIFEST, "the mutation must change the manifest");
+    assert!(serde_json::from_str::<Vec<Capture>>(&edited).is_ok(), "the edit keeps the JSON valid");
+    assert!(parse(&edited).is_err());
+    assert!(parse(MANIFEST).is_ok());
 }
 
 #[test]

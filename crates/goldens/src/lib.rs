@@ -234,8 +234,8 @@ pub fn build_persistence_corpus_report() -> Result<CorpusReport, CorpusCoverageE
 
 fn all_family_corpus_evidence() -> Result<Vec<FamilyCorpusEvidence>, CorpusCoverageError> {
     let mut families = base_family_corpus_evidence()?;
-    historical_writer::append(&mut families).map_err(|error| CorpusCoverageError::InvalidEvidence {
-        kind: ConfigKind::Lifecycle,
+    historical_writer::append(&mut families).map_err(|(kind, error)| CorpusCoverageError::InvalidEvidence {
+        kind,
         reason: error.to_string(),
     })?;
     Ok(families)

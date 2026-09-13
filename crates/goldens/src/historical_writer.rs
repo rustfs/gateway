@@ -129,10 +129,14 @@ fn bytes(configuration: &Configuration) -> Result<&'static [u8], GoldenFailure> 
 }
 
 fn captures() -> Result<Vec<Capture>, GoldenFailure> {
-    if hex::encode(Sha256::digest(MANIFEST.as_bytes())) != MANIFEST_SHA256 {
+    parse(MANIFEST)
+}
+
+fn parse(manifest: &str) -> Result<Vec<Capture>, GoldenFailure> {
+    if hex::encode(Sha256::digest(manifest.as_bytes())) != MANIFEST_SHA256 {
         return Err(input_failure("capture manifest digest differs"));
     }
-    let captures: Vec<Capture> = serde_json::from_str(MANIFEST).map_err(input_failure)?;
+    let captures: Vec<Capture> = serde_json::from_str(manifest).map_err(input_failure)?;
     validate(&captures)?;
     Ok(captures)
 }
@@ -257,15 +261,26 @@ fn accept<T>(
     Ok(true)
 }
 
-pub(crate) fn append(families: &mut [FamilyCorpusEvidence]) -> Result<Vec<(ConfigKind, usize)>, GoldenFailure> {
+/// Family charged with a failure of the capture manifest itself.
+///
+/// Callers report failures per family, and a manifest failure (digest pin, schema, census) has no
+/// single family; the failure's own text names the historical writer matrix. Failures of one
+/// observed field are charged to that field's real family instead.
+pub(crate) const MANIFEST_FAILURE_FAMILY: ConfigKind = ConfigKind::Lifecycle;
+
+/// Runs every nonempty historical export through D1-D5 and admits the unseen ones to `families`.
+///
+/// Returns the number of samples newly admitted per family. An export whose bytes are already in
+/// the family is still executed, then counted as an alias rather than a second sample.
+pub(crate) fn append(families: &mut [FamilyCorpusEvidence]) -> Result<Vec<(ConfigKind, usize)>, (ConfigKind, GoldenFailure)> {
     let mut counts = ConfigKind::ALL.map(|kind| (kind, 0));
-    for capture in captures()? {
+    for capture in captures().map_err(|failure| (MANIFEST_FAILURE_FAMILY, failure))? {
         for configuration in &capture.configurations {
-            let raw = bytes(configuration)?;
+            let kind = kind(&configuration.kind).map_err(|failure| (MANIFEST_FAILURE_FAMILY, failure))?;
+            let raw = bytes(configuration).map_err(|failure| (kind, failure))?;
             if raw.is_empty() {
                 continue;
             }
-            let kind = kind(&configuration.kind)?;
             let origin = SampleOrigin {
                 source: format!("{SOURCE}#{}-{}", capture.id, configuration.kind),
                 producer: capture.writer.clone(),
@@ -274,10 +289,10 @@ pub(crate) fn append(families: &mut [FamilyCorpusEvidence]) -> Result<Vec<(Confi
             };
             macro_rules! observe {
                 ($parse:ident, $check:ident) => {{
-                    let value = $parse(raw).map_err(input_failure)?.structure;
+                    let value = $parse(raw).map_err(|error| (kind, input_failure(error)))?.structure;
                     accept(GoldenSample { kind, bytes: raw.to_vec(), value, origin,
                         notes: format!("Historical writer raw export; API status {}, mc exit {:?}. A nonempty export is evaluated independently of request success.", configuration.api_status, configuration.mc_exit_code),
-                    }, crate::$check, families)?
+                    }, crate::$check, families).map_err(|failure| (kind, failure))?
                 }};
             }
             let added = match kind {
@@ -298,7 +313,7 @@ pub(crate) fn append(families: &mut [FamilyCorpusEvidence]) -> Result<Vec<(Confi
             let (_, count) = counts
                 .iter_mut()
                 .find(|(family, _)| *family == kind)
-                .ok_or_else(|| input_failure("the observed family has no execution counter"))?;
+                .ok_or_else(|| (kind, input_failure("the observed family has no execution counter")))?;
             *count += usize::from(added);
         }
     }

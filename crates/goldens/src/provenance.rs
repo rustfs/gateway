@@ -384,15 +384,14 @@ fn validate_registration(
         witnessed += matches.len();
     }
 
-    if let Some((name, version)) = writer {
-        if source == PersistenceSource::HistoricalWriterMatrix
-            && !historical_writer::witness_set_matches(name, version, registration.witness_digests)
-                .map_err(|error| PersistenceSourceError::HistoricalWriterMatrix(error.to_string()))?
-        {
-            return Err(PersistenceSourceError::HistoricalWriterMatrix(
-                "the registered witnesses omit or duplicate captured XML".to_owned(),
-            ));
-        }
+    if let Some((name, version)) = writer
+        && source == PersistenceSource::HistoricalWriterMatrix
+        && !historical_writer::witness_set_matches(name, version, registration.witness_digests)
+            .map_err(|error| PersistenceSourceError::HistoricalWriterMatrix(error.to_string()))?
+    {
+        return Err(PersistenceSourceError::HistoricalWriterMatrix(
+            "the registered witnesses omit or duplicate captured XML".to_owned(),
+        ));
     }
 
     Ok(SourceReport {
