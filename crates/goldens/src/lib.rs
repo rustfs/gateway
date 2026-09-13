@@ -51,6 +51,11 @@ mod oracle_admission;
 mod provenance;
 mod public_access_block;
 mod replication;
+// Test-only: three RustFS admin routes as extension operations through a real assembled service
+// (rustfs/backlog#1744). Like `operation_diff`, it links the runtime through dev-dependencies.
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod rustfs_admin_proof;
 mod source_a_boundary;
 mod source_a_census;
 mod source_a_create_defaults;
@@ -82,6 +87,11 @@ pub use logging::assert_bucket_logging_four_way;
 pub use migration_inventory::request_divergences::{
     DivergenceFollowUp, DivergenceRuling, REQUEST_DIVERGENCES, RequestDivergence, RequestDivergenceError,
     RequestDivergenceReport, build_request_divergences,
+};
+pub use migration_inventory::rustfs_admin_routes::{
+    AdminAuthMode, AdminRoute, BodySealing, ExtensionRoute, INVENTORY_FORMAT, InventoryCensus, InventorySource,
+    QueryDiscriminator, RUSTFS_SOURCE_COMMIT, RequestBodyUse, ResponseBodyUse, RouteInventoryError, RouteMethod, RouteRisk,
+    RouteSurface, RustfsAdminRouteInventory, derive_census, parse_inventory, rustfs_admin_route_inventory,
 };
 pub use migration_inventory::{
     DoctypeForm, DoctypeWitness, MigrationInventoryError, MigrationInventoryReport, build_migration_inventory,

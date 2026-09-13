@@ -388,6 +388,7 @@ fn audit_samples<'a>(
 }
 
 pub(crate) mod request_divergences;
+pub(crate) mod rustfs_admin_routes;
 
 #[cfg(test)]
 mod tests;
