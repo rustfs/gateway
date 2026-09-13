@@ -113,7 +113,7 @@ impl ConnectionState {
 /// One frame of an event stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservedEvent {
-    /// The event type as the server named it.
+    /// The event type, or the error code of a terminal request-level error.
     pub event_type: String,
     /// Event headers, in arrival order.
     pub headers: Vec<(String, String)>,
@@ -131,6 +131,17 @@ pub(crate) fn has_event_stream_content_type(headers: &[(String, String)]) -> boo
                 .next()
                 .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("application/vnd.amazon.event-stream"))
     })
+}
+
+impl ObservedEvent {
+    /// Whether this frame is an `event` message named `event_type`.
+    ///
+    /// A request-level error frame never matches: its error code is the server's own text, and a
+    /// code spelled `End` must not read as the success terminator.
+    #[must_use]
+    pub(crate) fn is_event_of(&self, event_type: &str) -> bool {
+        self.event_type == event_type && event_header(&self.headers, ":message-type") == Some("event")
+    }
 }
 
 /// Decodes and validates the complete event-stream body observed on the wire.
@@ -190,13 +201,20 @@ pub(crate) fn decode_event_stream(body: &[u8]) -> Result<Vec<ObservedEvent>, Str
             "event" => event_header(&headers, ":event-type")
                 .ok_or_else(|| "an event frame has no :event-type".to_owned())?
                 .to_owned(),
-            "exception" => event_header(&headers, ":exception-type")
-                .ok_or_else(|| "an exception frame has no :exception-type".to_owned())?
-                .to_owned(),
+            "error" => {
+                let code = event_header(&headers, ":error-code").ok_or_else(|| "an error frame has no :error-code".to_owned())?;
+                if event_header(&headers, ":error-message").is_none() {
+                    return Err("an error frame has no :error-message".to_owned());
+                }
+                if payload_start != payload_end {
+                    return Err("an error frame has a payload".to_owned());
+                }
+                code.to_owned()
+            }
             _ => return Err("an event-stream frame has an unknown :message-type".to_owned()),
         };
         phase = match (message_type, event_type.as_str(), phase) {
-            ("exception", _, Phase::Scanning | Phase::Counted) => Phase::Terminated,
+            ("error", _, Phase::Scanning | Phase::Counted) => Phase::Terminated,
             ("event", "Records" | "Progress" | "Cont", Phase::Scanning) => Phase::Scanning,
             ("event", "Stats", Phase::Scanning) => Phase::Counted,
             ("event", "End", Phase::Counted) => Phase::Terminated,
@@ -212,7 +230,7 @@ pub(crate) fn decode_event_stream(body: &[u8]) -> Result<Vec<ObservedEvent>, Str
             .ok_or_else(|| "the event-stream cursor ran past the body".to_owned())?;
     }
     if phase != Phase::Terminated {
-        return Err("the event stream ended without End or an exception".to_owned());
+        return Err("the event stream ended without End or an error frame".to_owned());
     }
     Ok(events)
 }
@@ -421,6 +439,9 @@ impl Observation {
 }
 
 #[cfg(test)]
+mod select_error_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use rustfs_gateway::EventKind;
@@ -469,7 +490,7 @@ mod tests {
     }
 
     /// Negative — a syntactically valid Records frame is not a complete Select response without a
-    /// terminal End or exception frame.
+    /// terminal End or error frame.
     #[test]
     fn n_an_event_stream_without_a_terminator_is_refused() {
         let mut bytes = Vec::new();

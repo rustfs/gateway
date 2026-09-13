@@ -365,20 +365,38 @@ fn a_complete_stream_reads_back_frame_by_frame() {
     assert!(frames[3].payload.is_empty(), "the terminator carries nothing");
 }
 
-/// An in-band exception reads back as an exception, not as an event.
-///
-/// The distinction is the whole of in-band error reporting: the status line already said `200`,
-/// so `:message-type` is the only thing that tells a client the stream failed.
+/// S3 Select puts an in-band failure entirely in three string headers.
+/// https://docs.aws.amazon.com/AmazonS3/latest/developerguide/RESTSelectObjectAppendix.html
 #[test]
-fn an_exception_reads_back_as_an_exception() {
+fn a_select_error_reads_back_as_headers_without_a_payload() {
     let mut out = Vec::new();
-    encode_exception("ParseUnexpectedToken", "<Error><Code>ParseUnexpectedToken</Code></Error>", &mut out)
-        .expect("a small message");
+    encode_exception("ParseUnexpectedToken", "Unexpected token.", &mut out).expect("a small message");
     let frames = read_stream(&out).expect("an independent decoder reads the frame");
     assert_eq!(frames.len(), 1);
-    assert_eq!(header_of(&frames[0], ":message-type"), Some("exception"));
-    assert_eq!(header_of(&frames[0], ":exception-type"), Some("ParseUnexpectedToken"));
-    assert!(header_of(&frames[0], ":event-type").is_none(), "an exception is not an event");
+    assert_eq!(header_of(&frames[0], ":message-type"), Some("error"));
+    assert_eq!(header_of(&frames[0], ":error-code"), Some("ParseUnexpectedToken"));
+    assert_eq!(header_of(&frames[0], ":error-message"), Some("Unexpected token."));
+    assert_eq!(frames[0].headers.len(), 3);
+    assert!(frames[0].payload.is_empty());
+}
+
+#[test]
+fn select_error_headers_preserve_utf8_at_the_wire_length_limit() {
+    let maximum = "x".repeat(usize::from(u16::MAX) - 2) + "é";
+    let remaining_header_space = "x".repeat(128 * 1024 - 55 - maximum.len());
+    for (code, message) in [
+        (maximum.as_str(), "Malformed CSV record."),
+        ("CSVParsingError", maximum.as_str()),
+        (maximum.as_str(), remaining_header_space.as_str()),
+    ] {
+        let mut out = Vec::new();
+        encode_exception(code, message, &mut out).expect("each value fits the two-byte length");
+        let frames = read_stream(&out).expect("both header values remain valid UTF-8");
+        assert_eq!(frames.len(), 1);
+        assert!(header_of(&frames[0], ":error-code") == Some(code), "error-code bytes changed");
+        assert!(header_of(&frames[0], ":error-message") == Some(message), "error-message bytes changed");
+        assert!(frames[0].payload.is_empty());
+    }
 }
 
 /// Negative — every single-byte corruption of a frame is caught by one of the two CRCs.

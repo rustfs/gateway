@@ -42,7 +42,7 @@
 //! encoder.
 //!
 //! [`shared::event_stream`](super::shared::event_stream) encodes a `Records` / `Stats` /
-//! `Progress` / `Cont` / `End` / exception message byte for byte, both CRC-32s included, and is
+//! `Progress` / `Cont` / `End` / error message byte for byte, both CRC-32s included, and is
 //! exported through the facade. The conformance target parses those frames independently. So the
 //! piece that a hand-rolled implementation gets subtly
 //! wrong — a CRC over the wrong range produces a stream every SDK rejects and no unit test of

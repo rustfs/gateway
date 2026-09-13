@@ -42,6 +42,9 @@ path = "tests/integration.rs"
 # has proved this guard could fail since P0 quietly stops proving anything. Keep `[dependencies]`
 # last.
 [dev-dependencies]
+# The Select transport regression supplies a fallible producer to the facade's ByteStream.
+# The producer trait is not re-exported by the facade and stays test-only here.
+rustfs-gateway-stream = { workspace = true }
 # The allocation instrument. `src/fixture/list_allocations.rs` installs `dhat::Alloc` as the
 # global allocator of the library's own test executable, under `#[cfg(test)]`, so nothing in the
 # shipped library reaches it and a dev-dependency is not inherited by an implementation that runs

@@ -14,8 +14,9 @@
 
 //! Event-stream count and payload expectations.
 //!
-//! Responsible for: matching independently decoded event frames by type and applying the ordinary
-//! byte-exact body vocabulary to one expected payload. NOT responsible for: decoding frames or
+//! Responsible for: matching independently decoded `event` messages by type — never a
+//! request-level error frame, whatever its code spells — and applying the ordinary byte-exact body
+//! vocabulary to one expected payload. NOT responsible for: decoding frames or
 //! judging the settled response body. Upstream: the observation and parent expectation engine.
 //! Downstream: select/restore conformance cases.
 
@@ -36,7 +37,7 @@ pub(super) fn check_events(
     for (index, spec) in events.iter().enumerate() {
         let at = format!("{pointer}/events/{index}");
         let Some(event_type) = spec.read("expect.events[].type").and_then(Value::as_str) else { continue };
-        let count = observed.events.iter().filter(|event| event.event_type == event_type).count() as i64;
+        let count = observed.events.iter().filter(|event| event.is_event_of(event_type)).count() as i64;
         let minimum = spec
             .read("expect.events[].min_count")
             .and_then(Value::as_integer)
@@ -57,11 +58,7 @@ pub(super) fn check_events(
             ));
         }
         if let Some(payload) = spec.read("expect.events[].payload") {
-            let matching: Vec<_> = observed
-                .events
-                .iter()
-                .filter(|event| event.event_type == event_type)
-                .collect();
+            let matching: Vec<_> = observed.events.iter().filter(|event| event.is_event_of(event_type)).collect();
             if matching.len() != 1 {
                 out.push(Diagnostic::deny(
                     "expect/events.payload",

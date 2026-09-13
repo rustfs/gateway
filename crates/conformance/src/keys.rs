@@ -256,7 +256,8 @@ pub const DECLARED: &[(&str, Disposition, &str)] = &[
         "expect.events[].headers",
         Disposition::Unhonoured,
         "per-frame headers of an observed event stream. Both transports decode and record them, \
-         but the event matcher currently counts frames by `type` and never compares these values",
+         but the event matcher currently counts `event` messages by `type` and never compares \
+         these values",
     ),
     // -- Unreachable behind a refusal -------------------------------------------------------------
     (

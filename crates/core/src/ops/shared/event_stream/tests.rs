@@ -15,9 +15,9 @@
 //! Byte-exact frames, and the order they are allowed to arrive in.
 //!
 //! Responsible for: proving the framing byte for byte — the two CRC ranges, the header block, the
-//! five event types and the exception — and proving the order contract in both directions.
-//! NOT responsible for: the sequence's use by anything real, because nothing in this workspace
-//! sends a frame yet; nor for a decoder, which `crates/conformance` supplies independently.
+//! five event types and the request-level error — and proving the order contract in both directions.
+//! NOT responsible for: transport coverage or a decoder, which `crates/conformance` supplies
+//! independently.
 //! Upstream: [`super`]. Downstream: nothing.
 //!
 //! Every expected value below is a **literal**, produced outside this workspace by an independent
@@ -73,13 +73,14 @@ const STATS_FRAME: &str = "000000d500000043cbe23f6a\
                            726e65643e333c2f427974657352657475726e65643e3c2f44657461696c733e3c2f53746174733e\
                            5a1bdc47";
 
-/// An in-band exception, byte for byte. `:message-type` is `exception`, not `event`.
-const EXCEPTION_FRAME: &str = "0000006d000000551f81c9ee\
-                               0d3a6d6573736167652d74797065070009657863657074696f6e\
-                               0f3a657863657074696f6e2d7479706507000f43535650617273696e674572726f72\
-                               0d3a636f6e74656e742d74797065070008746578742f786d6c\
-                               3c4572726f722f3e\
-                               ba713e91";
+/// S3 Select errors use three string headers and no payload.
+/// https://docs.aws.amazon.com/AmazonS3/latest/developerguide/RESTSelectObjectAppendix.html
+/// Lengths and CRCs were computed with Python `struct` and `zlib`, independently of this encoder.
+const ERROR_FRAME: &str = "0000006b0000005b77791149\
+                          0d3a6d6573736167652d747970650700056572726f72\
+                          0b3a6572726f722d636f646507000f43535650617273696e674572726f72\
+                          0e3a6572726f722d6d6573736167650700154d616c666f726d656420435356207265636f72642e\
+                          47d24567";
 
 /// The digest is the published parameterisation and not one of this project's invention.
 ///
@@ -143,12 +144,73 @@ fn the_progress_document_differs_from_the_stats_document_only_in_its_root() {
     );
 }
 
-/// An exception frame matches, and says `exception` rather than `event`.
+/// The request-level error frame matches the independent AWS-format golden.
 #[test]
-fn the_exception_frame_is_byte_exact() {
+fn the_select_error_frame_is_byte_exact() {
     let mut out = Vec::new();
-    encode_exception("CSVParsingError", "<Error/>", &mut out).expect("a small message");
-    assert_eq!(out, hex(EXCEPTION_FRAME));
+    encode_exception("CSVParsingError", "Malformed CSV record.", &mut out).expect("a small message");
+    assert_eq!(out, hex(ERROR_FRAME));
+}
+
+#[test]
+fn n_an_error_code_beyond_the_string_header_limit_is_refused() {
+    let code = "x".repeat(usize::from(u16::MAX) + 1);
+    let mut out = hex(RECORDS_FRAME);
+    assert_eq!(
+        encode_exception(&code, "Malformed CSV record.", &mut out),
+        Err(EventStreamError::HeaderTooLarge)
+    );
+    assert_eq!(out, hex(RECORDS_FRAME), "a refused frame leaves earlier bytes intact");
+}
+
+#[test]
+fn n_an_error_message_beyond_the_string_header_limit_is_refused() {
+    let message = "x".repeat(usize::from(u16::MAX) + 1);
+    let mut out = hex(RECORDS_FRAME);
+    assert_eq!(
+        encode_exception("CSVParsingError", &message, &mut out),
+        Err(EventStreamError::HeaderTooLarge)
+    );
+    assert_eq!(out, hex(RECORDS_FRAME), "a refused frame leaves earlier bytes intact");
+}
+
+#[test]
+fn n_an_oversized_utf8_error_message_is_not_truncated_inside_a_character() {
+    let message = "é".repeat(usize::from(u16::MAX) / 2 + 1);
+    let mut out = Vec::new();
+    assert_eq!(
+        encode_exception("CSVParsingError", &message, &mut out),
+        Err(EventStreamError::HeaderTooLarge)
+    );
+    assert!(out.is_empty());
+}
+
+#[test]
+fn n_an_error_header_block_beyond_128_kib_is_refused() {
+    // The three header names, types, lengths, and the literal "error" occupy 55 bytes.
+    // https://smithy.io/2.0/aws/amazon-eventstream.html#message-format
+    let code = "x".repeat(usize::from(u16::MAX));
+    let message = "x".repeat(128 * 1024 - 55 - code.len() + 1);
+    let mut out = hex(RECORDS_FRAME);
+    assert_eq!(encode_exception(&code, &message, &mut out), Err(EventStreamError::HeaderTooLarge));
+    assert_eq!(out, hex(RECORDS_FRAME), "a refused frame leaves earlier bytes intact");
+}
+
+#[test]
+fn n_a_refused_error_frame_does_not_terminate_the_sequence() {
+    let mut out = hex(RECORDS_FRAME);
+    let mut sequence = EventSequence::new();
+    let result = sequence.exception("CSVParsingError", &"x".repeat(usize::from(u16::MAX) + 1), &mut out);
+    // Complete the sequence before assertions so a failed assertion cannot also panic in Drop.
+    let was_terminated = sequence.is_terminated();
+    if !was_terminated {
+        sequence
+            .exception("CSVParsingError", "Malformed CSV record.", &mut out)
+            .expect("a reportable failure");
+    }
+    assert_eq!(result, Err(EventStreamError::HeaderTooLarge));
+    assert!(!was_terminated);
+    assert_eq!(out, [hex(RECORDS_FRAME), hex(ERROR_FRAME)].concat());
 }
 
 /// The prelude CRC covers eight bytes, and the message CRC covers everything before itself.
@@ -338,7 +400,11 @@ fn the_content_types_are_the_documented_ones() {
 /// Negative — a refusal message never carries a byte of what was being framed.
 #[test]
 fn n_a_refusal_message_is_a_constant() {
-    for error in [EventStreamError::PayloadTooLarge, EventStreamError::OutOfOrder] {
+    for error in [
+        EventStreamError::PayloadTooLarge,
+        EventStreamError::HeaderTooLarge,
+        EventStreamError::OutOfOrder,
+    ] {
         let text = error.message();
         assert!(!text.contains("SELECT"), "{text}");
         assert!(!text.is_empty());
