@@ -89,6 +89,7 @@ mod commit_task;
 mod config;
 #[cfg(feature = "server")]
 mod conn;
+mod dialect_posture;
 mod dispatch;
 mod ext;
 mod gate;
