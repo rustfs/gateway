@@ -13486,8 +13486,8 @@ expect_fail check_mint_report.sh 'a mint record proposal that loses the exclusio
     mut_mint_report_proposal_drops_exclusion 'record mode carries an exclusion into the proposal unchanged'
 
 mut_mint_report_excluded_leave_console() {
-    mint_mutate "$MINT_REPORT" 'outcomes = read_progress(Path(args.progress), sdks, problems)' \
-        'outcomes = read_progress(Path(args.progress), [sdk for sdk in sdks if sdk not in exclusions], problems)'
+    mint_mutate "$MINT_REPORT" 'outcomes.update(read_progress(console, pass_sdks, problems))' \
+        'outcomes.update(read_progress(console, [sdk for sdk in pass_sdks if sdk not in exclusions], problems))'
 }
 expect_fail check_mint_report.sh 'an excluded mint SDK no longer has to start and finish in order' \
     mut_mint_report_excluded_leave_console 'an excluded SDK the console never saw start is still an incomplete run'
