@@ -263,8 +263,40 @@ for overlay in sorted(overlays.glob("*.toml")):
         ):
             fail(f"{overlay.relative_to(root)} makes {target.group(1)} stricter than lenient")
 
+# --- Replication: the one fail-closed stored configuration (rustfs/backlog#1725). RustFS parses the
+# stored replication document fail-closed, so a write decoder that grew stricter would not switch the
+# feature off the way it would for the six switches above — it would make the bucket unusable on the
+# next read. The narrow q-repl-0015 refusal (a non-empty <Filter> whose every child is unknown) is a
+# different dimension on a different target and is deliberately not what this checks. -------------
+
+replication_codec = source("generated/codec/ops/put_bucket_replication.rs")
+if not re.search(r"^fn read_", replication_codec, re.MULTILINE):
+    fail("PutBucketReplication's generated decoder no longer reads an XML document; the lenient check would be vacuous")
+if UNKNOWN_GUARD.removeprefix("return ").removesuffix(";") in replication_codec:
+    fail("PutBucketReplication's generated decoder refuses unknown elements; the fail-closed replication write stays lenient")
+replication_overlay = source("model/overlays/quirks/replication.toml")
+for record in re.findall(r'\[\[quirk\]\]\n(.*?)(?=\n\[\[quirk\]\]|\Z)', replication_overlay, re.DOTALL):
+    if (
+        re.search(r'^target\s*=\s*"PutBucketReplication"', record, re.MULTILINE)
+        and re.search(r'^mutation_dimension\s*=\s*"unknown_element_policy"$', record, re.MULTILINE)
+        and not re.search(r'^codec_value\s*=\s*"skip"$', record, re.MULTILINE)
+    ):
+        fail("model/overlays/quirks/replication.toml makes PutBucketReplication stricter than lenient")
+leniency = quirk_record(replication_overlay, "q-repl-0005")
+for pattern, message in [
+    (r'^kind\s*=\s*"lenient_unknown_elements"$', "q-repl-0005 no longer records the replication write as lenient"),
+    (r'^target\s*=\s*"PutBucketReplication"$', "q-repl-0005 no longer targets PutBucketReplication"),
+    (r'^cases\s*=\s*\[[^\]]*"c-replication-0019"[^\]]*\]$', "q-repl-0005 is not bound to its acceptance case"),
+]:
+    require(pattern, leniency, message)
+leniency_case = source("conformance/cases/replication/c-replication-0019.toml")
+require(r'^quirks = \[[^\]]*"q-repl-0005"[^\]]*\]$', leniency_case, "c-replication-0019 no longer binds q-repl-0005")
+statuses = re.findall(r'^status = (\d+)$', leniency_case, re.MULTILINE)
+if not statuses or set(statuses) != {"200"}:
+    fail("c-replication-0019 no longer expects the unknown-element write and its read-back to succeed")
+
 print(
-    "check_codec_policy: bucket configuration write grading, CORS leniency and "
+    "check_codec_policy: bucket configuration write grading, replication leniency, CORS leniency and "
     "selected/unselected Lifecycle XML policies are bound"
 )
 PY

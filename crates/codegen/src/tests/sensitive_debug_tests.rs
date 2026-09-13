@@ -54,6 +54,10 @@ const SENSITIVE_WIRE_NAMES: &[&str] = &[
     "KeyId",
     "KMSKeyId",
     "KMSContext",
+    // The replication destination's account id. `q-repl-0010` classifies it beside the replica KMS
+    // key id as a configuration secret the stored document echoes on the read and nothing else may
+    // print; a derived `Debug` is one `{:?}` away from the log line that rule forbids.
+    "Account",
 ];
 
 fn operations() -> &'static [OperationIr] {

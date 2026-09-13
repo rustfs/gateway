@@ -23,9 +23,11 @@
 
 #[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
 use crate::compat::S3sBucketEncryptionObservation;
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
+use crate::persistence::{PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule};
 use crate::persistence::{
-    PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule, PersistedEncryptionByDefault,
-    PersistedEncryptionConfiguration, PersistedReplicationConfiguration, parse_bucket_encryption, parse_replication,
+    PersistedEncryptionByDefault, PersistedEncryptionConfiguration, PersistedReplicationConfiguration, parse_bucket_encryption,
+    parse_replication,
 };
 
 /// Spelled so that no other part of any rendering can contain it by accident.
@@ -125,6 +127,32 @@ fn c_persist_n006_the_replica_kms_key_id_never_appears_in_debug() {
         );
         assert!(rendered.contains("arn:aws:s3:::backup"), "the destination is still visible: {rendered}");
     }
+}
+
+/// `q-repl-0010` names the destination account id beside the replica KMS key id: a configuration
+/// secret the stored document echoes on the read and nothing else prints. The migration goldens
+/// format parsed replication documents with `{:?}` in their D1-D5 diagnostics, so a derived `Debug`
+/// on the destination would put every stored account id into a failing golden's report.
+#[test]
+fn c_persist_n008_the_replication_destination_account_never_appears_in_debug() {
+    const ACCOUNT: &str = "731073107310";
+    let bytes = format!(
+        "<ReplicationConfiguration><Role>arn:aws:iam::123456789012:role/replication</Role><Rule><Destination><Account>{ACCOUNT}</Account><Bucket>arn:aws:s3:::backup</Bucket><StorageClass>STANDARD_IA</StorageClass></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>"
+    );
+    let parsed: PersistedReplicationConfiguration =
+        parse_replication(bytes.as_bytes()).expect("a stored destination account is readable");
+    for rendered in both_renderings(&parsed) {
+        assert!(!rendered.contains(ACCOUNT), "a destination account id reached Debug: {rendered}");
+        assert!(rendered.contains("arn:aws:s3:::backup"), "the destination is still visible: {rendered}");
+        assert!(rendered.contains("STANDARD_IA"), "a non-secret sibling is still visible: {rendered}");
+    }
+    assert!(
+        format!("{parsed:?}").contains(&format!("account: Some(<redacted {} bytes>)", ACCOUNT.len())),
+        "presence and length stay readable: {parsed:?}"
+    );
+
+    let absent = format!("{:?}", crate::persistence::PersistedReplicationDestination::default());
+    assert!(absent.contains("account: None"), "an absent account must not look present: {absent}");
 }
 
 #[test]

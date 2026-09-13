@@ -312,3 +312,34 @@ fn c_dto_n026_the_wire_algorithm_set_is_wider_than_the_computable_one() {
     assert!(ChecksumAlgorithm::VALUES.len() > 5, "the model declares more than the five we compute");
     assert!(ChecksumAlgorithm::VALUES.contains(&"CRC32"));
 }
+
+#[test]
+fn c_dto_n027_a_replication_destination_never_prints_its_account_or_replica_key() {
+    // `q-repl-0010`: the destination account id and the replica KMS key id are configuration
+    // secrets. The read echoes them — that is the documented GET — and nothing else may, so the
+    // `Debug` a handler would reach for in a log line lists both members by presence only.
+    let destination = dto::Destination {
+        bucket: "arn:aws:s3:::replica-bucket".to_owned(),
+        account: Some("account-must-never-be-logged".to_owned()),
+        encryption_configuration: Some(dto::EncryptionConfiguration {
+            replica_kms_key_id: Some("replica-key-must-never-be-logged".to_owned()),
+        }),
+        ..Default::default()
+    };
+    for rendered in [format!("{destination:?}"), format!("{destination:#?}")] {
+        assert!(
+            !rendered.contains("must-never-be-logged"),
+            "a replication secret reached Debug: {rendered}"
+        );
+        assert!(
+            rendered.contains("arn:aws:s3:::replica-bucket"),
+            "the destination bucket is not a secret and stays visible: {rendered}"
+        );
+    }
+    assert!(
+        format!("{destination:?}").contains("account: Some(\"<redacted>\")"),
+        "the account is still listed, with a placeholder: {destination:?}"
+    );
+    let absent = format!("{:?}", dto::Destination::default());
+    assert!(absent.contains("account: None"), "an absent account must not look present: {absent}");
+}

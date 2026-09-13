@@ -27,11 +27,11 @@
 /// destructure it exhaustively (P3). A required member is a bare type and an optional one is
 /// `Option<T>`; `Default` fills a required member with a wire-invalid placeholder (P10) that
 /// [`Destination::check_required`] refuses to let off the decode path.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct Destination {
     /// Wire `Bucket`, bound as BodyXml. Required.
     pub bucket: String,
-    /// Wire `Account`, bound as BodyXml. Optional.
+    /// Wire `Account`, bound as BodyXml. Optional. Secret: `Debug` prints a placeholder.
     pub account: Option<String>,
     /// Wire `StorageClass`, bound as BodyXml. Optional.
     pub storage_class: Option<crate::ops::enums::StorageClass>,
@@ -63,5 +63,23 @@ impl Destination {
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
         crate::reject_placeholder("Destination", "Bucket", &self.bucket)?;
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Destination {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn redact<T>(value: &Option<T>) -> Option<&'static str> {
+            value.as_ref().map(|_| "<redacted>")
+        }
+
+        f.debug_struct("Destination")
+            .field("bucket", &self.bucket)
+            .field("account", &redact(&self.account))
+            .field("storage_class", &self.storage_class)
+            .field("access_control_translation", &self.access_control_translation)
+            .field("encryption_configuration", &self.encryption_configuration)
+            .field("replication_time", &self.replication_time)
+            .field("metrics", &self.metrics)
+            .finish()
     }
 }

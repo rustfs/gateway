@@ -14434,6 +14434,71 @@ expect_fail check_codec_policy.sh \
     'the persisted versioning write refusing unknown elements' \
     mut_codec_policy_versioning_made_strict
 
+# Replication is the one fail-closed stored configuration (rustfs/backlog#1725): a stricter write
+# decoder does not switch the feature off, it makes the bucket unusable on the next read.
+
+mut_codec_policy_replication_made_strict() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("generated/codec/ops/put_bucket_replication.rs")
+path.write_text(
+    path.read_text()
+    + '\nfn refuse_unknown() -> Result<(), CodecError> {\n    Err(CodecError::malformed_xml("the body contains an unknown element"))\n}\n'
+)
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the fail-closed replication write refusing unknown elements' \
+    mut_codec_policy_replication_made_strict
+
+mut_codec_policy_replication_rule_made_reject() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("model/overlays/quirks/replication.toml")
+path.write_text(
+    path.read_text()
+    + '\n[[quirk]]\nid = "q-repl-9999"\nkind = "security_unknown_elements"\nclassification = "mutable"\n'
+    + 'mutation_dimension = "unknown_element_policy"\ncodec_value = "reject"\ntarget = "PutBucketReplication"\n'
+    + 'summary = "A stricter replication write."\ncases = []\n'
+)
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'an overlay rule making the fail-closed replication write strict' \
+    mut_codec_policy_replication_rule_made_reject
+
+mut_codec_policy_replication_contract_unbound() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("model/overlays/quirks/replication.toml")
+text = path.read_text()
+old = 'kind    = "lenient_unknown_elements"\n'
+if text.count(old) != 1:
+    raise SystemExit("replication leniency contract mutation anchor is not unique")
+path.write_text(text.replace(old, 'kind    = "strict_unknown_elements"\n', 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the replication leniency contract changing kind' \
+    mut_codec_policy_replication_contract_unbound
+
+mut_codec_policy_replication_case_refuses() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/replication/c-replication-0019.toml")
+text = path.read_text()
+old = "status = 200\n"
+if text.count(old) != 2:
+    raise SystemExit("replication leniency case mutation anchor moved: expected the write and the read-back")
+# Only the write exchange: the read-back still answers 200, so a guard that checked one status
+# line and happened to pick the second would miss this.
+path.write_text(text.replace(old, "status = 400\n", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the replication leniency case expecting a refusal' \
+    mut_codec_policy_replication_case_refuses
+
 mut_codec_policy_website_rule_made_reject() {
     python3 - <<'PYEOF'
 from pathlib import Path

@@ -73,7 +73,11 @@ pub struct PersistedOptionalReplicationStatus {
 }
 
 /// A persisted Replication destination.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+///
+/// `Debug` is written by hand because the destination account id is, beside the replica KMS key
+/// id, one of the two configuration secrets `q-repl-0010` names: it renders as presence and length
+/// only, and every other member renders as a derived `Debug` would.
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct PersistedReplicationDestination {
     /// Destination account identifier.
     pub account: Option<String>,
@@ -89,6 +93,21 @@ pub struct PersistedReplicationDestination {
     pub replication_time: Option<PersistedReplicationTime>,
     /// Destination storage class.
     pub storage_class: Option<String>,
+}
+
+impl fmt::Debug for PersistedReplicationDestination {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PersistedReplicationDestination")
+            .field("account", &RedactedKeyId(self.account.as_deref()))
+            .field("access_control_translation", &self.access_control_translation)
+            .field("bucket", &self.bucket)
+            .field("encryption_configuration", &self.encryption_configuration)
+            .field("metrics", &self.metrics)
+            .field("replication_time", &self.replication_time)
+            .field("storage_class", &self.storage_class)
+            .finish()
+    }
 }
 
 /// Ownership override for replicated objects.
