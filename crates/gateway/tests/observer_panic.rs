@@ -24,10 +24,27 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use bytes::Bytes;
 use http::{Method, StatusCode};
-use rustfs_gateway::{Observer, RequestEvent};
+use rustfs_gateway::{Observer, RequestEvent, S3Service};
 
 use crate::support::{self, Backend, CopyCommit, Ping, RefuseEverything, exchange, plain, wired};
+
+/// [`exchange`], except that a panic escaping the service fails the test rather than unwinding
+/// through it. The test harness drops the payload of a panic that leaves a test, and a payload
+/// whose destructor panics would stop the test thread without a verdict, hanging the whole run.
+async fn exchange_contained(service: &S3Service, request: http::Request<Bytes>) -> (StatusCode, String) {
+    let service = service.clone();
+    match tokio::spawn(async move { exchange(&service, request).await }).await {
+        Ok(answer) => answer,
+        Err(error) => {
+            if let Ok(payload) = error.try_into_panic() {
+                std::mem::forget(payload);
+            }
+            panic!("an observer panic escaped the service");
+        }
+    }
+}
 
 struct PanickingObserver(Arc<AtomicUsize>);
 
@@ -51,7 +68,7 @@ async fn an_observer_panic_cannot_break_ordinary_successes() {
 
     let mut responses = Vec::new();
     for _ in 0..2 {
-        let (status, body) = exchange(&service, plain(Method::POST, "/")).await;
+        let (status, body) = exchange_contained(&service, plain(Method::POST, "/")).await;
         responses.push((status, body.contains("pong")));
     }
     assert_eq!((responses, calls.load(Ordering::SeqCst)), (vec![(StatusCode::OK, true); 2], 2));
@@ -69,7 +86,7 @@ async fn an_observer_panic_cannot_break_an_ordinary_refusal() {
         .build()
         .expect("a complete assembly");
 
-    let (status, body) = exchange(&service, plain(Method::POST, "/")).await;
+    let (status, body) = exchange_contained(&service, plain(Method::POST, "/")).await;
     assert_eq!(
         (status, body.contains("<Code>SlowDown</Code>"), calls.load(Ordering::SeqCst)),
         (StatusCode::SERVICE_UNAVAILABLE, true, 1),
@@ -86,7 +103,7 @@ async fn an_observer_panic_cannot_break_a_committed_success() {
         .build()
         .expect("a complete assembly");
 
-    let (status, body) = exchange(&service, support::copy_commit_request()).await;
+    let (status, body) = exchange_contained(&service, support::copy_commit_request()).await;
     assert_eq!(
         (status, body.contains("<CopyObjectResult"), calls.load(Ordering::SeqCst)),
         (StatusCode::OK, true, 1),
@@ -103,7 +120,7 @@ async fn an_observer_panic_cannot_replace_a_committed_refusal() {
         .build()
         .expect("a complete assembly");
 
-    let (status, body) = exchange(&service, support::copy_commit_request()).await;
+    let (status, body) = exchange_contained(&service, support::copy_commit_request()).await;
     assert_eq!(
         (status, body.contains("<Code>NoSuchKey</Code>"), calls.load(Ordering::SeqCst)),
         (StatusCode::OK, true, 1),
@@ -152,7 +169,7 @@ async fn an_observer_payload_drop_panic_cannot_break_an_ordinary_response() {
         })
         .build()
         .expect("a complete assembly");
-    let (status, body) = exchange(&service, plain(Method::POST, "/")).await;
+    let (status, body) = exchange_contained(&service, plain(Method::POST, "/")).await;
     assert_eq!((status, body.contains("pong"), drops.load(Ordering::SeqCst)), (StatusCode::OK, true, 1));
 }
 
@@ -167,7 +184,7 @@ async fn an_observer_payload_drop_panic_cannot_replace_a_committed_refusal() {
         })
         .build()
         .expect("a complete assembly");
-    let (status, body) = exchange(&service, support::copy_commit_request()).await;
+    let (status, body) = exchange_contained(&service, support::copy_commit_request()).await;
     assert_eq!(
         (status, body.contains("<Code>NoSuchKey</Code>"), drops.load(Ordering::SeqCst)),
         (StatusCode::OK, true, 1),
@@ -188,6 +205,6 @@ async fn an_observer_panic_payload_is_released() {
         })
         .build()
         .expect("a complete assembly");
-    let (status, body) = exchange(&service, plain(Method::POST, "/")).await;
+    let (status, body) = exchange_contained(&service, plain(Method::POST, "/")).await;
     assert_eq!((status, body.contains("pong"), drops.load(Ordering::SeqCst)), (StatusCode::OK, true, 1));
 }

@@ -146,9 +146,7 @@ pub trait AuthzAuditSink: Send + Sync + 'static {
 }
 
 pub(crate) fn emit_safely(sink: &dyn AuthzAuditSink, event: &AuthzAuditEvent<'_>) {
-    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink.on_decision(event))).is_err() {
-        eprintln!("ERROR: authorization audit sink panicked; the response was not changed");
-    }
+    crate::panic_boundary::contain_report("authorization audit sink", || sink.on_decision(event));
 }
 
 pub(crate) fn emit_input_safely(

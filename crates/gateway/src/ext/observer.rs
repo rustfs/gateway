@@ -87,20 +87,17 @@ pub trait Observer: Send + Sync + 'static {
     /// An observer that only saw successful requests would be an audit trail with the interesting
     /// half missing.
     ///
-    /// The service isolates callback panics: an event may be lost, but the ordinary response or
-    /// committed terminal document is still delivered unchanged. Ordinary panic payloads are
-    /// released. If a payload destructor itself panics, its secondary panic payload is deliberately
-    /// leaked to keep cleanup bounded and prevent another destructor panic escaping this boundary.
+    /// **Must not panic.** The framework isolates a panic the way it isolates one in an
+    /// [`crate::AuthzAuditSink`]: the event is lost and one fixed error line is written, but the
+    /// response — including the terminal document of a committed response, which is sent after
+    /// this call — goes out unchanged. The panic payload is released; if its destructor panics in
+    /// turn, that second payload is leaked rather than risk a third.
     fn on_response(&self, event: &RequestEvent<'_>);
 }
 
+/// Reports `event` to `observer` behind the same boundary the authorization audit sink uses.
 pub(crate) fn observe_safely(observer: &dyn Observer, event: &RequestEvent<'_>) {
-    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer.on_response(event)))
-        && let Err(secondary) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(payload)))
-    {
-        // A second payload may have another panicking destructor; do not recurse on request work.
-        std::mem::forget(secondary);
-    }
+    crate::panic_boundary::contain_report("request observer", || observer.on_response(event));
 }
 
 impl<T: Observer + ?Sized> Observer for std::sync::Arc<T> {

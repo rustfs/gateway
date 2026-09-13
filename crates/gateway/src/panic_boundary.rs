@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The panic boundary around deployment-provided asynchronous work.
+//! The panic boundary around deployment-provided work.
 //!
-//! Responsible for: catching both future construction and polling panics.
+//! Responsible for: catching both future construction and polling panics, and panics in the
+//! synchronous report callbacks that run after an answer is settled — the authorization audit sink
+//! and the request observer — so that neither can change what the caller receives.
 //! NOT responsible for: deciding which failures permit or refuse a request.
-//! Upstream: a boxed deployment future. Downstream: `crate::service` failure settlement.
+//! Upstream: a boxed deployment future, or a report callback. Downstream: `crate::service` failure
+//! settlement, `crate::ext::authz_audit`, `crate::ext::observer`.
 
 use std::future::poll_fn;
 use std::panic::AssertUnwindSafe;
@@ -39,4 +42,20 @@ where
         },
     )
     .await
+}
+
+/// Runs one report callback so that a panic in it cannot reach the answer it reports on.
+///
+/// A panic is reported as one fixed line naming `component`, and nothing from the payload, which
+/// is deployment text. The payload is then released under a second boundary: a payload whose
+/// destructor panics would otherwise unwind out of here after all. That second payload is leaked
+/// rather than dropped, because its destructor may panic too and nothing bounds how often.
+pub(crate) fn contain_report(component: &str, report: impl FnOnce()) {
+    let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(report)) else {
+        return;
+    };
+    eprintln!("ERROR: {component} panicked; the response was not changed");
+    if let Err(secondary) = std::panic::catch_unwind(AssertUnwindSafe(move || drop(payload))) {
+        std::mem::forget(secondary);
+    }
 }
