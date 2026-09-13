@@ -19,6 +19,9 @@ rustfs-gateway-sig = { path = "../crates/sig" }
 rustfs-gateway-stream = { path = "../crates/stream" }
 rustfs-gateway-types = { path = "../crates/types" }
 rustfs-gateway-xml = { path = "../crates/xml" }
+# The `policy_json` property's reference reader: the JSON reader RustFS loads a stored policy with.
+serde = "1"
+serde_json = "1"
 
 [workspace]
 members = ["."]
@@ -117,6 +120,13 @@ bench = false
 [[bin]]
 name = "header_accept"
 path = "fuzz_targets/header_accept.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "policy_json"
+path = "fuzz_targets/policy_json.rs"
 test = false
 doc = false
 bench = false
