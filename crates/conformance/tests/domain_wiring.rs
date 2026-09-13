@@ -135,11 +135,18 @@ const GATES: &[(&str, Wiring)] = &[
     ),
     // `c-object-0030` writes a raw request head, `c-object-0054` half-closes a declared-length
     // body, `c-object-0055` closes it outright, and `c-object-0056` stalls between body frames.
+    // `c-object-0060` writes a raw chunked head with no length (rustfs/gateway#774).
     // Only a transport that puts bytes on a socket can express them; the in-process target is
     // handed a parsed `http::Request`. `tests/object.rs` reads the skips from the other side.
     (
         "object",
-        Wiring::Runs(&["c-object-0030", "c-object-0054", "c-object-0055", "c-object-0056"]),
+        Wiring::Runs(&[
+            "c-object-0030",
+            "c-object-0054",
+            "c-object-0055",
+            "c-object-0056",
+            "c-object-0060",
+        ]),
     ),
     ("range", Wiring::Runs(&[])),
     ("replication", Wiring::Runs(&[])),
