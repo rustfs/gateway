@@ -64,6 +64,8 @@ pub struct MetaView<'a> {
     bucket: Option<BucketName>,
     key: Option<ObjectKey>,
     names: NamePolicy,
+    /// The object length `content-length` answers with, for an `aws-chunked` body.
+    framed_content_length: Option<u64>,
 }
 
 impl<'a> MetaView<'a> {
@@ -141,7 +143,29 @@ impl<'a> MetaView<'a> {
             bucket,
             key,
             names: names.clone(),
+            framed_content_length: None,
         })
+    }
+
+    /// This view, with `content-length` answered by an `aws-chunked` body's object length.
+    ///
+    /// For a framed body the object's size is `x-amz-decoded-content-length`, not the wire
+    /// `Content-Length`, which counts the chunk framing too — and which a body the transport ends
+    /// (`Transfer-Encoding: chunked`, HTTP/2) does not carry at all. The assembly calls this once,
+    /// with the decoded length its ingest layer validated against the signature's payload mode, so
+    /// that a codec binding `Content-Length` reads the number the decoder holds the body to
+    /// (rustfs/gateway#750). Every other header reads exactly as before.
+    #[must_use]
+    pub fn with_framed_content_length(&self, length: u64) -> Self {
+        Self {
+            method: self.method,
+            headers: self.headers,
+            query: self.query,
+            bucket: self.bucket.clone(),
+            key: self.key.clone(),
+            names: self.names.clone(),
+            framed_content_length: Some(length),
+        }
     }
 
     /// The naming policy this view was built under.
@@ -191,6 +215,11 @@ impl<'a> MetaView<'a> {
     #[must_use]
     pub fn header(&self, name: &str) -> Option<Cow<'a, str>> {
         let name = http::HeaderName::from_bytes(name.as_bytes()).ok()?;
+        if let Some(length) = self.framed_content_length
+            && name == http::header::CONTENT_LENGTH
+        {
+            return Some(Cow::Owned(length.to_string()));
+        }
         if !self.headers.is_multi(&name) {
             return self.headers.get_str(&name).map(Cow::Borrowed);
         }

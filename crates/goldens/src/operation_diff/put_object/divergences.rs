@@ -49,6 +49,14 @@ fn replica(request: &RawRequest, probe: &Arc<BodyProbe>) -> Result<Result<oracle
 /// the request to its handler. This is a behavioral difference a migration must decide, not a
 /// conversion gap: no gateway input exists for the conversion to run on.
 ///
+/// `Transfer-Encoding: chunked` does not change that for a plain body: the transport ending the
+/// body is not a length, and the operation needs one. Only an `aws-chunked` body states the
+/// object's length another way — `x-amz-decoded-content-length`, mandatory in every streaming mode
+/// — and rustfs/gateway#750 gives the codec that number for it, whatever framed the wire
+/// (`c-chunked-0002`, `crates/gateway/tests/streaming_without_length.rs`). This decode harness runs
+/// no payload mode, so what it holds is the half that must not move: no framed length, no
+/// `ContentLength`.
+///
 /// Ruling: `rd-put-0003`
 #[test]
 fn a_put_without_content_length_is_refused_by_the_gateway_and_backfilled_by_s3s() {
@@ -61,6 +69,20 @@ fn a_put_without_content_length_is_refused_by_the_gateway_and_backfilled_by_s3s(
             conversion: Ok(()),
             oracle: Ok(()),
         }
+    );
+
+    let chunked = request.with("transfer-encoding", "chunked");
+    let probe = Arc::new(BodyProbe::default());
+    assert_eq!(
+        gateway_decode(&chunked, &probe).err().as_deref(),
+        Some("MissingContentLength"),
+        "a plain body the transport ends still states no length"
+    );
+    let unframed = chunked.with("x-amz-decoded-content-length", "5");
+    assert_eq!(
+        gateway_decode(&unframed, &probe).err().as_deref(),
+        Some("MissingContentLength"),
+        "a decoded length with no streaming payload mode is not a length either"
     );
 }
 

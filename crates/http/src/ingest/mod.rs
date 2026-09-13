@@ -157,7 +157,8 @@ impl ChunkFraming {
     }
 }
 
-/// A decoded body length that has been cross-checked against the wire length.
+/// A decoded body length that has been cross-checked against the wire length, or that stands as
+/// the body's only ceiling because the transport, not a declared length, ends the wire body.
 ///
 /// The type exists so that the consumers of an upload — quota, policy, storage, audit — cannot
 /// accidentally read the *header*. The header is a number the peer chose; the pipeline's own
@@ -195,6 +196,16 @@ const MIN_UNSIGNED_CHUNK_OVERHEAD: u64 = 1 + 2 + 2;
 /// * The decoded length plus the minimum possible framing must fit inside `Content-Length`. A
 ///   body that declares more decoded bytes than the wire can carry is refused before it starts.
 ///
+/// The last rule (C-7) needs a wire length, and a body the transport ends has none:
+/// `Transfer-Encoding: chunked` around `aws-chunked`, which botocore sends for every trailer
+/// upload over TLS, or HTTP/2 without `Content-Length` ([`Framing::is_transport_delimited`]). AWS
+/// lets a streaming upload omit `Content-Length` for exactly that reason and makes the decoded
+/// length mandatory in every mode. So for that shape the decoded length is the ceiling itself,
+/// and nothing is lost by it: the decoder refuses the first byte past it and a terminal chunk
+/// short of it, derives its chunk-count and overhead ceilings from it, and the assembly still
+/// counts every wire byte against its body ceilings as the frames arrive. A present
+/// `Content-Length` is always held to rule C-7, on HTTP/2 as on HTTP/1.1.
+///
 /// # Errors
 ///
 /// [`ChunkReject::ModeConfusion`], with the specific rule in [`ModeConfusion`].
@@ -226,9 +237,12 @@ pub fn validate_decoded_length(
             .ok_or(ChunkReject::ModeConfusion(ModeConfusion::DecodedLengthMalformed))?;
     }
 
-    let Some(wire_length) = wire.declared_length() else {
-        return Err(ChunkReject::ModeConfusion(ModeConfusion::WireLengthMissing));
-    };
+    if wire.is_transport_delimited() {
+        return Ok(Some(DecodedLength(decoded)));
+    }
+    // Only a transport-delimited body lacks a wire length, and it has returned above; a zero
+    // here would fail closed rather than skip the check.
+    let wire_length = wire.declared_length().unwrap_or(0);
 
     let per_chunk = if framing.has_chunk_signatures() {
         MIN_SIGNED_CHUNK_OVERHEAD

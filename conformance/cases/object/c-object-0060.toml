@@ -1,0 +1,50 @@
+# c-object-0060 — a plain object write framed only by Transfer-Encoding: chunked.
+#
+# Schema dimensions exercised: raw request head, chunked transfer coding, dedicated status.
+
+[case]
+id = "c-object-0060"
+schema_version = 1
+title = "A plain object write under Transfer-Encoding chunked with no Content-Length is still a 411"
+rationale = """
+The streaming upload of c-chunked-0002 is accepted without Content-Length because aws-chunked \
+states the object size another way. A plain body has no such second statement: the chunked \
+transfer coding says where the message ends, not how long the object is, and the operation needs \
+that length. So the relaxation must not leak to it; the answer stays the dedicated length status \
+with the MissingContentLength code c-object-0030 asserts for a write with no framing at all."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["wire-bytes", "chunked", "error-shape"]
+quirks = ["q-length-0007"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "A write without a declared length is answered with the dedicated MissingContentLength code."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/blob/87686db11dcf8c4cdff2a2c16cd1246693afe070/crates/s3s/src/ops/signature.rs#L864-L870"
+summary = "s3s refuses an unsigned non-streaming payload that has neither Content-Length nor an exact body size."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[request]
+raw_head_utf8 = "PUT /conf-object/chunked-no-length HTTP/1.1\r\nhost: s3.localhost\r\nx-amz-content-sha256: UNSIGNED-PAYLOAD\r\ntransfer-encoding: chunked\r\n\r\n"
+sign = { mode = "sigv4_unsigned_payload", service = "s3", region = "us-east-1", credential = "valid" }
+
+[[request.chunks]]
+utf8 = "5\r\nhello\r\n0\r\n\r\n"
+
+[expect]
+kind = "response"
+status = 411
+headers_absent = ["etag"]
+
+[expect.error]
+code = "MissingContentLength"
+request_id_present = true

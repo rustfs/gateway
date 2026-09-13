@@ -996,6 +996,8 @@ impl S3Service {
             })
         };
 
+        let framed_meta = crate::chunked::framed_meta(&meta, framing_mode.as_ref(), &headers, wire.framing());
+        let dispatch_meta = framed_meta.as_ref().unwrap_or(&meta);
         let body_service = self;
         let body_meta = &meta;
         let body_headers = &headers;
@@ -1170,7 +1172,7 @@ impl S3Service {
             Ok((decisions, config, sse, context))
         };
         let execution = match std::panic::catch_unwind(AssertUnwindSafe(|| {
-            mode.dispatch(op, operation, &meta, authorize_route, read_body, authorize_input)
+            mode.dispatch(op, operation, dispatch_meta, authorize_route, read_body, authorize_input)
         })) {
             Ok(execution) => execution,
             Err(_) => {

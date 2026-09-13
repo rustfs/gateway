@@ -1,0 +1,71 @@
+# c-chunked-0003 — aws-chunked upload under Transfer-Encoding: chunked that sends more than it declared.
+#
+# Schema dimensions exercised: framed upload without a wire length, error shape, connection verdict.
+
+[case]
+id = "c-chunked-0003"
+schema_version = 1
+title = "Without a Content-Length the decoded length is the ceiling, and a body past it is refused"
+rationale = """
+Accepting a streaming upload with no Content-Length (c-chunked-0002) leaves the declared decoded \
+length as the only number the body is held to. That is safe only if it is held exactly: a server \
+that treated it as advisory would store whatever the chunks carried, and one that checked it only \
+at the end would already have spent the bytes. Eleven decoded bytes against a declaration of ten \
+must be refused as an incomplete body, nothing may be stored, and the connection ends because the \
+refusal was for bytes the peer was still sending."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["streaming", "chunked", "wire-bytes", "error-shape", "connection"]
+timeout_ms = 10000
+quirks = []
+applies_to = { http_versions = ["http/1.1"], tls = "any" }
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-streaming.html"
+summary = "The decoded length header is mandatory in every streaming mode and states the object size in bytes."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/blob/87686db11dcf8c4cdff2a2c16cd1246693afe070/crates/s3s/src/stream/aws_chunked_stream.rs#L688-L698"
+summary = "s3s fails the stream when the decoded byte count passes or falls short of the declared length."
+kind = "other"
+
+[[setup.buckets]]
+name = "conf-chunked"
+
+[[setup.objects]]
+bucket = "conf-chunked"
+key = "chunked-overflow"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-chunked/chunked-overflow"
+
+[request.headers]
+"content-encoding" = "aws-chunked"
+"transfer-encoding" = "chunked"
+"x-amz-decoded-content-length" = "10"
+
+[request.sign]
+mode = "sigv4_streaming"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+payload_hash = "streaming"
+
+[[request.chunks]]
+utf8 = "hello"
+
+[[request.chunks]]
+utf8 = " world"
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "closed"
+headers_absent = ["etag"]
+
+[expect.error]
+code = "IncompleteBody"
+request_id_present = true

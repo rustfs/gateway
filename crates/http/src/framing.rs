@@ -69,6 +69,8 @@ pub enum BodyLength {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Framing {
     length: BodyLength,
+    /// Whether the transport, rather than a length in the head, ends the body.
+    delimited_by_transport: bool,
 }
 
 impl Framing {
@@ -100,6 +102,22 @@ impl Framing {
     #[must_use]
     pub fn is_transfer_chunked(&self) -> bool {
         matches!(self.length, BodyLength::Chunked)
+    }
+
+    /// Whether the transport, rather than a length the head states, ends the body.
+    ///
+    /// True for `Transfer-Encoding: chunked`, whose terminal chunk ends it, and for an HTTP/2 or
+    /// later request without `Content-Length`, whose stream's `END_STREAM` ends it (RFC 9113
+    /// §8.1). Neither has a wire length the head can state, so a length layered *inside* the body
+    /// — `x-amz-decoded-content-length` — has nothing to be checked against and has to stand as
+    /// the ceiling itself (rustfs/gateway#750).
+    ///
+    /// [`Framing::declared_length`] still answers `Some(0)` for the HTTP/2 case, because the
+    /// head-level ceilings read it as "nothing declared beyond the head"; this predicate is for
+    /// the one question where the difference matters.
+    #[must_use]
+    pub fn is_transport_delimited(&self) -> bool {
+        self.delimited_by_transport
     }
 
     /// Whether a body is expected at all.
@@ -148,7 +166,7 @@ fn classify(version: Version, headers: &HeaderMap, limits: &Limits) -> Result<Fr
     if let Some(value) = first_te {
         // W-3. HTTP/2 and HTTP/3 have their own framing; a transfer coding riding along with it
         // is a message meant for an HTTP/1.1 parser somewhere behind us.
-        if version != Version::HTTP_10 && version != Version::HTTP_11 && version != Version::HTTP_09 {
+        if is_http2_or_later(version) {
             return Err(WireReject::TransferEncodingOnHttp2);
         }
         if repeated_te {
@@ -163,6 +181,7 @@ fn classify(version: Version, headers: &HeaderMap, limits: &Limits) -> Result<Fr
         }
         return Ok(Framing {
             length: BodyLength::Chunked,
+            delimited_by_transport: true,
         });
     }
 
@@ -177,12 +196,22 @@ fn classify(version: Version, headers: &HeaderMap, limits: &Limits) -> Result<Fr
         }
         return Ok(Framing {
             length: BodyLength::Exact(length),
+            delimited_by_transport: false,
         });
     }
 
+    // RFC 9112 §6.3 gives an HTTP/1.x request with neither header a zero-length body. HTTP/2 has
+    // no such rule: `Content-Length` is optional there and `END_STREAM` ends the body.
     Ok(Framing {
         length: BodyLength::Empty,
+        delimited_by_transport: is_http2_or_later(version),
     })
+}
+
+/// Whether `version` frames messages itself, which is what makes a transfer coding forbidden
+/// (W-3) and a missing `Content-Length` a body the stream ends rather than an empty one.
+fn is_http2_or_later(version: Version) -> bool {
+    version != Version::HTTP_10 && version != Version::HTTP_11 && version != Version::HTTP_09
 }
 
 /// Parses a `Content-Length` value under W-5.
