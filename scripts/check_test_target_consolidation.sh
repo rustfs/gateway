@@ -639,6 +639,7 @@ if (
     fail("crates/gateway integration target must use the active harness without required features")
 
 gateway_modules = (
+    "anonymous_delegation_runtime",
     "assembly",
     "assembly_order",
     "assembly_snapshot",
@@ -694,6 +695,7 @@ gateway_modules = (
     "streaming_request",
     "tagging_reachability",
     "throughput_request",
+    "verified_scope_runtime",
     "vhost_resolution",
 )
 gateway_tests = gateway_root / "tests"
