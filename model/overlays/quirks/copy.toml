@@ -122,6 +122,33 @@ cases   = ["c-copy-0017", "c-copy-0018", "c-copy-0031", "c-copy-0032", "c-copy-0
   ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1"
   summary = "Defines the precondition fields and their evaluation against one selected representation, which is what makes two representations two independent evaluations."
 
+# The copy-source twin of q-cond-0050, kept as its own row so its mutation is killed by copy cases
+# and not by a read case that happens to share the reading.
+[[quirk]]
+id      = "q-copy-source-date-0159"
+kind    = "header_tolerance"
+classification = "mutable"
+codec_value = "date_condition"
+mutation_dimension = "header_tolerance"
+target  = "CopyObject.CopySourceIfUnmodifiedSince"
+summary = "A copy-source date condition whose value is not a valid HTTP-date is ignored and the copy proceeds, on both copy-source date members of CopyObject and UploadPartCopy, while a readable one is still evaluated against the source object."
+cases   = ["c-copy-0039", "c-copy-0040", "c-copy-0041", "c-copy-0042", "c-copy-0043"]
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.3"
+  summary = "A recipient ignores a modification-date condition it cannot parse, and the copy-source form is that condition applied to the source representation."
+
+  [[quirk.evidence]]
+  kind    = "rfc"
+  ref     = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.4"
+  summary = "The same instruction to ignore an unreadable date is stated for the unmodified-since condition, which is the header minio-js 8 sends as the string Invalid Date."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+  summary = "The reference types both copy-source date conditions as timestamps and names no error for a value that is not one; no AWS answer for an unreadable value has been measured."
+
 [[quirk]]
 id      = "q-copy-error-after-200-0082"
 kind    = "error_after_200"

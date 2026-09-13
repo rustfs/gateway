@@ -10,7 +10,7 @@ cases = "c-cond-0024,c-cond-0025,c-mpu-0001,c-mpu-0002,c-mpu-0003,c-mpu-0005,c-m
 
 [[operation]]
 name = "CopyObject"
-cases = "c-authz-0004,c-authz-0005,c-authz-0006,c-authz-1002,c-authz-1011,c-authz-1012,c-authz-1013,c-authz-1014,c-cond-0004,c-cond-0026,c-cond-0027,c-copy-0001,c-copy-0002,c-copy-0003,c-copy-0004,c-copy-0005,c-copy-0006,c-copy-0007,c-copy-0008,c-copy-0009,c-copy-0010,c-copy-0012,c-copy-0016,c-copy-0017,c-copy-0018,c-copy-0019,c-copy-0021,c-copy-0023,c-copy-0024,c-copy-0025,c-copy-0026,c-copy-0027,c-copy-0028,c-copy-0029,c-copy-0030,c-copy-0031,c-copy-0032,c-copy-0033,c-copy-0034,c-copy-0035,c-copy-0038,c-ssec-0004"
+cases = "c-authz-0004,c-authz-0005,c-authz-0006,c-authz-1002,c-authz-1011,c-authz-1012,c-authz-1013,c-authz-1014,c-cond-0004,c-cond-0026,c-cond-0027,c-copy-0001,c-copy-0002,c-copy-0003,c-copy-0004,c-copy-0005,c-copy-0006,c-copy-0007,c-copy-0008,c-copy-0009,c-copy-0010,c-copy-0012,c-copy-0016,c-copy-0017,c-copy-0018,c-copy-0019,c-copy-0021,c-copy-0023,c-copy-0024,c-copy-0025,c-copy-0026,c-copy-0027,c-copy-0028,c-copy-0029,c-copy-0030,c-copy-0031,c-copy-0032,c-copy-0033,c-copy-0034,c-copy-0035,c-copy-0038,c-copy-0039,c-copy-0040,c-copy-0042,c-ssec-0004"
 
 [[operation]]
 name = "CreateBucket"
@@ -366,5 +366,5 @@ cases = "c-mpu-0018,c-mpu-0024,c-mpu-0025,c-mpu-0027,c-mpu-0028,c-mpu-0029,c-mpu
 
 [[operation]]
 name = "UploadPartCopy"
-cases = "c-authz-0001,c-authz-1001,c-copy-0011,c-copy-0013,c-copy-0014,c-copy-0015,c-copy-0020,c-copy-0036,c-copy-0037,c-mpu-0052,c-range-0006"
+cases = "c-authz-0001,c-authz-1001,c-copy-0011,c-copy-0013,c-copy-0014,c-copy-0015,c-copy-0020,c-copy-0036,c-copy-0037,c-copy-0041,c-copy-0043,c-mpu-0052,c-range-0006"
 

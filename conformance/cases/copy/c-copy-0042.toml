@@ -1,0 +1,85 @@
+# c-copy-0042 — a readable copy-source unmodified-since is still evaluated
+#
+# Schema dimensions exercised: clock injection so the source's modification date is known, destination read back
+
+[case]
+id = "c-copy-0042"
+schema_version = 1
+title = "A copy whose copy-source unmodified-since predates the source is refused with 412 and writes nothing"
+rationale = """
+Tolerance for an unreadable date is only correct if a readable one still guards the copy. Without this case the rule could be implemented by dropping every copy-source date, every ignored-date case would pass, and a client's compare-and-swap copy would silently overwrite its destination with a source that changed underneath it."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["conditional", "preconditions", "timing"]
+timeout_ms = 10000
+quirks = ["q-copy-source-date-0159"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.4"
+summary = "The unmodified-since condition fails when the selected representation was modified after the supplied date."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "Documents that the copy is carried out only if the source has not been modified since the supplied time."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "dst/existing"
+content_type = "text/plain"
+body = { utf8 = "keep me" }
+
+[[exchanges]]
+name = "the-readable-condition-fails"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/existing"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-copy-source-if-unmodified-since" = "Thu, 01 Jan 2026 00:00:00 GMT" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 412
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>PreconditionFailed</Code>"]
+
+[[exchanges]]
+name = "the-destination-was-not-written"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-copy/dst/existing"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "keep me"

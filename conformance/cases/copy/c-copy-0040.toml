@@ -1,0 +1,53 @@
+# c-copy-0040 — an unreadable copy-source modified-since is ignored, not refused
+#
+# Schema dimensions exercised: the second copy-source date member, which carries its own quirk reference
+
+[case]
+id = "c-copy-0040"
+schema_version = 1
+title = "A copy whose copy-source modified-since is not an HTTP-date ignores it and copies"
+rationale = """
+The two copy-source date conditions are separate members with separate quirk references, so a tolerance attached to one of them compiles and satisfies every unmodified-since assertion. This case pins the other member: an unreadable modified-since is dropped and the copy is carried out, exactly as the same header is on a read."""
+polarity = "negative"
+operation = "CopyObject"
+tags = ["conditional", "preconditions", "timing"]
+timeout_ms = 10000
+quirks = ["q-copy-source-date-0159"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.3"
+summary = "A recipient ignores a modified-since condition whose value is not a valid HTTP-date."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "Documents the copy-source modified-since condition as a timestamp and defines no error for a value that is not one."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0040"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-copy-source-if-modified-since" = "not-a-date" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+redact = ["LastModified"]
+contains_utf8 = ["<CopyObjectResult", "<ETag>&quot;5eb63bbbe01eeed093cb22bb8f5acdc3&quot;</ETag>"]
+not_contains_utf8 = ["<Error>"]

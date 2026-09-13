@@ -21,7 +21,7 @@
 //! `tests/tolerant_conditions.rs`.
 //! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 //!
-//! 3 positive / 6 negative. The negatives are the ones that matter: a tolerance that fails to
+//! 3 positive / 7 negative. The negatives are the ones that matter: a tolerance that fails to
 //! resolve leaves the member strict, which looks exactly like a decoder doing its job and is a
 //! refusal the RFC forbids.
 
@@ -189,5 +189,38 @@ fn the_object_family_reads_dates_tolerantly_and_leaves_etags_to_the_operation_pa
             !text.contains("value::etag_form(raw, \"IfMatch\")?"),
             "{path}: the codec must not duplicate the operation-owned entity-tag parser"
         );
+    }
+}
+
+/// Negative — the copy family reads its two copy-source date conditions as tolerantly as a read
+/// reads its own.
+///
+/// They are the same RFC 9110 conditions evaluated against the source object. Before this rule the
+/// four members decoded with `value::timestamp(..)?`, and minio-js's `Invalid Date` was a `400`
+/// before the handler ran. Asserted over the emitted text for the same reason as the test above.
+#[test]
+fn the_copy_family_reads_copy_source_dates_tolerantly() {
+    let artifacts = super::codegen_tests::artifacts();
+    for operation in ["copy_object", "upload_part_copy"] {
+        let path = format!("codec/ops/{operation}.rs");
+        let text = artifacts
+            .files
+            .iter()
+            .find(|(name, _)| name.to_string_lossy().ends_with(&path))
+            .map(|(_, body)| body.clone())
+            .unwrap_or_else(|| panic!("{path} is generated"));
+        for header in ["x-amz-copy-source-if-modified-since", "x-amz-copy-source-if-unmodified-since"] {
+            let line = text
+                .lines()
+                .find(|line| line.contains(&format!("request.header(\"{header}\")")))
+                .unwrap_or_else(|| panic!("{path} binds {header}"));
+            let assignment = text
+                .lines()
+                .skip_while(|candidate| *candidate != line)
+                .nth(2)
+                .unwrap_or_else(|| panic!("{path} assigns {header}"));
+            assert!(assignment.contains("date_condition"), "{path} {header}: {assignment}");
+            assert!(!assignment.contains('?'), "{path} {header} still refuses: {assignment}");
+        }
     }
 }

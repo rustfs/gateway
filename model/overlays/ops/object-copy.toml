@@ -207,12 +207,12 @@ quirks = ["q-etag-form-0074", "q-copy-conditions-0081"]
 [[op.CopyObject.field]]
 side = "input"
 name = "CopySourceIfModifiedSince"
-quirks = ["q-timestamp-0005", "q-copy-conditions-0081"]
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081", "q-copy-source-date-0159"]
 
 [[op.CopyObject.field]]
 side = "input"
 name = "CopySourceIfUnmodifiedSince"
-quirks = ["q-timestamp-0005", "q-copy-conditions-0081"]
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081", "q-copy-source-date-0159"]
 
 [[op.CopyObject.field]]
 side = "output"
@@ -339,12 +339,12 @@ quirks = ["q-etag-form-0074", "q-copy-conditions-0081"]
 [[op.UploadPartCopy.field]]
 side = "input"
 name = "CopySourceIfModifiedSince"
-quirks = ["q-timestamp-0005", "q-copy-conditions-0081"]
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081", "q-copy-source-date-0159"]
 
 [[op.UploadPartCopy.field]]
 side = "input"
 name = "CopySourceIfUnmodifiedSince"
-quirks = ["q-timestamp-0005", "q-copy-conditions-0081"]
+quirks = ["q-timestamp-0005", "q-copy-conditions-0081", "q-copy-source-date-0159"]
 
 [[op.UploadPartCopy.field]]
 side = "input"

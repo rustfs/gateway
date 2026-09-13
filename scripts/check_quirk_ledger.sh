@@ -43,13 +43,13 @@ ops_dir = root / "model/overlays/ops"
 case_dir = root / "conformance/cases"
 
 EXPECTED = {
-    "records": 351,
-    "mutable": 102,
+    "records": 352,
+    "mutable": 103,
     "typed_contracts": 160,
     "untyped_contracts": 89,
-    "typed_sources": 262,
+    "typed_sources": 263,
     "dimensions": 179,
-    "wired": 260,
+    "wired": 261,
     "emitted_constants": 171,
 }
 CAPABILITY_BLOCKS = {"q-cors-0006", "q-cors-0047"}

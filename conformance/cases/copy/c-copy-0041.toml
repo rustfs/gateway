@@ -1,0 +1,58 @@
+# c-copy-0041 — a part copy is no stricter about an unreadable copy-source date than a copy
+#
+# Schema dimensions exercised: a captured upload id, the part-copy response root
+
+[case]
+id = "c-copy-0041"
+schema_version = 1
+title = "A part copy whose copy-source unmodified-since is not an HTTP-date ignores it and copies"
+rationale = """
+UploadPartCopy shares the four copy-source conditions with CopyObject, and a rule fixed on one of the two is the defect the copy family exists to prevent. A multipart copy tool that sends the same malformed date on every part would otherwise see the whole-object copy succeed and every part copy refused."""
+polarity = "negative"
+operation = "UploadPartCopy"
+tags = ["conditional", "preconditions", "multipart"]
+timeout_ms = 10000
+quirks = ["q-copy-source-date-0159"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.4"
+summary = "A recipient ignores an unmodified-since condition whose value is not a valid HTTP-date."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "Documents the same four copy-source conditions for a part copy, with no error defined for an unreadable date."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-copy"
+key = "dst/0041"
+capture_upload_id_as = "upload"
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0041?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-copy-source-if-unmodified-since" = "Invalid Date" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.body]
+redact = ["LastModified"]
+contains_utf8 = ["<CopyPartResult", "<ETag>&quot;5eb63bbbe01eeed093cb22bb8f5acdc3&quot;</ETag>"]
+not_contains_utf8 = ["<Error>"]

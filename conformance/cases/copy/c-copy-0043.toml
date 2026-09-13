@@ -1,0 +1,63 @@
+# c-copy-0043 — a readable copy-source unmodified-since is still evaluated on a part copy
+#
+# Schema dimensions exercised: clock injection, a captured upload id, the part-copy half of the readable-date control
+
+[case]
+id = "c-copy-0043"
+schema_version = 1
+title = "A part copy whose copy-source unmodified-since predates the source is refused with 412"
+rationale = """
+The part-copy half of the readable-date control. A tolerance that reached UploadPartCopy by dropping every copy-source date would pass c-copy-0041 and let a multipart copy assemble parts from a source that changed after the client last saw it; a readable date that the source has moved past must still refuse the part with a precondition failure."""
+polarity = "negative"
+operation = "UploadPartCopy"
+tags = ["conditional", "preconditions", "multipart"]
+timeout_ms = 10000
+quirks = ["q-copy-source-date-0159"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-13.1.4"
+summary = "The unmodified-since condition fails when the selected representation was modified after the supplied date."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "Documents that a part is copied only if the source has not been modified since the supplied time, and a precondition failure otherwise."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[setup.objects]]
+bucket = "conf-copy"
+key = "src/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[[setup.multipart_uploads]]
+bucket = "conf-copy"
+key = "dst/0043"
+capture_upload_id_as = "upload"
+
+[request]
+method = "PUT"
+target = "/conf-copy/dst/0043?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "/conf-copy/src/plain.txt", "x-amz-copy-source-if-unmodified-since" = "Thu, 01 Jan 2026 00:00:00 GMT" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 412
+connection_after = "open"
+headers_absent = ["etag"]
+
+[expect.error]
+code = "PreconditionFailed"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>PreconditionFailed</Code>"]
+not_contains_utf8 = ["<CopyPartResult"]

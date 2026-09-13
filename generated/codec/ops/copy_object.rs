@@ -88,22 +88,20 @@ impl OperationCodec for dto::CopyObject {
             let raw = raw.as_ref();
             input.copy_source_if_match = Some(raw.to_owned());
         }
-        // CopySourceIfModifiedSince — header `x-amz-copy-source-if-modified-since`, repeated field lines joined.
+        // CopySourceIfModifiedSince — header `x-amz-copy-source-if-modified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("x-amz-copy-source-if-modified-since") {
             let raw = raw.as_ref();
-            input.copy_source_if_modified_since =
-                Some(value::timestamp(raw, TimestampFormat::HttpDate, "CopySourceIfModifiedSince")?);
+            input.copy_source_if_modified_since = value::date_condition(raw, TimestampFormat::HttpDate).honoured();
         }
         // CopySourceIfNoneMatch — header `x-amz-copy-source-if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-if-none-match") {
             let raw = raw.as_ref();
             input.copy_source_if_none_match = Some(raw.to_owned());
         }
-        // CopySourceIfUnmodifiedSince — header `x-amz-copy-source-if-unmodified-since`, repeated field lines joined.
+        // CopySourceIfUnmodifiedSince — header `x-amz-copy-source-if-unmodified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("x-amz-copy-source-if-unmodified-since") {
             let raw = raw.as_ref();
-            input.copy_source_if_unmodified_since =
-                Some(value::timestamp(raw, TimestampFormat::HttpDate, "CopySourceIfUnmodifiedSince")?);
+            input.copy_source_if_unmodified_since = value::date_condition(raw, TimestampFormat::HttpDate).honoured();
         }
         // Expires — header `expires`, repeated field lines joined.
         if let Some(raw) = request.header("expires") {
