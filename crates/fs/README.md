@@ -61,6 +61,15 @@ of these headers keeps the eight-line record form. Multipart takes them from
 `CreateMultipartUpload`, `CopyObject` copies them under `COPY` and rebuilds them from the request
 under `REPLACE`, and a browser `POST` stores the media type the form pipeline hands over.
 
+A `PutObject` also stores the tag set its `x-amz-tagging` header carries, validated as the
+`?tagging` subresource's document is and written into the new version's directory before the
+version becomes visible, and the storage class its `x-amz-storage-class` names. `CopyObject`
+records the class the request names, `STANDARD` when it names none, copies the source's tags
+under the default tagging directive and takes the request's under `REPLACE`; a self copy that only
+names a class is a change. A class a record cannot carry is refused as `InvalidStorageClass`
+before anything is written. `CreateMultipartUpload` does not yet carry its class or tags to the
+completed object.
+
 `ListBuckets` answers every bucket under the single-tenant data root in byte order, with the
 configured owner, a prefix filter, a region filter, and `max-buckets` pages resumed by a minted
 opaque cursor. `DeleteObjects` runs every authorized key through the same single-key deletion

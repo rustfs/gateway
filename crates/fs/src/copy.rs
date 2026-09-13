@@ -20,7 +20,7 @@
 //! seals the raw header and supplies the proof consumed here. Upstream: `rustfs-gateway` copy and
 //! conditional contracts plus `super::reads`. Downstream: the CRUD registry.
 
-use rustfs_gateway::dto::{CopyObject, CopyObjectInput, CopyObjectOutput, MetadataDirective};
+use rustfs_gateway::dto::{CopyObject, CopyObjectInput, CopyObjectOutput, MetadataDirective, TaggingDirective};
 use rustfs_gateway::{
     ConditionalOutcome, ETag, ErrorCode, Handler, HandlerError, HandlerResult, MetadataSource, ObjectValidators,
     PRECONDITION_FAILED_MESSAGE, Preconditions, Req, RequestKind, Resp, Timestamp, classify_self_copy,
@@ -29,12 +29,19 @@ use rustfs_gateway::{
 
 use super::reads::Representation;
 use super::records::ObjectAttributes;
+use super::tagging::{read_persisted_tags, tags_from_header};
+use super::transitions::requested_storage_class;
 use super::versioning::PublishedObject;
 use super::{FsBackend, etag};
 
 fn directive(input: &CopyObjectInput) -> Result<MetadataSource, HandlerError> {
     MetadataSource::parse(input.metadata_directive.as_ref().map(MetadataDirective::as_str))
         .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "x-amz-metadata-directive must be COPY or REPLACE"))
+}
+
+fn tagging_directive(input: &CopyObjectInput) -> Result<MetadataSource, HandlerError> {
+    MetadataSource::parse(input.tagging_directive.as_ref().map(TaggingDirective::as_str))
+        .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "x-amz-tagging-directive must be COPY or REPLACE"))
 }
 
 fn conditional_etag(value: Option<&str>) -> Result<Option<ETag>, HandlerError> {
@@ -107,24 +114,41 @@ impl Handler<CopyObject> for FsBackend {
             .ok_or_else(|| HandlerError::internal_error("the copy-source authorization proof did not match"))?;
         let input = request.into_input();
         let metadata_source = directive(&input)?;
+        let tag_source = tagging_directive(&input)?;
+        // The destination's class is the request's, never the source's: a copy that names none is
+        // recorded `STANDARD`. It is refused before any read or write when this backend cannot
+        // record it.
+        let storage_class = requested_storage_class(input.storage_class.as_ref())?;
         let source_representation = self
             .representation(source.bucket().as_str(), source.key().as_str(), source.version_id())
             .await?;
-        let self_copy = classify_self_copy(&source, &input.bucket, &input.key, metadata_source.changes_the_object());
+        // Naming a storage class is itself a change, so a self copy that only moves the object to
+        // another class is not refused as a no-op.
+        let changes_the_object = metadata_source.changes_the_object() || storage_class.is_some();
+        let self_copy = classify_self_copy(&source, &input.bucket, &input.key, changes_the_object);
         if let Some(rejection) = self_copy.rejection() {
             return Err(HandlerError::new(rejection.code().clone(), rejection.reason()));
         }
-        // The directive decides the representation headers together with the user metadata: S3
-        // copies both from the source under COPY and rebuilds both from the request under REPLACE.
-        let attributes = match metadata_source {
-            MetadataSource::FromSource => ObjectAttributes {
-                metadata: source_representation.metadata.clone(),
-                headers: source_representation.headers.clone(),
-            },
-            MetadataSource::FromRequest => ObjectAttributes {
-                metadata: input.metadata.clone(),
-                headers: request_content_headers!(input),
-            },
+        // The metadata directive decides the representation headers together with the user
+        // metadata: S3 copies both from the source under COPY and rebuilds both from the request
+        // under REPLACE. The tagging directive decides the tag set the same way, independently.
+        let (metadata, headers) = match metadata_source {
+            MetadataSource::FromSource => (source_representation.metadata.clone(), source_representation.headers.clone()),
+            MetadataSource::FromRequest => (input.metadata.clone(), request_content_headers!(input)),
+        };
+        // The source's tags are read only when the directive copies them, so a copy that replaces
+        // them does not fail on a source whose tag document is unreadable. A plain object file
+        // predates version records and has no tags.
+        let tags = match (tag_source, source_representation.directory.as_deref()) {
+            (MetadataSource::FromRequest, _) => tags_from_header(input.tagging.as_deref())?,
+            (MetadataSource::FromSource, Some(directory)) => read_persisted_tags(directory).await?,
+            (MetadataSource::FromSource, None) => Vec::new(),
+        };
+        let attributes = ObjectAttributes {
+            metadata,
+            headers,
+            storage_class,
+            tags,
         };
 
         let guard_before_write = copy_source_guards_before_target_write();

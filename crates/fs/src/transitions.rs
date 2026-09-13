@@ -19,8 +19,8 @@
 //! moving bytes between physical tiers, expiration, or noncurrent-version actions. Upstream:
 //! lifecycle selection and version authority. Downstream: filesystem GET, HEAD, and list handlers.
 
-use rustfs_gateway::HandlerError;
 use rustfs_gateway::dto::{LifecycleRule, Status, StorageClass, Transition};
+use rustfs_gateway::{ErrorCode, HandlerError};
 
 use super::lifecycle::{LifecycleRecord, rule_selects};
 use super::versioning::CurrentObjectRecord;
@@ -148,9 +148,34 @@ fn has_explicit_size_filter(rule: &LifecycleRule) -> bool {
 pub(super) fn persisted_storage_class(value: String) -> Option<StorageClass> {
     matches!(
         value.as_str(),
-        "STANDARD" | "STANDARD_IA" | "ONEZONE_IA" | "INTELLIGENT_TIERING" | "GLACIER" | "DEEP_ARCHIVE" | "GLACIER_IR"
+        "STANDARD"
+            | "REDUCED_REDUNDANCY"
+            | "STANDARD_IA"
+            | "ONEZONE_IA"
+            | "INTELLIGENT_TIERING"
+            | "GLACIER"
+            | "DEEP_ARCHIVE"
+            | "GLACIER_IR"
     )
     .then(|| StorageClass::custom(value.to_owned()))
+}
+
+/// The storage class a `PutObject` or `CopyObject` names, as this backend will record it.
+///
+/// Only the classes a record may carry are accepted, so a class this backend could store but never
+/// read back is refused before any byte is written rather than corrupting the version it names.
+///
+/// # Errors
+///
+/// [`ErrorCode::INVALID_STORAGE_CLASS`] for any other class.
+pub(super) fn requested_storage_class(requested: Option<&StorageClass>) -> Result<Option<StorageClass>, HandlerError> {
+    requested
+        .map(|class| {
+            persisted_storage_class(class.as_str().to_owned()).ok_or_else(|| {
+                HandlerError::new(ErrorCode::INVALID_STORAGE_CLASS, "The storage class you specified is not valid")
+            })
+        })
+        .transpose()
 }
 
 fn transition_storage_class(value: &str) -> Option<StorageClass> {

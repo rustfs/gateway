@@ -40,6 +40,8 @@ use sha2::{Digest as _, Sha256};
 use super::records::{
     ObjectAttributes, RecordKind, VersionRecord, decode_version_record, encode_version_record, validate_attributes,
 };
+use super::tagging::{TAGS_FILE, serialize_tags, tags_from_header};
+use super::transitions::requested_storage_class;
 use super::{FsBackend, drain, etag, no_such_key, storage_error};
 
 pub(super) const STATUS_FILE: &str = "versioning-status";
@@ -391,6 +393,11 @@ impl FsBackend {
                 }
                 _ => (String::new(), 0),
             };
+            // Written into the temporary directory, so the tags a write carried become visible in
+            // the same rename as the version itself — never a version first and its tags later.
+            if !attributes.tags.is_empty() {
+                tokio::fs::write(temporary.join(TAGS_FILE), serialize_tags(&attributes.tags)).await?;
+            }
             let record = encode_version_record(&VersionRecord {
                 path: destination.clone(),
                 sequence,
@@ -404,7 +411,7 @@ impl FsBackend {
                 modified,
                 e_tag: tag,
                 size,
-                storage_class: StorageClass::STANDARD,
+                storage_class: attributes.storage_class.clone().unwrap_or(StorageClass::STANDARD),
                 metadata: attributes.metadata.clone(),
                 headers: attributes.headers.clone(),
             });
@@ -551,11 +558,16 @@ impl Handler<GetBucketVersioning> for FsBackend {
 impl Handler<PutObject> for FsBackend {
     async fn call(&self, request: Req<PutObject>) -> HandlerResult<PutObject> {
         let input = request.into_input();
+        // The body is drained before any attribute is judged, so a refusal is reported as itself
+        // rather than as a body the handler abandoned. Every refusal still precedes publication:
+        // a malformed tag header or an unknown class fails the request with no version written.
+        let bytes = drain(input.body).await?;
         let attributes = ObjectAttributes {
             headers: request_content_headers!(input),
+            storage_class: requested_storage_class(input.storage_class.as_ref())?,
+            tags: tags_from_header(input.tagging.as_deref())?,
             metadata: input.metadata,
         };
-        let bytes = drain(input.body).await?;
         let e_tag = etag(&bytes)?;
         let published = self
             .publish_object(input.bucket.as_str(), input.key.as_str(), &bytes, &e_tag, &attributes)

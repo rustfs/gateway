@@ -393,7 +393,11 @@ impl FsBackend {
             upload_id,
             initiated,
             checksum,
-            attributes: Box::new(ObjectAttributes { metadata, headers }),
+            attributes: Box::new(ObjectAttributes {
+                metadata,
+                headers,
+                ..ObjectAttributes::default()
+            }),
         })
     }
 
