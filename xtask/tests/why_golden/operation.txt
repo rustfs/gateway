@@ -9,6 +9,7 @@ CASES     c-location-0001 — GetBucketLocation answers with LocationConstraint 
           c-location-0002 — A us-east-1 bucket answers with an empty LocationConstraint element
           c-location-0003 — A bucket placed with the legacy EU constraint answers EU verbatim
           c-location-0004 — GetBucketLocation on a bucket that does not exist is NoSuchBucket
+          c-location-0005 — GetBucketLocation signed for a region the deployment does not serve is refused by default
 ADR       ADR-0001 — Licensing and provenance boundary
 SPEC      spec/operations/GetBucketLocation.toml
 RELATED   q-empty-0002
