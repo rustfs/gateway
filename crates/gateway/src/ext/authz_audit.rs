@@ -305,6 +305,7 @@ mod tests {
             route_key: Some(&key),
             identity: None,
             target_origin: TargetOrigin::Path,
+            subject: None,
         };
         let mut event = event_with(Decision::Allow, Some(snapshot.id()), trace.request_id());
         event.stage = AuthzStage::Input;

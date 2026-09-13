@@ -60,7 +60,7 @@ pub use crate::codec::response::{
     response_framing_allowed, status_code,
 };
 pub use crate::codec::value::*;
-pub use crate::codec::view::{MetaView, RequestBody, RequestBodyMode};
+pub use crate::codec::view::{MetaView, RequestBody, RequestBodyMode, bucket_label};
 
 use crate::op::Operation;
 

@@ -40,9 +40,13 @@
 
 use std::fmt;
 
+use crate::authz::{ActionRule, SubjectRule};
 use crate::error::{DisallowedPreAuthCode, PreAuthError};
-use crate::op::{Operation, is_standard_operation_name, standard_operation_name_ignoring_case};
+use crate::op::{AuthRequirement, Operation, is_standard_operation_name, standard_operation_name_ignoring_case};
 use crate::registry::OperationSpec;
+
+/// Action namespaces an IAM policy is written in, which an own-account label may not borrow.
+const IAM_SERVICES: &[&str] = &["admin", "iam", "kms", "s3", "s3express", "sts"];
 
 /// Why an operation could not be registered.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,6 +94,13 @@ pub enum RegistryError {
         name: &'static str,
         /// The action as declared.
         action: &'static str,
+    },
+    /// The operation's action rule or subject rule cannot be authorised as declared (ADR-0025).
+    InvalidAuthRule {
+        /// The operation.
+        name: &'static str,
+        /// Why, as a constant.
+        why: &'static str,
     },
     /// A third-party operation whose name is not `vendor:Name`.
     NameNotNamespaced {
@@ -142,6 +153,7 @@ impl RegistryError {
             | Self::MissingAuthRequirement { name }
             | Self::MissingHandlerDeadlineClass { name }
             | Self::MalformedAuthAction { name, .. }
+            | Self::InvalidAuthRule { name, .. }
             | Self::NameNotNamespaced { name }
             | Self::NameCollidesWithStandard { name, .. }
             | Self::UnknownStandardOperation { name }
@@ -174,6 +186,7 @@ impl fmt::Display for RegistryError {
             Self::MalformedAuthAction { name, action } => {
                 write!(f, "{name} declares the action {action:?}, which is not spelled `service:Action`")
             }
+            Self::InvalidAuthRule { name, why } => write!(f, "{name}: {why}"),
             Self::NameNotNamespaced { name } => write!(
                 f,
                 "{name} is defined outside this crate and must be named `vendor:Name`, so that an \
@@ -218,6 +231,15 @@ pub(crate) fn check_operation<O: Operation>() -> Result<(), RegistryError> {
         if spec.receives_caller_secret() {
             return Err(RegistryError::StandardOperationReceivesCallerSecret { name });
         }
+        if spec
+            .auth
+            .is_some_and(|auth| auth.rule() != ActionRule::One || auth.subject().is_some())
+        {
+            return Err(RegistryError::InvalidAuthRule {
+                name,
+                why: "a standard operation is authorised by its one generated action, about no subject",
+            });
+        }
         if !is_standard_operation_name(name) {
             return Err(RegistryError::UnknownStandardOperation { name });
         }
@@ -249,11 +271,29 @@ pub(crate) fn check_spec(spec: &'static OperationSpec) -> Result<(), RegistryErr
     let Some(auth) = spec.auth else {
         return Err(RegistryError::MissingAuthRequirement { name });
     };
-    if !auth.is_well_formed() {
-        return Err(RegistryError::MalformedAuthAction {
-            name,
-            action: auth.action,
-        });
+    if let Some(action) = auth
+        .actions()
+        .iter()
+        .find(|action| !AuthRequirement::new(action, auth.resource).is_well_formed())
+    {
+        return Err(RegistryError::MalformedAuthAction { name, action });
+    }
+    if let Some(why) = auth.fault() {
+        return Err(RegistryError::InvalidAuthRule { name, why });
+    }
+    // An own-account operation evaluates no IAM action in RustFS. Its action is therefore a label
+    // in the operation's own vendor namespace, which no IAM policy grants or denies by accident,
+    // and never `admin:` or `s3:` spelling that a reviewer would read as a policy check (ADR-0025).
+    if auth.subject() == Some(SubjectRule::Caller) {
+        let vendor = name.split_once(':').map(|(vendor, _)| vendor);
+        let service = auth.action.split_once(':').map(|(service, _)| service);
+        if vendor != service || service.is_some_and(|service| IAM_SERVICES.contains(&service)) {
+            return Err(RegistryError::InvalidAuthRule {
+                name,
+                why: "an own-account operation's action is in the operation's own vendor namespace, never an IAM \
+                      service's",
+            });
+        }
     }
 
     for param in spec.required_params {
@@ -281,6 +321,11 @@ fn is_namespaced(name: &str) -> bool {
         None => false,
     }
 }
+
+#[cfg(test)]
+#[path = "reject_rule_tests.rs"]
+#[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+mod rule_tests;
 
 #[cfg(test)]
 mod tests {

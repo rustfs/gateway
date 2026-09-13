@@ -49,7 +49,7 @@
 
 use rustfs_gateway_sig::OperationFloor;
 
-use crate::authz::{DerivedResourceError, DerivedResourceSet};
+use crate::authz::{ActionRule, DerivedResourceError, DerivedResourceSet, SubjectRule, WhenAbsent};
 use crate::registry::OperationSpec;
 use crate::route::ROUTES;
 
@@ -111,34 +111,167 @@ pub enum ResourceShape {
 ///
 /// P4-05 owns the full authorisation shape (condition keys, two-stage resources for copy, derived
 /// resources). This is the minimum the registry needs to refuse an operation nobody can authorise.
+///
+/// ADR-0025 adds two private facts, set only through the constructors below: how several actions
+/// combine ([`ActionRule`]), and whose account the operation acts on ([`SubjectRule`]). They are
+/// private so a requirement cannot be written as a literal that skips them:
+///
+/// ```compile_fail
+/// use rustfs_gateway_core::{AuthRequirement, ResourceShape};
+/// let literal = AuthRequirement { action: "admin:A", resource: ResourceShape::Service };
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AuthRequirement {
-    /// The IAM action, in its wire spelling: `s3:GetObject`.
+    /// The IAM action, in its wire spelling: `s3:GetObject`. For an any-of or all-of rule, the
+    /// first of its actions.
     pub action: &'static str,
     /// What the action is about.
     pub resource: ResourceShape,
+    rule: ActionRule,
+    subject: Option<SubjectRule>,
 }
 
 impl AuthRequirement {
     /// An action and the resource shape it names.
     #[must_use]
     pub const fn new(action: &'static str, resource: ResourceShape) -> Self {
-        Self { action, resource }
+        Self {
+            action,
+            resource,
+            rule: ActionRule::One,
+            subject: None,
+        }
     }
 
-    /// Whether the action is spelled `service:Action` with both halves non-empty.
+    /// Allowed when at least one of `actions` is: RustFS's `evaluate_admin_actions`. Registration
+    /// refuses fewer than two actions and a repeated one.
+    #[must_use]
+    pub const fn any_of(actions: &'static [&'static str], resource: ResourceShape) -> Self {
+        Self {
+            action: first_action(actions),
+            resource,
+            rule: ActionRule::AnyOf(actions),
+            subject: None,
+        }
+    }
+
+    /// Allowed only when every one of `actions` is. Registration refuses fewer than two actions
+    /// and a repeated one.
+    #[must_use]
+    pub const fn all_of(actions: &'static [&'static str], resource: ResourceShape) -> Self {
+        Self {
+            action: first_action(actions),
+            resource,
+            rule: ActionRule::AllOf(actions),
+            subject: None,
+        }
+    }
+
+    /// This requirement, about the account `subject` names. The facade extracts the subject before
+    /// authentication and hands it to both authorizer stages and to the handler (ADR-0025).
+    #[must_use]
+    pub const fn about_subject(mut self, subject: SubjectRule) -> Self {
+        self.subject = Some(subject);
+        self
+    }
+
+    /// How the actions combine.
+    #[must_use]
+    pub const fn rule(&self) -> ActionRule {
+        self.rule
+    }
+
+    /// Whose account the operation acts on, when that is part of its authorisation.
+    #[must_use]
+    pub const fn subject(&self) -> Option<SubjectRule> {
+        self.subject
+    }
+
+    /// Every action the facade asks about, in declaration order.
+    #[must_use]
+    pub fn actions(&self) -> &[&'static str] {
+        match self.rule {
+            ActionRule::One => core::slice::from_ref(&self.action),
+            ActionRule::AllOf(actions) | ActionRule::AnyOf(actions) => actions,
+        }
+    }
+
+    /// Whether every action is spelled `service:Action` with both halves non-empty.
     ///
     /// Checked at registration rather than here: a `const fn` that could fail would either panic in
     /// a const context or return a `Result` every declaration has to unwrap, and both are worse
     /// than one check in the one place registration happens.
     #[must_use]
     pub fn is_well_formed(&self) -> bool {
-        match self.action.split_once(':') {
-            Some((service, action)) => {
-                !service.is_empty() && !action.is_empty() && !action.contains(':') && !self.action.contains(char::is_whitespace)
+        self.actions().iter().all(|action| is_well_formed_action(action))
+    }
+
+    /// Why the rule itself cannot be registered, or `None`. The spelling of each action is
+    /// [`Self::is_well_formed`]'s.
+    #[must_use]
+    pub fn fault(&self) -> Option<&'static str> {
+        if let ActionRule::AllOf(actions) | ActionRule::AnyOf(actions) = self.rule {
+            if actions.len() < 2 {
+                return Some("an any-of or all-of rule names at least two actions; one action is `AuthRequirement::new`");
             }
-            None => false,
+            if actions
+                .iter()
+                .enumerate()
+                .any(|(index, action)| actions.iter().take(index).any(|earlier| earlier == action))
+            {
+                return Some("an any-of or all-of rule names each action once");
+            }
         }
+        match self.subject {
+            Some(SubjectRule::Caller) if self.rule != ActionRule::One => {
+                Some("an own-account operation names exactly one action")
+            }
+            Some(SubjectRule::Caller) if self.resource != ResourceShape::Service => {
+                Some("an own-account operation is about the caller, not a bucket or an object")
+            }
+            Some(subject) => subject.fault(),
+            None => None,
+        }
+    }
+
+    /// The requirement as an overlay records it: the action alone for one action, and otherwise
+    /// the rule and the subject spelled out, so a reviewer reads every action that decides.
+    #[must_use]
+    pub fn render(&self) -> String {
+        let mut rendered = match self.rule {
+            ActionRule::One => self.action.to_owned(),
+            ActionRule::AllOf(actions) => format!("allOf({})", actions.join(", ")),
+            ActionRule::AnyOf(actions) => format!("anyOf({})", actions.join(", ")),
+        };
+        match self.subject {
+            Some(SubjectRule::Caller) => rendered.push_str(" about caller"),
+            Some(SubjectRule::Query { param, when_absent }) => {
+                let absent = match when_absent {
+                    WhenAbsent::Caller => "caller",
+                    WhenAbsent::Refuse => "refused",
+                };
+                rendered.push_str(&format!(" about query({param}, absent={absent})"));
+            }
+            None => {}
+        }
+        rendered
+    }
+}
+
+/// The first action, or the empty (and so refused) action for an empty set.
+const fn first_action(actions: &'static [&'static str]) -> &'static str {
+    match actions {
+        [first, ..] => first,
+        [] => "",
+    }
+}
+
+fn is_well_formed_action(action: &str) -> bool {
+    match action.split_once(':') {
+        Some((service, name)) => {
+            !service.is_empty() && !name.is_empty() && !name.contains(':') && !action.contains(char::is_whitespace)
+        }
+        None => false,
     }
 }
 

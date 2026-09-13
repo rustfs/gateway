@@ -197,6 +197,7 @@ fn dialect() -> Dialect {
         precedence,
         rows,
         shadows: &[],
+        bucket_param: None,
     };
     Dialect::assemble(&OVERLAY)
         .declare_claimed::<Vendor<0>>(claimed(10, STATUS_ROWS))

@@ -27,6 +27,8 @@
 //!   `admin:ListTier`, whose handler reads the tier from the typed path parameters.
 //! - [`ReplicationMetricsV2`], `GET /{bucket}?replication-metrics=2`: an S3-shaped read the RustFS
 //!   admin router claims by query value, under `s3:GetReplicationConfiguration` on the bucket.
+//! - One route from each custom-auth class of the inventory, and the bound bucket, on ADR-0025's
+//!   rules: `classes.rs`. The overlay record for all nine is `overlay.rs`.
 //!
 //! The first three are claimed rows inside the dialect's two path-prefix claims, `/rustfs/admin` and
 //! `/minio/admin`. The fourth is an S3-table row. The service is the facade's own: the SigV4
@@ -53,14 +55,14 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use http::Method;
 use rustfs_gateway::{
-    Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, ErrorCode, Handler, HandlerContext, HandlerError, HandlerResult,
-    InputAuthzRequest, InputDecisions, Req, RequestContext, RequestContextView, Resp, S3Service, ServiceBuilder,
-    SigV4Authenticator, StaticCredentials, dto,
+    Authorizer, AuthzRequest, BoxFuture, CorsSource, CorsSourceError, Credentials, Decision, ErrorCode, Governor,
+    GovernorRequest, Handler, HandlerContext, HandlerError, HandlerResult, InputAuthzRequest, InputDecisions, Lease, Req,
+    RequestContext, RequestContextView, Resp, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, dto,
 };
 use rustfs_gateway_core::codec::{
     CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode, ResponseBody,
 };
-use rustfs_gateway_core::dialect::{ClaimedRoute, ClaimedRow, Dialect, DialectError, DialectOverlay, DialectRoute, OverlayRow};
+use rustfs_gateway_core::dialect::ClaimedRow;
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec};
 use rustfs_gateway_core::route::{PathClaim, Predicate, ShadowingDecl, TargetKind};
@@ -70,6 +72,7 @@ use rustfs_gateway_types::BucketName;
 
 use crate::operation_diff::s3s_f3e17541::context::{ACCESS_KEY, REGIONS, SECRET_KEY};
 
+mod overlay;
 mod seal;
 
 pub(crate) use self::seal::{open, same_bytes, seal};
@@ -452,90 +455,7 @@ pub(crate) static REPLICATION_METRICS_SHADOWS: &[ShadowingDecl] = &[
     ahead_of("ListObjects"),
 ];
 
-/// The reviewed record: the two claims and the four operations, alias rows included.
-static OVERLAY: DialectOverlay = DialectOverlay {
-    name: "rustfs-admin-proof",
-    vendor: "rustfs",
-    claims: CLAIMS,
-    operations: &[
-        OverlayRow {
-            name: SERVER_INFO,
-            precedence: SERVER_INFO_PRECEDENCE,
-            selector: "PathTemplate(\"/rustfs/admin/v3/info\") ∧ Method(GET) ∨ \
-                       PathTemplate(\"/minio/admin/v3/info\") ∧ Method(GET)",
-            action: SERVER_INFO_ACTION,
-            resource: ResourceShape::Service,
-            success_status: 200,
-            anonymous: false,
-            evidence: &[RUSTFS_ROUTER, ISSUE],
-        },
-        OverlayRow {
-            name: ADD_SERVICE_ACCOUNT,
-            precedence: ADD_SERVICE_ACCOUNT_PRECEDENCE,
-            selector: "PathTemplate(\"/rustfs/admin/v3/add-service-account\") ∧ Method(PUT) ∨ \
-                       PathTemplate(\"/minio/admin/v3/add-service-account\") ∧ Method(PUT)",
-            action: ADD_SERVICE_ACCOUNT_ACTION,
-            resource: ResourceShape::Service,
-            success_status: 200,
-            anonymous: false,
-            evidence: &[RUSTFS_ROUTER, ISSUE],
-        },
-        OverlayRow {
-            name: GET_TIER,
-            precedence: GET_TIER_PRECEDENCE,
-            selector: "PathTemplate(\"/rustfs/admin/v3/tier/{tier}\") ∧ Method(GET) ∨ \
-                       PathTemplate(\"/minio/admin/v3/tier/{tier}\") ∧ Method(GET)",
-            action: GET_TIER_ACTION,
-            resource: ResourceShape::Service,
-            success_status: 200,
-            anonymous: false,
-            evidence: &[RUSTFS_ROUTER, ISSUE],
-        },
-        OverlayRow {
-            name: REPLICATION_METRICS_V2,
-            precedence: REPLICATION_METRICS_PRECEDENCE,
-            selector: "Method(GET) ∧ Target(Bucket) ∧ QueryEquals(\"replication-metrics\", \"2\")",
-            action: REPLICATION_METRICS_ACTION,
-            resource: ResourceShape::Bucket,
-            success_status: 200,
-            anonymous: false,
-            evidence: &[RUSTFS_ROUTER, ISSUE],
-        },
-    ],
-};
-
-/// The four operations, with `replication_metrics` as the S3-shaped row's declarations; tests
-/// swap them to prove each is needed.
-pub(crate) fn admin_dialect_with(replication_metrics: &'static [ShadowingDecl]) -> Result<Dialect, Vec<DialectError>> {
-    Dialect::assemble(&OVERLAY)
-        .declare_claimed::<ServerInfo>(ClaimedRoute {
-            precedence: SERVER_INFO_PRECEDENCE,
-            rows: SERVER_INFO_ROWS,
-            shadows: &[],
-        })
-        .declare_claimed::<AddServiceAccount>(ClaimedRoute {
-            precedence: ADD_SERVICE_ACCOUNT_PRECEDENCE,
-            rows: ADD_SERVICE_ACCOUNT_ROWS,
-            shadows: &[],
-        })
-        .declare_claimed::<GetTier>(ClaimedRoute {
-            precedence: GET_TIER_PRECEDENCE,
-            rows: GET_TIER_ROWS,
-            shadows: &[],
-        })
-        .declare::<ReplicationMetricsV2>(DialectRoute {
-            precedence: REPLICATION_METRICS_PRECEDENCE,
-            selector: REPLICATION_METRICS_SELECTOR,
-            path_shape: "/{Bucket}",
-            shadows: replication_metrics,
-        })
-        .build()
-}
-
-/// The four operations with the reviewed declarations.
-pub(crate) fn admin_dialect() -> Dialect {
-    admin_dialect_with(REPLICATION_METRICS_SHADOWS).expect("the record and the declarations state the same facts")
-}
+pub(crate) use self::overlay::{admin_dialect, admin_dialect_bound, admin_dialect_with};
 
 // ── the authorizer and the backend ────────────────────────────────────────────────────────────
 
@@ -549,6 +469,8 @@ pub(crate) struct AuthzCall {
     pub(crate) caller: Option<String>,
     pub(crate) bucket: Option<String>,
     pub(crate) key: Option<String>,
+    /// The subject asked about (ADR-0025): `None` for none, `Some(None)` for the caller.
+    pub(crate) subject: Option<Option<String>>,
 }
 
 type Policy = Box<dyn Fn(&AuthzRequest<'_>) -> bool + Send + Sync>;
@@ -568,6 +490,7 @@ impl RecordingAuthorizer {
             caller: request.identity.map(|identity| identity.access_key_id().to_owned()),
             bucket: request.bucket.map(|bucket| bucket.as_str().to_owned()),
             key: request.key.map(|key| key.as_str().to_owned()),
+            subject: request.subject.map(|subject| subject.name().map(str::to_owned)),
         });
         if (self.policy)(request) {
             Decision::Allow
@@ -606,6 +529,8 @@ pub(crate) struct Seen {
     pub(crate) bucket: Option<String>,
     pub(crate) key: Option<String>,
     pub(crate) params: Vec<(String, String)>,
+    /// The subject the context carried, as [`AuthzCall::subject`] renders one.
+    pub(crate) subject: Option<Option<String>>,
 }
 
 /// A backend that records what each handler was handed, and every account it created.
@@ -641,6 +566,7 @@ impl Backend {
                 .iter()
                 .map(|(name, value)| (name.to_owned(), value.to_owned()))
                 .collect(),
+            subject: context.subject().map(|subject| subject.name().map(str::to_owned)),
         });
     }
 
@@ -711,6 +637,11 @@ handler!(AddServiceAccount, add_service_account);
 handler!(GetTier, get_tier);
 handler!(ReplicationMetricsV2, replication_metrics);
 
+// After the macro, so the classes' module could use it; it serves them with one generic impl.
+mod classes;
+
+pub(crate) use self::classes::{GetBucketQuota, GetUserInfo, ListPools, SelfAccountInfo, ServiceRestart};
+
 impl Backend {
     fn get_object(&self, request: &Req<dto::GetObject>) -> HandlerResult<dto::GetObject> {
         self.see(request.context());
@@ -738,11 +669,47 @@ pub(crate) struct Options {
     pub(crate) delegate_anonymous: bool,
 }
 
+/// Every `(operation, bucket)` a governor was asked about.
+type Governed = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
+/// Admits everything and records the operation and bucket it was asked about: the governor must
+/// see a bound bucket exactly as the authorizer does (ADR-0025).
+struct RecordingGovernor {
+    governed: Governed,
+}
+
+impl Governor for RecordingGovernor {
+    fn try_acquire<'a>(&'a self, request: &'a GovernorRequest<'a>) -> BoxFuture<'a, Result<Lease, ()>> {
+        self.governed
+            .lock()
+            .expect("uncontended")
+            .push((request.operation().to_owned(), request.bucket().map(|bucket| bucket.as_str().to_owned())));
+        Box::pin(async { Ok(Lease::admit()) })
+    }
+}
+
+/// Answers no document and records every bucket whose CORS document was read: a claimed row's
+/// bound bucket must never be one of them (ADR-0025).
+struct RecordingCors {
+    loaded: Arc<Mutex<Vec<String>>>,
+}
+
+impl CorsSource for RecordingCors {
+    fn load<'a>(&'a self, bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<dto::CorsConfiguration>, CorsSourceError>> {
+        self.loaded.lock().expect("uncontended").push(bucket.as_str().to_owned());
+        Box::pin(async { Ok(None) })
+    }
+}
+
 /// A service with the admin dialect and two S3 neighbours, and what it records.
 pub(crate) struct Assembled {
     pub(crate) service: S3Service,
     pub(crate) backend: Arc<Backend>,
     pub(crate) calls: Arc<Mutex<Vec<AuthzCall>>>,
+    /// Every `(operation, bucket)` the governor was asked about.
+    pub(crate) governed: Governed,
+    /// Every bucket whose CORS document was read.
+    pub(crate) cors_loaded: Arc<Mutex<Vec<String>>>,
 }
 
 impl Assembled {
@@ -761,9 +728,17 @@ pub(crate) fn assemble(options: Options, policy: impl Fn(&AuthzRequest<'_>) -> b
         authenticator = authenticator.hand_caller_secret_to_handlers();
     }
     let calls = Arc::new(Mutex::new(Vec::new()));
+    let governed = Arc::new(Mutex::new(Vec::new()));
+    let cors_loaded = Arc::new(Mutex::new(Vec::new()));
     let backend = Arc::new(Backend::default());
     let mut builder = ServiceBuilder::new()
         .authenticator(authenticator)
+        .governor(RecordingGovernor {
+            governed: Arc::clone(&governed),
+        })
+        .cors_source(RecordingCors {
+            loaded: Arc::clone(&cors_loaded),
+        })
         .authorizer(RecordingAuthorizer {
             policy: Box::new(policy),
             calls: Arc::clone(&calls),
@@ -773,6 +748,11 @@ pub(crate) fn assemble(options: Options, policy: impl Fn(&AuthzRequest<'_>) -> b
         .register::<AddServiceAccount, _>(Arc::clone(&backend))
         .register::<GetTier, _>(Arc::clone(&backend))
         .register::<ReplicationMetricsV2, _>(Arc::clone(&backend))
+        .register::<ListPools, _>(Arc::clone(&backend))
+        .register::<SelfAccountInfo, _>(Arc::clone(&backend))
+        .register::<GetUserInfo, _>(Arc::clone(&backend))
+        .register::<GetBucketQuota, _>(Arc::clone(&backend))
+        .register::<ServiceRestart, _>(Arc::clone(&backend))
         .register::<dto::GetObject, _>(Arc::clone(&backend))
         .register::<dto::ListObjects, _>(Arc::clone(&backend));
     if options.delegate_anonymous {
@@ -783,8 +763,12 @@ pub(crate) fn assemble(options: Options, policy: impl Fn(&AuthzRequest<'_>) -> b
         service: builder.build().expect("a complete assembly"),
         backend,
         calls,
+        governed,
+        cors_loaded,
     }
 }
 
+#[cfg(test)]
+mod class_tests;
 #[cfg(test)]
 mod tests;

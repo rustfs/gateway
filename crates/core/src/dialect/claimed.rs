@@ -64,6 +64,11 @@ pub struct ClaimedRoute {
     /// The overlaps with other claimed rows this placement creates, each with a reason and a
     /// source. Never about an S3 row: a claimed row cannot overlap one.
     pub shadows: &'static [ShadowingDecl],
+    /// The template parameter whose raw segment names the bucket the operation is authorised on
+    /// (ADR-0025), or `None` for a service-level operation. When set, every row's template carries
+    /// the parameter, the operation declares `ResourceShape::Bucket`, and the segment meets the
+    /// S3 bucket-name rules before anything is authenticated.
+    pub bucket_param: Option<&'static str>,
 }
 
 /// One operation a dialect serves inside its claims: its rows and their declarations.
@@ -205,18 +210,59 @@ impl DialectBuilder {
                 *claim,
             ));
         }
-        if !self.check_record::<O>(route.precedence, render_claimed_rows(route.rows)) {
+        // The binding before the record: a route whose bucket nothing supplies is refused for that,
+        // not for the selector text the missing binding also changes.
+        let resource = O::spec().auth.map(|auth| auth.resource);
+        match (route.bucket_param, resource) {
+            (None, Some(ResourceShape::Service) | None) => {}
+            (None, Some(resource)) => {
+                self.errors
+                    .push(DialectError::ClaimedOperationNamesAResource { name, resource });
+                return None;
+            }
+            (Some(param), Some(ResourceShape::Bucket)) => {
+                if entries
+                    .iter()
+                    .any(|entry| !entry.template().parameters().any(|name| name == param))
+                {
+                    self.errors.push(DialectError::ClaimedBucketParam {
+                        name,
+                        param,
+                        why: "a row's template has no parameter of that name, so that row would supply no bucket",
+                    });
+                    return None;
+                }
+            }
+            (Some(param), _) => {
+                self.errors.push(DialectError::ClaimedBucketParam {
+                    name,
+                    param,
+                    why: "only an operation authorised on a bucket binds one; a service-level or object operation \
+                          would be asked about a resource it does not declare",
+                });
+                return None;
+            }
+        }
+        if !self.check_record::<O>(route.precedence, render_claimed_route(route)) {
             return None;
         }
-        if let Some(auth) = O::spec().auth
-            && auth.resource != ResourceShape::Service
-        {
-            self.errors.push(DialectError::ClaimedOperationNamesAResource {
-                name,
-                resource: auth.resource,
-            });
-            return None;
-        }
-        Some(entries)
+        Some(
+            entries
+                .into_iter()
+                .map(|entry| entry.with_bucket_param(route.bucket_param))
+                .collect(),
+        )
+    }
+}
+
+/// Renders a whole claimed route the way an overlay records it: [`render_claimed_rows`], then,
+/// for a route that binds its bucket, ` ⇒ BucketParam("…")`, so the binding is reviewed with the
+/// rows (ADR-0025).
+#[must_use]
+pub fn render_claimed_route(route: &ClaimedRoute) -> String {
+    let rows = render_claimed_rows(route.rows);
+    match route.bucket_param {
+        Some(param) => format!("{rows} ⇒ BucketParam({param:?})"),
+        None => rows,
     }
 }

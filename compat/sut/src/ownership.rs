@@ -172,6 +172,7 @@ mod tests {
             route_key: None,
             identity,
             target_origin: TargetOrigin::Path,
+            subject: None,
         }
     }
 

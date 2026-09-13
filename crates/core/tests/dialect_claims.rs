@@ -196,6 +196,7 @@ pub(crate) fn claimed(precedence: u16, rows: &'static [ClaimedRow], shadows: &'s
         precedence,
         rows,
         shadows,
+        bucket_param: None,
     }
 }
 

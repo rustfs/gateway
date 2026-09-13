@@ -116,8 +116,9 @@ pub mod sse;
 mod static_dispatch;
 
 pub use crate::authz::{
-    Authorized, AuthorizedRead, Decision, Denied, DerivedResourceError, DerivedResourceSet, NoDerived, OwnedResource,
-    ResourceIdentity, ResourceRef,
+    ActionRule, Authorized, AuthorizedRead, Combined, Decision, Denied, DerivedResourceError, DerivedResourceSet,
+    MAX_SUBJECT_BYTES, NoDerived, OwnedResource, ResourceIdentity, ResourceRef, Subject, SubjectError, SubjectName, SubjectRule,
+    WhenAbsent,
 };
 pub use crate::cancellation::{HandlerCancellation, HandlerCancellationSource, HandlerContext};
 pub use crate::codec::{

@@ -48,9 +48,9 @@ use crate::operation_diff::s3s_f3e17541::context::{ACCESS_KEY, ContextRequest, P
 use crate::operation_diff::s3s_f3e17541::harness::block_on;
 use crate::{RouteMethod, rustfs_admin_route_inventory};
 
-const REGION: &str = "us-east-1";
+pub(super) const REGION: &str = "us-east-1";
 const CREATED: &str = "svc-proof";
-const HAND_OFF: Options = Options {
+pub(super) const HAND_OFF: Options = Options {
     secret_hand_off: true,
     delegate_anonymous: false,
 };
@@ -71,7 +71,7 @@ fn path_style_target(path: &str) -> TargetKind {
 }
 
 /// The operation `method target` reaches, with `dialect` installed or none.
-fn routed(dialect: Option<&Dialect>, method: &str, target: &str) -> Option<&'static str> {
+pub(super) fn routed(dialect: Option<&Dialect>, method: &str, target: &str) -> Option<&'static str> {
     let request = Request::builder()
         .method(method)
         .uri(format!("http://{PATH_HOST}{target}"))
@@ -113,19 +113,19 @@ fn leaked(declarations: Vec<ShadowingDecl>) -> &'static [ShadowingDecl] {
 }
 
 /// One answer from the assembled service.
-struct Answer {
-    status: u16,
+pub(super) struct Answer {
+    pub(super) status: u16,
     content_type: Option<String>,
-    body: Vec<u8>,
+    pub(super) body: Vec<u8>,
 }
 
 impl Answer {
-    fn text(&self) -> String {
+    pub(super) fn text(&self) -> String {
         String::from_utf8_lossy(&self.body).into_owned()
     }
 }
 
-fn answer(assembled: &Assembled, http_request: Request<bytes::Bytes>) -> Answer {
+pub(super) fn answer(assembled: &Assembled, http_request: Request<bytes::Bytes>) -> Answer {
     let response = block_on(assembled.service.call_bytes(http_request));
     let collected = block_on(rustfs_gateway::collect(response)).expect("an in-memory body");
     Answer {
@@ -140,7 +140,7 @@ fn answer(assembled: &Assembled, http_request: Request<bytes::Bytes>) -> Answer 
     }
 }
 
-fn send_with(assembled: &Assembled, request: &ContextRequest, edit: impl FnOnce(&mut http::HeaderMap)) -> Answer {
+pub(super) fn send_with(assembled: &Assembled, request: &ContextRequest, edit: impl FnOnce(&mut http::HeaderMap)) -> Answer {
     let mut headers = request.wire_headers(RequestNow::capture()).expect("fixture headers");
     edit(&mut headers);
     let http_request = request
@@ -150,7 +150,7 @@ fn send_with(assembled: &Assembled, request: &ContextRequest, edit: impl FnOnce(
     answer(assembled, http_request)
 }
 
-fn send(assembled: &Assembled, request: &ContextRequest) -> Answer {
+pub(super) fn send(assembled: &Assembled, request: &ContextRequest) -> Answer {
     send_with(assembled, request, |_| {})
 }
 
@@ -191,15 +191,15 @@ fn presigned(path: &str) -> Request<bytes::Bytes> {
     builder.body(bytes::Bytes::new()).expect("a request")
 }
 
-fn only(action: &'static str) -> impl Fn(&AuthzRequest<'_>) -> bool + Send + Sync + 'static {
+pub(super) fn only(action: &'static str) -> impl Fn(&AuthzRequest<'_>) -> bool + Send + Sync + 'static {
     move |request| request.action == action
 }
 
-fn route_calls(calls: &[AuthzCall]) -> Vec<&AuthzCall> {
+pub(super) fn route_calls(calls: &[AuthzCall]) -> Vec<&AuthzCall> {
     calls.iter().filter(|call| call.stage == "route").collect()
 }
 
-fn assert_refused_before_the_handler(assembled: &Assembled, answer: &Answer, status: u16) {
+pub(super) fn assert_refused_before_the_handler(assembled: &Assembled, answer: &Answer, status: u16) {
     assert_eq!(answer.status, status, "{}", answer.text());
     assert!(assembled.backend.seen().is_empty(), "a handler ran: {:?}", assembled.backend.seen());
     assert!(assembled.backend.created().is_empty());

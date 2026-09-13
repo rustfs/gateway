@@ -1,0 +1,11 @@
+error[E0616]: field `rule` of struct `AuthRequirement` is private
+  --> tests/compile_fail/authz_requirement_literal.rs:27:17
+   |
+27 |     requirement.rule = ActionRule::AnyOf(&["admin:A", "admin:B"]);
+   |                 ^^^^ private field
+
+error[E0616]: field `subject` of struct `AuthRequirement` is private
+  --> tests/compile_fail/authz_requirement_literal.rs:28:17
+   |
+28 |     requirement.subject = None;
+   |                 ^^^^^^^ private field
