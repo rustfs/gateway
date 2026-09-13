@@ -88,6 +88,10 @@ pub use migration_inventory::request_divergences::{
     DivergenceFollowUp, DivergenceRuling, REQUEST_DIVERGENCES, RequestDivergence, RequestDivergenceError,
     RequestDivergenceReport, build_request_divergences,
 };
+pub use migration_inventory::rollback_constraints::{
+    ROLLBACK_AUTHORITY, ROLLBACK_CONSTRAINTS, RollbackConstraint, RollbackConstraintError, RollbackConstraintReport,
+    build_rollback_constraints,
+};
 pub use migration_inventory::rustfs_admin_routes::{
     AdminAuthMode, AdminRoute, BodySealing, ExtensionRoute, INVENTORY_FORMAT, InventoryCensus, InventorySource,
     QueryDiscriminator, RUSTFS_SOURCE_COMMIT, RequestBodyUse, ResponseBodyUse, RouteInventoryError, RouteMethod, RouteRisk,

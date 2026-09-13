@@ -34,6 +34,7 @@
 
 mod base64;
 mod checksum;
+mod checksummer;
 mod error_code;
 mod etag;
 mod name;
@@ -48,9 +49,9 @@ mod upload_id;
 mod tests;
 
 pub use self::checksum::{
-    ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, Checksummer, ContentMd5, Md5Digest,
-    parse_request_checksum,
+    ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, ContentMd5, Md5Digest, parse_request_checksum,
 };
+pub use self::checksummer::Checksummer;
 pub use self::error_code::ErrorCode;
 pub use self::etag::{ETag, EtagRender};
 pub use self::name::{BucketName, ObjectKey, is_xml_representable, validate_bucket_name, validate_object_key};

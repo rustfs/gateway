@@ -146,15 +146,13 @@ pub fn input_to_s3s(input: dto::PutObjectInput) -> Result<oracle::PutObjectInput
         checksum_crc32: checksum_value(ChecksumAlgorithm::Crc32),
         checksum_crc32c: checksum_value(ChecksumAlgorithm::Crc32c),
         checksum_crc64nvme: checksum_value(ChecksumAlgorithm::Crc64Nvme),
-        // The gateway model has no MD5, SHA-512 or XXHASH checksum member, so a gateway input
-        // never holds one. A request carrying one diverges at decode; the goldens diff names it.
-        checksum_md5: None,
+        checksum_md5: checksum_value(ChecksumAlgorithm::Md5),
         checksum_sha1: checksum_value(ChecksumAlgorithm::Sha1),
         checksum_sha256: checksum_value(ChecksumAlgorithm::Sha256),
-        checksum_sha512: None,
-        checksum_xxhash128: None,
-        checksum_xxhash3: None,
-        checksum_xxhash64: None,
+        checksum_sha512: checksum_value(ChecksumAlgorithm::Sha512),
+        checksum_xxhash128: checksum_value(ChecksumAlgorithm::XxHash128),
+        checksum_xxhash3: checksum_value(ChecksumAlgorithm::XxHash3),
+        checksum_xxhash64: checksum_value(ChecksumAlgorithm::XxHash64),
         content_disposition: input.content_disposition,
         content_encoding: input.content_encoding,
         content_language: input.content_language,
@@ -218,8 +216,7 @@ pub fn replica_input_to_s3s(input: dto::PutObjectInput, version_id: String) -> R
 /// # Errors
 ///
 /// [`ConversionError`] when the s3s output holds something the gateway output cannot: no entity
-/// tag, a checksum of an algorithm the gateway model lacks, more than one checksum, or a value that
-/// is not well formed for its member.
+/// tag, more than one checksum, or a value that is not well formed for its member.
 pub fn output_from_s3s(output: oracle::PutObjectOutput) -> Result<dto::PutObjectOutput, ConversionError> {
     // Exhaustive on purpose: this is the pinned s3s struct, not a gateway DTO, and an oracle
     // re-pin that adds a member must be a compile error here rather than a member silently dropped.
@@ -247,26 +244,17 @@ pub fn output_from_s3s(output: oracle::PutObjectOutput) -> Result<dto::PutObject
         size,
         version_id,
     } = output;
-    for (field, value) in [
-        ("checksum_md5", &checksum_md5),
-        ("checksum_sha512", &checksum_sha512),
-        ("checksum_xxhash128", &checksum_xxhash128),
-        ("checksum_xxhash3", &checksum_xxhash3),
-        ("checksum_xxhash64", &checksum_xxhash64),
-    ] {
-        if value.is_some() {
-            return Err(ConversionError {
-                field,
-                reason: "the gateway output has no member for this checksum algorithm",
-            });
-        }
-    }
     let mut present = [
         ("checksum_crc32", ChecksumAlgorithm::Crc32, checksum_crc32),
         ("checksum_crc32c", ChecksumAlgorithm::Crc32c, checksum_crc32c),
         ("checksum_crc64nvme", ChecksumAlgorithm::Crc64Nvme, checksum_crc64nvme),
+        ("checksum_md5", ChecksumAlgorithm::Md5, checksum_md5),
         ("checksum_sha1", ChecksumAlgorithm::Sha1, checksum_sha1),
         ("checksum_sha256", ChecksumAlgorithm::Sha256, checksum_sha256),
+        ("checksum_sha512", ChecksumAlgorithm::Sha512, checksum_sha512),
+        ("checksum_xxhash128", ChecksumAlgorithm::XxHash128, checksum_xxhash128),
+        ("checksum_xxhash3", ChecksumAlgorithm::XxHash3, checksum_xxhash3),
+        ("checksum_xxhash64", ChecksumAlgorithm::XxHash64, checksum_xxhash64),
     ]
     .into_iter()
     .filter_map(|(field, algorithm, value)| value.map(|value| (field, algorithm, value)));
