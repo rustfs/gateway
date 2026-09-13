@@ -105,6 +105,14 @@ pub enum WireReject {
     MalformedHeaderValue(HeaderName),
     /// A user-metadata header failed its key or value rules.
     MalformedMetadata(MetadataReject),
+    /// One user-metadata key carried more than one value.
+    ///
+    /// Field names are case-insensitive, so `X-Amz-Meta-Q` and `x-amz-meta-q` are the same key.
+    /// Metadata is a map: keeping either value would silently discard the other, and joining them
+    /// would store a value the client never sent. RustFS behind the pinned s3s refuses the request
+    /// with `InvalidRequest` before any handler runs, and this is that refusal (rustfs/gateway
+    /// migration ruling `rd-ctx-0006`).
+    DuplicateMetadataHeader(HeaderName),
     /// The request target was not a form this gateway serves, or carried a control character.
     MalformedRequestTarget,
     /// The query string could not be split into parameters.
@@ -199,9 +207,10 @@ impl WireReject {
             | Self::TransferEncodingOnHttp2
             | Self::DuplicateContentLength
             | Self::MalformedContentLength => FRAMING_MESSAGE,
-            Self::DuplicateSingleValuedHeader(_) | Self::NonUtf8SignificantHeader(_) | Self::MalformedHeaderValue(_) => {
-                HEADER_MESSAGE
-            }
+            Self::DuplicateSingleValuedHeader(_)
+            | Self::DuplicateMetadataHeader(_)
+            | Self::NonUtf8SignificantHeader(_)
+            | Self::MalformedHeaderValue(_) => HEADER_MESSAGE,
             Self::MalformedMetadata(_) => METADATA_MESSAGE,
             Self::DuplicateSingleValuedQuery(_) | Self::AmbiguousQueryParameterName | Self::MalformedQuery => QUERY_MESSAGE,
             Self::MalformedRequestTarget => "Couldn't parse the specified URI.",
@@ -287,6 +296,7 @@ impl WireReject {
             Self::NonUtf8SignificantHeader(_) => "non-utf8-significant-header",
             Self::MalformedHeaderValue(_) => "malformed-header-value",
             Self::MalformedMetadata(_) => "malformed-metadata",
+            Self::DuplicateMetadataHeader(_) => "duplicate-metadata-header",
             Self::MalformedRequestTarget => "malformed-request-target",
             Self::MalformedQuery => "malformed-query",
             // `host` on its own was the label until the disjointness guard caught it: it is an

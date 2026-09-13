@@ -415,9 +415,10 @@ fn write_canonical_value<W: fmt::Write>(value: &str, out: &mut W) -> Result<(), 
 
 /// Applies every acceptance-time header rule.
 ///
-/// In order: the size ceilings, the repeated single-valued headers, then a single pass in which
-/// each field is checked for control characters, for readability when it is significant, and —
-/// when it is user metadata — against the metadata name and value rules.
+/// In order: a single pass in which the size ceilings are counted and each field is checked for
+/// control characters, for readability when it is significant, and — when it is user metadata —
+/// against the metadata name and value rules; then the repeated single-valued headers; then the
+/// repeated user-metadata keys.
 pub(crate) fn validate(headers: &HeaderMap, limits: &Limits) -> Result<(), WireReject> {
     let mut field_count = 0usize;
     let mut byte_count = 0usize;
@@ -453,6 +454,17 @@ pub(crate) fn validate(headers: &HeaderMap, limits: &Limits) -> Result<(), WireR
         let mut values = headers.get_all(*name).iter();
         if values.next().is_some() && values.next().is_some() {
             return Err(WireReject::DuplicateSingleValuedHeader(name));
+        }
+    }
+
+    // One value per user-metadata key. `HeaderMap` keys are already lowercased, so a name repeated
+    // in another case is counted here as the same key, which is what it is.
+    for name in headers.keys() {
+        if name.as_str().starts_with(METADATA_PREFIX) {
+            let mut values = headers.get_all(name).iter();
+            if values.next().is_some() && values.next().is_some() {
+                return Err(WireReject::DuplicateMetadataHeader(name.clone()));
+            }
         }
     }
 

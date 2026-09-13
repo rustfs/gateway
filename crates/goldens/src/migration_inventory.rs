@@ -387,5 +387,7 @@ fn audit_samples<'a>(
     }
 }
 
+pub(crate) mod request_divergences;
+
 #[cfg(test)]
 mod tests;

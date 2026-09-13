@@ -1,0 +1,75 @@
+# c-object-0057 — one user-metadata key sent on two header lines.
+#
+# Schema dimensions exercised: a repeated header expressed as a list, header absence proving no
+# write happened, request-progress assertion.
+
+[case]
+id = "c-object-0057"
+schema_version = 1
+title = "A metadata key sent twice is refused rather than resolved to one of its values"
+rationale = """
+User metadata is a map from key to one value, and field names are case-insensitive, so \
+`X-Amz-Meta-Q: a` and `x-amz-meta-q: b` are two values for one key. An implementation that keeps \
+the last line silently discards the first — the client is told the write succeeded and a later \
+HEAD returns a value it did not choose, which is invisible until someone reads the metadata back. \
+RustFS today (the pinned s3s) refuses this request with InvalidRequest before any handler runs, \
+and the gateway it migrates to must not turn that refusal into silent data loss. The refusal must \
+come before the body is consumed and before anything is stored."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["metadata", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-meta-0009"]
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-5.1"
+summary = "Field names are case-insensitive, so two spellings of one name are one field."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html"
+summary = "User metadata keys are stored lowercased, so keys differing only in case collide."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/backlog/issues/1762"
+summary = "The PutObject context differential observed the gateway keep the last repeated metadata line while the pinned s3s refused the request."
+kind = "observed"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "meta/repeated"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-object/meta/repeated"
+headers = { "content-type" = "text/plain", "x-amz-meta-q" = ["a", "b"] }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+headers_absent = ["etag", "x-amz-version-id"]
+connection_after = "open"
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.request_progress]
+body_fully_sent = false
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidRequest</Code>"]

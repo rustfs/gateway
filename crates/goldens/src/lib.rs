@@ -79,6 +79,10 @@ pub use cors::assert_cors_four_way;
 pub use four_way::{FourWayFamilyReport, FourWayRunError, FourWayRunReport, run_four_way_all, run_four_way_core_shard};
 pub use lifecycle::assert_lifecycle_four_way;
 pub use logging::assert_bucket_logging_four_way;
+pub use migration_inventory::request_divergences::{
+    DivergenceFollowUp, DivergenceRuling, REQUEST_DIVERGENCES, RequestDivergence, RequestDivergenceError,
+    RequestDivergenceReport, build_request_divergences,
+};
 pub use migration_inventory::{
     DoctypeForm, DoctypeWitness, MigrationInventoryError, MigrationInventoryReport, build_migration_inventory,
 };
