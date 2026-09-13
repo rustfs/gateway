@@ -488,6 +488,44 @@ mod tests {
         assert_eq!(decisions, [true, false, false, true, false]);
     }
 
+    /// Negative — the same counter-example through the real decision path, with a non-zero refill
+    /// and the injected monotonic clock advanced explicitly (nothing sleeps). An idle victim must
+    /// not reach its replacement as a full burst, a drained victim must not reach it as a fresh
+    /// one, and an address that keeps its slot still refills on the clock.
+    #[test]
+    fn an_evicting_address_inherits_debt_through_the_governor_with_refill() {
+        let (governor, clock) = DefaultGovernor::manually_clocked(GovernorRates {
+            per_ip: Rate::new(2, 1),
+            tracked_clients: CLIENT_SHARDS,
+            ..rates()
+        });
+        let first = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let shard = governor.clients.shard_index(first);
+        let mut same_shard = (2..=u16::MAX)
+            .map(|tail| IpAddr::V4(Ipv4Addr::new(198, 51, (tail >> 8) as u8, tail as u8)))
+            .filter(|address| governor.clients.shard_index(*address) == shard);
+        let second = same_shard.next().expect("a second address maps to the same shard");
+        let third = same_shard.next().expect("a third address maps to the same shard");
+        let admits_now = |address| admits(&governor, ClassKind::Unauthenticated, Some(address));
+
+        assert!(admits_now(first));
+        clock.advance_seconds(1);
+        assert!(admits_now(second), "the evicting request is charged against the inherited meter");
+        assert!(!admits_now(second), "an idle victim refilled into a full burst for a new address");
+        assert_eq!(governor.tracked_clients(), 1);
+
+        clock.advance_seconds(1);
+        assert!(admits_now(second), "a retained address stopped refilling");
+        assert!(!admits_now(second));
+        clock.advance_seconds(2);
+        assert!(admits_now(second), "a retained idle address did not recover its burst");
+        assert!(admits_now(second), "a retained idle address did not recover its burst");
+        assert!(!admits_now(second));
+
+        assert!(!admits_now(third), "eviction reset a drained victim's debt");
+        assert_eq!(governor.tracked_clients(), 1);
+    }
+
     #[test]
     fn client_state_stays_at_its_bound_under_high_address_cardinality() {
         const ATTEMPTS: u32 = 10_000;

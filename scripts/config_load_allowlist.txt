@@ -29,7 +29,7 @@ crates/gateway/src/ext/credential_guard.rs:293
 crates/gateway/src/ext/credential_guard.rs:313
 crates/gateway/src/ext/governor.rs:390
 crates/gateway/src/ext/governor.rs:391
-crates/gateway/src/ext/governor/default.rs:586
+crates/gateway/src/ext/governor/default.rs:624
 crates/gateway/src/ext/governor/meter.rs:63
 crates/gateway/src/ext/governor/meter.rs:90
 crates/gateway/src/ext/oplayer.rs:288
