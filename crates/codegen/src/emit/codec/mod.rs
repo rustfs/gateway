@@ -242,10 +242,27 @@ fn unknown_element_policy(ir: &OperationIr, rules: &CodecRules) -> Result<Unknow
     Ok(found.unwrap_or(UnknownElementPolicyValue::Skip))
 }
 
+/// The `allow-registered` guard: refuse any child element outside `names`.
+///
+/// Emitted already in rustfmt's layout, because the generated tree is both compared byte for byte
+/// with a fresh run and checked by `cargo fmt`. The names are bound first so the `if` chain stays
+/// under rustfmt's `chain_width` for every shape; the array itself is horizontal when it fits
+/// rustfmt's `array_width` (sixty per cent of the repository's 130-column `max_width`) and one
+/// name per line otherwise, which is rustfmt's layout for string literals longer than its
+/// short-element threshold — every wire name a security configuration carries today.
 fn unknown_child_guard<'a>(node: &str, names: impl Iterator<Item = &'a str>, indent: &str) -> String {
-    let names = names.map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(", ");
+    const ARRAY_WIDTH: usize = 130 * 6 / 10;
+    let names = names.map(|name| format!("\"{name}\"")).collect::<Vec<_>>();
+    let horizontal = format!("[{}]", names.join(", "));
+    let array = if horizontal.len() <= ARRAY_WIDTH {
+        horizontal
+    } else {
+        let items = names.iter().map(|name| format!("{indent}    {name},\n")).collect::<String>();
+        format!("[\n{items}{indent}]")
+    };
     format!(
-        "{indent}if {node}.children.iter().any(|child| ![{names}].contains(&child.name.as_str())) {{\n\
+        "{indent}let known = {array};\n\
+         {indent}if {node}.children.iter().any(|child| !known.contains(&child.name.as_str())) {{\n\
          {indent}    return Err(CodecError::malformed_xml(\"the body contains an unknown element\"));\n\
          {indent}}}\n"
     )
