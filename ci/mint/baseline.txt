@@ -53,47 +53,72 @@
 #   29 FAIL, and every other failure matches generation 1 by function and error. Net
 #   minio-js 28 -> 29.
 #
-# generation: 2
+# GENERATION 3 (rustfs/gateway#738, rustfs/gateway#744)
+#   The fs backend now stores Content-Type, registers ListBuckets, DeleteObjects and POST
+#   Object, and keeps tagging, storage class and copy conditions. Measured by the native amd64
+#   `record` run https://github.com/rustfs/gateway/actions/runs/34767157918 on main at
+#   096bc115 and compared with the generation-2 `record` run
+#   https://github.com/rustfs/gateway/actions/runs/34747147109. Nothing is raised:
+#     minio-js 29 -> 24, s3cmd 1 -> 0, and aws-sdk-go-v2 goes from excluded to counted at 1.
+#   aws-sdk-go-v2 was excluded only for rustfs/gateway#718. It now writes a complete,
+#   attributable log (3 PASS, 1 FAIL, 0 NA), so the exclusion is removed.
+#   aws-sdk-ruby, awscli and versioning stop at their first failure. Each moved past its fixed
+#   failure onto a newly reached one, so the count is unchanged but the attribution is new.
+#   minio-java went UP, 2 -> 16. Once listBuckets() passes, the suite reaches tests it never
+#   ran before (43 -> 78 records). Its line stays at 2 until every added failure is attributed,
+#   rustfs/gateway#756, so a `ratchet` run reports it as a REGRESSION until then. The same
+#   issue tracks the failures below that are not yet attributed or that the fixes above were
+#   expected to remove.
+#
+# generation: 3
 .minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 the pinned image ships no .NET test binary, so its runner writes no record at all
-aws-sdk-go-v2 excluded https://github.com/rustfs/gateway/issues/718 HeadObject omits Content-Type, and the suite panics before writing its first record
+#   1 FAIL of 4 records. The aggregate report names no function for an SDK that was excluded
+#   in the run, so this one is not yet attributed, rustfs/gateway#756.
+aws-sdk-go-v2 1
 aws-sdk-java-v2 excluded https://github.com/rustfs/gateway/issues/719 every test returns without a record unless ENABLE_HTTPS=1, and the SUT serves plaintext only
 #   abortMultipartupload: expects 204 for an unknown upload ID (MinIO); the SUT answers 404
 #   NoSuchUpload, the S3 answer. Not a gateway defect.
 aws-sdk-php 1
-#   listBuckets: ListBuckets is not registered by the fs backend, rustfs/gateway#721.
+#   presignedPut: newly reached once listBuckets passed (0 -> 11 PASS), rustfs/gateway#756.
 aws-sdk-ruby 1
-#   s3api head-object on a copy: CopyObject drops the storage class, rustfs/gateway#722.
+#   s3 presign: newly reached once head-object on a copy passed, rustfs/gateway#756.
 awscli 1
 #   testLivenessEndpoint: GET /minio/health/live is a MinIO-only endpoint, not an S3 contract.
 healthcheck 1
 mc excluded https://github.com/rustfs/gateway/issues/720 its runner prints a line that is not JSON into log.json ahead of its records
 minio-go 0
-#   listBuckets(): rustfs/gateway#721. listenBucketNotification(): a MinIO-only API.
+#   Measured 16, held at 2 rather than raised, rustfs/gateway#756. listBuckets() passes now.
+#   listenBucketNotification(): a MinIO-only API. The 15 newly reached failures:
+#   getPresignedObjectUrl() x2, getPresignedPostFormData(), removeBucket(),
+#   uploadSnowballObjects() x2, putObjectFanOut(), and 8 MinIO admin API calls (addUser,
+#   addCannedPolicy, setPolicy, getUserInfo, listUsers, listCannedPolicies, deleteUser,
+#   removeCannedPolicy).
 minio-java 2
-#   29 failures, by cause:
+#   24 failures, by cause:
 #   10  PutBucketVersioning sent without Content-MD5 (4 setBucketVersioning, 2 "Enable Versioning
 #       on Bucket", 1 "Enable versioning", 3 `before all` hooks that enable it). The pinned model
 #       marks the operation http_checksum_required (spec/operations/PutBucketVersioning.toml), so
 #       the refusal is the contract. Not a gateway defect.
 #    1  statObject `::` Not Found: the object a failed versioning hook never created.
-#    9  DeleteObjects is not registered, rustfs/gateway#721: 4 listObjects steps left with
-#       objects that removeObjects could not delete, 4 `after all` BucketNotEmpty cleanups, and
-#       listBuckets(cb).
-#    2  statObject: 1 Content-Type mismatch, rustfs/gateway#718. 1 mocha 30-minute timeout; the
-#       SUT held no connection during the stall (sampled twice), so the callback never finished.
-#       Likely the same missing Content-Type, rustfs/gateway#718.
-#    1  copyObject with setMatchETagExcept(<source etag>) was not refused, rustfs/gateway#722.
-#    2  presignedPostPolicy (both steps): the browser POST is answered 501 NotImplemented
-#       because the fs backend registers no POST Object operation, rustfs/gateway#721.
+#    6  2 listObjects steps and 4 `after all` cleanups (`Clean up temp directory part files`,
+#       `Remove Object post select of content:`, `Force Deletion of prefix`, `functional tests`).
+#       Attributed to the missing DeleteObjects in generation 2. DeleteObjects is registered now
+#       and these still fail, rustfs/gateway#756.
+#    1  copyObject with setMatchETagExcept(<source etag>): still not refused after
+#       rustfs/gateway#744, rustfs/gateway#756.
+#    2  presignedPostPolicy (both steps): still failing after POST Object was registered in
+#       rustfs/gateway#738, rustfs/gateway#756.
 #    1  putObjectRetention: object lock, rustfs/backlog#1726 (P5-11).
 #    1  selectObjectContent: SelectObjectContent, rustfs/backlog#1730 (P5-15).
 #    2  listenBucketNotification and extensions.listObjectsV2WithMetadata: MinIO-only APIs.
-minio-js 29
-#   content-type test: GetObject/HeadObject return no Content-Type, rustfs/gateway#718.
+#   Gone since generation 2: listBuckets(cb) and 2 listObjects (rustfs/gateway#721), and both
+#   statObject failures, the Content-Type mismatch and the 30-minute timeout (rustfs/gateway#718).
+minio-js 24
+#   (unnamed): the record names no function; 2 -> 12 PASS, not yet attributed, rustfs/gateway#756.
 minio-py 1
-#   test_sync_list_objects: `rb --recursive` needs DeleteObjects, rustfs/gateway#721.
-s3cmd 1
+s3cmd 0
 #   select_object_content: SelectObjectContent, rustfs/backlog#1730 (P5-15).
 s3select 1
-#   testPutObjectWithTaggingAndMetadata: PutObject drops x-amz-tagging, rustfs/gateway#722.
+#   testListObjectVersionsSimple: newly reached once tagging passed (2 -> 7 PASS),
+#   rustfs/gateway#756.
 versioning 1
