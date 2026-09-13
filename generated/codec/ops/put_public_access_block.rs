@@ -88,7 +88,13 @@ fn read_public_access_block_configuration(
     node: &rustfs_gateway_xml::XmlNode,
 ) -> Result<dto::PublicAccessBlockConfiguration, CodecError> {
     let mut shape = dto::PublicAccessBlockConfiguration { ..Default::default() };
-    if node.children.iter().any(|child| !["BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"].contains(&child.name.as_str())) {
+    let known = [
+        "BlockPublicAcls",
+        "IgnorePublicAcls",
+        "BlockPublicPolicy",
+        "RestrictPublicBuckets",
+    ];
+    if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {
         return Err(CodecError::malformed_xml("the body contains an unknown element"));
     }
     if let Some(raw) = node.child_text("BlockPublicAcls") {
