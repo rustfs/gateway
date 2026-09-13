@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="UTF-8"?><s3:Delete xmlns:s3="http://s3.amazonaws.com/doc/2006-03-01/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><Object><Key>a&amp;b&#x41;</Key></Object><Grantee xsi:type="Group"/></s3:Delete>

@@ -151,3 +151,6 @@ mod website_roundtrip;
 
 #[path = "xml_character_range.rs"]
 mod xml_character_range;
+
+#[path = "xml_parse_replay.rs"]
+mod xml_parse_replay;

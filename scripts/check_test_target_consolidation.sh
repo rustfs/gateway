@@ -230,6 +230,7 @@ core_modules = (
     "upload_capability",
     "website_roundtrip",
     "xml_character_range",
+    "xml_parse_replay",
 )
 core_tests = root / "crates/core/tests"
 actual_core_sources = tuple(

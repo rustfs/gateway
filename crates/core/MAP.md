@@ -70,4 +70,5 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/rule_filter_boundaries.rs` | Filter boundaries both consumers of the shared grammar still answer, side by side. | A lifecycle or replication Filter refusal changes. |
 | `tests/security_request_policy.rs` | Unknown-element refusal for every security configuration PUT (allow-registered write policy). | A security PUT starts accepting, or stops refusing, an unregistered element. |
 | `tests/purity_guard.rs` | Source-shape guards for pre-auth code. | Add public/core routing code. |
+| `tests/xml_parse_replay.rs` | Replays `fuzz/seeds/xml_parse/` and 40,000 fixed-seed samples through the `xml_parse` property over `rustfs-gateway-xml`'s bounded reader. | Change an XML ceiling or refusal, or add a minimised fuzz regression seed. |
 | `tests/golden/route-table.txt` | Protected ordered route table. | Never edit without the Breaking Change process. |
