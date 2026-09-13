@@ -1614,6 +1614,15 @@ fn not_configured<O: Operation>(message: &'static str) -> HandlerError {
     }
 }
 
+/// The same declaration for a read whose unconfigured answer is a `200`: the absence of a code is
+/// the rule, so a declared one must reach the wire too (`q-acc-0001`, rustfs/backlog#1728).
+fn unconfigured<O: Operation>(absent: bool) -> Result<(), HandlerError> {
+    match O::spec().not_configured_error.clone() {
+        Some(code) if absent => Err(HandlerError::new(code, "the subresource is not configured")),
+        _ => Ok(()),
+    }
+}
+
 /// `NoSuchCORSConfiguration`, in AWS's own wording for a bucket that never had a CORS document.
 fn no_such_cors_configuration() -> HandlerError {
     not_configured::<dto::GetBucketCors>("The CORS configuration does not exist")
@@ -3750,6 +3759,7 @@ impl Stub {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         let stored = fixture.versioning(input.bucket.as_str());
+        unconfigured::<dto::GetBucketVersioning>(stored.is_none())?;
         Ok(Resp::new(dto::GetBucketVersioningOutput {
             status: stored.and_then(|configuration| configuration.status.clone()),
             mfa_delete: stored.and_then(|configuration| configuration.mfa_delete.clone()),
@@ -3778,6 +3788,7 @@ impl Stub {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         let stored = fixture.accelerate(input.bucket.as_str());
+        unconfigured::<dto::GetBucketAccelerateConfiguration>(stored.is_none())?;
         Ok(Resp::new(dto::GetBucketAccelerateConfigurationOutput {
             status: stored.and_then(|configuration| configuration.status.clone()),
             ..dto::GetBucketAccelerateConfigurationOutput::default()
@@ -3808,6 +3819,7 @@ impl Stub {
     ) -> HandlerResult<dto::GetBucketRequestPayment> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
+        unconfigured::<dto::GetBucketRequestPayment>(fixture.request_payment(input.bucket.as_str()).is_none())?;
         let payer = fixture
             .request_payment(input.bucket.as_str())
             .map_or_else(|| dto::Payer::BUCKETOWNER, |configuration| configuration.payer.clone());
@@ -3832,6 +3844,7 @@ impl Stub {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         let stored = fixture.logging(input.bucket.as_str());
+        unconfigured::<dto::GetBucketLogging>(stored.is_none())?;
         Ok(Resp::new(dto::GetBucketLoggingOutput {
             logging_enabled: stored.and_then(|configuration| configuration.logging_enabled.clone()),
         }))
@@ -3873,6 +3886,7 @@ impl Stub {
     ) -> HandlerResult<dto::GetBucketNotificationConfiguration> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
+        unconfigured::<dto::GetBucketNotificationConfiguration>(fixture.notification(input.bucket.as_str()).is_none())?;
         let stored = fixture.notification(input.bucket.as_str()).cloned().unwrap_or_default();
         Ok(Resp::new(dto::GetBucketNotificationConfigurationOutput {
             topic_configurations: stored.topic_configurations,
