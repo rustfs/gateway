@@ -36,8 +36,8 @@ fn shell(args: Vec<String>, step: &str) -> GateCommand {
     ("sh".to_owned(), args, step.to_owned())
 }
 
-fn test_supervisor(capture_root: PathBuf) -> Supervisor {
-    let signals = SignalControl::new(None)
+fn test_supervisor(capture_root: PathBuf) -> Supervisor<'static> {
+    let signals = SignalControl::new(None, &Instant::now)
         .expect("signal listener must start")
         .expect("a supervisor without a deadline must acquire the lock");
     Supervisor {
@@ -45,6 +45,7 @@ fn test_supervisor(capture_root: PathBuf) -> Supervisor {
         capture_root,
         signals,
         cleaned: false,
+        clock: &Instant::now,
     }
 }
 

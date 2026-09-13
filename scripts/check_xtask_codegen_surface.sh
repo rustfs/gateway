@@ -859,8 +859,6 @@ for name in (
 for name in (
     "verify_full",
     "run_all",
-    "run_setup_then_concurrently",
-    "run_commands_concurrently",
     "run",
 ):
     items = functions_named(name, syntax, comments_removed)
@@ -933,6 +931,9 @@ for name in ("GateCommand", "GateResult"):
 process_items = top_level_items(r"\bmod\s+process\s*;")
 if len(process_items) != 1 or process_items[0][1]:
     fail("the process supervisor must remain on the light crate-verification surface")
+full_gate_items = top_level_items(r"\bmod\s+full_gate\s*;")
+if len(full_gate_items) != 1 or [compact(attr) for attr in full_gate_items[0][1]] != [expected_full_attribute]:
+    fail("the full-gate stage runner must remain full-only")
 for pattern, description in (
     (r"\buse\s+crate\s*::\s*\{\s*catalog\s*,\s*codegen\s*\}\s*;", "the operation catalog imports"),
 ):
