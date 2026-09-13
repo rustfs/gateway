@@ -263,9 +263,9 @@ fn legal_hold() -> impl Strategy<Value = dto::ObjectLockLegalHold> {
 ///
 /// `Days` and `Years` sample the **whole** of `i32`, negatives and both extremes included. That
 /// is on purpose and it is the opposite of what the validator accepts: `object_lock.rs` refuses a
-/// period below one, but the decoder is lenient by design (`q-lock-0014` and the module docs on
-/// why a stored WORM document must not meet a stricter reader than the one that wrote it), so a
-/// value it will not refuse is a value that has to survive. `i32::MIN` has no positive counterpart
+/// period below one, but the decoder does not range-check values — `q-lock-0010` is the
+/// validator's rule, not the codec's — so a value it will not refuse is a value that has to
+/// survive. `i32::MIN` has no positive counterpart
 /// and is exactly the sort of value a hand-rolled renderer loses.
 fn lock_configuration() -> impl Strategy<Value = dto::ObjectLockConfiguration> {
     (
@@ -606,20 +606,18 @@ fn n_a_days_value_that_is_not_a_number_is_refused() {
     assert_eq!(error.member(), Some("Days"), "{error:?}");
 }
 
-/// An unknown element is skipped rather than refused (`q-lock-0014`), and — this is the half that
-/// matters — it does not survive the round trip. A decoder that kept it could not, because the
-/// DTO has nowhere to put it; the assertion is that the document that comes back is a truthful
-/// report of what was stored rather than an echo of what was sent.
+/// An unknown element is refused rather than skipped (`q-lock-0014`). The DTO has nowhere to put
+/// it, so accepting it could only mean dropping it — a 200 for a retention setting the client
+/// believes is stored. The known-only twin is decoded and re-encoded beside it, so the refusal is
+/// attributable to the unknown element and not to the rest of the document.
 #[test]
-fn n_an_unknown_element_is_skipped_and_does_not_come_back() {
-    let document = "<Retention><Mode>GOVERNANCE</Mode><Governance>yes</Governance></Retention>";
+fn n_an_unknown_element_is_refused_rather_than_dropped() {
+    let known = "<Retention><Mode>GOVERNANCE</Mode></Retention>";
+    let unknown = "<Retention><Mode>GOVERNANCE</Mode><Governance>yes</Governance></Retention>";
 
-    let retention = decode_retention(document).expect("an unknown element is skipped, not refused");
-    let reserialised = encode_retention(retention);
+    let retention = decode_retention(known).expect("the known-only twin decodes");
+    assert_eq!(root_element(&encode_retention(retention)), ROOT_RETENTION);
 
-    assert!(
-        !reserialised.contains("<Governance>"),
-        "the unknown element was echoed rather than dropped: {reserialised}"
-    );
-    assert_eq!(root_element(&reserialised), ROOT_RETENTION);
+    let error = decode_retention(unknown).expect_err("an unknown retention setting never reaches the handler");
+    assert_eq!(error.code().as_str(), "MalformedXML", "{error:?}");
 }
