@@ -248,6 +248,17 @@ fn c_lim_0023_refuses_a_body_that_nests_past_the_depth_ceiling() {
     assert_eq!(parse(body.as_bytes()), Err(XmlError::TooDeep));
 }
 
+/// Negative — the same tree with its deepest element self-closed. `<A/>` and `<A></A>` are one
+/// element at one depth; counting only the paired spelling let a tree nest one level past the
+/// ceiling (rustfs/backlog#1766). The positive half — exactly `MAX_DEPTH` levels ending in `<A/>` —
+/// is still accepted.
+#[test]
+fn n_refuses_a_self_closed_leaf_past_the_depth_ceiling() {
+    let nest = |levels: usize| format!("{}<A/>{}", "<A>".repeat(levels), "</A>".repeat(levels));
+    assert_eq!(parse(nest(MAX_DEPTH).as_bytes()), Err(XmlError::TooDeep));
+    assert!(parse(nest(MAX_DEPTH - 1).as_bytes()).is_ok());
+}
+
 #[test]
 fn c_lim_0024_refuses_a_body_with_more_elements_than_the_ceiling() {
     let mut body = String::from("<Delete>");

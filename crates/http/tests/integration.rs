@@ -32,6 +32,8 @@ mod form_allocations;
 mod form_limits;
 #[path = "framing_smuggling.rs"]
 mod framing_smuggling;
+#[path = "header_accept_replay.rs"]
+mod header_accept_replay;
 #[path = "header_and_query.rs"]
 mod header_and_query;
 #[path = "host_ambiguity.rs"]

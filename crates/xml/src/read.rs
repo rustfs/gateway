@@ -296,6 +296,12 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
                 if elements > limits.max_elements {
                     return Err(XmlError::TooManyElements);
                 }
+                // `<X/>` is the same element as `<X></X>` and sits at the same depth. Checking only
+                // the paired spelling let every tree nest one level past the ceiling through a
+                // self-closed leaf (rustfs/backlog#1766, found by the `xml_parse` property).
+                if stack.len() >= limits.max_depth {
+                    return Err(XmlError::TooDeep);
+                }
                 // An empty element declares and closes in one event, so its frame lives exactly as
                 // long as the resolution of its own attributes.
                 scopes.push(declarations(&empty, limits)?);

