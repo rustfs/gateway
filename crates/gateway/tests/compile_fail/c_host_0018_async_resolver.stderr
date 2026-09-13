@@ -1,0 +1,8 @@
+error[E0053]: method `resolve` has an incompatible type for trait
+  --> tests/compile_fail/c_host_0018_async_resolver.rs:24:56
+   |
+24 |     async fn resolve(&self, _query: &HostQuery<'_>) -> ResolvedHost {
+   |                                                        ^^^^^^^^^^^^ expected `ResolvedHost`, found future
+   |
+   = note: expected signature `fn(&AsyncResolver, &HostQuery<'_>) -> ResolvedHost`
+              found signature `fn(&AsyncResolver, &HostQuery<'_>) -> impl Future<Output = ResolvedHost>`

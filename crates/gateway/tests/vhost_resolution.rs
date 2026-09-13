@@ -65,6 +65,100 @@ fn bucket_of(resolved: &ResolvedHost) -> Option<String> {
     resolved.bucket().map(|bucket| bucket.as_str().to_owned())
 }
 
+/// A fixed sequence makes a failed sample reproducible without weakening the input space.
+fn next_host_sample(state: &mut u64) -> u64 {
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+    *state
+}
+
+#[test]
+fn c_host_0032_fifty_thousand_suffix_collisions_remain_path_style() {
+    let resolver = two_domains();
+    let mut state = 0x6c61_6265_6c73_7566;
+    for _ in 0..50_000 {
+        let label = next_host_sample(&mut state);
+        let domain = if label & 1 == 0 { "mys3.com" } else { "s3.example.com" };
+        let host = format!("bucket-{label:x}{domain}");
+        let resolved = resolve(&resolver, &host, "GET", "/bucket/key");
+        assert_eq!(resolved.addressing, Addressing::Path, "host {host}");
+    }
+}
+
+#[test]
+fn c_host_0032_fifty_thousand_foreign_suffixes_remain_path_style() {
+    let resolver = two_domains();
+    let mut state = 0x666f_7265_6967_6e73;
+    for _ in 0..50_000 {
+        let label = next_host_sample(&mut state);
+        let domain = if label & 1 == 0 { "mys3.com" } else { "s3.example.com" };
+        let host = format!("bucket-{label:x}.{domain}.outside-{label:x}.net");
+        let resolved = resolve(&resolver, &host, "GET", "/bucket/key");
+        assert_eq!(resolved.addressing, Addressing::Path, "host {host}");
+    }
+}
+
+#[test]
+fn generated_matching_hosts_still_name_their_own_bucket() {
+    let resolver = two_domains();
+    let mut state = 0x706f_7369_7469_7665;
+    for _ in 0..10_000 {
+        let label = next_host_sample(&mut state);
+        let bucket = format!("bucket-{label:x}");
+        let domain = if label & 1 == 0 { "mys3.com" } else { "s3.example.com" };
+        let host = format!("{}.{domain}.:9000", bucket.to_ascii_uppercase());
+        let resolved = resolve(&resolver, &host, "GET", "/key");
+        assert_eq!(bucket_of(&resolved).as_deref(), Some(bucket.as_str()), "host {host}");
+    }
+}
+
+#[test]
+fn c_host_0031_one_hundred_thousand_raw_hosts_preserve_signing_bytes() {
+    let resolver = two_domains();
+    let mut state = 0x7261_772d_686f_7374;
+    let mut accepted_count = 0;
+    let mut rejected_count = 0;
+    for sample in 0..100_000 {
+        let value = next_host_sample(&mut state);
+        let raw = match sample % 5 {
+            0 => format!("BUCKET-{value:x}.MYS3.COM.:9000").into_bytes(),
+            1 => format!("bucket-{value:x}mys3.com").into_bytes(),
+            2 => b"[2001:db8::1]:9000".to_vec(),
+            3 => vec![b'.'; (value as usize % 1024) + 1],
+            _ => (0..value % 1024).map(|_| next_host_sample(&mut state) as u8).collect(),
+        };
+        let Ok(header) = http::HeaderValue::from_bytes(&raw) else {
+            rejected_count += 1;
+            continue;
+        };
+        let mut request = http::Request::new(());
+        *request.uri_mut() = http::Uri::from_static("/bucket/key");
+        request.headers_mut().insert(http::header::HOST, header);
+        let Ok(accepted) = WireRequest::accept(request, &Limits::default()) else {
+            rejected_count += 1;
+            continue;
+        };
+        accepted_count += 1;
+        let host = accepted.host().host_without_port();
+        let has_domain_labels = ["mys3.com", "s3.example.com"].iter().any(|domain| {
+            // Compare complete labels independently of the production byte-offset matcher.
+            host.rsplit('.').take(domain.split('.').count()).eq(domain.rsplit('.'))
+        });
+        let resolved = resolver.resolve(&HostQuery {
+            host: accepted.host(),
+            path: accepted.raw_path().as_str(),
+            method: accepted.method(),
+        });
+        if !has_domain_labels {
+            assert_eq!(resolved.addressing, Addressing::Path, "raw host {raw:?}");
+        }
+        assert_eq!(accepted.host().raw_for_signing().as_str().as_bytes(), raw);
+    }
+    assert!(accepted_count >= 60_000, "the resolver must receive the accepted host shapes");
+    assert!(rejected_count > 0, "the sample must also exercise the acceptance boundary");
+}
+
 // ---------------------------------------------------------------------------------------------
 // Positive — the shapes that must resolve.
 // ---------------------------------------------------------------------------------------------

@@ -23,6 +23,7 @@ fn gateway_compile_fail_contracts_are_enforced() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/azc_*.rs");
     cases.compile_fail("tests/compile_fail/c_ck_0020_*.rs");
+    cases.compile_fail("tests/compile_fail/c_host_0018_*.rs");
     cases.compile_fail("tests/compile_fail/error_resolution_*.rs");
     cases.compile_fail("tests/trybuild/credential/*.rs");
 }
