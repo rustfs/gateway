@@ -457,14 +457,17 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # crates/dialect-minio/src/ops/put_object_replica.rs (rustfs/gateway#769). A dialect operation is
 # outside the standard authority, so it states its class; it states Standard, the class PutObject
 # has, because a replica write is the same body-streaming PUT with one more query key.
-if central_builders != 102 or explicit_builders != 28:
+# explicit=31: the 29th to 31st are the test-only `rustfs:ServerInfo`, `rustfs:AddServiceAccount`
+# and `rustfs:ReplicationMetricsV2` fixtures in crates/goldens/src/rustfs_admin_proof.rs
+# (rustfs/backlog#1744). They are dialect operations too, and state Standard for the same reason.
+if central_builders != 102 or explicit_builders != 31:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=28"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=31"
     )
 
 print(
-    "check_handler_deadline_class: 135 repository builder sites are inventoried "
-    "(130 classified: 102 central standard, 28 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 138 repository builder sites are inventoried "
+    "(133 classified: 102 central standard, 31 explicit; 5 authority tests)"
 )
 PY
