@@ -153,6 +153,7 @@ fn write_field(field: &mut Field, property: &str, value: &SourceValue, path: &st
             }
             field.omit_when = None;
         }
+        "default_document" => super::default_document::write(field, value, path)?,
         "default_int" => field.default = Some(Value::Int(int(value, path)?)),
         "default_string" => field.default = Some(Value::Str(text(value, path)?)),
         "etag_render" => {

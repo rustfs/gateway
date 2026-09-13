@@ -51,6 +51,10 @@
 //! fixture, and reporting that as "no report" hides a compile kill behind a label that reads like a
 //! broken harness.
 //!
+//! A compile kill can mean an ill-formed plan: the three `required_body` rules were compile kills
+//! because an optional flip retyped the member (rustfs/backlog#1726). They are now planned as an
+//! absent document read as the default, keeping the type; see `rustfs_gateway_codegen::mutate`.
+//!
 //! # `UNWITNESSED`: the rows that certify nothing
 //!
 //! A green suite is a finding about the corpus only when some case in the corpus could have gone

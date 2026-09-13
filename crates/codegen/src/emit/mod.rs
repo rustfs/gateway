@@ -54,6 +54,25 @@ pub fn json_scalar(value: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Float(f) => f.to_string(),
         Value::Null => "\"\"".to_owned(),
+        // The empty document: the wire default of a structure member, which only a mutation
+        // writes (see [`reads_default_document`]).
+        Value::Object(members) if members.is_empty() => "{}".to_owned(),
         other => quote(&format!("{other:?}")),
     }
+}
+
+/// Whether a required structure member's absence reads as the shape's `Default` document.
+///
+/// The lowered model never says this: every required structure is refused when absent, which is
+/// what `q-lock-0007`, `q-restore-0006` and `q-web-0004` pin. It is the violation of that rule a
+/// mutation writes, spelled as the member's wire default being the empty document, because the
+/// other violation — making the member optional — changes its Rust type from `T` to `Option<T>`
+/// and every consumer that reads it bare stops compiling before a single case can run
+/// (rustfs/backlog#1726). The member stays bare; only the decoder's answer to absence changes,
+/// and that answer is exactly the upstream defect those rules exist to refuse.
+#[must_use]
+pub fn reads_default_document(field: &rustfs_gateway_model::ir::Field) -> bool {
+    field.required
+        && matches!(field.ty, rustfs_gateway_model::ir::Type::Structure(_))
+        && matches!(&field.default, Some(Value::Object(members)) if members.is_empty())
 }

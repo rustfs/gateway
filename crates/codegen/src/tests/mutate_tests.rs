@@ -43,6 +43,7 @@ fn source(path: &str, current: SourceValue) -> ResolvedSource {
     ResolvedSource {
         path: path.to_owned(),
         current,
+        request_structure: false,
     }
 }
 
@@ -556,5 +557,160 @@ fn n_a_codec_path_cannot_name_a_different_rule() {
     assert!(
         error.contains("names `q-cors-0007`") && error.contains("belongs to `q-acl-0006`"),
         "{error}"
+    );
+}
+
+/// The three `required_body` rules and the one generated decoder each one's mutation must reach.
+const REQUIRED_BODY_RULES: [(&str, &str); 3] = [
+    ("q-lock-0007", "codec/ops/put_object_retention.rs"),
+    ("q-restore-0006", "codec/ops/restore_object.rs"),
+    ("q-web-0004", "codec/ops/put_bucket_website.rs"),
+];
+
+fn file<'a>(artifacts: &'a crate::Artifacts, suffix: &str) -> &'a str {
+    artifacts
+        .files
+        .iter()
+        .find(|(path, _)| path.ends_with(suffix))
+        .map(|(_, bytes)| bytes.as_str())
+        .unwrap_or_else(|| panic!("no generated artefact ends with `{suffix}`"))
+}
+
+#[test]
+fn a_required_body_rule_is_violated_on_the_wire_without_retyping_its_member() {
+    // rustfs/backlog#1726: flipping `required` to `false` made each payload `Option<T>`, the
+    // fixture stopped compiling, and all three rows read KILLED_BY_COMPILE with no case consulted.
+    // The plan now has to change the decoder and nothing a consumer compiles against.
+    let root = root();
+    let input = CodegenInput::at(&root);
+    let out = CodegenOutput::at(&root);
+    let plain = generate(&input, &out).expect("codegen runs");
+    for (quirk, decoder) in REQUIRED_BODY_RULES {
+        let sources = plain.source_rules.get(quirk).expect("the rule has resolved sources");
+        let mutations: Vec<Mutation> = sources
+            .iter()
+            .map(|source| {
+                assert!(source.request_structure, "`{}` is a required structure member", source.path);
+                plan(quirk, MutationDimension::Optionality, source).expect("a required structure is plannable")
+            })
+            .collect();
+        for mutation in &mutations {
+            assert!(
+                mutation.path.ends_with(".default_document"),
+                "`{quirk}` must not be planned as a type change: {}",
+                mutation.path
+            );
+        }
+
+        let mutated = generate_mutated(&input, &out, &mutations).expect("codegen runs");
+
+        // Doc comments may say the member now has a wire default; the code a consumer compiles
+        // against may not change by a single token.
+        let dto = |artifacts: &crate::Artifacts| -> Vec<(std::path::PathBuf, String)> {
+            artifacts
+                .files
+                .iter()
+                .filter(|(path, _)| path.components().any(|part| part.as_os_str() == "dto"))
+                .map(|(path, bytes)| {
+                    let code: Vec<&str> = bytes.lines().filter(|line| !line.trim_start().starts_with("///")).collect();
+                    (path.clone(), code.join("\n"))
+                })
+                .collect()
+        };
+        assert_eq!(dto(&plain), dto(&mutated), "`{quirk}` must leave every dto type as it was");
+        assert_ne!(
+            file(&plain, decoder),
+            file(&mutated, decoder),
+            "`{quirk}` must reach the decoder that refuses the absent document"
+        );
+    }
+}
+
+#[test]
+fn a_defaulted_payload_reads_an_empty_body_as_the_default_document() {
+    let root = root();
+    let input = CodegenInput::at(&root);
+    let out = CodegenOutput::at(&root);
+    let plain = generate(&input, &out).expect("codegen runs");
+    let mutations: Vec<Mutation> = plain.source_rules["q-lock-0007"]
+        .iter()
+        .map(|source| plan("q-lock-0007", MutationDimension::Optionality, source).expect("plannable"))
+        .collect();
+
+    let mutated = generate_mutated(&input, &out, &mutations).expect("codegen runs");
+
+    let defaulted =
+        "        if raw_body.as_ref().is_empty() {\n            input.retention = Default::default();\n        } else {\n";
+    assert!(!file(&plain, "codec/ops/put_object_retention.rs").contains(defaulted));
+    assert!(
+        file(&mutated, "codec/ops/put_object_retention.rs").contains(defaulted),
+        "the mutant is the upstream defect: an empty body read as a defaulted retention"
+    );
+}
+
+#[test]
+fn a_defaulted_shape_member_is_no_longer_refused_when_absent() {
+    let root = root();
+    let input = CodegenInput::at(&root);
+    let out = CodegenOutput::at(&root);
+    let plain = generate(&input, &out).expect("codegen runs");
+    let mutations: Vec<Mutation> = plain.source_rules["q-web-0004"]
+        .iter()
+        .map(|source| plan("q-web-0004", MutationDimension::Optionality, source).expect("plannable"))
+        .collect();
+
+    let mutated = generate_mutated(&input, &out, &mutations).expect("codegen runs");
+
+    let refusal = ".about(\"Redirect\")";
+    assert!(file(&plain, "codec/ops/put_bucket_website.rs").contains(refusal));
+    assert!(
+        !file(&mutated, "codec/ops/put_bucket_website.rs").contains(refusal),
+        "a routing rule with no Redirect must decode to a default redirect under the mutation"
+    );
+}
+
+#[test]
+fn n_a_required_member_that_is_not_a_request_structure_keeps_the_boolean_flip() {
+    // Only a structure has a default document to fall back to; a required output string keeps
+    // the plain opposite, and the planner must not widen the new plan onto it.
+    let plain = artifacts();
+    let source = plain.source_rules["q-empty-0063"]
+        .iter()
+        .find(|source| source.path == "ListObjects.output.Prefix.required")
+        .expect("the ListObjects prefix source resolves");
+    assert!(!source.request_structure);
+
+    let mutation = plan("q-empty-0063", MutationDimension::Optionality, source).expect("plannable");
+
+    assert_eq!(mutation.path, source.path);
+    assert_eq!(mutation.to, SourceValue::Bool(false));
+}
+
+#[test]
+fn n_a_default_document_is_refused_on_a_member_that_is_not_a_structure() {
+    let mut operations = lowered();
+    let path = "PutObjectRetention.input.Bucket.default_document";
+    let error = resolve_at(&operations, path).expect_err("a bucket label has no default document");
+    assert!(error.contains("not a required structure"), "{error}");
+
+    let forced = Mutation::new("q-lock-0007", path, SourceValue::Bool(false), SourceValue::Bool(true))
+        .expect("the plan itself is well formed");
+    apply(&mut operations, &forced).expect_err("the writer must not invent a default for a scalar");
+}
+
+#[test]
+fn a_default_document_is_written_where_the_reader_reads_it() {
+    let mut operations = lowered();
+    let path = "PutBucketWebsite.shapes.RoutingRule.fields.Redirect.default_document";
+    assert_eq!(resolve_at(&operations, path).expect("resolves"), SourceValue::Bool(false));
+    let mutation = Mutation::new("q-web-0004", path, SourceValue::Bool(false), SourceValue::Bool(true)).expect("well formed");
+
+    apply(&mut operations, &mutation).expect("the writer accepts its own plan");
+
+    assert_eq!(resolve_at(&operations, path).expect("resolves"), SourceValue::Bool(true));
+    assert_eq!(
+        resolve_at(&operations, "PutBucketWebsite.shapes.RoutingRule.fields.Redirect.required").expect("resolves"),
+        SourceValue::Bool(true),
+        "the member stays required, so its dto type stays bare"
     );
 }
