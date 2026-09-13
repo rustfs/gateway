@@ -633,6 +633,16 @@ impl Handler<DeleteObject> for FsBackend {
 impl Handler<ListObjectVersions> for FsBackend {
     async fn call(&self, request: Req<ListObjectVersions>) -> HandlerResult<ListObjectVersions> {
         let input = request.input();
+        // The version cursor resumes within the key the key cursor names; alone it names nothing,
+        // and answering page one would repeat what the client already has (`c-list-0034`).
+        // An empty key marker needs no rule of its own: no version lives under the empty key, so
+        // the resume lookup below refuses it with the same code.
+        if input.version_id_marker.is_some() && input.key_marker.is_none() {
+            return Err(HandlerError::new(
+                ErrorCode::INVALID_ARGUMENT,
+                "a version-id-marker requires a key-marker",
+            ));
+        }
         let _guard = self.version_lock.lock().await;
         let _state = self.versioning_state(input.bucket.as_str()).await?;
         let mut records = self.version_records(input.bucket.as_str()).await?;

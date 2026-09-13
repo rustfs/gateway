@@ -98,6 +98,114 @@ fn c_sig_0425_expired_policy_is_rejected() {
     assert_eq!(result.err(), Some(PostPolicyError::Expired));
 }
 
+// The expiration is an ISO 8601 instant, and the documented policy example writes it with
+// milliseconds (`2007-12-01T12:00:00.000Z`); minio-js and minio-java send that form
+// (rustfs/gateway#756). The policies below are `POLICY` with only the expiration changed.
+const POLICY_MILLISECONDS: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMC4wMDBaIiwiY29uZGl0aW9ucyI6W3siYnVja2V0IjoiZXhhbXBsZS1idWNrZXQifSxbInN0YXJ0cy13aXRoIiwiJGtleSIsInVwbG9hZHMvIl0seyJ4LWFtei1hbGdvcml0aG0iOiJBV1M0LUhNQUMtU0hBMjU2In0seyJ4LWFtei1jcmVkZW50aWFsIjoiQUtJREVYQU1QTEUvMjAxNTA4MzAvdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCJ9LHsieC1hbXotZGF0ZSI6IjIwMTUwODMwVDEyMzYwMFoifV19";
+const POLICY_HALF_SECOND: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMC41WiIsImNvbmRpdGlvbnMiOlt7ImJ1Y2tldCI6ImV4YW1wbGUtYnVja2V0In0sWyJzdGFydHMtd2l0aCIsIiRrZXkiLCJ1cGxvYWRzLyJdLHsieC1hbXotYWxnb3JpdGhtIjoiQVdTNC1ITUFDLVNIQTI1NiJ9LHsieC1hbXotY3JlZGVudGlhbCI6IkFLSURFWEFNUExFLzIwMTUwODMwL3VzLWVhc3QtMS9zMy9hd3M0X3JlcXVlc3QifSx7IngtYW16LWRhdGUiOiIyMDE1MDgzMFQxMjM2MDBaIn1dfQ==";
+const POLICY_EMPTY_FRACTION: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMC5aIiwiY29uZGl0aW9ucyI6W3siYnVja2V0IjoiZXhhbXBsZS1idWNrZXQifSxbInN0YXJ0cy13aXRoIiwiJGtleSIsInVwbG9hZHMvIl0seyJ4LWFtei1hbGdvcml0aG0iOiJBV1M0LUhNQUMtU0hBMjU2In0seyJ4LWFtei1jcmVkZW50aWFsIjoiQUtJREVYQU1QTEUvMjAxNTA4MzAvdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCJ9LHsieC1hbXotZGF0ZSI6IjIwMTUwODMwVDEyMzYwMFoifV19";
+const POLICY_TEN_DIGIT_FRACTION: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMC4wMDAwMDAwMDAwWiIsImNvbmRpdGlvbnMiOlt7ImJ1Y2tldCI6ImV4YW1wbGUtYnVja2V0In0sWyJzdGFydHMtd2l0aCIsIiRrZXkiLCJ1cGxvYWRzLyJdLHsieC1hbXotYWxnb3JpdGhtIjoiQVdTNC1ITUFDLVNIQTI1NiJ9LHsieC1hbXotY3JlZGVudGlhbCI6IkFLSURFWEFNUExFLzIwMTUwODMwL3VzLWVhc3QtMS9zMy9hd3M0X3JlcXVlc3QifSx7IngtYW16LWRhdGUiOiIyMDE1MDgzMFQxMjM2MDBaIn1dfQ==";
+
+fn fields_with_policy<'a>(signature: &'a str, policy: &'a str) -> Vec<(&'a str, &'a str)> {
+    let mut fields = valid_fields(signature);
+    for field in &mut fields {
+        if field.0 == "policy" {
+            field.1 = policy;
+        }
+    }
+    fields
+}
+
+#[test]
+fn a_millisecond_expiration_is_accepted_and_verified() {
+    let key = SigningKey::from_array([7u8; 32]);
+    let signature = hex_encode(&hmac_sha256(key.expose(), POLICY_MILLISECONDS.as_bytes()));
+    let policy = parse(&fields_with_policy(&signature, POLICY_MILLISECONDS), "report.txt").expect("a millisecond expiration");
+    assert!(policy.verify(&key).is_ok());
+    assert!(parse(&fields_with_policy(&signature, POLICY_HALF_SECOND), "report.txt").is_ok());
+}
+
+#[test]
+fn n_a_fraction_does_not_extend_the_expiration() {
+    // 13:36:00.5 expires at 13:36:00: the fraction is truncated, never rounded up, so a policy
+    // is never honoured past the whole second it names.
+    let signature = "0".repeat(64);
+    let result = PostPolicy::parse(
+        &fields_with_policy(&signature, POLICY_HALF_SECOND),
+        "report.txt",
+        PostPolicyLimits::default(),
+        RequestNow::from_unix_seconds(1_440_941_760),
+    );
+    assert_eq!(result.err(), Some(PostPolicyError::Expired));
+}
+
+#[test]
+fn n_an_empty_fraction_is_malformed() {
+    let signature = "0".repeat(64);
+    let result = parse(&fields_with_policy(&signature, POLICY_EMPTY_FRACTION), "report.txt");
+    assert_eq!(result.err(), Some(PostPolicyError::Malformed));
+}
+
+#[test]
+fn n_a_fraction_past_nanoseconds_is_malformed() {
+    let signature = "0".repeat(64);
+    let result = parse(&fields_with_policy(&signature, POLICY_TEN_DIGIT_FRACTION), "report.txt");
+    assert_eq!(result.err(), Some(PostPolicyError::Malformed));
+}
+
+// A browser form names its bucket in the URL; the `bucket` form field is optional, and minio-java
+// sends none (rustfs/gateway#756). A policy condition on `$bucket` then binds the bucket the
+// request is routed to, checked when the route is known.
+const POLICY_NO_BUCKET_CONDITION: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMC4wMDBaIiwiY29uZGl0aW9ucyI6W1sic3RhcnRzLXdpdGgiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9XX0=";
+const POLICY_BUCKET_PREFIX: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMC4wMDBaIiwiY29uZGl0aW9ucyI6W1sic3RhcnRzLXdpdGgiLCIkYnVja2V0IiwiZXhhbXBsZS0iXSxbInN0YXJ0cy13aXRoIiwiJGtleSIsInVwbG9hZHMvIl0seyJ4LWFtei1hbGdvcml0aG0iOiJBV1M0LUhNQUMtU0hBMjU2In0seyJ4LWFtei1jcmVkZW50aWFsIjoiQUtJREVYQU1QTEUvMjAxNTA4MzAvdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCJ9LHsieC1hbXotZGF0ZSI6IjIwMTUwODMwVDEyMzYwMFoifV19";
+
+fn fields_without_bucket<'a>(signature: &'a str, policy: &'a str) -> Vec<(&'a str, &'a str)> {
+    let mut fields = fields_with_policy(signature, policy);
+    fields.retain(|field| field.0 != "bucket");
+    fields
+}
+
+#[test]
+fn a_form_without_a_bucket_field_is_bound_by_the_policy_condition() {
+    let signature = "0".repeat(64);
+    let policy = parse(&fields_without_bucket(&signature, POLICY_MILLISECONDS), "report.txt").expect("the URL names the bucket");
+    assert!(policy.enforce_final("example-bucket", "uploads/report.txt", 1).is_ok());
+    assert_eq!(
+        policy.enforce_final("other-bucket", "uploads/report.txt", 1).err(),
+        Some(PostPolicyError::ConditionFailed)
+    );
+}
+
+#[test]
+fn a_bucket_prefix_condition_is_checked_against_the_routed_bucket() {
+    let signature = "0".repeat(64);
+    let policy = parse(&fields_without_bucket(&signature, POLICY_BUCKET_PREFIX), "report.txt").expect("a bucket prefix");
+    assert!(policy.enforce_final("example-one", "uploads/report.txt", 1).is_ok());
+    assert_eq!(
+        policy.enforce_final("sample-bucket", "uploads/report.txt", 1).err(),
+        Some(PostPolicyError::ConditionFailed)
+    );
+}
+
+#[test]
+fn n_a_form_that_binds_no_bucket_is_refused() {
+    // Neither a field nor a condition names a bucket: the signature would then authorize an upload
+    // into any bucket the key may write, so the form is refused rather than left unbound.
+    let signature = "0".repeat(64);
+    let result = parse(&fields_without_bucket(&signature, POLICY_NO_BUCKET_CONDITION), "report.txt");
+    assert_eq!(result.err(), Some(PostPolicyError::ConditionFailed));
+}
+
+#[test]
+fn n_a_bucket_field_still_binds_the_routed_bucket() {
+    let signature = "0".repeat(64);
+    let policy = parse(&valid_fields(&signature), "report.txt").expect("policy shape is valid");
+    assert_eq!(
+        policy.enforce_final("other-bucket", "uploads/report.txt", 1).err(),
+        Some(PostPolicyError::ConditionFailed)
+    );
+}
+
 #[test]
 fn c_sig_0426_wrong_signature_is_rejected() {
     let signature = "0".repeat(64);

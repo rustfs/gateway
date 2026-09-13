@@ -133,7 +133,7 @@ pub struct PostPolicy {
     signed_at: AmzDate,
     signature: Signature,
     session_token: Option<SessionToken>,
-    bucket: String,
+    bucket: BucketBinding,
     final_key: String,
     minimum_file_bytes: u64,
     maximum_file_bytes: u64,
@@ -262,7 +262,7 @@ impl PostPolicy {
 /// A SigV2 browser POST policy using [`PostPolicy`]'s field, JSON, and size authority.
 pub struct SigV2PostPolicy {
     encoded: String,
-    bucket: String,
+    bucket: BucketBinding,
     final_key: String,
     minimum_file_bytes: u64,
     maximum_file_bytes: u64,
@@ -339,7 +339,7 @@ impl SigV2PostPolicy {
 
 struct CommonPolicy {
     encoded: String,
-    bucket: String,
+    bucket: BucketBinding,
     final_key: String,
     minimum_file_bytes: u64,
     maximum_file_bytes: u64,
@@ -409,8 +409,20 @@ fn enforce_policy_fields(
     let mut mentioned = BTreeSet::new();
     let mut minimum_file_bytes = 0;
     let mut maximum_file_bytes = limits.max_file_bytes;
+    let bucket_field = fields.get("bucket");
+    let mut bucket_rules = Vec::new();
     for condition in conditions {
         match condition {
+            // Without a `bucket` field the URL names the bucket, which is not known here: the
+            // condition binds the routed bucket and `enforce_final` checks it.
+            Condition::Exact(name, expected) if name == "bucket" && bucket_field.is_none() => {
+                mentioned.insert(name.clone());
+                bucket_rules.push(BucketRule::Exact(expected.clone()));
+            }
+            Condition::StartsWith(name, prefix) if name == "bucket" && bucket_field.is_none() => {
+                mentioned.insert(name.clone());
+                bucket_rules.push(BucketRule::StartsWith(prefix.clone()));
+            }
             Condition::Exact(name, expected) => {
                 mentioned.insert(name.clone());
                 if condition_value(fields, name, &final_key)? != expected {
@@ -441,9 +453,16 @@ fn enforce_policy_fields(
         }
     }
 
+    if bucket_field.is_none() && bucket_rules.is_empty() {
+        return Err(PostPolicyError::ConditionFailed);
+    }
+
     Ok(CommonPolicy {
         encoded,
-        bucket: fields.required("bucket")?.to_owned(),
+        bucket: BucketBinding {
+            field: bucket_field.map(str::to_owned),
+            rules: bucket_rules,
+        },
         final_key,
         minimum_file_bytes,
         maximum_file_bytes,
@@ -451,7 +470,7 @@ fn enforce_policy_fields(
 }
 
 fn enforce_final_values(
-    expected_bucket: &str,
+    expected_bucket: &BucketBinding,
     expected_key: &str,
     minimum_file_bytes: u64,
     maximum_file_bytes: u64,
@@ -459,7 +478,7 @@ fn enforce_final_values(
     key: &str,
     file_bytes: u64,
 ) -> Result<PostPolicyEnforcement, PostPolicyError> {
-    if bucket != expected_bucket || key != expected_key {
+    if !expected_bucket.admits(bucket) || key != expected_key {
         return Err(PostPolicyError::ConditionFailed);
     }
     if file_bytes < minimum_file_bytes {
@@ -469,6 +488,34 @@ fn enforce_final_values(
         return Err(PostPolicyError::EntityTooLarge);
     }
     Ok(PostPolicyEnforcement(()))
+}
+
+/// How a policy binds the bucket its form is routed to.
+///
+/// A browser form names its bucket in the URL, and the `bucket` form field is optional: minio-java
+/// sends none (rustfs/gateway#756). With the field, the routed bucket must equal it, and the
+/// policy's `$bucket` conditions were checked against it at parse time. Without it, those
+/// conditions are kept here and checked against the routed bucket. A form bound by neither is
+/// refused at parse time, so a signature never authorizes an upload into whichever bucket the URL
+/// happens to name.
+struct BucketBinding {
+    field: Option<String>,
+    rules: Vec<BucketRule>,
+}
+
+enum BucketRule {
+    Exact(String),
+    StartsWith(String),
+}
+
+impl BucketBinding {
+    fn admits(&self, bucket: &str) -> bool {
+        self.field.as_deref().is_none_or(|field| field == bucket)
+            && self.rules.iter().all(|rule| match rule {
+                BucketRule::Exact(expected) => bucket == expected,
+                BucketRule::StartsWith(prefix) => bucket.starts_with(prefix.as_str()),
+            })
+    }
 }
 
 enum Condition {
@@ -572,18 +619,32 @@ fn substitute_filename(template: &str, filename: Option<&str>) -> Result<String,
     }
 }
 
+/// Reads the policy's `expiration`: an ISO 8601 UTC instant, `YYYY-MM-DDTHH:MM:SS`, an optional
+/// fraction of one to nine digits, then `Z`.
+///
+/// The documented policy example writes milliseconds (`2007-12-01T12:00:00.000Z`), and minio-js
+/// and minio-java send that form, so refusing a fraction refused every form those SDKs sign
+/// (rustfs/gateway#756). The fraction is truncated, never rounded up: a policy is not honoured
+/// past the whole second it names.
 fn parse_expiration(value: &str) -> Result<AmzDate, PostPolicyError> {
     let bytes = value.as_bytes();
     if !value.is_ascii()
-        || bytes.len() != 20
+        || bytes.len() < 20
         || bytes[4] != b'-'
         || bytes[7] != b'-'
         || bytes[10] != b'T'
         || bytes[13] != b':'
         || bytes[16] != b':'
-        || bytes[19] != b'Z'
+        || bytes[bytes.len() - 1] != b'Z'
     {
         return Err(PostPolicyError::Malformed);
+    }
+    let fraction = &value[19..value.len() - 1];
+    if !fraction.is_empty() {
+        let digits = fraction.strip_prefix('.').ok_or(PostPolicyError::Malformed)?;
+        if digits.is_empty() || digits.len() > 9 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(PostPolicyError::Malformed);
+        }
     }
     let compact = format!(
         "{}{}{}T{}{}{}Z",
