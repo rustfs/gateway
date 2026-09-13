@@ -359,6 +359,31 @@ RUSTEOF
 expect_fail 'an escaped conformance include is rejected fail-closed' \
     mut_conformance_escaped_include_reuses_source
 
+# The replay's one escaping #[path] is allowed as an exact (file, target) pair. Both halves are
+# controlled: the same target from another gateway test, and another target from the replay.
+mut_gateway_other_file_includes_host_property() {
+    cat >>crates/gateway/tests/vhost_resolution.rs <<'RUSTEOF'
+
+#[path = "../../../fuzz/support/host_resolve.rs"]
+mod host_property;
+RUSTEOF
+}
+expect_fail 'only the replay may include the host fuzz property from outside the crate' \
+    mut_gateway_other_file_includes_host_property
+
+mut_gateway_replay_includes_other_fuzz_file() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/host_resolve_replay.rs")
+text = path.read_text()
+old = '#[path = "../../../fuzz/support/host_resolve.rs"]'
+assert old in text, "missing mutation subject: the replay's #[path]"
+path.write_text(text.replace(old, '#[path = "../../../fuzz/support/chunked_decode.rs"]', 1))
+PYEOF
+}
+expect_fail 'the replay may include only the host fuzz property' \
+    mut_gateway_replay_includes_other_fuzz_file
+
 mut_core_second_trybuild_batch() {
     python3 - <<'PYEOF'
 from pathlib import Path

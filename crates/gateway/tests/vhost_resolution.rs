@@ -469,10 +469,13 @@ fn n_the_origin_cannot_disagree_with_the_addressing() {
 // The single source, through the assembled service.
 // ---------------------------------------------------------------------------------------------
 
+/// One audited question: the stage, its bucket, its key, and where the bucket came from.
+type Audited = (String, Option<String>, Option<String>, TargetOrigin);
+
 /// Every `(bucket, key)` the service handed to authorisation and to the handler.
 #[derive(Default)]
 struct Seen {
-    authorised: Mutex<Vec<(String, Option<String>, Option<String>, TargetOrigin)>>,
+    authorised: Mutex<Vec<Audited>>,
     handled: Mutex<Vec<(String, String)>>,
 }
 
