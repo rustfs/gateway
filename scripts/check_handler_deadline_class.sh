@@ -162,7 +162,10 @@ for required in (
     "let request_cancellation = request_config.request_cancellation();",
     "handler_with_request_cancellation(",
 ):
-    if invoke_body.count(required) != 1:
+    # Compared with whitespace collapsed: rustfs/gateway#771 nested this block one level deeper
+    # without changing a token, and a re-indent is not a change of deadline source. Each fragment
+    # must still appear exactly once in the dispatch body.
+    if " ".join(invoke_body.split()).count(" ".join(required.split())) != 1:
         fail("dynamic dispatch does not consume one request snapshot's handler deadline configuration")
 if invoke_body.count("handler deadline exceeded after cleanup completed") != 1:
     fail("dynamic dispatch can commit a handler result completed after its deadline")
@@ -286,7 +289,12 @@ for report, expected in (
     if connection_test_source.count(report) != expected:
         fail("handler deadline observer evidence does not distinguish all report outcomes")
 
-core_exports = facade_source.partition("pub use rustfs_gateway_core::{")[2].partition("};")[0]
+# Every `pub use rustfs_gateway_core::{..}` block: rustfs/gateway#771 added a second one for the
+# request-context types ahead of the main list, and the export rule is about the facade, not
+# about which block comes first.
+core_exports = " ".join(
+    block.partition("};")[0] for block in facade_source.split("pub use rustfs_gateway_core::{")[1:]
+)
 config_exports = facade_source.partition("pub use crate::config::{")[2].partition("};")[0]
 if not core_exports or "HandlerDeadlineClass" not in core_exports.replace("\n", " ").replace(",", " ").split():
     fail("facade does not export HandlerDeadlineClass")
