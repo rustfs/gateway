@@ -210,12 +210,13 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 14] = [
         aws: "supports SHA-512, MD5, XXHash3, XXHash64 and XXHash128 checksums since 2026-04",
         aws_evidence: "https://aws.amazon.com/about-aws/whats-new/2026/04/s3-five-additional-checksum-algorithms/",
         s3s: "hands the value to the handler; RustFS verifies and stores it",
-        gateway: "the pinned model predates the algorithms, so the checksum binder refuses the header as an unknown algorithm",
-        client_impact: "a client configured for one of the new algorithms is refused",
+        gateway: "binds the value into ChecksumSpec like the other five algorithms, verifies it against the body, and the \
+                  compat conversion hands it to the same s3s member",
+        client_impact: "none: both stacks hand the handler the same checksum member",
         ruling: DivergenceRuling::AlignAws,
-        follow_up: DivergenceFollowUp::Open("https://github.com/rustfs/gateway/issues/751"),
+        follow_up: DivergenceFollowUp::Landed("c-checksum-0003"),
         test_file: PUT_DECODE,
-        test: "a_checksum_algorithm_the_gateway_model_predates_is_refused_by_the_gateway_and_kept_by_s3s",
+        test: "a_checksum_algorithm_added_in_2026_04_is_handed_over_by_both_stacks",
     },
     RequestDivergence {
         id: "rd-put-0007",
