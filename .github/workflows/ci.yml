@@ -99,9 +99,11 @@ on:
 permissions:
   contents: read
 
+# A superseded pull-request run is cancelled; a main push always runs to completion, because
+# with frequent merges a cancelled main run means nobody can ever confirm main is green.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
