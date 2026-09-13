@@ -73,7 +73,8 @@
         "required": false,
         "binding": { "kind": "Header" },
         "type": { "kind": "String" },
-        "hot": true
+        "hot": true,
+        "quirk_refs": []
       },
       {
         "name": "ContentMD5",

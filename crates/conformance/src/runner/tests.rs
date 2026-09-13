@@ -72,7 +72,7 @@ fn with_no_target_every_runnable_case_is_skipped_and_says_why() {
         })
         .map(|outcome| outcome.id.as_str())
         .collect();
-    assert_eq!(profile_gated, ["c-naming-0025", "c-naming-0026", "c-naming-0027"]);
+    assert_eq!(profile_gated, ["c-naming-0025", "c-naming-0026", "c-naming-0027", "c-naming-0032"]);
     assert!(
         skipped
             .iter()

@@ -221,3 +221,18 @@ fn the_stalled_write_is_selected_and_skipped_for_its_socket_reason() {
     let reason = outcome.skip_reason.as_deref().unwrap_or_default();
     assert!(reason.contains("stall"), "{reason}");
 }
+
+/// Negative — the chunked write with no length stays selected, and is skipped only because its
+/// raw request head needs a socket this target has not got (rustfs/gateway#774).
+#[test]
+fn the_chunked_write_without_length_is_selected_and_skipped_for_its_socket_reason() {
+    let report = run_object_domain();
+    let outcome = report
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.id == "c-object-0060")
+        .expect("c-object-0060 is in the object domain");
+    assert_eq!(outcome.verdict, Verdict::Skipped);
+    let reason = outcome.skip_reason.as_deref().unwrap_or_default();
+    assert!(reason.contains("raw_head_utf8"), "{reason}");
+}
