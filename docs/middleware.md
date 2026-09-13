@@ -104,8 +104,14 @@ and the pipeline stops.
    reachable from `WireHead` at all, so there is nothing to freeze there.
 3. **It may not choose the target.** `RoutedView` publishes shared references and no mutable one.
 4. **It may not defeat a response invariant.** A `304` cannot be given content, a `Content-Length`
-   cannot be left overstating its body, and the request identifier cannot be removed — all three
-   run after `on_response`.
+   that disagrees with a body of known length is corrected, and the request identifier cannot be
+   removed — all three run after `on_response`.
+   A filter that installs a stream of *unknown* length keeps the `Content-Length` it declared,
+   because nothing can check a length before the bytes exist. The transport holds it to that
+   declaration instead: on both HTTP/1.1 drivers a stream that ends short of it, or fails part-way,
+   ends the connection with only the bytes the stream produced, and an undeclared stream that fails
+   never sends the last chunk, so a truncated body cannot pass for a complete one. That is c-mw-0024,
+   asserted on a real socket in `crates/gateway/tests/response_stream_termination.rs`.
 
 ### Order
 
@@ -172,7 +178,10 @@ Omitted optional middleware uses the same defaults as initial assembly. An inval
 the installed generation intact.
 
 Every request captures one immutable generation at entry and keeps it through both authorization
-stages and response delivery. A committed response also retains that generation's observer until
+stages and response delivery. That includes a replacement published by the request's own
+`on_wire` or `on_routed`: routing, the policy source, both authorization stages, the operation
+layers, the response seam and the observer of that request all stay on the entry generation.
+`crates/gateway/tests/assembly_snapshot.rs` publishes from inside those two seams to prove it. A committed response also retains that generation's observer until
 its terminal document is ready. A successful update reaches every service clone together.
 
 The existing narrower updates remain available: `ConfigHandle::store` changes only request

@@ -1,0 +1,10 @@
+error[E0624]: associated function `new` is private
+  --> tests/compile_fail/c_mw_0020_next_cannot_be_minted.rs:26:47
+   |
+26 |     let _mint = Next::<'static, ListBuckets>::new;
+   |                                               ^^^ private associated function
+   |
+  ::: src/ext/oplayer.rs
+   |
+   |     pub(crate) fn new(remaining: &'a [Arc<dyn OpLayer<O>>], terminal: &'a dyn Terminal<O>) -> Self {
+   |     ---------------------------------------------------------------------------------------------- private associated function defined here

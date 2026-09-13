@@ -1,0 +1,13 @@
+error[E0053]: method `on_response` has an incompatible type for trait
+  --> tests/compile_fail/c_mw_0015_observer_takes_no_mut.rs:26:34
+   |
+26 |     fn on_response(&self, event: &mut RequestEvent<'_>) {
+   |                                  ^^^^^^^^^^^^^^^^^^^^^ types differ in mutability
+   |
+   = note: expected signature `fn(&Rewriter, &RequestEvent<'_>)`
+              found signature `fn(&Rewriter, &mut RequestEvent<'_>)`
+help: change the parameter type to match the trait
+   |
+26 -     fn on_response(&self, event: &mut RequestEvent<'_>) {
+26 +     fn on_response(&self, event: &RequestEvent<'_>) {
+   |

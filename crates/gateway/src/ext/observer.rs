@@ -80,12 +80,41 @@ pub struct RequestEvent<'a> {
 ///
 /// Synchronous; see the module documentation. Held as `Arc<dyn Observer>` so that the service
 /// stays non-generic over it.
+///
+/// # Examples
+///
+/// An observer that counts error responses:
+///
+/// ```
+/// use std::sync::atomic::{AtomicU64, Ordering};
+///
+/// use rustfs_gateway::{Observer, RequestEvent, ServiceBuilder};
+///
+/// #[derive(Default)]
+/// struct Errors(AtomicU64);
+///
+/// impl Observer for Errors {
+///     fn on_response(&self, event: &RequestEvent<'_>) {
+///         if event.error.is_some() {
+///             self.0.fetch_add(1, Ordering::Relaxed);
+///         }
+///     }
+/// }
+///
+/// let _builder = ServiceBuilder::new().observer(Errors::default());
+/// ```
 pub trait Observer: Send + Sync + 'static {
     /// Called exactly once per request, after the response has been decided.
     ///
     /// It is called for a request that was rejected at acceptance too, where `operation` is `None`.
     /// An observer that only saw successful requests would be an audit trail with the interesting
     /// half missing.
+    ///
+    /// **It reports the head, not the body.** For an ordinary response the call happens before the
+    /// response is handed to the transport, so before the first body byte is produced: the event is
+    /// the same whether a streaming body then completes, ends short, fails, or is abandoned by the
+    /// client. A committed response is the exception: its event waits for the detached work and is
+    /// delivered even if the client has already gone.
     ///
     /// **Must not panic.** The framework isolates a panic the way it isolates one in an
     /// [`crate::AuthzAuditSink`]: the event is lost and one fixed error line is written, but the

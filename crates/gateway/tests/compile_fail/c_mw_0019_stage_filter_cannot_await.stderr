@@ -1,0 +1,22 @@
+error[E0053]: method `on_wire` has an incompatible type for trait
+  --> tests/compile_fail/c_mw_0019_stage_filter_cannot_await.rs:27:58
+   |
+27 |     async fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), HandlerError> {
+   |                                                          ^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HandlerError>`, found future
+   |
+   = note: expected signature `fn(&AsyncLookup, &mut WireHead<'_>) -> Result<(), HandlerError>`
+              found signature `fn(&AsyncLookup, &mut WireHead<'_>) -> impl Future<Output = Result<(), HandlerError>>`
+
+error[E0053]: method `on_wire` has an incompatible type for trait
+  --> tests/compile_fail/c_mw_0019_stage_filter_cannot_await.rs:35:52
+   |
+35 |     fn on_wire(&self, _head: &mut WireHead<'_>) -> BoxFuture<'static, Result<(), HandlerError>> {
+   |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HandlerError>`, found `Pin<Box<...>>`
+   |
+   = note: expected signature `fn(&BoxedLookup, &mut WireHead<'_>) -> Result<(), HandlerError>`
+              found signature `fn(&BoxedLookup, &mut WireHead<'_>) -> Pin<Box<(dyn Future<Output = Result<(), HandlerError>> + Send + 'static)>>`
+help: change the output type to match the trait
+   |
+35 -     fn on_wire(&self, _head: &mut WireHead<'_>) -> BoxFuture<'static, Result<(), HandlerError>> {
+35 +     fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), HandlerError> {
+   |

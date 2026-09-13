@@ -14827,6 +14827,14 @@ mut_no_filter_trait_file() {
 expect_fail check_stage_filter_sync.sh \
     'the StageFilter trait file missing entirely (a guard whose input is gone must fail, not skip)' mut_no_filter_trait_file
 
+mut_async_seam_beside_the_fixture() {
+    cp crates/gateway/tests/compile_fail/c_mw_0019_stage_filter_cannot_await.rs \
+        crates/gateway/tests/compile_fail/c_mw_0019_async_copy.rs
+}
+expect_fail check_stage_filter_sync.sh \
+    'an async seam in a second compile-fail file (the fixture skip is one exact path, not a directory)' \
+    mut_async_seam_beside_the_fixture
+
 # -----------------------------------------------------------------------------
 # check_patch_layer_map.sh is checked in both directions plus the count, because
 # the failure it exists to prevent is silent: a renamed test leaves the table

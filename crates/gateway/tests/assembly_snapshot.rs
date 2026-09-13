@@ -164,14 +164,14 @@ fn layer<O: Operation>(record: Record) -> impl OpLayer<O> {
     })
 }
 
-fn live(events: &Events, pause: Option<Arc<Pause>>, ceiling: u64) -> (S3Service, ConfigHandle) {
+fn old_generation(events: &Events, pause: Option<Arc<Pause>>, ceiling: u64) -> (ServiceBuilder, ConfigHandle) {
     let record = Record {
         generation: "old",
         events: Arc::clone(events),
     };
     let policy = record.clone();
     let (builder, handle) = wired().config(ServiceConfig::new(ceiling));
-    let service = builder
+    let builder = builder
         .dialect(&support::ping_dialect())
         .dialect(&support::content_ping_dialect())
         .register::<Ping, _>(Arc::new(Backend))
@@ -185,26 +185,38 @@ fn live(events: &Events, pause: Option<Arc<Pause>>, ceiling: u64) -> (S3Service,
         .policy_source(policy_from(move |_| {
             policy.mark("policy");
             Ok(PolicySnapshot::of(Arc::new(policy.generation)))
-        }))
-        .build()
-        .expect("the initial generation is valid");
-    (service, handle)
+        }));
+    (builder, handle)
+}
+
+fn live(events: &Events, pause: Option<Arc<Pause>>, ceiling: u64) -> (S3Service, ConfigHandle) {
+    let (builder, handle) = old_generation(events, pause, ceiling);
+    (builder.build().expect("the initial generation is valid"), handle)
 }
 
 fn replacement(events: &Events, ceiling: u64) -> AssemblyUpdate {
+    replacement_serving(events, ceiling, true)
+}
+
+/// The "new" generation; without `ping`, it has no route for `POST /` at all.
+fn replacement_serving(events: &Events, ceiling: u64, ping: bool) -> AssemblyUpdate {
     let record = Record {
         generation: "new",
         events: Arc::clone(events),
     };
     let policy = record.clone();
-    AssemblyUpdate::new()
+    let mut update = AssemblyUpdate::new()
         .config(ServiceConfig::new(ceiling))
-        .dialect(&support::ping_dialect())
         .dialect(&support::content_ping_dialect())
-        .register::<Ping, _>(Arc::new(Backend))
         .register::<ContentPing, _>(Arc::new(Backend))
-        .op_layer::<Ping, _>(layer(record.clone()))
-        .op_layer::<ContentPing, _>(layer(record.clone()))
+        .op_layer::<ContentPing, _>(layer(record.clone()));
+    if ping {
+        update = update
+            .dialect(&support::ping_dialect())
+            .register::<Ping, _>(Arc::new(Backend))
+            .op_layer::<Ping, _>(layer(record.clone()));
+    }
+    update
         .stage_filter(record.clone())
         .observer(record.clone())
         .authz_audit(record.clone())
@@ -509,4 +521,109 @@ async fn a_committed_response_reports_to_the_observer_it_entered_with() {
         .expect("the committed request task completed")
         .expect("the committed request completed");
     assert_eq!((status, take(&events)), (StatusCode::OK, vec![("old", "observer")]));
+}
+
+type Deferred = Box<dyn FnOnce() + Send>;
+
+/// Publishes a replacement from inside one seam of the generation serving the request.
+///
+/// The hook is the pipeline's own call rather than a timer: the replacement is validated and
+/// installed before the seam returns, so every later stage runs with a newer generation already in
+/// the store, and only a stage reading the request's entry snapshot still sees the old one. It is
+/// one-shot, which also drops the service clone it holds and so leaves no ownership cycle.
+struct PublishAt {
+    seam: &'static str,
+    update: Arc<Mutex<Option<Deferred>>>,
+}
+
+impl PublishAt {
+    fn fire(&self, seam: &'static str) {
+        if seam != self.seam {
+            return;
+        }
+        let update = self.update.lock().expect("the publication slot is not poisoned").take();
+        if let Some(update) = update {
+            update();
+        }
+    }
+}
+
+impl StageFilter for PublishAt {
+    fn on_wire(&self, _head: &mut WireHead<'_>) -> Result<(), HandlerError> {
+        self.fire("wire");
+        Ok(())
+    }
+
+    fn on_routed(&self, _routed: &RoutedView<'_>) -> Result<(), HandlerError> {
+        self.fire("routed");
+        Ok(())
+    }
+}
+
+/// The old generation, with a filter that publishes `update()` at `seam` during the first request.
+fn publishing_at(events: &Events, seam: &'static str, update: impl FnOnce() -> AssemblyUpdate + Send + 'static) -> S3Service {
+    let slot: Arc<Mutex<Option<Deferred>>> = Arc::default();
+    let (builder, _handle) = old_generation(events, None, 64);
+    let service = builder
+        .stage_filter(PublishAt {
+            seam,
+            update: Arc::clone(&slot),
+        })
+        .build()
+        .expect("the initial generation is valid");
+    let publisher = service.clone();
+    let published = Arc::clone(events);
+    *slot.lock().expect("the publication slot is not poisoned") = Some(Box::new(move || {
+        publisher
+            .replace_assembly(update())
+            .expect("the mid-request replacement is valid");
+        published.lock().expect("event log is not poisoned").push(("replaced", seam));
+    }));
+    service
+}
+
+/// The old generation's full trail, with the publication recorded right after `seam`'s own mark.
+fn in_flight(seam: &'static str) -> Vec<(&'static str, &'static str)> {
+    let mut events = expected("old");
+    let at = events
+        .iter()
+        .position(|&(_, stage)| stage == seam)
+        .expect("the seam is part of the trail");
+    events.insert(at + 1, ("replaced", seam));
+    events
+}
+
+/// Negative, with a runtime counterexample for routing. A replacement published inside `on_wire`,
+/// before host resolution and routing, has no `POST /` route at all. The in-flight request is still
+/// routed, filtered, authorized, layered and reported by the generation it entered with; a router,
+/// policy source or seam read from the store after entry would answer it with the new
+/// generation's `501` or record a `new` stage.
+#[tokio::test]
+async fn a_replacement_published_at_the_wire_seam_cannot_reach_the_routing_of_the_request() {
+    let events = Events::default();
+    let replacement_events = Arc::clone(&events);
+    let service = publishing_at(&events, "wire", move || replacement_serving(&replacement_events, 64, false));
+
+    assert_eq!(ping(&service).await, (StatusCode::OK, "<Ping>pong</Ping>".to_owned()));
+    assert_eq!(take(&events), in_flight("wire"));
+    // The control: the replacement really is installed, and it has no route for the same request.
+    assert_eq!(ping(&service).await.0, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(take(&events), [("new", "wire"), ("new", "response"), ("new", "observer")]);
+    assert_eq!(body_request(&service).await, StatusCode::OK);
+    assert_eq!(take(&events), expected("new"));
+}
+
+/// Negative. A replacement published inside `on_routed` lands between the routed seam and the
+/// policy fetch. The policy source, both authorization stages, the audit sink, the operation layer,
+/// the response seam and the observer all still belong to the generation the request entered with.
+#[tokio::test]
+async fn a_replacement_published_at_the_routed_seam_cannot_reach_later_stages() {
+    let events = Events::default();
+    let replacement_events = Arc::clone(&events);
+    let service = publishing_at(&events, "routed", move || replacement(&replacement_events, 64));
+
+    assert_eq!(ping(&service).await, (StatusCode::OK, "<Ping>pong</Ping>".to_owned()));
+    assert_eq!(take(&events), in_flight("routed"));
+    assert_eq!(ping(&service).await, (StatusCode::OK, "<Ping>pong</Ping>".to_owned()));
+    assert_eq!(take(&events), expected("new"));
 }

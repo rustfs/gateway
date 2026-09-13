@@ -1,0 +1,15 @@
+error[E0382]: use of moved value: `next`
+  --> tests/compile_fail/c_mw_0020_next_runs_once.rs:26:13
+   |
+24 | fn twice<O: Operation>(next: Next<'_, O>, first: Req<O>, second: Req<O>) {
+   |                        ---- move occurs because `next` has type `Next<'_, O>`, which does not implement the `Copy` trait
+25 |     let _ = next.run(first);
+   |                  ---------- `next` moved due to this method call
+26 |     let _ = next.run(second);
+   |             ^^^^ value used here after move
+   |
+note: `Next::<'a, O>::run` takes ownership of the receiver `self`, which moves `next`
+  --> src/ext/oplayer.rs
+   |
+   |     pub fn run(self, request: Req<O>) -> BoxFuture<'a, HandlerResult<O>> {
+   |                ^^^^
