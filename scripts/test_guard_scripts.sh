@@ -15368,6 +15368,7 @@ expect_authz_fail_minimal() {
         crates/gateway/examples/custom_authorizer.rs
         crates/gateway/examples/minimal.rs
         crates/gateway/tests/assembly.rs
+        crates/gateway/tests/assembly_snapshot.rs
         crates/gateway/tests/authz_consumption.rs
         crates/gateway/tests/authz_contract.rs
         crates/gateway/tests/authz_contract/oracle.rs
@@ -15607,6 +15608,21 @@ mut_policy_module_deleted() {
 }
 expect_fail check_policy_snapshot_once.sh \
     "the guard's own subject deleted, which must fail rather than skip" mut_policy_module_deleted
+
+mut_policy_source_no_longer_held() {
+    python3 - <<'AZPY'
+import pathlib
+p = pathlib.Path("crates/gateway/src/routing.rs")
+s = p.read_text()
+subject = "    pub(crate) policy_source: Arc<dyn PolicySource>,\n"
+if s.count(subject) != 1:
+    raise SystemExit("missing mutation subject: the captured generation's policy source field")
+p.write_text(s.replace(subject, "    pub(crate) policy_source: fn() -> Box<dyn PolicySource>,\n", 1))
+AZPY
+}
+expect_fail check_policy_snapshot_once.sh \
+    'a request generation that builds its policy source instead of holding one' mut_policy_source_no_longer_held \
+    'no `policy_source: Arc<dyn PolicySource>` field'
 
 # ── check_authz_no_default_impl.sh (P6-02) ─────────────────────────────────────
 
