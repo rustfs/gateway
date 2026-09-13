@@ -24,6 +24,8 @@ mod support;
 mod assembly;
 #[path = "assembly_order.rs"]
 mod assembly_order;
+#[path = "assembly_snapshot.rs"]
+mod assembly_snapshot;
 #[path = "authz_consumption.rs"]
 mod authz_consumption;
 #[path = "authz_contract.rs"]

@@ -18,9 +18,10 @@ fail() {
 [[ -f "$ALLOWLIST" ]] || fail 'scripts/config_load_allowlist.txt is missing'
 [[ -f "$RUNTIME_EVIDENCE" ]] || fail 'c-lim-0005 runtime evidence is missing'
 
+# rcu also exposes a current snapshot; only assembly, update, and final-drop sites may use it.
 actual="$({
     cd "$ROOT_DIR"
-    grep -RInE '(\.|::)(load|load_full)([^[:alnum:]_]|$)' crates/gateway/src --include='*.rs' \
+    grep -RInE '(\.|::)(load|load_full|rcu)([^[:alnum:]_]|$)' crates/gateway/src --include='*.rs' \
         | cut -d: -f1,2 \
         | LC_ALL=C sort
 } || true)"
@@ -31,12 +32,10 @@ expected="$(grep -Ev '^[[:space:]]*(#|$)' "$ALLOWLIST" | LC_ALL=C sort)"
     printf 'check_config_load_once: expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
     exit 1
 }
-for routing_entry in 317 332; do
-    [[ "$(grep -c "^crates/gateway/src/service.rs:${routing_entry}$" <<<"$expected")" == 1 ]] \
-        || fail 'each request entry must allowlist exactly one routing snapshot load'
+for snapshot_entry in 286 303; do
+    [[ "$(grep -c "^crates/gateway/src/service.rs:${snapshot_entry}$" <<<"$expected")" == 1 ]] \
+        || fail 'each request entry must allowlist exactly one assembly snapshot load'
 done
-[[ "$(grep -c '^crates/gateway/src/service.rs:353$' <<<"$expected")" == 1 ]] \
-    || fail 'the shared request pipeline must allowlist exactly one configuration snapshot load'
 
 stages="$(grep -oE '\.(wire|targeted|routed|governed|meta_auth|route_authorized|guarded|decoded|authorized)\(' \
     "${SOURCE_ROOT}/service.rs" | tr -d '.(')"
@@ -50,15 +49,21 @@ import sys
 
 service = Path(sys.argv[1]).read_text(encoding="utf-8")
 request_config = Path(sys.argv[2]).read_text(encoding="utf-8")
-routing_capture = "        let routing = self.inner.routing.load_full();\n"
-if service.count(routing_capture) != 2:
-    raise SystemExit("check_config_load_once: dynamic and monomorphic request entries must each capture one routing snapshot")
-capture = """        let config = self.inner.config.load_full();
-        let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
+capture = """        let snapshot = self.inner.config.load_full();
+        let runtime = snapshot.runtime();
+"""
+if service.count(capture) != 2:
+    raise SystemExit("check_config_load_once: dynamic and monomorphic request entries must each capture one owned assembly snapshot")
+handoff = """        self.call_with_mode(request, mode, Arc::clone(&snapshot.config), runtime)
+            .await
+"""
+if service.count(handoff) != 2:
+    raise SystemExit("check_config_load_once: request settings and middleware must come from the same entry snapshot")
+capture = """        let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
         let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
 """
 if service.count(capture) != 1:
-    raise SystemExit("check_config_load_once: shared request entry does not capture cancellation beside its one configuration snapshot")
+    raise SystemExit("check_config_load_once: shared request entry does not carry cancellation beside its captured configuration")
 for fragment in (
     "request_cancellation: Option<tokio::sync::watch::Receiver<bool>>,",
     "self.request_cancellation = request_cancellation;",
@@ -109,4 +114,4 @@ if "#[cfg" in body:
     raise SystemExit("check_config_load_once: c-lim-0005 runtime evidence is conditionally disabled")
 PY
 
-printf 'OK: c-lim-0005 observes one configuration and one routing snapshot per request; c-lim-0041 rejects later reloads\n'
+printf 'OK: c-lim-0005 observes one settings and middleware snapshot per request; c-lim-0041 rejects later reloads\n'

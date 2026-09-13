@@ -9,9 +9,9 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | File | Responsibility | Read it when |
 | --- | --- | --- |
 | `src/lib.rs` | Modules and public re-exports | A downstream caller cannot name a type |
-| `src/builder.rs` | Registration, extension setters, assembly checks | Adding a knob or diagnosing `build()` |
-| `src/config.rs`, `src/routing.rs` | Immutable hot configuration and atomic route/dispatch snapshots | Updating either live generation or checking one-load-per-request |
-| `src/service.rs` | Ordered pipeline and `S3Service` | Moving a stage or tracing a response |
+| `src/builder.rs`, `src/builder/assembly_update.rs` | Registration and validated initial or replacement assemblies | Adding a knob or diagnosing candidate validation |
+| `src/config.rs`, `src/routing.rs` | One atomic settings, routing, and middleware snapshot | Updating a live generation or checking one-load-per-request |
+| `src/service.rs`, `src/service/update.rs` | Ordered pipeline and atomic assembly publication | Moving a stage, replacing middleware, or tracing a response |
 | `src/service_tests.rs` | The pipeline's own unit suite, split out at the 800-line limit | Changing what is decidable without a request |
 | `src/adapt.rs` | tower and hyper adapters | Wiring a server or checking `Infallible` |
 | `src/conn/**` | Optional plaintext HTTP/1.1 request framing and response transport | Auditing the self-held socket path or adding file-region transfer |
@@ -74,7 +74,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/assembly_order.rs` | Aggregate extension call order and counts |
 | `tests/service_clone_allocations.rs` | Zero-allocation connection clones |
 | `tests/service_concurrency.rs` | One hundred concurrent clones and requests |
-| `tests/service_config.rs`, `tests/operation_registry_hot_update.rs` | Configuration and routing updates cannot tear an in-flight request snapshot |
+| `tests/service_config.rs`, `tests/operation_registry_hot_update.rs`, `tests/assembly_snapshot.rs` | Settings, routing, and middleware updates retain one in-flight generation and preserve concurrent partial updates |
 | `tests/handler_panic.rs` | Handler panic becomes 500; next request still runs |
 | `tests/pipeline.rs` | End-to-end ordering, response shapes, body progress |
 | `tests/authz_contract.rs` | Two authorization stages, audit, failure floor |

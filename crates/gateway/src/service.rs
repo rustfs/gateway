@@ -120,7 +120,7 @@ use rustfs_gateway_core::cors::{
 };
 use rustfs_gateway_core::{
     Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel, RequestBodyMode,
-    ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, Router, SseConfig, StaticDispatchError, StaticDispatchOutcome,
+    ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, SseConfig, StaticDispatchError, StaticDispatchOutcome,
     TargetKind, TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
     resolve,
@@ -132,18 +132,15 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
-use crate::assembly::AssemblyError;
-use crate::builder::ServiceBuilder;
 use crate::clock::{Clock, ClockPosture, MonotonicClock, MonotonicNow};
 use crate::close::ConnectionIntent;
-use crate::config::ConfigStore;
+use crate::config::{ConfigSnapshot, ConfigStore};
 use crate::dispatch::target_of;
 use crate::ext::{
-    AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
-    AuthzRequest, AuthzStage, BucketOwnerSource, CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, Governor,
-    GovernorRequest, HostQuery, HostResolver, InputAuthzRequest, Observer, PolicySnapshot, PolicySource, PolicyTimeout,
-    RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions, SigV2Authentication, StageFilter,
-    WireHead, emit_safely,
+    AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, AuthzAuditEvent, AuthzRequest, AuthzStage,
+    BucketOwnerSource, CORS_PREFLIGHT, CachedCorsSource, ClassKind, ClientAddr, Governor, GovernorRequest, HostQuery,
+    HostResolver, InputAuthzRequest, PolicySnapshot, RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView,
+    ServerExtensions, SigV2Authentication, WireHead, emit_safely,
 };
 use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedBody};
 use crate::monomorphic::sealed::Set as StaticSet;
@@ -159,7 +156,9 @@ use crate::render::{
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::trace::{RequestTrace, TraceSource};
-use crate::{response::into_response, routing::RoutingStore};
+use crate::{response::into_response, routing::RuntimeAssembly};
+
+mod update;
 
 /// The one sentence a request gets when the authenticator itself could not answer.
 ///
@@ -170,26 +169,18 @@ const UNAUTHENTICATED: &str = "the request could not be authenticated";
 /// Everything an assembled service holds. Behind one `Arc`, so cloning the service is one
 /// refcount bump and a connection may hold its own clone.
 pub(crate) struct Inner {
-    pub(crate) routing: RoutingStore,
-    /// The deployment's stage filters, in order; emptiness is checked before any seam does work.
-    pub(crate) filters: Arc<[Arc<dyn StageFilter>]>,
     pub(crate) floor: SecurityFloor,
     pub(crate) limits: Limits,
     pub(crate) names: NamePolicy,
     pub(crate) config: ConfigStore,
-    pub(crate) authorizer: Arc<dyn Authorizer>,
     pub(crate) authenticator: Arc<dyn Authenticator>,
     pub(crate) custom_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::SignatureVerifier>>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
     pub(crate) dangerously_replaced_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::AwsSignatureVerifier>>,
-    pub(crate) policy_source: Arc<dyn PolicySource>,
-    pub(crate) policy_timeout: PolicyTimeout,
-    pub(crate) authz_audit: Arc<dyn AuthzAuditSink>,
     pub(crate) authz_clock: Arc<dyn MonotonicClock>,
     pub(crate) bucket_owner_source: Arc<dyn BucketOwnerSource>,
     pub(crate) host_resolver: Arc<dyn HostResolver>,
     pub(crate) governor: Arc<dyn Governor>,
-    pub(crate) observer: Arc<dyn Observer>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) clock_posture: ClockPosture,
     pub(crate) security_posture: SecurityPosture,
@@ -240,9 +231,9 @@ pub struct S3Service {
 
 impl core::fmt::Debug for S3Service {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let routing = self.inner.routing.load();
+        let snapshot = self.inner.config.load();
         f.debug_struct("S3Service")
-            .field("operations", &routing.dispatch.names().collect::<Vec<_>>())
+            .field("operations", &snapshot.runtime().routing.dispatch.names().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }
@@ -254,30 +245,8 @@ impl S3Service {
 
     /// The operations this service answers, sorted. Everything else is `501`.
     pub fn operations(&self) -> impl Iterator<Item = &'static str> {
-        let routing = self.inner.routing.load();
-        routing.dispatch.names().collect::<Vec<_>>().into_iter()
-    }
-
-    /// Atomically replaces this service's routes, codecs, handlers, and operation layers.
-    ///
-    /// The candidate builder is consumed, and only its dialect routes, operation registrations,
-    /// codecs, and operation layers participate in the replacement. The live service deliberately
-    /// retains its authenticator, authorizer, filters, limits, request configuration, and all other
-    /// deployment extension points. Every clone observes the same validated generation, while a
-    /// request already in flight keeps the generation it loaded at entry.
-    ///
-    /// Candidate validation does not emit startup or security-posture logs. The atomic store is
-    /// changed only after the candidate route and dispatch tables agree.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AssemblyError`] when the candidate registry is empty, has an unattached operation
-    /// layer, contains conflicting routes, or cannot build a matching codec/handler dispatch table.
-    /// The last-good generation remains installed on every error.
-    pub fn replace_registry(&self, builder: ServiceBuilder) -> Result<(), AssemblyError> {
-        let routing = builder.into_routing()?;
-        self.inner.routing.store(Arc::new(routing));
-        Ok(())
+        let snapshot = self.inner.config.load();
+        snapshot.runtime().routing.dispatch.names().collect::<Vec<_>>().into_iter()
     }
 
     /// The acceptance ceilings in force.
@@ -314,11 +283,13 @@ impl S3Service {
         B::Data: Send,
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        let routing = self.inner.routing.load_full();
+        let snapshot = self.inner.config.load_full();
+        let runtime = snapshot.runtime();
         let mode = DynamicMode {
-            dispatch: &routing.dispatch,
+            dispatch: &runtime.routing.dispatch,
         };
-        self.call_with_mode(request, mode, &routing.router).await
+        self.call_with_mode(request, mode, Arc::clone(&snapshot.config), runtime)
+            .await
     }
 
     pub(crate) async fn call_monomorphic<B, H, Operations>(&self, request: Request<B>, backend: Arc<H>) -> Response<Body>
@@ -329,15 +300,23 @@ impl S3Service {
         H: Send + Sync + 'static,
         Operations: StaticSet<H>,
     {
-        let routing = self.inner.routing.load_full();
+        let snapshot = self.inner.config.load_full();
+        let runtime = snapshot.runtime();
         let mode: MonomorphicMode<H, Operations> = MonomorphicMode {
             backend,
             operations: core::marker::PhantomData,
         };
-        self.call_with_mode(request, mode, &routing.router).await
+        self.call_with_mode(request, mode, Arc::clone(&snapshot.config), runtime)
+            .await
     }
 
-    async fn call_with_mode<B, M>(&self, request: Request<B>, mode: M, router: &Router) -> Response<Body>
+    async fn call_with_mode<B, M>(
+        &self,
+        request: Request<B>,
+        mode: M,
+        config: ConfigSnapshot,
+        runtime: &Arc<RuntimeAssembly>,
+    ) -> Response<Body>
     where
         B: http_body::Body + Send + 'static,
         B::Data: Send,
@@ -348,9 +327,7 @@ impl S3Service {
         // handed both values; nothing below holds either source, so neither a second identifier nor
         // a second instant can be produced — which is what lets the `Date` header and the skew
         // window name the same moment.
-        // Exactly one load per request. The snapshot is passed down rather than the store, so no
-        // later stage can observe a replacement made while this request is in flight.
-        let config = self.inner.config.load_full();
+        // Settings and middleware came from the same entry snapshot. No stage reloads the store.
         let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
         let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
         let handler_deadline_report = config.handler_deadline_report();
@@ -378,7 +355,7 @@ impl S3Service {
                     client_addr,
                 },
                 &mode,
-                router,
+                runtime,
             )
             .await;
         // The CORS decoration for an ordinary request, applied here because it belongs on
@@ -406,13 +383,13 @@ impl S3Service {
         // would; before the invariants and the stamp, so neither can be defeated by one. It runs
         // for every response this service produces, including one refused at acceptance — which is
         // most of what a compatibility rewrite is about.
-        if !self.inner.filters.is_empty() {
+        if !runtime.filters.is_empty() {
             let view = ResponseView {
                 request_id: trace.request_id(),
                 operation: outcome.operation,
                 method: &method,
             };
-            for filter in self.inner.filters.iter() {
+            for filter in runtime.filters.iter() {
                 if let Err(error) = filter.on_response(&view, &mut response) {
                     response = outcome.refuse_handler(error);
                     break;
@@ -439,7 +416,7 @@ impl S3Service {
         let event_operation = outcome.operation;
         let event_status = response.status().as_u16();
         let event_identity = outcome.identity.clone();
-        let committed_observer = Arc::clone(&self.inner.observer);
+        let committed_observer = Arc::clone(&runtime.observer);
         let started_committed_work = crate::commit::start_pending(
             &mut response,
             Box::new(move |error| {
@@ -454,7 +431,7 @@ impl S3Service {
             }),
         );
         if !started_committed_work {
-            self.inner.observer.on_response(&RequestEvent {
+            runtime.observer.on_response(&RequestEvent {
                 request_id: trace.request_id(),
                 operation: outcome.operation,
                 status: response.status().as_u16(),
@@ -482,7 +459,7 @@ impl S3Service {
         config: RequestConfig<Entered>,
         context: RequestEntryContext,
         mode: &M,
-        router: &Router,
+        runtime: &Arc<RuntimeAssembly>,
     ) -> Response<Body>
     where
         B: http_body::Body + Send + 'static,
@@ -490,6 +467,7 @@ impl S3Service {
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
         M: OperationMode,
     {
+        let router = &runtime.routing.router;
         let RequestEntryContext {
             now,
             connection,
@@ -511,9 +489,9 @@ impl S3Service {
         // The wire seam, before acceptance so that whatever it writes is subject to every
         // acceptance rule — the framing conflict, the duplicate headers, the limits — exactly as a
         // client's own bytes are.
-        if !self.inner.filters.is_empty() {
+        if !runtime.filters.is_empty() {
             let mut head = WireHead::new(&mut parts);
-            for filter in self.inner.filters.iter() {
+            for filter in runtime.filters.iter() {
                 if let Err(error) = filter.on_wire(&mut head) {
                     return outcome.refuse_handler(error);
                 }
@@ -628,7 +606,7 @@ impl S3Service {
         // bucket and the key are all decided by the line above, and the whole point of the single
         // normalisation is that they have one producer. A seam able to write them would be a
         // second.
-        if !self.inner.filters.is_empty() {
+        if !runtime.filters.is_empty() {
             let view = RoutedView {
                 operation,
                 spec: dispatched.spec,
@@ -639,7 +617,7 @@ impl S3Service {
                 key: meta.key(),
                 declared_body_bytes: declared_length,
             };
-            for filter in self.inner.filters.iter() {
+            for filter in runtime.filters.iter() {
                 if let Err(error) = filter.on_routed(&view) {
                     return outcome.refuse_handler(error);
                 }
@@ -872,6 +850,7 @@ impl S3Service {
         let server_extensions = ServerExtensions::new();
 
         let route_service = self;
+        let route_runtime = runtime;
         let route_meta = &meta;
         let route_headers = &headers;
         let route_wire = &wire;
@@ -896,9 +875,9 @@ impl S3Service {
                 target_origin,
             };
             let policy = match policy_snapshot_with_timeout(
-                route_service.inner.policy_source.as_ref(),
+                route_runtime.policy_source.as_ref(),
                 route_verdict.identity(),
-                route_service.inner.policy_timeout.get(),
+                route_runtime.policy_timeout.get(),
             )
             .await
             {
@@ -906,7 +885,7 @@ impl S3Service {
                 Some(Err(_)) | None => {
                     let decision = Decision::Indeterminate;
                     emit_safely(
-                        route_service.inner.authz_audit.as_ref(),
+                        route_runtime.authz_audit.as_ref(),
                         &AuthzAuditEvent {
                             request_id,
                             stage: AuthzStage::Route,
@@ -937,8 +916,7 @@ impl S3Service {
             let authz_context = RequestContext::from_request(now, policy.as_ref(), auth_scheme, route_server_extensions);
             let route_started = route_service.inner.authz_clock.monotonic();
             let mut route_decision =
-                match catch_boxed_future(|| route_service.inner.authorizer.authorize_route(&authz_context, &route_request)).await
-                {
+                match catch_boxed_future(|| route_runtime.authorizer.authorize_route(&authz_context, &route_request)).await {
                     Ok(decision) => decision,
                     Err(()) => {
                         return Err(from_handler(
@@ -962,7 +940,7 @@ impl S3Service {
             }
             let settled = route_decision.settle();
             emit_safely(
-                route_service.inner.authz_audit.as_ref(),
+                route_runtime.authz_audit.as_ref(),
                 &AuthzAuditEvent {
                     request_id,
                     stage: AuthzStage::Route,
@@ -1062,6 +1040,7 @@ impl S3Service {
         };
 
         let input_service = self;
+        let input_runtime = runtime;
         let input_meta = &meta;
         let input_verdict = &verdict;
         let input_server_extensions = &server_extensions;
@@ -1110,8 +1089,7 @@ impl S3Service {
             let authz_context = RequestContext::from_request(now, state.policy.as_ref(), auth_scheme, input_server_extensions);
             let input_started = input_service.inner.authz_clock.monotonic();
             let input_decisions =
-                match catch_boxed_future(|| input_service.inner.authorizer.authorize_input(&authz_context, &input_request)).await
-                {
+                match catch_boxed_future(|| input_runtime.authorizer.authorize_input(&authz_context, &input_request)).await {
                     Ok(decisions) => decisions,
                     Err(()) => {
                         return Err(from_handler(
@@ -1137,7 +1115,7 @@ impl S3Service {
             audited_resources.push(route_request);
             audited_resources.extend(input_resources.iter().copied());
             crate::ext::emit_input_safely(
-                input_service.inner.authz_audit.as_ref(),
+                input_runtime.authz_audit.as_ref(),
                 &AuthzAuditEvent {
                     request_id,
                     stage: AuthzStage::Input,

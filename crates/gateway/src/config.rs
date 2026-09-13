@@ -278,7 +278,27 @@ impl ServiceConfig {
 /// One request's immutable configuration.
 pub type ConfigSnapshot = Arc<ServiceConfig>;
 
-pub(crate) type ConfigStore = Arc<ArcSwap<ServiceConfig>>;
+/// Request settings and replaceable middleware published by one atomic store.
+pub(crate) struct AssemblySnapshot {
+    pub(crate) config: ConfigSnapshot,
+    pub(crate) runtime: Option<Arc<crate::routing::RuntimeAssembly>>,
+}
+
+impl AssemblySnapshot {
+    pub(crate) fn unassembled(config: ServiceConfig) -> Self {
+        Self {
+            config: Arc::new(config),
+            runtime: None,
+        }
+    }
+
+    #[allow(clippy::expect_used)] // Runtime reads are only reachable after validated service construction.
+    pub(crate) fn runtime(&self) -> &Arc<crate::routing::RuntimeAssembly> {
+        self.runtime.as_ref().expect("service assembly is installed") // Only a successfully built S3Service calls this.
+    }
+}
+
+pub(crate) type ConfigStore = Arc<ArcSwap<AssemblySnapshot>>;
 
 /// Replaces configuration between requests; in-flight requests retain their snapshot.
 #[derive(Clone)]
@@ -293,9 +313,17 @@ impl ConfigHandle {
         }
     }
 
-    /// Replaces configuration for requests that have not started.
+    /// Replaces request settings for requests that have not started.
+    ///
+    /// The installed registry and middleware are retained, including concurrent updates to them.
     pub fn store(&self, config: ServiceConfig) {
-        self.store.store(Arc::new(config));
+        let config = Arc::new(config);
+        self.store.rcu(|current| {
+            Arc::new(AssemblySnapshot {
+                config: Arc::clone(&config),
+                runtime: current.runtime.clone(),
+            })
+        });
     }
 }
 
@@ -360,11 +388,11 @@ impl ServiceConfig {
 
 #[cfg(test)]
 fn load_entry(store: &ConfigStore) -> ConfigSnapshot {
-    store.load_full()
+    Arc::clone(&store.load_full().config)
 }
 
 #[cfg(test)]
-fn load_replacement(store: &ConfigStore) -> ConfigSnapshot {
+fn load_replacement(store: &ConfigStore) -> Arc<AssemblySnapshot> {
     // A distinct helper keeps both allowlisted test loads explicit.
     // Production still performs its sole load at request entry.
     // The allowlist tracks these calls as guard fixtures.
@@ -504,7 +532,7 @@ mod tests {
     // a-asm-0006: stable load anchors prove replacement cannot split the entry snapshot.
     #[test]
     fn all_ten_pipeline_stages_share_one_arc() {
-        let store = Arc::new(ArcSwap::from_pointee(ServiceConfig::new(8)));
+        let store = Arc::new(ArcSwap::from_pointee(AssemblySnapshot::unassembled(ServiceConfig::new(8))));
         let handle = ConfigHandle::new(&store);
         let entry = load_entry(&store);
         let mut seen = Vec::new();
@@ -521,7 +549,7 @@ mod tests {
         seen.push(Arc::clone(governed.config()));
         handle.store(ServiceConfig::new(16));
         let replacement = load_replacement(&store);
-        assert!(!Arc::ptr_eq(&entry, &replacement), "the mid-request replacement did not happen");
+        assert!(!Arc::ptr_eq(&entry, &replacement.config), "the mid-request replacement did not happen");
         let meta_auth = governed.meta_auth();
         seen.push(Arc::clone(meta_auth.config()));
         let route_authorized = meta_auth.route_authorized();
@@ -537,5 +565,68 @@ mod tests {
         for snapshot in seen {
             assert!(Arc::ptr_eq(&entry, &snapshot));
         }
+    }
+
+    /// Positive control: detaching a handle from its builder keeps the original settings store.
+    #[test]
+    fn a_detached_handle_keeps_accepting_request_settings() {
+        let (builder, handle) = crate::ServiceBuilder::new().config(ServiceConfig::new(8));
+        drop(builder);
+        handle.store(ServiceConfig::new(64));
+        assert_eq!(load_replacement(&handle.store).config.max_buffered_body_bytes(), 64);
+    }
+
+    /// Negative: a settings update during runtime destruction cannot restore the removed runtime.
+    #[test]
+    #[allow(clippy::expect_used)] // Fixed in-memory assembly and bounded synchronization for the drop control.
+    fn a_partial_update_cannot_resurrect_a_dropped_runtime() {
+        use std::sync::{Mutex, mpsc};
+
+        struct DroppingFilter {
+            _handle: ConfigHandle,
+            entered: mpsc::SyncSender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+        }
+        impl crate::StageFilter for DroppingFilter {}
+        impl Drop for DroppingFilter {
+            fn drop(&mut self) {
+                let _ = self.entered.send(());
+                let _ = self
+                    .release
+                    .lock()
+                    .expect("drop control is not poisoned")
+                    .recv_timeout(Duration::from_secs(3));
+            }
+        }
+
+        let (entered_send, entered_receive) = mpsc::sync_channel(1);
+        let (release_send, release_receive) = mpsc::sync_channel(1);
+        let (builder, handle) = crate::ServiceBuilder::new().config(ServiceConfig::new(8));
+        let service = builder
+            .register::<crate::dto::ListBuckets, _>(Arc::new(crate::tests::NoBackend))
+            .authorizer(crate::allow_when(|_| true))
+            .authenticator(crate::SigV4Authenticator::new(
+                Arc::new(crate::StaticCredentials::new()),
+                crate::RegionSet::new(["us-east-1"]).expect("the region set is nonempty"),
+            ))
+            .stage_filter(DroppingFilter {
+                _handle: handle.clone(),
+                entered: entered_send,
+                release: Mutex::new(release_receive),
+            })
+            .build()
+            .expect("a valid service assembly");
+        let dropper = std::thread::spawn(move || drop(service));
+        entered_receive
+            .recv_timeout(Duration::from_secs(3))
+            .expect("runtime destruction started");
+        let before = load_replacement(&handle.store);
+        let before = (before.config.max_buffered_body_bytes(), before.runtime.is_some());
+        handle.store(ServiceConfig::new(64));
+        let after = load_replacement(&handle.store);
+        let after = (after.config.max_buffered_body_bytes(), after.runtime.is_some());
+        release_send.send(()).expect("runtime destruction is still waiting");
+        dropper.join().expect("runtime destruction completed");
+        assert_eq!((before, after), ((8, false), (64, false)));
     }
 }

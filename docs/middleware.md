@@ -163,6 +163,27 @@ authenticator and both authorisation stages. Not calling `next` skips the *handl
 authorisation: there is no constructor anywhere that turns a layer's own value into an authorised
 request.
 
+## Replacing middleware
+
+`S3Service::replace_assembly(AssemblyUpdate)` validates and publishes a complete request assembly:
+request settings, routes and handlers, operation layers, stage filters, authorizer, policy source
+and timeout, audit sink, and observer. Each candidate supplies its complete registry and authorizer.
+Omitted optional middleware uses the same defaults as initial assembly. An invalid candidate leaves
+the installed generation intact.
+
+Every request captures one immutable generation at entry and keeps it through both authorization
+stages and response delivery. A committed response also retains that generation's observer until
+its terminal document is ready. A successful update reaches every service clone together.
+
+The existing narrower updates remain available: `ConfigHandle::store` changes only request
+settings, and `S3Service::replace_registry` changes only routes, codecs, handlers, and operation
+layers. Their atomic updates retain concurrent changes to the other fields. Handles obtained from
+the original service builder keep updating the same service after a complete assembly replacement.
+
+`AssemblyUpdate` exposes only replaceable fields. Authentication, security floors, governors, and
+other fixed host settings belong to the initial `ServiceBuilder`; the update API cannot accept and
+silently ignore a change to those settings.
+
 ## The nine RustFS tower patch layers, and where each one lands
 
 Source: `rustfs/src/server/layer.rs`. This table is the acceptance list for `P10-06`, which deletes
