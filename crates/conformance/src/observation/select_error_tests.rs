@@ -76,6 +76,13 @@ fn the_independent_select_error_golden_is_observed() {
     assert!(events[0].payload.is_empty());
 }
 
+// Each negative names the one check that refused it. `is_err()` alone could not tell the checks
+// apart: the sequence match also refuses a frame after a terminator, so deleting the dedicated
+// terminator check — or any single check here — would leave an `is_err()` test green.
+fn refusal(bytes: &[u8]) -> String {
+    decode_event_stream(bytes).expect_err("the observer refuses this stream")
+}
+
 #[test]
 fn n_the_exception_dialect_is_not_a_select_error_frame() {
     let bytes = frame(
@@ -86,30 +93,48 @@ fn n_the_exception_dialect_is_not_a_select_error_frame() {
         ],
         b"<Error/>",
     );
-    assert!(decode_event_stream(&bytes).is_err());
+    assert_eq!(refusal(&bytes), "an event-stream frame has an unknown :message-type");
 }
 
 #[test]
 fn n_a_select_error_without_its_code_is_refused() {
     let bytes = frame(&[ERROR_HEADERS[0], ERROR_HEADERS[2]], &[]);
-    assert!(decode_event_stream(&bytes).is_err());
+    assert_eq!(refusal(&bytes), "an error frame has no :error-code");
 }
 
 #[test]
 fn n_a_select_error_without_its_message_is_refused() {
     let bytes = frame(&ERROR_HEADERS[..2], &[]);
-    assert!(decode_event_stream(&bytes).is_err());
+    assert_eq!(refusal(&bytes), "an error frame has no :error-message");
 }
 
 #[test]
 fn n_a_select_error_with_a_payload_is_refused() {
-    assert!(decode_event_stream(&frame(&ERROR_HEADERS, b"<Error/>")).is_err());
+    assert_eq!(refusal(&frame(&ERROR_HEADERS, b"<Error/>")), "an error frame has a payload");
 }
 
 #[test]
 fn n_end_cannot_follow_a_select_error() {
     let bytes = [hex(ERROR_FRAME), hex(END_FRAME)].concat();
-    assert!(decode_event_stream(&bytes).is_err());
+    assert_eq!(refusal(&bytes), "an event-stream frame followed the terminator");
+}
+
+/// Negative — a header-only frame after the terminal error is still a frame after the terminator,
+/// and so is a second error.
+#[test]
+fn n_no_frame_follows_a_select_error() {
+    let continuation = frame(&[(":message-type", "event"), (":event-type", "Cont")], &[]);
+    for trailer in [continuation, hex(ERROR_FRAME)] {
+        let bytes = [hex(ERROR_FRAME), trailer].concat();
+        assert_eq!(refusal(&bytes), "an event-stream frame followed the terminator");
+    }
+}
+
+/// Negative — bytes too short to be a prelude after the terminal error are not ignored.
+#[test]
+fn n_stray_bytes_after_a_select_error_are_refused() {
+    let bytes = [hex(ERROR_FRAME), vec![0, 0, 0]].concat();
+    assert_eq!(refusal(&bytes), "an event-stream frame followed the terminator");
 }
 
 #[test]
@@ -119,14 +144,14 @@ fn n_a_select_error_with_a_bad_prelude_crc_is_refused() {
     let message_crc_offset = bytes.len() - 4;
     let message_crc = crate::crc32::checksum(&bytes[..message_crc_offset]);
     bytes[message_crc_offset..].copy_from_slice(&message_crc.to_be_bytes());
-    assert!(decode_event_stream(&bytes).is_err());
+    assert_eq!(refusal(&bytes), "the event-stream prelude CRC does not match");
 }
 
 #[test]
 fn n_a_select_error_with_a_bad_message_crc_is_refused() {
     let mut bytes = hex(ERROR_FRAME);
     *bytes.last_mut().expect("a trailing CRC") ^= 1;
-    assert!(decode_event_stream(&bytes).is_err());
+    assert_eq!(refusal(&bytes), "the event-stream message CRC does not match");
 }
 
 #[cfg(feature = "production-transports")]

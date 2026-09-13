@@ -261,7 +261,7 @@ impl<O: Operation> Resp<O> {
     /// Answers with an `application/vnd.amazon.event-stream` frame sequence.
     ///
     /// The stream is already framed: a backend uses the exported event-stream encoder to produce
-    /// `Records`, `Stats`, `Progress`, `Cont`, `End`, or an in-band exception. The facade supplies
+    /// `Records`, `Stats`, `Progress`, `Cont`, `End`, or a terminal error message. The facade supplies
     /// the response content type and sends the operation's declared success status; no generated
     /// document encoder is involved.
     #[must_use]

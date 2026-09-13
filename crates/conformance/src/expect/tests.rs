@@ -385,6 +385,56 @@ fn a_capture_with_no_source_element_fails_instead_of_binding_nothing() {
     assert_eq!(rules(&judgement), vec!["expect/capture"]);
 }
 
+/// One decoded frame as the observer records it: `event_type` is the `:event-type` of an event, or
+/// the `:error-code` of an error, and `:message-type` is always among the headers.
+fn event_frame(message_type: &str, name: &str, payload: &[u8]) -> ObservedEvent {
+    ObservedEvent {
+        event_type: name.to_owned(),
+        headers: vec![(":message-type".to_owned(), message_type.to_owned())],
+        payload: payload.to_vec(),
+    }
+}
+
+/// Positive — a real terminator counts toward `End`; the control for the negative below.
+#[test]
+fn an_end_event_counts_toward_its_type() {
+    let mut observed = ok_response();
+    observed.outcome = Outcome::EventStream;
+    for name in ["Records", "Stats", "End"] {
+        observed.events.push(event_frame("event", name, b""));
+    }
+    let expect = expectation("kind = \"event_stream\"\n[[events]]\ntype = \"End\"\nmin_count = 1\nmax_count = 1\n");
+    let judgement = judge(&expect, &observed, "/expect", &no_goldens());
+    assert!(judgement.is_clean(), "{:?}", judgement.diagnostics);
+}
+
+/// Negative — an error frame whose code spells `End` is not the success terminator. Error codes are
+/// the server's own text; matching them against event names would read a failed stream as a success.
+#[test]
+fn n_an_error_frame_whose_code_spells_end_is_not_a_terminator() {
+    let mut observed = ok_response();
+    observed.outcome = Outcome::EventStream;
+    observed.events.push(event_frame("event", "Records", b""));
+    observed.events.push(event_frame("event", "Stats", b""));
+    observed.events.push(event_frame("error", "End", b""));
+    let expect = expectation("kind = \"event_stream\"\n[[events]]\ntype = \"End\"\nmin_count = 1\n");
+    let judgement = judge(&expect, &observed, "/expect", &no_goldens());
+    assert_eq!(rules(&judgement), vec!["expect/events.min_count"]);
+}
+
+/// Positive — an error frame whose code spells `Records` does not join the Records frames a payload
+/// expectation selects, so the one real Records frame is still the one compared.
+#[test]
+fn an_error_frame_whose_code_spells_records_is_not_a_payload_candidate() {
+    let mut observed = ok_response();
+    observed.outcome = Outcome::EventStream;
+    observed.events.push(event_frame("event", "Records", b"345"));
+    observed.events.push(event_frame("error", "Records", b""));
+    let expect = expectation("kind = \"event_stream\"\n[[events]]\ntype = \"Records\"\n[events.payload]\nexact_utf8 = \"345\"\n");
+    let judgement = judge(&expect, &observed, "/expect", &no_goldens());
+    assert!(judgement.is_clean(), "{:?}", judgement.diagnostics);
+}
+
 #[test]
 fn an_event_stream_frame_shortfall_is_reported() {
     let mut observed = ok_response();
@@ -398,11 +448,7 @@ fn an_event_stream_frame_shortfall_is_reported() {
 fn an_event_payload_is_compared_as_body_bytes() {
     let mut observed = ok_response();
     observed.outcome = Outcome::EventStream;
-    observed.events.push(ObservedEvent {
-        event_type: "Records".to_owned(),
-        headers: Vec::new(),
-        payload: b"345".to_vec(),
-    });
+    observed.events.push(event_frame("event", "Records", b"345"));
     let expect = expectation("kind = \"event_stream\"\n[[events]]\ntype = \"Records\"\n[events.payload]\nexact_utf8 = \"345\"\n");
     let judgement = judge(&expect, &observed, "/expect", &no_goldens());
     assert!(judgement.is_clean(), "{:?}", judgement.diagnostics);
@@ -412,11 +458,7 @@ fn an_event_payload_is_compared_as_body_bytes() {
 fn n_a_different_event_payload_is_reported() {
     let mut observed = ok_response();
     observed.outcome = Outcome::EventStream;
-    observed.events.push(ObservedEvent {
-        event_type: "Records".to_owned(),
-        headers: Vec::new(),
-        payload: b"0123456789".to_vec(),
-    });
+    observed.events.push(event_frame("event", "Records", b"0123456789"));
     let expect = expectation("kind = \"event_stream\"\n[[events]]\ntype = \"Records\"\n[events.payload]\nexact_utf8 = \"345\"\n");
     let judgement = judge(&expect, &observed, "/expect", &no_goldens());
     assert_eq!(rules(&judgement), vec!["expect/body.exact_utf8"]);

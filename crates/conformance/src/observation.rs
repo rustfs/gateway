@@ -133,6 +133,17 @@ pub(crate) fn has_event_stream_content_type(headers: &[(String, String)]) -> boo
     })
 }
 
+impl ObservedEvent {
+    /// Whether this frame is an `event` message named `event_type`.
+    ///
+    /// A request-level error frame never matches: its error code is the server's own text, and a
+    /// code spelled `End` must not read as the success terminator.
+    #[must_use]
+    pub(crate) fn is_event_of(&self, event_type: &str) -> bool {
+        self.event_type == event_type && event_header(&self.headers, ":message-type") == Some("event")
+    }
+}
+
 /// Decodes and validates the complete event-stream body observed on the wire.
 ///
 /// This parser is deliberately independent of the framework's encoder. It checks both CRC-32s,
