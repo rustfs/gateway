@@ -414,15 +414,16 @@ impl fmt::Debug for Admission<'_> {
 /// The rules that run outside every verifier.
 ///
 /// Configuration can narrow this type and cannot widen it: [`SkewWindow`] is capped at fifteen
-/// minutes, the presigned ceiling is a constant, and the two switches that exist
-/// ([`SecurityFloor::enable_sigv2_presigned_compatibility`] and the custom-scheme registry) only
-/// add scheme surface — they cannot remove a check.
+/// minutes, the presigned ceiling is a constant, and the three switches that exist
+/// ([`SecurityFloor::enable_sigv2_presigned_compatibility`], the custom-scheme registry and
+/// anonymous delegation, ADR-0021) only add scheme surface — they cannot remove a check.
 #[derive(Clone, Debug, Default)]
 pub struct SecurityFloor {
     skew: SkewWindow,
     sigv2: SigV2Policy,
     failure_floor: FailureFloor,
     custom_schemes: CustomSchemeRegistry,
+    anonymous: crate::operation::AnonymousPolicy,
 }
 
 impl SecurityFloor {
@@ -529,7 +530,12 @@ impl SecurityFloor {
                 return Err(AuthError::AccessDenied);
             }
         }
-        if !operation.allowed_schemes().allows(slot) {
+        let allowed = match slot {
+            // The one anonymous predicate, shared with the posture report (ADR-0021).
+            SchemeSlot::Anonymous => self.admits_anonymous(operation),
+            _ => operation.allowed_schemes().allows(slot),
+        };
+        if !allowed {
             return Err(AuthError::AccessDenied);
         }
         Ok(())
@@ -782,6 +788,9 @@ impl SecurityFloor {
         verdict
     }
 }
+
+#[path = "floor_anonymous.rs"]
+mod anonymous;
 
 #[cfg(test)]
 #[path = "floor_tests.rs"]

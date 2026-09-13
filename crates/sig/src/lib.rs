@@ -134,7 +134,7 @@ pub use mode::{
     STREAMING_ECDSA_TRAILER, STREAMING_SIGNED, STREAMING_SIGNED_TRAILER, STREAMING_UNSIGNED_TRAILER, TrailerName, TrailerSet,
     UNSIGNED_PAYLOAD,
 };
-pub use operation::{AllowedSchemes, FloorConfigError, OperationFloor, SchemeSlot, SigV2Presigned};
+pub use operation::{AllowedSchemes, AnonymousPolicy, FloorConfigError, OperationFloor, SchemeSlot, SigV2Presigned};
 pub use parse::{
     AmzDate, CredentialScope, PresignedParams, SCOPE_TERMINATOR, ScopeDate, SigV4Authorization, X_AMZ_ALGORITHM,
     X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,

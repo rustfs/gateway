@@ -1331,7 +1331,7 @@ validate_rust_evidence "$gateway_dispatch" source_order \
     'self.entries.values().map(OperationDispatch::floor)' \
     'check_sig_case_coverage: startup posture cannot enumerate registered operation floors'
 validate_rust_evidence "$gateway_posture" source_order \
-    '.filter(|operation| operation.allows_anonymous())' \
+    '.filter(|operation| floor.admits_anonymous(operation))' \
     'format_names(&anonymous_reachable_ops)' \
     'check_sig_case_coverage: startup posture lost anonymous operation enumeration'
 validate_rust_evidence "$gateway_posture" source_order \

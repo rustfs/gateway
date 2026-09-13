@@ -548,8 +548,14 @@ impl ServiceBuilder {
     /// Narrows the security floor.
     ///
     /// `SecurityFloor` can be narrowed and cannot be widened: its skew window is capped, its
-    /// presigned ceiling is a constant, and its two switches only add scheme surface. There is no
-    /// way to hand this method a floor that enforces less than the default does.
+    /// presigned ceiling is a constant, and its switches only add scheme surface. There is no way
+    /// to hand this method a floor that enforces less than the default does.
+    ///
+    /// One of those switches is
+    /// `SecurityFloor::delegate_anonymous_to_authorizer_after_listing_in_the_posture_report`, for
+    /// a deployment whose own access check decides every request (ADR-0021). It lets a request
+    /// that presented nothing reach every non-privileged operation's authorization stages, and
+    /// the installed `Authorizer` then decides. The default stays per operation.
     #[must_use]
     pub fn security_floor(mut self, floor: SecurityFloor) -> Self {
         self.floor = floor;
