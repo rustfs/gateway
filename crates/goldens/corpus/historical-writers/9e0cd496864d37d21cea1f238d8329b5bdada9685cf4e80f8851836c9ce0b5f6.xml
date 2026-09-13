@@ -1,0 +1,1 @@
+<BucketLoggingStatus><LoggingEnabled><TargetBucket>hist-beta12-target</TargetBucket><TargetPrefix>access/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>

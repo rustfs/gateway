@@ -524,7 +524,7 @@ fn production_registry() -> Vec<CaseDeclaration> {
             "rustfs/src/admin/handlers/bucket_meta.rs::g_d3_005_new_writer_backup_payloads_pass_old_import_validators",
             "db41d64e021753e2efd4743de471674b451ef6e92ee3883695abb73603462eb8",
         ),
-        CaseDeclaration::blocked("g-d4-001", ISSUE_2096),
+        CaseDeclaration::passed("g-d4-001", RuntimeProbe::AllFamilies, "crates/goldens/src/historical_writer.rs::append"),
         CaseDeclaration::passed(
             "g-d4-002",
             RuntimeProbe::Variant(Replication, UnknownAttribute),
@@ -545,7 +545,7 @@ fn production_registry() -> Vec<CaseDeclaration> {
             RuntimeProbe::Variant(Replication, UnknownScalar),
             "crates/goldens/src/replication.rs::replication_corpus_evidence",
         ),
-        CaseDeclaration::blocked("g-d5-001", ISSUE_2096),
+        CaseDeclaration::passed("g-d5-001", RuntimeProbe::AllFamilies, "crates/goldens/src/historical_writer.rs::append"),
         CaseDeclaration::passed(
             "g-d5-002",
             RuntimeProbe::Variant(Versioning, Extension),

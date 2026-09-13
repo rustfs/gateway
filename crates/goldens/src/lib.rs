@@ -34,6 +34,7 @@ mod corpus;
 mod cors;
 mod ecstore_source_a;
 mod four_way;
+mod historical_writer;
 mod lifecycle;
 mod logging;
 mod minio_migration;
@@ -232,6 +233,15 @@ pub fn build_persistence_corpus_report() -> Result<CorpusReport, CorpusCoverageE
 }
 
 fn all_family_corpus_evidence() -> Result<Vec<FamilyCorpusEvidence>, CorpusCoverageError> {
+    let mut families = base_family_corpus_evidence()?;
+    historical_writer::append(&mut families).map_err(|error| CorpusCoverageError::InvalidEvidence {
+        kind: ConfigKind::Lifecycle,
+        reason: error.to_string(),
+    })?;
+    Ok(families)
+}
+
+fn base_family_corpus_evidence() -> Result<Vec<FamilyCorpusEvidence>, CorpusCoverageError> {
     let migration_error = |kind: ConfigKind, error: GoldenFailure| CorpusCoverageError::InvalidEvidence {
         kind,
         reason: error.to_string(),

@@ -32,7 +32,7 @@ use std::collections::BTreeSet;
 
 use rustfs_gateway_corpus::store::check_writer;
 
-use crate::{CorpusReport, minio_migration, source_a_lifecycle, source_b_mc};
+use crate::{CorpusReport, historical_writer, minio_migration, source_a_lifecycle, source_b_mc};
 
 /// One approved source of persisted-metadata corpus bytes.
 ///
@@ -112,8 +112,8 @@ pub(crate) struct SourceRegistration {
 
 /// Every persisted-metadata source this repository currently admits bytes under.
 ///
-/// (d′) has no row yet. Collecting it means running historical RustFS and MinIO binaries and is
-/// its own task; until it lands, [`require_persistence_sources`] refuses closure by name.
+/// The historical tier has one row per pinned writer version. Equal XML bytes remain
+/// deduplicated in the corpus and are tied to every observed writer by the capture manifest.
 const MINIO_MIGRATION_WITNESSES: &[&str] = &[
     minio_migration::LIFECYCLE_SHA256,
     minio_migration::OBJECT_LOCK_SHA256,
@@ -146,6 +146,12 @@ const SOURCE_REGISTRY: &[SourceRegistration] = &[
         witness_digests: MINIO_MIGRATION_WITNESSES,
         reference: "crates/goldens/src/minio_migration.rs",
     },
+    historical_writer::REGISTRATIONS[0],
+    historical_writer::REGISTRATIONS[1],
+    historical_writer::REGISTRATIONS[2],
+    historical_writer::REGISTRATIONS[3],
+    historical_writer::REGISTRATIONS[4],
+    historical_writer::REGISTRATIONS[5],
 ];
 
 /// One validated source row.
@@ -177,7 +183,7 @@ impl PersistenceSourceReport {
     pub fn render(&self) -> String {
         let mut output = format!(
             "persisted metadata sources: {}/{} approved sources present\n",
-            self.rows.len(),
+            self.rows.iter().map(|row| row.source).collect::<BTreeSet<_>>().len(),
             PersistenceSource::ALL.len()
         );
         for row in &self.rows {
@@ -202,6 +208,8 @@ pub enum PersistenceSourceError {
     SourceAbsent(PersistenceSource),
     /// A source was registered more than once.
     DuplicateSource(PersistenceSource),
+    /// The historical tier does not match its complete six-writer capture census.
+    HistoricalWriterMatrix(String),
     /// A tier that requires a writer named none, or named one outside the writer allowlist, or
     /// named a version that pins no reproducible build.
     UntraceableWriter {
@@ -242,6 +250,7 @@ impl core::fmt::Display for PersistenceSourceError {
                 source.slug()
             ),
             Self::DuplicateSource(source) => write!(formatter, "{} is registered more than once", source.slug()),
+            Self::HistoricalWriterMatrix(reason) => write!(formatter, "d-prime-historical-writer-matrix: {reason}"),
             Self::UntraceableWriter { source, reason } => write!(formatter, "{}: {reason}", source.slug()),
             Self::UnexpectedWriter(source) => {
                 write!(formatter, "{} carries no writer identity but declared one", source.slug())
@@ -291,19 +300,33 @@ fn validate_sources(
     corpus: &CorpusReport,
 ) -> Result<PersistenceSourceReport, PersistenceSourceError> {
     let mut seen = BTreeSet::new();
+    let mut seen_sources = BTreeSet::new();
     let mut rows = Vec::with_capacity(PersistenceSource::ALL.len());
     for registration in registry {
-        if !seen.insert(registration.source) {
+        let first_source = seen_sources.insert(registration.source);
+        if (!first_source && registration.source != PersistenceSource::HistoricalWriterMatrix)
+            || !seen.insert((registration.source, registration.writer, registration.version))
+        {
             return Err(PersistenceSourceError::DuplicateSource(registration.source));
         }
         rows.push(validate_registration(registration, corpus)?);
     }
     for source in PersistenceSource::ALL {
-        if !seen.contains(&source) {
+        if !seen.iter().any(|(registered, _, _)| *registered == source) {
             return Err(PersistenceSourceError::SourceAbsent(source));
         }
     }
-    rows.sort_by_key(|row| row.source);
+    let writers = rows
+        .iter()
+        .filter(|row| row.source == PersistenceSource::HistoricalWriterMatrix)
+        .filter_map(|row| row.writer)
+        .collect::<BTreeSet<_>>();
+    if writers != BTreeSet::from(historical_writer::EXPECTED_WRITERS) {
+        return Err(PersistenceSourceError::HistoricalWriterMatrix(
+            "the six collected writer versions are not all registered".to_owned(),
+        ));
+    }
+    rows.sort_by_key(|row| (row.source, row.writer));
     Ok(PersistenceSourceReport { rows })
 }
 
@@ -343,7 +366,13 @@ fn validate_registration(
         }
         if let Some((name, version)) = writer {
             for sample in &matches {
-                if !sample.producer.eq_ignore_ascii_case(name) || sample.version != version {
+                let matches_writer = if source == PersistenceSource::HistoricalWriterMatrix {
+                    historical_writer::witness_matches(name, version, digest, sample.kind)
+                        .map_err(|error| PersistenceSourceError::HistoricalWriterMatrix(error.to_string()))?
+                } else {
+                    sample.producer.eq_ignore_ascii_case(name) && sample.version == version
+                };
+                if !matches_writer {
                     return Err(PersistenceSourceError::WitnessWriterMismatch {
                         source,
                         sha256: digest,
@@ -353,6 +382,17 @@ fn validate_registration(
             }
         }
         witnessed += matches.len();
+    }
+
+    if let Some((name, version)) = writer {
+        if source == PersistenceSource::HistoricalWriterMatrix
+            && !historical_writer::witness_set_matches(name, version, registration.witness_digests)
+                .map_err(|error| PersistenceSourceError::HistoricalWriterMatrix(error.to_string()))?
+        {
+            return Err(PersistenceSourceError::HistoricalWriterMatrix(
+                "the registered witnesses omit or duplicate captured XML".to_owned(),
+            ));
+        }
     }
 
     Ok(SourceReport {
