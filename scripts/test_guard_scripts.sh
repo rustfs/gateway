@@ -18252,6 +18252,160 @@ mut_config_load_allowlist_deleted() {
 expect_fail check_config_load_once.sh \
     'the config-load allowlist being absent' mut_config_load_allowlist_deleted
 
+# The allowlist anchors each load by file, enclosing item and line text. gateway#707 and #724 each
+# went red because an unrelated edit above an allowed load moved its line number.
+mut_config_load_test_inserted_above() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/ext/governor/default.rs")
+text = path.read_text()
+subject = "mod tests {\n"
+if text.count(subject) != 1 or ".load(" not in text.split(subject, 1)[1]:
+    raise SystemExit("missing mutation subject: a test module holding an allowed load")
+addition = "    // Inserted above every allowed load in this module.\n\n    #[test]\n    fn shifts_the_loads_below() {\n        assert_eq!(1 + 1, 2);\n    }\n\n"
+path.write_text(text.replace(subject, subject + addition, 1))
+PYEOF
+}
+expect_guard_pass check_config_load_once.sh \
+    'a test inserted above an allowed load, moving its line number' mut_config_load_test_inserted_above
+
+mut_config_load_lines_removed_above() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "    /// Answers one request.\n    ///\n"
+if text.count(subject) != 1 or "self.inner.config.load_full()" not in text.split(subject, 1)[1]:
+    raise SystemExit("missing mutation subject: documentation above the request-entry snapshots")
+path.write_text(text.replace(subject, "", 1))
+PYEOF
+}
+expect_guard_pass check_config_load_once.sh \
+    'documentation removed above the request-entry snapshot loads' mut_config_load_lines_removed_above
+
+# The same line text in another item is a new site, not the listed one.
+mut_config_load_copied_to_new_item() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "impl S3Service {\n"
+listed = "        let snapshot = self.inner.config.load();\n"
+if text.count(subject) != 1 or listed not in text:
+    raise SystemExit("missing mutation subject: an allowed S3Service snapshot load")
+addition = "    #[allow(dead_code)]\n    fn illicit_snapshot(&self) {\n" + listed + "        drop(snapshot);\n    }\n\n"
+path.write_text(text.replace(subject, subject + addition, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'an allowed load line copied into a new unlisted function' mut_config_load_copied_to_new_item \
+    'unlisted load at crates/gateway/src/service.rs:'
+
+# Moving a load keeps its file, its line text and the count; only the item path sees it arrive
+# somewhere the reviewed entry did not name.
+mut_config_load_moved_to_other_item() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+listed = "        let snapshot = self.inner.config.load();\n"
+source = listed + "        f.debug_struct(\"S3Service\")"
+target = "    pub fn limits(&self) -> &Limits {\n"
+if text.count(source) != 1 or text.count(target) != 1:
+    raise SystemExit("missing mutation subject: the Debug snapshot load and the limits() accessor")
+text = text.replace(source, "        let snapshot = self.inner.config.as_ref();\n        f.debug_struct(\"S3Service\")", 1)
+path.write_text(text.replace(target, target + listed + "        drop(snapshot);\n", 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'an allowed load moved into another function of the same file' mut_config_load_moved_to_other_item \
+    'unlisted load at crates/gateway/src/service.rs:'
+
+mut_config_load_entry_orphaned() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "        let snapshot = self.inner.config.load();\n        snapshot.runtime().routing.dispatch.names()"
+if text.count(subject) != 1:
+    raise SystemExit("missing mutation subject: the operations() snapshot load")
+path.write_text(text.replace(subject, "        let snapshot = self.inner.config.as_ref();\n        snapshot.runtime().routing.dispatch.names()", 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'an allowlist entry left behind after its load is removed' mut_config_load_entry_orphaned \
+    'allowlist entry matches no load site: crates/gateway/src/service.rs'
+
+mut_config_load_entry_ambiguous() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+load = "        let snapshot = self.inner.config.load();\n"
+subject = load + "        snapshot.runtime().routing.dispatch.names()"
+if text.count(subject) != 1:
+    raise SystemExit("missing mutation subject: the operations() snapshot load")
+path.write_text(text.replace(subject, load + subject, 1))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'one allowlist entry matching a second identical load in the same function' mut_config_load_entry_ambiguous \
+    'is listed 1 time(s) but matches 2 site(s)'
+
+# Two genuinely identical loads in one item are listed twice; one entry must not cover both.
+mut_config_load_repeated_entry_collapsed() {
+    python3 - <<'PYEOF'
+from collections import Counter
+from pathlib import Path
+
+path = Path("scripts/config_load_allowlist.txt")
+lines = path.read_text().splitlines(keepends=True)
+repeated = [line for line, count in Counter(lines).items() if count == 2 and not line.startswith("#")]
+if not repeated:
+    raise SystemExit("missing mutation subject: an allowlist entry listed for two identical sites")
+lines.remove(repeated[0])
+path.write_text("".join(lines))
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'an entry for two identical loads collapsed into one' mut_config_load_repeated_entry_collapsed \
+    'is listed 1 time(s) but matches 2 site(s)'
+
+mut_config_load_entry_malformed() {
+    printf 'crates/gateway/src/service.rs:1\n' >>scripts/config_load_allowlist.txt
+}
+expect_fail check_config_load_once.sh \
+    'a line-number allowlist entry' mut_config_load_entry_malformed \
+    'is not `FILE | ITEM PATH | LINE TEXT`'
+
+# Listing a second load in a request entry satisfies the inventory; it must still be refused.
+mut_request_entry_second_listed_load() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/service.rs")
+text = path.read_text()
+subject = "        let runtime = snapshot.runtime();\n        let mode = DynamicMode {\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing mutation subject: the dynamic request entry")
+added = "        let _torn = self.inner.config.load();\n"
+path.write_text(text.replace(subject, subject.replace("        let mode", added + "        let mode", 1), 1))
+allowlist = Path("scripts/config_load_allowlist.txt")
+allowlist.write_text(
+    allowlist.read_text() + "crates/gateway/src/service.rs | impl S3Service / fn call | let _torn = self.inner.config.load();\n"
+)
+PYEOF
+}
+expect_fail check_config_load_once.sh \
+    'a request entry with a second, allowlisted snapshot load' mut_request_entry_second_listed_load \
+    'each request entry must allowlist exactly one assembly snapshot load'
+
 mut_config_snapshot_stage_deleted() {
     python3 - <<'PYEOF'
 import pathlib
@@ -18263,8 +18417,26 @@ PYEOF
 expect_fail check_config_load_once.sh \
     'a real request path dropping the decoded snapshot stage' mut_config_snapshot_stage_deleted
 
-# Same-line load-then-store rewrites keep every file:line in the load allowlist, so only the
-# write-primitive rule can see that a partial update may now overwrite a concurrent one.
+# Each load-then-store rewrite also re-anchors its load allowlist entry, as an author would, so the
+# load inventory passes and only the write-primitive rule can see that a partial update may now
+# overwrite a concurrent one.
+reanchor_config_load_entry() {
+    python3 - "$@" <<'PYEOF'
+from pathlib import Path
+import sys
+
+file, old, new = sys.argv[1:]
+path = Path("scripts/config_load_allowlist.txt")
+lines = path.read_text().splitlines(keepends=True)
+suffix = " | " + " ".join(old.split()) + "\n"
+matches = [index for index, line in enumerate(lines) if line.startswith(file + " | ") and line.endswith(suffix)]
+if len(matches) != 1:
+    raise SystemExit(f"missing mutation subject: one allowlist entry for {old!r} in {file}")
+lines[matches[0]] = lines[matches[0]][: -len(suffix)] + " | " + " ".join(new.split()) + "\n"
+path.write_text("".join(lines))
+PYEOF
+}
+
 mut_settings_update_load_then_store() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -18276,6 +18448,8 @@ if text.count(subject) != 1:
     raise SystemExit("missing mutation subject: the settings update's rcu")
 path.write_text(text.replace(subject, "        let current = self.store.load_full(); self.store.store({\n", 1))
 PYEOF
+    reanchor_config_load_entry crates/gateway/src/config.rs \
+        'self.store.rcu(|current| {' 'let current = self.store.load_full(); self.store.store({'
 }
 expect_fail check_config_load_once.sh \
     'a settings update that loads then stores and can overwrite a concurrent registry update' \
@@ -18294,6 +18468,8 @@ if text.count(subject) != 1:
 replacement = "        let current = self.inner.config.load_full(); arc_swap::ArcSwapAny::store(&self.inner.config, {\n"
 path.write_text(text.replace(subject, replacement, 1))
 PYEOF
+    reanchor_config_load_entry crates/gateway/src/service/update.rs 'self.inner.config.rcu(|current| {' \
+        'let current = self.inner.config.load_full(); arc_swap::ArcSwapAny::store(&self.inner.config, {'
 }
 expect_fail check_config_load_once.sh \
     'a registry update storing through UFCS and able to overwrite a concurrent settings update' \
