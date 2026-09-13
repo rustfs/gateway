@@ -25,10 +25,22 @@
 
 use std::sync::Arc;
 
-use rustfs_gateway_types::compat::put_object::input_to_s3s;
+use rustfs_gateway_core::op::{Operation, ResourceShape};
+use rustfs_gateway_dialect_minio::PutObjectReplica;
+use rustfs_gateway_types::compat::put_object::{input_to_s3s, replica_input_to_s3s};
 
-use super::super::{BodyProbe, RawRequest, gateway_decode};
-use super::{BODY, Decoded, Refusal, TARGET, convert, full_request, put, run_decode};
+use super::super::{BodyProbe, RawRequest, gateway_decode, gateway_decode_replica, oracle};
+use super::{BODY, Decoded, Refusal, TARGET, body_streamed_once, convert, full_request, put, run_decode, run_decode_through};
+
+/// A version id as a replication source writes it.
+const SOURCE_VERSION: &str = "0190b7a1-6d4e-7c3a-9f00-0123456789ab";
+
+/// The gateway half under the RustFS profile of rd-put-0007: routed with the replication dialect
+/// installed, decoded by the replica codec, converted with its version id.
+fn replica(request: &RawRequest, probe: &Arc<BodyProbe>) -> Result<Result<oracle::PutObjectInput, String>, String> {
+    let input = gateway_decode_replica(request, probe)?;
+    Ok(replica_input_to_s3s(input.object, input.version_id).map_err(|error| error.to_string()))
+}
 
 // ── decode: the known divergences, named ──────────────────────────────────────────────────────
 
@@ -140,17 +152,37 @@ fn the_sdk_checksum_algorithm_header_is_read_by_the_gateway_and_not_by_s3s() {
     assert_eq!(diff.differing, ["checksum_algorithm"]);
 }
 
-/// `?versionId=` on a PUT, the MinIO extension RustFS replication writes with.
+/// `?versionId=` on a PUT, the MinIO extension RustFS replication writes with so a replica keeps
+/// its source's version id. On the default assembly it routes to `PutObject`, whose model has no
+/// such member: s3s hands it to its handler and the gateway drops it, so no ordinary writer
+/// chooses a version id. With the replication dialect installed
+/// (`rustfs_gateway_dialect_minio::replication_dialect`, the RustFS profile) the same request
+/// routes to `minio:PutObjectReplica` and converts, member for member, to the input s3s decodes,
+/// with the body still crossing once and live. That operation is authorised as
+/// `s3:ReplicateObject` before its body is read and as `s3:PutObject` on the key before its
+/// handler runs, and is never presigned; `crates/gateway/tests/replica_put.rs` shows the `403` an
+/// ordinary writer gets at the wire.
 ///
 /// Ruling: `rd-put-0007`
 #[test]
-fn the_minio_version_id_query_on_a_put_is_seen_by_s3s_only() {
+fn a_put_version_id_reaches_the_app_body_only_through_the_replica_write() {
     let request = RawRequest {
-        target: format!("{TARGET}?versionId=v1"),
+        target: format!("{TARGET}?versionId={SOURCE_VERSION}"),
         ..put(TARGET, BODY, 5)
     };
-    let diff = run_decode(&request, &request, convert).compared();
-    assert_eq!(diff.differing, ["version_id"], "the gateway model has no PutObject versionId member");
+
+    let default = run_decode(&request, &request, convert).compared();
+    assert_eq!(default.differing, ["version_id"], "the default assembly ignores the query");
+
+    let profile = run_decode_through(&request, &request, &replica).compared();
+    assert!(profile.differing.is_empty(), "{:?}", profile.differing);
+    assert_eq!(body_streamed_once(&profile, &request), Ok(()));
+
+    let auth = PutObjectReplica::spec()
+        .auth
+        .expect("a registered operation names its action");
+    assert_eq!((auth.action, auth.resource), ("s3:ReplicateObject", ResourceShape::Object));
+    assert!(!PutObjectReplica::floor().allowed_schemes().allows_presigned());
 }
 
 /// The gateway's object-key floor refuses a `..` path segment before anything is stored; the

@@ -204,11 +204,31 @@ pub fn input_to_s3s(input: dto::PutObjectInput) -> Result<oracle::PutObjectInput
         server_side_encryption: input.server_side_encryption.map(|value| value.as_str().to_owned().into()),
         storage_class: input.storage_class.map(|value| value.as_str().to_owned().into()),
         tagging: input.tagging,
-        // MinIO's `?versionId=` on a PUT has no member in the gateway model.
+        // MinIO's `?versionId=` on a PUT has no member in the gateway model. Only the authorised
+        // replica write carries one, and it converts through `replica_input_to_s3s`.
         version_id: None,
         website_redirect_location: input.website_redirect_location,
         write_offset_bytes: input.write_offset_bytes,
     })
+}
+
+/// Converts the input of the authorised replica write (`minio:PutObjectReplica`, in
+/// `rustfs-gateway-dialect-minio`) into the s3s input a RustFS app body receives: [`input_to_s3s`],
+/// plus the version id the replica must be stored under, in the MinIO member the pinned s3s reads
+/// `?versionId=` into (rustfs/gateway#752).
+///
+/// Nothing else may call it with a version id a client chose: the gateway routes `?versionId=` on a
+/// PUT to that operation only when the replication dialect is installed, and authorises it as
+/// `s3:ReplicateObject` before decoding. An ordinary `PutObject` goes through [`input_to_s3s`] and
+/// never carries one.
+///
+/// # Errors
+///
+/// As [`input_to_s3s`].
+pub fn replica_input_to_s3s(input: dto::PutObjectInput, version_id: String) -> Result<oracle::PutObjectInput, ConversionError> {
+    let mut converted = input_to_s3s(input)?;
+    converted.version_id = Some(version_id);
+    Ok(converted)
 }
 
 /// Converts the s3s output a RustFS app body returned into the gateway output the codec writes.

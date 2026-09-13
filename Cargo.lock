@@ -1751,6 +1751,7 @@ dependencies = [
  "hyper",
  "md-5",
  "rustfs-gateway-core",
+ "rustfs-gateway-dialect-minio",
  "rustfs-gateway-http",
  "rustfs-gateway-macros",
  "rustfs-gateway-server",
@@ -1839,9 +1840,13 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-dialect-minio"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
+ "http",
  "proptest",
+ "rustfs-gateway-core",
+ "rustfs-gateway-http",
+ "rustfs-gateway-sig",
  "rustfs-gateway-types",
  "rustfs-gateway-xml",
 ]
@@ -1872,6 +1877,7 @@ dependencies = [
  "rustfs-gateway",
  "rustfs-gateway-core",
  "rustfs-gateway-corpus",
+ "rustfs-gateway-dialect-minio",
  "rustfs-gateway-http",
  "rustfs-gateway-sig",
  "rustfs-gateway-stream",
@@ -1973,7 +1979,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-types"
-version = "0.20.0+aws.2026-08-04"
+version = "0.21.0+aws.2026-08-04"
 dependencies = [
  "bytes",
  "crc-fast",

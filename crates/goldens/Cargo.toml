@@ -43,6 +43,8 @@ rustfs-gateway-stream = { workspace = true }
 # scope check and client signer. Dev-only, for the same reason as the three above.
 rustfs-gateway = { workspace = true }
 rustfs-gateway-sig = { workspace = true }
+# The RustFS profile of rd-put-0007: the replica write decoded through the replication dialect.
+rustfs-gateway-dialect-minio = { path = "../dialect-minio" }
 bytes = { workspace = true }
 futures-core = { workspace = true }
 http = { workspace = true }

@@ -106,6 +106,8 @@ mod presigned_put;
 mod refusal_order_guards;
 #[path = "reject_rendering.rs"]
 mod reject_rendering;
+#[path = "replica_put.rs"]
+mod replica_put;
 #[path = "replication_token.rs"]
 mod replication_token;
 #[path = "request_allocations.rs"]

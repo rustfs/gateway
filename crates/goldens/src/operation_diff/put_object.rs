@@ -168,9 +168,20 @@ impl Decoded {
 /// `conversion`, and diffs the two oracle inputs. The two requests are the same one except where a
 /// mutation below edits one of them on purpose.
 fn run_decode(gateway_side: &RawRequest, oracle_side: &RawRequest, conversion: Convert) -> Decoded {
+    run_decode_through(gateway_side, oracle_side, &|request, probe| {
+        gateway_decode(request, probe).map(conversion)
+    })
+}
+
+/// The gateway half of one decode: the gateway's own verdict, then the conversion's.
+type GatewaySide<'a> = &'a dyn Fn(&RawRequest, &Arc<BodyProbe>) -> Result<Result<oracle::PutObjectInput, String>, String>;
+
+/// [`run_decode`] with the gateway half supplied: the replica write of rd-put-0007 routes and
+/// converts through its own operation rather than through `PutObject`.
+fn run_decode_through(gateway_side: &RawRequest, oracle_side: &RawRequest, gateway: GatewaySide<'_>) -> Decoded {
     let gateway_probe = Arc::new(BodyProbe::default());
     let oracle_probe = Arc::new(BodyProbe::default());
-    let gateway = gateway_decode(gateway_side, &gateway_probe);
+    let gateway = gateway(gateway_side, &gateway_probe);
     let exchange = s3s_exchange(oracle_side, &oracle_probe, accepted_output()).expect("the s3s harness itself runs");
     let oracle_verdict = match &exchange.input {
         Some(_) => Ok(()),
@@ -184,7 +195,7 @@ fn run_decode(gateway_side: &RawRequest, oracle_side: &RawRequest, conversion: C
             oracle: oracle_verdict,
         });
     };
-    let mut converted = match conversion(input) {
+    let mut converted = match input {
         Ok(converted) => converted,
         Err(error) => {
             return Decoded::Refused(Refusal {

@@ -682,6 +682,7 @@ gateway_modules = (
     "presigned_put",
     "refusal_order_guards",
     "reject_rendering",
+    "replica_put",
     "replication_token",
     "request_allocations",
     "response_invariants",

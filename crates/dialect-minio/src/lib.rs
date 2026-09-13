@@ -12,15 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Clean-room concrete dialect fields for MinIO-compatible protocol bytes.
+//! Clean-room concrete dialect fields and operations for MinIO-compatible protocol bytes.
 //!
 //! Responsible for: registering the lifecycle `DelMarkerExpiration` field against the production
-//! ExtField mechanism. NOT responsible for: literal bodies, error rendering, other extensions, or
-//! MinIO server implementation details. Upstream: public protocol observations and ADR-0007.
-//! Downstream: applications that explicitly select this dialect.
+//! ExtField mechanism, and the replica write `minio:PutObjectReplica` ([`replication`]) against the
+//! dialect operation mechanism. NOT responsible for: literal bodies, error rendering, other
+//! extensions, or MinIO server implementation details. Upstream: public protocol observations,
+//! ADR-0007 and `rustfs-gateway-core`'s dialect module. Downstream: applications that explicitly
+//! select this dialect.
 #![doc = include_str!("../README.md")]
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
+
+pub mod replication;
+
+pub use replication::{PutObjectReplica, PutObjectReplicaInput, ReplicaWriteResources, replication_dialect};
 
 use rustfs_gateway_types::ext::{CodecPolicy, ExtError, ExtField, PersistedXml};
 use rustfs_gateway_types::persistence::{

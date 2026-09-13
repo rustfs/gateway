@@ -314,6 +314,50 @@ pub(crate) fn gateway_decode(
         other => return Err(format!("routed to {other:?}, not PutObject")),
     }
     let view = MetaView::of(&wire, TargetKind::Object).map_err(|error| error.code().as_str().to_owned())?;
+    let stream = probe_stream(request, probe)?;
+    rustfs_gateway_types::dto::PutObject::decode(&view, RequestBody::Stream(stream))
+        .map_err(|error| error.code().as_str().to_owned())
+}
+
+/// Routes `request` through a router with the MinIO replication dialect installed — the RustFS
+/// profile of rd-put-0007 — and decodes it with the replica codec, handing the decoder a live body
+/// that `probe` observes.
+///
+/// # Errors
+///
+/// The wire refusal, the operation a wrong route reached, or the codec's error code.
+pub(crate) fn gateway_decode_replica(
+    request: &RawRequest,
+    probe: &Arc<BodyProbe>,
+) -> Result<rustfs_gateway_dialect_minio::PutObjectReplicaInput, String> {
+    use rustfs_gateway_dialect_minio::{PutObjectReplica, replication, replication_dialect};
+
+    let wire = gateway_wire(request)?;
+    let parts = RouteRequestParts {
+        method: wire.method(),
+        path: wire.raw_path().as_str(),
+        target: TargetKind::Object,
+        host_class: HostClass::Standard,
+        arn_form: None,
+        query: wire.query(),
+        headers: wire.headers(),
+    };
+    let dialect = replication_dialect().map_err(|errors| format!("the dialect was refused: {errors:?}"))?;
+    let router = rustfs_gateway_core::registry::RouterBuilder::new()
+        .dialect(&dialect)
+        .build()
+        .map_err(|error| format!("the router was refused: {error:?}"))?;
+    match router.resolve(&parts).map(|entry| entry.op_name) {
+        Some(replication::NAME) => {}
+        other => return Err(format!("routed to {other:?}, not {}", replication::NAME)),
+    }
+    let view = MetaView::of(&wire, TargetKind::Object).map_err(|error| error.code().as_str().to_owned())?;
+    let stream = probe_stream(request, probe)?;
+    PutObjectReplica::decode(&view, RequestBody::Stream(stream)).map_err(|error| error.code().as_str().to_owned())
+}
+
+/// The fixture body as the live gateway stream, with its trailers, observed by `probe`.
+fn probe_stream(request: &RawRequest, probe: &Arc<BodyProbe>) -> Result<ByteStream, String> {
     let mut trailers = http::HeaderMap::new();
     for (name, value) in &request.trailers {
         let name = http::HeaderName::from_bytes(name.as_bytes()).map_err(|error| error.to_string())?;
@@ -321,9 +365,7 @@ pub(crate) fn gateway_decode(
         trailers.append(name, value);
     }
     let source = ProbeSource::new(request, TrailingHeaders::from_header_map(trailers), Arc::clone(probe));
-    let stream = ByteStream::new(Box::pin(source)).map_err(|error| error.to_string())?;
-    rustfs_gateway_types::dto::PutObject::decode(&view, RequestBody::Stream(stream))
-        .map_err(|error| error.code().as_str().to_owned())
+    ByteStream::new(Box::pin(source)).map_err(|error| error.to_string())
 }
 
 /// Encodes `output` exactly as the gateway pipeline does, as the answer to `request`.

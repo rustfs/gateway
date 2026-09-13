@@ -58,6 +58,8 @@ tokio = { workspace = true, features = ["fs", "io-util", "net", "sync", "time"] 
 [dev-dependencies]
 dhat = { workspace = true }
 md-5 = { workspace = true }
+# `tests/replica_put.rs`: the replication dialect's replica write, assembled through this facade.
+rustfs-gateway-dialect-minio = { path = "../dialect-minio" }
 socket2 = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "test-util"] }
 trybuild = { workspace = true }
