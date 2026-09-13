@@ -388,11 +388,19 @@ mut_sig_p2_05_primary_assertion_removed() {
 from pathlib import Path
 path = Path("crates/sig/src/post_policy_tests.rs")
 text = path.read_text()
+# Other tests (the millisecond-expiration one from rustfs/gateway#756) verify a policy too, so the
+# subject is the c-sig-0417 body alone, not the first matching line in the file.
+signature = "fn c_sig_0417_valid_policy_produces_a_proof_and_final_receipt() {\n"
 old = "assert!(policy.verify(&key).is_ok());"
 new = "assert!(policy.final_key().starts_with(\"uploads/\"));"
-if text.count(old) != 1:
+if text.count(signature) != 1:
     raise SystemExit("missing P2-05 primary-assertion mutation subject")
-path.write_text(text.replace(old, new, 1))
+start = text.index(signature)
+end = text.find("\n}\n", start)
+body = text[start:end]
+if end < 0 or body.count(old) != 1:
+    raise SystemExit("missing P2-05 primary-assertion mutation subject")
+path.write_text(text[:start] + body.replace(old, new, 1) + text[end:])
 PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
