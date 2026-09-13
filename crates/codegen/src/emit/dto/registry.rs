@@ -332,7 +332,10 @@ fn same_members(left: &[Field], right: &[Field]) -> bool {
 ///
 /// The key digests are listed for the same reason `rustfs-gateway-core`'s `KeyFingerprint` has no
 /// `Debug`: anything derived from key material does not render itself. The XML body members carry
-/// the same KMS key ids and context as the headers, inside a bucket or restore document.
+/// the same KMS key ids and context as the headers, inside a bucket or restore document. The
+/// replication destination's `Account` sits beside its `ReplicaKmsKeyID` for the reason
+/// `q-repl-0010` records: both are configuration secrets the stored document echoes on the read
+/// and nothing else may print.
 /// `tests/sensitive_debug_tests.rs` walks the registry against an independent list of these names.
 pub const REDACTED_WIRE_NAMES: &[&str] = &[
     "x-amz-server-side-encryption-customer-key",
@@ -346,6 +349,7 @@ pub const REDACTED_WIRE_NAMES: &[&str] = &[
     "KeyId",
     "KMSKeyId",
     "KMSContext",
+    "Account",
 ];
 
 /// Model members whose string value must use the dedicated zeroizing DTO carrier.
