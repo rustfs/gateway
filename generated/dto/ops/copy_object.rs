@@ -120,7 +120,7 @@ pub struct Input {
     pub sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-server-side-encryption-customer-key`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub sse_customer_key: Option<crate::SseCustomerKey>,
-    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
+    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub sse_customer_key_md5: Option<String>,
     /// Wire `x-amz-server-side-encryption-aws-kms-key-id`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub ssekms_key_id: Option<String>,
@@ -132,7 +132,7 @@ pub struct Input {
     pub copy_source_sse_customer_algorithm: Option<String>,
     /// Wire `x-amz-copy-source-server-side-encryption-customer-key`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub copy_source_sse_customer_key: Option<crate::SseCustomerKey>,
-    /// Wire `x-amz-copy-source-server-side-encryption-customer-key-md5`, bound as Header. Optional.
+    /// Wire `x-amz-copy-source-server-side-encryption-customer-key-md5`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub copy_source_sse_customer_key_md5: Option<String>,
     /// Wire `x-amz-request-payer`, bound as Header. Optional.
     pub request_payer: Option<crate::ops::enums::RequestPayer>,
@@ -209,13 +209,13 @@ impl std::fmt::Debug for Input {
             .field("website_redirect_location", &self.website_redirect_location)
             .field("sse_customer_algorithm", &self.sse_customer_algorithm)
             .field("sse_customer_key", &redact(&self.sse_customer_key))
-            .field("sse_customer_key_md5", &self.sse_customer_key_md5)
+            .field("sse_customer_key_md5", &redact(&self.sse_customer_key_md5))
             .field("ssekms_key_id", &redact(&self.ssekms_key_id))
             .field("ssekms_encryption_context", &redact(&self.ssekms_encryption_context))
             .field("bucket_key_enabled", &self.bucket_key_enabled)
             .field("copy_source_sse_customer_algorithm", &self.copy_source_sse_customer_algorithm)
             .field("copy_source_sse_customer_key", &redact(&self.copy_source_sse_customer_key))
-            .field("copy_source_sse_customer_key_md5", &self.copy_source_sse_customer_key_md5)
+            .field("copy_source_sse_customer_key_md5", &redact(&self.copy_source_sse_customer_key_md5))
             .field("request_payer", &self.request_payer)
             .field("tagging", &self.tagging)
             .field("object_lock_mode", &self.object_lock_mode)
@@ -250,7 +250,7 @@ pub struct Output {
     pub server_side_encryption: Option<crate::ops::enums::ServerSideEncryption>,
     /// Wire `x-amz-server-side-encryption-customer-algorithm`, bound as Header. Optional.
     pub sse_customer_algorithm: Option<String>,
-    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional.
+    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub sse_customer_key_md5: Option<String>,
     /// Wire `x-amz-server-side-encryption-aws-kms-key-id`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
     pub ssekms_key_id: Option<String>,
@@ -299,7 +299,7 @@ impl std::fmt::Debug for Output {
             .field("version_id", &self.version_id)
             .field("server_side_encryption", &self.server_side_encryption)
             .field("sse_customer_algorithm", &self.sse_customer_algorithm)
-            .field("sse_customer_key_md5", &self.sse_customer_key_md5)
+            .field("sse_customer_key_md5", &redact(&self.sse_customer_key_md5))
             .field("ssekms_key_id", &redact(&self.ssekms_key_id))
             .field("ssekms_encryption_context", &redact(&self.ssekms_encryption_context))
             .field("bucket_key_enabled", &self.bucket_key_enabled)

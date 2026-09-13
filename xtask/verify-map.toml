@@ -110,7 +110,7 @@ cases = "c-lifecycle-0002,c-lifecycle-0003,c-lifecycle-0004,c-lifecycle-0005,c-l
 
 [[operation]]
 name = "GetBucketLocation"
-cases = "c-location-0001,c-location-0002,c-location-0003,c-location-0004"
+cases = "c-location-0001,c-location-0002,c-location-0003,c-location-0004,c-location-0005"
 
 [[operation]]
 name = "GetBucketLogging"
@@ -314,7 +314,7 @@ cases = "c-bucketconfig-0012,c-bucketconfig-0014,c-bucketconfig-0036,c-bucketcon
 
 [[operation]]
 name = "PutObject"
-cases = "c-checksum-0001,c-checksum-0003,c-checksum-0004,c-checksum-0005,c-checksum-0006,c-checksum-0007,c-checksum-0008,c-checksum-0009,c-checksum-0010,c-checksum-0011,c-checksum-0012,c-checksum-0013,c-chunked-0001,c-chunked-0002,c-chunked-0003,c-cond-0001,c-cond-0006,c-cond-0009,c-cond-0011,c-cond-0012,c-cond-0013,c-cond-0018,c-copy-0022,c-encryption-0026,c-host-0008,c-naming-0025,c-naming-0030,c-object-0006,c-object-0013,c-object-0026,c-object-0027,c-object-0030,c-object-0040,c-object-0041,c-object-0042,c-object-0043,c-object-0044,c-object-0051,c-object-0054,c-object-0055,c-object-0056,c-object-0057,c-object-0059,c-object-0060,c-sig-0001,c-ssec-0001,c-ssec-0003,c-ssec-0005,c-ssec-0006,c-ssec-0007,c-ssec-0008,c-ssec-0009,c-ssec-0010,c-tagging-0003,c-tagging-0016,c-tagging-0017"
+cases = "c-checksum-0001,c-checksum-0003,c-checksum-0004,c-checksum-0005,c-checksum-0006,c-checksum-0007,c-checksum-0008,c-checksum-0009,c-checksum-0010,c-checksum-0011,c-checksum-0012,c-checksum-0013,c-chunked-0001,c-chunked-0002,c-chunked-0003,c-cond-0001,c-cond-0006,c-cond-0009,c-cond-0011,c-cond-0012,c-cond-0013,c-cond-0018,c-copy-0022,c-encryption-0026,c-host-0008,c-naming-0025,c-naming-0030,c-object-0006,c-object-0013,c-object-0026,c-object-0027,c-object-0030,c-object-0040,c-object-0041,c-object-0042,c-object-0043,c-object-0044,c-object-0051,c-object-0054,c-object-0055,c-object-0056,c-object-0057,c-object-0059,c-object-0060,c-sig-0001,c-sig-0594,c-sig-0595,c-ssec-0001,c-ssec-0003,c-ssec-0005,c-ssec-0006,c-ssec-0007,c-ssec-0008,c-ssec-0009,c-ssec-0010,c-tagging-0003,c-tagging-0016,c-tagging-0017"
 
 [[operation]]
 name = "PutObjectAcl"

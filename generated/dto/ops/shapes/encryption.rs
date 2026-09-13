@@ -27,13 +27,13 @@
 /// destructure it exhaustively (P3). A required member is a bare type and an optional one is
 /// `Option<T>`; `Default` fills a required member with a wire-invalid placeholder (P10) that
 /// [`Encryption::check_required`] refuses to let off the decode path.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct Encryption {
     /// Wire `EncryptionType`, bound as BodyXml. Required.
     pub encryption_type: crate::ops::enums::EncryptionType,
-    /// Wire `KMSKeyId`, bound as BodyXml. Optional.
+    /// Wire `KMSKeyId`, bound as BodyXml. Optional. Secret: `Debug` prints a placeholder.
     pub kms_key_id: Option<String>,
-    /// Wire `KMSContext`, bound as BodyXml. Optional.
+    /// Wire `KMSContext`, bound as BodyXml. Optional. Secret: `Debug` prints a placeholder.
     pub kms_context: Option<String>,
 }
 
@@ -55,5 +55,19 @@ impl Encryption {
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
         crate::reject_placeholder("Encryption", "EncryptionType", &self.encryption_type)?;
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Encryption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn redact<T>(value: &Option<T>) -> Option<&'static str> {
+            value.as_ref().map(|_| "<redacted>")
+        }
+
+        f.debug_struct("Encryption")
+            .field("encryption_type", &self.encryption_type)
+            .field("kms_key_id", &redact(&self.kms_key_id))
+            .field("kms_context", &redact(&self.kms_context))
+            .finish()
     }
 }

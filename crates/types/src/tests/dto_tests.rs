@@ -241,6 +241,31 @@ fn c_dto_n018_debug_never_prints_an_sse_c_key() {
 }
 
 #[test]
+fn c_dto_n023_debug_never_prints_a_key_digest_or_a_bucket_kms_key_id() {
+    let input = put_object::Input {
+        sse_customer_key_md5: Some("digest-must-never-be-logged".to_owned()),
+        ..Default::default()
+    };
+    let rendered = format!("{input:?}");
+    assert!(
+        !rendered.contains("digest-must-never-be-logged"),
+        "a key digest reached Debug: {rendered}"
+    );
+    assert!(rendered.contains("sse_customer_key_md5: Some(\"<redacted>\")"), "{rendered}");
+
+    let default = dto::ServerSideEncryptionByDefault {
+        kms_master_key_id: Some("bucket-kms-key-must-never-be-logged".to_owned()),
+        ..Default::default()
+    };
+    let rendered = format!("{default:?}");
+    assert!(
+        !rendered.contains("must-never-be-logged"),
+        "a bucket KMS key id reached Debug: {rendered}"
+    );
+    assert!(rendered.contains("kms_master_key_id: Some(\"<redacted>\")"), "{rendered}");
+}
+
+#[test]
 fn c_dto_n022_debug_still_prints_the_fields_that_are_not_secret() {
     // The redaction must not degrade into "print nothing", which would make the type useless for
     // diagnostics and would tempt somebody to remove it.

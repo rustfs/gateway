@@ -1,0 +1,60 @@
+# c-sig-0595 — the same presigned request, signed in full, gets past authentication.
+
+[case]
+id = "c-sig-0595"
+schema_version = 1
+title = "A presigned PutObject that signs its SSE-C key headers passes authentication and meets the cleartext gate"
+rationale = """
+The control for c-sig-0594: identical request, but the runner's default X-Amz-SignedHeaders covers \
+the SSE-C algorithm, key and digest. Authentication accepts it, so the request reaches the SSE gate, \
+which refuses a customer key on this suite's cleartext in-process transport with 400 InvalidRequest. \
+Without this control a verifier that refused every presigned SSE-C request, signed or not, would \
+satisfy c-sig-0594 for the wrong reason."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["signature", "sigv4", "presigned", "security", "sse", "tls"]
+timeout_ms = 10000
+quirks = ["q-sse-0010"]
+
+[case.applies_to]
+tls = "forbidden"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html"
+summary = "A SigV4 presigned URL covers the request headers named in X-Amz-SignedHeaders."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html"
+summary = "Requests using a customer-provided key must be made over a secure connection."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[request]
+method = "PUT"
+target = "/conf-sig/presigned-signed-ssec.bin"
+headers = { "x-amz-server-side-encryption-customer-algorithm" = "AES256", "x-amz-server-side-encryption-customer-key" = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "x-amz-server-side-encryption-customer-key-md5" = "tP/LI3N87DFaSk0aoqYgzg==" }
+body = { size = 16 }
+sign = { mode = "presigned_v4", service = "s3", region = "us-east-1", credential = "valid", expires_s = 60 }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["x-amz-server-side-encryption-customer-key"]
+
+[expect.error]
+code = "InvalidRequest"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>InvalidRequest</Code><Message>requests specifying a customer-provided encryption key must be made over a secure connection</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

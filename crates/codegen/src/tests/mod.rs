@@ -40,6 +40,7 @@ mod operations_md_tests;
 mod request_body_mode_tests;
 mod route_only_tests;
 mod runtime_contract_tests;
+mod sensitive_debug_tests;
 mod structural_union_tests;
 mod tagging_tests;
 mod tolerance_tests;

@@ -27,9 +27,9 @@
 /// destructure it exhaustively (P3). A required member is a bare type and an optional one is
 /// `Option<T>`; `Default` fills a required member with a wire-invalid placeholder (P10) that
 /// [`Ssekms::check_required`] refuses to let off the decode path.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct Ssekms {
-    /// Wire `KeyId`, bound as BodyXml. Required.
+    /// Wire `KeyId`, bound as BodyXml. Required. Secret: `Debug` prints a placeholder.
     pub key_id: String,
 }
 
@@ -51,5 +51,11 @@ impl Ssekms {
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
         crate::reject_placeholder("Ssekms", "KeyId", &self.key_id)?;
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for Ssekms {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Ssekms").field("key_id", &"<redacted>").finish()
     }
 }
