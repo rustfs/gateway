@@ -213,14 +213,17 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 14] = [
         request: "?versionId= on the PUT (MinIO extension)",
         aws: "PutObject takes no versionId; the service mints version ids",
         aws_evidence: API_PUT_OBJECT,
-        s3s: "reads it into version_id",
-        gateway: "no member; the query is dropped",
-        client_impact: "RustFS replication writes replicas with ?versionId= and a RustFS target keeps the source version id; \
-                        behind the gateway every replica would get a fresh id",
+        s3s: "reads it into version_id for every caller; the RustFS handler passes it to the store",
+        gateway: "PutObject has no member and drops the query. With the replication dialect installed \
+                  (rustfs-gateway-dialect-minio replication_dialect) the request routes to minio:PutObjectReplica, authorised as \
+                  s3:ReplicateObject and s3:PutObject on the key and never presigned, which carries it to the handler",
+        client_impact: "a RustFS deployment installs the dialect, so replicas keep the source version id; a caller without \
+                        s3:ReplicateObject is refused with 403 there, and ignored everywhere else. The source-version-id header \
+                        fallback arrives on an ordinary PutObject and stays with the adapter's replication-header authorisation",
         ruling: DivergenceRuling::RustfsProfile,
-        follow_up: DivergenceFollowUp::Open("https://github.com/rustfs/gateway/issues/752"),
+        follow_up: DivergenceFollowUp::Landed("c-object-0059"),
         test_file: PUT_DECODE,
-        test: "the_minio_version_id_query_on_a_put_is_seen_by_s3s_only",
+        test: "a_put_version_id_reaches_the_app_body_only_through_the_replica_write",
     },
     RequestDivergence {
         id: "rd-put-0008",

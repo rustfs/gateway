@@ -18,6 +18,12 @@
 //! exact sibling placement, property coverage over valid values, and fail-closed RMW. NOT responsible for: literal bodies, error
 //! rendering, or any other vendor extension. Upstream: ADR-0007 and public protocol evidence.
 //! Downstream: the P6 dialect integration surface.
+//!
+//! The crate's one test target: the replica-write suite is registered here rather than as a
+//! second target.
+
+#[path = "replication.rs"]
+mod replication;
 
 use proptest::prelude::*;
 use rustfs_gateway_dialect_minio::{DelMarkerExpiration, MinioLifecycleDialect};

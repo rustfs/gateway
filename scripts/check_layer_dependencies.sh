@@ -42,7 +42,6 @@ layers = [
     ("rustfs-gateway-xml", set()),
     ("rustfs-gateway-codegen", {"rustfs-gateway-model"}),
     ("rustfs-gateway-types", {"rustfs-gateway-xml", "rustfs-gateway-stream"}),
-    ("rustfs-gateway-dialect-minio", {"rustfs-gateway-types", "rustfs-gateway-xml"}),
     ("rustfs-gateway-goldens", {"rustfs-gateway-types", "rustfs-gateway-corpus"}),
     ("rustfs-gateway-http", {"rustfs-gateway-types", "rustfs-gateway-stream"}),
     ("rustfs-gateway-sig", {"rustfs-gateway-http", "rustfs-gateway-types", "rustfs-gateway-stream"}),
@@ -55,6 +54,11 @@ layers = [
             "rustfs-gateway-xml",
             "rustfs-gateway-stream",
         },
+    ),
+    # After core: the replica write is a dialect operation built on core's dialect mechanism.
+    (
+        "rustfs-gateway-dialect-minio",
+        {"rustfs-gateway-core", "rustfs-gateway-sig", "rustfs-gateway-types", "rustfs-gateway-xml"},
     ),
     ("rustfs-gateway-server", set()),
     (

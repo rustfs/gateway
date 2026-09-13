@@ -1,0 +1,91 @@
+# c-object-0059 — a versionId on an ordinary PutObject does not choose the stored version id.
+#
+# Schema dimensions exercised: a versioned bucket, a three-exchange write-then-read, an error code.
+
+[case]
+id = "c-object-0059"
+schema_version = 1
+title = "A versionId on an ordinary PutObject does not choose the stored version id"
+rationale = """
+PutObject has no version-id input: the service mints every version id. Replication between \
+MinIO-compatible servers writes a replica with `?versionId=` so the target keeps the source's id, \
+and this gateway honours that only through the replication dialect's own operation, behind its own \
+permission. On the standard assembly the query must stay what it always was, ignored: a writer that \
+could choose its own version id could plant a version in a history it was never shown. Reading the \
+named id back is what makes the difference observable, because a 200 there would mean the client \
+picked it."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["versioning", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "The documented request has no version-id input; the response reports the id the service assigned."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/752"
+summary = "A caller-chosen version id is honoured only on the replication dialect's authorised operation."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object-replica"
+versioning = "enabled"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "write-naming-a-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-object-replica/doc.txt?versionId=conformance-version-9999"
+body = { utf8 = "replica bytes" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-version-id" = "*"
+
+[[exchanges]]
+name = "the-named-version-was-never-stored"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object-replica/doc.txt?versionId=conformance-version-9999"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchVersion"
+request_id_present = true
+
+[[exchanges]]
+name = "the-write-is-the-current-version"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object-replica/doc.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "replica bytes"
