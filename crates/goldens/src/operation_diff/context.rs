@@ -31,12 +31,9 @@
 //!
 //! Every value comes from a gateway component that already computed it for this request: the
 //! method, raw path and raw query from `WireRequest`; the headers from its text view (the wire
-//! layer publishes no header map); the host region from the resolver; the principal from the
-//! authenticator's verdict. One value does **not** survive the gateway pipeline: the verified
-//! credential scope. `Verdict::Authenticated` carries the identity and the scheme, not the region
-//! or service the signature was scoped to, so the harness re-runs the signature crate's own
-//! `enforce_scope` on the same header — the check the authenticator ran — and a production adapter
-//! would need the gateway to expose that value first.
+//! layer publishes no header map); the host region from the resolver; the principal and the
+//! verified credential scope from the authenticator's verdict, which carries the scope the
+//! signature was verified under (ADR-0020) — nothing here re-runs a signature-crate check.
 
 mod get_bucket_location;
 mod put_object;
@@ -55,9 +52,8 @@ use rustfs_gateway_core::codec::MetaView;
 use rustfs_gateway_core::route::RouteRequestParts;
 use rustfs_gateway_http::{Limits, RawHost, WireRequest};
 use rustfs_gateway_sig::{
-    Admission, AmzDate, ExpectedScope, OperationFloor, PayloadMode, RawQuery, RegionSet, RequestNow, SecurityFloor, SigService,
-    SigV4Authorization, SigV4Signer, SigningCredentials, SigningRequest, SigningScope, SkewWindow, TrailerSet, WireView,
-    enforce_clock_skew, enforce_scope,
+    Admission, AmzDate, OperationFloor, PayloadMode, RawQuery, RegionSet, RequestNow, SecurityFloor, SigService, SigV4Signer,
+    SigningCredentials, SigningRequest, SigningScope, TrailerSet, WireView,
 };
 use rustfs_gateway_types::compat::request_context::{GatewayRequestContext, Principal, VerifiedScope, request_to_s3s};
 
@@ -322,16 +318,12 @@ fn authenticate(
         .verdict()
         .identity()
         .ok_or_else(|| format!("authentication refused: {:?}", outcome.verdict().rejection()))?;
-
-    // The verdict names who, not the scope. Re-derive the verified scope with the check the
-    // authenticator itself ran; see the module documentation.
-    let authorization =
-        SigV4Authorization::parse(header_text(headers, "authorization")?).map_err(|error| format!("authorization: {error:?}"))?;
-    let signed_at = AmzDate::parse(header_text(headers, "x-amz-date")?).map_err(|error| format!("x-amz-date: {error:?}"))?;
-    let clock = enforce_clock_skew(&signed_at, now, SkewWindow::DEFAULT).map_err(|error| format!("clock: {error:?}"))?;
-    let regions = RegionSet::new(REGIONS).map_err(|error| format!("regions: {error:?}"))?;
-    let verified = enforce_scope(authorization.scope(), clock, &ExpectedScope::new(SigService::S3, &regions))
-        .map_err(|error| format!("scope: {error:?}"))?;
+    // The scope the signature was verified under, from the verdict itself (ADR-0020). Required: a
+    // SigV4 verdict without one is a gateway defect, not a request with no region.
+    let verified = outcome
+        .verdict()
+        .verified_scope()
+        .ok_or_else(|| "the SigV4 verdict carries no verified scope".to_owned())?;
     Ok(Some(Principal {
         access_key: identity.access_key_id().to_owned(),
         secret_key: stored_secret(identity.access_key_id())?,

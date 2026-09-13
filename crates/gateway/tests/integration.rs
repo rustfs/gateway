@@ -130,5 +130,7 @@ mod streaming_request;
 mod tagging_reachability;
 #[path = "throughput_request.rs"]
 mod throughput_request;
+#[path = "verified_scope_runtime.rs"]
+mod verified_scope_runtime;
 #[path = "vhost_resolution.rs"]
 mod vhost_resolution;

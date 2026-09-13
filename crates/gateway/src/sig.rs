@@ -43,7 +43,7 @@ pub use rustfs_gateway_sig::{
     SessionBindingError, SessionToken, SigFamily, SigIdentity, SigLocation, SigService, SigV2Mode, SigV2Signer,
     SigV2StringToSignSpec, SigV4Authorization, SigV4Signer, Signature, SignatureMatch, SignatureVerifier, SignedRequest,
     SignerError, SigningCredentials, SigningKey, SigningRequest, SigningScope, SkewWindow, SystemClock, TRAILER_ALGORITHM,
-    Tamper, TamperComponent, TrailerSet, Verdict, X_AMZ_SECURITY_TOKEN_HEADER,
+    Tamper, TamperComponent, TrailerSet, Verdict, VerifiedScope, X_AMZ_SECURITY_TOKEN_HEADER,
 };
 #[cfg(feature = "dangerous-replace-signature-verifier")]
 pub use rustfs_gateway_sig::{AwsSignatureVerifier, DangerAck, SealedAws};

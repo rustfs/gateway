@@ -116,6 +116,125 @@ async fn c_sig_0428_form_field_material_uses_the_post_policy_authority() {
         panic!("authenticated verdict required")
     };
     assert!(verdict.is_authenticated());
+    let scope = verdict.verified_scope().expect("a SigV4 form names its scope");
+    assert_eq!((scope.date().as_str(), scope.region(), scope.service()), ("20150830", "us-east-1", "s3"));
+}
+
+// ── the verified scope on the verdict ─────────────────────────────────────────────────────────
+
+const SCOPE_STAMP: &str = "20150830T123600Z";
+const SCOPE_NOW: i64 = 1_440_938_160;
+const SCOPE_HOST: &[u8] = b"s3.example.test";
+
+/// Two served regions, so a verdict reporting the first configured one is not a pass.
+fn two_region_authenticator() -> SigV4Authenticator {
+    SigV4Authenticator::new(
+        Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid"))),
+        RegionSet::new(["us-east-1", "eu-west-1"]).expect("non-empty"),
+    )
+}
+
+fn signer_for(region: &str) -> rustfs_gateway_sig::SigV4Signer {
+    let stamp = AmzDate::parse(SCOPE_STAMP).expect("valid stamp");
+    let scope = rustfs_gateway_sig::SigningScope::new(stamp.day(), region, SigService::S3).expect("valid scope");
+    let credentials = rustfs_gateway_sig::SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
+    rustfs_gateway_sig::SigV4Signer::new(credentials, scope)
+}
+
+/// A bodiless `GET /bucket`, header-signed for `region`.
+fn header_signed(region: &str) -> http::HeaderMap {
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.test"));
+    let host = RawHost::from_host_header(SCOPE_HOST).expect("valid host");
+    let stamp = AmzDate::parse(SCOPE_STAMP).expect("valid stamp");
+    let signing =
+        rustfs_gateway_sig::SigningRequest::new(&Method::GET, "/bucket", "", &headers, &host, PayloadMode::Unsigned, stamp);
+    signer_for(region).sign_headers(&signing).expect("signable").headers().clone()
+}
+
+/// Floor, then the built-in verifier, exactly as the service runs them.
+async fn verify(headers: &http::HeaderMap, query: &str, operation: &OperationFloor) -> Verdict {
+    let view = WireView::new(headers, RawQuery::new(query));
+    let admitted = SecurityFloor::new()
+        .admit(view, operation, RequestNow::from_unix_seconds(SCOPE_NOW))
+        .expect("the floor admits the request");
+    let Admission::Sealed(sealed) = admitted else { panic!("a SigV4 request must be sealed") };
+    let token = headers
+        .get("x-amz-content-sha256")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("UNSIGNED-PAYLOAD");
+    let payload = PayloadMode::parse(token, rustfs_gateway_sig::TrailerSet::None).expect("payload mode");
+    let host = RawHost::from_host_header(SCOPE_HOST).expect("valid host");
+    let request = Authentication::new(&sealed, &Method::GET, "/bucket", &host, &payload, None);
+    let outcome = two_region_authenticator()
+        .authenticate(&request)
+        .await
+        .expect("credential store is available");
+    let (verdict, _) = outcome.into_parts();
+    verdict
+}
+
+/// Positive — the verdict names the region the signature was verified under. `RegionSet` sorts,
+/// so the first served region here is `eu-west-1`; signing for `us-east-1` means a verdict that
+/// reported the first configured region instead would fail.
+#[tokio::test]
+async fn a_header_signed_verdict_carries_the_verified_scope() {
+    let operation = OperationFloor::builtin("GetBucketLocation", SigService::S3);
+    let verdict = verify(&header_signed("us-east-1"), "", &operation).await;
+    let scope = verdict
+        .verified_scope()
+        .expect("an authenticated SigV4 verdict names its scope");
+    assert_eq!((scope.date().as_str(), scope.region(), scope.service()), ("20150830", "us-east-1", "s3"));
+}
+
+/// Positive — a presigned URL's scope is carried from the query it was verified from.
+#[tokio::test]
+async fn a_presigned_verdict_carries_the_verified_scope() {
+    let headers = {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.test"));
+        headers
+    };
+    let host = RawHost::from_host_header(SCOPE_HOST).expect("valid host");
+    let stamp = AmzDate::parse(SCOPE_STAMP).expect("valid stamp");
+    let signing =
+        rustfs_gateway_sig::SigningRequest::new(&Method::GET, "/bucket", "", &headers, &host, PayloadMode::Unsigned, stamp);
+    let presigned = signer_for("eu-west-1").presign(&signing, 900).expect("presignable");
+    let operation = OperationFloor::builtin_presigned("GetBucketLocation", SigService::S3);
+    let verdict = verify(presigned.headers(), presigned.query(), &operation).await;
+    let scope = verdict.verified_scope().expect("a presigned SigV4 verdict names its scope");
+    assert_eq!(scope.region(), "eu-west-1");
+}
+
+/// Negative — a client cannot choose the region the verdict reports. Re-scoping a valid
+/// signature to the other served region keeps the old signature, which no longer verifies, so
+/// the request is rejected and no scope is reported at all.
+#[tokio::test]
+async fn a_rescoped_credential_is_rejected_and_reports_no_scope() {
+    let mut headers = header_signed("us-east-1");
+    let authorization = headers
+        .get(http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .expect("a signed request has an Authorization header")
+        .replace("/us-east-1/", "/eu-west-1/");
+    headers.insert(
+        http::header::AUTHORIZATION,
+        http::HeaderValue::from_str(&authorization).expect("valid header"),
+    );
+    let operation = OperationFloor::builtin("GetBucketLocation", SigService::S3);
+    let verdict = verify(&headers, "", &operation).await;
+    assert_eq!(verdict.rejection(), Some(AuthError::SignatureDoesNotMatch));
+    assert!(verdict.verified_scope().is_none());
+}
+
+/// Negative — a scope naming a region this deployment does not serve never becomes a verdict
+/// scope, even with a signature that is valid for that region.
+#[tokio::test]
+async fn an_unserved_region_is_rejected_and_reports_no_scope() {
+    let operation = OperationFloor::builtin("GetBucketLocation", SigService::S3);
+    let verdict = verify(&header_signed("ap-south-1"), "", &operation).await;
+    assert_eq!(verdict.rejection(), Some(AuthError::AuthorizationHeaderMalformed));
+    assert!(verdict.verified_scope().is_none());
 }
 
 /// Positive — c-sig-0586: the built-in verifier authenticates the floor-sealed SigV2 POST proof.
@@ -152,4 +271,6 @@ async fn c_sig_0586_sigv2_post_policy_reaches_the_builtin_authenticator() {
     };
     assert_eq!(scheme.family, SigFamily::V2);
     assert_eq!(scheme.location, SigLocation::FormField);
+    // SigV2 has no credential scope, so none is reported rather than one being invented.
+    assert!(verdict.verified_scope().is_none());
 }

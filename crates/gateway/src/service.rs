@@ -918,7 +918,13 @@ impl S3Service {
                 }
             };
             let policy = Arc::new(policy);
-            let authz_context = RequestContext::from_request(now, policy.as_ref(), auth_scheme, route_server_extensions);
+            let authz_context = RequestContext::from_request(
+                now,
+                policy.as_ref(),
+                auth_scheme,
+                route_verdict.verified_scope(),
+                route_server_extensions,
+            );
             let route_started = route_service.inner.authz_clock.monotonic();
             let mut route_decision =
                 match catch_boxed_future(|| route_runtime.authorizer.authorize_route(&authz_context, &route_request)).await {
@@ -1091,7 +1097,13 @@ impl S3Service {
                 });
             }
             let input_request = InputAuthzRequest::new(&route_request, &input_resources);
-            let authz_context = RequestContext::from_request(now, state.policy.as_ref(), auth_scheme, input_server_extensions);
+            let authz_context = RequestContext::from_request(
+                now,
+                state.policy.as_ref(),
+                auth_scheme,
+                input_verdict.verified_scope(),
+                input_server_extensions,
+            );
             let input_started = input_service.inner.authz_clock.monotonic();
             let input_decisions =
                 match catch_boxed_future(|| input_runtime.authorizer.authorize_input(&authz_context, &input_request)).await {

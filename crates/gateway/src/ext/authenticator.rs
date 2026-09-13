@@ -160,9 +160,9 @@ impl AuthenticationOutcome {
 ///
 /// The `aws-chunked` chunk chain is seeded by the *request* signature and verified with the *same*
 /// `k_signing` the request signature was computed from. Neither value survives
-/// [`Verdict`]: `Verdict::Authenticated` carries an identity, a scheme and a zero-sized
-/// [`SignatureMatch`], which is exactly the right shape for "who is this" and exactly the wrong
-/// shape for "keep verifying". `Verdict` is `rustfs-gateway-sig`'s and `#[non_exhaustive]`, so it
+/// [`Verdict`]: `Verdict::Authenticated` carries an identity, a scheme, the verified scope and a
+/// zero-sized [`SignatureMatch`], which is exactly the right shape for "who is this" and exactly
+/// the wrong shape for "keep verifying" — the scope names the key, it does not hold it. `Verdict` is `rustfs-gateway-sig`'s and `#[non_exhaustive]`, so it
 /// cannot grow a variant from here.
 ///
 /// So the material travels beside the verdict, through a sink the pipeline owns and the
@@ -636,7 +636,15 @@ impl SigV4Authenticator {
         {
             sink.publish(ChunkVerification::new(key, presented.scope().scope_string(), date.as_str().to_owned()));
         }
-        Ok(Some(Verdict::authenticated(credentials.identity().clone(), scheme, proof)))
+        // The scope published is the one `enforce_scope` produced above and the signing key was
+        // derived from — not a re-parse of the header and not a configured region, so a verdict
+        // cannot name a region other than the one the signature is valid under (ADR-0020).
+        Ok(Some(Verdict::authenticated_in_scope(
+            credentials.identity().clone(),
+            scheme,
+            verified,
+            proof,
+        )))
     }
 }
 
