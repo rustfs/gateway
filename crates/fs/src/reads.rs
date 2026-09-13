@@ -39,6 +39,7 @@ use rustfs_gateway::{
     Timestamp, evaluate_range,
 };
 
+use super::content_headers::ContentHeaders;
 use super::records::RecordKind;
 use super::storage_error;
 use super::versioning::{delete_marker_error, explicit_for_key, missing_version, newest_for_key};
@@ -57,6 +58,8 @@ pub(super) struct Representation {
     /// re-applies RFC 2047 on the way out, so what is stored and what is returned are the same
     /// Unicode value rather than two encodings of it.
     pub(super) metadata: std::collections::BTreeMap<String, String>,
+    /// The representation headers stored with this version.
+    pub(super) headers: ContentHeaders,
 }
 
 /// The window a read serves, and the answer's status.
@@ -170,6 +173,7 @@ impl super::FsBackend {
                 storage_class: Some(record.storage_class.clone()),
                 version_id: (record.version_id != "null").then(|| record.version_id.clone()),
                 metadata: record.metadata.clone(),
+                headers: record.headers.clone(),
             });
         }
         if version_id.is_some_and(|id| id != "null") {
@@ -185,6 +189,7 @@ impl super::FsBackend {
             // A plain object file predates the version records entirely and carries no metadata
             // section, so the honest answer is the empty map rather than a guess.
             metadata: std::collections::BTreeMap::new(),
+            headers: ContentHeaders::default(),
         })
     }
 }
@@ -223,6 +228,12 @@ impl Handler<GetObject> for super::FsBackend {
                 storage_class: representation.storage_class,
                 version_id: representation.version_id,
                 metadata: representation.metadata,
+                content_type: Some(representation.headers.served_content_type()),
+                cache_control: representation.headers.cache_control,
+                content_disposition: representation.headers.content_disposition,
+                content_encoding: representation.headers.content_encoding,
+                content_language: representation.headers.content_language,
+                expires: representation.headers.expires.map(Into::into),
                 body: Some(ByteStream::from_bytes(Bytes::from(body))),
                 ..GetObjectOutput::default()
             },
@@ -251,6 +262,12 @@ impl Handler<HeadObject> for super::FsBackend {
                 storage_class: representation.storage_class,
                 version_id: representation.version_id,
                 metadata: representation.metadata,
+                content_type: Some(representation.headers.served_content_type()),
+                cache_control: representation.headers.cache_control,
+                content_disposition: representation.headers.content_disposition,
+                content_encoding: representation.headers.content_encoding,
+                content_language: representation.headers.content_language,
+                expires: representation.headers.expires.map(Into::into),
                 ..HeadObjectOutput::default()
             },
             window.status,

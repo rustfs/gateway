@@ -39,7 +39,6 @@
 //! uniqueness scope and the counter can live beside the upload records whose scanner already
 //! ignores exact dot-prefixed authority files.
 
-use std::collections::BTreeMap;
 use std::io::{self, Write as _};
 use std::path::Path;
 use std::sync::atomic::Ordering;
@@ -48,7 +47,7 @@ use rustfs_gateway::dto::{self, CompletedPart};
 use rustfs_gateway::{ChecksumAlgorithm, ChecksumSpec, ChecksumType, ErrorCode, HandlerError, RecordedUpload};
 use tokio::io::AsyncWriteExt as _;
 
-use super::records::{decode_metadata_section, encode_metadata_section, validate_user_metadata};
+use super::records::{ObjectAttributes, decode_trailing_sections, encode_trailing_sections, validate_attributes};
 use super::{FsBackend, PARTS_DIR, UPLOAD_RECORD, storage_error};
 
 const UPLOAD_ID_SEQUENCE: &str = ".multipart-upload-id-sequence";
@@ -284,8 +283,11 @@ pub(super) struct UploadRecord {
     pub(super) upload_id: Option<String>,
     pub(super) initiated: Option<i64>,
     pub(super) checksum: Option<UploadChecksum>,
-    /// The user metadata the initiating `CreateMultipartUpload` carried.
-    pub(super) metadata: BTreeMap<String, String>,
+    /// The user metadata and representation headers the initiating `CreateMultipartUpload` carried.
+    ///
+    /// Boxed because upload listing holds records beside bare common prefixes in one enum, and the
+    /// attributes are read only once, at completion.
+    pub(super) attributes: Box<ObjectAttributes>,
 }
 
 impl RecordedUpload for UploadRecord {
@@ -384,14 +386,14 @@ impl FsBackend {
             (Some(algorithm), Some(kind)) => Some(UploadChecksum::decode(algorithm, kind)?),
             _ => return Err(storage_error()),
         };
-        let metadata = decode_metadata_section(&mut lines)?;
+        let (metadata, headers) = decode_trailing_sections(&mut lines)?;
         Ok(UploadRecord {
             bucket,
             key,
             upload_id,
             initiated,
             checksum,
-            metadata,
+            attributes: Box::new(ObjectAttributes { metadata, headers }),
         })
     }
 
@@ -407,9 +409,9 @@ impl FsBackend {
         bucket: &rustfs_gateway::BucketName,
         key: &rustfs_gateway::ObjectKey,
         checksum: Option<UploadChecksum>,
-        metadata: &BTreeMap<String, String>,
+        attributes: &ObjectAttributes,
     ) -> Result<String, HandlerError> {
-        validate_user_metadata(metadata)?;
+        validate_attributes(attributes)?;
         self.require_bucket(bucket.as_str()).await?;
         let uploads = self.uploads_path(bucket.as_str());
         let upload_id = self.allocate_upload_id(bucket.as_str()).await?;
@@ -433,7 +435,7 @@ impl FsBackend {
                 hex::encode(key.as_str()),
                 hex::encode(&upload_id),
                 self.clock.now().unix_seconds(),
-                encode_metadata_section(metadata),
+                encode_trailing_sections(attributes),
             );
             let mut file = tokio::fs::OpenOptions::new()
                 .write(true)

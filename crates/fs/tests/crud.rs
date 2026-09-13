@@ -67,6 +67,18 @@ mod copy_object;
 #[path = "crud/object_tagging.rs"]
 mod object_tagging;
 
+#[path = "crud/content_headers.rs"]
+mod content_headers;
+
+#[path = "crud/list_buckets.rs"]
+mod list_buckets;
+
+#[path = "crud/delete_objects.rs"]
+mod delete_objects;
+
+#[path = "crud/post_object.rs"]
+mod post_object;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -324,6 +336,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "DeleteBucketLifecycle",
             "DeleteObject",
             "DeleteObjectTagging",
+            "DeleteObjects",
             "GetBucketLifecycleConfiguration",
             "GetBucketLocation",
             "GetBucketVersioning",
@@ -331,11 +344,13 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "GetObjectTagging",
             "HeadBucket",
             "HeadObject",
+            "ListBuckets",
             "ListMultipartUploads",
             "ListObjectVersions",
             "ListObjects",
             "ListObjectsV2",
             "ListParts",
+            "PostObject",
             "PutBucketLifecycleConfiguration",
             "PutBucketVersioning",
             "PutObject",

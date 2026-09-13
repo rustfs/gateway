@@ -32,9 +32,9 @@ use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
     AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CopyObject,
     CreateBucket, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketLifecycle, DeleteObject,
-    GetBucketLifecycleConfiguration, GetBucketLocation, GetBucketVersioning, GetObject, HeadBucket, HeadObject,
-    ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, ListPartsOutput, Owner, Part,
-    PutBucketLifecycleConfiguration, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
+    DeleteObjects, GetBucketLifecycleConfiguration, GetBucketLocation, GetBucketVersioning, GetObject, HeadBucket, HeadObject,
+    ListBuckets, ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, ListPartsOutput, Owner, Part,
+    PostObject, PutBucketLifecycleConfiguration, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
@@ -63,6 +63,7 @@ macro_rules! reference_operations {
             lifecycle DeleteBucketLifecycle => "DeleteBucketLifecycle",
             crud DeleteObject => "DeleteObject",
             tagging DeleteObjectTagging => "DeleteObjectTagging",
+            crud DeleteObjects => "DeleteObjects",
             lifecycle GetBucketLifecycleConfiguration => "GetBucketLifecycleConfiguration",
             crud GetBucketLocation => "GetBucketLocation",
             versioning GetBucketVersioning => "GetBucketVersioning",
@@ -70,11 +71,13 @@ macro_rules! reference_operations {
             tagging GetObjectTagging => "GetObjectTagging",
             crud HeadBucket => "HeadBucket",
             crud HeadObject => "HeadObject",
+            crud ListBuckets => "ListBuckets",
             listing ListMultipartUploads => "ListMultipartUploads",
             versioning ListObjectVersions => "ListObjectVersions",
             listing ListObjects => "ListObjects",
             listing ListObjectsV2 => "ListObjectsV2",
             multipart ListParts => "ListParts",
+            crud PostObject => "PostObject",
             lifecycle PutBucketLifecycleConfiguration => "PutBucketLifecycleConfiguration",
             versioning PutBucketVersioning => "PutBucketVersioning",
             crud PutObject => "PutObject",
@@ -142,11 +145,16 @@ macro_rules! register_lifecycle_entries {
     };
 }
 
+// First, so the `request_content_headers!` reader it defines is in scope for every module below.
+#[macro_use]
+mod content_headers;
 mod buckets;
 mod copy;
+mod deletes;
 mod lifecycle;
 mod lifecycle_scheduler;
 mod listing;
+mod post_object;
 mod reads;
 mod records;
 mod tagging;
@@ -154,6 +162,7 @@ mod transitions;
 mod uploads;
 mod versioning;
 
+use records::ObjectAttributes;
 use uploads::UploadRecord;
 
 pub use lifecycle_scheduler::{LifecycleScheduler, LifecycleSchedulerReport};
@@ -534,11 +543,14 @@ impl Handler<CreateMultipartUpload> for FsBackend {
         let input = request.into_input();
         let checksum = uploads::UploadChecksum::negotiate(input.checksum_algorithm.as_ref(), input.checksum_type.as_ref())?;
         let checksum_type = checksum.map(uploads::UploadChecksum::dto_type);
-        // S3 carries user metadata on the initiating request and on neither the parts nor the
-        // completion, so this is the only call in the multipart family that has it to persist.
-        let upload_id = self
-            .create_upload(&input.bucket, &input.key, checksum, &input.metadata)
-            .await?;
+        // S3 carries user metadata and the representation headers on the initiating request and on
+        // neither the parts nor the completion, so this is the only call in the multipart family
+        // that has them to persist.
+        let attributes = ObjectAttributes {
+            metadata: input.metadata.clone(),
+            headers: request_content_headers!(input),
+        };
+        let upload_id = self.create_upload(&input.bucket, &input.key, checksum, &attributes).await?;
         Ok(Resp::new(CreateMultipartUploadOutput {
             bucket: input.bucket,
             key: input.key,
@@ -728,7 +740,13 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
         ));
         tokio::fs::rename(&upload, &tombstone).await.map_err(|_| no_such_upload())?;
         let published = match self
-            .publish_object(input.bucket.as_str(), input.key.as_str(), &completed_bytes, &composite, &record.metadata)
+            .publish_object(
+                input.bucket.as_str(),
+                input.key.as_str(),
+                &completed_bytes,
+                &composite,
+                &record.attributes,
+            )
             .await
         {
             Ok(published) => published,

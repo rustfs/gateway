@@ -6,12 +6,15 @@ Agent entry point. File → responsibility → when you need to open it.
 |---|---|---|
 | `README.md` | Scope fence and supported-operation summary. | Deciding whether this reference backend fits a use case. |
 | `src/lib.rs` | Filesystem paths, capability authority, served region and owner, and five multipart handlers. | Changing shared storage behavior or the registered operation set. |
+| `src/deletes.rs` | `DeleteObjects`: every requested key through the single-key deletion, reported once as deleted or as an error; quiet mode. | Changing batch deletion or its per-key report. |
+| `src/post_object.rs` | Browser `POST` Object: the accepted form's file, media type and metadata stored through ordinary publication. | Changing what a form upload stores. |
+| `src/content_headers.rs` | The six stored representation headers, the default media type, the request reader macro, and the `headers/1` section grammar. | Changing which headers an object stores or how they persist. |
 | `src/copy.rs` | Authorized source selection, source conditions, metadata directives, self-copy classification, and destination publication. | Changing server-side object-copy behavior. |
-| `src/buckets.rs` | Bucket creation and removal, the `LocationConstraint` a creation may name, and the region `HeadBucket`/`GetBucketLocation` report. | Changing bucket lifetime or the region this backend serves. |
+| `src/buckets.rs` | Bucket creation and removal, the `ListBuckets` census and cursor, the `LocationConstraint` a creation may name, and the region `HeadBucket`/`GetBucketLocation` report. | Changing bucket lifetime, bucket listing, or the region this backend serves. |
 | `src/lifecycle.rs` | Durable lifecycle documents, filter evaluation, and one-shot current-object expiration. | Changing lifecycle configuration or expiration semantics. |
 | `src/lifecycle_scheduler.rs` | Repeated lifecycle cadence, failure accounting, and bounded shutdown. | Changing automatic expiration scheduling or worker lifetime. |
 | `src/listing.rs` | Object/upload filtering, owner projection, delimiter rollup, V1/paired markers, and scoped V2 cursors. | Changing object or upload listing pagination semantics. |
-| `src/records.rs` | The on-disk grammar of one version record, the versioned trailing section carrying user metadata, and the storability rules a metadata pair must pass. | Changing the persisted record format or the user-metadata rules. |
+| `src/records.rs` | The on-disk grammar of one version record, the versioned trailing sections carrying user metadata and stored representation headers, and the storability rules both must pass. | Changing the persisted record format or the user-metadata rules. |
 | `src/reads.rs` | Representation selection for `GetObject`/`HeadObject` and the `Range` window `evaluate_range` decides. | Changing ranged or version-selected reads. |
 | `src/tagging.rs` | Durable per-version object tag replacement, reads, deletion, and storage safety. | Changing object-tagging operations or lifecycle tag inputs. |
 | `src/transitions.rs` | One-shot current-object transition selection and storage-class mutation. | Changing lifecycle transition eligibility or class persistence. |
@@ -31,6 +34,10 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/multipart_upload_ids.rs` | Restarted upload-ID uniqueness and allocator corruption, exhaustion, and symlink refusals. | Changing multipart capability allocation or its durable counter. |
 | `tests/crud/multipart_versioning.rs` | Multipart publication into enabled, suspended, and null version lineages. | Changing completion/version integration or its failure boundaries. |
 | `tests/crud/object_metadata.rs` | Restarted `x-amz-meta-*` persistence, initiation-time multipart metadata, size and storability refusals, and the pre-section record fixture. | Changing user-metadata persistence or the record's compatibility story. |
+| `tests/crud/content_headers.rs` | Restarted `Content-Type` and standard stored headers, the untyped default, per-version answers, multipart initiation headers, and COPY/REPLACE. | Changing stored representation headers. |
+| `tests/crud/list_buckets.rs` | Bucket census order, owner, prefix/region filters, `max-buckets` paging, and cursor/page-size refusals. | Changing `ListBuckets`. |
+| `tests/crud/delete_objects.rs` | Batch deletion across versioning states, quiet mode, explicit versions, per-key errors, and whole-request refusals. | Changing `DeleteObjects` or single-key deletion. |
+| `tests/crud/post_object.rs` | Anonymous form uploads stored and read back, versions reported, and storage refusals. | Changing POST Object storage. |
 | `tests/crud/object_tagging.rs` | Restarted current/version tag operations and lifecycle filter consumption. | Changing object tags or tag-selected lifecycle expiration. |
 | `tests/fixtures/version-record-v0/**` | One version directory captured verbatim from the build that wrote eight-line records. | Proving this build still reads what the pre-metadata-section build wrote. |
 | `tests/crud/versioning.rs` | Enabled, suspended, owner reporting, restart, corruption, and symlink versioning evidence. | Changing versioned object behavior or persistence. |
