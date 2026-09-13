@@ -1781,11 +1781,14 @@ dependencies = [
  "bytes",
  "http",
  "http-body",
+ "rcgen",
  "rustfs-gateway",
  "rustfs-gateway-fs",
  "rustfs-gateway-server",
+ "rustls",
  "sha2",
  "tokio",
+ "tokio-rustls",
  "tower",
 ]
 

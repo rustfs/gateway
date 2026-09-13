@@ -53,6 +53,12 @@ COVERED = {
 # Members not yet consolidated. targets is what `cargo test --workspace` links for that member
 # today and is enforced exactly, so the debt cannot grow quietly while phase 2 is pending.
 EXCEPTIONS = {
+    "compat/sut": (
+        1,
+        "rustfs/gateway#277",
+        "one target, tests/tls.rs, which spawns the built binary; consolidating a single source buys "
+        "nothing until a second one is added",
+    ),
     "crates/fs": (
         1,
         "rustfs/gateway#277",

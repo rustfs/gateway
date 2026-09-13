@@ -15,6 +15,12 @@
 # Everything a driver writes to stderr is captured by the runner and attached to the result, so
 # diagnostics belong there rather than on stdout, which must hold the result object and nothing
 # else.
+#
+# The endpoint is `COMPAT_ENDPOINT`, plaintext, and every scenario uses it unless the client can
+# express that scenario only over TLS. For those, the runner also exports `COMPAT_TLS_ENDPOINT`
+# (`https://`, the same server, data root and probe log) and `COMPAT_CA_BUNDLE`, the PEM authority
+# that is the only thing a driver may trust for it. Never disable verification instead: a client
+# that skips it is a different client from the one the manifest names.
 
 emit() {
     local scenario="$1" status="$2" detail="${3:-}"

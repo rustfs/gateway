@@ -2,7 +2,8 @@ id: trailer-chunked-upload
 description: >-
   Upload with a checksum carried in a trailing header rather than a request header. The
   x-amz-trailer form of aws-chunked framing is the second half of the streaming blind spot,
-  and a client only reaches it when its body is not seekable.
+  and a client reaches it only on its unsigned-payload path, which most SDKs take only over
+  TLS; the runner offers the system under test's TLS listener for that (rustfs/gateway#719).
 requires_operations: [CreateBucket, PutObject, GetObject, DeleteObject, DeleteBucket]
 object_size_bytes: 1048576
 wire_assertions:

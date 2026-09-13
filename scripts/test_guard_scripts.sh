@@ -13626,10 +13626,17 @@ expect_fail check_suites_pinned.sh 'the mint default SUT command loses its crede
     mut_mint_runner_default_flag_deleted 'is missing required flags: --access-key'
 
 mut_mint_runner_stops_naming_sdks() {
-    mint_mutate ci/mint/run.sh '"$MINT_IMAGE" "${MINT_SDK_LIST[@]}" >"$CONSOLE"' '"$MINT_IMAGE" >"$CONSOLE"'
+    mint_mutate ci/mint/run.sh '"$MINT_IMAGE" "$@" >/dev/null' '"$MINT_IMAGE" >/dev/null'
 }
 expect_fail check_suites_pinned.sh 'the mint runner lets mint pick its SDKs, skipping hidden ones' \
-    mut_mint_runner_stops_naming_sdks 'lost its suite run naming every SDK explicitly'
+    mut_mint_runner_stops_naming_sdks "lost its suite run naming the pass's SDKs explicitly"
+
+mut_mint_runner_drops_the_plaintext_pass() {
+    mint_mutate ci/mint/run.sh 'MINT_REPORT_PASSES=(--pass "${MINT_PLAIN_LIST[*]}" "$CONSOLE")' \
+        'MINT_REPORT_PASSES=(--progress "$CONSOLE")'
+}
+expect_fail check_suites_pinned.sh 'the mint runner stops telling the report which SDKs the plaintext pass ran' \
+    mut_mint_runner_drops_the_plaintext_pass 'lost the plaintext pass it hands the report'
 
 mut_mint_runner_skips_census() {
     mint_mutate ci/mint/run.sh '-A /mint/run/core' '-A /mint'
@@ -13645,10 +13652,10 @@ expect_fail check_suites_pinned.sh 'the mint image pulled for whatever platform 
     mut_mint_runner_pulls_without_platform 'must pull the pinned image with --platform'
 
 mut_mint_runner_runs_without_platform() {
-    mint_mutate ci/mint/run.sh '    --platform "$MINT_PLATFORM" \' '    \'
+    mint_mutate ci/mint/run.sh '        --platform "$MINT_PLATFORM" \' '        \'
 }
 expect_fail check_suites_pinned.sh 'the mint suite container run without the pinned platform' \
-    mut_mint_runner_runs_without_platform 'must run the suite container with --platform'
+    mut_mint_runner_runs_without_platform 'must create the suite container with --platform'
 
 mut_mint_runner_skips_redaction() {
     mint_mutate ci/mint/run.sh 'report.py" redact --secret-env' 'report.py" judge --secret-env'

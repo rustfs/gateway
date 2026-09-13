@@ -370,11 +370,14 @@ if 'source "${ROOT_DIR}/ci/mint/pins.env"' not in mint_runner:
 if 'docker pull --quiet --platform "$MINT_PLATFORM" "$MINT_IMAGE"' not in mint_runner:
     failures.append("ci/mint/run.sh must pull the pinned image with --platform \"$MINT_PLATFORM\"")
 
-# The run's steps, in the only order that makes its verdict mean anything.
+# The run's steps, in the only order that makes its verdict mean anything. The suite runs in
+# passes (rustfs/gateway#719): one container over plaintext, and one over the SUT's TLS listener
+# for the SDKs only it can measure. Each pass is `mint_pass`, which creates its container from
+# the pinned image, runs it, and copies its /mint/log out before returning, so the plaintext
+# pass's call is where "the suite ran and its evidence was copied" sits in the file.
 MINT_STEPS = (
     ("census", "-A /mint/run/core", "its SDK census check against the image"),
-    ("suite", '"$MINT_IMAGE" "${MINT_SDK_LIST[@]}"', "its suite run naming every SDK explicitly"),
-    ("copy", 'docker cp "$MINT_CONTAINER:/mint/log"', "its copy of /mint/log out of the container"),
+    ("suite", 'mint_pass "$MINT_CONTAINER"', "its plaintext suite pass"),
     ("redact", 'report.py" redact', "its redaction of the copied evidence"),
     ("judge", 'report.py" "${REPORT_ARGS[@]}"', "its judgement of the redacted evidence"),
 )
@@ -387,12 +390,44 @@ if all(position >= 0 for position in positions.values()):
     ordered = [positions[key] for key, _, _ in MINT_STEPS]
     if ordered != sorted(ordered):
         failures.append(
-            "ci/mint/run.sh must check the census, run the suite, copy /mint/log out, redact it, and only "
+            "ci/mint/run.sh must check the census, run the suite, redact the copied evidence, and only "
             "then judge it, in that order; a report written before the log is copied judges nothing"
         )
-    suite_command = mint_runner[mint_runner.rfind("docker run", 0, positions["suite"]):positions["suite"]]
-    if '--platform "$MINT_PLATFORM"' not in suite_command:
-        failures.append('ci/mint/run.sh must run the suite container with --platform "$MINT_PLATFORM"')
+
+# One pass, in order: a container from the pinned image and platform naming its SDKs explicitly,
+# run to completion, then its /mint/log copied out before anything else can remove it.
+pass_start = mint_runner.find("\nmint_pass() {\n")
+pass_end = mint_runner.find("\n}\n", pass_start) if pass_start >= 0 else -1
+if pass_start < 0 or pass_end < 0:
+    failures.append("ci/mint/run.sh lost `mint_pass() {`, the one place a suite container is run")
+else:
+    body = mint_runner[pass_start:pass_end]
+    PASS_STEPS = (
+        ("create", "docker create", "its container creation"),
+        ("image", '"$MINT_IMAGE" "$@"', "its suite run naming the pass's SDKs explicitly"),
+        ("start", "docker start --attach", "its suite run"),
+        ("copy", 'docker cp "${container}:/mint/log"', "its copy of /mint/log out of the container"),
+    )
+    found = {key: body.find(marker) for key, marker, _ in PASS_STEPS}
+    for key, marker, description in PASS_STEPS:
+        if found[key] < 0:
+            failures.append(f"ci/mint/run.sh's mint_pass lost {description}: {marker}")
+    if all(position >= 0 for position in found.values()):
+        if [found[key] for key, _, _ in PASS_STEPS] != sorted(found.values()):
+            failures.append("ci/mint/run.sh's mint_pass must create, run, and only then copy /mint/log out")
+        if '--platform "$MINT_PLATFORM"' not in body[found["create"]:found["image"]]:
+            failures.append('ci/mint/run.sh must create the suite container with --platform "$MINT_PLATFORM"')
+
+# Every pinned SDK runs in exactly one pass. The runner derives the plaintext list from the census
+# list, and the report is handed that full list plus each pass's own; ci/mint/report.py refuses
+# (exit 2) passes that do not cover it exactly once, so an SDK cannot silently never start.
+for marker, description in (
+    ('for sdk in "${MINT_SDK_LIST[@]}"', "its plaintext SDK list derived from the census list"),
+    ('--sdks "${MINT_SDK_LIST[*]}"', "the full SDK list it hands the report"),
+    ('--pass "${MINT_PLAIN_LIST[*]}"', "the plaintext pass it hands the report"),
+):
+    if marker not in mint_runner:
+        failures.append(f"ci/mint/run.sh lost {description}: {marker}")
 if not re.search(r"REPORT_ARGS=\(\s*judge\b", mint_runner):
     failures.append("ci/mint/run.sh must hand the report the `judge` command")
 
