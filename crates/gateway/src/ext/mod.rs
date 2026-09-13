@@ -106,6 +106,7 @@ pub use self::governor::{
     LayeredGovernor, Lease, Rate, Unlimited, VerifiedBodyProgress,
 };
 pub use self::host::{Addressing, HostQuery, HostResolver, PathStyleOnly, ResolvedHost, TargetOrigin, VhostHint};
+pub(crate) use self::observer::observe_safely;
 pub use self::observer::{NoObserver, Observer, RequestEvent};
 pub use self::oplayer::{Next, OpLayer, op_layer};
 pub(crate) use self::oplayer::{OpLayerSlot, Terminal};

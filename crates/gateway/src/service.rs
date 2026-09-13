@@ -416,29 +416,34 @@ impl S3Service {
         let event_operation = outcome.operation;
         let event_status = response.status().as_u16();
         let event_identity = outcome.identity.clone();
+        // Both reports below go to the observer this request's entry snapshot holds, and both go
+        // through one panic boundary. The committed one runs before the terminal document is sent,
+        // so a panic there would otherwise replace that document with the stopped-work fallback.
         let committed_observer = Arc::clone(&runtime.observer);
         let started_committed_work = crate::commit::start_pending(
             &mut response,
             Box::new(move |error| {
-                committed_observer.on_response(&RequestEvent {
+                let event = RequestEvent {
                     request_id: &event_request_id,
                     operation: event_operation,
                     status: event_status,
                     handler_deadline,
                     identity: event_identity.as_ref(),
                     error: error.as_ref(),
-                });
+                };
+                crate::ext::observe_safely(committed_observer.as_ref(), &event);
             }),
         );
         if !started_committed_work {
-            runtime.observer.on_response(&RequestEvent {
+            let event = RequestEvent {
                 request_id: trace.request_id(),
                 operation: outcome.operation,
                 status: response.status().as_u16(),
                 handler_deadline,
                 identity: outcome.identity.as_ref(),
                 error: outcome.error.as_ref(),
-            });
+            };
+            crate::ext::observe_safely(runtime.observer.as_ref(), &event);
         }
         response
     }

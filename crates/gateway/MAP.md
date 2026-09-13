@@ -75,7 +75,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/service_clone_allocations.rs` | Zero-allocation connection clones |
 | `tests/service_concurrency.rs` | One hundred concurrent clones and requests |
 | `tests/service_config.rs`, `tests/operation_registry_hot_update.rs`, `tests/assembly_snapshot.rs` | Settings, routing, and middleware updates retain one in-flight generation and preserve concurrent partial updates |
-| `tests/handler_panic.rs` | Handler panic becomes 500; next request still runs |
+| `tests/handler_panic.rs`, `tests/observer_panic.rs` | Handler panic becomes 500 and the next request still runs; an observer panic changes neither an ordinary response nor a committed terminal document |
 | `tests/pipeline.rs` | End-to-end ordering, response shapes, body progress |
 | `tests/authz_contract.rs` | Two authorization stages, audit, failure floor |
 | `tests/governor_runtime.rs` | Limits run before expensive work and recover |

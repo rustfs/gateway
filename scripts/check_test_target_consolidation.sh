@@ -663,6 +663,7 @@ gateway_modules = (
     "monomorphic",
     "naming_policy",
     "object_lock_intent",
+    "observer_panic",
     "operation_registry_hot_update",
     "operation_registry_wire",
     "patch_layer_landings",

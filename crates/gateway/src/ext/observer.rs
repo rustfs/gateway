@@ -86,7 +86,18 @@ pub trait Observer: Send + Sync + 'static {
     /// It is called for a request that was rejected at acceptance too, where `operation` is `None`.
     /// An observer that only saw successful requests would be an audit trail with the interesting
     /// half missing.
+    ///
+    /// **Must not panic.** The framework isolates a panic the way it isolates one in an
+    /// [`crate::AuthzAuditSink`]: the event is lost and one fixed error line is written, but the
+    /// response — including the terminal document of a committed response, which is sent after
+    /// this call — goes out unchanged. The panic payload is released; if its destructor panics in
+    /// turn, that second payload is leaked rather than risk a third.
     fn on_response(&self, event: &RequestEvent<'_>);
+}
+
+/// Reports `event` to `observer` behind the same boundary the authorization audit sink uses.
+pub(crate) fn observe_safely(observer: &dyn Observer, event: &RequestEvent<'_>) {
+    crate::panic_boundary::contain_report("request observer", || observer.on_response(event));
 }
 
 impl<T: Observer + ?Sized> Observer for std::sync::Arc<T> {
