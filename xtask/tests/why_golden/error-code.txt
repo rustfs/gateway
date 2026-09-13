@@ -4,6 +4,10 @@ CASES     c-copy-0025 — A copy source that is an ARN of another service is ref
           c-copy-0034 — A copy from a missing key answers NoSuchKey and from a missing bucket answers NoSuchBucket
           c-copy-0038 — A copy that fails after its head is flushed answers with an Error document under a success status
           c-cors-0033 — A post-authorisation failure still carries the CORS headers
+          c-lock-0035 — An object write carrying lock headers into a bucket without object lock is InvalidRequest and creates nothing
+          c-lock-0037 — A retain-until header in HTTP-date form is refused, because this header alone is ISO 8601
+          c-lock-0038 — A lock mode header without a retain-until header is refused, and so is a date without a mode
+          c-lock-0039 — Lock headers outside their closed value sets are refused as arguments rather than stored
           c-object-0007 — A read of a key that does not exist is a 404 NoSuchKey with no object headers at all
           c-object-0016 — The response- overrides apply to a successful read and never to the error document
           c-object-0025 — A read and a delete on a bucket that does not exist both name the bucket, not the key

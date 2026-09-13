@@ -16821,10 +16821,18 @@ expect_fail check_ci_time_gate.sh \
     'the workflow environment overriding the required command path' mut_ci_time_workflow_env_overrides_cargo
 
 mut_ci_time_concurrency_cancel_disabled() {
-    replace_ci_text '  cancel-in-progress: true' '  cancel-in-progress: false'
+    replace_ci_text "  cancel-in-progress: \${{ github.event_name == 'pull_request' }}" '  cancel-in-progress: false'
 }
 expect_fail check_ci_time_gate.sh \
-    'superseded branch runs no longer being cancelled' mut_ci_time_concurrency_cancel_disabled
+    'superseded pull-request runs no longer being cancelled' mut_ci_time_concurrency_cancel_disabled
+
+# The other direction: an unconditional cancel lets the next merge cancel every main run, so main
+# never completes a run and nobody can confirm it is green.
+mut_ci_time_concurrency_cancels_main() {
+    replace_ci_text "  cancel-in-progress: \${{ github.event_name == 'pull_request' }}" '  cancel-in-progress: true'
+}
+expect_fail check_ci_time_gate.sh \
+    'main pushes being cancelled by the next merge again' mut_ci_time_concurrency_cancels_main
 
 mut_ci_time_static_parent_fetch_dropped() {
     python3 - <<'PYEOF'
