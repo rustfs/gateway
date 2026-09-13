@@ -29,6 +29,11 @@ rustfs-gateway-server = { workspace = true }
 bytes = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
+# The optional encrypted listener (rustfs/gateway#719): rcgen generates the throwaway authority for
+# `--tls-self-signed`, and rustls' re-exported PEM reader loads `--tls-cert`/`--tls-key`. Both are
+# already workspace dependencies of the server crate's own TLS tests.
+rcgen = { workspace = true }
+rustls = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { workspace = true }
 
@@ -36,3 +41,6 @@ tower = { workspace = true }
 # The launcher's own tests drive signed requests through the very service `main` serves, so they
 # need the signer any SDK would use and the digest it puts in `x-amz-content-sha256`.
 sha2 = { workspace = true }
+# `tests/tls.rs` dials the real binary over both listeners, as a client would.
+tokio = { workspace = true, features = ["io-util", "net"] }
+tokio-rustls = { workspace = true }

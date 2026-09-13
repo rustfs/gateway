@@ -14,12 +14,14 @@
 
 //! The external-suite system under test: the filesystem reference backend behind a real listener.
 //!
-//! Responsible for: parsing the command line, assembling `rustfs-gateway-fs` into a signed,
-//! plaintext S3 endpoint that any third-party SDK or external suite can be pointed at, publishing
-//! the operation set that endpoint really registers, and recording one wire-evidence line per
-//! served request.
-//! NOT responsible for: production durability, TLS, deciding whether a scenario passed, or fixing
-//! any gap a client finds — a matrix failure is fixed in the issue that owns the operation.
+//! Responsible for: parsing the command line, assembling `rustfs-gateway-fs` into a signed S3
+//! endpoint that any third-party SDK or external suite can be pointed at — plaintext always, and
+//! optionally a second, encrypted listener serving the very same service — publishing the
+//! operation set that endpoint really registers, and recording one wire-evidence line per served
+//! request.
+//! NOT responsible for: production durability, the TLS handshake itself (`rustfs-gateway-server`),
+//! deciding whether a scenario passed, or fixing any gap a client finds — a matrix failure is fixed
+//! in the issue that owns the operation.
 //! Upstream: `ci/compat/run_matrix.sh` and `ci/lib/sut.sh`, which start it before any driver or
 //! suite runs.
 //! Downstream: the drivers under `compat/drivers/**`, `ci/compat/report.py`, and the Ceph s3-tests
@@ -30,13 +32,22 @@
 //! compat-sut --data <dir> --access-key MAIN --secret-key ... --owner-id s3gate-main \
 //!            --alt-access-key ALT --alt-secret-key ... --alt-owner-id s3gate-alt \
 //!            --lc-debug-interval 10
+//! compat-sut --data <dir> --port 9100 --tls-port 9443 --tls-self-signed <ca.pem> [--tls-san <name>]
+//! compat-sut --data <dir> --port 9100 --tls-port 9443 --tls-cert <chain.pem> --tls-key <key.pem>
 //! compat-sut --print-capabilities
 //! ```
+//!
+//! Some client behaviour exists only over TLS — botocore's `STREAMING-UNSIGNED-PAYLOAD-TRAILER`
+//! uploads, and every test of MinIO mint's `aws-sdk-java-v2` suite (rustfs/gateway#719) — so the
+//! encrypted listener is what makes those measurable. Plaintext stays on `--port` either way, so
+//! nothing that already points at it changes.
 
 mod identity;
 mod ownership;
 mod probe;
 mod service;
+mod tls;
+mod transport;
 
 use std::env;
 use std::io;
@@ -46,12 +57,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rustfs_gateway_fs::FsBackend;
-use rustfs_gateway_server::{Server, ServerConfig};
+use rustfs_gateway_server::{Server, ServerConfig, TlsHandle};
 
 use crate::identity::{AccountArgs, Accounts};
 use crate::ownership::BucketOwners;
 use crate::probe::{ProbeLog, ProbeService};
 use crate::service::{build_service, capability_names};
+use crate::tls::{TlsArgs, TlsListener, TlsSource};
+use crate::transport::DeclareTransport;
 
 /// Everything the launcher accepts. There are no defaults for the **second** credential pair on
 /// purpose: a matrix run whose driver and whose server disagree about the secret fails as
@@ -68,6 +81,8 @@ pub(crate) struct Options {
     /// backend's 24-hour cadence alone and starts no sweeper, which is what a matrix run wants and
     /// what a lifecycle suite cannot use.
     pub(crate) lifecycle_debug_interval: Option<Duration>,
+    /// The optional encrypted listener, on the same host as the plaintext one.
+    pub(crate) tls: Option<TlsListener>,
 }
 
 fn parse_options<I, S>(arguments: I) -> Result<Options, io::Error>
@@ -83,6 +98,7 @@ where
     let mut primary = AccountArgs::default();
     let mut secondary = AccountArgs::default();
     let mut lifecycle_debug_interval = None;
+    let mut tls = TlsArgs::default();
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         let mut value = || -> Result<String, io::Error> {
@@ -126,10 +142,31 @@ where
             }
             "--region" => region = value()?,
             "--probe-log" => probe_log = Some(PathBuf::from(value()?)),
+            "--tls-port" => {
+                tls.port = Some(
+                    value()?
+                        .parse()
+                        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "--tls-port requires a number"))?,
+                );
+            }
+            "--tls-cert" => tls.certificate = Some(PathBuf::from(value()?)),
+            "--tls-key" => tls.private_key = Some(PathBuf::from(value()?)),
+            "--tls-self-signed" => tls.self_signed = Some(PathBuf::from(value()?)),
+            "--tls-san" => tls.extra_names.push(value()?),
             unknown => {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unknown argument: {unknown}")));
             }
         }
+    }
+    let tls = tls.resolve(host)?;
+    if let Some(listener) = tls.as_ref()
+        && listener.port == port
+        && port != 0
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "--tls-port must differ from --port; the plaintext listener stays up beside the encrypted one",
+        ));
     }
     Ok(Options {
         data,
@@ -138,6 +175,7 @@ where
         region,
         probe_log,
         lifecycle_debug_interval,
+        tls,
     })
 }
 
@@ -190,21 +228,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => Some(Arc::new(ProbeLog::create(path)?)),
         None => None,
     };
+    // Both listeners serve this one value, so a request is authorized, served and recorded the same
+    // way whichever socket it arrived on. The only difference is the transport fact, and that is
+    // read from the socket by `DeclareTransport`, never from the request.
+    let served = DeclareTransport::new(ProbeService::new(service, log.clone()));
+
+    // The encrypted listener is bound first. The plaintext port is what `ci/lib/sut.sh` polls for
+    // readiness, so once it answers, the TLS port is bound too and a generated authority is
+    // already on disk for the runner to hand out.
+    let encrypted = match options.tls.as_ref() {
+        Some(listener) => {
+            let handle = TlsHandle::new(listener.source.load()?)?;
+            let config = ServerConfig {
+                bind_addr: SocketAddr::new(options.address.ip(), listener.port),
+                ..ServerConfig::default()
+            };
+            Some(Server::new(config, served.clone()).with_tls(handle).serve()?)
+        }
+        None => None,
+    };
     let config = ServerConfig {
         bind_addr: options.address,
         plaintext: true,
         ..ServerConfig::default()
     };
-
-    // Both arms serve the same assembled service; only the evidence differs. The probe is opt-in
-    // so that a driver being debugged by hand does not silently overwrite a matrix run's evidence.
-    let running = match log.as_ref() {
-        Some(log) => Server::new(config, ProbeService::new(service, Arc::clone(log))).serve()?,
-        None => Server::new(config, service).serve()?,
-    };
-    // The banner is the readiness signal `ci/compat/run_matrix.sh` waits for. It names the port
-    // that was actually bound, so `--port 0` is usable for a local run.
+    let running = Server::new(config, served).serve()?;
+    // The banner is the readiness signal `ci/compat/run_matrix.sh` waits for. It names the ports
+    // that were actually bound, so `--port 0` and `--tls-port 0` are usable for a local run.
     println!("compat-sut listening on http://{}", running.local_addr);
+    if let Some(encrypted) = encrypted.as_ref() {
+        println!("compat-sut listening on https://{}", encrypted.local_addr);
+    }
+    if let Some(TlsSource::SelfSigned { authority_out, .. }) = options.tls.as_ref().map(|listener| &listener.source) {
+        println!("compat-sut tls authority {}", authority_out.display());
+    }
     println!("compat-sut region {}", options.region);
     for line in identity_lines(&options.accounts) {
         println!("{line}");
@@ -214,6 +271,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tokio::signal::ctrl_c().await?;
+    if let Some(encrypted) = encrypted {
+        let report = encrypted.shutdown.trigger(Duration::from_secs(30)).await;
+        println!("compat-sut tls shutdown drained={} aborted={}", report.drained, report.aborted);
+        encrypted.task.await??;
+    }
     let report = running.shutdown.trigger(Duration::from_secs(30)).await;
     if let Some(scheduler) = scheduler {
         let sweeps = scheduler.shutdown().await?;

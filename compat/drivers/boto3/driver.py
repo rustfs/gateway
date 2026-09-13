@@ -20,12 +20,17 @@ from botocore.exceptions import ClientError
 ENDPOINT = os.environ["COMPAT_ENDPOINT"]
 BUCKET = os.environ["COMPAT_BUCKET"]
 WORKDIR = os.environ["COMPAT_WORKDIR"]
+# The system under test's encrypted listener and the only authority it trusts. Used by the one
+# scenario botocore can express only over TLS; every other scenario stays on the plaintext endpoint.
+TLS_ENDPOINT = os.environ.get("COMPAT_TLS_ENDPOINT", "")
+CA_BUNDLE = os.environ.get("COMPAT_CA_BUNDLE", "")
 
 
-def client():
+def client(endpoint=ENDPOINT, verify=None):
     return boto3.client(
         "s3",
-        endpoint_url=ENDPOINT,
+        endpoint_url=endpoint,
+        verify=verify,
         aws_access_key_id=os.environ["COMPAT_ACCESS_KEY"],
         aws_secret_access_key=os.environ["COMPAT_SECRET_KEY"],
         region_name=os.environ["COMPAT_REGION"],
@@ -83,6 +88,30 @@ def scenario_small_object_roundtrip(s3, scenario):
         emit(scenario, "pass", "", {"etag": head["ETag"]})
     finally:
         drop_bucket(s3, ["small.bin"])
+
+
+def scenario_trailer_chunked_upload(_plaintext, scenario):
+    # Over TLS botocore takes the unsigned-payload path for a streaming body, and on that path it
+    # moves the request checksum into an `x-amz-trailer` behind aws-chunked framing on its own
+    # (`request_checksum_calculation` defaults to `when_supported`). Nothing here asks for the
+    # trailer: whether it was really sent is the probe's call, not this driver's.
+    if not TLS_ENDPOINT or not CA_BUNDLE:
+        emit(
+            scenario,
+            "unsupported",
+            "the runner offered no TLS endpoint, and botocore sends a trailer only on the unsigned-payload path it takes over TLS",
+        )
+    s3 = client(TLS_ENDPOINT, CA_BUNDLE)
+    payload = os.urandom(1024 * 1024)
+    make_bucket(s3)
+    try:
+        s3.put_object(Bucket=BUCKET, Key="trailer.bin", Body=payload)
+        read = s3.get_object(Bucket=BUCKET, Key="trailer.bin")["Body"].read()
+        if read != payload:
+            emit(scenario, "fail", f"read back {len(read)} bytes that differ from the {len(payload)} written")
+        emit(scenario, "pass", "", {"endpoint": "tls"})
+    finally:
+        drop_bucket(s3, ["trailer.bin"])
 
 
 def scenario_large_multipart_upload(s3, scenario):
@@ -265,6 +294,7 @@ SCENARIOS = {
     "versioned-object": scenario_versioned_object,
     "copy-object": scenario_copy_object,
     "delete-batch": scenario_delete_batch,
+    "trailer-chunked-upload": scenario_trailer_chunked_upload,
 }
 
 UNSUPPORTED = {
@@ -276,8 +306,10 @@ UNSUPPORTED = {
     # to force the wrapper raises `UnsupportedOperation: seek` before a request is built, so there
     # is no boto3 call that produces chunked framing here. Recording that as a failure would blame
     # the server for a client's payload-mode choice.
+    # Over TLS it does use aws-chunked, but unsigned (`STREAMING-UNSIGNED-PAYLOAD-TRAILER`): no
+    # chunk carries a signature there either, so this scenario's signed-chunk assertion is out of
+    # its reach on both endpoints. The TLS form is measured by `trailer-chunked-upload` instead.
     "streaming-chunked-upload": "botocore signs the whole payload over a plaintext endpoint and offers no switch that selects aws-chunked framing",
-    "trailer-chunked-upload": "botocore emits a checksum header rather than a trailer unless the payload is unsigned, which it only is over TLS",
 }
 
 

@@ -19,8 +19,10 @@
 #   1. start or adopt a system under test                      (ci/lib/sut.sh)
 #   2. pull the pinned image by digest for linux/amd64, and assert both
 #   3. assert the image's SDK census is exactly MINT_SDKS in ci/mint/pins.env
-#   4. run every SDK, named explicitly, against the system under test
-#   5. copy /mint/log out of the container, then redact it and the console in place
+#   4. run every SDK, named explicitly, against the system under test: one container over
+#      plaintext, then one over the SUT's TLS listener for the SDKs in MINT_TLS_SDKS
+#   5. copy /mint/log out of each container, merge the trees, then redact them and the
+#      consoles in place
 #   6. assert the system under test survived the run
 #   7. judge the per-SDK failure counts against ci/mint/baseline.txt
 #
@@ -48,6 +50,17 @@
 #   Measured on Colima on 2026-09-12: host.lima.internal reached a listener on the host's
 #   loopback from both the host and the bridge network; 127.0.0.1 under --network host was
 #   refused.
+#
+# THE TLS PASS (rustfs/gateway#719)
+#   The pinned aws-sdk-java-v2 suite returns from every test without writing a record unless
+#   ENABLE_HTTPS=1, so over plaintext it measures nothing. The SDKs in MINT_TLS_SDKS (default:
+#   that one) run in a second container, with ENABLE_HTTPS=1, against the SUT's TLS listener
+#   on MINT_SUT_TLS_PORT. compat-sut generates a throwaway authority for that listener; it is
+#   copied into the container and named by SSL_CERT_FILE, and the Java suite additionally
+#   trusts every certificate once ENABLE_HTTPS=1. Every other SDK stays on plaintext: moving
+#   one changes which of its tests run, which is a baseline change of its own. MINT_TLS_SDKS=
+#   (empty) runs every SDK over plaintext, as before the pass existed. ci/mint/report.py reads
+#   each pass's console against the SDKs that pass was given.
 #
 # THE SUITE IS NEVER VENDORED
 #   It runs only as the pinned image. Its licence is Apache-2.0 and its review is in
@@ -83,7 +96,7 @@ while [[ "$#" -gt 0 ]]; do
         shift 2
         ;;
     -h | --help)
-        sed -n '17,62p' "${BASH_SOURCE[0]}"
+        sed -n '17,74p' "${BASH_SOURCE[0]}"
         exit 0
         ;;
     *)
@@ -112,7 +125,7 @@ MINT_ENV_FILE="${WORK_DIR}/mint.env"
 # shellcheck disable=SC2329 # invoked by the EXIT trap below.
 mint_cleanup() {
     rm -f "$MINT_ENV_FILE"
-    docker rm -f "$MINT_CONTAINER" "${MINT_CONTAINER}-census" >/dev/null 2>&1 || true
+    docker rm -f "$MINT_CONTAINER" "${MINT_CONTAINER}-tls" "${MINT_CONTAINER}-census" >/dev/null 2>&1 || true
     sut_stop
 }
 trap mint_cleanup EXIT
@@ -148,12 +161,50 @@ core | full) ;;
     exit "$EXIT_USAGE"
     ;;
 esac
-export MINT_ACCESS_KEY MINT_SECRET_KEY MINT_REGION MINT_SUT_HOST MINT_SUT_PORT MINT_SUT_BINARY
+: "${MINT_SUT_TLS_PORT:=9243}"
+# `=` and not `:=`: an explicitly empty MINT_TLS_SDKS means something, namely no TLS pass.
+: "${MINT_TLS_SDKS=aws-sdk-java-v2}"
+read -r -a MINT_TLS_LIST <<<"$MINT_TLS_SDKS"
+for sdk in ${MINT_TLS_LIST[@]+"${MINT_TLS_LIST[@]}"}; do
+    case " ${MINT_SDK_LIST[*]} " in
+    *" ${sdk} "*) ;;
+    *)
+        printf 'run: MINT_TLS_SDKS names %s, which MINT_SDKS in ci/mint/pins.env does not\n' "$sdk" >&2
+        exit "$EXIT_USAGE"
+        ;;
+    esac
+done
+MINT_PLAIN_LIST=()
+for sdk in "${MINT_SDK_LIST[@]}"; do
+    case " ${MINT_TLS_SDKS} " in
+    *" ${sdk} "*) ;;
+    *) MINT_PLAIN_LIST+=("$sdk") ;;
+    esac
+done
+# Mint given no SDK name runs every visible one, so an empty plaintext pass would not be empty.
+((${#MINT_PLAIN_LIST[@]} > 0)) || {
+    printf 'run: MINT_TLS_SDKS names every pinned SDK; at least one must run over plaintext\n' >&2
+    exit "$EXIT_USAGE"
+}
+MINT_TLS_AUTHORITY="${WORK_DIR}/tls/ca.pem"
+MINT_TLS_AUTHORITY_IN_CONTAINER=/mint/compat-sut-ca.pem
+export MINT_ACCESS_KEY MINT_SECRET_KEY MINT_REGION MINT_SUT_HOST MINT_SUT_PORT MINT_SUT_BINARY \
+    MINT_SUT_TLS_PORT MINT_SERVER_HOST
 
 # --- the system under test ---------------------------------------------------------------
 # The names stay literal in the command: sut_start logs the launch shape, and expanding the
 # secret here would put it in that log. bash -c expands the exported values in the child, so
 # the embedded quotes are for that shell and not this one.
+# The TLS listener is bound before the plaintext one, so sut_start's readiness wait on the
+# plaintext port also covers it. A certificate for MINT_SERVER_HOST is added when the
+# container dials the host by another name.
+MINT_TLS_FLAGS=""
+if ((${#MINT_TLS_LIST[@]} > 0)); then
+    MINT_TLS_FLAGS=" --tls-port \"\$MINT_SUT_TLS_PORT\" --tls-self-signed \"${MINT_TLS_AUTHORITY}\""
+    if [[ -n "$MINT_SERVER_HOST" ]]; then
+        MINT_TLS_FLAGS+=" --tls-san \"\$MINT_SERVER_HOST\""
+    fi
+fi
 # shellcheck disable=SC2089,SC2090
 : "${GATEWAY_SUT_COMMAND:=\"\$MINT_SUT_BINARY\" \
     --data \"${WORK_DIR}/compat-sut-data\" \
@@ -161,7 +212,7 @@ export MINT_ACCESS_KEY MINT_SECRET_KEY MINT_REGION MINT_SUT_HOST MINT_SUT_PORT M
     --port \"\$MINT_SUT_PORT\" \
     --region \"\$MINT_REGION\" \
     --access-key \"\$MINT_ACCESS_KEY\" \
-    --secret-key \"\$MINT_SECRET_KEY\"}"
+    --secret-key \"\$MINT_SECRET_KEY\"${MINT_TLS_FLAGS}}"
 # shellcheck disable=SC2090 # the child `bash -c` in ci/lib/sut.sh is the shell that reads it.
 export GATEWAY_SUT_COMMAND
 export GATEWAY_SUT_HOST="${GATEWAY_SUT_HOST:-$MINT_SUT_HOST}"
@@ -169,6 +220,10 @@ export GATEWAY_SUT_PORT="${GATEWAY_SUT_PORT:-$MINT_SUT_PORT}"
 export GATEWAY_SUT_LOG="${GATEWAY_SUT_LOG:-${WORK_DIR}/compat-sut.log}"
 sut_start
 MINT_SERVER_HOST="${MINT_SERVER_HOST:-$SUT_HOST}"
+if ((${#MINT_TLS_LIST[@]} > 0)); then
+    sut_wait_ready "$SUT_HOST" "$MINT_SUT_TLS_PORT" 5 ||
+        sut_die "MINT_TLS_SDKS (${MINT_TLS_SDKS}) runs over the SUT's TLS listener, and nothing accepts connections on ${SUT_HOST}:${MINT_SUT_TLS_PORT}; a GATEWAY_SUT_COMMAND or GATEWAY_SUT_ENDPOINT without one needs MINT_TLS_SDKS= to run every SDK over plaintext"
+fi
 
 # --- the image ---------------------------------------------------------------------------
 printf 'run: pulling %s for %s\n' "$MINT_IMAGE" "$MINT_PLATFORM"
@@ -193,44 +248,84 @@ PINNED_CENSUS="$(printf '%s\n' "${MINT_SDK_LIST[@]}" | LC_ALL=C sort | tr '\n' '
 printf 'run: the image carries exactly the %s pinned SDK(s)\n' "${#MINT_SDK_LIST[@]}"
 
 # --- the suite ---------------------------------------------------------------------------
-# Handed over as an env file rather than as arguments, so the secret never appears on a
-# process command line. The file is private to this user and removed as soon as the
-# container has read it.
-(
-    umask 077
-    printf '%s=%s\n' \
-        SERVER_ENDPOINT "${MINT_SERVER_HOST}:${SUT_PORT}" \
-        ACCESS_KEY "$MINT_ACCESS_KEY" \
-        SECRET_KEY "$MINT_SECRET_KEY" \
-        SERVER_REGION "$MINT_REGION" \
-        ENABLE_HTTPS 0 \
-        MINT_MODE "$MINT_TEST_MODE" \
-        RUN_ON_FAIL 1 >"$MINT_ENV_FILE"
-)
+# mint_pass <container> <console> <log-dir> <endpoint> <https> <sdk>...
+# One container, one console, one copied /mint/log. The configuration is handed over as an
+# env file rather than as arguments, so the secret never appears on a process command line.
+# The file is private to this user and removed as soon as the container has been created
+# from it.
+mint_pass() {
+    local container="$1" console="$2" log_dir="$3" endpoint="$4" https="$5"
+    shift 5
+    (
+        umask 077
+        printf '%s=%s\n' \
+            SERVER_ENDPOINT "$endpoint" \
+            ACCESS_KEY "$MINT_ACCESS_KEY" \
+            SECRET_KEY "$MINT_SECRET_KEY" \
+            SERVER_REGION "$MINT_REGION" \
+            ENABLE_HTTPS "$https" \
+            MINT_MODE "$MINT_TEST_MODE" \
+            RUN_ON_FAIL 1 >"$MINT_ENV_FILE"
+        if [[ "$https" == 1 && -s "$MINT_TLS_AUTHORITY" ]]; then
+            printf '%s=%s\n' SSL_CERT_FILE "$MINT_TLS_AUTHORITY_IN_CONTAINER" >>"$MINT_ENV_FILE"
+        fi
+    )
+    docker create --name "$container" \
+        --platform "$MINT_PLATFORM" \
+        --network "$MINT_DOCKER_NETWORK" \
+        --env-file "$MINT_ENV_FILE" \
+        "$MINT_IMAGE" "$@" >/dev/null || {
+        rm -f "$MINT_ENV_FILE"
+        sut_die "cannot create the mint container ${container}"
+    }
+    rm -f "$MINT_ENV_FILE"
+    # Copied rather than bind-mounted: a daemon inside a VM cannot see a host temporary
+    # directory, and `docker cp` works the same on every daemon.
+    if [[ "$https" == 1 && -s "$MINT_TLS_AUTHORITY" ]]; then
+        docker cp "$MINT_TLS_AUTHORITY" "${container}:${MINT_TLS_AUTHORITY_IN_CONTAINER}" >/dev/null ||
+            sut_die "cannot copy the SUT's TLS authority into ${container}"
+    fi
+    printf 'run: running %s SDK(s) in mode %s against %s (ENABLE_HTTPS=%s); the console stays in %s\n' \
+        "$#" "$MINT_TEST_MODE" "$endpoint" "$https" "$console"
+    local started="$SECONDS" status
+    set +e
+    docker start --attach "$container" >"$console" 2>&1
+    status="$?"
+    set -e
+    printf 'run: mint exited %s after %ss; its exit is not a verdict, the records are\n' \
+        "$status" "$((SECONDS - started))"
+    # Copied before anything judges it, and redacted before anything reads it.
+    rm -rf "$log_dir"
+    docker cp "${container}:/mint/log" "$log_dir" >/dev/null ||
+        sut_die "cannot copy /mint/log out of ${container}; without it this run measured nothing"
+    docker rm -f "$container" >/dev/null 2>&1 || true
+}
+
+MINT_LOG="${WORK_DIR}/mint-log"
 CONSOLE="${WORK_DIR}/console.txt"
-printf 'run: running %s SDK(s) in mode %s against %s:%s; the console stays in %s\n' \
-    "${#MINT_SDK_LIST[@]}" "$MINT_TEST_MODE" "$MINT_SERVER_HOST" "$SUT_PORT" "$CONSOLE"
-MINT_STARTED="$SECONDS"
-set +e
-docker run --name "$MINT_CONTAINER" \
-    --platform "$MINT_PLATFORM" \
-    --network "$MINT_DOCKER_NETWORK" \
-    --env-file "$MINT_ENV_FILE" \
-    "$MINT_IMAGE" "${MINT_SDK_LIST[@]}" >"$CONSOLE" 2>&1
-MINT_STATUS="$?"
-set -e
-rm -f "$MINT_ENV_FILE"
-printf 'run: mint exited %s after %ss; its exit is not a verdict, the records are\n' \
-    "$MINT_STATUS" "$((SECONDS - MINT_STARTED))"
+mint_pass "$MINT_CONTAINER" "$CONSOLE" "$MINT_LOG" "${MINT_SERVER_HOST}:${SUT_PORT}" 0 "${MINT_PLAIN_LIST[@]}"
+MINT_REPORT_PASSES=(--pass "${MINT_PLAIN_LIST[*]}" "$CONSOLE")
+MINT_CONSOLES=("$CONSOLE")
+if ((${#MINT_TLS_LIST[@]} > 0)); then
+    TLS_CONSOLE="${WORK_DIR}/console-tls.txt"
+    TLS_LOG="${WORK_DIR}/mint-log-tls"
+    mint_pass "${MINT_CONTAINER}-tls" "$TLS_CONSOLE" "$TLS_LOG" "${MINT_SERVER_HOST}:${MINT_SUT_TLS_PORT}" 1 \
+        "${MINT_TLS_LIST[@]}"
+    # One tree, as if one container had written it, so records are read exactly as before.
+    # Both passes writing the same SDK's directory would make one of them silently win.
+    while IFS= read -r -d '' entry; do
+        name="${entry##*/}"
+        [[ ! -e "${MINT_LOG}/${name}" ]] ||
+            sut_die "both passes wrote /mint/log/${name}; refusing to judge a tree one of them overwrote"
+        mv "$entry" "${MINT_LOG}/${name}"
+    done < <(find "$TLS_LOG" -mindepth 1 -maxdepth 1 -print0)
+    rm -rf "$TLS_LOG"
+    MINT_REPORT_PASSES+=(--pass "${MINT_TLS_LIST[*]}" "$TLS_CONSOLE")
+    MINT_CONSOLES+=("$TLS_CONSOLE")
+fi
 
 # --- the evidence ------------------------------------------------------------------------
-# Copied before anything judges it, and redacted before anything reads it.
-MINT_LOG="${WORK_DIR}/mint-log"
-rm -rf "$MINT_LOG"
-docker cp "$MINT_CONTAINER:/mint/log" "$MINT_LOG" >/dev/null ||
-    sut_die "cannot copy /mint/log out of ${MINT_CONTAINER}; without it this run measured nothing"
-docker rm -f "$MINT_CONTAINER" >/dev/null 2>&1 || true
-python3 "${ROOT_DIR}/ci/mint/report.py" redact --secret-env MINT_SECRET_KEY "$MINT_LOG" "$CONSOLE" ||
+python3 "${ROOT_DIR}/ci/mint/report.py" redact --secret-env MINT_SECRET_KEY "$MINT_LOG" "${MINT_CONSOLES[@]}" ||
     sut_die "redaction failed; refusing to judge evidence that may still carry signing material"
 
 # A service that died part-way makes every later SDK fail with connection refused, which
@@ -240,12 +335,16 @@ if [[ -n "$SUT_PID" ]] && ! kill -0 "$SUT_PID" 2>/dev/null; then
 fi
 sut_wait_ready "$SUT_HOST" "$SUT_PORT" 5 ||
     sut_die "the system under test stopped accepting connections during the run"
+if ((${#MINT_TLS_LIST[@]} > 0)); then
+    sut_wait_ready "$SUT_HOST" "$MINT_SUT_TLS_PORT" 5 ||
+        sut_die "the system under test's TLS listener stopped accepting connections during the run"
+fi
 
 # --- the verdict -------------------------------------------------------------------------
 REPORT_ARGS=(
     judge
     --log-dir "$MINT_LOG"
-    --progress "$CONSOLE"
+    "${MINT_REPORT_PASSES[@]}"
     --baseline "${ROOT_DIR}/ci/mint/baseline.txt"
     --sdks "${MINT_SDK_LIST[*]}"
     --image "$MINT_IMAGE"

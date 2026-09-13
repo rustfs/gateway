@@ -64,6 +64,17 @@ but never out of the run or the report. An excluded SDK:
     * is flagged RECOVERED, without changing the exit code, when its log becomes a complete,
       attributable measurement. That is the signal to remove the line.
 
+# Passes
+
+`ci/mint/run.sh` may run the SDKs in more than one container: the SDKs a TLS-only suite needs
+run in a second pass against the system under test's encrypted listener (rustfs/gateway#719).
+Each pass has its own console, numbered only over the SDKs that pass was given, so each is read
+against that list with `--pass "<sdks>" <console>`. The passes must cover every SDK in `--sdks`
+exactly once, or the invocation is refused as a usage error: a partition that silently dropped an
+SDK would let it never start and still look judged. The `/mint/log` trees are merged by the
+runner before they arrive here, so records are read exactly as for one pass. `--progress <console>`
+is the one-pass form and stays equivalent to a single `--pass` naming every SDK.
+
 Exit codes: 0 ok, 1 regression, 2 usage, 3 environment.
 """
 
@@ -453,10 +464,32 @@ def render_proposal(generation: int, sdks: list[str], rows: list[Row], excluded:
     return "\n".join(lines) + "\n"
 
 
+def resolve_passes(args: argparse.Namespace, sdks: list[str]) -> list[tuple[list[str], Path]]:
+    """Each container's SDKs, in the order it was asked to run them, with its console."""
+    if args.passes and args.progress:
+        raise ReportError("give either --progress for one pass or --pass for each pass, not both", EXIT_USAGE)
+    if not args.passes:
+        if not args.progress:
+            raise ReportError("--progress or at least one --pass is required", EXIT_USAGE)
+        return [(sdks, Path(args.progress))]
+    passes: list[tuple[list[str], Path]] = []
+    seen: list[str] = []
+    for listed, console in args.passes:
+        pass_sdks = listed.split()
+        if not pass_sdks or not all(SDK_NAME.fullmatch(sdk) for sdk in pass_sdks):
+            raise ReportError("each --pass must name at least one SDK", EXIT_USAGE)
+        seen.extend(pass_sdks)
+        passes.append((pass_sdks, Path(console)))
+    if sorted(seen) != sorted(sdks):
+        raise ReportError("the --pass lists must name every SDK in --sdks exactly once, across all passes", EXIT_USAGE)
+    return passes
+
+
 def judge(args: argparse.Namespace) -> int:
     sdks = args.sdks.split()
     if not sdks or len(set(sdks)) != len(sdks) or not all(SDK_NAME.fullmatch(sdk) for sdk in sdks):
         raise ReportError("--sdks must name each SDK the runner asked for exactly once", EXIT_USAGE)
+    passes = resolve_passes(args, sdks)
     baseline_path = Path(args.baseline)
     record_path = Path(args.record) if args.record else None
     if record_path is not None and record_path.resolve() == baseline_path.resolve():
@@ -494,7 +527,9 @@ def judge(args: argparse.Namespace) -> int:
 
     # Excluded SDKs stay in the console check: one that hangs or runs out of order hides every
     # SDK after it, which is the run breaking, not the SDK.
-    outcomes = read_progress(Path(args.progress), sdks, problems)
+    outcomes: dict[str, str] = {}
+    for pass_sdks, console in passes:
+        outcomes.update(read_progress(console, pass_sdks, problems))
     for sdk, tally in tallies.items():
         if outcomes.get(sdk) == "FAILED" and tally.failed == 0:
             problems.append(
@@ -622,7 +657,16 @@ def main(argv: list[str]) -> int:
     redact.add_argument("--secret-env", action="append", default=[], help="environment variable holding a secret")
     judging = commands.add_parser("judge", help="compare a run with the per-SDK baseline")
     judging.add_argument("--log-dir", required=True, help="the /mint/log tree copied out of the container")
-    judging.add_argument("--progress", required=True, help="the container's console transcript")
+    judging.add_argument("--progress", help="the container's console transcript, when one container ran every SDK")
+    judging.add_argument(
+        "--pass",
+        dest="passes",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("SDKS", "CONSOLE"),
+        help="one container's SDKs, in order, and its console transcript; repeat once per container",
+    )
     judging.add_argument("--baseline", required=True)
     judging.add_argument("--sdks", required=True, help="the SDKs the runner asked for, in order")
     judging.add_argument("--image", default="")

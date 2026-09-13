@@ -96,15 +96,16 @@ def healthy_logs() -> dict[str, str | None]:
     }
 
 
-def console(outcomes: dict[str, str | None], order: list[str] | None = None) -> str:
+def console(outcomes: dict[str, str | None], order: list[str] | None = None, total: int | None = None) -> str:
     order = order if order is not None else SDKS
+    total = total if total is not None else len(SDKS)
     lines = ["Running with", "SERVER_ENDPOINT:      127.0.0.1:9200", ""]
     for index, sdk in enumerate(order, start=1):
         outcome = outcomes.get(sdk, "done")
         if outcome is None:
-            lines.append(f"({index}/{len(SDKS)}) Running {sdk} tests ... ")
+            lines.append(f"({index}/{total}) Running {sdk} tests ... ")
             break
-        lines.append(f"({index}/{len(SDKS)}) Running {sdk} tests ... {outcome} in 3 seconds")
+        lines.append(f"({index}/{total}) Running {sdk} tests ... {outcome} in 3 seconds")
     return "\n".join(lines) + "\n"
 
 
@@ -142,6 +143,8 @@ def probe(
     stale_proposal: bool = False,
     record_at_baseline: bool = False,
     after=None,
+    passes: list[tuple[list[str], str]] | None = None,
+    also_progress: bool = False,
 ) -> None:
     global probes
     probes += 1
@@ -169,9 +172,15 @@ def probe(
             proposal.write_text("# generation: 99\nstale 0\n", encoding="utf-8")
         command = [
             sys.executable, report, "judge",
-            "--log-dir", str(log_dir), "--progress", str(progress_path), "--baseline", str(baseline_path),
+            "--log-dir", str(log_dir), "--baseline", str(baseline_path),
             "--sdks", " ".join(SDKS), "--markdown", str(markdown), "--json", str(report_json),
         ]
+        if passes is None or also_progress:
+            command += ["--progress", str(progress_path)]
+        for index, (pass_sdks, pass_console) in enumerate(passes or []):
+            pass_path = work / f"console-{index}.txt"
+            pass_path.write_text(pass_console, encoding="utf-8")
+            command += ["--pass", " ".join(pass_sdks), str(pass_path)]
         if record or record_at_baseline:
             command += ["--record", str(proposal)]
         result = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -261,6 +270,33 @@ probe("an SDK the console never saw start is an incomplete run", 3,
 probe("a console that ran the SDKs in another order is an incomplete run", 3,
       ["where the runner asked for"],
       progress=console(HEALTHY_PROGRESS, order=["minio-go", "awscli", ".minio-dotnet"]))
+
+# --- passes: the TLS-only SDKs run in a second container with a console of their own ---------
+PLAIN_PASS = ["awscli", "minio-go"]
+TLS_PASS = [".minio-dotnet"]
+PLAIN_CONSOLE = console(HEALTHY_PROGRESS, order=PLAIN_PASS, total=len(PLAIN_PASS))
+TLS_CONSOLE = console(HEALTHY_PROGRESS, order=TLS_PASS, total=len(TLS_PASS))
+probe("two passes that together ran every SDK are judged as one run", 0,
+      ["KNOWN      minio-go fail=1 baseline=1", "OK         .minio-dotnet", "incomplete=0"], ["INCOMPLETE"],
+      passes=[(PLAIN_PASS, PLAIN_CONSOLE), (TLS_PASS, TLS_CONSOLE)])
+
+probe("an SDK its pass's console never saw start is an incomplete run", 3,
+      [".minio-dotnet: the console never reported it starting"],
+      passes=[(PLAIN_PASS, PLAIN_CONSOLE), (TLS_PASS, "Running with\n")])
+
+probe("a pass whose console is numbered over another list is an incomplete run", 3,
+      ["where the runner asked for"],
+      passes=[(PLAIN_PASS, PLAIN_CONSOLE), (TLS_PASS, console(HEALTHY_PROGRESS, order=TLS_PASS))])
+
+probe("an SDK the passes leave out is refused, never judged as unrun", 2,
+      ["must name every SDK in --sdks exactly once"], passes=[(PLAIN_PASS, PLAIN_CONSOLE)])
+
+probe("an SDK two passes both claim is refused", 2,
+      ["must name every SDK in --sdks exactly once"],
+      passes=[(PLAIN_PASS, PLAIN_CONSOLE), (["minio-go", ".minio-dotnet"], TLS_CONSOLE)])
+
+probe("--progress and --pass together are refused", 2, ["not both"],
+      passes=[(PLAIN_PASS, PLAIN_CONSOLE), (TLS_PASS, TLS_CONSOLE)], also_progress=True)
 
 probe("a baseline without an SDK's line is an incomplete run", 3, ["the baseline has no line for: .minio-dotnet"],
       base=baseline({"awscli": 0, "minio-go": 1}))

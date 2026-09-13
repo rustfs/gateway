@@ -16,7 +16,8 @@
 //!
 //! Responsible for: recording, per request the system under test actually served, the payload mode
 //! a client chose, whether it framed the body as `aws-chunked`, how many signed chunks crossed the
-//! socket, and whether a trailer section followed — written as one JSON object per line.
+//! socket, whether a trailer section followed, and whether the socket was encrypted — written as
+//! one JSON object per line.
 //! NOT responsible for: deciding whether a scenario passed, storing anything, or reproducing any
 //! signature material. The chunk signatures themselves are counted and discarded; nothing here
 //! writes a signature, an `Authorization` header, or a credential into the log.
@@ -36,7 +37,7 @@ use std::task::{Context, Poll};
 
 use bytes::Buf as _;
 use http::Request;
-use rustfs_gateway::S3Service;
+use rustfs_gateway::{S3Service, TransportSecurity};
 
 /// The chunk-extension every signed `aws-chunked` frame carries.
 ///
@@ -225,12 +226,17 @@ where
 #[derive(Clone)]
 pub(crate) struct ProbeService {
     inner: S3Service,
-    log: Arc<ProbeLog>,
+    log: Option<Arc<ProbeLog>>,
 }
 
 impl ProbeService {
-    /// Wraps `inner`, appending one record per served request to `log`.
-    pub(crate) fn new(inner: S3Service, log: Arc<ProbeLog>) -> Self {
+    /// Wraps `inner`, appending one record per served request to `log` when there is one.
+    ///
+    /// `None` records nothing, and is what a launch without `--probe-log` gets: the probe is
+    /// opt-in so that a driver being debugged by hand does not overwrite a matrix run's evidence.
+    /// It is one type either way so that the plaintext and the encrypted listener serve the same
+    /// value.
+    pub(crate) fn new(inner: S3Service, log: Option<Arc<ProbeLog>>) -> Self {
         Self { inner, log }
     }
 }
@@ -252,7 +258,7 @@ where
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
         let facts = Arc::new(BodyFacts::default());
-        let log = Arc::clone(&self.log);
+        let log = self.log.clone();
         let mut inner = self.inner.clone();
         let (parts, body) = request.into_parts();
         let record = RequestFacts::of(&parts);
@@ -267,7 +273,9 @@ where
                 // be the thing that panics.
                 Err(_) => 0,
             };
-            log.append(&record.render(status, &facts));
+            if let Some(log) = log {
+                log.append(&record.render(status, &facts));
+            }
             response
         })
     }
@@ -283,6 +291,10 @@ struct RequestFacts {
     decoded_length: String,
     declared_trailer: String,
     client: String,
+    /// What the gateway is about to be told about the socket: the `TransportSecurity` that
+    /// `crate::transport::DeclareTransport` inserted, read back rather than recomputed, so the
+    /// record shows the fact the customer-key gate acts on.
+    transport: &'static str,
 }
 
 impl RequestFacts {
@@ -312,6 +324,10 @@ impl RequestFacts {
             decoded_length: header("x-amz-decoded-content-length"),
             declared_trailer: header("x-amz-trailer"),
             client: header("user-agent"),
+            transport: match parts.extensions.get::<TransportSecurity>() {
+                Some(TransportSecurity::Encrypted) => "encrypted",
+                Some(TransportSecurity::Plaintext) | None => "plaintext",
+            },
         }
     }
 
@@ -321,7 +337,7 @@ impl RequestFacts {
                 "{{\"method\":{},\"path\":{},\"query\":{},\"status\":{},",
                 "\"payload_mode\":{},\"content_encoding\":{},\"decoded_content_length\":{},",
                 "\"declared_trailer\":{},\"signed_chunks\":{},\"trailer_signature\":{},",
-                "\"request_wire_bytes\":{},\"user_agent\":{}}}"
+                "\"request_wire_bytes\":{},\"user_agent\":{},\"transport\":{}}}"
             ),
             quote(&self.method),
             quote(&self.path),
@@ -335,6 +351,7 @@ impl RequestFacts {
             facts.trailer_signature.load(Ordering::Relaxed),
             facts.wire_bytes.load(Ordering::Relaxed),
             quote(&self.client),
+            quote(self.transport),
         )
     }
 }

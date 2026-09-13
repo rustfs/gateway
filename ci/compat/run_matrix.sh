@@ -97,14 +97,27 @@ selected() {
 #
 # It refuses to run without a command because this repository had no server binary to start
 # (rustfs/gateway#624). `compat-sut` is that binary, and this is where it is named.
+#
+# The same process also serves TLS on a second port (rustfs/gateway#719). Nothing changes for a
+# driver that ignores it: `COMPAT_ENDPOINT` stays plaintext, which is where minio-go sends real
+# signed chunks. Only a scenario a client can express solely over TLS — botocore sends an
+# `x-amz-trailer` upload only on the unsigned-payload path, which it takes only over TLS — reaches
+# for `COMPAT_TLS_ENDPOINT`, trusting `COMPAT_CA_BUNDLE`. Both listeners share one data root and one
+# probe log, so a cell's evidence is read the same way whichever it used. `compat-sut` writes the
+# throwaway authority and binds the TLS port before the plaintext one, so the readiness wait in
+# `sut_start` covers both; the checks after it only confirm that.
+TLS_PORT="${GATEWAY_COMPAT_TLS_PORT:-9443}"
+TLS_AUTHORITY="$RUN_DIR/tls/ca.pem"
 export GATEWAY_SUT_HOST=127.0.0.1
 export GATEWAY_SUT_PORT="$PORT"
 export GATEWAY_SUT_LOG="$RUN_DIR/sut.log"
-export GATEWAY_SUT_COMMAND="$(printf '%q %q %q %q %q %q %q %q %q %q %q %q %q' \
+export GATEWAY_SUT_COMMAND="$(printf '%q ' \
     "$GATEWAY_COMPAT_SUT_BIN" \
     --data "$RUN_DIR/data" \
     --host 127.0.0.1 \
     --port "$PORT" \
+    --tls-port "$TLS_PORT" \
+    --tls-self-signed "$TLS_AUTHORITY" \
     --access-key "$GATEWAY_COMPAT_ACCESS_KEY" \
     --secret-key "$GATEWAY_COMPAT_SECRET_KEY" \
     --probe-log "$PROBE_LOG")"
@@ -112,8 +125,12 @@ export GATEWAY_SUT_COMMAND="$(printf '%q %q %q %q %q %q %q %q %q %q %q %q %q' \
 source "$ROOT_DIR/ci/lib/sut.sh"
 sut_start
 trap sut_stop EXIT
+[[ -s "$TLS_AUTHORITY" ]] || problem "compat-sut wrote no TLS authority at $TLS_AUTHORITY"
+sut_wait_ready 127.0.0.1 "$TLS_PORT" 5 || problem "the encrypted listener on port $TLS_PORT is not accepting connections"
 ENDPOINT="$SUT_ENDPOINT"
-printf 'run_matrix: system under test at %s\n' "$ENDPOINT"
+export COMPAT_TLS_ENDPOINT="https://127.0.0.1:$TLS_PORT"
+export COMPAT_CA_BUNDLE="$TLS_AUTHORITY"
+printf 'run_matrix: system under test at %s and %s\n' "$ENDPOINT" "$COMPAT_TLS_ENDPOINT"
 
 for client in $CLIENTS; do
     selected "$CLIENT_FILTER" "$client" || continue

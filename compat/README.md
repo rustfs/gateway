@@ -95,4 +95,4 @@ must say so rather than record 56 failures and poison the baseline.
 | `drivers/<client>/run.sh` | One client's translation of those scenarios. |
 | `known-fail.txt` | Excused failures. Shrinks only. |
 | `matrix.json` | The generated manifest. A protected file: it is an external promise. |
-| `sut/` | The `compat-sut` binary: puts `rustfs-gateway-fs` behind a real socket and records what crossed it. It is the runnable server rustfs/gateway#624 says the workspace lacked. Started through `ci/lib/sut.sh`, the launcher shared with the P8-05 external-suite runner (rustfs/backlog#1764). |
+| `sut/` | The `compat-sut` binary: puts `rustfs-gateway-fs` behind a real socket and records what crossed it. It is the runnable server rustfs/gateway#624 says the workspace lacked. Started through `ci/lib/sut.sh`, the launcher shared with the P8-05 external-suite runner (rustfs/backlog#1764). The matrix also starts its TLS listener (`--tls-port`, `--tls-self-signed`) and hands drivers `COMPAT_TLS_ENDPOINT` and `COMPAT_CA_BUNDLE`; only a scenario a client can express solely over TLS uses them (rustfs/gateway#719). |
