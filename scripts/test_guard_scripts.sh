@@ -21210,10 +21210,12 @@ from pathlib import Path
 
 path = Path("crates/core/src/registry/reject.rs")
 text = path.read_text()
-subject = "        .handler_deadline_class(HandlerDeadlineClass::Standard)\n"
+# Anchored on the `SPEC` builder: #788 added `SECRET_HUNGRY_SPEC` with the same class line.
+builder = '    static SPEC: OperationSpec = OperationSpec::builder("WriteGetObjectResponse", 200, None)\n'
+subject = builder + "        .handler_deadline_class(HandlerDeadlineClass::Standard)\n"
 if text.count(subject) != 1:
     raise SystemExit("missing unique final-batch deadline removal subject")
-path.write_text(text.replace(subject, "", 1))
+path.write_text(text.replace(subject, builder, 1))
 PYEOF
 }
 expect_fail_with_diagnostic check_handler_deadline_class.sh \
