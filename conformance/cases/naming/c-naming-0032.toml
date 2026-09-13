@@ -1,0 +1,58 @@
+# c-naming-0032 — the RustFS migration profile opens no delete path to a traversal
+#
+[case]
+id = "c-naming-0032"
+schema_version = 1
+title = "The MinIO profile refuses a DeleteObject whose key holds a dot-dot segment"
+rationale = """
+The profile RustFS runs today folds slash runs, and a migration carve-out that let reads or deletes \
+through for legacy keys would live on exactly this profile. None exists: a RustFS store refuses a \
+dot or dot-dot segment on every write, so no stored object has one to recover, and a delete that \
+resolved a traversal would be the most destructive door a carve-out could open \
+(rustfs/gateway#754). The doubled slash makes the case exercise the folding step first."""
+polarity = "negative"
+operation = "DeleteObject"
+tags = ["naming", "routing", "security"]
+timeout_ms = 10000
+quirks = []
+applies_to = { profiles = ["minio"] }
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-8r6f-hmq2-28rg"
+summary = "A traversal-shaped object key reached filesystem mapping and escaped the bucket boundary."
+kind = "other"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/754"
+summary = "The migration ruling adds no RustFS-profile read or delete carve-out for dot-dot keys."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "secret.txt"
+body = { utf8 = "must survive" }
+
+[request]
+method = "DELETE"
+target = "/conf-naming/a//../secret.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]

@@ -187,7 +187,9 @@ fn a_put_version_id_reaches_the_app_body_only_through_the_replica_write() {
 
 /// The gateway's object-key floor refuses a `..` path segment before anything is stored; the
 /// pinned s3s hands its handler the key `..` unchanged. Found by the decode property, which
-/// therefore never draws a dot-only segment.
+/// therefore never draws a dot-only segment. The RustFS store refuses the same segment on every
+/// write, so the refusal strands no stored object; `c-naming-0028`..`c-naming-0032` pin it for
+/// HEAD, DELETE, PUT, multipart and the MinIO profile.
 ///
 /// Ruling: `rd-put-0008`
 #[test]

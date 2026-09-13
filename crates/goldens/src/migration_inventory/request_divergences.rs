@@ -114,7 +114,6 @@ const PINNED_TEST_FILES: [&str; 2] = [PUT_DECODE, PUT_CONTEXT];
 const API_PUT_OBJECT: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html";
 const M1_ADAPTER: &str = "https://github.com/rustfs/backlog/issues/1752";
 const ADAPTER_SEAM: &str = "https://github.com/rustfs/gateway/issues/753";
-const DOT_KEY_INVENTORY: &str = "https://github.com/rustfs/gateway/issues/754";
 
 /// Every decided request divergence.
 pub const REQUEST_DIVERGENCES: [RequestDivergence; 14] = [
@@ -231,12 +230,21 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 14] = [
         request: "a key with a .. segment",
         aws: "keys are opaque, so a .. segment is a legal key",
         aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html",
-        s3s: "hands the key to the handler unchanged",
-        gateway: "the object-key floor refuses it with InvalidArgument, for every operation that names the key",
-        client_impact: "the refusal protects a filesystem-backed store from traversal; an object already stored under such a key would be \
-                        unreachable through the gateway, so the operator has to find those before the switch",
+        s3s: "hands the key to the handler unchanged; the RustFS store behind it then refuses a . or .. segment (and a // run) on \
+              every put, get, delete, copy and multipart entry (ecstore check_*_args through is_valid_object_prefix), so RustFS \
+              never stored such a key",
+        gateway: "the object-key floor refuses it with InvalidArgument, split on / and \\, for every operation that names the key: \
+                  GET, HEAD, DELETE, PUT, multipart, a DeleteObjects body key and a copy source, on every profile. A . segment, \
+                  an empty segment and one leading / stay legal; a leading // is refused as UNC. Reads and deletes get no \
+                  migration carve-out",
+        client_impact: "none for stored data: RustFS cannot hold a .. key, so no object becomes unreachable, and a RustFS-profile \
+                        read or delete carve-out would reopen the traversal floor for a key class that is provably empty. Keys \
+                        the gateway refuses that RustFS does store (a C0, DEL or C1 control other than NUL, LF and CR; a leading \
+                        backslash; a drive root such as C:/; a literal %2F, %5C or %2E%2E) are listed before the switch by the \
+                        RustFS admin key inventory, GET /rustfs/admin/v3/gateway-key-inventory, and copied to a safe key \
+                        through the legacy stack",
         ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::Open(DOT_KEY_INVENTORY),
+        follow_up: DivergenceFollowUp::Landed("c-naming-0029"),
         test_file: PUT_DECODE,
         test: "a_dot_dot_key_segment_is_refused_by_the_gateway_and_kept_by_s3s",
     },

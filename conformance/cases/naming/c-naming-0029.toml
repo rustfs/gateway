@@ -1,0 +1,58 @@
+# c-naming-0029 — a delete is refused like a read, so no profile hands one a traversal
+#
+[case]
+id = "c-naming-0029"
+schema_version = 1
+title = "A DeleteObject whose key holds a backslash-delimited dot-dot segment is refused"
+rationale = """
+A refusal that covered reads but not deletes would leave the destructive verb as the one that still \
+resolves a traversal, and a Windows-hosted store reads `..\\real.txt` as the parent of the bucket. \
+The floor keeps the delete refused on every assembly, including the RustFS migration: a RustFS store \
+refuses a dot or dot-dot segment on every write, so no legacy object needs this path to be deleted \
+(rustfs/gateway#754). The backslash spelling is the one a forward-slash-only floor would let through."""
+polarity = "negative"
+operation = "DeleteObject"
+tags = ["naming", "routing", "security"]
+timeout_ms = 10000
+quirks = ["q-naming-0003"]
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-8r6f-hmq2-28rg"
+summary = "An object key carrying a traversal sequence reached the filesystem mapping and escaped the bucket."
+kind = "other"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/754"
+summary = "The migration ruling keeps reads and deletes of a dot-dot key refused because RustFS never stored one."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-naming"
+
+[[setup.objects]]
+bucket = "conf-naming"
+key = "real.txt"
+body = { utf8 = "in the bucket" }
+
+[request]
+method = "DELETE"
+target = "/conf-naming/..%5Creal.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidArgument"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["in the bucket"]

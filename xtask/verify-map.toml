@@ -18,7 +18,7 @@ cases = "c-bkt-0001,c-bkt-0002,c-bkt-0003,c-bkt-0004,c-bkt-0005,c-bkt-0006,c-bkt
 
 [[operation]]
 name = "CreateMultipartUpload"
-cases = "c-mpu-0004,c-mpu-0006,c-mpu-0007"
+cases = "c-mpu-0004,c-mpu-0006,c-mpu-0007,c-naming-0031"
 
 [[operation]]
 name = "DeleteBucket"
@@ -54,7 +54,7 @@ cases = "c-bucketconfig-0015,c-bucketconfig-0032"
 
 [[operation]]
 name = "DeleteObject"
-cases = "c-object-0003"
+cases = "c-naming-0029,c-naming-0032,c-object-0003"
 
 [[operation]]
 name = "DeleteObjectAnnotation"
@@ -210,7 +210,7 @@ cases = "c-bkt-0008,c-bkt-0009,c-bkt-0025,c-bkt-0026"
 
 [[operation]]
 name = "HeadObject"
-cases = "c-object-0002,c-object-0008,c-object-0018,c-object-0028,c-object-0038,c-object-0053,c-object-0058,c-select-restore-0004,c-select-restore-0005,c-select-restore-0019"
+cases = "c-naming-0028,c-object-0002,c-object-0008,c-object-0018,c-object-0028,c-object-0038,c-object-0053,c-object-0058,c-select-restore-0004,c-select-restore-0005,c-select-restore-0019"
 
 [[operation]]
 name = "ListBucketAnalyticsConfigurations"
@@ -314,7 +314,7 @@ cases = "c-bucketconfig-0012,c-bucketconfig-0014,c-bucketconfig-0036,c-bucketcon
 
 [[operation]]
 name = "PutObject"
-cases = "c-checksum-0001,c-chunked-0001,c-cond-0001,c-cond-0006,c-cond-0009,c-cond-0011,c-cond-0012,c-cond-0013,c-cond-0018,c-copy-0022,c-encryption-0026,c-host-0008,c-naming-0025,c-object-0006,c-object-0013,c-object-0026,c-object-0027,c-object-0030,c-object-0040,c-object-0041,c-object-0042,c-object-0043,c-object-0044,c-object-0051,c-object-0054,c-object-0055,c-object-0056,c-object-0057,c-sig-0001,c-ssec-0001,c-ssec-0003,c-ssec-0005,c-ssec-0006,c-ssec-0007,c-ssec-0008,c-ssec-0009,c-ssec-0010,c-tagging-0003,c-tagging-0016,c-tagging-0017"
+cases = "c-checksum-0001,c-chunked-0001,c-cond-0001,c-cond-0006,c-cond-0009,c-cond-0011,c-cond-0012,c-cond-0013,c-cond-0018,c-copy-0022,c-encryption-0026,c-host-0008,c-naming-0025,c-naming-0030,c-object-0006,c-object-0013,c-object-0026,c-object-0027,c-object-0030,c-object-0040,c-object-0041,c-object-0042,c-object-0043,c-object-0044,c-object-0051,c-object-0054,c-object-0055,c-object-0056,c-object-0057,c-object-0059,c-sig-0001,c-ssec-0001,c-ssec-0003,c-ssec-0005,c-ssec-0006,c-ssec-0007,c-ssec-0008,c-ssec-0009,c-ssec-0010,c-tagging-0003,c-tagging-0016,c-tagging-0017"
 
 [[operation]]
 name = "PutObjectAcl"
