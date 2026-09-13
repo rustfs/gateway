@@ -17733,7 +17733,7 @@ PYEOF
 }
 expect_fail check_config_load_once.sh \
     'request entry dropping the server cancellation signal' mut_request_cancellation_capture_removed \
-    'shared request entry does not capture cancellation beside its one configuration snapshot'
+    'shared request entry does not carry cancellation beside its captured configuration'
 
 mut_request_cancellation_store_removed() {
     python3 - <<'PYEOF'
