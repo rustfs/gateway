@@ -1,0 +1,17 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+  --> tests/compile_fail/c_mw_0030_filter_cannot_mint_a_signature.rs:29:22
+   |
+29 |         let _proof = rustfs_gateway::sig::SignatureMatch(());
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> $WORKSPACE/crates/sig/src/signature.rs
+   |
+   | pub struct SignatureMatch(());
+   |                           ^^ private field
+
+error[E0599]: no method named `verdict` found for reference `&RoutedView<'_>` in the current scope
+  --> tests/compile_fail/c_mw_0030_filter_cannot_mint_a_signature.rs:30:31
+   |
+30 |         let _verdict = routed.verdict();
+   |                               ^^^^^^^ method not found in `&RoutedView<'_>`

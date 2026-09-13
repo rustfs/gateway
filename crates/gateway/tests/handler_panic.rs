@@ -72,3 +72,34 @@ async fn a_handler_panic_is_a_500_and_the_next_request_still_runs() {
     assert_eq!(second.0, http::StatusCode::OK, "{}", second.1);
     assert!(second.1.contains("recovered"), "{}", second.1);
 }
+
+/// c-mw-0022. A panic inside an `OpLayer` is contained where a handler panic is: the request is a
+/// `500`, and the same service answers the next request through the same layer.
+#[tokio::test]
+async fn an_op_layer_panic_is_a_500_and_the_next_request_still_runs() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let layer_calls = Arc::clone(&calls);
+    let service = wired()
+        .register::<Ping, _>(Arc::new(support::Backend))
+        .op_layer::<Ping, _>(rustfs_gateway::op_layer(
+            move |request: Req<Ping>, next: rustfs_gateway::Next<'_, Ping>| {
+                let first = layer_calls.fetch_add(1, Ordering::SeqCst) == 0;
+                Box::pin(async move {
+                    if first {
+                        panic!("op layer panic fixture");
+                    }
+                    next.run(request).await
+                }) as rustfs_gateway::BoxFuture<'_, HandlerResult<Ping>>
+            },
+        ))
+        .dialect(&crate::support::ping_dialect())
+        .build()
+        .expect("a complete assembly");
+
+    let first = exchange(&service, plain(http::Method::POST, "/")).await;
+    assert_eq!(first.0, http::StatusCode::INTERNAL_SERVER_ERROR, "{}", first.1);
+
+    let second = exchange(&service, plain(http::Method::POST, "/")).await;
+    assert_eq!(second, (http::StatusCode::OK, "<Ping>pong</Ping>".to_owned()));
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "the second request did not pass through the layer");
+}

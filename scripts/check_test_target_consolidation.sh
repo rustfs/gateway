@@ -587,8 +587,13 @@ error_sources = {path.stem for path in gateway_compile_dir.glob("error_resolutio
 error_goldens = {path.stem for path in gateway_compile_dir.glob("error_resolution_*.stderr")}
 if error_sources != error_goldens:
     fail("gateway error-resolution trybuild sources and goldens must remain paired")
+middleware_sources = {path.stem for path in gateway_compile_dir.glob("c_mw_*.rs")}
+middleware_goldens = {path.stem for path in gateway_compile_dir.glob("c_mw_*.stderr")}
+if not middleware_sources or middleware_sources != middleware_goldens:
+    fail("gateway middleware trybuild sources and goldens must exist and remain paired")
 gateway_calls = ['cases.compile_fail("tests/compile_fail/azc_*.rs");']
 gateway_calls.append('cases.compile_fail("tests/compile_fail/c_ck_0020_*.rs");')
+gateway_calls.append('cases.compile_fail("tests/compile_fail/c_mw_*.rs");')
 if error_sources:
     gateway_calls.append('cases.compile_fail("tests/compile_fail/error_resolution_*.rs");')
 gateway_calls.append('cases.compile_fail("tests/compile_fail/host_resolver_*.rs");')
@@ -688,6 +693,7 @@ gateway_modules = (
     "request_allocations",
     "request_context_runtime",
     "response_invariants",
+    "response_stream_termination",
     "select_restore_intent",
     "self_held_http1",
     "service_clone_allocations",

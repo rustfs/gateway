@@ -43,6 +43,11 @@ set -euo pipefail
 #   Not applicable. A seam that needs to await needs an ADR revisiting ADR-0002
 #   and the pre-authentication amplification argument first.
 #
+#   One file is skipped, by exact path, the way check_resolver_pure.sh skips its
+#   own: COMPILE_FAIL_FIXTURE writes the forbidden async seams on purpose, so
+#   that the compile-fail harness can prove the compiler refuses them too. That
+#   file never compiles, so it cannot install a filter anywhere.
+#
 # USAGE
 #   scripts/check_stage_filter_sync.sh
 #   GATEWAY_CHECK_ROOT=/path/to/repo scripts/check_stage_filter_sync.sh
@@ -57,6 +62,8 @@ cd "$ROOT_DIR"
 # must be pointed at the new home in the same change, and a guard that silently
 # finds nothing is the defect this repository has produced seven times.
 TRAIT_FILE='crates/gateway/src/ext/filter.rs'
+# The c-mw-0019 fixture: the rule-1 violation, written for the compiler to refuse.
+COMPILE_FAIL_FIXTURE='crates/gateway/tests/compile_fail/c_mw_0019_stage_filter_cannot_await.rs'
 # Exactly the seams the trait may declare, space separated and in any order.
 SEAMS='on_wire on_routed on_response'
 # Type names that mean "this value can reach storage".
@@ -97,6 +104,7 @@ guarded=("$TRAIT_FILE")
 impl_count=0
 for file in "${sources[@]}"; do
     [[ "$file" == "$TRAIT_FILE" ]] && continue
+    [[ "$file" == "$COMPILE_FAIL_FIXTURE" ]] && continue
     if grep -qE '^[ \t]*impl([ \t]*<[^>]*>)?[ \t]+StageFilter([ \t]*<[^>]*>)?[ \t]+for[ \t]+' "$file"; then
         guarded+=("$file")
         impl_count=$((impl_count + 1))

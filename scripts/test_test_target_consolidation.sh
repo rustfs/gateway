@@ -631,6 +631,21 @@ PYEOF
 }
 expect_fail 'gateway error-resolution pairs cannot lose their shared-batch pattern' mut_gateway_error_resolution_pattern_omitted
 
+mut_gateway_middleware_pattern_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/tests/compile_fail.rs")
+text = path.read_text()
+path.write_text(text.replace('    cases.compile_fail("tests/compile_fail/c_mw_*.rs");\n', "", 1))
+PYEOF
+}
+expect_fail 'gateway middleware fixtures cannot lose their shared-batch pattern' mut_gateway_middleware_pattern_omitted
+
+mut_gateway_middleware_golden_missing() {
+    rm -f crates/gateway/tests/compile_fail/c_mw_0018_routed_target_is_read_only.stderr
+}
+expect_fail 'a gateway middleware fixture without its golden is rejected' mut_gateway_middleware_golden_missing
+
 mut_gateway_batch_duplicated() {
     python3 - <<'PYEOF'
 from pathlib import Path

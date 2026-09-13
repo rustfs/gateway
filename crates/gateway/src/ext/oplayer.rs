@@ -124,6 +124,35 @@ impl<O: Operation> core::fmt::Debug for Next<'_, O> {
 ///
 /// **This is the level for a rewrite that needs a DTO.** A rewrite that does not is a
 /// [`crate::StageFilter`]; observation is a [`crate::Observer`].
+///
+/// # Examples
+///
+/// A layer that edits one field of one operation's typed output, and nothing else:
+///
+/// ```
+/// use rustfs_gateway::dto::GetObjectAttributes;
+/// use rustfs_gateway::{BoxFuture, HandlerResult, Next, OpLayer, Req, ServiceBuilder};
+///
+/// struct WithoutEntityTag;
+///
+/// impl OpLayer<GetObjectAttributes> for WithoutEntityTag {
+///     fn wrap<'a>(
+///         &'a self,
+///         request: Req<GetObjectAttributes>,
+///         next: Next<'a, GetObjectAttributes>,
+///     ) -> BoxFuture<'a, HandlerResult<GetObjectAttributes>> {
+///         Box::pin(async move {
+///             let mut response = next.run(request).await?;
+///             if let Some(output) = response.output_mut() {
+///                 output.e_tag = None;
+///             }
+///             Ok(response)
+///         })
+///     }
+/// }
+///
+/// let _builder = ServiceBuilder::new().op_layer::<GetObjectAttributes, _>(WithoutEntityTag);
+/// ```
 pub trait OpLayer<O: Operation>: Send + Sync + 'static {
     /// Wraps one call.
     ///

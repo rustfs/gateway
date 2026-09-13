@@ -1,0 +1,11 @@
+error[E0616]: field `bucket` of struct `RoutedView` is private
+  --> tests/compile_fail/c_mw_0018_routed_target_is_read_only.rs:28:16
+   |
+28 |         routed.bucket = None;
+   |                ^^^^^^ private field
+
+error[E0616]: field `key` of struct `RoutedView` is private
+  --> tests/compile_fail/c_mw_0018_routed_target_is_read_only.rs:29:16
+   |
+29 |         routed.key = None;
+   |                ^^^ private field

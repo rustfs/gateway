@@ -116,6 +116,8 @@ mod request_allocations;
 mod request_context_runtime;
 #[path = "response_invariants.rs"]
 mod response_invariants;
+#[path = "response_stream_termination.rs"]
+mod response_stream_termination;
 #[path = "select_restore_intent.rs"]
 mod select_restore_intent;
 #[path = "self_held_http1.rs"]

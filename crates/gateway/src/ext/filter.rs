@@ -333,6 +333,27 @@ impl ResponseView<'_> {
 ///
 /// **This is the level for a rewrite that does not need a typed input.** If you only want to
 /// observe, use [`crate::Observer`]; if you want one operation's DTO, use [`crate::OpLayer`].
+///
+/// # Examples
+///
+/// A filter that states only the response seam and marks every answer:
+///
+/// ```
+/// use rustfs_gateway::{Body, HandlerError, ResponseView, ServiceBuilder, StageFilter};
+///
+/// struct ServedBy;
+///
+/// impl StageFilter for ServedBy {
+///     fn on_response(&self, _view: &ResponseView<'_>, response: &mut http::Response<Body>) -> Result<(), HandlerError> {
+///         response
+///             .headers_mut()
+///             .insert("x-served-by", http::HeaderValue::from_static("gateway"));
+///         Ok(())
+///     }
+/// }
+///
+/// let _builder = ServiceBuilder::new().stage_filter(ServedBy);
+/// ```
 pub trait StageFilter: Send + Sync + 'static {
     /// Before acceptance: the head as it arrived, mutable except for [`FROZEN_WIRE_HEADERS`].
     ///
