@@ -483,6 +483,11 @@ fn c_sig_0335_a_presigned_url_without_an_expiry_is_refused() {
 // ---------------------------------------------------------------------------
 
 fn scope_rejection(credential: &str, expected_service: SigService) -> Option<ScopeRejection> {
+    scope_verdict(credential, expected_service, false).err()
+}
+
+/// The region `enforce_scope` verified, or its rejection; `any_region` selects the ADR-0023 policy.
+fn scope_verdict(credential: &str, expected_service: SigService, any_region: bool) -> Result<String, ScopeRejection> {
     let headers = signed_headers(SIGNED_AT);
     let view = WireView::new(&headers, RawQuery::new(""));
     let operation = OperationFloor::builtin("Any", expected_service);
@@ -492,8 +497,54 @@ fn scope_rejection(credential: &str, expected_service: SigService) -> Option<Sco
     };
     let presented = CredentialScope::parse(credential).expect("a well-formed scope");
     let regions = regions();
-    let expected = ExpectedScope::new(expected_service, &regions);
-    enforce_scope(&presented, sealed.clock(), &expected).err()
+    let mut expected = ExpectedScope::new(expected_service, &regions);
+    if any_region {
+        expected = expected.accepting_any_region();
+    }
+    enforce_scope(&presented, sealed.clock(), &expected).map(|scope| scope.region().to_owned())
+}
+
+/// Positive — ADR-0023: under the any-region policy an unserved region in the configured-name
+/// grammar is verified, and the verified scope is the client's region, not a configured one.
+#[test]
+fn any_region_policy_verifies_an_unserved_region_in_the_grammar() {
+    for region in ["ap-south-1", "rustfs-local", "a"] {
+        let credential = format!("AKIDEXAMPLE/20150830/{region}/s3/aws4_request");
+        assert_eq!(scope_verdict(&credential, SigService::S3, true).as_deref(), Ok(region));
+    }
+}
+
+/// Negative — ADR-0023: a region the scope parser accepts but the configured-name grammar does
+/// not is still refused, naming the first configured region, so nothing a configured name could
+/// not spell reaches a handler. (Over 64 bytes never gets this far: the parser refuses it.)
+#[test]
+fn n_any_region_policy_still_refuses_a_region_outside_the_grammar() {
+    for region in ["AP-SOUTH-1", "rustfs_local", "eu.west.1", "us-east-1!"] {
+        let credential = format!("AKIDEXAMPLE/20150830/{region}/s3/aws4_request");
+        let rejection = scope_verdict(&credential, SigService::S3, true).expect_err(region);
+        assert_eq!(rejection.expected_region().map(ScopeRegion::as_str), Some("eu-west-1"), "{region}");
+    }
+}
+
+/// Negative — ADR-0023 widens the region check only: another day and another service are still
+/// refused under the policy.
+#[test]
+fn n_any_region_policy_still_enforces_the_date_and_the_service() {
+    for (credential, service) in [
+        ("AKIDEXAMPLE/20150831/ap-south-1/s3/aws4_request", SigService::S3),
+        ("AKIDEXAMPLE/20150830/ap-south-1/sts/aws4_request", SigService::S3),
+    ] {
+        let rejection = scope_verdict(credential, service, true).expect_err(credential);
+        assert_eq!(rejection.expected_region(), None, "{credential}");
+    }
+}
+
+/// Negative — the policy is opt-in: without it the same unserved region is refused.
+#[test]
+fn n_without_the_policy_an_unserved_region_in_the_grammar_is_refused() {
+    let rejection =
+        scope_verdict("AKIDEXAMPLE/20150830/rustfs-local/s3/aws4_request", SigService::S3, false).expect_err("strict default");
+    assert_eq!(rejection.expected_region().map(ScopeRegion::as_str), Some("eu-west-1"));
 }
 
 /// Negative — c-sig-0340: a signature minted for STS cannot replay against S3.

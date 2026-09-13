@@ -49,9 +49,7 @@ mod s3s_9c4690d8 {
 /// s3s `f3e17541`, the revision RustFS main links and the RustFS adapter converts through.
 #[path = "operation_diff"]
 #[allow(clippy::duplicate_mod)] // Deliberate: one harness source is compiled once per seam revision.
-// Crate-visible so the RustFS admin proof (rustfs/backlog#1744) signs its requests with the same
-// client signer, under the revision RustFS main links.
-pub(crate) mod s3s_f3e17541 {
+mod s3s_f3e17541 {
     use rustfs_gateway_types::compat::OracleRevision;
     use rustfs_gateway_types::compat::s3s_f3e17541 as seam;
     use s3s::dto as oracle;
@@ -60,9 +58,9 @@ pub(crate) mod s3s_f3e17541 {
     /// The revision this compilation measures.
     const SEAM_REVISION: OracleRevision = OracleRevision::Candidate;
 
-    pub(crate) mod harness;
+    mod harness;
     use harness::*;
 
-    pub(crate) mod context;
+    mod context;
     mod put_object;
 }

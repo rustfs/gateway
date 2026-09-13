@@ -34,7 +34,6 @@ MissingRequestBodyError|empty-body refusal; the codec answers MalformedXML inste
 MissingSecurityElement|browser POST policy document; same owner as MalformedPOSTRequest
 MissingSecurityHeader|browser POST policy document; same owner as MissingSecurityElement
 NoLoggingStatusForKey|bucket-logging family; same owner as CrossLocationLoggingProhibited
-NotSignedUp|account-level condition; same owner as AccountProblem
 OperationAborted|concurrent-modification conflict the storage side detects
 RequestIsNotMultiPartContent|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
 TokenRefreshRequired|session-credential path; same owner as CredentialsNotSupported

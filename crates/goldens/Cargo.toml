@@ -48,6 +48,8 @@ rustfs-gateway-dialect-minio = { path = "../dialect-minio" }
 bytes = { workspace = true }
 futures-core = { workspace = true }
 http = { workspace = true }
+# The rd-loc pins read a whole gateway response body, which is an `http_body::Body`.
+http-body-util = { workspace = true }
 proptest = { workspace = true }
 
 [[test]]

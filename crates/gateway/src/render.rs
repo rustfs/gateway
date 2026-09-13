@@ -221,14 +221,12 @@ pub(crate) fn from_pre_auth(error: PreAuthError, response: ResponseKind) -> S3Er
 }
 
 pub(crate) fn from_auth(error: AuthError, response: ResponseKind, body_owed: bool) -> S3Error {
-    // A comparison failure is deliberately collapsed into the unknown-key response. Keeping the
-    // internal variants distinct lets the verifier test its state machine without making the
-    // access-key store observable on the wire. Authentication has its own connection policy; it is
-    // neither wire nor chunk rejection. Every `AuthError::code()` spelling has a row in the error
-    // status authority — `check_error_status_total.sh` reads the arms — so `known` cannot miss.
-    let (code, message) = if error == AuthError::SignatureDoesNotMatch {
-        (ErrorCode::INVALID_ACCESS_KEY_ID, AuthError::InvalidAccessKeyId.message())
-    } else if error == AuthError::AuthorizationHeaderMalformed {
+    // A comparison failure keeps its own code, as S3 answers it and SDKs branch on it (rd-loc-0002);
+    // message, status, headers and the work done stay one for both (docs/security-model.md).
+    // Authentication has its own connection policy; it is neither wire nor chunk rejection. Every
+    // `AuthError::code()` spelling has a row in the error status authority —
+    // `check_error_status_total.sh` reads the arms — so `known` cannot miss.
+    let (code, message) = if error == AuthError::AuthorizationHeaderMalformed {
         (ErrorCode::ACCESS_DENIED, "the request was not authenticated")
     } else {
         (ErrorCode::known(error.code()).unwrap_or(ErrorCode::ACCESS_DENIED), error.message())
@@ -537,7 +535,7 @@ mod tests {
         handler(HandlerError::new(code, message))
     }
 
-    /// Negative — a comparison rejection carries the uniform credential code and no request data.
+    /// Negative — a comparison rejection carries its own code and no request data.
     #[tokio::test]
     async fn a_rendered_refusal_echoes_nothing_from_the_request() {
         let error = from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other, true);
@@ -545,17 +543,18 @@ mod tests {
             .await
             .expect("an in-memory body");
         let body = String::from_utf8(collected.body().to_vec()).expect("utf-8");
-        assert!(body.contains("<Code>InvalidAccessKeyId</Code>"), "{body}");
+        assert!(body.contains("<Code>SignatureDoesNotMatch</Code>"), "{body}");
         assert!(body.contains("the request was not authenticated"), "{body}");
         assert!(!body.contains("Authorization"), "{body}");
     }
 
-    /// Negative — a wrong signature and unknown key have one rendered response.
+    /// Negative — a wrong signature and an unknown key differ in their S3 code alone (rd-loc-0002).
     #[test]
-    fn the_two_credential_rejections_are_indistinguishable() {
+    fn the_two_credential_rejections_differ_only_in_their_code() {
         let unknown = from_auth(AuthError::InvalidAccessKeyId, ResponseKind::Other, true);
         let mismatch = from_auth(AuthError::SignatureDoesNotMatch, ResponseKind::Other, true);
-        assert_eq!(unknown.code(), mismatch.code());
+        assert_eq!(unknown.code(), Some(&ErrorCode::INVALID_ACCESS_KEY_ID));
+        assert_eq!(mismatch.code(), Some(&ErrorCode::SIGNATURE_DOES_NOT_MATCH));
         assert_eq!(unknown.message(), mismatch.message());
         assert_eq!(unknown.status(), mismatch.status());
     }

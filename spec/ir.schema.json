@@ -317,7 +317,7 @@
         "response_algorithms": { "type": "array", "items": { "$ref": "#/$defs/checksum_algo" } }
       }
     },
-    "checksum_algo": { "enum": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256", "SHA512", "MD5", "XXHASH64", "XXHASH3", "XXHASH128"] },
+    "checksum_algo": { "enum": ["CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"] },
 
     "field_set": {
       "type": "object",

@@ -277,7 +277,7 @@ async fn a_presigned_url_holds_only_for_its_signed_host_spelling() {
             .insert(http::header::HOST, http::HeaderValue::from_str(changed_host).expect("a host header"));
         let response = support::exchange_wire(&service, request).await;
         assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
-        assert!(String::from_utf8_lossy(response.body()).contains("<Code>InvalidAccessKeyId</Code>"));
+        assert!(String::from_utf8_lossy(response.body()).contains("<Code>SignatureDoesNotMatch</Code>"));
         assert_eq!(calls.put_entries.load(Ordering::SeqCst), 0);
         assert_eq!(calls.put_commits.load(Ordering::SeqCst), 0);
     }

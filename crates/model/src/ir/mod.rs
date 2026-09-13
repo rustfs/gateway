@@ -359,8 +359,7 @@ pub struct Checksum {
     pub response_algorithms: Vec<ChecksumAlgo>,
 }
 
-/// The ten checksum algorithms the IR admits: the original five, and the five S3 added in 2026-04
-/// (rustfs/gateway#751).
+/// The five checksum algorithms the IR admits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ChecksumAlgo {
     /// CRC-32.
@@ -373,16 +372,6 @@ pub enum ChecksumAlgo {
     Sha1,
     /// SHA-256.
     Sha256,
-    /// SHA-512.
-    Sha512,
-    /// MD5, as an `x-amz-checksum-md5` value (not `Content-MD5`).
-    Md5,
-    /// XXH64, seed 0.
-    XxHash64,
-    /// XXH3, 64-bit.
-    XxHash3,
-    /// XXH3, 128-bit.
-    XxHash128,
 }
 
 impl ChecksumAlgo {
@@ -394,15 +383,10 @@ impl ChecksumAlgo {
             ChecksumAlgo::Crc64Nvme => "CRC64NVME",
             ChecksumAlgo::Sha1 => "SHA1",
             ChecksumAlgo::Sha256 => "SHA256",
-            ChecksumAlgo::Sha512 => "SHA512",
-            ChecksumAlgo::Md5 => "MD5",
-            ChecksumAlgo::XxHash64 => "XXHASH64",
-            ChecksumAlgo::XxHash3 => "XXHASH3",
-            ChecksumAlgo::XxHash128 => "XXHASH128",
         }
     }
 
-    /// Parses an IR spelling. Returns `None` for a spelling that names no S3 checksum algorithm.
+    /// Parses an IR spelling. Returns `None` for algorithms the model knows and the IR does not.
     pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
             "CRC32" => ChecksumAlgo::Crc32,
@@ -410,11 +394,6 @@ impl ChecksumAlgo {
             "CRC64NVME" => ChecksumAlgo::Crc64Nvme,
             "SHA1" => ChecksumAlgo::Sha1,
             "SHA256" => ChecksumAlgo::Sha256,
-            "SHA512" => ChecksumAlgo::Sha512,
-            "MD5" => ChecksumAlgo::Md5,
-            "XXHASH64" => ChecksumAlgo::XxHash64,
-            "XXHASH3" => ChecksumAlgo::XxHash3,
-            "XXHASH128" => ChecksumAlgo::XxHash128,
             _ => return None,
         })
     }

@@ -4,7 +4,7 @@
 id = "c-sig-0583"
 schema_version = 1
 title = "A SigV2 request signed with the wrong secret cannot become anonymous"
-rationale = "ListBuckets is reachable to an authenticated caller and refused to an anonymous one, so the 403 and uniform authentication document distinguish a verified refusal from a downgrade that happened to reach the handler."
+rationale = "ListBuckets is reachable to an authenticated caller and refused to an anonymous one, so the 403 and the SignatureDoesNotMatch document, which S3 gives a wrong secret on a known key, distinguish a verified refusal from a downgrade that happened to reach the handler."
 polarity = "negative"
 operation = "ListBuckets"
 tags = ["signature", "sigv2", "security"]
@@ -37,7 +37,7 @@ status = 403
 connection_after = "open"
 
 [expect.error]
-code = "InvalidAccessKeyId"
+code = "SignatureDoesNotMatch"
 request_id_present = true
 
 [expect.headers_present]

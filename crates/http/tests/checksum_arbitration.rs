@@ -21,7 +21,7 @@
 //! published check values) or the response rendering (the facade owns that).
 //! Upstream: `rustfs-gateway-http`. Downstream: nothing.
 //!
-//! 21 negative / 7 positive.
+//! 19 negative / 6 positive.
 
 use http::{HeaderMap, HeaderName, HeaderValue};
 use rustfs_gateway_http::{BodyIntegrity, ChecksumReject, ChecksumSubject, HeaderView};
@@ -36,20 +36,6 @@ const CRC32: &str = "DUoRhQ==";
 const SHA1: &str = "Kq5sNclPz7QV2+lfQIuc6R7oRu0=";
 /// base64(MD5(BODY)).
 const MD5: &str = "XrY7u+Ae7tCTyyK7j1rNww==";
-/// The five algorithms S3 added in 2026-04, as `(header, base64 digest of BODY, same-width value
-/// that is not it)`. The XXHash digests are big-endian; each was checked against two independent
-/// implementations.
-const ADDED_2026_04: &[(&str, &str, &str)] = &[
-    (
-        "x-amz-checksum-sha512",
-        "MJ7MSJwS1utMxA9QyQLytNDtd+5RGnx6m808qG1M2G+YndNbxf9JlnDaNCVbRbDP2DDoH2Bdz33FVC6TrpzXbw==",
-        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-    ),
-    ("x-amz-checksum-md5", MD5, "AAAAAAAAAAAAAAAAAAAAAA=="),
-    ("x-amz-checksum-xxhash64", "RatnNLIeaWg=", "AAAAAAAAAAA="),
-    ("x-amz-checksum-xxhash3", "1Eex6kDmmIs=", "AAAAAAAAAAA="),
-    ("x-amz-checksum-xxhash128", "340J6T+HSQCpm4d1zBW2xw==", "AAAAAAAAAAAAAAAAAAAAAA=="),
-];
 
 fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
     let mut map = HeaderMap::new();
@@ -243,44 +229,6 @@ fn a_malformed_content_md5_is_invalid_digest_and_not_bad_digest() {
         Err(ChecksumReject::InvalidDigest),
         "base64 of the wrong width is not an MD5"
     );
-}
-
-/// Positive — each algorithm added in 2026-04 is arbitrated like the other five: its header is a
-/// claim, the claim is verified against the body, and the verified checksum is the one reported.
-#[test]
-fn an_algorithm_added_in_2026_04_is_verified_and_reported() {
-    for (header, digest, _) in ADDED_2026_04 {
-        let mut digests = resolve(&[(header, digest)])
-            .unwrap_or_else(|error| panic!("{header} is a checksum claim: {error:?}"))
-            .begin();
-        digests.update(BODY);
-        let verified = digests.verify().unwrap_or_else(|error| panic!("{header}: {error:?}"));
-        let checksum = verified.checksum().expect("the request claimed one");
-        assert_eq!(checksum.algorithm().header_name(), *header);
-        assert_eq!(checksum.render_base64(), *digest);
-        assert_eq!(verified.verified_bytes(), BODY.len() as u64);
-    }
-}
-
-/// Negative — a well-formed value of the right width that is not the body's digest is a checksum
-/// mismatch for each added algorithm, not an unknown algorithm and not a pass.
-#[test]
-fn an_algorithm_added_in_2026_04_refuses_a_digest_that_is_not_the_bodys() {
-    for (header, _, other) in ADDED_2026_04 {
-        let error = round_trip(&[(header, other)], BODY).expect_err("that is not the digest of the body");
-        assert_eq!(error, ChecksumReject::ChecksumMismatch, "{header}");
-        assert_eq!(error.error_code(), ErrorCode::X_AMZ_CONTENT_CHECKSUM_MISMATCH, "{header}");
-    }
-}
-
-/// Negative — an added algorithm beside another checksum header is two claims, refused before any
-/// body byte, exactly as two of the original five are.
-#[test]
-fn an_algorithm_added_in_2026_04_beside_another_checksum_is_two_claims() {
-    for (header, digest, _) in ADDED_2026_04 {
-        let error = resolve(&[(header, digest), ("x-amz-checksum-sha1", SHA1)]).expect_err("two claims are two claims");
-        assert_eq!(error, ChecksumReject::MultipleChecksumHeaders, "{header}");
-    }
 }
 
 #[test]

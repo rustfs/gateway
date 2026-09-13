@@ -7,11 +7,13 @@
 [case]
 id = "c-cred-0009"
 schema_version = 1
-title = "A wrong secret is refused exactly like an unknown access key"
+title = "A wrong secret is SignatureDoesNotMatch and otherwise refused exactly like an unknown access key"
 rationale = """
-The credential contract deliberately collapses a wrong signature and an unknown access key to one \
-wire answer. A different code would confirm that the named access key exists, so the status, \
-headers and body are pinned to the same bytes as c-cred-0008. Nothing derived from verification is \
+S3 answers a wrong signature on a known key with SignatureDoesNotMatch and an unknown key with \
+InvalidAccessKeyId, and SDKs branch on the difference, so the codes stay distinct (rd-loc-0002, \
+docs/security-model.md). Everything else is pinned to the same bytes as c-cred-0008: the status, \
+the headers and the message, so the code is the only difference, and timing parity and the \
+credential rate limit bound what it tells an enumerator. Nothing derived from verification is \
 rendered."""
 polarity = "negative"
 operation = "GetObject"
@@ -53,7 +55,7 @@ connection_after = "open"
 headers_absent = ["etag", "x-amz-version-id", "last-modified"]
 
 [expect.error]
-code = "InvalidAccessKeyId"
+code = "SignatureDoesNotMatch"
 request_id_present = true
 
 [expect.headers_present]
@@ -63,7 +65,7 @@ request_id_present = true
 redact = ["RequestId", "HostId"]
 exact_utf8 = """
 <?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>InvalidAccessKeyId</Code><Message>the request was not authenticated</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>"""
+<Error><Code>SignatureDoesNotMatch</Code><Message>the request was not authenticated</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>"""
 not_contains_utf8 = [
     "AKIAIOSFODNN7EXAMPLE",
     "wJalrXUtnFEMI",

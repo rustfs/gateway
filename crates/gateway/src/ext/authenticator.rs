@@ -471,6 +471,9 @@ pub struct SigV4Authenticator {
     /// Whether a successful lookup's secret is handed to the handler (ADR-0022). Off by default;
     /// `pub(super)` so the SigV2 half honours the same switch.
     pub(super) hand_secret: bool,
+    /// Whether a scope region outside `regions` is verified (ADR-0023). Off by default;
+    /// `pub(super)` so the switch in `super::authenticator_switches` sets it.
+    pub(super) any_region: bool,
 }
 
 /// An authenticated verdict, and the looked-up secret when the authenticator hands it on.
@@ -484,6 +487,7 @@ impl core::fmt::Debug for SigV4Authenticator {
             .field("regions", &self.regions)
             .field("credential_guard", self.credentials.config())
             .field("hands_caller_secret_to_handlers", &self.hand_secret)
+            .field("accepts_any_signing_region", &self.any_region)
             .finish()
     }
 }
@@ -496,11 +500,7 @@ impl SigV4Authenticator {
     /// listed a region it does not serve would accept a signature minted for another endpoint.
     #[must_use]
     pub fn new(credentials: Arc<dyn CredentialProvider>, regions: RegionSet) -> Self {
-        Self {
-            credentials: Arc::new(GuardedCredentialProvider::new(credentials)),
-            regions,
-            hand_secret: false,
-        }
+        Self::with_guard_config(credentials, regions, CredentialGuardConfig::default())
     }
 
     /// Builds the verifier with an explicit credential lookup posture.
@@ -514,22 +514,8 @@ impl SigV4Authenticator {
             credentials: Arc::new(GuardedCredentialProvider::with_config(credentials, config)),
             regions,
             hand_secret: false,
+            any_region: false,
         }
-    }
-
-    /// Hands the secret this authenticator's own credential lookup returned for an authenticated
-    /// principal to the handler, as `RequestPrincipal::secret_key_from_authenticator_lookup`
-    /// (ADR-0022).
-    ///
-    /// Off by default, and meant for a backend that genuinely needs the secret: one that decrypts
-    /// a payload the client encrypted with it, or an adapter filling s3s's
-    /// `Credentials::secret_key`. The secret travels only after the signature matched and the
-    /// credential was admitted; a rejected or anonymous request never carries one, and no lookup
-    /// happens that verification did not already make.
-    #[must_use]
-    pub fn hand_caller_secret_to_handlers(mut self) -> Self {
-        self.hand_secret = true;
-        self
     }
 
     async fn verify(&self, request: &Authentication<'_>) -> Result<AuthenticationOutcome, Unavailable> {
@@ -554,6 +540,11 @@ impl SigV4Authenticator {
         // H5, and the only public producer of the `VerifiedScope` the derivation takes. A scope
         // the client chose therefore cannot seed a signing key.
         let expected = ExpectedScope::new(sealed.expected_service(), &self.regions);
+        let expected = if self.any_region {
+            expected.accepting_any_region()
+        } else {
+            expected
+        };
         let verified = enforce_scope(presented.scope(), sealed.clock(), &expected).map_err(VerificationFailure::Scope)?;
 
         let resolved = self

@@ -93,8 +93,8 @@ fn strict_closure_holds_under_every_revision() {
     assert!(text.contains("P9-01 acceptance census: passed=39 blocked=0 total=39\n"), "{text}");
     assert!(text.contains("oracle admission: revisions=3 open-findings=0\n"), "{text}");
     assert!(!text.contains("finding "), "{text}");
-    assert!(text.contains("request divergences: rulings=14 "), "{text}");
-    assert_eq!(text.lines().filter(|line| line.starts_with("divergence rd-")).count(), 14, "{text}");
+    assert!(text.contains("request divergences: rulings=18 "), "{text}");
+    assert_eq!(text.lines().filter(|line| line.starts_with("divergence rd-")).count(), 18, "{text}");
 }
 
 /// The ordinary report shows every revision's D1-D5, widening and refusal evidence.
@@ -108,12 +108,12 @@ fn ordinary_report_shows_evidence_per_oracle_revision() {
     assert!(text.contains("P9-01 acceptance census: passed=39 blocked=0 total=39\n"), "{text}");
     assert!(text.contains("oracle admission: revisions=3 open-findings=0\n"), "{text}");
     assert!(
-        text.contains("migration inventory: decided-refusals=1 rollback-constraints=1\nrefusal persisted-doctype decision=https://github.com/rustfs/gateway/issues/469 "),
+        text.contains("migration inventory: decided-refusals=1\nrefusal persisted-doctype decision=https://github.com/rustfs/gateway/issues/469 "),
         "{text}"
     );
     assert!(
         text.contains(
-            "request divergences: rulings=14 keep-gateway=7 align-s3s=4 align-aws=1 rustfs-profile=2 open-follow-ups=3 landed=6\n\
+            "request divergences: rulings=18 keep-gateway=9 align-s3s=4 align-aws=2 rustfs-profile=3 open-follow-ups=4 landed=7\n\
              divergence rd-put-0001 operation=PutObject ruling=rustfs-profile follow-up=c-object-0058 "
         ),
         "{text}"

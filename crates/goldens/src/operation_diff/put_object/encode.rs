@@ -178,12 +178,7 @@ fn outputs() -> impl Strategy<Value = oracle::PutObjectOutput> {
                         ChecksumAlgorithm::Crc64Nvme => &mut output.checksum_crc64nvme,
                         ChecksumAlgorithm::Sha1 => &mut output.checksum_sha1,
                         ChecksumAlgorithm::Sha256 => &mut output.checksum_sha256,
-                        ChecksumAlgorithm::Sha512 => &mut output.checksum_sha512,
-                        ChecksumAlgorithm::Md5 => &mut output.checksum_md5,
-                        ChecksumAlgorithm::XxHash64 => &mut output.checksum_xxhash64,
-                        ChecksumAlgorithm::XxHash3 => &mut output.checksum_xxhash3,
-                        ChecksumAlgorithm::XxHash128 => &mut output.checksum_xxhash128,
-                        // `ALL` is the generator's domain; an eleventh algorithm must get its own slot.
+                        // `ALL` is the generator's domain; a sixth algorithm must get its own slot.
                         other => panic!("no oracle output slot for {other:?}"),
                     };
                     *slot = Some(value);
