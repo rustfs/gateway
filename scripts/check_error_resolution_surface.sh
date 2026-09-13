@@ -537,6 +537,7 @@ validate_harness(
         'cases.compile_fail("tests/compile_fail/azc_*.rs");',
         'cases.compile_fail("tests/compile_fail/c_ck_0020_*.rs");',
         'cases.compile_fail("tests/compile_fail/error_resolution_*.rs");',
+        'cases.compile_fail("tests/compile_fail/host_resolver_*.rs");',
         'cases.compile_fail("tests/trybuild/credential/*.rs");',
     ],
     exact_body=True,

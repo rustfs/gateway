@@ -587,6 +587,7 @@ gateway_calls = ['cases.compile_fail("tests/compile_fail/azc_*.rs");']
 gateway_calls.append('cases.compile_fail("tests/compile_fail/c_ck_0020_*.rs");')
 if error_sources:
     gateway_calls.append('cases.compile_fail("tests/compile_fail/error_resolution_*.rs");')
+gateway_calls.append('cases.compile_fail("tests/compile_fail/host_resolver_*.rs");')
 gateway_calls.append('cases.compile_fail("tests/trybuild/credential/*.rs");')
 expected_gateway_code = "".join(
     (
@@ -658,6 +659,7 @@ gateway_modules = (
     "governor_runtime",
     "governor_streaming",
     "handler_panic",
+    "host_resolve_replay",
     "ingest_assembly",
     "lifecycle_reachability",
     "middleware",
@@ -788,6 +790,14 @@ for source_path in gateway_root.rglob("*.rs"):
             if literal is None:
                 fail(f"{source_path.relative_to(root)} has a path attribute the guard cannot resolve")
             target = (source_path.parent / literal.group(1)).resolve()
+            # One reviewed exception, as a pair and not a directory: the stable replay runs the
+            # same property file as the `host_resolve` fuzz target, so a finding and its replay
+            # can never assert different things. Any other file, or any other target, escapes.
+            if (
+                source_path == gateway_root / "tests/host_resolve_replay.rs"
+                and target == (root / "fuzz/support/host_resolve.rs").resolve()
+            ):
+                continue
             if not inside(target, gateway_root.resolve()):
                 fail(f"{source_path.relative_to(root)} has a path attribute escaping the gateway crate")
             if target == gateway_harness_path.resolve() and source_path != gateway_integration_path:
@@ -818,6 +828,9 @@ fixture_sets = {
         "azc_0020_service_config_default",
         "azc_0021_allow_all",
         "azc_0025_request_extensions",
+    }),
+    root / "crates/gateway/tests/compile_fail": ("host_resolver_*", {
+        "host_resolver_async",
     }),
     root / "crates/gateway/tests/trybuild/credential": ("*", {
         "constructs_anonymous",

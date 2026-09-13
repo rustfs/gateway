@@ -98,3 +98,10 @@ path = "fuzz_targets/wire_accept.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "host_resolve"
+path = "fuzz_targets/host_resolve.rs"
+test = false
+doc = false
+bench = false

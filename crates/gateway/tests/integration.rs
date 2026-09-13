@@ -66,6 +66,8 @@ mod governor_runtime;
 mod governor_streaming;
 #[path = "handler_panic.rs"]
 mod handler_panic;
+#[path = "host_resolve_replay.rs"]
+mod host_resolve_replay;
 #[path = "ingest_assembly.rs"]
 mod ingest_assembly;
 #[path = "lifecycle_reachability.rs"]

@@ -104,8 +104,19 @@ fn presigned_request(
     payload: PayloadMode,
     access_key: &str,
 ) -> http::Request<Bytes> {
+    presigned_request_on_host(method, path, body, payload, access_key, "s3.example.com")
+}
+
+fn presigned_request_on_host(
+    method: http::Method,
+    path: &str,
+    body: Bytes,
+    payload: PayloadMode,
+    access_key: &str,
+    host_text: &str,
+) -> http::Request<Bytes> {
     let mut headers = http::HeaderMap::new();
-    headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
+    headers.insert(http::header::HOST, http::HeaderValue::from_str(host_text).expect("a host header"));
     if !matches!(payload, PayloadMode::Empty | PayloadMode::Unsigned) {
         headers.insert(
             http::HeaderName::from_static("x-amz-content-sha256"),
@@ -113,7 +124,7 @@ fn presigned_request(
         );
     }
 
-    let host = rustfs_gateway_http::RawHost::from_host_header(b"s3.example.com").expect("an acceptable host");
+    let host = rustfs_gateway_http::RawHost::from_host_header(host_text.as_bytes()).expect("an acceptable host");
     let credentials = SigningCredentials::new(access_key, b"secret").expect("valid credentials");
     let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("a SigV4 stamp");
     let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
@@ -222,6 +233,54 @@ async fn a_presigned_put_with_a_changed_host_is_refused_before_the_handler() {
     assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
     assert_eq!(calls.put_entries.load(Ordering::SeqCst), 0, "a changed signed host reached PutObject");
     assert_eq!(calls.put_commits.load(Ordering::SeqCst), 0);
+}
+
+/// Positive — s3s#438: a non-default port survives the real presigned admission path.
+#[tokio::test]
+async fn a_presigned_non_default_port_reaches_put_object() {
+    let (service, calls) = service_at(support::SIGNED_AT_UNIX_SECONDS);
+    let request = presigned_request_on_host(
+        http::Method::PUT,
+        "/bucket/key",
+        Bytes::from_static(b"payload"),
+        PayloadMode::Unsigned,
+        "AKIDEXAMPLE",
+        "s3.example.com:9000",
+    );
+    let response = support::exchange_wire(&service, request).await;
+    assert_eq!(response.status(), http::StatusCode::OK);
+    assert_eq!(calls.put_entries.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.put_commits.load(Ordering::SeqCst), 1);
+}
+
+/// Negative — one presigned URL cannot become valid for another port or host spelling: the
+/// canonical request signs the raw bytes, never the normalised host the resolver matches on.
+#[tokio::test]
+async fn a_presigned_url_holds_only_for_its_signed_host_spelling() {
+    for changed_host in [
+        "s3.example.com",
+        "s3.example.com:9001",
+        "S3.EXAMPLE.COM:9000",
+        "s3.example.com.:9000",
+    ] {
+        let (service, calls) = service_at(support::SIGNED_AT_UNIX_SECONDS);
+        let mut request = presigned_request_on_host(
+            http::Method::PUT,
+            "/bucket/key",
+            Bytes::from_static(b"payload"),
+            PayloadMode::Unsigned,
+            "AKIDEXAMPLE",
+            "s3.example.com:9000",
+        );
+        request
+            .headers_mut()
+            .insert(http::header::HOST, http::HeaderValue::from_str(changed_host).expect("a host header"));
+        let response = support::exchange_wire(&service, request).await;
+        assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+        assert!(String::from_utf8_lossy(response.body()).contains("<Code>InvalidAccessKeyId</Code>"));
+        assert_eq!(calls.put_entries.load(Ordering::SeqCst), 0);
+        assert_eq!(calls.put_commits.load(Ordering::SeqCst), 0);
+    }
 }
 
 /// Negative — an exact body declaration still binds the bytes read after authentication.
