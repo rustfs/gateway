@@ -382,13 +382,8 @@ impl RuntimeObservations {
 ///
 /// Returns the first registry, runtime observation, or external binding failure.
 pub fn build_acceptance_census() -> Result<AcceptanceCensusReport, AcceptanceCensusError> {
-    Ok(census_with_observations()?.0)
-}
-
-fn census_with_observations() -> Result<(AcceptanceCensusReport, RuntimeObservations), AcceptanceCensusError> {
     let observations = RuntimeObservations::collect()?;
-    let report = validate_registry(&production_registry(), &observations)?;
-    Ok((report, observations))
+    validate_registry(&production_registry(), &observations)
 }
 
 /// Requires every registered case to have passed direct evidence.
@@ -400,10 +395,17 @@ fn census_with_observations() -> Result<(AcceptanceCensusReport, RuntimeObservat
 /// specification blocker remains, or the same fail-closed validation errors as
 /// [`build_acceptance_census`].
 pub fn require_acceptance_closure() -> Result<AcceptanceCensusReport, AcceptanceCensusError> {
-    let (report, observations) = census_with_observations()?;
-    if let Some(source) = observations.absent_source() {
+    closure_verdict(build_acceptance_census()?)
+}
+
+/// The strict verdict over an already validated census, separate from observation so that both
+/// directions can be proved: production evidence cannot close while rustfs/backlog#2096 and
+/// #2104 are open, so only a synthetic census can show that a fully resolved one is accepted.
+/// An absent source is checked first and wins even over rows that all read passed.
+fn closure_verdict(report: AcceptanceCensusReport) -> Result<AcceptanceCensusReport, AcceptanceCensusError> {
+    if let Some(source) = report.absent_source {
         return Err(AcceptanceCensusError::ApprovedSourceAbsent {
-            source: source.slug(),
+            source,
             cases: SOURCE_DEPENDENT_CASES.to_vec(),
         });
     }

@@ -281,6 +281,21 @@ fn n_reassigning_historical_witness_to_another_writer_fails_closed() {
     ));
 }
 
+/// With no (d′) row at all, the coverage report shows the source absent instead of failing: the
+/// six-writer check applies only once the source is present, and closure refuses absence.
+#[test]
+fn withdrawn_historical_matrix_is_reported_absent_not_invalid() {
+    let mut absent = registry();
+    absent.retain(|row| row.source != PersistenceSource::HistoricalWriterMatrix);
+    let report = source_report(&absent, corpus()).expect("an absent source is a reported state");
+    assert!(report.render().contains("3/4 approved sources present"));
+    assert!(report.render().contains("d-prime-historical-writer-matrix: absent"));
+    assert_eq!(
+        validate_sources(&absent, corpus()),
+        Err(PersistenceSourceError::SourceAbsent(PersistenceSource::HistoricalWriterMatrix))
+    );
+}
+
 #[test]
 fn n_omitting_one_historical_witness_fails_closed() {
     let mut mutant = registry();

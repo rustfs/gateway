@@ -75,6 +75,61 @@ fn n_non_absence_provenance_failure_is_not_a_blocker() {
     assert_eq!(required_blocker("g-d4-001", observations()), None);
 }
 
+/// A census over the exact 39 IDs with the named rows blocked. Only the strict verdict reads it;
+/// production evidence cannot produce a fully resolved census while its blockers are open.
+fn synthetic_census(blocked: &[&'static str], absent_source: Option<&'static str>) -> AcceptanceCensusReport {
+    AcceptanceCensusReport {
+        cases: EXPECTED_CASE_IDS
+            .into_iter()
+            .map(|id| AcceptanceCaseReport {
+                id,
+                status: if blocked.contains(&id) {
+                    AcceptanceCaseStatus::Blocked { issue: ISSUE_2104 }
+                } else {
+                    AcceptanceCaseStatus::Passed
+                },
+                source_ref: "synthetic",
+            })
+            .collect(),
+        absent_source,
+    }
+}
+
+#[test]
+fn fully_resolved_synthetic_census_closes() {
+    let resolved = synthetic_census(&[], None);
+    assert_eq!((resolved.passed_count(), resolved.blocked_count()), (39, 0));
+    assert_eq!(closure_verdict(resolved.clone()), Ok(resolved));
+}
+
+#[test]
+fn n_one_blocked_case_holds_closure() {
+    assert_eq!(
+        closure_verdict(synthetic_census(&["g-d1-003"], None)),
+        Err(AcceptanceCensusError::ClosureBlocked(vec!["g-d1-003"]))
+    );
+}
+
+/// A missing source is never turned into a pass, even when every row reads passed.
+#[test]
+fn n_absent_source_holds_closure_even_when_every_case_passed() {
+    assert_eq!(
+        closure_verdict(synthetic_census(&[], Some("d-prime-historical-writer-matrix"))),
+        Err(AcceptanceCensusError::ApprovedSourceAbsent {
+            source: "d-prime-historical-writer-matrix",
+            cases: vec!["g-d4-001", "g-d5-001"],
+        })
+    );
+}
+
+#[test]
+fn n_absent_source_is_named_ahead_of_blocked_cases() {
+    assert!(matches!(
+        closure_verdict(synthetic_census(&["g-d1-003"], Some("d-prime-historical-writer-matrix"))),
+        Err(AcceptanceCensusError::ApprovedSourceAbsent { .. })
+    ));
+}
+
 /// The `g-d2-001` and `g-d3-001` rows claim every persisted family, so their probe has to go
 /// red the moment one family stops executing D1-D5. Without this the two rows would read like
 /// the blocked rows they replaced: a status with nothing behind it.

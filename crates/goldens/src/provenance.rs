@@ -165,7 +165,7 @@ pub struct SourceReport {
     pub witnessed_samples: usize,
 }
 
-/// A validated census of every approved persisted-metadata source.
+/// Validated persisted-metadata source registrations, with absent sources rendered explicitly.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistenceSourceReport {
     rows: Vec<SourceReport>,
@@ -191,6 +191,11 @@ impl PersistenceSourceReport {
                 .writer
                 .map_or_else(|| "writer=n/a".to_owned(), |(name, version)| format!("writer={name}@{version}"));
             output.push_str(&format!("{}: {writer} witnessed={}\n", row.source.slug(), row.witnessed_samples));
+        }
+        for source in PersistenceSource::ALL {
+            if !self.rows.iter().any(|row| row.source == source) {
+                output.push_str(&format!("{}: absent\n", source.slug()));
+            }
         }
         output
     }
@@ -283,6 +288,18 @@ impl PersistenceSourceError {
 
 impl std::error::Error for PersistenceSourceError {}
 
+/// Reports validated present sources and explicitly renders absent approved sources.
+///
+/// This is a coverage report, not a closure decision. Use [`require_persistence_sources`]
+/// when every approved source must be present.
+///
+/// # Errors
+///
+/// Returns any invalid registration or witness failure; absent sources remain visible in the report.
+pub fn build_persistence_source_report(corpus: &CorpusReport) -> Result<PersistenceSourceReport, PersistenceSourceError> {
+    source_report(SOURCE_REGISTRY, corpus)
+}
+
 /// Validates every approved persisted-metadata source against the built corpus.
 ///
 /// # Errors
@@ -299,6 +316,19 @@ fn validate_sources(
     registry: &[SourceRegistration],
     corpus: &CorpusReport,
 ) -> Result<PersistenceSourceReport, PersistenceSourceError> {
+    let report = source_report(registry, corpus)?;
+    for source in PersistenceSource::ALL {
+        if !report.rows.iter().any(|row| row.source == source) {
+            return Err(PersistenceSourceError::SourceAbsent(source));
+        }
+    }
+    Ok(report)
+}
+
+fn source_report(
+    registry: &[SourceRegistration],
+    corpus: &CorpusReport,
+) -> Result<PersistenceSourceReport, PersistenceSourceError> {
     let mut seen = BTreeSet::new();
     let mut seen_sources = BTreeSet::new();
     let mut rows = Vec::with_capacity(PersistenceSource::ALL.len());
@@ -311,17 +341,15 @@ fn validate_sources(
         }
         rows.push(validate_registration(registration, corpus)?);
     }
-    for source in PersistenceSource::ALL {
-        if !seen.iter().any(|(registered, _, _)| *registered == source) {
-            return Err(PersistenceSourceError::SourceAbsent(source));
-        }
-    }
+    // (d′) is present once any of its writers is registered, and from then on it must be the
+    // whole collected matrix. With no row at all it is absent: a state this report renders and
+    // `validate_sources` refuses, never a partial matrix that reads as present.
     let writers = rows
         .iter()
         .filter(|row| row.source == PersistenceSource::HistoricalWriterMatrix)
         .filter_map(|row| row.writer)
         .collect::<BTreeSet<_>>();
-    if writers != BTreeSet::from(historical_writer::EXPECTED_WRITERS) {
+    if !writers.is_empty() && writers != BTreeSet::from(historical_writer::EXPECTED_WRITERS) {
         return Err(PersistenceSourceError::HistoricalWriterMatrix(
             "the six collected writer versions are not all registered".to_owned(),
         ));
