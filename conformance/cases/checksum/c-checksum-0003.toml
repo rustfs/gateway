@@ -1,0 +1,75 @@
+# c-checksum-0003 — a SHA-512 checksum on a write.
+
+[case]
+id = "c-checksum-0003"
+schema_version = 1
+title = "A SHA-512 write is verified, answered with its checksum, and read back under the same algorithm"
+rationale = """
+SHA-512 carries the widest value S3 sends, eighty-eight base64 bytes, so it is the algorithm that \
+overflows a checksum store sized for SHA-256. The write must be verified and echoed, and a read \
+that asks for the checksum must get the same algorithm back rather than a truncated value or a \
+CRC the store substituted."""
+polarity = "positive"
+operation = "PutObject"
+tags = ["checksum", "object-attributes"]
+timeout_ms = 10000
+quirks = ["q-checksum-0006"]
+
+[[case.evidence]]
+url = "https://aws.amazon.com/about-aws/whats-new/2026/04/s3-five-additional-checksum-algorithms/"
+summary = "S3 added MD5, XXHash3, XXHash64, XXHash128 and SHA-512 checksums and validates a supplied value against the upload before storing it."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+summary = "Lists the ten checksum algorithms an upload may name, and states that a supplied checksum that does not match fails the upload."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-checksum"
+
+[[exchanges]]
+name = "write-with-sha512"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-checksum/added/sha512"
+headers = { "x-amz-checksum-sha512" = "MJ7MSJwS1utMxA9QyQLytNDtd+5RGnx6m808qG1M2G+YndNbxf9JlnDaNCVbRbDP2DDoH2Bdz33FVC6TrpzXbw==" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-checksum-sha512" = "MJ7MSJwS1utMxA9QyQLytNDtd+5RGnx6m808qG1M2G+YndNbxf9JlnDaNCVbRbDP2DDoH2Bdz33FVC6TrpzXbw=="
+"x-amz-checksum-type" = "FULL_OBJECT"
+
+[[exchanges]]
+name = "read-returns-sha512"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-checksum/added/sha512"
+headers = { "x-amz-checksum-mode" = "ENABLED" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_absent = ["x-amz-checksum-crc32", "x-amz-checksum-sha256"]
+
+[exchanges.expect.headers_present]
+"x-amz-checksum-sha512" = "MJ7MSJwS1utMxA9QyQLytNDtd+5RGnx6m808qG1M2G+YndNbxf9JlnDaNCVbRbDP2DDoH2Bdz33FVC6TrpzXbw=="
+
+[exchanges.expect.body]
+exact_utf8 = "hello world"

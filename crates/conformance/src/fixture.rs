@@ -1952,6 +1952,11 @@ struct ReportedChecksum {
     crc64nvme: Option<String>,
     sha1: Option<String>,
     sha256: Option<String>,
+    sha512: Option<String>,
+    md5: Option<String>,
+    xxhash64: Option<String>,
+    xxhash3: Option<String>,
+    xxhash128: Option<String>,
     kind: Option<dto::ChecksumType>,
 }
 
@@ -1994,6 +1999,31 @@ fn read_checksum(mode: Option<&dto::ChecksumMode>, partial: bool, stored: Option
         },
         ChecksumAlgorithm::Sha256 => ReportedChecksum {
             sha256: value,
+            kind,
+            ..ReportedChecksum::default()
+        },
+        ChecksumAlgorithm::Sha512 => ReportedChecksum {
+            sha512: value,
+            kind,
+            ..ReportedChecksum::default()
+        },
+        ChecksumAlgorithm::Md5 => ReportedChecksum {
+            md5: value,
+            kind,
+            ..ReportedChecksum::default()
+        },
+        ChecksumAlgorithm::XxHash64 => ReportedChecksum {
+            xxhash64: value,
+            kind,
+            ..ReportedChecksum::default()
+        },
+        ChecksumAlgorithm::XxHash3 => ReportedChecksum {
+            xxhash3: value,
+            kind,
+            ..ReportedChecksum::default()
+        },
+        ChecksumAlgorithm::XxHash128 => ReportedChecksum {
+            xxhash128: value,
             kind,
             ..ReportedChecksum::default()
         },
@@ -2685,6 +2715,11 @@ impl Stub {
                 checksum_crc64nvme: checksum.crc64nvme,
                 checksum_sha1: checksum.sha1,
                 checksum_sha256: checksum.sha256,
+                checksum_sha512: checksum.sha512,
+                checksum_md5: checksum.md5,
+                checksum_xxhash64: checksum.xxhash64,
+                checksum_xxhash3: checksum.xxhash3,
+                checksum_xxhash128: checksum.xxhash128,
                 checksum_type: checksum.kind,
                 cache_control: object.cache_control.clone(),
                 content_disposition: object.content_disposition.clone(),
@@ -2796,6 +2831,11 @@ impl Stub {
                 checksum_crc64nvme: checksum.crc64nvme,
                 checksum_sha1: checksum.sha1,
                 checksum_sha256: checksum.sha256,
+                checksum_sha512: checksum.sha512,
+                checksum_md5: checksum.md5,
+                checksum_xxhash64: checksum.xxhash64,
+                checksum_xxhash3: checksum.xxhash3,
+                checksum_xxhash128: checksum.xxhash128,
                 checksum_type: checksum.kind,
                 cache_control: object.cache_control.clone(),
                 content_disposition: object.content_disposition.clone(),

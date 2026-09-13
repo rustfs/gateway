@@ -15,7 +15,8 @@
 //! Decided migration refusals: persisted bytes every admitted s3s revision reads, which the
 //! production decoders refuse on purpose.
 //!
-//! Responsible for: re-proving each decided refusal on every run. Every admitted revision must
+//! Responsible for: re-proving each decided refusal on every run, and carrying the validated
+//! rollback-constraint register (`rollback_constraints`, rustfs/backlog#1768) into the same report. Every admitted revision must
 //! still read each witness, or the entry is stale. The production decoder must refuse each witness
 //! with the entry's named error, or the decision was broken. No writer-produced corpus sample may
 //! carry the refused syntax, or the claim that no writer emits it is false.
@@ -47,6 +48,7 @@ use core::fmt;
 
 use rustfs_gateway_types::compat::{OracleRevision, with_oracle};
 
+use self::rollback_constraints::{RollbackConstraintError, RollbackConstraintReport, build_rollback_constraints};
 use crate::oracle_admission::{OldReading, new_refusal, old_reading};
 use crate::{ConfigKind, SampleOrigin, all_family_corpus_evidence};
 
@@ -155,6 +157,7 @@ pub struct MigrationInventoryReport {
     refused: usize,
     tolerated: usize,
     boundary_fixtures: usize,
+    rollback: RollbackConstraintReport,
 }
 
 impl MigrationInventoryReport {
@@ -170,20 +173,29 @@ impl MigrationInventoryReport {
         self.tolerated
     }
 
-    /// Renders the inventory, one line per decided refusal.
+    /// The validated rollback-constraint register.
+    #[must_use]
+    pub const fn rollback(&self) -> &RollbackConstraintReport {
+        &self.rollback
+    }
+
+    /// Renders the inventory: one line per decided refusal, then the rollback constraints.
     #[must_use]
     pub fn render(&self) -> String {
         let revisions = OracleRevision::ALL.map(|oracle| oracle.to_string()).join(", ");
-        format!(
-            "migration inventory: decided-refusals=1\n\
+        let mut out = format!(
+            "migration inventory: decided-refusals=1 rollback-constraints={}\n\
              refusal persisted-doctype decision={DECISION} witnesses={} refused={} tolerated={} \
              old=reads under {revisions} new={NAMED_ERROR} writer-samples-with-doctype=0 boundary-fixtures={} \
              ingress=bucket-metadata-import-archive remediation=re-put-configuration-through-s3-api\n",
+            self.rollback.entries().len(),
             self.refused + self.tolerated,
             self.refused,
             self.tolerated,
             self.boundary_fixtures,
-        )
+        );
+        out.push_str(&self.rollback.render());
+        out
     }
 }
 
@@ -228,6 +240,8 @@ pub enum MigrationInventoryError {
         /// Producer the sample names.
         producer: String,
     },
+    /// The rollback-constraint register is malformed or no longer bound to its pinned tests.
+    RollbackConstraint(RollbackConstraintError),
     /// The number of boundary fixtures carrying a declaration moved.
     BoundaryFixtureCountDrift {
         /// Pinned count.
@@ -241,6 +255,7 @@ impl fmt::Display for MigrationInventoryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Corpus(reason) => write!(formatter, "corpus unavailable: {reason}"),
+            Self::RollbackConstraint(error) => write!(formatter, "rollback constraints: {error}"),
             Self::NoWitnessBase(kind) => write!(formatter, "{} has no accepted document to witness with", kind.report_name()),
             Self::StaleRefusal { oracle, kind, form } => write!(
                 formatter,
@@ -301,10 +316,12 @@ pub fn build_migration_inventory() -> Result<MigrationInventoryReport, Migration
         new_refusal,
     )?;
     let boundary_fixtures = audit_samples(samples)?;
+    let rollback = build_rollback_constraints().map_err(MigrationInventoryError::RollbackConstraint)?;
     Ok(MigrationInventoryReport {
         refused,
         tolerated,
         boundary_fixtures,
+        rollback,
     })
 }
 
@@ -388,6 +405,7 @@ fn audit_samples<'a>(
 }
 
 pub(crate) mod request_divergences;
+pub(crate) mod rollback_constraints;
 pub(crate) mod rustfs_admin_routes;
 
 #[cfg(test)]
