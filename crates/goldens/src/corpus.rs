@@ -252,6 +252,9 @@ pub struct CorpusSampleProvenance {
     pub producer: String,
     /// Producer version, commit, or fixture revision recorded on the sample.
     pub version: String,
+    /// Whether the sample is accepted evidence that runs through D1-D5, rather than a refusal
+    /// both parsers must reject. A digest alone cannot say which side of the boundary it is on.
+    pub accepted: bool,
 }
 
 /// Validated coverage derived only from concrete family-owned cases.
@@ -461,6 +464,7 @@ pub fn build_corpus_report(
                 sha256: case.origin.sha256.clone(),
                 producer: case.origin.producer.clone(),
                 version: case.origin.version.clone(),
+                accepted: case.disposition == CorpusDisposition::Accepted,
             });
             for variant in &case.variants {
                 if !variants.contains(variant) {

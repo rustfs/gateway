@@ -28,7 +28,6 @@ use crate::{
 };
 
 const RUSTFS_REVISION: &str = "bb3784136204a632b5b9b9cbef49d58f03df8bb6";
-const ISSUE_2104: &str = "https://github.com/rustfs/backlog/issues/2104";
 const ISSUE_2096: &str = "https://github.com/rustfs/backlog/issues/2096";
 
 /// The acceptance cases whose Given is the full corpus, and which therefore cannot be claimed
@@ -81,6 +80,9 @@ enum RuntimeProbe {
     AllFamilies,
     Family(ConfigKind),
     Variant(ConfigKind, CorpusVariant),
+    /// Every named digest is an accepted corpus sample of that family, and the family ran D1-D5.
+    /// Narrower than [`Self::Variant`]: a variant label can be satisfied by an unrelated sample.
+    AcceptedSamples(ConfigKind, &'static [&'static str]),
     External {
         repository: &'static str,
         revision: &'static str,
@@ -108,6 +110,9 @@ impl CaseDeclaration {
         }
     }
 
+    /// No production row is blocked once every source is present and rustfs/backlog#2104 is
+    /// resolved; only mutation tests construct one, to prove a stale blocker is refused.
+    #[cfg(test)]
     const fn blocked(id: &'static str, issue: &'static str) -> Self {
         Self {
             id,
@@ -285,6 +290,7 @@ impl std::error::Error for AcceptanceCensusError {}
 #[derive(Clone, Debug)]
 struct RuntimeObservations {
     corpus: String,
+    accepted: Vec<(ConfigKind, String)>,
     families: Vec<ConfigKind>,
     sources: Result<PersistenceSourceReport, PersistenceSourceError>,
 }
@@ -294,6 +300,12 @@ impl RuntimeObservations {
         let corpus_report =
             build_persistence_corpus_report().map_err(|error| AcceptanceCensusError::Observation(error.to_string()))?;
         let corpus = corpus_report.render();
+        let accepted = corpus_report
+            .samples()
+            .iter()
+            .filter(|sample| sample.accepted)
+            .map(|sample| (sample.kind, sample.sha256.clone()))
+            .collect();
         let sources = require_persistence_sources(&corpus_report);
         // An absent source is a state this census reports on. Any other provenance failure is a
         // broken registration, and reporting it as a blocker would hide it behind a row that
@@ -306,6 +318,7 @@ impl RuntimeObservations {
         let four_way = run_four_way_all().map_err(|error| AcceptanceCensusError::Observation(error.to_string()))?;
         Ok(Self {
             corpus,
+            accepted,
             families: four_way.families.into_iter().map(|family| family.kind).collect(),
             sources,
         })
@@ -356,6 +369,23 @@ impl RuntimeObservations {
                     ))
                 }
             }
+            RuntimeProbe::AcceptedSamples(kind, digests) => {
+                if digests.is_empty() {
+                    return Err(format!("{} sample probe names no witness", kind.report_name()));
+                }
+                if !self.families.contains(&kind) {
+                    return Err(format!("{} did not execute through D1-D5", kind.report_name()));
+                }
+                match digests.iter().find(|digest| {
+                    !self
+                        .accepted
+                        .iter()
+                        .any(|(candidate_kind, candidate)| *candidate_kind == kind && candidate == *digest)
+                }) {
+                    Some(missing) => Err(format!("{} witness {missing} is not an accepted D1-D5 sample", kind.report_name())),
+                    None => Ok(()),
+                }
+            }
             RuntimeProbe::External {
                 repository,
                 revision,
@@ -399,9 +429,9 @@ pub fn require_acceptance_closure() -> Result<AcceptanceCensusReport, Acceptance
 }
 
 /// The strict verdict over an already validated census, separate from observation so that both
-/// directions can be proved: production evidence cannot close while rustfs/backlog#2096 and
-/// #2104 are open, so only a synthetic census can show that a fully resolved one is accepted.
-/// An absent source is checked first and wins even over rows that all read passed.
+/// directions can be proved with synthetic censuses: a fully resolved one is accepted, and any
+/// blocked row or absent source holds closure. An absent source is checked first and wins even
+/// over rows that all read passed.
 fn closure_verdict(report: AcceptanceCensusReport) -> Result<AcceptanceCensusReport, AcceptanceCensusError> {
     if let Some(source) = report.absent_source {
         return Err(AcceptanceCensusError::ApprovedSourceAbsent {
@@ -438,7 +468,13 @@ fn production_registry() -> Vec<CaseDeclaration> {
             RuntimeProbe::Variant(Replication, UnknownTopLevel),
             "crates/goldens/src/replication.rs::UNKNOWN_TOP_LEVEL",
         ),
-        CaseDeclaration::blocked("g-d1-003", ISSUE_2104),
+        // Narrowed by rustfs/backlog#2104 to what the pinned oracle provably reads: an unknown
+        // subtree beside `Rule`. Unknown content inside `Rule` stays a shared refusal.
+        CaseDeclaration::passed(
+            "g-d1-003",
+            RuntimeProbe::AcceptedSamples(Lifecycle, crate::lifecycle::UNKNOWN_TOP_LEVEL_SUBTREES),
+            "crates/goldens/src/lifecycle.rs::UNKNOWN_TOP_LEVEL_SUBTREES",
+        ),
         CaseDeclaration::passed(
             "g-d1-004",
             RuntimeProbe::Family(Lifecycle),
@@ -681,11 +717,12 @@ fn validate_registry(
 /// source is genuinely absent. The moment the historical writer matrix lands, this returns
 /// `None` for them and a still-blocked row becomes [`AcceptanceCensusError::InvalidBlocker`] —
 /// which is what stops "source absent" and "source present" from producing the same verdict.
+/// No specification blocker remains: rustfs/backlog#2104 narrowed `g-d1-003` to evidence.
 fn required_blocker(id: &str, observations: &RuntimeObservations) -> Option<&'static str> {
-    match id {
-        "g-d1-003" => Some(ISSUE_2104),
-        id if SOURCE_DEPENDENT_CASES.contains(&id) => observations.absent_source().map(|_| ISSUE_2096),
-        _ => None,
+    if SOURCE_DEPENDENT_CASES.contains(&id) {
+        observations.absent_source().map(|_| ISSUE_2096)
+    } else {
+        None
     }
 }
 
