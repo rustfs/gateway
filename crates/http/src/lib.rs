@@ -27,7 +27,9 @@
 //! 1. **The raw request stops here.** [`WireRequest::accept`] takes an [`http::Request`] *by
 //!    value* and never gives it back: no accessor returns a [`http::HeaderMap`], a [`http::Uri`],
 //!    or the request itself. Layers above see [`HeaderView`], [`QueryView`], [`RawPath`] and
-//!    [`EffectiveHost`], all of which have already been disambiguated.
+//!    [`EffectiveHost`], all of which have already been disambiguated. [`HeaderView::iter_raw`]
+//!    gives read-only access to every accepted field line, not the map. Nothing it yields can be
+//!    rewritten, and no line it yields escaped a rule acceptance applies.
 //! 2. **Ambiguity is rejected, never resolved.** Whenever two sources of the same fact disagree —
 //!    `Content-Length` against `Transfer-Encoding`, `:authority` against `Host`, one single-valued
 //!    header appearing twice — the request is refused. A silent first-wins or last-wins choice is

@@ -511,7 +511,7 @@ dependencies = [
 
 [[package]]
 name = "ext-field-spike"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "quick-xml 0.41.0",
  "rustfs-gateway-core",
@@ -1775,7 +1775,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-compat-sut"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bytes",
  "http",
@@ -1848,7 +1848,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-fs"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bytes",
  "hex",
@@ -1884,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-http"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "dhat",
  "hmac",
@@ -1900,7 +1900,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-macros"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bytes",
  "http",
@@ -3292,7 +3292,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "command-group",
  "http",
@@ -3311,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "xtask-launcher"
-version = "0.1.3"
+version = "0.1.4"
 
 [[package]]
 name = "xxhash-rust"
