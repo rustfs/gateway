@@ -18,11 +18,11 @@
 //! and routing decisions. NOT responsible for: production parsing or event delivery. Upstream:
 //! pinned s3s. Downstream: Notification persistence goldens; deleted by P9-09.
 
-use s3s::dto::{
+use super::s3s::dto::{
     Event, EventBridgeConfiguration, FilterRule, FilterRuleName, LambdaFunctionConfiguration, NotificationConfiguration,
     NotificationConfigurationFilter, QueueConfiguration, S3KeyFilter, TopicConfiguration,
 };
-use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
+use super::s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::persistence::{
     NotificationBehaviorProjection, NotificationRouteProjection, PersistedEventBridgeConfiguration, PersistedFilterRule,
@@ -30,23 +30,14 @@ use crate::persistence::{
     PersistedQueueConfiguration, PersistedS3KeyFilter, PersistedTopicConfiguration,
 };
 
-use super::CompatCodecError;
-
-/// One old-codec Notification observation before normalization.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct S3sNotificationObservation {
-    /// Complete parsed persistence structure.
-    pub structure: PersistedNotificationConfiguration,
-    /// Complete routing decisions projected directly from the old DTO.
-    pub behavior: NotificationBehaviorProjection,
-}
+use crate::compat::{CompatCodecError, S3sNotificationObservation};
 
 /// Parses Notification bytes with the pinned old persistence decoder.
 ///
 /// # Errors
 ///
 /// Returns [`CompatCodecError`] when the old decoder rejects the document or trailing bytes.
-pub fn parse_s3s_notification(input: &[u8]) -> Result<S3sNotificationObservation, CompatCodecError> {
+pub(crate) fn parse_s3s_notification(input: &[u8]) -> Result<S3sNotificationObservation, CompatCodecError> {
     let mut deserializer = Deserializer::new(input);
     let value = NotificationConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
     deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
@@ -188,7 +179,7 @@ fn old_filter(filter: NotificationConfigurationFilter) -> PersistedNotificationC
 /// # Errors
 ///
 /// Returns [`CompatCodecError`] when the old encoder refuses the value.
-pub fn serialize_s3s_notification(value: &PersistedNotificationConfiguration) -> Result<Vec<u8>, CompatCodecError> {
+pub(crate) fn serialize_s3s_notification(value: &PersistedNotificationConfiguration) -> Result<Vec<u8>, CompatCodecError> {
     let old_value = NotificationConfiguration {
         event_bridge_configuration: value
             .event_bridge_configuration

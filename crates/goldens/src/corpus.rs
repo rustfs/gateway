@@ -220,6 +220,14 @@ impl FamilyCorpusEvidence {
         Ok(())
     }
 
+    /// Rejected samples as `(bytes, sha256)`, so they can be re-read under another oracle revision.
+    pub(crate) fn rejected_samples(&self) -> impl Iterator<Item = (&[u8], &str)> {
+        self.cases
+            .iter()
+            .filter(|case| case.disposition == CorpusDisposition::Rejected)
+            .map(|case| (case.bytes.as_slice(), case.origin.sha256.as_str()))
+    }
+
     pub(crate) fn source_a_registrations(&self) -> Vec<(ConfigKind, String, bool)> {
         self.cases
             .iter()

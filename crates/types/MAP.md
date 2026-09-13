@@ -18,14 +18,16 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `../dialect-minio/src/lib.rs` | Clean-room concrete `DelMarkerExpiration` registration consuming the generic lifecycle extension point. | Reviewing the first real runtime extension consumer without putting a vendor type in this crate. |
 | `src/cors_tagging.rs` | Persisted CORS and Tagging codecs plus runtime behavior projections. | Changing stored CORS rules, tag sets, or their migration evidence. |
 | `src/persistence/notification.rs` | Full Notification persistence structure, old-order writer, bounded parser, and routing decisions. | Changing Notification metadata compatibility or event-routing semantics. |
-| `src/compat.rs` | Milestone-bounded adapters to the pinned-s3s persistence oracle for the implemented families, plus the re-export of that pinned crate. | Auditing old-read or rollback behavior for D1-D5. |
-| `src/compat/put_object.rs` | Pure PutObject conversion: gateway input to s3s input, s3s output to gateway output, live body moved unread; not wired into any request path. | Auditing the single-operation migration seam or a member the goldens decode/encode diff names. |
-| `src/compat/accelerate_payment.rs` | Independent pinned-s3s observations for Accelerate and Request Payment. | Auditing the old side of either family’s D1-D5 evidence. |
-| `src/compat/lifecycle.rs` | Pinned-s3s Lifecycle translation and decision observation. | Auditing Lifecycle D1-D5 against the old codec. |
-| `src/compat/notification.rs` | Independent pinned-s3s Notification structure and routing observations. | Auditing Notification D1-D5 against the old codec. |
+| `src/compat.rs` | Milestone-bounded oracle facade: `OracleRevision`, per-thread revision selection, shared observations, and dispatch to one adapter compilation per pinned s3s revision. | Auditing which s3s revisions admission measures or how a revision is selected. |
+| `src/compat/put_object.rs` | Pure PutObject conversion against the baseline revision: gateway input to s3s input, s3s output to gateway output, live body moved unread; not wired into any request path. | Auditing the single-operation migration seam or a member the goldens decode/encode diff names. |
+| `src/compat/tests.rs` | Proves the manifest pins exactly the named revisions and that selection reaches a different compilation in both directions. | Changing a pinned oracle revision or the selector. |
+| `src/compat/oracle/bucket_configs.rs` | Old-codec adapters for Versioning, Object Lock, Bucket Encryption, CORS, Public Access Block, Tagging, Logging and Website, compiled once per revision. | Auditing the old side of those families' D1-D5 evidence. |
+| `src/compat/oracle/accelerate_payment.rs` | Independent old-codec observations for Accelerate and Request Payment, compiled once per revision. | Auditing the old side of either family’s D1-D5 evidence. |
+| `src/compat/oracle/lifecycle.rs` | Old-codec Lifecycle translation and decision observation, compiled once per revision. | Auditing Lifecycle D1-D5 against the old codec. |
+| `src/compat/oracle/notification.rs` | Independent old-codec Notification structure and routing observations, compiled once per revision. | Auditing Notification D1-D5 against the old codec. |
 | `src/persistence/logging_website.rs` | Bucket Logging and Website persisted structures, codecs, and runtime decision seams. | Auditing either family without loading unrelated persistence implementations. |
 | `src/persistence/replication.rs` | Full Replication persistence structure, permissive top-level parser, strict nested parser, and old-order writer. | Changing Replication metadata compatibility or rule semantics. |
-| `src/compat/replication.rs` | Pinned-s3s Replication translation, exact writer, and runtime rule observation. | Auditing Replication D1-D5 against the old codec. |
+| `src/compat/oracle/replication.rs` | Old-codec Replication translation, exact writer, and runtime rule observation, compiled once per revision. | Auditing Replication D1-D5 against the old codec. |
 | `src/scalar/bucket.rs` | Validated bucket names. | Bucket syntax or display changes. |
 | `src/scalar/key.rs` | Lossless object-key bytes. | Key normalization/encoding changes. |
 | `src/scalar/etag.rs` | Context-typed entity tags. | ETag quoting or comparison changes. |

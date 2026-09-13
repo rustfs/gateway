@@ -17,8 +17,8 @@
 //! Responsible for: validating all named persistence families, rendering their concrete counts,
 //! rendering source and acceptance blockers, and offering an explicit strict closure mode.
 //! NOT responsible for: defining corpus cases, persistence codecs, CI orchestration, report
-//! validation rules, or deciding closure (`require_acceptance_closure` decides; this maps it to
-//! a process status).
+//! validation rules, or deciding closure (`require_acceptance_closure` and
+//! `require_oracle_admission` decide; this maps their conjunction to a process status).
 //! Upstream: `rustfs-gateway-goldens` corpus APIs. Downstream: developers and release automation
 //! invoking the `corpus-report` binary.
 
@@ -27,9 +27,11 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+use std::fmt;
+
 use rustfs_gateway_goldens::{
-    AcceptanceCensusError, CorpusCoverageError, CorpusReport, build_acceptance_census, build_persistence_corpus_report,
-    build_persistence_source_report, require_acceptance_closure,
+    CorpusCoverageError, CorpusReport, build_acceptance_census, build_oracle_admission, build_persistence_corpus_report,
+    build_persistence_source_report, require_acceptance_closure, require_oracle_admission,
 };
 
 /// Ordinary coverage report: zero while the evidence is valid, even with blockers still open.
@@ -43,14 +45,28 @@ fn run(
         .and_then(|report| {
             let sources = build_persistence_source_report(&report).map_err(|error| format!("source census failed: {error}"))?;
             let acceptance = build_acceptance_census().map_err(|error| format!("acceptance census failed: {error}"))?;
-            Ok(format!("{}{}{}", report.render(), sources.render(), acceptance.render()))
+            let admission = build_oracle_admission().map_err(|error| format!("oracle admission failed: {error}"))?;
+            Ok(format!(
+                "{}{}{}{}",
+                report.render(),
+                sources.render(),
+                acceptance.render(),
+                admission.render()
+            ))
         });
     emit(result, "corpus report", stdout, stderr)
 }
 
+/// The strict verdict: the closed P9-01 census and admission under every pinned s3s revision.
+fn strict_closure() -> Result<String, String> {
+    let census = require_acceptance_closure().map_err(|error| error.to_string())?;
+    let admission = require_oracle_admission().map_err(|error| error.to_string())?;
+    Ok(format!("{}{}", census.render(), admission.render()))
+}
+
 /// Strict migration closure: zero only when `check` returns a closed census.
-fn run_closure(
-    check: impl FnOnce() -> Result<String, AcceptanceCensusError>,
+fn run_closure<E: fmt::Display>(
+    check: impl FnOnce() -> Result<String, E>,
     stdout: &mut impl Write,
     stderr: &mut impl Write,
 ) -> ExitCode {
@@ -81,9 +97,7 @@ fn main() -> ExitCode {
     let mut stderr = io::stderr().lock();
     match args.as_slice() {
         [] => run(build_persistence_corpus_report, &mut stdout, &mut stderr),
-        [arg] if arg == "--require-closure" => {
-            run_closure(|| require_acceptance_closure().map(|report| report.render()), &mut stdout, &mut stderr)
-        }
+        [arg] if arg == "--require-closure" => run_closure(strict_closure, &mut stdout, &mut stderr),
         _ => {
             drop(writeln!(stderr, "usage: corpus-report [--require-closure]"));
             ExitCode::FAILURE
@@ -186,7 +200,7 @@ mod tests {
         let census = "P9-01 acceptance census: passed=39 blocked=0 total=39\n";
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        let status = run_closure(|| Ok(census.to_owned()), &mut stdout, &mut stderr);
+        let status = run_closure(|| Ok::<_, AcceptanceCensusError>(census.to_owned()), &mut stdout, &mut stderr);
         assert_eq!(status, ExitCode::SUCCESS);
         assert_eq!(stdout, census.as_bytes());
         assert!(stderr.is_empty());
@@ -209,7 +223,7 @@ mod tests {
     fn n_closed_census_that_cannot_be_written_exits_nonzero() {
         let mut stdout = RefusingWriter;
         let mut stderr = Vec::new();
-        let status = run_closure(|| Ok("closed\n".to_owned()), &mut stdout, &mut stderr);
+        let status = run_closure(|| Ok::<_, AcceptanceCensusError>("closed\n".to_owned()), &mut stdout, &mut stderr);
         assert_eq!(status, ExitCode::FAILURE);
         assert_eq!(
             String::from_utf8(stderr).expect("the diagnostic is UTF-8"),

@@ -22,12 +22,20 @@ For final migration acceptance, run the strict gate:
 cargo run -p rustfs-gateway-goldens --bin corpus-report -- --require-closure
 ```
 
-This calls `require_acceptance_closure()` and returns nonzero until every approved source is
-present and every acceptance case passes. The current census is 39 passed, 0 blocked, 39 total:
-all four sources are present, including the historical writer matrix with six writer versions
-(rustfs/backlog#2096), and `g-d1-003` was narrowed by rustfs/backlog#2104, so strict mode exits
-zero and prints the census. This strict gate is required for migration closure, not for ordinary
-PR sample regression. Do not infer acceptance from a clean D1-D5 run.
+This calls `require_acceptance_closure()` and `require_oracle_admission()` and returns nonzero
+until both hold. The P9-01 census is 39 passed, 0 blocked, 39 total: all four sources are present,
+including the historical writer matrix with six writer versions (rustfs/backlog#2096), and
+`g-d1-003` was narrowed by rustfs/backlog#2104. This strict gate is required for migration
+closure, not for ordinary PR sample regression. Do not infer acceptance from a clean D1-D5 run.
+
+Oracle admission repeats the whole D1-D5 run, and re-reads every rejected sample, under each s3s
+revision a real RustFS build links (`rustfs_gateway_types::compat::OracleRevision`): the baseline
+`9c4690d8` (1.0.0-rc.5-preview.2), the rollback target `bdcb6259` (1.0.0-rc.6) and the candidate
+`f3e17541` (`main`). Every refusal boundary that moves under a revision must match a finding in
+`src/oracle_admission.rs` exactly, and every registered finding must still reproduce. Today all
+accepted samples pass under all three, and one boundary moves: rollback and candidate read
+`Rule/BlockedEncryptionTypes`, which the production decoder refuses (rustfs/gateway#740). Strict
+mode therefore exits nonzero, naming that finding under both revisions, until #740 is resolved.
 
 Strict mode names one reason at a time: while a source is absent it reports
 `ApprovedSourceAbsent`, even if every other row passed; once all sources are present it

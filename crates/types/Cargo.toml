@@ -40,7 +40,16 @@ http = { workspace = true }
 percent-encoding = { workspace = true }
 sha2 = { workspace = true }
 unicode-normalization = { workspace = true }
-s3s = { git = "https://github.com/rustfs/s3s.git", rev = "9c4690d8e73fc8d184031a19b2c4539ebc77d180", version = "0.15.0", features = ["minio"], optional = true }
+# The three s3s revisions persistence migration is admitted against, each read from the
+# `Cargo.lock` of the RustFS build named beside it and each listed in `compat::OracleRevision`.
+# Every alias is renamed so no crate is called `s3s`: a forgotten `super::` in an adapter then
+# fails to compile instead of silently measuring the baseline twice.
+# Baseline: RustFS 1.0.0-rc.5-preview.2; the original P9-01 oracle every golden was measured against.
+s3s_baseline = { package = "s3s", git = "https://github.com/rustfs/s3s.git", rev = "9c4690d8e73fc8d184031a19b2c4539ebc77d180", version = "0.15.0", features = ["minio"], optional = true }
+# Rollback: RustFS 1.0.0-rc.6, the latest release and the build an operator rolls back to.
+s3s_rollback = { package = "s3s", git = "https://github.com/rustfs/s3s.git", rev = "bdcb6259339c41369f9f1c60e3a42b5ab8da607b", version = "0.15.0", features = ["minio"], optional = true }
+# Candidate: RustFS main, the production build the migration is a candidate for.
+s3s_candidate = { package = "s3s", git = "https://github.com/s3s-project/s3s.git", rev = "f3e17541f366696bf0cbaf380fcbd8b44c17eba4", version = "0.15.0", features = ["minio"], optional = true }
 # Only for `compat::put_object`: the s3s streaming body is a `futures_core::Stream`, so moving the
 # live gateway body into it without buffering needs the trait. Never enabled without `compat-s3s`.
 futures-core = { workspace = true, optional = true }
@@ -68,4 +77,4 @@ serde_json = { workspace = true }
 # it to float would make a golden compare two moving targets.
 # DELETE BY: P9-09 removes this dependency and compatibility module after the last migration.
 # see ADR-0004: version carries +aws.<model-date> once the model is pinned
-compat-s3s = ["dep:s3s", "dep:futures-core"]
+compat-s3s = ["dep:s3s_baseline", "dep:s3s_rollback", "dep:s3s_candidate", "dep:futures-core"]

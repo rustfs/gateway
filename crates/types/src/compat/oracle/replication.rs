@@ -18,16 +18,16 @@
 //! NOT responsible for: production parsing, policy validation, or golden verdicts.
 //! Upstream: pinned s3s revision and persistence value shapes. Downstream: migration goldens.
 
-use s3s::dto::{
+use super::s3s::dto::{
     AccessControlTranslation, DeleteMarkerReplication, DeleteMarkerReplicationStatus, DeleteReplication, DeleteReplicationStatus,
     Destination, EncryptionConfiguration, ExistingObjectReplication, ExistingObjectReplicationStatus, Metrics, MetricsStatus,
     OwnerOverride, ReplicaModifications, ReplicaModificationsStatus, ReplicationConfiguration, ReplicationRule,
     ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationRuleStatus, ReplicationTime, ReplicationTimeStatus,
     ReplicationTimeValue, SourceSelectionCriteria, SseKmsEncryptedObjects, SseKmsEncryptedObjectsStatus, StorageClass, Tag,
 };
-use s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
+use super::s3s::xml::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::CompatCodecError;
+use crate::compat::{CompatCodecError, S3sReplicationObservation};
 use crate::persistence::{
     PersistedAccessControlTranslation, PersistedEncryptionConfiguration, PersistedOptionalReplicationStatus,
     PersistedReplicationAnd, PersistedReplicationConfiguration, PersistedReplicationDestination, PersistedReplicationFilter,
@@ -36,21 +36,12 @@ use crate::persistence::{
     ReplicationRuleBehaviorProjection,
 };
 
-/// Independent old-codec Replication observation.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct S3sReplicationObservation {
-    /// Complete parsed persistence structure.
-    pub structure: PersistedReplicationConfiguration,
-    /// Runtime-relevant rule projection made from the old DTO.
-    pub behavior: ReplicationBehaviorProjection,
-}
-
 /// Parses Replication bytes with the pinned old persistence decoder.
 ///
 /// # Errors
 ///
 /// Returns [`CompatCodecError`] when s3s rejects the document or trailing input.
-pub fn parse_s3s_replication(input: &[u8]) -> Result<S3sReplicationObservation, CompatCodecError> {
+pub(crate) fn parse_s3s_replication(input: &[u8]) -> Result<S3sReplicationObservation, CompatCodecError> {
     let mut deserializer = Deserializer::new(input);
     let value = ReplicationConfiguration::deserialize(&mut deserializer).map_err(CompatCodecError::old_codec)?;
     deserializer.expect_eof().map_err(CompatCodecError::old_codec)?;
@@ -99,7 +90,7 @@ fn old_behavior(value: &ReplicationConfiguration) -> ReplicationBehaviorProjecti
 /// # Errors
 ///
 /// Returns [`CompatCodecError`] when s3s cannot render the value.
-pub fn serialize_s3s_replication(value: &PersistedReplicationConfiguration) -> Result<Vec<u8>, CompatCodecError> {
+pub(crate) fn serialize_s3s_replication(value: &PersistedReplicationConfiguration) -> Result<Vec<u8>, CompatCodecError> {
     let old_value = to_old_configuration(value);
     let mut output = Vec::with_capacity(1024);
     let mut serializer = Serializer::new(&mut output);
