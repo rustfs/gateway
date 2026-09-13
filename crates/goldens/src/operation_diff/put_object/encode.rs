@@ -24,8 +24,9 @@ use std::sync::Arc;
 
 use proptest::prelude::*;
 use rustfs_gateway_types::ChecksumAlgorithm;
-use rustfs_gateway_types::compat::put_object::{ConversionError, output_from_s3s};
+use rustfs_gateway_types::compat::ConversionError;
 
+use super::super::seam::put_object::output_from_s3s;
 use super::super::{BodyProbe, RawRequest, WireAnswer, gateway_encode, oracle, s3s_exchange};
 use super::{accepted_output, checksum, md5_base64, pick, s3s_etag};
 

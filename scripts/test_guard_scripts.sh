@@ -7175,6 +7175,34 @@ mut_drop_delete_by() {
 expect_fail check_ring_boundaries.sh \
     'compat-s3s losing its "# DELETE BY" expiry marker' mut_drop_delete_by
 
+mut_floating_s3s_feature() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/types/Cargo.toml")
+text = path.read_text()
+for old in ('compat-s3s-f3e17541 = [', '"compat-s3s-f3e17541", '):
+    if text.count(old) != 1:
+        raise SystemExit(f"{old} is not unique")
+path.write_text(text.replace('compat-s3s-f3e17541 = [', 'compat-s3s-prod = [').replace('"compat-s3s-f3e17541", ', '"compat-s3s-prod", '))
+PYEOF
+}
+expect_fail check_ring_boundaries.sh \
+    'an s3s feature not named after the revision it links' mut_floating_s3s_feature
+
+mut_s3s_feature_outside_umbrella() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/types/Cargo.toml")
+text = path.read_text()
+old = '"compat-s3s-f3e17541", '
+if text.count(old) != 1:
+    raise SystemExit(f"{old} is not unique")
+path.write_text(text.replace(old, ""))
+PYEOF
+}
+expect_fail check_ring_boundaries.sh \
+    'an s3s feature compat-s3s does not include' mut_s3s_feature_outside_umbrella
+
 mut_server_unreviewed_dep() {
     python3 - <<'PYEOF'
 from pathlib import Path

@@ -26,10 +26,8 @@
 
 use std::sync::Arc;
 
+use super::super::seam::request_context::{GatewayRequestContext, Principal, S3S_CONTEXT_MEMBERS, VerifiedScope, request_to_s3s};
 use proptest::prelude::*;
-use rustfs_gateway_types::compat::request_context::{
-    GatewayRequestContext, Principal, S3S_CONTEXT_MEMBERS, VerifiedScope, request_to_s3s,
-};
 
 use super::super::{BodyProbe, BodyReads, RawRequest, gateway_decode, oracle, s3s, s3s_exchange};
 use super::{

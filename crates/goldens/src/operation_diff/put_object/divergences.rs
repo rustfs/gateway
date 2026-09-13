@@ -27,8 +27,11 @@ use std::sync::Arc;
 
 use rustfs_gateway_core::op::{Operation, ResourceShape};
 use rustfs_gateway_dialect_minio::PutObjectReplica;
-use rustfs_gateway_types::compat::put_object::{input_to_s3s, replica_input_to_s3s};
 
+use rustfs_gateway_types::compat::OracleRevision;
+
+use super::super::SEAM_REVISION;
+use super::super::seam::put_object::{input_to_s3s, replica_input_to_s3s};
 use super::super::{BodyProbe, RawRequest, gateway_decode, gateway_decode_replica, oracle};
 use super::{BODY, Decoded, Refusal, TARGET, body_streamed_once, convert, full_request, put, run_decode, run_decode_through};
 
@@ -86,13 +89,24 @@ fn a_put_without_content_length_is_refused_by_the_gateway_and_backfilled_by_s3s(
     );
 }
 
-/// An `Expires` that is not a date: the gateway keeps it opaque, s3s refuses the request, and the
-/// conversion refuses it by name because an s3s input cannot hold it.
+/// An `Expires` that is not a date: the gateway keeps it opaque under every revision. The baseline
+/// s3s `9c4690d8` holds the member parsed, so it refuses the request and the seam refuses the value
+/// by name. `f3e17541`, the revision RustFS main links, holds the wire text: both stacks hand their
+/// handler the same `never`, and the seam carries it across.
 ///
 /// Ruling: `rd-put-0004`
 #[test]
-fn an_expires_that_is_not_a_date_is_kept_by_the_gateway_and_refused_by_s3s() {
+fn an_expires_that_is_not_a_date_is_kept_by_the_gateway_and_refused_only_by_the_baseline_s3s() {
     let request = full_request().replace("expires", "never");
+    if SEAM_REVISION == OracleRevision::Candidate {
+        let diff = run_decode(&request, &request, convert).compared();
+        assert!(
+            diff.differing.is_empty(),
+            "f3e17541 and the seam both keep the text: {:?}",
+            diff.differing
+        );
+        return;
+    }
     let refusal = run_decode(&request, &request, convert).refused();
     assert_eq!(refusal.gateway, Ok(()), "the gateway keeps Expires opaque (q-timestamp-0005)");
     assert!(matches!(refusal.oracle, Err((400, _))), "{refusal:?}");

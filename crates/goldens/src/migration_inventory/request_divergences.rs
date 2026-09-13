@@ -176,13 +176,18 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 14] = [
         request: "an Expires value that is not a date",
         aws: "Expires is modelled as a timestamp, and stored values that are not dates exist (q-timestamp-0005)",
         aws_evidence: API_PUT_OBJECT,
-        s3s: "400 before the handler",
-        gateway: "keeps the value opaque; the compat conversion refuses it by member name (expires)",
-        client_impact: "RustFS stores Expires as a timestamp and cannot hold the text, so its clients already get a 400 for it",
+        s3s: "9c4690d8 answers 400 before the handler. f3e17541, the revision RustFS main links, holds Expires as text and hands it to \
+              the handler, whose put body answers 400 InvalidArgument \"Invalid Expires header\" (rustfs/src/app/object/shared.rs \
+              parse_expires_header)",
+        gateway: "keeps the value opaque; the 9c4690d8 seam refuses it by member name (expires), the f3e17541 seam carries the text \
+                  to the RustFS body unchanged",
+        client_impact: "RustFS stores Expires as a timestamp and cannot hold the text, so its clients already get a 400 for it; through \
+                        the f3e17541 seam the RustFS body still gives that 400, provided the M1 adapter maps its InvalidArgument \
+                        to 400 rather than a 500",
         ruling: DivergenceRuling::AlignS3s,
         follow_up: DivergenceFollowUp::Open(M1_ADAPTER),
         test_file: PUT_DECODE,
-        test: "an_expires_that_is_not_a_date_is_kept_by_the_gateway_and_refused_by_s3s",
+        test: "an_expires_that_is_not_a_date_is_kept_by_the_gateway_and_refused_only_by_the_baseline_s3s",
     },
     RequestDivergence {
         id: "rd-put-0005",
