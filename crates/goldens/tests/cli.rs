@@ -35,17 +35,18 @@ fn sample_regression_commands_remain_successful() {
         .output()
         .expect("run four-way");
     assert!(four_way.status.success(), "{four_way:?}");
-    assert!(String::from_utf8_lossy(&four_way.stdout).starts_with("D1..D5 all clean, 204 samples across 13 families"));
+    assert!(String::from_utf8_lossy(&four_way.stdout).starts_with("D1..D5 all clean, 206 samples across 13 families"));
 }
 
 #[test]
-fn n_corpus_report_discloses_blocked_acceptance_rows() {
+fn corpus_report_discloses_every_acceptance_row_as_passed() {
     let output = corpus_report();
     let text = String::from_utf8(output.stdout).expect("UTF-8 report");
-    assert!(text.contains("P9-01 acceptance census: passed=38 blocked=1 total=39"), "{text}");
+    assert!(text.contains("P9-01 acceptance census: passed=39 blocked=0 total=39"), "{text}");
     assert_eq!(text.lines().filter(|line| line.starts_with("g-")).count(), 39);
+    assert!(!text.contains("blocked issue="), "{text}");
     for row in [
-        "g-d1-003: blocked issue=https://github.com/rustfs/backlog/issues/2104",
+        "g-d1-003: passed source=crates/goldens/src/lifecycle.rs::UNKNOWN_TOP_LEVEL_SUBTREES",
         "g-d4-001: passed source=crates/goldens/src/historical_writer.rs::append",
         "g-d5-001: passed source=crates/goldens/src/historical_writer.rs::append",
     ] {
@@ -77,17 +78,19 @@ fn corpus_report_lists_every_approved_source_and_historical_writer() {
     assert!(!text.contains("approved persisted-metadata source absent"), "{text}");
 }
 
-/// With every source present, strict closure still refuses on rustfs/backlog#2104's blocker alone.
+/// Every source is present and no case is blocked, so strict closure exits zero and prints the
+/// fully passed census on standard output.
 #[test]
-fn n_strict_closure_still_refuses_the_specification_blocker() {
+fn strict_closure_succeeds_on_the_real_evidence() {
     let output = Command::new(env!("CARGO_BIN_EXE_corpus-report"))
         .arg("--require-closure")
         .output()
         .expect("run strict closure");
-    assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert!(output.stdout.is_empty());
-    let diagnostic = String::from_utf8(output.stderr).expect("UTF-8 diagnostic");
-    assert_eq!(diagnostic, "migration closure failed: ClosureBlocked([\"g-d1-003\"])\n");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let census = String::from_utf8(output.stdout).expect("UTF-8 census");
+    assert!(census.starts_with("P9-01 acceptance census: passed=39 blocked=0 total=39\n"), "{census}");
+    assert!(!census.contains("blocked issue="), "{census}");
 }
 
 #[test]

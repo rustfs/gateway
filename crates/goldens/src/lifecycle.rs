@@ -35,6 +35,17 @@ mod source_b;
 const MINIMAL: &[u8] = b"<LifecycleConfiguration><Rule><Status>Enabled</Status></Rule></LifecycleConfiguration>";
 const NAMESPACE: &[u8] = b"<LifecycleConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Rule><Status>Enabled</Status></Rule></LifecycleConfiguration>";
 const UNKNOWN_TOP_LEVEL: &[u8] = b"<LifecycleConfiguration><FutureTopLevel>future</FutureTopLevel><Rule><Status>Enabled</Status></Rule></LifecycleConfiguration>";
+/// `g-d1-003`, as narrowed by rustfs/backlog#2104: a whole unknown subtree beside `Rule`, not
+/// inside it. Both the pinned s3s oracle and the persisted decoder skip it and still read every
+/// known field that follows. Unknown content inside `Rule`, `Expiration` or `Filter` is refused by
+/// both and stays in the refusal matrix below; nested leniency is not claimed here.
+const UNKNOWN_SUBTREE_BEFORE_RULE: &[u8] = b"<LifecycleConfiguration><FutureBlock><Nested><Deeper>future</Deeper></Nested><Sibling/></FutureBlock><Rule><Expiration><Days>30</Days></Expiration><Filter><Prefix>logs/</Prefix></Filter><ID>keep</ID><Status>Enabled</Status></Rule></LifecycleConfiguration>";
+const UNKNOWN_SUBTREE_AFTER_RULE: &[u8] = b"<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><Filter><Prefix>logs/</Prefix></Filter><ID>keep</ID><Status>Enabled</Status></Rule><FutureBlock><Nested><Deeper>future</Deeper></Nested><Sibling/></FutureBlock></LifecycleConfiguration>";
+/// Pinned witnesses the `g-d1-003` census row requires to be accepted D1-D5 samples.
+pub(crate) const UNKNOWN_TOP_LEVEL_SUBTREES: &[&str] = &[
+    "15b32d2d31933729bd8f3c566159f9a8002eb1682cb05212833cfa4b39dc2015",
+    "f94f58b7683d6b5c222248468e90bec48571c22dc7bf8c0335dad6f039e90540",
+];
 const ALTERNATE_ORDER: &[u8] = b"<LifecycleConfiguration><Rule><Transition><StorageClass>GLACIER</StorageClass><Days>30</Days></Transition><Status>Disabled</Status><ID>alt</ID></Rule></LifecycleConfiguration>";
 const UNKNOWN_STATUS: &[u8] = b"<LifecycleConfiguration><Rule><Status>FutureStatus</Status></Rule></LifecycleConfiguration>";
 const SIX_DIGIT_TIMESTAMP: &[u8] = b"<LifecycleConfiguration><ExpiryUpdatedAt>2026-08-30T12:34:56.123456Z</ExpiryUpdatedAt><Rule><Status>Enabled</Status></Rule></LifecycleConfiguration>";
@@ -55,6 +66,22 @@ fn minimal() -> PersistedLifecycleConfiguration {
         }],
         ..PersistedLifecycleConfiguration::default()
     }
+}
+
+/// The known fields both `UNKNOWN_SUBTREE_*` samples carry: ID, Status, Expiration.Days and
+/// Filter.Prefix. A decoder that stops reading at the unknown subtree loses at least one of them.
+fn fields_beside_unknown_subtree() -> PersistedLifecycleConfiguration {
+    let mut value = minimal();
+    value.rules[0].id = Some("keep".to_owned());
+    value.rules[0].expiration = Some(PersistedLifecycleExpiration {
+        days: Some(30),
+        ..PersistedLifecycleExpiration::default()
+    });
+    value.rules[0].filter = Some(PersistedLifecycleFilter {
+        prefix: Some("logs/".to_owned()),
+        ..PersistedLifecycleFilter::default()
+    });
+    value
 }
 
 #[cfg(test)]
@@ -278,6 +305,18 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedLifecycleConfig
             "unknown top-level content remains old-readable",
         ),
         (
+            UNKNOWN_SUBTREE_BEFORE_RULE,
+            fields_beside_unknown_subtree(),
+            vec![CorpusVariant::UnknownTopLevel],
+            "unknown top-level subtree before Rule is skipped and later known fields are kept",
+        ),
+        (
+            UNKNOWN_SUBTREE_AFTER_RULE,
+            fields_beside_unknown_subtree(),
+            vec![CorpusVariant::UnknownTopLevel],
+            "unknown top-level subtree after Rule is skipped and earlier known fields are kept",
+        ),
+        (
             ALTERNATE_ORDER,
             alternate,
             vec![CorpusVariant::AlternateOrder],
@@ -314,6 +353,8 @@ pub(crate) fn corpus_evidence() -> ConcreteFamilyCorpus<PersistedLifecycleConfig
     accepted.extend(crate::source_a_new_writer::lifecycle_cases());
     let mut refused = vec![
         rejected(b"<LifecycleConfiguration><Rule><Future>future</Future><Status>Enabled</Status></Rule></LifecycleConfiguration>", &[CorpusVariant::UnknownNested], "unknown Rule child"),
+        rejected(b"<LifecycleConfiguration><Rule><Status>Enabled</Status><Future>future</Future></Rule></LifecycleConfiguration>", &[CorpusVariant::UnknownNested], "unknown Rule child after Status"),
+        rejected(b"<LifecycleConfiguration><Rule><FutureBlock><Nested><Deeper>future</Deeper></Nested><Sibling/></FutureBlock><Expiration><Days>30</Days></Expiration><Filter><Prefix>logs/</Prefix></Filter><ID>keep</ID><Status>Enabled</Status></Rule></LifecycleConfiguration>", &[CorpusVariant::UnknownNested], "unknown Rule subtree"),
         rejected(b"<LifecycleConfiguration><Rule><Expiration><Future>future</Future></Expiration><Status>Enabled</Status></Rule></LifecycleConfiguration>", &[CorpusVariant::UnknownNested], "unknown Expiration child"),
         rejected(b"<LifecycleConfiguration><Rule><Filter><Future>future</Future></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>", &[CorpusVariant::UnknownNested], "unknown Filter child"),
         rejected(b"<LifecycleConfiguration><ExpiryUpdatedAt>2026-08-30T00:00:00Z</ExpiryUpdatedAt><ExpiryUpdatedAt>2026-08-30T00:00:00Z</ExpiryUpdatedAt><Rule><Status>Enabled</Status></Rule></LifecycleConfiguration>", &[CorpusVariant::DuplicateField], "duplicate ExpiryUpdatedAt"),
@@ -463,6 +504,84 @@ mod tests {
         }
     }
 
+    /// The census row binds these literal digests; they must be the digests of the bytes that
+    /// actually run through D1-D5, or the row would point at nothing.
+    #[test]
+    fn g_d1_003_witness_digests_are_the_unknown_subtree_samples() {
+        let observed = [UNKNOWN_SUBTREE_BEFORE_RULE, UNKNOWN_SUBTREE_AFTER_RULE].map(|bytes| hex::encode(Sha256::digest(bytes)));
+        assert_eq!(observed.as_slice(), UNKNOWN_TOP_LEVEL_SUBTREES);
+        let accepted = corpus_evidence()
+            .accepted
+            .into_iter()
+            .map(|case| case.sample.origin.sha256)
+            .collect::<Vec<_>>();
+        for digest in UNKNOWN_TOP_LEVEL_SUBTREES {
+            assert!(accepted.iter().any(|candidate| candidate == digest), "{digest} is not accepted evidence");
+        }
+    }
+
+    /// `g-d1-003` Then: success and every known field correct, on both real decoders.
+    #[test]
+    fn g_d1_003_unknown_top_level_subtree_keeps_every_known_field_on_both_decoders() {
+        let expected = fields_beside_unknown_subtree();
+        for bytes in [UNKNOWN_SUBTREE_BEFORE_RULE, UNKNOWN_SUBTREE_AFTER_RULE] {
+            let old = LifecycleCodec
+                .old_parse(bytes)
+                .expect("the pinned s3s oracle skips a top-level subtree");
+            let new = LifecycleCodec
+                .new_parse(bytes)
+                .expect("the persisted decoder skips a top-level subtree");
+            assert_eq!(old.structure, expected);
+            assert_eq!(new, expected);
+            let rule = &new.rules[0];
+            assert_eq!(rule.id.as_deref(), Some("keep"));
+            assert_eq!(rule.status, "Enabled");
+            assert_eq!(rule.expiration.as_ref().and_then(|expiration| expiration.days), Some(30));
+            assert_eq!(rule.filter.as_ref().and_then(|filter| filter.prefix.as_deref()), Some("logs/"));
+        }
+    }
+
+    /// The other direction of `g-d1-003`: the same subtree, and a plain unknown child, one level
+    /// down inside `Rule`, `Expiration` or `Filter` is refused by both decoders. Were either to
+    /// start accepting it, this corpus would be claiming nested leniency the pinned oracle never had.
+    #[test]
+    fn n_unknown_content_inside_rule_expiration_or_filter_stays_rejected_by_both_decoders() {
+        let nested = corpus_evidence()
+            .rejected
+            .into_iter()
+            .filter(|case| case.variants.contains(&CorpusVariant::UnknownNested))
+            .map(|case| case.sample.notes)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            nested,
+            [
+                "unknown Rule child",
+                "unknown Rule child after Status",
+                "unknown Rule subtree",
+                "unknown Expiration child",
+                "unknown Filter child",
+            ]
+        );
+        let subtree_inside: [(&str, &[u8]); 3] = [
+            ("Rule", b"<LifecycleConfiguration><Rule><FutureBlock><Nested><Deeper>future</Deeper></Nested></FutureBlock><Status>Enabled</Status></Rule></LifecycleConfiguration>"),
+            ("Expiration", b"<LifecycleConfiguration><Rule><Expiration><FutureBlock><Nested><Deeper>future</Deeper></Nested></FutureBlock><Days>30</Days></Expiration><Status>Enabled</Status></Rule></LifecycleConfiguration>"),
+            ("Filter", b"<LifecycleConfiguration><Rule><Filter><FutureBlock><Nested><Deeper>future</Deeper></Nested></FutureBlock><Prefix>logs/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>"),
+        ];
+        let refused_corpus = corpus_evidence()
+            .rejected
+            .into_iter()
+            .filter(|case| case.variants.contains(&CorpusVariant::UnknownNested))
+            .map(|case| ("corpus", case.sample.bytes));
+        for (parent, bytes) in subtree_inside
+            .into_iter()
+            .map(|(parent, bytes)| (parent, bytes.to_vec()))
+            .chain(refused_corpus)
+        {
+            assert!(LifecycleCodec.old_parse(&bytes).is_err(), "old accepted unknown {parent} content");
+            assert!(LifecycleCodec.new_parse(&bytes).is_err(), "new accepted unknown {parent} content");
+        }
+    }
+
     #[test]
     fn duplicate_optional_lifecycle_fields_are_rejected_by_both_real_parsers() {
         for case in corpus_evidence()
@@ -587,6 +706,12 @@ mod tests {
         new_behavior_drift: bool,
         unknown_status_enabled: bool,
         panic_on_old_parse: bool,
+        reject_unknown_top_level_subtree: bool,
+        stop_reading_at_unknown_subtree: bool,
+    }
+
+    fn has_unknown_subtree(bytes: &[u8]) -> bool {
+        bytes.windows(b"<FutureBlock>".len()).any(|window| window == b"<FutureBlock>")
     }
 
     impl FourWayCodec for Mutant {
@@ -611,9 +736,19 @@ mod tests {
             if self.reject_historical_in_new && bytes == NAMESPACE {
                 return Err("mutation: new Lifecycle parser is stricter".to_owned());
             }
+            if self.reject_unknown_top_level_subtree && has_unknown_subtree(bytes) {
+                return Err("mutation: new Lifecycle parser refuses a top-level unknown subtree".to_owned());
+            }
             let mut parsed = LifecycleCodec.new_parse(bytes)?;
             if self.new_structure_drift {
                 parsed.rules[0].id = Some("drift".to_owned());
+            }
+            if self.stop_reading_at_unknown_subtree && has_unknown_subtree(bytes) {
+                // What a decoder that abandons the document at the unknown subtree keeps: the
+                // rule shell, but not the known fields beside the subtree.
+                parsed.rules[0].id = None;
+                parsed.rules[0].expiration = None;
+                parsed.rules[0].filter = None;
             }
             Ok(parsed)
         }
@@ -671,7 +806,59 @@ mod tests {
             new_behavior_drift: false,
             unknown_status_enabled: false,
             panic_on_old_parse: false,
+            reject_unknown_top_level_subtree: false,
+            stop_reading_at_unknown_subtree: false,
         }
+    }
+
+    fn unknown_subtree_samples() -> Vec<GoldenSample<PersistedLifecycleConfiguration>> {
+        let samples = corpus_evidence()
+            .accepted
+            .into_iter()
+            .filter(|case| UNKNOWN_TOP_LEVEL_SUBTREES.contains(&case.sample.origin.sha256.as_str()))
+            .map(|case| case.sample)
+            .collect::<Vec<_>>();
+        assert_eq!(samples.len(), UNKNOWN_TOP_LEVEL_SUBTREES.len());
+        samples
+    }
+
+    /// `g-d1-003` bites: a persisted decoder stricter than the oracle on a top-level subtree
+    /// goes red on D4 for both witnesses.
+    #[test]
+    fn g_d1_003_d4_detects_a_decoder_refusing_a_top_level_subtree() {
+        let mut codec = mutant();
+        codec.reject_unknown_top_level_subtree = true;
+        for sample in unknown_subtree_samples() {
+            assert_lifecycle_four_way(&sample).expect("the real codecs accept the witness");
+            assert_eq!(
+                assert_four_way(&codec, &sample)
+                    .expect_err("D4 must reject a decoder that refuses a top-level subtree")
+                    .direction,
+                crate::Direction::D4NotStricter,
+                "{}",
+                sample.notes
+            );
+        }
+    }
+
+    /// `g-d1-003` bites: accepting the document but dropping the known fields beside the subtree
+    /// goes red on D1 for both witnesses, so "success" alone cannot satisfy the case.
+    #[test]
+    fn g_d1_003_d1_detects_a_decoder_dropping_fields_beside_the_subtree() {
+        let mut codec = mutant();
+        codec.stop_reading_at_unknown_subtree = true;
+        for sample in unknown_subtree_samples() {
+            assert_eq!(
+                assert_four_way(&codec, &sample)
+                    .expect_err("D1 must compare the known fields beside the subtree")
+                    .direction,
+                crate::Direction::D1CompatibleRead,
+                "{}",
+                sample.notes
+            );
+        }
+        let plain = base_sample();
+        assert!(assert_four_way(&codec, &plain).is_ok(), "the mutation must only fire on the subtree");
     }
 
     #[test]

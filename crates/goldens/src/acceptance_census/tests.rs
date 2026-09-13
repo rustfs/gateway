@@ -28,15 +28,131 @@ fn observations() -> &'static RuntimeObservations {
     OBSERVATIONS.get_or_init(|| RuntimeObservations::collect().expect("real corpus and D1-D5 observations pass"))
 }
 
+/// The issue that held `g-d1-003` before it was narrowed to evidence.
+const ISSUE_2104: &str = "https://github.com/rustfs/backlog/issues/2104";
+
 #[test]
 fn production_registry_is_the_exact_runtime_linked_39_case_set() {
     let report =
         validate_registry(&production_registry(), observations()).expect("the exact 39 acceptance cases must be registered");
     assert_eq!(report.cases().len(), 39);
-    assert_eq!(report.passed_count(), 38);
-    assert_eq!(report.blocked_count(), 1);
-    assert_eq!(require_acceptance_closure(), Err(AcceptanceCensusError::ClosureBlocked(vec!["g-d1-003"])));
+    assert_eq!(report.passed_count(), 39);
+    assert_eq!(report.blocked_count(), 0);
+    assert_eq!(require_acceptance_closure(), Ok(report.clone()));
     assert!(!report.render().contains("approved persisted-metadata source absent"));
+    assert!(!report.render().contains("blocked issue="));
+}
+
+fn without_accepted(digest: &str) -> RuntimeObservations {
+    let full = observations();
+    let accepted = full
+        .accepted
+        .iter()
+        .filter(|(_, candidate)| candidate != digest)
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(accepted.len() + 1, full.accepted.len(), "{digest} must be one accepted sample");
+    RuntimeObservations {
+        corpus: full.corpus.clone(),
+        accepted,
+        families: full.families.clone(),
+        sources: full.sources.clone(),
+    }
+}
+
+/// `g-d1-003` is held by its own witnesses: losing either top-level-subtree sample from the
+/// accepted D1-D5 set turns the row red, even though other Lifecycle samples still carry the
+/// `unknown-top-level` variant label.
+#[test]
+fn n_g_d1_003_goes_red_without_either_accepted_witness() {
+    for digest in crate::lifecycle::UNKNOWN_TOP_LEVEL_SUBTREES {
+        let observed = without_accepted(digest);
+        assert!(
+            observed
+                .evaluate(RuntimeProbe::Variant(ConfigKind::Lifecycle, CorpusVariant::UnknownTopLevel), "variant")
+                .is_ok(),
+            "the variant label alone would still read covered"
+        );
+        assert_eq!(
+            validate_registry(&production_registry(), &observed),
+            Err(AcceptanceCensusError::ProbeFailed {
+                id: "g-d1-003",
+                reason: format!("lifecycle witness {digest} is not an accepted D1-D5 sample"),
+            })
+        );
+    }
+}
+
+/// A witness digest carried by a refused sample, or by another family, is not evidence.
+#[test]
+fn n_accepted_sample_probe_requires_family_and_disposition() {
+    let full = observations();
+    // Refused samples are in the corpus but never in the accepted set the probe reads, which is
+    // what keeps a nested-unknown refusal from being cited as `g-d1-003` evidence.
+    for refused in crate::lifecycle::corpus_evidence().rejected {
+        let digest = refused.sample.origin.sha256;
+        assert!(
+            !full.accepted.iter().any(|(_, candidate)| *candidate == digest),
+            "refused {} reads as accepted",
+            refused.sample.notes
+        );
+    }
+    let before = crate::lifecycle::UNKNOWN_TOP_LEVEL_SUBTREES[0];
+    let mut relabeled = without_accepted(before);
+    relabeled.accepted.push((ConfigKind::Replication, before.to_owned()));
+    assert!(
+        relabeled
+            .evaluate(
+                RuntimeProbe::AcceptedSamples(ConfigKind::Lifecycle, crate::lifecycle::UNKNOWN_TOP_LEVEL_SUBTREES),
+                "x"
+            )
+            .is_err()
+    );
+    assert!(
+        full.evaluate(RuntimeProbe::AcceptedSamples(ConfigKind::Lifecycle, &[]), "x")
+            .is_err(),
+        "an empty witness list must not pass"
+    );
+    let unexecuted = RuntimeObservations {
+        families: full
+            .families
+            .iter()
+            .copied()
+            .filter(|kind| *kind != ConfigKind::Lifecycle)
+            .collect(),
+        ..full.clone()
+    };
+    assert!(
+        unexecuted
+            .evaluate(
+                RuntimeProbe::AcceptedSamples(ConfigKind::Lifecycle, crate::lifecycle::UNKNOWN_TOP_LEVEL_SUBTREES),
+                "x"
+            )
+            .is_err()
+    );
+}
+
+/// The resolved specification blocker cannot come back as a blocked row.
+#[test]
+fn n_g_d1_003_cannot_be_blocked_on_its_resolved_issue() {
+    let mut rows = production_registry();
+    *rows.iter_mut().find(|row| row.id == "g-d1-003").unwrap() = CaseDeclaration::blocked("g-d1-003", ISSUE_2104);
+    assert_eq!(
+        validate_registry(&rows, observations()),
+        Err(AcceptanceCensusError::InvalidBlocker("g-d1-003"))
+    );
+}
+
+/// Swapping the witness probe for the broader variant label is a binding change, not a pass.
+#[test]
+fn n_g_d1_003_probe_cannot_be_widened_to_a_variant_label() {
+    let mut rows = production_registry();
+    rows.iter_mut().find(|row| row.id == "g-d1-003").unwrap().probe =
+        Some(RuntimeProbe::Variant(ConfigKind::Lifecycle, CorpusVariant::UnknownTopLevel));
+    assert_eq!(
+        validate_registry(&rows, observations()),
+        Err(AcceptanceCensusError::WrongBinding("g-d1-003"))
+    );
 }
 
 /// Removing a collected source must turn its passing full-corpus cases red.
@@ -44,6 +160,7 @@ fn production_registry_is_the_exact_runtime_linked_39_case_set() {
 fn source_absence_does_not_leave_full_corpus_cases_passing() {
     let absent = RuntimeObservations {
         corpus: observations().corpus.clone(),
+        accepted: observations().accepted.clone(),
         families: observations().families.clone(),
         sources: Err(PersistenceSourceError::SourceAbsent(PersistenceSource::HistoricalWriterMatrix)),
     };
@@ -138,6 +255,7 @@ fn all_family_rows_fail_closed_when_one_family_stops_executing() {
     let full = observations();
     let truncated = RuntimeObservations {
         corpus: full.corpus.clone(),
+        accepted: full.accepted.clone(),
         families: full
             .families
             .iter()
@@ -204,19 +322,20 @@ fn unknown_status_mutation_fails_closed() {
     );
 }
 
+/// A row that must be blocked cannot read passed. With every source present no row must be, so
+/// both directions are shown on the same registry: it validates against the real observation and
+/// fails as `BlockedCasePassed` once the source it depends on is withdrawn.
 #[test]
 fn blocked_as_pass_mutation_fails_closed() {
-    let mut rows = production_registry();
-    let blocked = rows
-        .iter_mut()
-        .find(|row| row.id == "g-d1-003")
-        .expect("the specification blocker is registered");
-    blocked.status = "passed";
-    blocked.probe = Some(RuntimeProbe::AllFamilies);
-    blocked.issue = None;
+    let absent = RuntimeObservations {
+        sources: Err(PersistenceSourceError::SourceAbsent(PersistenceSource::HistoricalWriterMatrix)),
+        ..observations().clone()
+    };
+    let rows = production_registry();
+    assert!(validate_registry(&rows, observations()).is_ok());
     assert_eq!(
-        validate_registry(&rows, observations()),
-        Err(AcceptanceCensusError::BlockedCasePassed("g-d1-003"))
+        validate_registry(&rows, &absent),
+        Err(AcceptanceCensusError::BlockedCasePassed("g-d4-001"))
     );
 }
 
