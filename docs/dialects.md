@@ -36,7 +36,7 @@ mechanisms, different blast radii and different rules.
 
 | # | Dimension | Mechanism | May | May not |
 |---|---|---|---|---|
-| 1 | **Extra operations** | `Dialect::operations`, this document | add a **new** `vendor:Name` operation with its own route row, spec, floor and handler | take an AWS operation name in any case; stand in front of a standard row without a declaration; change a standard operation's row, spec or authentication requirement |
+| 1 | **Extra operations** | `Dialect::operations`, `Dialect::claimed_operations`, this document | add a **new** `vendor:Name` operation with its own route row — or a reviewed path-prefix claim and rows inside it — spec, floor and handler | take an AWS operation name in any case; stand in front of a standard row without a declaration; claim a prefix that could shadow a bucket; change a standard operation's row, spec or authentication requirement |
 | 2 | **Extension fields on existing types** | `ExtField` codec vtable | add a child element to an existing parent shape | change an existing field's type, order or name; add a field to a security-relevant type |
 | 3 | **Parsing leniency** | runtime `CodecPolicy` | relax request-XML strictness — unknown elements, bare-literal bodies | relax anything about a security-relevant configuration, a signature, or an authorisation decision |
 
@@ -74,8 +74,8 @@ places it is written disagree.
 | Fact | Where the code says it | Where the overlay says it |
 |---|---|---|
 | Name | `Operation::NAME` | `OverlayRow::name` |
-| Precedence | `DialectRoute::precedence` | `OverlayRow::precedence` |
-| Selector | `DialectRoute::selector` | `OverlayRow::selector`, rendered |
+| Precedence | `DialectRoute::precedence` or `ClaimedRoute::precedence` | `OverlayRow::precedence` |
+| Selector | `DialectRoute::selector`, or every row of `ClaimedRoute::rows` | `OverlayRow::selector`, rendered — for a claimed route by `render_claimed_rows`, alias rows included |
 | Action and resource | `OperationSpec::auth` | `OverlayRow::action`, `OverlayRow::resource` |
 | Success status | `OperationSpec::success_status` | `OverlayRow::success_status` |
 | Anonymous reachability | `OperationFloor::allows_anonymous` | `OverlayRow::anonymous` |
@@ -131,6 +131,15 @@ the dialect boundary's.
 | A shadowing declaration about two operations the dialect did not add | `GetBucketAcl` over `ListObjects` | A dialect accounts for the overlaps its own row creates. Signing off on a standard pair is duplication today and a silent approval of a routing change the moment a model upgrade adds a pair nobody has reviewed |
 | Undeclared overlap | a row in front of a standard one | The route table's own decision, reached unchanged: a dialect selector that hides an AWS one needs a declaration with a reason and a source |
 | An added row wearing an AWS name | `RouteEntry { op_name: "GetObject", .. }` | Sends requests AWS defines to a handler nobody reviewed, whatever it registered as |
+| A claim shallower than two segments | `/health`, `/rustfs`, `/iceberg` | The first path-style segment is a bucket: the claim would take a whole bucket away from S3 |
+| A malformed or unsourced claim | `/rustfs/admin/`, `/rustfs/%61dmin`, `evidence: &[]` | A claim is the widest change a dialect can make; it names whole unreserved segments and carries a reason and a source |
+| Overlapping claims | `/rustfs/admin` and `/rustfs/admin/v3`, in one dialect or two | Which dialect answers must not depend on installation order |
+| A claim no row uses | a prefix with no claimed row inside it | It would take its namespace away from S3 to answer nothing |
+| An S3-table row inside a claim | `PathLiteral("/rustfs/admin/v3/info")` beside a `/rustfs/admin` claim | S3 routing never looks inside a claim: the row would be dead |
+| A template outside the dialect's claims, or malformed | `/other/x`, `/rustfs/{x}/v3`, `{Name}`, `{id}.zip` | A template starts with its claim's segments and binds whole segments |
+| A claimed row restating the claim | `Target(Object)`, `PathLiteral`, `HostClass`, `ArnForm`, no or two methods | The claim decides the target, the path, the face and the ARN form; a row names one method |
+| A claimed operation naming a bucket or object | `ResourceShape::Bucket` on a claimed route | Inside a claim the path names neither, so nothing would supply the resource |
+| A standard operation opting in to the caller's secret | `OperationSpec::standard(..).hand_caller_secret_to_handler()` | No AWS operation needs the key to serve a request |
 
 There is no rule refusing a dialect that changes a standard operation's `OperationSpec`, because
 there is no way to write one: a spec is `&'static` data this crate owns, `Operation::spec` returns a
@@ -152,18 +161,67 @@ answer is the wrong answer rather than an error, which is the worst kind.
 **Every overlap that placement creates has to be declared.** The default policy is
 `ShadowingPolicy::EveryOverlap`, and a client may send two query keys at once, so a dialect row in a
 busy method-and-target cell overlaps every other row in that cell — one declaration per pair, each
-with a reason and a source. Two ways to keep that small:
+with a reason and a source.
 
-- **Put an admin or STS surface on a path literal.** `POST /acme/admin/...` in the `0..=99` band
-  contradicts every bucket and object row, so it overlaps nothing and needs no declarations. This is
-  the shape to prefer for a whole API surface.
+**A path literal does not make a row disjoint.** The lattice treats the path and the target as
+independent dimensions, so `GET /acme/admin/info` on a `PathLiteral` still overlaps every standard
+`GET` object row — a client may send `/acme/admin/info?tagging` and both rows accept it. Measured in
+rustfs/backlog#1744: such a row owes 10 declarations on `GET` and 11 on `PUT`. (An earlier revision
+of this document said it "overlaps nothing"; that was wrong.) Two ways to keep the count small:
+
+- **Claim a path prefix for a whole API surface** — see the next section. Rows inside a claim owe
+  no declaration to any S3 row, because S3 routing never sees inside the claim.
 - **Pick a sparse cell** when the operation genuinely has to look like an S3 request. `HEAD` on an
   object target holds exactly one standard row, which is why the worked example uses it: one
-  overlap, one declaration.
+  overlap, one declaration. A vendor query key on a busy cell — `GET /{bucket}?vendor-key` — owes
+  one declaration per standard row in the cell, and that is the price of an S3-shaped request.
 
 Moving a row afterwards is not a free edit. The declaration records which of the two has the lower
 precedence, so moving the row behind the operation it declared it shadows is refused as a stale
 declaration — the table will not quietly start answering the other operation.
+
+## Path-prefix claims (ADR-0024)
+
+An admin, STS or catalog surface is not S3, and routing it through the S3 table makes every row a
+collection of overlap declarations. A dialect instead **claims** a prefix:
+`DialectOverlay::claims` holds `PathClaim { prefix, reason, evidence }`, and
+`DialectBuilder::declare_claimed::<O>(ClaimedRoute { precedence, rows, shadows })` serves an
+operation at one or more `ClaimedRow { template, selector }` inside it.
+
+- **What a claim covers.** A path-style request on the standard endpoint, with no ARN, whose raw
+  path is the prefix or continues it with `/`. The router asks the claimed table first; inside a
+  claim a claimed row answers or nothing does (`501`, `NO_CLAIMED_ROUTE_MESSAGE`), and the S3 table
+  is never consulted. A virtual-hosted request is never covered: its path is a key.
+- **Why two segments.** The first path-style segment is a bucket, so `/health` or `/rustfs` would
+  take a whole bucket away from S3 and is refused. `/rustfs/admin` takes only the path-style
+  spelling of the keys `admin` and `admin/…` in the bucket `rustfs` — what RustFS does today. The
+  bucket itself, every other key in it, the same keys virtual-hosted, and a percent-encoded
+  spelling of the prefix all remain S3, authorised as S3.
+- **Templates.** Literal segments and whole-segment `{name}` parameters. A parameter never matches
+  across a separator, an encoded separator or a dot segment in any spelling. Values are decoded
+  once after routing and read by the handler as `context.path_params().get("name")` or
+  `.parse::<T>("name")`; a value that decodes to a separator, a dot segment, a control character or
+  invalid UTF-8 is a `400` before authorisation.
+- **Aliases.** One operation may carry any number of rows — `/rustfs/admin/v3/x` and
+  `/minio/admin/v3/x` — and the overlay records every one of them.
+- **Overlap inside a claim** follows the S3 table's rules: same precedence is a conflict, across
+  precedences a `ShadowingDecl` between the two dialect operations is required, and a stale one is
+  refused.
+- **Service-level.** A claimed operation declares `ResourceShape::Service`. The authorizer, the
+  governor, the audit event and the handler context see no bucket and no key — and so does every
+  other operation declaring `ResourceShape::Service`, whatever its path names.
+- **The caller's secret.** An operation opts in with `hand_caller_secret_to_handler()`. When the
+  authenticator hands a secret over, it reaches only those operations by default, and is dropped,
+  zeroized, for every other one when the verdict is read.
+  `ServiceBuilder::hand_caller_secret_to_every_operation_after_listing_in_the_posture_report()`
+  widens it to every handler, for the s3s migration adapter, which cannot build a credential
+  without one. A standard operation may not opt in.
+- **Presigned.** A dialect operation's `OperationFloor::custom` admits header signatures only; a
+  presigned admin request is a `403` before the authorizer. Opting one operation in is
+  `OperationFloor::allow_presigned`, which the posture report lists, and nothing does until a
+  client is shown to need it.
+- **Reported.** Start-up prints `DIALECT_POSTURE claimed_prefixes=[prefix@dialect,…]
+  caller_secret_ops=[…]` beside `SECURITY_POSTURE`.
 
 ## Clean-room policy
 

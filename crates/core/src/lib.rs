@@ -126,7 +126,10 @@ pub use crate::codec::{
 };
 pub use crate::committed::{CommitOutcome, CommitWork, CommittedResponse, DeferredOperation, HeadPart, HeadPartError};
 pub use crate::contracts::{copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, error_root_namespace};
-pub use crate::dialect::{Dialect, DialectBuilder, DialectError, DialectOperation, DialectOverlay, DialectRoute, OverlayRow};
+pub use crate::dialect::{
+    ClaimedOperation, ClaimedRoute, ClaimedRow, Dialect, DialectBuilder, DialectError, DialectOperation, DialectOverlay,
+    DialectRoute, OverlayRow,
+};
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
 pub use crate::error::{DisallowedPreAuthCode, PRE_AUTH_STATUSES, PreAuthError};
 pub use crate::error_resolution::{
@@ -152,8 +155,9 @@ pub use crate::request_context::{
     Addressed, AddressingStyle, AuthenticatedScheme, CallerSecretKey, RequestContextView, RequestPrincipal,
 };
 pub use crate::route::{
-    ArnForm, CompileError, CompiledRouter, Explanation, HostClass, OpId, Predicate, RequestShape, RouteBuildError, RouteEntry,
-    RouteRequestParts, RouteSelector, RouteTable, ShadowingDecl, ShadowingDecls, ShadowingPolicy, TargetKind,
+    ArnForm, ClaimedEntry, ClaimedTable, CompileError, CompiledRouter, Explanation, HostClass, InstalledClaim, OpId, PathClaim,
+    PathParamError, PathParams, PathTemplate, Predicate, RequestShape, RouteBuildError, RouteEntry, RouteRequestParts,
+    RouteSelector, RouteTable, ShadowingDecl, ShadowingDecls, ShadowingPolicy, TargetKind,
 };
 pub use crate::sse::{
     KeyFingerprint, KeySide, PartRejection, PlaintextCustomerKeyAck, SseConfig, SseEnforced, SseRejection, TransportSecurity,

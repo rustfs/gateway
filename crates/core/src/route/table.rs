@@ -57,6 +57,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::ops::RangeInclusive;
 
+use super::claim::ClaimRejection;
 use super::lattice::{Constraints, Contradiction, OverlapError, overlap_witness};
 use super::selector::{RouteEntry, RouteRequestParts, RouteSelector};
 use super::shadowing::{ShadowingDecls, ShadowingPolicy};
@@ -168,6 +169,39 @@ pub enum RouteBuildError {
     },
     /// The overlap decision contradicted the matcher. A bug in this crate, not in the table.
     Inconsistent(OverlapError),
+    /// A path-prefix claim that breaks the claim grammar (ADR-0024).
+    RefusedClaim {
+        /// The prefix as written.
+        prefix: &'static str,
+        /// The rule it breaks.
+        rejection: ClaimRejection,
+    },
+    /// Two installed claims could cover one path: equal, or one nested in the other.
+    OverlappingClaims {
+        /// The dialect that installed the first.
+        first_dialect: &'static str,
+        /// The first prefix.
+        first: &'static str,
+        /// The dialect that installed the second.
+        second_dialect: &'static str,
+        /// The second prefix.
+        second: &'static str,
+    },
+    /// A claimed row outside every installed claim.
+    UnclaimedRow {
+        /// The operation.
+        op_name: &'static str,
+        /// The row's template.
+        template: &'static str,
+    },
+    /// An S3-table row pins a path literal inside a claim, where S3 routing never looks: the row
+    /// would be dead, and a dead row reads as coverage.
+    RowInsideClaim {
+        /// The operation.
+        op_name: &'static str,
+        /// The prefix that covers its literal.
+        claim: &'static str,
+    },
 }
 
 impl fmt::Display for RouteBuildError {
@@ -219,6 +253,25 @@ impl fmt::Display for RouteBuildError {
             Self::InvalidPredicate { op_name, detail } => write!(f, "{op_name} has an unusable predicate: {detail}"),
             Self::DuplicateOperation { op_name } => write!(f, "{op_name} appears twice in the route table"),
             Self::Inconsistent(error) => write!(f, "{error}"),
+            Self::RefusedClaim { prefix, rejection } => write!(f, "the path claim {prefix:?} is refused: {rejection}"),
+            Self::OverlappingClaims {
+                first_dialect,
+                first,
+                second_dialect,
+                second,
+            } => write!(
+                f,
+                "the path claims {first:?} ({first_dialect}) and {second:?} ({second_dialect}) could both cover one \
+                 path; which dialect answers must not depend on installation order"
+            ),
+            Self::UnclaimedRow { op_name, template } => {
+                write!(f, "{op_name} has the claimed row {template:?}, which no installed claim covers")
+            }
+            Self::RowInsideClaim { op_name, claim } => write!(
+                f,
+                "{op_name} pins a path literal inside the claim {claim:?}, where S3 routing never looks; \
+                 declare it as a claimed row instead"
+            ),
         }
     }
 }
@@ -452,7 +505,7 @@ impl RouteTable {
 }
 
 /// Rejects predicates this crate could not evaluate faithfully.
-fn validate_predicates(entry: &RouteEntry) -> Result<(), RouteBuildError> {
+pub(super) fn validate_predicates(entry: &RouteEntry) -> Result<(), RouteBuildError> {
     for predicate in entry.selector.predicates() {
         if let Some(name) = predicate.header_name()
             && !is_lowercase_token(name)

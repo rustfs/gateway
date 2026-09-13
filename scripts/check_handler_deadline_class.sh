@@ -460,14 +460,21 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # explicit=31: the 29th to 31st are the test-only `rustfs:ServerInfo`, `rustfs:AddServiceAccount`
 # and `rustfs:ReplicationMetricsV2` fixtures in crates/goldens/src/rustfs_admin_proof.rs
 # (rustfs/backlog#1744). They are dialect operations too, and state Standard for the same reason.
-if central_builders != 102 or explicit_builders != 31:
+# explicit=35: the 32nd to 35th are ADR-0024's vendor fixtures, each stating Standard for the same
+# reason: `rustfs:GetTier` in crates/goldens/src/rustfs_admin_proof.rs, the `acme:*` family's one
+# `const fn spec` in crates/core/tests/dialect_claims.rs, the `example:*` family's one in
+# crates/gateway/tests/dialect_claims_runtime.rs, and `example:SecretProbe` in
+# crates/gateway/tests/request_context_runtime.rs.
+# explicit=36: the 36th is `SecretHungry`'s spec in crates/core/src/registry/reject.rs, the
+# rowless `WriteGetObjectResponse` authority fixture again with the caller-secret opt-in (ADR-0024).
+if central_builders != 102 or explicit_builders != 36:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=31"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=36"
     )
 
 print(
-    "check_handler_deadline_class: 138 repository builder sites are inventoried "
-    "(133 classified: 102 central standard, 31 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 143 repository builder sites are inventoried "
+    "(138 classified: 102 central standard, 36 explicit; 5 authority tests)"
 )
 PY

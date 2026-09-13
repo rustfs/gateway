@@ -37,6 +37,8 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/route/selector.rs` | Route predicates and entries. | Add or interpret a predicate. |
 | `src/route/lattice.rs` | Selector overlap/refinement decision. | A conflict or shadowing decision is wrong. |
 | `src/route/table.rs` | Ordered table construction and resolution. | A request selects the wrong operation. |
+| `src/route/claim.rs` | A dialect's path-prefix claims, path templates and their typed values (ADR-0024). | A claim or template refuses, matches or extracts the wrong thing. |
+| `src/route/claimed.rs` | Claimed rows, and the table the router asks before the S3 table. | A claimed request reaches the wrong row, or reaches S3. |
 | `src/route/shadowing.rs` | Declaration types; mounts the generated record from `model/overlays/route.toml`. | A route intentionally stands before another. |
 | `src/route/compiled.rs` | Fast lookup equivalent to the readable table. | Routing performance or equivalence fails. |
 | `src/route/explain.rs` | Route explanation data. | `cargo xtask route explain` omits a reason. |
@@ -52,6 +54,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/committed.rs` | Typed frozen response heads and statusless detached work for the generated deferred-operation set. | A permitted operation, early header, or committed outcome is wrong. |
 | `src/handler.rs` | Typed handler request/response contracts, including the carried SSE proof. | Implement a backend or represent a committed failure. |
 | `src/static_dispatch.rs` | Sealed generic codec and concrete-handler entry. | Build or audit the monomorphic facade path. |
+| `src/dialect/claimed.rs` | Operations a dialect serves inside its own claims: rows, aliases, the overlay cross-check. | A claimed route is refused, or its alias is not reviewed. |
 | `src/registry/` | Handler/codec registration and erasure. | Registration, completeness or dynamic dispatch fails. |
 | `src/dispatch.rs` | Route, registration and parameter refusal order. | A request fails in the wrong stage. |
 | `src/error.rs` | Closed pre-authentication errors. | A refusal before authentication has the wrong status. |
@@ -60,6 +63,8 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/cors/` | CORS rule and response primitives. | CORS semantics change. |
 | `src/sse/` | Server-side encryption proof, bounded KMS context JSON validation and rejection types. | SSE headers or key handling change. |
 | `tests/route_table.rs` | Route-table positive/negative matrix. | Any route row changes. |
+| `tests/dialect_claims.rs` | What a claim captures, templates, aliases, typed values, the secret opt-in default. | A claim captures too much or too little. |
+| `tests/dialect_claims_refusals.rs` | Every claim, template and claimed-row refusal, one variant each. | A claimed-route refusal changes. |
 | `tests/route_sizes.rs` | Independent compile-time size ceiling for the copied hot-path bucket. | The compiled router's bucket layout changes. |
 | `benches/route.rs` | Allocation gate and non-blocking timing record for compiled route lookup. | Routing hot-path cost changes. |
 | `tests/params_and_dispatch.rs` | Dispatch and required-parameter matrix. | Registry or dispatch changes. |

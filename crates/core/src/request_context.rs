@@ -53,7 +53,8 @@
 //! handlers read it (the admin API decrypts request bodies with it). So a handler may need it; but
 //! most never do, and a value that is merely *there* ends up in a log line. The secret therefore
 //! reaches a context only when the authenticator that looked it up was explicitly told to hand it
-//! over, only for an authenticated verdict, only through
+//! over *and* the routed operation opted in (ADR-0024), only for an authenticated verdict, only
+//! through
 //! [`RequestPrincipal::secret_key_from_authenticator_lookup`], and only as a [`CallerSecretKey`]:
 //! zeroized on drop, no `Clone`, no `PartialEq`, a `Debug` that prints `<redacted>`.
 
@@ -63,6 +64,8 @@ use http::{HeaderMap, Method};
 use rustfs_gateway_http::{HeaderView, WireRequest};
 use rustfs_gateway_sig::{Identity, SecretBytes, SigFamily, SigIdentity, SigLocation, SigService, Verdict, VerifiedScope};
 use rustfs_gateway_types::{BucketName, ObjectKey};
+
+use crate::route::PathParams;
 
 /// How the request named its bucket, as the facade's host resolver decided it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -211,10 +214,12 @@ impl RequestPrincipal {
 
     /// The caller's secret key, when the authenticator that looked it up was told to hand it over.
     ///
-    /// `None` by default: the built-in `SigV4Authenticator` keeps the secret unless the deployment
-    /// calls its `hand_caller_secret_to_handlers`. A handler that needs the secret — to decrypt a
-    /// payload the client encrypted with it, or to fill s3s's `Credentials::secret_key` — reads it
-    /// here and nowhere else (ADR-0022).
+    /// `None` by default. It is `Some` only when two opt-ins agree: the deployment called the built-in
+    /// `SigV4Authenticator`'s `hand_caller_secret_to_handlers` (or a custom authenticator attached
+    /// it), and the routed operation's spec called
+    /// [`crate::OperationSpec::hand_caller_secret_to_handler`] (ADR-0024). A handler that needs the
+    /// secret — to open a payload the client sealed with it — reads it here and nowhere else
+    /// (ADR-0022).
     #[must_use]
     pub const fn secret_key_from_authenticator_lookup(&self) -> Option<&CallerSecretKey> {
         self.secret.as_ref()
@@ -265,6 +270,7 @@ pub struct RequestContextView {
     addressed: Addressed,
     headers: HeaderMap,
     principal: Option<RequestPrincipal>,
+    path_params: PathParams,
 }
 
 impl RequestContextView {
@@ -315,7 +321,18 @@ impl RequestContextView {
             addressed,
             headers,
             principal,
+            path_params: PathParams::none(),
         })
+    }
+
+    /// This context, with the values the routed claimed row's template extracted (ADR-0024).
+    ///
+    /// The facade calls it once, with what `PathTemplate::extract` produced for the row that
+    /// accepted the request; a context outside a claim keeps [`PathParams::none`].
+    #[must_use]
+    pub fn with_path_params(mut self, path_params: PathParams) -> Self {
+        self.path_params = path_params;
+        self
     }
 
     /// The context of a request built outside the pipeline, by [`crate::Req::new`] or a direct
@@ -338,6 +355,7 @@ impl RequestContextView {
             },
             headers: HeaderMap::new(),
             principal: None,
+            path_params: PathParams::none(),
         }
     }
 
@@ -414,6 +432,13 @@ impl RequestContextView {
     pub const fn is_anonymous(&self) -> bool {
         self.principal.is_none()
     }
+
+    /// The path parameters of the claimed row that accepted the request, decoded once and
+    /// readable as typed values through [`PathParams::parse`]. Empty outside a claim (ADR-0024).
+    #[must_use]
+    pub const fn path_params(&self) -> &PathParams {
+        &self.path_params
+    }
 }
 
 /// Prints the header names only: a value may be a signature, a session token or an SSE-C key.
@@ -439,6 +464,7 @@ impl fmt::Debug for RequestContextView {
             .field("addressed", &self.addressed)
             .field("header_names", &HeaderNames(&self.headers))
             .field("principal", &self.principal)
+            .field("path_params", &self.path_params)
             .finish()
     }
 }

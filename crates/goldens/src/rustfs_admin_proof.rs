@@ -12,37 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! RustFS admin routes as gateway extension operations: the P10-01 proof slice
-//! (rustfs/backlog#1744).
+//! RustFS admin routes as gateway extension operations: the P10-01 proof (rustfs/backlog#1744), on
+//! ADR-0024's path-prefix claims.
 //!
-//! Responsible for: three representative RustFS admin routes registered as `rustfs:` extension
-//! operations through the ordinary dialect mechanism, each with every overlap its route row
-//! creates declared, and a real assembled service to drive them:
+//! Responsible for: four representative RustFS admin routes registered as `rustfs:` extension
+//! operations through the ordinary dialect mechanism, and a real assembled service to drive them:
 //!
-//! - [`ServerInfo`], `GET /rustfs/admin/v3/info`: a plain JSON read under `admin:ServerInfo`.
-//! - [`AddServiceAccount`], `PUT /minio/admin/v3/add-service-account`: the MinIO alias, where
-//!   RustFS seals both bodies with the caller's secret key, under `admin:CreateServiceAccount`.
+//! - [`ServerInfo`], `GET /rustfs/admin/v3/info` and its `/minio/admin` alias: a plain JSON read
+//!   under `admin:ServerInfo`.
+//! - [`AddServiceAccount`], `PUT /rustfs/admin/v3/add-service-account` and its `/minio/admin` alias,
+//!   where RustFS seals both bodies with the caller's secret key, under `admin:CreateServiceAccount`.
+//!   The one operation here that opts in to the caller's secret.
+//! - [`GetTier`], `GET /rustfs/admin/v3/tier/{tier}` and its alias: a templated read under
+//!   `admin:ListTier`, whose handler reads the tier from the typed path parameters.
 //! - [`ReplicationMetricsV2`], `GET /{bucket}?replication-metrics=2`: an S3-shaped read the RustFS
 //!   admin router claims by query value, under `s3:GetReplicationConfiguration` on the bucket.
 //!
-//! The service is the facade's own: the SigV4 authenticator, a recording authorizer, and a backend
-//! that records what each handler was handed.
+//! The first three are claimed rows inside the dialect's two path-prefix claims, `/rustfs/admin` and
+//! `/minio/admin`. The fourth is an S3-table row. The service is the facade's own: the SigV4
+//! authenticator, a recording authorizer, and a backend that records what each handler was handed.
 //! NOT responsible for: what RustFS does behind these handlers; the madmin sealing format (the seal
 //! here is a keyed stand-in, because the claim under test is who holds the key, not the cipher);
 //! production wiring (this module exists only under `cfg(test)`); or any other route.
 //! Upstream: `rustfs-gateway-core`'s dialect mechanism, `rustfs-gateway`'s assembly, the request
-//! signer of `operation_diff::context`, and the recorded inventory the three actions are bound to.
+//! signer of `operation_diff::context`, and the recorded inventory the actions are bound to.
 //! Downstream: the ring-2 admin migration of rustfs/backlog#1744.
 //!
-//! # Why every overlap is declared
+//! # Why only the S3-shaped row declares overlaps
 //!
-//! The route lattice treats the path and the target as independent dimensions, so a row pinned to
-//! a path literal still overlaps every standard row on the same method and target: a client may
-//! name `/rustfs/admin/v3/info?tagging`, and both rows accept it. RustFS answers such a request
-//! from its admin router, which claims the whole prefix before its S3 service, whatever the query.
-//! The faithful rows therefore sit in front of those standard rows and declare each overlap. The
-//! count is the finding: under `ShadowingPolicy::EveryOverlap` a path-literal GET admin row owes
-//! 10 declarations and a PUT row 11, one per standard row in that method-and-target cell.
+//! A claimed row cannot overlap an S3 row: the router asks the claim first, and a request inside
+//! `/rustfs/admin` or `/minio/admin` is answered by a claimed row or by nothing. RustFS's own
+//! router behaves the same way: it takes the whole admin prefix ahead of its S3 service. The 21
+//! declarations the #778 slice owed for its two path-literal rows are therefore gone.
+//! `ReplicationMetricsV2` is a different case. It is an S3-shaped request by design, and every overlap
+//! its placement creates, such as `?acl&replication-metrics=2`, is a real routing decision that
+//! stays declared: 34 of them, one per standard `GET` bucket row.
 
 use std::sync::{Arc, Mutex};
 
@@ -56,16 +60,19 @@ use rustfs_gateway::{
 use rustfs_gateway_core::codec::{
     CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode, ResponseBody,
 };
-use rustfs_gateway_core::dialect::{Dialect, DialectError, DialectOverlay, DialectRoute, OverlayRow};
+use rustfs_gateway_core::dialect::{ClaimedRoute, ClaimedRow, Dialect, DialectError, DialectOverlay, DialectRoute, OverlayRow};
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec};
-use rustfs_gateway_core::route::{Predicate, ShadowingDecl, TargetKind};
+use rustfs_gateway_core::route::{PathClaim, Predicate, ShadowingDecl, TargetKind};
 use rustfs_gateway_core::{DerivedResourceError, NoDerived};
 use rustfs_gateway_sig::{OperationFloor, RegionSet, SecurityFloor, SigService};
 use rustfs_gateway_types::BucketName;
-use sha2::{Digest, Sha256};
 
 use crate::operation_diff::s3s_f3e17541::context::{ACCESS_KEY, REGIONS, SECRET_KEY};
+
+mod seal;
+
+pub(crate) use self::seal::{open, same_bytes, seal};
 
 /// The RustFS router whose `is_match` claims the admin prefixes and the extension queries before
 /// its S3 service, at the commit the inventory was generated from.
@@ -75,28 +82,56 @@ const RUSTFS_ROUTER: &str =
 const ISSUE: &str = "https://github.com/rustfs/backlog/issues/1744";
 const ROUTER_EVIDENCE: &[&str] = &[RUSTFS_ROUTER];
 
-const ADMIN_PATH_CLAIM: &str = "RustFS's admin router answers every request on this admin path before its S3 service, \
-                                whatever the query, so this key is not reachable through S3 on RustFS either.";
+const RUSTFS_PREFIX_CLAIM: &str = "RustFS's admin router answers every path-style request under this prefix before its S3 \
+                                   service, whatever the query.";
+const MINIO_PREFIX_CLAIM: &str = "RustFS serves its admin API a second time under the MinIO prefix, and seals admin \
+                                  bodies with the caller's secret only there.";
 const EXTENSION_CLAIM: &str = "RustFS's admin router answers a bucket GET carrying replication-metrics=2 before its S3 \
                                service, whatever else the query carries.";
+
+/// The two prefixes the dialect takes away from S3 routing.
+pub(crate) const CLAIMS: &[PathClaim] = &[
+    PathClaim {
+        prefix: "/rustfs/admin",
+        reason: RUSTFS_PREFIX_CLAIM,
+        evidence: ROUTER_EVIDENCE,
+    },
+    PathClaim {
+        prefix: "/minio/admin",
+        reason: MINIO_PREFIX_CLAIM,
+        evidence: ROUTER_EVIDENCE,
+    },
+];
 
 /// `rustfs:ServerInfo`.
 pub(crate) const SERVER_INFO: &str = "rustfs:ServerInfo";
 /// Its path, which the inventory records.
 pub(crate) const SERVER_INFO_PATH: &str = "/rustfs/admin/v3/info";
+/// Its MinIO alias.
+pub(crate) const SERVER_INFO_ALIAS: &str = "/minio/admin/v3/info";
 /// Its action.
 pub(crate) const SERVER_INFO_ACTION: &str = "admin:ServerInfo";
-const SERVER_INFO_PRECEDENCE: u16 = 60;
+const SERVER_INFO_PRECEDENCE: u16 = 10;
 
 /// `rustfs:AddServiceAccount`.
 pub(crate) const ADD_SERVICE_ACCOUNT: &str = "rustfs:AddServiceAccount";
-/// The path the inventory records; RustFS serves it at the MinIO alias too.
+/// The path the inventory records.
 pub(crate) const ADD_SERVICE_ACCOUNT_PATH: &str = "/rustfs/admin/v3/add-service-account";
-/// The alias this slice registers: the one where RustFS seals the bodies with the caller's secret.
+/// The alias where RustFS seals the bodies with the caller's secret.
 pub(crate) const ADD_SERVICE_ACCOUNT_ALIAS: &str = "/minio/admin/v3/add-service-account";
 /// Its action.
 pub(crate) const ADD_SERVICE_ACCOUNT_ACTION: &str = "admin:CreateServiceAccount";
-const ADD_SERVICE_ACCOUNT_PRECEDENCE: u16 = 61;
+const ADD_SERVICE_ACCOUNT_PRECEDENCE: u16 = 11;
+
+/// `rustfs:GetTier`.
+pub(crate) const GET_TIER: &str = "rustfs:GetTier";
+/// The template the inventory records.
+pub(crate) const GET_TIER_TEMPLATE: &str = "/rustfs/admin/v3/tier/{tier}";
+/// Its MinIO alias.
+pub(crate) const GET_TIER_ALIAS: &str = "/minio/admin/v3/tier/{tier}";
+/// Its action.
+pub(crate) const GET_TIER_ACTION: &str = "admin:ListTier";
+const GET_TIER_PRECEDENCE: u16 = 12;
 
 /// `rustfs:ReplicationMetricsV2`.
 pub(crate) const REPLICATION_METRICS_V2: &str = "rustfs:ReplicationMetricsV2";
@@ -129,7 +164,7 @@ fn json(value: &serde_json::Value) -> AdminBody {
     }
 }
 
-// ── the three operations ──────────────────────────────────────────────────────────────────────
+// ── the operations ────────────────────────────────────────────────────────────────────────────
 
 // The whole module is test-only through `lib.rs`; the operations also sit inside their own
 // `#[cfg(test)]` item because `check_op_file_shape.sh` admits an `impl Operation` outside an ops
@@ -187,10 +222,12 @@ mod operations {
     /// `PUT /minio/admin/v3/add-service-account`, whose body is sealed with the caller's secret.
     pub(crate) struct AddServiceAccount;
 
+    /// The one spec here that opts in to the caller's secret (ADR-0024).
     static ADD_SERVICE_ACCOUNT_SPEC: OperationSpec = OperationSpec::builder(ADD_SERVICE_ACCOUNT, 200, None)
         .handler_deadline_class(HandlerDeadlineClass::Standard)
         .required_params(&[])
         .auth(AuthRequirement::new(ADD_SERVICE_ACCOUNT_ACTION, ResourceShape::Service))
+        .hand_caller_secret_to_handler()
         .build();
 
     static ADD_SERVICE_ACCOUNT_FLOOR: OperationFloor = OperationFloor::custom(ADD_SERVICE_ACCOUNT, SigService::S3);
@@ -221,6 +258,51 @@ mod operations {
     impl OperationCodec for AddServiceAccount {
         fn decode(_request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
             body.into_buffered()
+        }
+
+        fn encode(output: Self::Output, _request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
+            encode_admin(output, status)
+        }
+    }
+
+    /// `GET /rustfs/admin/v3/tier/{tier}`.
+    pub(crate) struct GetTier;
+
+    static GET_TIER_SPEC: OperationSpec = OperationSpec::builder(GET_TIER, 200, None)
+        .handler_deadline_class(HandlerDeadlineClass::Standard)
+        .required_params(&[])
+        .auth(AuthRequirement::new(GET_TIER_ACTION, ResourceShape::Service))
+        .build();
+
+    static GET_TIER_FLOOR: OperationFloor = OperationFloor::custom(GET_TIER, SigService::S3);
+
+    impl Operation for GetTier {
+        const NAME: &'static str = GET_TIER;
+
+        type Input = ();
+        type Output = AdminBody;
+        type DerivedResources = NoDerived;
+
+        fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, DerivedResourceError> {
+            Ok(NoDerived)
+        }
+
+        fn seal_derived_input(_input: &mut Self::Input) {}
+
+        fn spec() -> &'static OperationSpec {
+            &GET_TIER_SPEC
+        }
+
+        fn floor() -> &'static OperationFloor {
+            &GET_TIER_FLOOR
+        }
+    }
+
+    impl OperationCodec for GetTier {
+        const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
+
+        fn decode(_request: &MetaView<'_>, _body: RequestBody) -> Result<Self::Input, CodecError> {
+            Ok(())
         }
 
         fn encode(output: Self::Output, _request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
@@ -274,20 +356,47 @@ mod operations {
     }
 }
 
-pub(crate) use operations::{AddServiceAccount, ReplicationMetricsV2, ServerInfo};
+pub(crate) use operations::{AddServiceAccount, GetTier, ReplicationMetricsV2, ServerInfo};
 
-// ── the route rows and what each one hides ────────────────────────────────────────────────────
+// ── the rows ──────────────────────────────────────────────────────────────────────────────────
 
-static SERVER_INFO_SELECTOR: &[Predicate] = &[
-    Predicate::Method(Method::GET),
-    Predicate::Target(TargetKind::Object),
-    Predicate::PathLiteral(SERVER_INFO_PATH),
+static GET: &[Predicate] = &[Predicate::Method(Method::GET)];
+static PUT: &[Predicate] = &[Predicate::Method(Method::PUT)];
+
+/// The canonical row, then the MinIO alias.
+pub(crate) static SERVER_INFO_ROWS: &[ClaimedRow] = &[
+    ClaimedRow {
+        template: SERVER_INFO_PATH,
+        selector: GET,
+    },
+    ClaimedRow {
+        template: SERVER_INFO_ALIAS,
+        selector: GET,
+    },
 ];
 
-static ADD_SERVICE_ACCOUNT_SELECTOR: &[Predicate] = &[
-    Predicate::Method(Method::PUT),
-    Predicate::Target(TargetKind::Object),
-    Predicate::PathLiteral(ADD_SERVICE_ACCOUNT_ALIAS),
+/// The canonical row, then the MinIO alias where the bodies are sealed.
+pub(crate) static ADD_SERVICE_ACCOUNT_ROWS: &[ClaimedRow] = &[
+    ClaimedRow {
+        template: ADD_SERVICE_ACCOUNT_PATH,
+        selector: PUT,
+    },
+    ClaimedRow {
+        template: ADD_SERVICE_ACCOUNT_ALIAS,
+        selector: PUT,
+    },
+];
+
+/// The canonical template, then the MinIO alias.
+pub(crate) static GET_TIER_ROWS: &[ClaimedRow] = &[
+    ClaimedRow {
+        template: GET_TIER_TEMPLATE,
+        selector: GET,
+    },
+    ClaimedRow {
+        template: GET_TIER_ALIAS,
+        selector: GET,
+    },
 ];
 
 static REPLICATION_METRICS_SELECTOR: &[Predicate] = &[
@@ -296,91 +405,64 @@ static REPLICATION_METRICS_SELECTOR: &[Predicate] = &[
     Predicate::QueryEquals(REPLICATION_METRICS_QUERY.0, REPLICATION_METRICS_QUERY.1),
 ];
 
-const fn claims(winner: &'static str, shadowed: &'static str, reason: &'static str) -> ShadowingDecl {
+const fn ahead_of(shadowed: &'static str) -> ShadowingDecl {
     ShadowingDecl {
-        winner,
+        winner: REPLICATION_METRICS_V2,
         shadowed,
-        reason,
+        reason: EXTENSION_CLAIM,
         evidence: ROUTER_EVIDENCE,
     }
 }
 
-/// Every standard `GET` row on an object.
-pub(crate) static SERVER_INFO_SHADOWS: &[ShadowingDecl] = &[
-    claims(SERVER_INFO, "ListParts", ADMIN_PATH_CLAIM),
-    claims(SERVER_INFO, "GetObjectAttributes", ADMIN_PATH_CLAIM),
-    claims(SERVER_INFO, "GetObjectTagging", ADMIN_PATH_CLAIM),
-    claims(SERVER_INFO, "GetObjectRetention", ADMIN_PATH_CLAIM),
-    claims(SERVER_INFO, "GetObjectLegalHold", ADMIN_PATH_CLAIM),
-    claims(SERVER_INFO, "GetObjectAcl", ADMIN_PATH_CLAIM),
-    claims(SERVER_INFO, "GetObjectAnnotation", ADMIN_PATH_CLAIM),
-    claims(SERVER_INFO, "ListObjectAnnotations", ADMIN_PATH_CLAIM),
-    claims(SERVER_INFO, "GetObjectTorrent", ADMIN_PATH_CLAIM),
-    claims(SERVER_INFO, "GetObject", ADMIN_PATH_CLAIM),
-];
-
-/// Every standard `PUT` row on an object.
-pub(crate) static ADD_SERVICE_ACCOUNT_SHADOWS: &[ShadowingDecl] = &[
-    claims(ADD_SERVICE_ACCOUNT, "UploadPartCopy", ADMIN_PATH_CLAIM),
-    claims(ADD_SERVICE_ACCOUNT, "UploadPart", ADMIN_PATH_CLAIM),
-    claims(ADD_SERVICE_ACCOUNT, "PutObjectTagging", ADMIN_PATH_CLAIM),
-    claims(ADD_SERVICE_ACCOUNT, "PutObjectRetention", ADMIN_PATH_CLAIM),
-    claims(ADD_SERVICE_ACCOUNT, "PutObjectLegalHold", ADMIN_PATH_CLAIM),
-    claims(ADD_SERVICE_ACCOUNT, "PutObjectAcl", ADMIN_PATH_CLAIM),
-    claims(ADD_SERVICE_ACCOUNT, "PutObjectAnnotation", ADMIN_PATH_CLAIM),
-    claims(ADD_SERVICE_ACCOUNT, "UpdateObjectEncryption", ADMIN_PATH_CLAIM),
-    claims(ADD_SERVICE_ACCOUNT, "RenameObject", ADMIN_PATH_CLAIM),
-    claims(ADD_SERVICE_ACCOUNT, "CopyObject", ADMIN_PATH_CLAIM),
-    claims(ADD_SERVICE_ACCOUNT, "PutObject", ADMIN_PATH_CLAIM),
-];
-
-/// Every standard `GET` row on a bucket.
+/// Every standard `GET` row on a bucket: the S3-shaped row's real routing decisions.
 pub(crate) static REPLICATION_METRICS_SHADOWS: &[ShadowingDecl] = &[
-    claims(REPLICATION_METRICS_V2, "GetBucketAccelerateConfiguration", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketLogging", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketNotificationConfiguration", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketPolicy", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketPolicyStatus", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetPublicAccessBlock", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketRequestPayment", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketVersioning", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketWebsite", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketAcl", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketOwnershipControls", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketIntelligentTieringConfiguration", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "ListBucketIntelligentTieringConfigurations", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketAnalyticsConfiguration", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "ListBucketAnalyticsConfigurations", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketAbac", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketInventoryConfiguration", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "ListBucketInventoryConfigurations", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "CreateSession", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketMetadataConfiguration", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketMetadataTableConfiguration", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketMetricsConfiguration", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "ListBucketMetricsConfigurations", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketLocation", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketCors", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketTagging", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketLifecycleConfiguration", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketEncryption", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetBucketReplication", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "GetObjectLockConfiguration", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "ListMultipartUploads", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "ListObjectsV2", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "ListObjectVersions", EXTENSION_CLAIM),
-    claims(REPLICATION_METRICS_V2, "ListObjects", EXTENSION_CLAIM),
+    ahead_of("GetBucketAccelerateConfiguration"),
+    ahead_of("GetBucketLogging"),
+    ahead_of("GetBucketNotificationConfiguration"),
+    ahead_of("GetBucketPolicy"),
+    ahead_of("GetBucketPolicyStatus"),
+    ahead_of("GetPublicAccessBlock"),
+    ahead_of("GetBucketRequestPayment"),
+    ahead_of("GetBucketVersioning"),
+    ahead_of("GetBucketWebsite"),
+    ahead_of("GetBucketAcl"),
+    ahead_of("GetBucketOwnershipControls"),
+    ahead_of("GetBucketIntelligentTieringConfiguration"),
+    ahead_of("ListBucketIntelligentTieringConfigurations"),
+    ahead_of("GetBucketAnalyticsConfiguration"),
+    ahead_of("ListBucketAnalyticsConfigurations"),
+    ahead_of("GetBucketAbac"),
+    ahead_of("GetBucketInventoryConfiguration"),
+    ahead_of("ListBucketInventoryConfigurations"),
+    ahead_of("CreateSession"),
+    ahead_of("GetBucketMetadataConfiguration"),
+    ahead_of("GetBucketMetadataTableConfiguration"),
+    ahead_of("GetBucketMetricsConfiguration"),
+    ahead_of("ListBucketMetricsConfigurations"),
+    ahead_of("GetBucketLocation"),
+    ahead_of("GetBucketCors"),
+    ahead_of("GetBucketTagging"),
+    ahead_of("GetBucketLifecycleConfiguration"),
+    ahead_of("GetBucketEncryption"),
+    ahead_of("GetBucketReplication"),
+    ahead_of("GetObjectLockConfiguration"),
+    ahead_of("ListMultipartUploads"),
+    ahead_of("ListObjectsV2"),
+    ahead_of("ListObjectVersions"),
+    ahead_of("ListObjects"),
 ];
 
-/// The reviewed record of the three rows.
+/// The reviewed record: the two claims and the four operations, alias rows included.
 static OVERLAY: DialectOverlay = DialectOverlay {
     name: "rustfs-admin-proof",
     vendor: "rustfs",
+    claims: CLAIMS,
     operations: &[
         OverlayRow {
             name: SERVER_INFO,
             precedence: SERVER_INFO_PRECEDENCE,
-            selector: "Method(GET) ∧ Target(Object) ∧ PathLiteral(\"/rustfs/admin/v3/info\")",
+            selector: "PathTemplate(\"/rustfs/admin/v3/info\") ∧ Method(GET) ∨ \
+                       PathTemplate(\"/minio/admin/v3/info\") ∧ Method(GET)",
             action: SERVER_INFO_ACTION,
             resource: ResourceShape::Service,
             success_status: 200,
@@ -390,8 +472,20 @@ static OVERLAY: DialectOverlay = DialectOverlay {
         OverlayRow {
             name: ADD_SERVICE_ACCOUNT,
             precedence: ADD_SERVICE_ACCOUNT_PRECEDENCE,
-            selector: "Method(PUT) ∧ Target(Object) ∧ PathLiteral(\"/minio/admin/v3/add-service-account\")",
+            selector: "PathTemplate(\"/rustfs/admin/v3/add-service-account\") ∧ Method(PUT) ∨ \
+                       PathTemplate(\"/minio/admin/v3/add-service-account\") ∧ Method(PUT)",
             action: ADD_SERVICE_ACCOUNT_ACTION,
+            resource: ResourceShape::Service,
+            success_status: 200,
+            anonymous: false,
+            evidence: &[RUSTFS_ROUTER, ISSUE],
+        },
+        OverlayRow {
+            name: GET_TIER,
+            precedence: GET_TIER_PRECEDENCE,
+            selector: "PathTemplate(\"/rustfs/admin/v3/tier/{tier}\") ∧ Method(GET) ∨ \
+                       PathTemplate(\"/minio/admin/v3/tier/{tier}\") ∧ Method(GET)",
+            action: GET_TIER_ACTION,
             resource: ResourceShape::Service,
             success_status: 200,
             anonymous: false,
@@ -410,100 +504,37 @@ static OVERLAY: DialectOverlay = DialectOverlay {
     ],
 };
 
-/// The declarations each row carries; tests swap one set to prove each declaration is needed.
-#[derive(Clone, Copy)]
-pub(crate) struct Shadows {
-    pub(crate) server_info: &'static [ShadowingDecl],
-    pub(crate) add_service_account: &'static [ShadowingDecl],
-    pub(crate) replication_metrics: &'static [ShadowingDecl],
-}
-
-impl Shadows {
-    /// The reviewed declarations.
-    pub(crate) const DECLARED: Self = Self {
-        server_info: SERVER_INFO_SHADOWS,
-        add_service_account: ADD_SERVICE_ACCOUNT_SHADOWS,
-        replication_metrics: REPLICATION_METRICS_SHADOWS,
-    };
-}
-
-/// The three rows with `shadows`.
-pub(crate) fn admin_dialect_with(shadows: Shadows) -> Result<Dialect, Vec<DialectError>> {
+/// The four operations, with `replication_metrics` as the S3-shaped row's declarations; tests
+/// swap them to prove each is needed.
+pub(crate) fn admin_dialect_with(replication_metrics: &'static [ShadowingDecl]) -> Result<Dialect, Vec<DialectError>> {
     Dialect::assemble(&OVERLAY)
-        .declare::<ServerInfo>(DialectRoute {
+        .declare_claimed::<ServerInfo>(ClaimedRoute {
             precedence: SERVER_INFO_PRECEDENCE,
-            selector: SERVER_INFO_SELECTOR,
-            path_shape: SERVER_INFO_PATH,
-            shadows: shadows.server_info,
+            rows: SERVER_INFO_ROWS,
+            shadows: &[],
         })
-        .declare::<AddServiceAccount>(DialectRoute {
+        .declare_claimed::<AddServiceAccount>(ClaimedRoute {
             precedence: ADD_SERVICE_ACCOUNT_PRECEDENCE,
-            selector: ADD_SERVICE_ACCOUNT_SELECTOR,
-            path_shape: ADD_SERVICE_ACCOUNT_ALIAS,
-            shadows: shadows.add_service_account,
+            rows: ADD_SERVICE_ACCOUNT_ROWS,
+            shadows: &[],
+        })
+        .declare_claimed::<GetTier>(ClaimedRoute {
+            precedence: GET_TIER_PRECEDENCE,
+            rows: GET_TIER_ROWS,
+            shadows: &[],
         })
         .declare::<ReplicationMetricsV2>(DialectRoute {
             precedence: REPLICATION_METRICS_PRECEDENCE,
             selector: REPLICATION_METRICS_SELECTOR,
             path_shape: "/{Bucket}",
-            shadows: shadows.replication_metrics,
+            shadows: replication_metrics,
         })
         .build()
 }
 
-/// The three rows with the reviewed declarations.
+/// The four operations with the reviewed declarations.
 pub(crate) fn admin_dialect() -> Dialect {
-    admin_dialect_with(Shadows::DECLARED).expect("the record and the declarations state the same facts")
-}
-
-// ── the caller-secret seal ────────────────────────────────────────────────────────────────────
-
-const TAG_LENGTH: usize = 32;
-
-fn keystream(secret: &[u8], length: usize) -> Vec<u8> {
-    let mut stream = Vec::with_capacity(length + TAG_LENGTH);
-    let mut counter = 0_u64;
-    while stream.len() < length {
-        let mut block = Sha256::new();
-        block.update(b"rustfs-admin-proof keystream");
-        block.update(secret);
-        block.update(counter.to_be_bytes());
-        stream.extend_from_slice(&block.finalize());
-        counter += 1;
-    }
-    stream.truncate(length);
-    stream
-}
-
-fn tag(secret: &[u8], plain: &[u8]) -> [u8; TAG_LENGTH] {
-    let mut tag = Sha256::new();
-    tag.update(b"rustfs-admin-proof tag");
-    tag.update(secret);
-    tag.update(plain);
-    tag.finalize().into()
-}
-
-/// Seals `plain` under `secret`, the way a madmin client seals an admin body (a stand-in cipher).
-pub(crate) fn seal(secret: &[u8], plain: &[u8]) -> Vec<u8> {
-    let mut sealed = tag(secret, plain).to_vec();
-    sealed.extend(plain.iter().zip(keystream(secret, plain.len())).map(|(byte, key)| byte ^ key));
-    sealed
-}
-
-/// Opens a body sealed under `secret`, or `None` when it was sealed under another key.
-pub(crate) fn open(secret: &[u8], sealed: &[u8]) -> Option<Vec<u8>> {
-    let (expected, cipher) = sealed.split_at_checked(TAG_LENGTH)?;
-    let plain = cipher
-        .iter()
-        .zip(keystream(secret, cipher.len()))
-        .map(|(byte, key)| byte ^ key)
-        .collect::<Vec<_>>();
-    same_bytes(&tag(secret, &plain), expected).then_some(plain)
-}
-
-/// A comparison that reads every byte, for key material and tags.
-pub(crate) fn same_bytes(left: &[u8], right: &[u8]) -> bool {
-    left.len() == right.len() && left.iter().zip(right).fold(0_u8, |acc, (a, b)| acc | (a ^ b)) == 0
+    admin_dialect_with(REPLICATION_METRICS_SHADOWS).expect("the record and the declarations state the same facts")
 }
 
 // ── the authorizer and the backend ────────────────────────────────────────────────────────────
@@ -517,6 +548,7 @@ pub(crate) struct AuthzCall {
     pub(crate) action: String,
     pub(crate) caller: Option<String>,
     pub(crate) bucket: Option<String>,
+    pub(crate) key: Option<String>,
 }
 
 type Policy = Box<dyn Fn(&AuthzRequest<'_>) -> bool + Send + Sync>;
@@ -535,6 +567,7 @@ impl RecordingAuthorizer {
             action: request.action.to_owned(),
             caller: request.identity.map(|identity| identity.access_key_id().to_owned()),
             bucket: request.bucket.map(|bucket| bucket.as_str().to_owned()),
+            key: request.key.map(|key| key.as_str().to_owned()),
         });
         if (self.policy)(request) {
             Decision::Allow
@@ -571,6 +604,8 @@ pub(crate) struct Seen {
     pub(crate) context_debug_shows_secret: bool,
     pub(crate) raw_path: String,
     pub(crate) bucket: Option<String>,
+    pub(crate) key: Option<String>,
+    pub(crate) params: Vec<(String, String)>,
 }
 
 /// A backend that records what each handler was handed, and every account it created.
@@ -600,6 +635,12 @@ impl Backend {
             context_debug_shows_secret: format!("{context:?}").contains(SECRET_KEY),
             raw_path: context.raw_path().to_owned(),
             bucket: context.bucket().map(|bucket| bucket.as_str().to_owned()),
+            key: context.key().map(|key| key.as_str().to_owned()),
+            params: context
+                .path_params()
+                .iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .collect(),
         });
     }
 
@@ -634,6 +675,17 @@ impl Backend {
         }))
     }
 
+    fn get_tier(&self, request: &Req<GetTier>) -> HandlerResult<GetTier> {
+        self.see(request.context());
+        // The typed value the template extracted, decoded once; never a second parse of the path.
+        let tier: String = request
+            .context()
+            .path_params()
+            .parse("tier")
+            .map_err(|_| HandlerError::internal_error("the template bound no tier"))?;
+        Ok(Resp::new(json(&serde_json::json!({"tier": tier, "status": "online"}))))
+    }
+
     fn replication_metrics(&self, request: &Req<ReplicationMetricsV2>) -> HandlerResult<ReplicationMetricsV2> {
         self.see(request.context());
         Ok(Resp::new(json(&serde_json::json!({"bucket": request.input().as_str(), "version": 2}))))
@@ -656,6 +708,7 @@ macro_rules! handler {
 
 handler!(ServerInfo, server_info);
 handler!(AddServiceAccount, add_service_account);
+handler!(GetTier, get_tier);
 handler!(ReplicationMetricsV2, replication_metrics);
 
 impl Backend {
@@ -678,7 +731,8 @@ handler!(dto::ListObjects, list_objects);
 /// How one service is assembled.
 #[derive(Clone, Copy)]
 pub(crate) struct Options {
-    /// Whether the authenticator hands the caller's secret to handlers (ADR-0022).
+    /// Whether the authenticator hands the caller's secret over. The assembly keeps ADR-0024's
+    /// default scope, so an operation receives it only when its spec opted in.
     pub(crate) secret_hand_off: bool,
     /// Whether anonymous admission is delegated to the authorizer (ADR-0021).
     pub(crate) delegate_anonymous: bool,
@@ -717,6 +771,7 @@ pub(crate) fn assemble(options: Options, policy: impl Fn(&AuthzRequest<'_>) -> b
         .dialect(&admin_dialect())
         .register::<ServerInfo, _>(Arc::clone(&backend))
         .register::<AddServiceAccount, _>(Arc::clone(&backend))
+        .register::<GetTier, _>(Arc::clone(&backend))
         .register::<ReplicationMetricsV2, _>(Arc::clone(&backend))
         .register::<dto::GetObject, _>(Arc::clone(&backend))
         .register::<dto::ListObjects, _>(Arc::clone(&backend));

@@ -11,7 +11,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/lib.rs` | Modules and public re-exports | A downstream caller cannot name a type |
 | `src/builder.rs`, `src/builder/assembly_update.rs` | Registration and validated initial or replacement assemblies | Adding a knob or diagnosing candidate validation |
 | `src/config.rs`, `src/routing.rs` | One atomic settings, routing, and middleware snapshot | Updating a live generation or checking one-load-per-request |
-| `src/service.rs`, `src/service/update.rs` | Ordered pipeline and atomic assembly publication | Moving a stage, replacing middleware, or tracing a response |
+| `src/service.rs`, `src/service/update.rs` | Ordered pipeline and atomic assembly publication; ADR-0024's service-level addressing, secret opt-in and typed path values are decided in `src/routed_facts.rs` | Moving a stage, replacing middleware, or tracing a response |
 | `src/service_tests.rs` | The pipeline's own unit suite, split out at the 800-line limit | Changing what is decidable without a request |
 | `src/adapt.rs` | tower and hyper adapters | Wiring a server or checking `Infallible` |
 | `src/conn/**` | Optional plaintext HTTP/1.1 request framing and response transport | Auditing the self-held socket path or adding file-region transfer |
@@ -31,7 +31,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/monomorphic.rs` | Concrete-backend service and type-level operation set | Building or auditing static dispatch |
 | `src/operation_mode.rs` | Dynamic/static adapters for the common pipeline | Auditing how a routed operation reaches its codec and handler |
 | `src/panic_boundary.rs` | Panic isolation for deployment-provided futures | An extension panic escapes the request boundary |
-| `src/posture.rs` | Startup-only security posture rendering and the public assembly snapshot | Auditing deployment security visibility |
+| `src/posture.rs` | Startup-only security posture rendering, the `DIALECT_POSTURE` line (claimed prefixes, caller-secret operations), and the public assembly snapshot | Auditing deployment security visibility |
 | `src/request_deadline.rs` | Runtime-independent policy and failure-floor deadlines | Editing timeout mechanics used by the request pipeline |
 | `src/request_body.rs` | Live verified request-body producer, terminal verdict, and progress signal | A streaming upload crosses the codec or handler boundary |
 | `src/stamp.rs` | Framework-owned response headers | A response lacks IDs, `Server`, or `Date` |

@@ -104,6 +104,7 @@ static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
 static OVERLAY: DialectOverlay = DialectOverlay {
     name: "minio-replication",
     vendor: "minio",
+    claims: &[],
     operations: &[OverlayRow {
         name: NAME,
         precedence: PRECEDENCE,

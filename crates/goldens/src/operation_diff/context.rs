@@ -259,7 +259,7 @@ impl ContextRequest {
 
 /// `YYYYMMDDTHHMMSSZ` for a Unix time. Both verifiers compare the stamp against their own clock,
 /// so the fixture is signed now rather than at a fixed instant.
-fn amz_date(unix: i64) -> String {
+pub(crate) fn amz_date(unix: i64) -> String {
     let days = unix.div_euclid(86_400);
     let second_of_day = unix.rem_euclid(86_400);
     // Civil-from-days (proleptic Gregorian), days counted from 1970-01-01.
@@ -451,6 +451,11 @@ fn gateway_service(request: &ContextRequest, recorded: &Arc<Mutex<Option<Recorde
         .bucket_owner_source(FixtureOwner)
         .register::<dto::PutObject, _>(Arc::clone(&backend))
         .register::<dto::GetBucketLocation, _>(backend);
+    // The seam fills s3s's `Credentials` for every handler it wraps and refuses to invent the
+    // secret, so the migration adapter widens the hand-off to every operation (ADR-0024).
+    if request.secret_hand_off {
+        builder = builder.hand_caller_secret_to_every_operation_after_listing_in_the_posture_report();
+    }
     if request.virtual_hosting {
         builder = builder.host_resolver(VirtualHostStyle::new([BASE_DOMAIN]).map_err(|error| format!("base domain: {error:?}"))?);
     }

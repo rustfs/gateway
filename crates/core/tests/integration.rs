@@ -50,6 +50,12 @@ mod cors_roundtrip;
 #[path = "dialect.rs"]
 mod dialect;
 
+#[path = "dialect_claims.rs"]
+mod dialect_claims;
+
+#[path = "dialect_claims_refusals.rs"]
+mod dialect_claims_refusals;
+
 #[path = "dto_cold_split.rs"]
 mod dto_cold_split;
 

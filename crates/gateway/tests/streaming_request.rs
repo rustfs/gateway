@@ -66,6 +66,7 @@ static STREAMING_PREDICATES: &[Predicate] = &[Predicate::Method(http::Method::PU
 static STREAMING_OVERLAY: DialectOverlay = DialectOverlay {
     name: "example-streaming-test",
     vendor: "example",
+    claims: &[],
     operations: &[OverlayRow {
         name: "example:StreamingPut",
         precedence: 50,

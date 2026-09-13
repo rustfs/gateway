@@ -14,11 +14,11 @@ authors = ["RustFS Team"]
 [workspace.dependencies]
 # Internal crates. Path only: nothing here is published, so the version double-write
 # that crates.io would require is just another thing to keep in sync.
-rustfs-gateway = { path = "crates/gateway", version = "0.44.0", default-features = false }
+rustfs-gateway = { path = "crates/gateway", version = "0.45.0", default-features = false }
 rustfs-gateway-codegen = { path = "crates/codegen", version = "0.16.0" }
 rustfs-gateway-conformance = { path = "crates/conformance", version = "0.10.2", default-features = false }
 rustfs-gateway-corpus = { path = "crates/corpus", version = "0.1.0" }
-rustfs-gateway-core = { path = "crates/core", version = "0.36.0" }
+rustfs-gateway-core = { path = "crates/core", version = "0.37.0" }
 rustfs-gateway-http = { path = "crates/http", version = "0.1.4" }
 rustfs-gateway-macros = { path = "crates/macros", version = "0.1.4" }
 rustfs-gateway-model = { path = "crates/model", version = "0.13.0" }

@@ -295,6 +295,7 @@ static QUERY_SHAPED_PREDICATES: &[Predicate] = &[
 static QUERY_SHAPED_OVERLAY: DialectOverlay = DialectOverlay {
     name: "example-query-test",
     vendor: "example",
+    claims: &[],
     operations: &[OverlayRow {
         name: "example:QueryShaped",
         precedence: 49,

@@ -126,6 +126,7 @@ static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
 static ACME: DialectOverlay = DialectOverlay {
     name: "acme",
     vendor: "acme",
+    claims: &[],
     operations: &[OverlayRow {
         name: "acme:HeadObjectReport",
         precedence: 505,

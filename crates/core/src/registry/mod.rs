@@ -154,6 +154,9 @@ pub struct OperationSpec {
     /// [`RegistryError::MissingAuthRequirement`], so there is no way to install a handler for one.
     pub auth: Option<AuthRequirement>,
     handler_deadline_class: Option<HandlerDeadlineClass>,
+    /// Whether this operation's handler is handed the caller's secret (ADR-0024). Private, so the
+    /// only way to set it is [`Self::hand_caller_secret_to_handler`] on the operation's own spec.
+    caller_secret: bool,
 }
 
 impl OperationSpec {
@@ -181,6 +184,7 @@ impl OperationSpec {
             not_configured_error,
             auth: None,
             handler_deadline_class: None,
+            caller_secret: false,
         }
     }
 
@@ -235,6 +239,7 @@ impl OperationSpec {
             not_configured_error,
             auth: None,
             handler_deadline_class: None,
+            caller_secret: false,
         }
     }
 
@@ -267,6 +272,33 @@ impl OperationSpec {
     pub fn deadline_class(&self) -> Option<HandlerDeadlineClass> {
         self.handler_deadline_class
             .or_else(|| standard_handler_deadline_class(self.name))
+    }
+
+    /// Opts this operation in to receiving the caller's secret (ADR-0024).
+    ///
+    /// The secret reaches the handler, as `RequestPrincipal::secret_key_from_authenticator_lookup`,
+    /// only when **both** this operation opted in **and** the authenticator that looked it up was
+    /// told to hand it over (ADR-0022). Anything else drops it, zeroized, as soon as the verdict is
+    /// read. Off by default, and meant for the few operations that genuinely need the key: an
+    /// admin call whose body the client sealed with it. A standard operation may not opt in;
+    /// registration refuses one that does.
+    #[must_use]
+    pub const fn hand_caller_secret_to_handler(mut self) -> Self {
+        self.caller_secret = true;
+        self
+    }
+
+    /// Whether this operation's handler receives the caller's secret. `false` unless the spec
+    /// called [`Self::hand_caller_secret_to_handler`]; nothing can flip it afterwards:
+    ///
+    /// ```compile_fail,E0616
+    /// fn flip(spec: &mut rustfs_gateway_core::OperationSpec) {
+    ///     spec.caller_secret = true;
+    /// }
+    /// ```
+    #[must_use]
+    pub const fn receives_caller_secret(&self) -> bool {
+        self.caller_secret
     }
 
     /// Finishes the specification.

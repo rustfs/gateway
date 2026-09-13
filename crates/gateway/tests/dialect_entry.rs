@@ -30,6 +30,7 @@ use rustfs_gateway_core::{
 static PING_OVERLAY: DialectOverlay = DialectOverlay {
     name: "example",
     vendor: "example",
+    claims: &[],
     operations: &[OverlayRow {
         name: "example:Ping",
         precedence: 50,

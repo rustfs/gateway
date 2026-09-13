@@ -313,6 +313,10 @@ pub struct RouteRequestParts<'a> {
     pub query: QueryView<'a>,
     /// The headers, borrowed.
     pub headers: HeaderView<'a>,
+    /// Whether the host resolver took the bucket from the host (virtual-hosted style), so that the
+    /// whole path is an object key. A dialect's path-prefix claim never reads such a path: inside
+    /// a bucket's key space there is no namespace for a dialect to claim (ADR-0024).
+    pub host_named_bucket: bool,
 }
 
 impl<'a> RouteRequestParts<'a> {

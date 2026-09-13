@@ -64,6 +64,7 @@ impl RequestFixture {
             arn_form: None,
             query: QueryView::new(self.query, &self.index),
             headers: HeaderView::new(&self.headers),
+            host_named_bucket: false,
         }
     }
 }

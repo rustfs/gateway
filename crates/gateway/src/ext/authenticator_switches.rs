@@ -48,6 +48,10 @@ impl SigV4Authenticator {
     /// `Credentials::secret_key`. The secret travels only after the signature matched and the
     /// credential was admitted; a rejected or anonymous request never carries one, and no lookup
     /// happens that verification did not already make.
+    ///
+    /// Which handlers receive it is the assembly's decision (ADR-0024): by default only the
+    /// operations whose spec calls `OperationSpec::hand_caller_secret_to_handler`, and every one
+    /// only after `ServiceBuilder::hand_caller_secret_to_every_operation_after_listing_in_the_posture_report`.
     #[must_use]
     pub fn hand_caller_secret_to_handlers(mut self) -> Self {
         self.hand_secret = true;

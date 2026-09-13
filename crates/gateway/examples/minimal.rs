@@ -80,6 +80,7 @@ static PING_PREDICATES: &[Predicate] = &[Predicate::Method(http::Method::POST), 
 static PING_OVERLAY: DialectOverlay = DialectOverlay {
     name: "example-minimal",
     vendor: "example",
+    claims: &[],
     operations: &[OverlayRow {
         name: "example:Ping",
         precedence: 50,

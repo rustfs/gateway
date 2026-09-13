@@ -26,6 +26,7 @@ use super::{CONTENT_PING_PREDICATES, ContentPing, HEAD_PING_PREDICATES, HeadPing
 static PING_OVERLAY: DialectOverlay = DialectOverlay {
     name: "example-test",
     vendor: "example",
+    claims: &[],
     operations: &[OverlayRow {
         name: "example:Ping",
         precedence: 50,
@@ -41,6 +42,7 @@ static PING_OVERLAY: DialectOverlay = DialectOverlay {
 static HEAD_PING_OVERLAY: DialectOverlay = DialectOverlay {
     name: "example-test",
     vendor: "example",
+    claims: &[],
     operations: &[OverlayRow {
         name: "example:HeadPing",
         precedence: 51,
@@ -56,6 +58,7 @@ static HEAD_PING_OVERLAY: DialectOverlay = DialectOverlay {
 static CONTENT_PING_OVERLAY: DialectOverlay = DialectOverlay {
     name: "example-test",
     vendor: "example",
+    claims: &[],
     operations: &[OverlayRow {
         name: "example:ContentPing",
         precedence: 52,

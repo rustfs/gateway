@@ -154,6 +154,7 @@ static PART_PREDICATES: &[Predicate] = &[
 static SSE_TEST_OVERLAY: DialectOverlay = DialectOverlay {
     name: "example-sse-test",
     vendor: "example",
+    claims: &[],
     operations: &[
         OverlayRow {
             name: "example:SsePut",

@@ -54,6 +54,8 @@ mod cors_runtime;
 mod credential_runtime;
 #[path = "custom_signature_verifier.rs"]
 mod custom_signature_verifier;
+#[path = "dialect_claims_runtime.rs"]
+mod dialect_claims_runtime;
 #[path = "dialect_entry.rs"]
 mod dialect_entry;
 #[path = "error_context_filters.rs"]

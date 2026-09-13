@@ -114,6 +114,7 @@ pub(crate) fn verify_operation_route(name: &str) -> Result<(), String> {
         arn_form,
         query: wire.query(),
         headers: wire.headers(),
+        host_named_bucket: false,
     };
     if !entry.selector.matches(&request) {
         return Err(format!("the generated witness does not satisfy {name}: {}", entry.selector));

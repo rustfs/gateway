@@ -180,6 +180,7 @@ impl Handler<rustfs_gateway::dto::GetObject> for PingBackend {
 static BUCKET_PING_OVERLAY: DialectOverlay = DialectOverlay {
     name: "example-cors-test",
     vendor: "example",
+    claims: &[],
     operations: &[OverlayRow {
         name: "example:BucketPing",
         precedence: 52,
