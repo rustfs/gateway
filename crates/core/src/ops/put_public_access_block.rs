@@ -31,8 +31,8 @@
 //!
 //! `<PublicAccessBlockConfiguration>` carries four independent booleans and none of them is
 //! required. An omitted switch is `false` — the setting is off — which is the same thing the empty
-//! document means, and it is why the write refuses nothing but a body that is not the document
-//! (`q-pab-0002`). The read renders them in lower case, the XML boolean spelling.
+//! document means. Unknown request settings are refused (`q-pab-0005`), independently of
+//! persisted metadata decoding. The read renders the known switches in XML boolean spelling.
 //!
 //! # Why the row exists before a backend does
 //!

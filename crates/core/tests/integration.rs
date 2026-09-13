@@ -119,6 +119,9 @@ mod route_sizes;
 #[path = "route_table.rs"]
 mod route_table;
 
+#[path = "security_request_policy.rs"]
+mod security_request_policy;
+
 #[path = "select_restore_roundtrip.rs"]
 mod select_restore_roundtrip;
 

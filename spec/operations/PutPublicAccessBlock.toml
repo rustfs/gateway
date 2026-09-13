@@ -11,7 +11,7 @@ precedence = 226
 success_status = 200
 alt_success_statuses = []
 predicates = ["Method PUT", "Target Bucket", "QueryPresent ?publicAccessBlock"]
-quirks = ["q-pab-0002", "q-pab-0004"]
+quirks = ["q-pab-0002", "q-pab-0004", "q-pab-0005"]
 
 [auth]
 requirement = "Required"

@@ -157,7 +157,7 @@ error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "MalformedXML", "Inv
 url_encoded_fields = []
 input_hot = ["Key", "Retention", "VersionId", "BypassGovernanceRetention"]
 output_hot = []
-quirk_refs = ["q-lock-0004", "q-lock-0006", "q-lock-0007", "q-lock-0008", "q-lock-0012", "q-lock-0013", "q-lock-0015"]
+quirk_refs = ["q-lock-0004", "q-lock-0006", "q-lock-0007", "q-lock-0008", "q-lock-0012", "q-lock-0013", "q-lock-0014", "q-lock-0015"]
 
 # =============================================================================================
 # GetObjectLegalHold
@@ -198,7 +198,7 @@ error_codes = ["NoSuchBucket", "NoSuchKey", "AccessDenied", "MalformedXML", "Inv
 url_encoded_fields = []
 input_hot = ["Key", "LegalHold", "VersionId"]
 output_hot = []
-quirk_refs = ["q-lock-0005", "q-lock-0006", "q-lock-0007", "q-lock-0011", "q-lock-0015"]
+quirk_refs = ["q-lock-0005", "q-lock-0006", "q-lock-0007", "q-lock-0011", "q-lock-0014", "q-lock-0015"]
 
 # =============================================================================================
 # Nested shapes owned by this family
