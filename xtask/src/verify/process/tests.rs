@@ -362,6 +362,38 @@ fn deadline_expires_while_waiting_for_supervisor_lock_without_starting_command()
     fs::remove_dir_all(root).expect("test directory must be removable");
 }
 
+/// The lock wait reads the injected clock as well: a deadline that clock has already passed ends
+/// the wait at once, although the real clock is still an hour short of it. The receive bound only
+/// keeps an implementation that waits on the real clock from hanging the suite.
+#[test]
+fn an_injected_clock_past_the_deadline_ends_the_lock_wait() {
+    let root = test_root("lock-injected-clock");
+    let marker = root.join("started");
+    let lock = SUPERVISOR_LOCK.lock().expect("test must hold the supervisor lock");
+    let (sender, receiver) = mpsc::channel();
+    let worker_root = root.clone();
+    let worker_marker = marker.clone();
+    let worker = thread::spawn(move || {
+        let commands = vec![shell(
+            vec!["-c".to_owned(), format!("touch '{}'", worker_marker.display())],
+            "must not start",
+        )];
+        let deadline = Instant::now() + Duration::from_secs(3600);
+        let batch = run_with_clock(&commands, &worker_root, Some(deadline), &move || deadline);
+        sender.send(batch).expect("test result receiver must remain available");
+    });
+
+    let result = receiver.recv_timeout(Duration::from_secs(30));
+    drop(lock);
+    worker.join().expect("deadline worker must finish");
+    let batch = result.expect("the lock wait ignored the injected clock");
+
+    assert!(batch.timed_out, "an injected expiry during the lock wait was not reported");
+    assert!(batch.results.is_empty(), "a command was reported before the supervisor lock was acquired");
+    assert!(!marker.exists(), "a command started after its injected deadline expired");
+    fs::remove_dir_all(root).expect("test directory must be removable");
+}
+
 #[test]
 fn supervisor_lock_released_before_deadline_allows_command_to_start() {
     let root = test_root("lock-release");

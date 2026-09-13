@@ -66,6 +66,15 @@ impl ScriptedClock {
         Self::moved_by(Vec::new())
     }
 
+    /// A frozen clock an hour ahead of the real one, so a deadline it has passed is still in the
+    /// real clock's future: only a supervisor that reads this clock sees the deadline as expired.
+    fn ahead_of_the_real_clock() -> Self {
+        Self {
+            base: Instant::now() + Duration::from_secs(3600),
+            marks: Vec::new(),
+        }
+    }
+
     fn moved_by(marks: Vec<(PathBuf, Duration)>) -> Self {
         Self {
             base: Instant::now(),
@@ -172,7 +181,7 @@ fn every_stage_runs_and_a_stage_starts_all_its_commands_before_awaiting_one() {
 #[test]
 fn an_expired_gate_starts_no_stage() {
     let fixture = Fixture::new("expired");
-    let clock = ScriptedClock::frozen();
+    let clock = ScriptedClock::ahead_of_the_real_clock();
     let stages = [
         stage("build", vec![shell("touch build", "build")]),
         stage("tests", vec![shell("touch tests", "tests")]),
