@@ -63,7 +63,7 @@ use super::{HOST, block_on, oracle, s3s};
 
 /// The one credential both stacks' stores hold.
 pub(crate) const ACCESS_KEY: &str = "AKIDCONTEXTDIFF";
-const SECRET_KEY: &str = "context-diff-secret-key";
+pub(crate) const SECRET_KEY: &str = "context-diff-secret-key";
 /// The regions the gateway serves. Two, so a region that is merely the first is not a pass.
 pub(crate) const REGIONS: [&str; 2] = ["us-east-1", "eu-west-1"];
 /// The base domain both stacks are told when a request is virtual-hosted.
@@ -85,7 +85,7 @@ pub(crate) struct ContextRequest {
     /// Query without its `?`; empty for none.
     query: String,
     headers: Vec<(HeaderName, HeaderValue)>,
-    body: Bytes,
+    pub(crate) body: Bytes,
     signing_region: Option<&'static str>,
     virtual_hosting: bool,
     transport_extension: bool,
@@ -184,7 +184,7 @@ impl ContextRequest {
     }
 
     /// The header lines on the wire, signed at `now` when the request is signed.
-    fn wire_headers(&self, now: RequestNow) -> Result<HeaderMap, String> {
+    pub(crate) fn wire_headers(&self, now: RequestNow) -> Result<HeaderMap, String> {
         let mut headers = HeaderMap::new();
         headers.insert(http::header::HOST, HeaderValue::from_str(&self.host).map_err(|error| error.to_string())?);
         if self.method == Method::PUT {
@@ -211,7 +211,7 @@ impl ContextRequest {
         Ok(signed.headers().clone())
     }
 
-    fn http_head(&self, headers: &HeaderMap) -> http::request::Builder {
+    pub(crate) fn http_head(&self, headers: &HeaderMap) -> http::request::Builder {
         let mut builder = http::Request::builder().method(self.method.clone()).uri(self.target());
         for (name, value) in headers {
             builder = builder.header(name, value);
