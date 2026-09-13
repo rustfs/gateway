@@ -446,6 +446,7 @@ fn n_no_refusal_sentence_carries_a_key_a_digest_or_a_key_id() {
         SseRejection::ManagedChannelInvalid(ManagedRejection::KmsQualifierWithoutKmsAlgorithm),
         SseRejection::ManagedChannelInvalid(ManagedRejection::BucketKeyNotABoolean),
         SseRejection::ManagedChannelInvalid(ManagedRejection::ContextNotBase64),
+        SseRejection::ManagedChannelInvalid(ManagedRejection::ContextNotJson),
         SseRejection::ManagedChannelInvalid(ManagedRejection::Document(
             crate::ops::shared::encryption::EncryptionRejection::AlgorithmUnknown,
         )),
