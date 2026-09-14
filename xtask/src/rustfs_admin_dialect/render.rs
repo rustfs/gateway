@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! The Rust source `cargo xtask rustfs-admin-dialect` writes: one operation module per declared
-//! operation, the module list, and the dialect's table.
+//! operation, the module list, and the dialect's table, split into one file per list.
 //!
 //! Responsible for: rendering each file from a [`Plan`] exactly, before rustfmt.
 //! NOT responsible for: choosing or ruling the routes, running rustfmt, or writing and comparing
@@ -22,6 +22,7 @@
 
 use std::fmt::Write as _;
 
+use super::rulings::{About, Absent};
 use super::{Declared, Plan};
 
 const LICENSE: &str = "// Copyright 2026 RustFS Team
@@ -75,6 +76,74 @@ fn request(declared: &Declared) -> String {
     }
 }
 
+/// The module documentation's paragraph on whose account the operation acts on.
+fn subject_doc(about: About, actions: &[&str]) -> String {
+    match about {
+        About::Caller => format!(
+            "//! It acts only on the caller's own account (`SubjectRule::Caller`): the request cannot name another.\n\
+             //! RustFS evaluates no IAM action here, so its action is the vendor label `{}`, which the\n\
+             //! authorizer is still asked (ADR-0025, ADR-0028).\n",
+            actions.first().copied().unwrap_or_default()
+        ),
+        About::Query { param, absent } => format!(
+            "//! It acts on the account the `{param}` query parameter names; an absent or empty one is {}.\n\
+             //! The facade reads it once, strictly, before authentication, and hands it to both authorizer\n\
+             //! stages and to the handler as `RequestContextView::subject()`; a handler never reads the query\n\
+             //! for it (ADR-0025, ADR-0028).\n",
+            match absent {
+                Absent::Caller => "the caller",
+                Absent::Refuse => "a `400` before authentication",
+            }
+        ),
+        About::Set { param, everyone } => {
+            let mut doc = format!(
+                "//! It acts on each account a `{param}` parameter names, each asked about in turn; naming nobody is the\n\
+                 //! caller. The handler reads `RequestContextView::subjects()` (ADR-0026).\n"
+            );
+            if let Some((flag, action)) = everyone {
+                let _ = writeln!(
+                    doc,
+                    "//! `{flag}=true` is every account, which also needs `{action}`, both asked about no account."
+                );
+            }
+            let _ = writeln!(
+                doc,
+                "//! A signed request cannot repeat `{param}` today: SigV4 canonicalisation refuses it, so naming\n\
+                 //! several accounts fails closed before anything reads the set (ADR-0026 (d))."
+            );
+            doc
+        }
+    }
+}
+
+/// The `rustfs_gateway_core` root items an operation module uses.
+fn core_root_imports(about: Option<About>) -> &'static str {
+    match about {
+        None => "DerivedResourceError, NoDerived",
+        Some(About::Caller | About::Set { everyone: None, .. }) => "DerivedResourceError, NoDerived, SubjectRule",
+        Some(About::Query { .. }) => "DerivedResourceError, NoDerived, SubjectRule, WhenAbsent",
+        Some(About::Set { everyone: Some(_), .. }) => "DerivedResourceError, Everyone, NoDerived, SubjectRule",
+    }
+}
+
+fn evidence(d: &Declared) -> String {
+    let mut cited = vec![format!("{:?}", d.handler_url)];
+    if d.ruled.is_some() {
+        cited.push("record::ADR_0025".to_owned());
+    }
+    if matches!(d.rule.about, Some(About::Set { .. })) {
+        cited.push("record::ADR_0026".to_owned());
+    }
+    if !d.params.is_empty() || !d.shadows.is_empty() {
+        cited.push("record::ADR_0027".to_owned());
+    }
+    if d.rule.about.is_some() {
+        cited.push("record::ADR_0028".to_owned());
+    }
+    cited.push("record::ISSUE".to_owned());
+    format!("&[{}]", cited.join(", "))
+}
+
 pub(super) fn render_operation(declared: &Declared) -> String {
     let mut out = String::from(LICENSE);
     let d = declared;
@@ -92,6 +161,10 @@ pub(super) fn render_operation(declared: &Declared) -> String {
             out,
             "//! The inventory records this route as custom-auth (`{class}`); its action is ADR-0025's ruling."
         );
+    }
+    if let Some(about) = d.rule.about {
+        out.push_str("//!\n");
+        out.push_str(&subject_doc(about, &d.rule.actions()));
     }
     if !d.params.is_empty() {
         let listed: Vec<String> = d.params.iter().map(|param| format!("`{param}`")).collect();
@@ -131,7 +204,7 @@ pub(super) fn render_operation(declared: &Declared) -> String {
     } else {
         out.push_str("use rustfs_gateway_core::route::{Predicate, ShadowingDecl};\n");
     }
-    out.push_str("use rustfs_gateway_core::{DerivedResourceError, NoDerived};\n");
+    let _ = writeln!(out, "use rustfs_gateway_core::{{{}}};", core_root_imports(d.rule.about));
     out.push_str("use rustfs_gateway_sig::OperationFloor;\n");
     match input {
         "Bytes" => out.push_str("use bytes::Bytes;\n"),
@@ -142,6 +215,12 @@ pub(super) fn render_operation(declared: &Declared) -> String {
         "\nuse crate::admin::{self, AdminOperation, AdminResponse};\nuse crate::record::{self, BodyKind, RouteRecord};\n\n",
     );
     let _ = writeln!(out, "/// The operation name.\npub const NAME: &str = {:?};\n", d.name);
+    if let Some(subject) = d.rule.subject_expression() {
+        let _ = writeln!(
+            out,
+            "/// Whose account it acts on, which the facade extracts before authentication.\npub const SUBJECT: SubjectRule = {subject};\n"
+        );
+    }
     let _ = writeln!(
         out,
         "/// What authorises it, on no bucket.\npub const AUTH: AuthRequirement = {};\n",
@@ -251,6 +330,7 @@ pub const RECORD: RouteRecord = RouteRecord {{
     query: {query},
     action: {action:?},
     ruled: {ruled},
+    subject: {subject},
     rustfs_handler: {handler:?},
     request_body: BodyKind::{request_body},
     response_body: BodyKind::{response_body},
@@ -268,17 +348,7 @@ pub const RECORD: RouteRecord = RouteRecord {{
         } else {
             "\n    fn shadows() -> &'static [ShadowingDecl] {\n        SHADOWS\n    }\n"
         },
-        evidence = {
-            let mut cited = vec![format!("{:?}", d.handler_url)];
-            if d.ruled.is_some() {
-                cited.push("record::ADR_0025".to_owned());
-            }
-            if !d.params.is_empty() || !d.shadows.is_empty() {
-                cited.push("record::ADR_0027".to_owned());
-            }
-            cited.push("record::ISSUE".to_owned());
-            format!("&[{}]", cited.join(", "))
-        },
+        evidence = evidence(d),
         order = d.order,
         method = d.method,
         path = d.path,
@@ -293,6 +363,7 @@ pub const RECORD: RouteRecord = RouteRecord {{
             .ruled
             .as_ref()
             .map_or_else(|| "None".to_owned(), |class| format!("Some({class:?})")),
+        subject = if d.rule.about.is_some() { "Some(SUBJECT)" } else { "None" },
         handler = d.handler,
         request_body = d.request_body,
         response_body = d.response_body,
@@ -313,40 +384,54 @@ pub(super) fn render_mod(plan: &Plan) -> String {
     out
 }
 
-pub(super) fn render_table(plan: &Plan, commit: &str) -> String {
+/// `crate::table`: the commit, the pending groups, and the three lists, each in its own file so
+/// that none grows past the file-size ceiling as the migrated orders grow.
+fn render_table_root(plan: &Plan, commit: &str) -> String {
     let mut out = String::from(LICENSE);
     out.push_str("//! The dialect's generated table: the overlay rows, the route records, the pending groups, and the\n");
     out.push_str("//! one list of every operation.\n//!\n");
-    out.push_str("//! Responsible for: [`OVERLAY_ROWS`], [`ROUTES`], [`PENDING`] and [`fold_every_operation`], in inventory\n");
-    out.push_str("//! order. NOT responsible for: the claims or the assembly (`crate::dialect`), or any operation's\n");
-    out.push_str("//! declaration (`crate::ops`). Upstream: the generator and `crate::ops`. Downstream: `crate::dialect`,\n");
-    out.push_str("//! the tests, and a deployment that walks every operation.\n\n");
-    out.push_str("use rustfs_gateway_core::dialect::OverlayRow;\n\n");
-    out.push_str("use crate::admin::OperationFold;\nuse crate::ops;\nuse crate::record::{PendingGroup, RouteRecord};\n\n");
+    out.push_str("//! Responsible for: [`RUSTFS_SOURCE_COMMIT`] and [`PENDING`] here, and the three per-operation lists\n");
+    out.push_str("//! in their own files (`overlay`, `routes`, `fold`), each in inventory order. NOT responsible for: the\n");
+    out.push_str("//! claims or the assembly (`crate::dialect`), or any operation's declaration (`crate::ops`).\n");
+    out.push_str("//! Upstream: the generator and `crate::ops`. Downstream: `crate::dialect`, the tests, and a deployment\n");
+    out.push_str("//! that walks every operation.\n\n");
+    out.push_str("mod fold;\nmod overlay;\nmod routes;\n\n");
+    out.push_str("pub use fold::fold_every_operation;\npub(crate) use overlay::OVERLAY_ROWS;\npub use routes::ROUTES;\n\n");
+    out.push_str("use crate::record::PendingGroup;\n\n");
     let _ = writeln!(
         out,
         "/// The RustFS commit the inventory was recorded from.\npub const RUSTFS_SOURCE_COMMIT: &str = {commit:?};\n"
     );
-    out.push_str(
-        "/// Every operation's record, as the overlay reviews it.\npub(crate) static OVERLAY_ROWS: &[OverlayRow] = &[\n",
-    );
-    for d in &plan.declared {
-        let _ = writeln!(out, "    ops::{}::OVERLAY_ROW,", d.stem);
-    }
-    out.push_str("];\n\n");
-    out.push_str("/// Every declared operation and the inventory row it was generated from, in inventory order.\n");
-    out.push_str("pub static ROUTES: &[RouteRecord] = &[\n");
-    for d in &plan.declared {
-        let _ = writeln!(out, "    ops::{}::RECORD,", d.stem);
-    }
-    out.push_str("];\n\n");
     out.push_str("/// Every registration group RustFS still serves itself, with its route count.\n");
     out.push_str("pub static PENDING: &[PendingGroup] = &[\n");
     for (group, order, routes) in &plan.pending {
         let _ = writeln!(out, "    PendingGroup {{ group: {group:?}, order: {order}, routes: {routes} }},");
     }
-    out.push_str("];\n\n");
-    out.push_str("/// Takes `fold`'s step for every operation in turn, in [`ROUTES`] order.\n");
+    out.push_str("];\n");
+    out
+}
+
+/// A table file that lists one `ops::<stem>::<ITEM>` per operation.
+fn render_list(plan: &Plan, doc: &str, header: &str, item: &str) -> String {
+    let mut out = String::from(LICENSE);
+    out.push_str(doc);
+    out.push('\n');
+    out.push_str(header);
+    for d in &plan.declared {
+        let _ = writeln!(out, "    ops::{}::{item},", d.stem);
+    }
+    out.push_str("];\n");
+    out
+}
+
+fn render_fold(plan: &Plan) -> String {
+    let mut out = String::from(LICENSE);
+    out.push_str("//! Every generated operation in one generic walk.\n//!\n");
+    out.push_str("//! Responsible for: [`fold_every_operation`], in inventory order. NOT responsible for: what a step does\n");
+    out.push_str("//! (the caller's `OperationFold`). Upstream: `crate::ops`. Downstream: `crate::dialect` and a deployment\n");
+    out.push_str("//! that registers a handler for every operation.\n\n");
+    out.push_str("use crate::admin::OperationFold;\nuse crate::ops;\n\n");
+    out.push_str("/// Takes `fold`'s step for every operation in turn, in [`crate::ROUTES`] order.\n");
     out.push_str("pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> F::Carry {\n");
     let count = plan.declared.len();
     for (index, d) in plan.declared.iter().enumerate() {
@@ -361,4 +446,37 @@ pub(super) fn render_table(plan: &Plan, commit: &str) -> String {
     }
     out.push_str("}\n");
     out
+}
+
+/// The table's files, by path under the output directory.
+pub(super) fn render_tables(plan: &Plan, commit: &str) -> [(&'static str, String); 4] {
+    [
+        ("table.rs", render_table_root(plan, commit)),
+        (
+            "table/overlay.rs",
+            render_list(
+                plan,
+                "//! Every generated operation's overlay row.\n//!\n\
+                 //! Responsible for: [`OVERLAY_ROWS`], in inventory order. NOT responsible for: any row's content\n\
+                 //! (its operation's module). Upstream: `crate::ops`. Downstream: `crate::dialect`'s overlay.\n",
+                "use rustfs_gateway_core::dialect::OverlayRow;\n\nuse crate::ops;\n\n\
+                 /// Every operation's record, as the overlay reviews it.\npub(crate) static OVERLAY_ROWS: &[OverlayRow] = &[\n",
+                "OVERLAY_ROW",
+            ),
+        ),
+        (
+            "table/routes.rs",
+            render_list(
+                plan,
+                "//! Every generated operation's route record.\n//!\n\
+                 //! Responsible for: [`ROUTES`], in inventory order. NOT responsible for: any record's content (its\n\
+                 //! operation's module). Upstream: `crate::ops`. Downstream: the tests and a deployment's report.\n",
+                "use crate::ops;\nuse crate::record::RouteRecord;\n\n\
+                 /// Every declared operation and the inventory row it was generated from, in inventory order.\n\
+                 pub static ROUTES: &[RouteRecord] = &[\n",
+                "RECORD",
+            ),
+        ),
+        ("table/fold.rs", render_fold(plan)),
+    ]
 }

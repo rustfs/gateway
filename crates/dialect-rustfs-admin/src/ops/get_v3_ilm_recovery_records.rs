@@ -111,7 +111,7 @@ impl AdminOperation for GetV3IlmRecoveryRecords {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 124,
+    precedence: 146,
     selector: "PathTemplate(\"/rustfs/admin/v3/ilm/recovery/records\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/ilm/recovery/records\") ∧ Method(GET)",
     action: "admin:ListTier",
     resource: ResourceShape::Service,
@@ -134,6 +134,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:ListTier",
     ruled: None,
+    subject: None,
     rustfs_handler: "IlmRecoveryControlListHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

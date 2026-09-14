@@ -116,7 +116,7 @@ impl AdminOperation for PostV3ServiceFreeze {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 216,
+    precedence: 265,
     selector: "PathTemplate(\"/rustfs/admin/v3/service\") ∧ Method(POST) ∧ QueryEquals(\"action\", \"freeze\") ∨ PathTemplate(\"/minio/admin/v3/service\") ∧ Method(POST) ∧ QueryEquals(\"action\", \"freeze\")",
     action: "admin:ServiceFreeze",
     resource: ResourceShape::Service,
@@ -140,6 +140,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: Some(("action", "freeze")),
     action: "admin:ServiceFreeze",
     ruled: Some("NotImplemented"),
+    subject: None,
     rustfs_handler: "ServiceHandle",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

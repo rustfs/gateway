@@ -34,6 +34,7 @@ use rustfs_gateway_core::dialect::{ClaimedRow, Dialect};
 use rustfs_gateway_core::op::ResourceShape;
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, RouterBuilder};
 use rustfs_gateway_core::route::{HostClass, Predicate, RouteRequestParts, ShadowingDecl, TargetKind};
+use rustfs_gateway_core::{Everyone, SubjectRule, WhenAbsent};
 use rustfs_gateway_dialect_rustfs_admin::admin::{self, AdminResponse};
 use rustfs_gateway_dialect_rustfs_admin::{
     AdminOperation, CLAIMS, OVERLAY, OperationFold, PENDING, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
@@ -150,6 +151,7 @@ struct Declared {
     precedence: u16,
     group: &'static str,
     action: Option<String>,
+    subject: Option<SubjectRule>,
     resource: Option<ResourceShape>,
     privileged: bool,
     anonymous: bool,
@@ -173,6 +175,7 @@ impl OperationFold for Collect {
             precedence: O::PRECEDENCE,
             group: O::GROUP,
             action: spec.auth.map(|auth| auth.render()),
+            subject: spec.auth.and_then(|auth| auth.subject()),
             resource: spec.auth.map(|auth| auth.resource),
             privileged: floor.privileged(),
             anonymous: floor.allows_anonymous(),
@@ -204,7 +207,7 @@ fn every_declared_row_reaches_its_operation() {
             rows += 1;
         }
     }
-    assert_eq!(rows, 310, "155 operations, each with its MinIO alias");
+    assert_eq!(rows, 442, "221 operations, each with its MinIO alias");
 }
 
 /// Negative — without the dialect, no row reaches any admin operation.
@@ -334,7 +337,7 @@ fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
             }
         }
     }
-    assert_eq!(refused, 10 * 2 * 19, "19 parameters across 17 templates, each with its alias");
+    assert_eq!(refused, 10 * 2 * 35, "35 parameters across 27 templates, each with its alias");
 }
 
 /// Positive and negative — `POST tier/clear` stands in front of `POST tier/{tiername}` and is
@@ -385,6 +388,7 @@ fn every_operation_declares_what_its_record_says() {
         assert_eq!(operation.name, name);
         assert_eq!(operation.group, record.group, "{name}");
         assert_eq!(operation.action.as_deref(), Some(record.action), "{name}");
+        assert_eq!(operation.subject, record.subject, "{name}");
         assert_eq!(operation.resource, Some(ResourceShape::Service), "{name}");
         assert_eq!(operation.secret, record.caller_secret, "{name}");
         assert_eq!(operation.deadline, Some(HandlerDeadlineClass::Standard), "{name}");
@@ -402,8 +406,8 @@ fn every_operation_declares_what_its_record_says() {
     }
 }
 
-/// Negative — no operation is reachable without a header signature, and none is authorised by
-/// a vendor label: every migrated route is an IAM check.
+/// Negative — no operation is reachable without a header signature, and only an own-account
+/// operation is authorised by a vendor label: every other migrated route is an IAM check.
 #[test]
 fn n_no_operation_is_reachable_without_a_header_signature() {
     for operation in declared() {
@@ -411,32 +415,137 @@ fn n_no_operation_is_reachable_without_a_header_signature() {
         assert!(operation.privileged, "{name}");
         assert!(!operation.anonymous, "{name}");
         assert!(!operation.presigned, "{name}");
-        assert!(operation.action.is_some_and(|action| !action.contains("rustfs:")), "{name}");
+        let own_account = operation.subject == Some(SubjectRule::Caller);
+        let action = operation.action.unwrap_or_default();
+        assert_eq!(action.starts_with("rustfs:"), own_account, "{name}: {action}");
+        assert_eq!(action.matches("rustfs:").count(), usize::from(own_account), "{name}: {action}");
     }
 }
 
-/// Positive and negative — exactly the eight operations whose body RustFS seals opt in to the
-/// caller's secret; every other operation is never handed it.
+/// Positive — exactly ADR-0025's and ADR-0026's order-4 subjects are declared: nine own-account
+/// operations, nine about one query-named account (four refusing an absent one), and the three
+/// bulk listings about each `users` account, `admin:ListUsers` for `all`.
 #[test]
-fn only_the_sealed_operations_hold_the_caller_secret() {
-    let holders: Vec<&str> = declared()
-        .iter()
-        .filter(|operation| operation.secret)
-        .map(|operation| operation.name)
-        .collect();
+fn the_subject_rules_are_the_order_four_rulings() {
+    let declared = declared();
+    let with = |wanted: &dyn Fn(SubjectRule) -> bool| {
+        declared
+            .iter()
+            .filter(|operation| operation.subject.is_some_and(wanted))
+            .map(|operation| operation.name)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(with(&|rule| rule == SubjectRule::Caller).len(), 9);
+    let refused = with(&|rule| {
+        matches!(
+            rule,
+            SubjectRule::Query {
+                when_absent: WhenAbsent::Refuse,
+                ..
+            }
+        )
+    });
     assert_eq!(
-        holders,
+        refused,
         [
-            "rustfs:DeleteV3DelConfigKv",
-            "rustfs:GetV3Config",
-            "rustfs:GetV3GetConfigKv",
-            "rustfs:GetV3ListConfigHistoryKv",
-            "rustfs:PostV3StartJob",
-            "rustfs:PutV3Config",
-            "rustfs:PutV3SetConfigKv",
-            "rustfs:PutV3SiteReplicationEdit",
+            "rustfs:DeleteV3DeleteServiceAccount",
+            "rustfs:DeleteV3DeleteServiceAccounts",
+            "rustfs:GetV3InfoServiceAccount",
+            "rustfs:GetV3UserInfo",
+            "rustfs:PostV3UpdateServiceAccount",
+            "rustfs:PutV3AddUser",
         ]
     );
+    let caller = with(&|rule| {
+        matches!(
+            rule,
+            SubjectRule::Query {
+                when_absent: WhenAbsent::Caller,
+                ..
+            }
+        )
+    });
+    assert_eq!(
+        caller,
+        [
+            "rustfs:GetV3IdpLdapListAccessKeys",
+            "rustfs:GetV3InfoAccessKey",
+            "rustfs:GetV3ListServiceAccounts"
+        ]
+    );
+    let bulk = SubjectRule::Set {
+        param: "users",
+        everyone: Some(Everyone {
+            param: "all",
+            action: "admin:ListUsers",
+        }),
+    };
+    assert_eq!(
+        with(&|rule| rule == bulk),
+        [
+            "rustfs:GetV3IdpLdapListAccessKeysBulk",
+            "rustfs:GetV3IdpOpenidListAccessKeysBulk",
+            "rustfs:GetV3ListAccessKeysBulk"
+        ]
+    );
+    assert_eq!(declared.iter().filter(|operation| operation.subject.is_some()).count(), 21);
+}
+
+/// Negative — a subject parameter selects nothing: every row of a subject-ruled operation reaches
+/// that operation whatever account, set, flag or malformed value its query carries, because the
+/// facade, not the router, reads and refuses it.
+#[test]
+fn n_a_subject_parameter_does_not_change_the_route() {
+    let dialect = dialect();
+    let resolve = resolver(Some(&dialect));
+    let mut checked = 0;
+    for record in ROUTES.iter().filter(|record| record.subject.is_some()) {
+        for path in paths(record) {
+            for query in [
+                "?accessKey=other",
+                "?user=a&userDN=b",
+                "?users=a&users=b",
+                "?all=true&users=a",
+                "?accessKey=%ff",
+            ] {
+                assert_eq!(resolve(record.method, &format!("{path}{query}")), Some(record.operation), "{path}{query}");
+                checked += 1;
+            }
+        }
+    }
+    assert_eq!(checked, 21 * 2 * 5);
+}
+
+/// Positive and negative — exactly the twenty-nine operations whose body RustFS seals opt in to
+/// the caller's secret, eight of order 3 and twenty-one of order 4 (xtask pins each name against
+/// the inventory); every other operation is never handed it.
+#[test]
+fn only_the_sealed_operations_hold_the_caller_secret() {
+    let holders: Vec<(&str, u8)> = declared()
+        .iter()
+        .zip(ROUTES)
+        .filter(|(operation, _)| operation.secret)
+        .map(|(operation, record)| (operation.name, record.order))
+        .collect();
+    assert_eq!(holders.len(), 29);
+    assert_eq!(holders.iter().filter(|(_, order)| *order == 3).count(), 8);
+    assert_eq!(holders.iter().filter(|(_, order)| *order == 4).count(), 21);
+    for name in [
+        "rustfs:GetV3Config",
+        "rustfs:PutV3SiteReplicationEdit",
+        "rustfs:PostV3AccountPassword",
+        "rustfs:GetV3ListAccessKeysBulk",
+        "rustfs:PutV3AddUser",
+    ] {
+        assert!(holders.iter().any(|(holder, _)| *holder == name), "{name}");
+    }
+    for name in [
+        "rustfs:GetV3AccountInfo",
+        "rustfs:GetV3UserInfo",
+        "rustfs:GetV3IdpLdapListAccessKeysBulk",
+    ] {
+        assert!(!holders.iter().any(|(holder, _)| *holder == name), "{name}");
+    }
 }
 
 /// Negative — no template parameter is a bucket: none is named for one, and no claimed entry
@@ -444,7 +553,7 @@ fn only_the_sealed_operations_hold_the_caller_secret() {
 #[test]
 fn n_no_template_parameter_is_a_bucket() {
     let templated: Vec<&RouteRecord> = ROUTES.iter().filter(|record| record.path.contains('{')).collect();
-    assert_eq!(templated.len(), 17);
+    assert_eq!(templated.len(), 27);
     for record in templated {
         for segment in record.path.split('/').filter_map(param) {
             assert!(!["bucket", "warehouse"].contains(&segment), "{}", record.operation);
@@ -456,7 +565,7 @@ fn n_no_template_parameter_is_a_bucket() {
         .iter()
         .flat_map(|operation| operation.entries())
         .collect();
-    assert_eq!(entries.len(), 310);
+    assert_eq!(entries.len(), 442);
     assert!(entries.iter().all(|entry| entry.bucket_param().is_none()));
 }
 
@@ -490,10 +599,11 @@ fn the_dialect_assembles_with_its_two_claims() {
     assert_eq!(prefixes, ["/rustfs/admin", "/minio/admin"]);
 }
 
-/// Positive — ADR-0024's orders 1 to 3 are declared, each inventory route once (the service
+/// Positive — ADR-0024's orders 1 to 4 are declared, each inventory route once (the service
 /// command as its four forms), and every other group is pending with the rest of the routes.
 #[test]
-fn orders_one_to_three_are_declared_and_the_rest_are_pending() {
+fn orders_one_to_four_are_declared_and_the_rest_are_pending() {
+    let order_four = ["account", "idp_compat", "mfa", "replication_handler", "user"];
     let order_three = [
         "audit",
         "batch_job",
@@ -512,6 +622,7 @@ fn orders_one_to_three_are_declared_and_the_rest_are_pending() {
         let order = match record.group {
             "system" => 1,
             group if order_three.contains(&group) => 3,
+            group if order_four.contains(&group) => 4,
             _ => 2,
         };
         assert_eq!(record.order, order, "{}", record.operation);
@@ -520,6 +631,7 @@ fn orders_one_to_three_are_declared_and_the_rest_are_pending() {
     assert_eq!(
         counts,
         [
+            ("account", 2),
             ("audit", 3),
             ("batch_job", 5),
             ("bucket_meta", 4),
@@ -528,9 +640,11 @@ fn orders_one_to_three_are_declared_and_the_rest_are_pending() {
             ("diagnostics", 12),
             ("extensions", 2),
             ("gateway_key_inventory", 1),
+            ("idp_compat", 13),
             ("ilm_transition", 11),
             ("inspect_archive", 1),
             ("kms", 35),
+            ("mfa", 8),
             ("module_switch", 2),
             ("object_data_cache", 2),
             ("plugins_catalog", 1),
@@ -538,21 +652,23 @@ fn orders_one_to_three_are_declared_and_the_rest_are_pending() {
             ("pools", 6),
             ("profile_admin", 6),
             ("rebalance", 3),
+            ("replication_handler", 6),
             ("scanner", 5),
             ("site_replication", 22),
             ("system", 9),
             ("tier", 7),
             ("tls_debug", 1),
+            ("user", 37),
         ]
     );
-    assert_eq!(ROUTES.len(), 155);
+    assert_eq!(ROUTES.len(), 221);
     assert!(
         PENDING
             .iter()
-            .all(|pending| pending.order > 3 && !by_group.contains_key(pending.group))
+            .all(|pending| pending.order > 4 && !by_group.contains_key(pending.group))
     );
-    assert_eq!(PENDING.len(), 15);
-    assert_eq!(PENDING.iter().map(|pending| usize::from(pending.routes)).sum::<usize>(), 356 - 152);
+    assert_eq!(PENDING.len(), 10);
+    assert_eq!(PENDING.iter().map(|pending| usize::from(pending.routes)).sum::<usize>(), 356 - 218);
 }
 
 // ── the answer ───────────────────────────────────────────────────────────────────────────────

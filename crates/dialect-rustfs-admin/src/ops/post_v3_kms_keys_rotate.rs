@@ -112,7 +112,7 @@ impl AdminOperation for PostV3KmsKeysRotate {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 192,
+    precedence: 239,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/keys/rotate\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/keys/rotate\") ∧ Method(POST)",
     action: "kms:RotateKey",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "kms:RotateKey",
     ruled: None,
+    subject: None,
     rustfs_handler: "RotateKmsKeyHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

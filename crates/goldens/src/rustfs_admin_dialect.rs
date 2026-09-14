@@ -36,6 +36,7 @@ use rustfs_gateway::{
     HandlerContext, HandlerResult, InputAuthzRequest, InputDecisions, Lease, Rate, Req, RequestContext, RequestContextView, Resp,
     S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
 };
+use rustfs_gateway_core::{Subject, SubjectRule, Subjects};
 use rustfs_gateway_dialect_rustfs_admin::{
     AdminOperation, AdminResponse, OperationFold, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
 };
@@ -60,7 +61,9 @@ pub(crate) struct Asked {
     pub(crate) caller: Option<String>,
     pub(crate) bucket: Option<String>,
     pub(crate) key: Option<String>,
-    pub(crate) about_an_account: bool,
+    /// Whose account the question is about: `None` for no account, `Some(None)` for the caller,
+    /// `Some(Some(name))` for a named one.
+    pub(crate) subject: Option<Option<String>>,
 }
 
 type Policy = Box<dyn Fn(&str, &str) -> bool + Send + Sync>;
@@ -80,7 +83,7 @@ impl RecordingAuthorizer {
             caller: request.identity.map(|identity| identity.access_key_id().to_owned()),
             bucket: request.bucket.map(|bucket| bucket.as_str().to_owned()),
             key: request.key.map(|key| key.as_str().to_owned()),
-            about_an_account: request.subject.is_some(),
+            subject: request.subject.map(|subject| subject.name().map(str::to_owned)),
         });
         if (self.policy)(request.operation, request.action) {
             Decision::Allow
@@ -126,6 +129,23 @@ pub(crate) struct Handed {
     pub(crate) params: Vec<(String, String)>,
     pub(crate) holds_secret: bool,
     pub(crate) secret_is_the_callers: bool,
+    /// The accounts the context carries: `none`, `caller`, `named:<name>`, `each:<a>,<b>` or
+    /// `everyone`.
+    pub(crate) subjects: String,
+    /// Whether `RequestContextView::subject()` holds one account, which it must only for a
+    /// single-subject request.
+    pub(crate) has_one_subject: bool,
+}
+
+/// The accounts a context carries, spelled as [`Handed::subjects`] records them.
+fn subjects_of(context: &RequestContextView) -> String {
+    match context.subjects() {
+        None => "none".to_owned(),
+        Some(Subjects::One(Subject::Caller)) => "caller".to_owned(),
+        Some(Subjects::One(subject)) => format!("named:{}", subject.name().unwrap_or_default()),
+        Some(Subjects::Each(each)) => format!("each:{}", each.iter().filter_map(Subject::name).collect::<Vec<_>>().join(",")),
+        Some(Subjects::Everyone) => "everyone".to_owned(),
+    }
 }
 
 impl Handed {
@@ -134,6 +154,8 @@ impl Handed {
             .principal()
             .and_then(|principal| principal.secret_key_from_authenticator_lookup());
         Self {
+            subjects: subjects_of(context),
+            has_one_subject: context.subject().is_some(),
             operation: context.operation(),
             params: context
                 .path_params()
@@ -254,30 +276,27 @@ pub(crate) fn assemble(policy: impl Fn(&str, &str) -> bool + Send + Sync + 'stat
 /// How many services a refusal test spreads its rows across.
 const LANES: usize = 8;
 
-/// Runs `check` on every row, split across [`LANES`] threads that each assemble their own service
+/// Runs `check` on every item, split across [`LANES`] threads that each assemble their own service
 /// under `policy`. Every refusal holds the security floor's uniform failure latency, which is the
-/// contract under test and is not lowered here, so a test that refuses all 310 rows one after
-/// another waits out 310 floors. The lanes wait them out side by side instead. One service per
+/// contract under test and is not lowered here, so a test that refuses all 442 rows one after
+/// another waits out 442 floors. The lanes wait them out side by side instead. One service per
 /// lane keeps every exchange's recorded questions its own. A panic in any lane fails the test with
-/// that lane's own message, and the lanes together must have checked every row they were handed.
-pub(crate) fn in_lanes<P>(
-    policy: P,
-    rows: &[(&'static RouteRecord, String)],
-    check: impl Fn(&Assembled, &RouteRecord, &str) + Sync,
-) where
+/// that lane's own message, and the lanes together must have checked every item they were handed.
+pub(crate) fn in_lanes<P, T: Sync>(policy: P, items: &[T], check: impl Fn(&Assembled, &T) + Sync)
+where
     P: Fn(&str, &str) -> bool + Copy + Send + Sync + 'static,
 {
-    let per_lane = rows.len().div_ceil(LANES).max(1);
+    let per_lane = items.len().div_ceil(LANES).max(1);
     let checked: usize = std::thread::scope(|scope| {
-        let lanes: Vec<_> = rows
+        let lanes: Vec<_> = items
             .chunks(per_lane)
             .map(|lane| {
                 let check = &check;
                 scope.spawn(move || {
                     let assembled = assemble(policy);
                     let mut done = 0;
-                    for (record, path) in lane {
-                        check(&assembled, record, path);
+                    for item in lane {
+                        check(&assembled, item);
                         done += 1;
                     }
                     done
@@ -289,16 +308,47 @@ pub(crate) fn in_lanes<P>(
             .map(|lane| lane.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
             .sum()
     });
-    assert_eq!(checked, rows.len(), "the lanes checked every row they were handed");
+    assert_eq!(checked, items.len(), "the lanes checked every item they were handed");
 }
 
-/// The actions a record's rule names, in order.
+/// The actions a record's rule asks about a named account, in order: the rendered rule without
+/// its ` about …` subject.
 pub(crate) fn actions(record: &RouteRecord) -> Vec<&'static str> {
-    record
-        .action
-        .strip_prefix("anyOf(")
+    let rule = record.action.split(" about ").next().unwrap_or(record.action);
+    rule.strip_prefix("anyOf(")
         .and_then(|listed| listed.strip_suffix(')'))
-        .map_or_else(|| vec![record.action], |listed| listed.split(", ").collect())
+        .map_or_else(|| vec![rule], |listed| listed.split(", ").collect())
+}
+
+/// The account every well-formed request for a named-account or set operation names.
+pub(crate) const ACCOUNT: &str = "account-1";
+
+/// The query parameter a record's subject rule reads, if any.
+pub(crate) const fn subject_param(record: &RouteRecord) -> Option<&'static str> {
+    match record.subject {
+        Some(SubjectRule::Query { param, .. } | SubjectRule::Set { param, .. }) => Some(param),
+        Some(SubjectRule::Caller) | None => None,
+    }
+}
+
+/// Whose account a well-formed request for `record` is about, as [`Asked::subject`] records it.
+pub(crate) fn expected_subject(record: &RouteRecord) -> Option<Option<String>> {
+    match record.subject {
+        None => None,
+        Some(SubjectRule::Caller) => Some(None),
+        Some(_) => Some(Some(ACCOUNT.to_owned())),
+    }
+}
+
+/// The accounts a well-formed request for `record` hands its handler, as [`Handed::subjects`]
+/// records them.
+pub(crate) fn expected_subjects(record: &RouteRecord) -> String {
+    match record.subject {
+        None => "none".to_owned(),
+        Some(SubjectRule::Caller) => "caller".to_owned(),
+        Some(SubjectRule::Query { .. }) => format!("named:{ACCOUNT}"),
+        Some(SubjectRule::Set { .. }) => format!("each:{ACCOUNT}"),
+    }
 }
 
 /// Allows an operation exactly the actions its own record names.
@@ -348,17 +398,30 @@ pub(crate) fn paths(record: &RouteRecord) -> Vec<String> {
     templates(record).into_iter().map(concrete).collect()
 }
 
-fn query(record: &RouteRecord) -> String {
-    record.query.map_or_else(String::new, |(key, value)| format!("{key}={value}"))
+/// A well-formed query for a record's operation: the value that selects it, and the account its
+/// subject rule reads, when it has either.
+pub(crate) fn query(record: &RouteRecord) -> String {
+    record
+        .query
+        .map(|(key, value)| format!("{key}={value}"))
+        .into_iter()
+        .chain(subject_param(record).map(|param| format!("{param}={ACCOUNT}")))
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
 /// A request for a record's operation at `path`, signed with the shared credential.
 pub(crate) fn signed(record: &RouteRecord, path: &str) -> ContextRequest {
+    signed_with(record, path, &query(record))
+}
+
+/// A request for a record's operation at `path?query`, signed with the shared credential.
+pub(crate) fn signed_with(record: &RouteRecord, path: &str, query: &str) -> ContextRequest {
     let request = match record.method {
-        "GET" => ContextRequest::get(PATH_HOST, path, &query(record)),
-        "POST" => ContextRequest::post(PATH_HOST, path, &query(record)),
-        "DELETE" => ContextRequest::delete(PATH_HOST, path, &query(record)),
-        "PUT" if record.query.is_none() => ContextRequest::put(PATH_HOST, path, b"{}"),
+        "GET" => ContextRequest::get(PATH_HOST, path, query),
+        "POST" => ContextRequest::post(PATH_HOST, path, query),
+        "DELETE" => ContextRequest::delete(PATH_HOST, path, query),
+        "PUT" => ContextRequest::put_with_query(PATH_HOST, path, query, b"{}"),
         other => panic!("{}: no signed fixture for {other}", record.operation),
     };
     request.signed(REGION)
@@ -375,7 +438,11 @@ pub(crate) fn wire(request: &ContextRequest) -> Request<Bytes> {
 
 /// The same request with no credentials at all.
 pub(crate) fn unsigned(record: &RouteRecord, path: &str) -> Request<Bytes> {
-    let query = query(record);
+    unsigned_with(record, path, &query(record))
+}
+
+/// A request for a record's operation at `path?query`, with no credentials at all.
+pub(crate) fn unsigned_with(record: &RouteRecord, path: &str, query: &str) -> Request<Bytes> {
     let uri = if query.is_empty() {
         path.to_owned()
     } else {
@@ -389,10 +456,11 @@ pub(crate) fn unsigned(record: &RouteRecord, path: &str) -> Request<Bytes> {
         .expect("a fixture request")
 }
 
-/// The request presigned in the query with the shared credential, now. Only for a record whose
-/// operation no query selects.
+/// The request presigned in the query with the shared credential, now, its account included.
+/// Only for a record whose operation no query selects.
 pub(crate) fn presigned(record: &RouteRecord, path: &str) -> Request<Bytes> {
     assert!(record.query.is_none(), "{}", record.operation);
+    let query = query(record);
     let method = Method::from_bytes(record.method.as_bytes()).expect("a method");
     let stamp = AmzDate::parse(&amz_date(RequestNow::capture().unix_seconds())).expect("a stamp");
     let scope = SigningScope::new(stamp.day(), REGION, SigService::S3).expect("a scope");
@@ -401,7 +469,7 @@ pub(crate) fn presigned(record: &RouteRecord, path: &str) -> Request<Bytes> {
     let mut headers = http::HeaderMap::new();
     headers.insert(http::header::HOST, HeaderValue::from_str(PATH_HOST).expect("a host"));
     let host = RawHost::from_host_header(PATH_HOST.as_bytes()).expect("an acceptable host");
-    let signing = SigningRequest::new(&method, path, "", &headers, &host, PayloadMode::Unsigned, stamp);
+    let signing = SigningRequest::new(&method, path, &query, &headers, &host, PayloadMode::Unsigned, stamp);
     let signed = signer.presign(&signing, 900).expect("a presignable request");
     let mut builder = Request::builder().method(method).uri(format!("{path}?{}", signed.query()));
     for (name, value) in signed.headers() {
@@ -410,4 +478,5 @@ pub(crate) fn presigned(record: &RouteRecord, path: &str) -> Request<Bytes> {
     builder.body(Bytes::new()).expect("a request")
 }
 
+mod subject_tests;
 mod tests;

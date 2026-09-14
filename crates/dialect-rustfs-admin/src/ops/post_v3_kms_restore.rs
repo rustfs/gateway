@@ -112,7 +112,7 @@ impl AdminOperation for PostV3KmsRestore {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 198,
+    precedence: 245,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/restore\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/restore\") ∧ Method(POST)",
     action: "kms:Restore",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "kms:Restore",
     ruled: None,
+    subject: None,
     rustfs_handler: "KmsRestoreHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

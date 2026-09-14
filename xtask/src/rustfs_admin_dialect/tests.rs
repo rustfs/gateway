@@ -17,16 +17,18 @@
 //!
 //! Responsible for: the drift check the gate runs, the naming rule, the service route's four
 //! forms, the pools rulings, template parameters, literal-over-parameter shadowing, the
-//! caller-secret mapping, and each refusal.
+//! caller-secret mapping, the order-4 subject rulings (own-account, named-account, account set),
+//! and each refusal.
 //! NOT responsible for: the inventory's validity (goldens' strict reader) or what the generated
 //! operations do (the dialect crate's tests and goldens' `rustfs_admin_dialect`).
 //! Upstream: `super`. Downstream: nothing.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 
+use super::rulings::Form;
 use super::{
-    FIRST_PRECEDENCE, FORMAT, INVENTORY, Inventory, Plan, RULINGS, Route, Ruling, Source, drift, generate, plan, repo_root,
-    snake, type_name,
+    About, Absent, FIRST_PRECEDENCE, FORMAT, INVENTORY, Inventory, Plan, RULINGS, Route, Ruled, Ruling, Source, drift, generate,
+    plan, repo_root, snake, type_name,
 };
 
 fn route(method: &str, path: &str, group: &str, auth_mode: &str, action: Option<&str>) -> Route {
@@ -99,7 +101,23 @@ fn the_committed_dialect_is_what_the_inventory_generates() {
     let root = repo_root();
     let files = generate(&root).expect("the recorded inventory generates");
     assert_eq!(drift(&root, &files), Vec::<String>::new());
-    assert_eq!(files.len(), 157, "155 operations, the module list and the table");
+    assert_eq!(files.len(), 226, "221 operations, the module list and the table's four files");
+}
+
+/// Negative — a file committed under a wholly generated directory without being generated, in
+/// `table/` as in `ops/`, is drift.
+#[test]
+fn n_an_extra_file_in_a_generated_directory_is_drift() {
+    let root = repo_root();
+    let mut files = generate(&root).expect("the recorded inventory generates");
+    for dropped in [
+        "crates/dialect-rustfs-admin/src/table/fold.rs",
+        "crates/dialect-rustfs-admin/src/ops/get_v3_info.rs",
+    ] {
+        let source = files.remove(std::path::Path::new(dropped)).expect("a generated file");
+        assert_eq!(drift(&root, &files), [format!("{dropped} is not generated")]);
+        files.insert(dropped.into(), source);
+    }
 }
 
 /// Positive — a name is the method, each path word after the admin prefix (a parameter as `By`
@@ -139,7 +157,7 @@ fn a_plain_route_is_declared_and_a_later_group_is_pending() {
     let plan = planned(
         vec![
             route("GET", "/rustfs/admin/v3/kms/status", "kms", "sigv4-admin", Some("kms:ServiceControl")),
-            route("GET", "/rustfs/admin/v3/list-users", "user", "sigv4-admin", Some("admin:ListUsers")),
+            route("GET", "/rustfs/admin/v3/heal/status", "heal", "sigv4-admin", Some("admin:Heal")),
         ],
         &[],
     );
@@ -150,7 +168,281 @@ fn a_plain_route_is_declared_and_a_later_group_is_pending() {
     assert_eq!(declared.rule.render(), "kms:ServiceControl");
     assert_eq!(declared.precedence, FIRST_PRECEDENCE);
     assert!(!declared.caller_secret && declared.params.is_empty() && declared.shadows.is_empty());
-    assert_eq!(plan.pending, vec![("user".to_owned(), 4, 1)]);
+    assert!(declared.rule.about.is_none());
+    assert_eq!(plan.pending, vec![("heal".to_owned(), 5, 1)]);
+}
+
+/// A custom-auth route of an order-4 group, classed `detail`.
+fn custom(method: &str, path: &str, detail: &str) -> Route {
+    let mut route = route(method, path, "user", "custom", None);
+    route.auth_detail = Some(detail.to_owned());
+    route
+}
+
+/// The recorded inventory's plan.
+fn recorded_plan() -> Plan {
+    let recorded = std::fs::read_to_string(repo_root().join(INVENTORY)).expect("the inventory");
+    let inventory: Inventory = serde_json::from_str(&recorded).expect("the inventory parses");
+    plan(&inventory, RULINGS).expect("the recorded inventory plans")
+}
+
+/// Positive — the own-account routes are about the caller under their vendor label, the
+/// named-account routes about their query parameter with their absence, and the bulk listings
+/// about each `users` account with `admin:ListUsers` for `all`; each spelled as core renders it,
+/// and each expression carrying the module's `SUBJECT`.
+#[test]
+fn a_subject_ruling_is_declared_about_its_subject() {
+    for (method, path, detail, rendered, expression) in [
+        (
+            "GET",
+            "/rustfs/admin/v3/account/info",
+            "CredentialOnly",
+            "rustfs:SelfAccountInfo about caller",
+            "SubjectRule::Caller",
+        ),
+        (
+            "GET",
+            "/rustfs/admin/v3/user-info",
+            "ContextualAuthorization",
+            "admin:GetUser about query(accessKey, absent=refused)",
+            "SubjectRule::Query { param: \"accessKey\", when_absent: WhenAbsent::Refuse }",
+        ),
+        (
+            "GET",
+            "/rustfs/admin/v3/list-service-accounts",
+            "ContextualAuthorization",
+            "admin:ListServiceAccounts about query(user, absent=caller)",
+            "SubjectRule::Query { param: \"user\", when_absent: WhenAbsent::Caller }",
+        ),
+        (
+            "GET",
+            "/rustfs/admin/v3/list-access-keys-bulk",
+            "MultipleActions",
+            "admin:ListServiceAccounts about each(users, everyone=all ⇒ admin:ListUsers)",
+            "SubjectRule::Set { param: \"users\", everyone: Some(Everyone { param: \"all\", action: \"admin:ListUsers\" }) }",
+        ),
+    ] {
+        let plan = planned(vec![custom(method, path, detail)], ruling_for(path));
+        let declared = &plan.declared[0];
+        assert_eq!(declared.rule.render(), rendered, "{path}");
+        assert_eq!(declared.rule.subject_expression().as_deref(), Some(expression), "{path}");
+        assert!(declared.rule.expression().ends_with(".about_subject(SUBJECT)"), "{path}");
+        assert_eq!(declared.ruled.as_deref(), Some(detail), "{path}");
+    }
+}
+
+/// Positive — in the recorded inventory, exactly the order-4 custom-auth routes carry a subject
+/// rule: nine own-account, nine named-account (four refusing an absent account, where RustFS
+/// answers `400`), and the three bulk listings; `list-remote-targets` is plain
+/// `admin:GetBucketTarget`, and the two policy-entities routes are any-of the three listings.
+#[test]
+fn the_recorded_subject_rulings_are_exactly_the_order_four_custom_routes() {
+    let plan = recorded_plan();
+    let about: Vec<(&str, String)> = plan
+        .declared
+        .iter()
+        .filter(|declared| declared.rule.about.is_some())
+        .map(|declared| (declared.name.as_str(), declared.rule.render()))
+        .collect();
+    assert!(
+        plan.declared
+            .iter()
+            .filter(|declared| declared.rule.about.is_some())
+            .all(|declared| declared.order == 4)
+    );
+    let own: Vec<&str> = about
+        .iter()
+        .filter(|(_, rule)| rule.ends_with(" about caller"))
+        .map(|(_, rule)| rule.trim_end_matches(" about caller"))
+        .collect();
+    assert_eq!(
+        own,
+        [
+            "rustfs:SelfAccountInfo",
+            "rustfs:AccountMfaStatus",
+            "rustfs:AccountInfo",
+            "rustfs:MfaChallenge",
+            "rustfs:AccountMfaActivate",
+            "rustfs:AccountMfaDisable",
+            "rustfs:AccountMfaEnroll",
+            "rustfs:AccountMfaRecoveryCodes",
+            "rustfs:ChangeOwnPassword",
+        ]
+    );
+    let named: Vec<(&str, &str)> = about
+        .iter()
+        .filter(|(_, rule)| rule.contains(" about query("))
+        .map(|(name, rule)| (*name, rule.as_str()))
+        .collect();
+    assert_eq!(
+        named,
+        [
+            (
+                "rustfs:DeleteV3DeleteServiceAccount",
+                "admin:RemoveServiceAccount about query(accessKey, absent=refused)"
+            ),
+            (
+                "rustfs:DeleteV3DeleteServiceAccounts",
+                "admin:RemoveServiceAccount about query(accessKey, absent=refused)"
+            ),
+            (
+                "rustfs:GetV3IdpLdapListAccessKeys",
+                "admin:ListServiceAccounts about query(userDN, absent=caller)"
+            ),
+            (
+                "rustfs:GetV3InfoAccessKey",
+                "admin:ListServiceAccounts about query(accessKey, absent=caller)"
+            ),
+            (
+                "rustfs:GetV3InfoServiceAccount",
+                "admin:ListServiceAccounts about query(accessKey, absent=refused)"
+            ),
+            (
+                "rustfs:GetV3ListServiceAccounts",
+                "admin:ListServiceAccounts about query(user, absent=caller)"
+            ),
+            ("rustfs:GetV3UserInfo", "admin:GetUser about query(accessKey, absent=refused)"),
+            (
+                "rustfs:PostV3UpdateServiceAccount",
+                "admin:UpdateServiceAccount about query(accessKey, absent=refused)"
+            ),
+            ("rustfs:PutV3AddUser", "admin:CreateUser about query(accessKey, absent=refused)"),
+        ]
+    );
+    let sets: Vec<&str> = about
+        .iter()
+        .filter(|(_, rule)| rule.contains(" about each("))
+        .map(|(name, _)| *name)
+        .collect();
+    assert_eq!(
+        sets,
+        [
+            "rustfs:GetV3IdpLdapListAccessKeysBulk",
+            "rustfs:GetV3IdpOpenidListAccessKeysBulk",
+            "rustfs:GetV3ListAccessKeysBulk",
+        ]
+    );
+    assert_eq!(about.len(), 21);
+    let rule_of = |name: &str| {
+        plan.declared
+            .iter()
+            .find(|declared| declared.name == name)
+            .map(|declared| declared.rule.render())
+    };
+    assert_eq!(rule_of("rustfs:GetV3ListRemoteTargets").as_deref(), Some("admin:GetBucketTarget"));
+    for name in ["rustfs:GetV3IdpBuiltinPolicyEntities", "rustfs:GetV3IdpLdapPolicyEntities"] {
+        assert_eq!(
+            rule_of(name).as_deref(),
+            Some("anyOf(admin:ListGroups, admin:ListUsers, admin:ListUserPolicies)"),
+            "{name}"
+        );
+    }
+}
+
+/// Negative — a rule outside ADR-0025's and ADR-0026's shapes is refused at generation, never
+/// written: an own-account operation under an IAM action, another vendor's label or two actions;
+/// a vendor label on any other operation; a subject parameter outside the unreserved set or
+/// equal to the form's selecting key; and a set whose flag is its own parameter, whose
+/// every-account action is malformed, a vendor label, or already asked about each account.
+#[test]
+fn n_a_subject_rule_outside_the_adrs_shapes_is_refused() {
+    const fn form(rule: Ruled, about: About) -> Form {
+        Form {
+            query: None,
+            rule,
+            about: Some(about),
+        }
+    }
+    const CALLER_ADMIN: &[Form] = &[form(Ruled::One("admin:GetUser"), About::Caller)];
+    const CALLER_FOREIGN: &[Form] = &[form(Ruled::One("minio:Self"), About::Caller)];
+    const CALLER_TWO: &[Form] = &[form(Ruled::AnyOf(&["rustfs:A", "rustfs:B"]), About::Caller)];
+    const LABEL_UNOWNED: &[Form] = &[Form {
+        query: None,
+        rule: Ruled::One("rustfs:Anything"),
+        about: None,
+    }];
+    const LABEL_NAMED: &[Form] = &[form(
+        Ruled::One("rustfs:Anything"),
+        About::Query {
+            param: "accessKey",
+            absent: Absent::Refuse,
+        },
+    )];
+    const BAD_PARAM: &[Form] = &[form(
+        Ruled::One("admin:GetUser"),
+        About::Query {
+            param: "access key",
+            absent: Absent::Refuse,
+        },
+    )];
+    const SELECTOR_PARAM: &[Form] = &[Form {
+        query: Some(("accessKey", "x")),
+        rule: Ruled::One("admin:GetUser"),
+        about: Some(About::Query {
+            param: "accessKey",
+            absent: Absent::Caller,
+        }),
+    }];
+    const FLAG_IS_PARAM: &[Form] = &[form(
+        Ruled::One("admin:ListServiceAccounts"),
+        About::Set {
+            param: "users",
+            everyone: Some(("users", "admin:ListUsers")),
+        },
+    )];
+    const FLAG_ACTION_MALFORMED: &[Form] = &[form(
+        Ruled::One("admin:ListServiceAccounts"),
+        About::Set {
+            param: "users",
+            everyone: Some(("all", "ListUsers")),
+        },
+    )];
+    const FLAG_ACTION_LABEL: &[Form] = &[form(
+        Ruled::One("admin:ListServiceAccounts"),
+        About::Set {
+            param: "users",
+            everyone: Some(("all", "rustfs:Everyone")),
+        },
+    )];
+    const FLAG_ACTION_ASKED: &[Form] = &[form(
+        Ruled::One("admin:ListServiceAccounts"),
+        About::Set {
+            param: "users",
+            everyone: Some(("all", "admin:ListServiceAccounts")),
+        },
+    )];
+    for (forms, why) in [
+        (CALLER_ADMIN, "own-account operation names exactly one action"),
+        (CALLER_FOREIGN, "own-account operation names exactly one action"),
+        (CALLER_TWO, "own-account operation names exactly one action"),
+        (LABEL_UNOWNED, "authorises only an own-account operation"),
+        (LABEL_NAMED, "authorises only an own-account operation"),
+        (BAD_PARAM, "unreserved characters"),
+        (SELECTOR_PARAM, "not the query key that selects the form"),
+        (FLAG_IS_PARAM, "an unreserved parameter of its own"),
+        (FLAG_ACTION_MALFORMED, "an IAM action spelled"),
+        (FLAG_ACTION_LABEL, "an IAM action spelled"),
+        (FLAG_ACTION_ASKED, "no named-account question already asks"),
+    ] {
+        let rulings = [Ruling {
+            method: "GET",
+            path: "/rustfs/admin/v3/x",
+            auth_detail: "CredentialOnly",
+            forms,
+        }];
+        let error = refusal(vec![custom("GET", "/rustfs/admin/v3/x", "CredentialOnly")], &rulings);
+        assert!(error.contains(why), "{why}: {error}");
+    }
+}
+
+/// Negative — a vendor label recorded by the inventory for a `sigv4-admin` route is refused: only a
+/// ruling can make an operation own-account.
+#[test]
+fn n_an_inventory_action_in_the_vendor_namespace_is_refused() {
+    let labelled = route("GET", "/rustfs/admin/v3/x", "system", "sigv4-admin", Some("rustfs:X"));
+    assert!(refusal(vec![labelled], &[]).contains("authorises only an own-account operation"));
+    let malformed = route("GET", "/rustfs/admin/v3/x", "system", "sigv4-admin", Some("admin"));
+    assert!(refusal(vec![malformed], &[]).contains("spelled `service:Action`"));
 }
 
 /// Positive — `POST service` becomes its four query forms, `freeze` and `unfreeze` sharing
@@ -220,21 +512,20 @@ fn only_a_sealed_route_opts_in_to_the_caller_secret() {
     assert_eq!(secrets, [true, true, true, false]);
 }
 
-/// Positive — in the recorded inventory, exactly the eight sealed routes of order 3 opt in to
-/// the caller's secret, and no route of orders 1 and 2 does.
+/// Positive — in the recorded inventory, exactly the eight sealed routes of order 3 and the
+/// twenty-one of order 4 opt in to the caller's secret, and no route of orders 1 and 2 does.
 #[test]
-fn the_recorded_opt_ins_are_exactly_the_sealed_order_three_routes() {
-    let recorded = std::fs::read_to_string(repo_root().join(INVENTORY)).expect("the inventory");
-    let inventory: Inventory = serde_json::from_str(&recorded).expect("the inventory parses");
-    let plan = plan(&inventory, RULINGS).expect("the recorded inventory plans");
-    let sealed: Vec<&str> = plan
-        .declared
-        .iter()
-        .filter(|declared| declared.caller_secret)
-        .map(|declared| declared.name.as_str())
-        .collect();
+fn the_recorded_opt_ins_are_exactly_the_sealed_routes() {
+    let plan = recorded_plan();
+    let sealed = |order: u8| -> Vec<&str> {
+        plan.declared
+            .iter()
+            .filter(|declared| declared.caller_secret && declared.order == order)
+            .map(|declared| declared.name.as_str())
+            .collect()
+    };
     assert_eq!(
-        sealed,
+        sealed(3),
         [
             "rustfs:DeleteV3DelConfigKv",
             "rustfs:GetV3Config",
@@ -246,12 +537,33 @@ fn the_recorded_opt_ins_are_exactly_the_sealed_order_three_routes() {
             "rustfs:PutV3SiteReplicationEdit",
         ]
     );
-    assert!(
-        plan.declared
-            .iter()
-            .filter(|declared| declared.order < 3)
-            .all(|declared| !declared.caller_secret)
+    assert_eq!(
+        sealed(4),
+        [
+            "rustfs:GetV3IdpBuiltinPolicyEntities",
+            "rustfs:GetV3IdpLdapPolicyEntities",
+            "rustfs:GetV3InfoAccessKey",
+            "rustfs:GetV3InfoServiceAccount",
+            "rustfs:GetV3ListAccessKeysBulk",
+            "rustfs:GetV3ListServiceAccounts",
+            "rustfs:GetV3ListUsers",
+            "rustfs:GetV3TemporaryAccountInfo",
+            "rustfs:PostV3AccountMfaActivate",
+            "rustfs:PostV3AccountMfaDisable",
+            "rustfs:PostV3AccountMfaRecoveryCodes",
+            "rustfs:PostV3AccountPassword",
+            "rustfs:PostV3IdpBuiltinPolicyAttach",
+            "rustfs:PostV3IdpBuiltinPolicyDetach",
+            "rustfs:PostV3ReplicationDiff",
+            "rustfs:PostV3UpdateServiceAccount",
+            "rustfs:PutV3AddServiceAccount",
+            "rustfs:PutV3AddServiceAccounts",
+            "rustfs:PutV3AddUser",
+            "rustfs:PutV3SetRemoteTarget",
+            "rustfs:PutV3SetUserSecretKey",
+        ]
     );
+    assert!(sealed(1).is_empty() && sealed(2).is_empty());
 }
 
 /// Positive — a templated route is declared at its template, service-level, with its

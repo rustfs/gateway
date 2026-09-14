@@ -114,7 +114,7 @@ impl AdminOperation for GetV3TierByTier {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 164,
+    precedence: 200,
     selector: "PathTemplate(\"/rustfs/admin/v3/tier/{tier}\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/tier/{tier}\") ∧ Method(GET)",
     action: "admin:ListTier",
     resource: ResourceShape::Service,
@@ -138,6 +138,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:ListTier",
     ruled: None,
+    subject: None,
     rustfs_handler: "VerifyTier",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

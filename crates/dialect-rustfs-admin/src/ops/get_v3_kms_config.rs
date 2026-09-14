@@ -111,7 +111,7 @@ impl AdminOperation for GetV3KmsConfig {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 132,
+    precedence: 157,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/config\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/kms/config\") ∧ Method(GET)",
     action: "kms:Configure",
     resource: ResourceShape::Service,
@@ -134,6 +134,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "kms:Configure",
     ruled: None,
+    subject: None,
     rustfs_handler: "KmsConfigHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

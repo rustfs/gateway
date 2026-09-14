@@ -138,6 +138,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:SetBucketTarget",
     ruled: None,
+    subject: None,
     rustfs_handler: "RemoveAuditTarget",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

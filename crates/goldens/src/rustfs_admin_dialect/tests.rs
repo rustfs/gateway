@@ -16,21 +16,24 @@
 //!
 //! Responsible for: every declared operation agreeing with its inventory row in both directions,
 //! the pending census adding up to the rest of the inventory, and, for every row of every
-//! operation, SigV4 and then exactly the declared action asked about no bucket and no account,
-//! the decoded path parameters and — only on the sealed rows — the caller's secret in the
-//! handler; refusal before the handler when that action is denied, when only other actions are
-//! allowed, when the request is unsigned, forged, from an unknown key, or presigned, and when a
-//! parameter value is malformed.
-//! NOT responsible for: the harness (`super`), routing without a service, or the generator.
+//! operation, SigV4 and then exactly the declared action asked about no bucket and exactly the
+//! declared account (none, the caller, or the one the query names), the decoded path parameters,
+//! the same accounts and — only on the sealed rows — the caller's secret in the handler; refusal
+//! before the handler when that action is denied, when only other actions are allowed, when the
+//! request is unsigned, forged, from an unknown key, or presigned, and when a parameter value is
+//! malformed.
+//! NOT responsible for: the harness (`super`), the subject rules' own refusals and forms
+//! (`subject_tests`), routing without a service, or the generator.
 //! Upstream: `super`, the recorded inventory. Downstream: nothing.
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use rustfs_gateway_core::SubjectRule;
 use rustfs_gateway_dialect_rustfs_admin::{BodyKind, PENDING, ROUTES, RouteRecord};
 
 use super::{
-    Exchange, actions, assemble, declared, in_lanes, param, paths, presigned, signed, templates, unsigned, value_of, wire,
-    with_segment,
+    Exchange, actions, assemble, declared, expected_subject, expected_subjects, in_lanes, param, paths, presigned, signed,
+    templates, unsigned, value_of, wire, with_segment,
 };
 use crate::migration_inventory::rustfs_admin_routes::{AdminAuthMode, RequestBodyUse, ResponseBodyUse};
 use crate::operation_diff::s3s_f3e17541::context::ACCESS_KEY;
@@ -149,9 +152,11 @@ fn the_pending_groups_are_the_rest_of_the_inventory() {
 
 /// Positive — every row of every operation, signed, is authorised by exactly its declared
 /// actions (every one, in order, for an any-of rule, whose answers the facade combines) about no
-/// bucket, no key and no account, for the signing caller, and reaches exactly its own handler,
-/// which is handed each path parameter decoded and the caller's secret only when its row is
-/// sealed.
+/// bucket and no key, for the signing caller, and about exactly its declared account: none, the
+/// caller for an own-account operation, or the account the query names for a named-account or
+/// set operation; and reaches exactly its own handler, which is handed each path parameter
+/// decoded, the same accounts (one subject only for a single-subject rule), and the caller's
+/// secret only when its row is sealed.
 #[test]
 fn every_row_is_authorised_by_exactly_its_declared_action() {
     let assembled = assemble(declared);
@@ -173,6 +178,10 @@ fn every_row_is_authorised_by_exactly_its_declared_action() {
         let handed = &exchange.handed[0];
         assert_eq!(handed.params, params, "{at}");
         assert_eq!(handed.holds_secret, record.caller_secret, "{at}");
+        assert_eq!(handed.subjects, expected_subjects(record), "{at}");
+        let single = matches!(record.subject, Some(SubjectRule::Caller | SubjectRule::Query { .. }));
+        assert_eq!(handed.has_one_subject, single, "{at}");
+        let about = expected_subject(record);
         let expected = actions(record);
         let asked_at_route: Vec<&str> = exchange
             .asked
@@ -185,18 +194,15 @@ fn every_row_is_authorised_by_exactly_its_declared_action() {
             assert_eq!(asked.operation, record.operation, "{at}");
             assert!(expected.contains(&asked.action.as_str()), "{at}: {asked:?}");
             assert_eq!(asked.caller.as_deref(), Some(ACCESS_KEY), "{at}");
-            assert_eq!(
-                (asked.bucket.as_deref(), asked.key.as_deref(), asked.about_an_account),
-                (None, None, false),
-                "{at}"
-            );
+            assert_eq!((asked.bucket.as_deref(), asked.key.as_deref()), (None, None), "{at}");
+            assert_eq!(asked.subject, about, "{at}");
         }
     }
 }
 
-/// Positive and negative — with the authenticator handing the secret over, exactly the sixteen
-/// rows of the eight sealed operations hold it, and it is the caller's; no other row's handler
-/// holds any secret.
+/// Positive and negative — with the authenticator handing the secret over, exactly the
+/// fifty-eight rows of the twenty-nine sealed operations hold it, and it is the caller's; no other
+/// row's handler holds any secret.
 #[test]
 fn the_caller_secret_reaches_exactly_the_sealed_rows() {
     let assembled = assemble(declared);
@@ -210,12 +216,12 @@ fn the_caller_secret_reaches_exactly_the_sealed_rows() {
             holders.insert((record.method, path));
         }
     }
-    assert_eq!(holders.len(), 16, "{holders:?}");
-    assert_eq!(holders.iter().filter(|(_, path)| path.starts_with("/minio/admin/")).count(), 8);
+    assert_eq!(holders.len(), 58, "{holders:?}");
+    assert_eq!(holders.iter().filter(|(_, path)| path.starts_with("/minio/admin/")).count(), 29);
 }
 
-/// Positive — each any-of row is authorised by any one of its actions alone: `datausageinfo`
-/// and both pools routes.
+/// Positive — each any-of row is authorised by any one of its actions alone: `datausageinfo`,
+/// both policy-entities routes and both pools routes.
 #[test]
 fn every_any_of_row_is_authorised_by_either_action() {
     let any_of: Vec<&RouteRecord> = ROUTES.iter().filter(|record| actions(record).len() > 1).collect();
@@ -224,6 +230,8 @@ fn every_any_of_row_is_authorised_by_either_action() {
         names,
         [
             "rustfs:GetV3Datausageinfo",
+            "rustfs:GetV3IdpBuiltinPolicyEntities",
+            "rustfs:GetV3IdpLdapPolicyEntities",
             "rustfs:GetV3PoolsList",
             "rustfs:GetV3PoolsStatus"
         ]
@@ -247,7 +255,7 @@ fn n_a_row_whose_action_is_denied_is_refused_before_its_handler() {
     in_lanes(
         |_, _| false,
         &rows().collect::<Vec<_>>(),
-        |assembled, record, path| {
+        |assembled, (record, path)| {
             let at = format!("{} {path}", record.method);
             let exchange = assembled.exchange(wire(&signed(record, path)));
             refused_before_the_handler(&exchange, &at);
@@ -266,20 +274,24 @@ fn n_a_row_whose_action_is_denied_is_refused_before_its_handler() {
 #[test]
 fn n_every_other_action_does_not_authorise_a_row() {
     let policy = |operation: &str, action: &str| !declared(operation, action);
-    in_lanes(policy, &rows().collect::<Vec<_>>(), |assembled, record, path| {
+    in_lanes(policy, &rows().collect::<Vec<_>>(), |assembled, (record, path)| {
         let exchange = assembled.exchange(wire(&signed(record, path)));
         refused_before_the_handler(&exchange, &format!("{} {path}", record.method));
     });
 }
 
-/// Negative — an unsigned request for any row is refused without asking the authorizer.
+/// Negative — an unsigned request for any row, its account included, is refused without asking
+/// the authorizer.
 #[test]
 fn n_an_unsigned_row_is_refused_without_asking() {
-    let assembled = assemble(|_, _| true);
-    for (record, path) in rows() {
-        let exchange = assembled.exchange(unsigned(record, &path));
-        refused_without_asking(&exchange, &format!("{} {path}", record.method));
-    }
+    in_lanes(
+        |_, _| true,
+        &rows().collect::<Vec<_>>(),
+        |assembled, (record, path)| {
+            let exchange = assembled.exchange(unsigned(record, path));
+            refused_without_asking(&exchange, &format!("{} {path}", record.method));
+        },
+    );
 }
 
 /// Negative — a forged signature or an unknown access key is refused without asking the
@@ -292,7 +304,7 @@ fn n_a_forged_or_unknown_key_row_is_refused_without_asking() {
     in_lanes(
         |_, _| true,
         &rows().collect::<Vec<_>>(),
-        |assembled, record, path| {
+        |assembled, (record, path)| {
             for request in [signed(record, path).forged(), signed(record, path).unknown_key()] {
                 let exchange = assembled.exchange(wire(&request));
                 let at = format!("{} {path}", record.method);
@@ -303,20 +315,22 @@ fn n_a_forged_or_unknown_key_row_is_refused_without_asking() {
     );
 }
 
-/// Negative — a presigned request for any row no query selects is refused at the floor, as
-/// `AccessDenied`, without asking the authorizer.
+/// Negative — a presigned request for any row no query selects, its account included, is refused
+/// at the floor, as `AccessDenied`, without asking the authorizer.
 #[test]
 fn n_a_presigned_row_is_refused_without_asking() {
-    let assembled = assemble(|_, _| true);
-    let mut refused = 0;
-    for (record, path) in rows().filter(|(record, _)| record.query.is_none()) {
-        let at = format!("{} {path}", record.method);
-        let exchange = assembled.exchange(presigned(record, &path));
-        refused_without_asking(&exchange, &at);
-        assert!(exchange.body.contains("<Code>AccessDenied</Code>"), "{at}: {}", exchange.body);
-        refused += 1;
-    }
-    assert_eq!(refused, 302, "every row but the service command's eight");
+    let presignable: Vec<_> = rows().filter(|(record, _)| record.query.is_none()).collect();
+    assert_eq!(presignable.len(), 434, "every row but the service command's eight");
+    in_lanes(
+        |_, _| true,
+        &presignable,
+        |assembled, (record, path)| {
+            let at = format!("{} {path}", record.method);
+            let exchange = assembled.exchange(presigned(record, path));
+            refused_without_asking(&exchange, &at);
+            assert!(exchange.body.contains("<Code>AccessDenied</Code>"), "{at}: {}", exchange.body);
+        },
+    );
 }
 
 /// Negative — a signed request whose parameter value does not decode to a plain segment (an
@@ -325,23 +339,27 @@ fn n_a_presigned_row_is_refused_without_asking() {
 /// `501`); both before the authorizer is asked or any handler runs.
 #[test]
 fn n_a_malformed_parameter_value_is_refused_before_authorising() {
-    let assembled = assemble(|_, _| true);
-    let mut refused = 0;
-    for (record, template, index, name) in parameters() {
-        for (raw, status) in [("%ff", 400), ("a%01b", 400), ("%c3%28", 400), ("%2e%2e", 501), ("a%2Fb", 501)] {
-            let path = with_segment(template, Some(index), raw);
+    let cases: Vec<_> = parameters()
+        .flat_map(|(record, template, index, name)| {
+            [("%ff", 400), ("a%01b", 400), ("%c3%28", 400), ("%2e%2e", 501), ("a%2Fb", 501)]
+                .map(|(raw, status)| (record, with_segment(template, Some(index), raw), name, raw, status))
+        })
+        .collect();
+    assert_eq!(cases.len(), 5 * 2 * 35, "35 parameters across 27 templates, each with its alias");
+    in_lanes(
+        |_, _| true,
+        &cases,
+        |assembled, (record, path, name, raw, status)| {
             let at = format!("{} {path}", record.method);
-            let exchange = assembled.exchange(wire(&signed(record, &path)));
-            assert_eq!(exchange.status, status, "{at}: {}", exchange.body);
+            let exchange = assembled.exchange(wire(&signed(record, path)));
+            assert_eq!(exchange.status, *status, "{at}: {}", exchange.body);
             assert!(exchange.reached.is_empty(), "{at}: a handler ran");
             assert!(exchange.asked.is_empty(), "{at}: the authorizer was asked {:?}", exchange.asked);
-            if status == 400 {
+            if *status == 400 {
                 assert!(exchange.body.contains("<Code>InvalidArgument</Code>"), "{at}: {}", exchange.body);
                 assert!(exchange.body.contains(name), "{at}: {}", exchange.body);
                 assert!(!exchange.body.contains(raw), "{at}: the value is echoed: {}", exchange.body);
             }
-            refused += 1;
-        }
-    }
-    assert_eq!(refused, 5 * 2 * 19, "19 parameters across 17 templates, each with its alias");
+        },
+    );
 }

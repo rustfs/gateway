@@ -134,6 +134,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:CancelBatchJob",
     ruled: None,
+    subject: None,
     rustfs_handler: "CancelBatchJobHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

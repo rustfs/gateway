@@ -111,7 +111,7 @@ impl AdminOperation for PostV3Update {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 230,
+    precedence: 279,
     selector: "PathTemplate(\"/rustfs/admin/v3/update\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/update\") ∧ Method(POST)",
     action: "admin:ServerUpdate",
     resource: ResourceShape::Service,
@@ -134,6 +134,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:ServerUpdate",
     ruled: None,
+    subject: None,
     rustfs_handler: "UpdateHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

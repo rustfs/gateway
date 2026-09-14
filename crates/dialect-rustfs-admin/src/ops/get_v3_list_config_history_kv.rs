@@ -111,7 +111,7 @@ impl AdminOperation for GetV3ListConfigHistoryKv {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 141,
+    precedence: 168,
     selector: "PathTemplate(\"/rustfs/admin/v3/list-config-history-kv\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/list-config-history-kv\") ∧ Method(GET)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,
@@ -134,6 +134,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:ConfigUpdate",
     ruled: None,
+    subject: None,
     rustfs_handler: "ListConfigHistoryKVHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

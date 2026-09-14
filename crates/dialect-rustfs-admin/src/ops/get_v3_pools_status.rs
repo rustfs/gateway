@@ -113,7 +113,7 @@ impl AdminOperation for GetV3PoolsStatus {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 149,
+    precedence: 180,
     selector: "PathTemplate(\"/rustfs/admin/v3/pools/status\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/pools/status\") ∧ Method(GET)",
     action: "anyOf(admin:ServerInfo, admin:Decommission)",
     resource: ResourceShape::Service,
@@ -137,6 +137,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "anyOf(admin:ServerInfo, admin:Decommission)",
     ruled: Some("MultipleActions"),
+    subject: None,
     rustfs_handler: "StatusPool",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

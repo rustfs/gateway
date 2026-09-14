@@ -111,7 +111,7 @@ impl AdminOperation for GetV4ClusterSnapshot {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 167,
+    precedence: 205,
     selector: "PathTemplate(\"/rustfs/admin/v4/cluster/snapshot\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v4/cluster/snapshot\") ∧ Method(GET)",
     action: "admin:ServerInfo",
     resource: ResourceShape::Service,
@@ -134,6 +134,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:ServerInfo",
     ruled: None,
+    subject: None,
     rustfs_handler: "GetClusterSnapshotHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

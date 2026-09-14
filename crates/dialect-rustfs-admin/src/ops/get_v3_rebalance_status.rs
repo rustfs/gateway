@@ -111,7 +111,7 @@ impl AdminOperation for GetV3RebalanceStatus {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 151,
+    precedence: 182,
     selector: "PathTemplate(\"/rustfs/admin/v3/rebalance/status\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/rebalance/status\") ∧ Method(GET)",
     action: "admin:Rebalance",
     resource: ResourceShape::Service,
@@ -134,6 +134,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:Rebalance",
     ruled: None,
+    subject: None,
     rustfs_handler: "RebalanceStatus",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,
