@@ -13135,6 +13135,87 @@ expect_fail check_suites_pinned.sh \
     mut_s3tests_external_endpoint_loses_precedence \
     'must prefer GATEWAY_SUT_ENDPOINT before requiring GATEWAY_SUT_COMMAND'
 
+# The suite's own requirements.txt floats, so a pinned suite commit still measured whatever
+# botocore PyPI served that week until the client was locked (rustfs/backlog#1764). Each of
+# these is a way to let it float again.
+mut_s3tests_lock_entry_floats() {
+    python3 - <<'PYEOF'
+import pathlib, re
+
+path = pathlib.Path("ci/s3tests/requirements.lock")
+text = path.read_text()
+floated, count = re.subn(r"(?m)^botocore==[^ ]+ \\$", "botocore>=1.0.0 \\\\", text, count=1)
+if count != 1:
+    raise SystemExit("lock pin mutation subject is missing")
+path.write_text(floated)
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'a locked suite dependency loosened from == to a floating lower bound' \
+    mut_s3tests_lock_entry_floats \
+    '`botocore>=1.0.0` is not pinned to one exact version'
+
+mut_s3tests_lock_deleted() {
+    rm -f ci/s3tests/requirements.lock
+}
+expect_fail check_suites_pinned.sh \
+    "the suite's dependency lock deleted, so its client floats with PyPI again" \
+    mut_s3tests_lock_deleted \
+    'ci/s3tests/requirements.lock is missing'
+
+mut_s3tests_install_without_hashes() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/run.sh")
+text = path.read_text()
+needle = '    --require-hashes --no-deps -r "$LOCK"'
+if text.count(needle) != 1:
+    raise SystemExit("require-hashes mutation subject is missing or ambiguous")
+path.write_text(text.replace(needle, '    --no-deps -r "$LOCK"', 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'the suite environment installed from the lock without --require-hashes' \
+    mut_s3tests_install_without_hashes \
+    'must install the suite environment with'
+
+mut_s3tests_back_to_tox() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/run.sh")
+text = path.read_text()
+needle = '"$SUITE_PYTHON" -m pytest -m "$FILTER" --junitxml="$JUNIT"'
+if needle not in text:
+    raise SystemExit("tox mutation subject is missing")
+path.write_text(text.replace(needle, 'tox -- -m "$FILTER" --junitxml="$JUNIT"', 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    "the suite run through tox again, whose environment follows the suite's floating requirements" \
+    mut_s3tests_back_to_tox \
+    'invokes tox'
+
+# Without the tenant identity the suite's per-case bucket sweep as `[s3 tenant]` is refused,
+# and 734 of 740 cases error in setup: measured on the first real dispatch, rustfs/backlog#1764.
+mut_s3tests_tenant_flag_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/run.sh")
+text = path.read_text()
+needle = '    --tenant-access-key \\"\\$S3TESTS_TENANT_ACCESS_KEY\\" \\\n'
+if needle not in text:
+    raise SystemExit("tenant flag mutation subject is missing")
+path.write_text(text.replace(needle, "", 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'the tenant identity dropped from the default SUT command, erroring every case in setup' \
+    mut_s3tests_tenant_flag_deleted \
+    'missing required flags: --tenant-access-key'
+
 mut_vendored_suite_tree() {
     mkdir -p tests/s3-tests
     printf 'from setuptools import setup\nsetup(name="s3tests")\n' >tests/s3-tests/setup.py
@@ -13232,6 +13313,32 @@ PYEOF
 expect_fail check_s3tests_report.sh \
     'every failure treated as tolerated, so no regression can ever fail the job' \
     mut_report_tolerates_every_failure
+
+# The per-case record is how a reader tells a passing case from a skipped one. Dropping the
+# skipped rows leaves a record that still reads complete.
+mut_report_outcomes_drop_skipped_cases() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/report.py")
+text = path.read_text()
+needle = "    for case in sorted(cases, key=lambda case: (OUTCOMES.index(case.outcome), case.id)):\n"
+if needle not in text:
+    raise SystemExit("report outcome-record mutation subject is missing")
+path.write_text(
+    text.replace(
+        needle,
+        "    for case in sorted((case for case in cases if case.outcome != \"skipped\"), "
+        "key=lambda case: (OUTCOMES.index(case.outcome), case.id)):\n",
+        1,
+    )
+)
+PYEOF
+}
+expect_fail check_s3tests_report.sh \
+    'the per-case outcome record silently dropping the skipped cases' \
+    mut_report_outcomes_drop_skipped_cases \
+    'the per-case outcome record must list every reported case once'
 
 mut_report_records_a_dead_service_as_failures() {
     python3 - <<'PYEOF'

@@ -348,6 +348,32 @@ def render_xfail(verdict: Verdict, generation: int) -> str:
     return "\n".join(lines)
 
 
+OUTCOMES = ("passed", "failed", "errored", "skipped")
+
+
+def render_outcomes(cases: list[Case], generation: int) -> str:
+    """Renders every reported case with the outcome this run gave it, one `<outcome> <id>` per line.
+
+    This is the per-case record behind a generation of the xfail list: which cases passed, which
+    failed, which errored in setup and which the suite skipped. The xfail list names only the
+    tolerated failures; without this record nobody can tell a case that passes from one that was
+    skipped, and `scripts/check_xfail_ratchet.sh` uses it to refuse an xfail entry that no run
+    ever measured failing.
+    """
+    counts = {outcome: sum(1 for case in cases if case.outcome == outcome) for outcome in OUTCOMES}
+    lines = [
+        "# Per-case outcomes of the Ceph s3-tests run that measured this xfail generation.",
+        "# Written by `ci/s3tests/report.py --outcomes`; refreshed together with ci/s3tests/xfail.txt.",
+        "# " + " ".join(f"{outcome}={counts[outcome]}" for outcome in OUTCOMES) + f" collected={len(cases)}",
+        "#",
+        f"# generation: {generation}",
+        "",
+    ]
+    for case in sorted(cases, key=lambda case: (OUTCOMES.index(case.outcome), case.id)):
+        lines.append(f"{case.outcome} {case.id}")
+    return "\n".join(lines) + "\n"
+
+
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="ci/s3tests/report.py",
@@ -355,6 +381,11 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--junit", required=True, type=Path, help="pytest JUnit XML written by the run")
     parser.add_argument("--xfail", required=True, type=Path, help="the tolerated-failure list")
+    parser.add_argument(
+        "--outcomes",
+        type=Path,
+        help="write every case's outcome here, for the generation a --record run proposes",
+    )
     parser.add_argument("--markdown", type=Path, help="write the job summary here")
     parser.add_argument("--json", dest="json_path", type=Path, help="write the machine-readable report here")
     parser.add_argument(
@@ -415,6 +446,9 @@ def main(argv: list[str]) -> int:
             + "\n",
             encoding="utf-8",
         )
+    if options.outcomes:
+        proposed_generation = generation + 1 if options.record else generation
+        options.outcomes.write_text(render_outcomes(cases, proposed_generation), encoding="utf-8")
     if options.record:
         options.record.write_text(render_xfail(verdict, generation + 1), encoding="utf-8")
         print(f"recorded a proposed xfail list at {options.record}; land it in a reviewed pull request")

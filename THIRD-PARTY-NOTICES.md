@@ -55,6 +55,11 @@ lands in this tree.
   - `git ls-remote --tags https://github.com/ceph/s3-tests` → **no output.**
     The project has never published a tag or a release, which is why the pin is
     a commit and not a version.
+- Python dependencies: the suite's `requirements.txt` has no upper bounds, so its
+  client is locked separately in `ci/s3tests/requirements.lock` (exact versions
+  and sha256 hashes, compiled for Python 3.12 on 2026-09-14) and installed with
+  `pip install --require-hashes --no-deps`. Those packages are downloaded at run
+  time into a scratch virtual environment and are not redistributed.
 
 Copyright the Ceph authors.
 

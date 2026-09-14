@@ -290,7 +290,7 @@ REPORT_ARGS=(
     --json "${OUT_DIR}/report.json"
 )
 if [[ "$MODE" == "record" ]]; then
-    REPORT_ARGS+=(--record "${OUT_DIR}/xfail.proposed.txt")
+    REPORT_ARGS+=(--record "${OUT_DIR}/xfail.proposed.txt" --outcomes "${OUT_DIR}/outcomes.proposed.txt")
 fi
 set +e
 python3 "${ROOT_DIR}/ci/s3tests/report.py" "${REPORT_ARGS[@]}"

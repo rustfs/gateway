@@ -182,6 +182,38 @@ probe(
 )
 
 # 8. A list with no generation cannot be ratcheted, so it is refused rather than read.
+# The per-case record behind a generation: every reported case, once, with its outcome. A record
+# that dropped the skipped or errored cases would hide exactly the cases nobody measured.
+with tempfile.TemporaryDirectory() as directory:
+    work = Path(directory)
+    (work / "junit.xml").write_text(
+        junit([(MULTIPART, "failed"), (ACL, "passed"), (LIFECYCLE, "skipped"), (MULTIPART + "_x", "errored")]),
+        encoding="utf-8",
+    )
+    (work / "xfail.txt").write_text(xfail([]), encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable, report, "--junit", str(work / "junit.xml"), "--xfail", str(work / "xfail.txt"),
+            "--record", str(work / "proposed.txt"), "--outcomes", str(work / "outcomes.txt"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    recorded = (work / "outcomes.txt").read_text(encoding="utf-8") if (work / "outcomes.txt").exists() else ""
+    rows = [line for line in recorded.splitlines() if line and not line.startswith("#")]
+    expected_rows = [
+        f"passed {ACL}",
+        f"failed {MULTIPART}",
+        f"errored {MULTIPART}_x",
+        f"skipped {LIFECYCLE}",
+    ]
+    if result.returncode != 0 or rows != expected_rows or "# generation: 4" not in recorded:
+        failures.append(
+            "the per-case outcome record must list every reported case once with its outcome, "
+            f"at the proposed generation; exit {result.returncode}, got:\n{recorded}{result.stderr}"
+        )
+
 probe(
     "an xfail list with no generation header is refused",
     [(ACL, "passed")],
