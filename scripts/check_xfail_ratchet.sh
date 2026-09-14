@@ -70,13 +70,18 @@ if ! git -C "$REPO_DIR" show "${baseline_ref}:${RELATIVE}" >"$previous" 2>/dev/n
 fi
 
 python3 - "$previous" "$CANDIDATE" "$RELATIVE" <<'PYEOF'
+import re
 import sys
 from pathlib import Path
+
+
+OWNER_ISSUE = re.compile(r"https://github\.com/rustfs/(?:gateway|backlog)/issues/[1-9][0-9]*")
 
 
 def read(path, label):
     generation = None
     entries = []
+    excluded = {}
     try:
         text = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
@@ -99,19 +104,56 @@ def read(path, label):
         entry = line.split("#", 1)[0].strip()
         if not entry:
             continue
-        if entry in entries:
-            print(f"check_xfail_ratchet: {label}:{number}: duplicate entry {entry}", file=sys.stderr)
+        fields = entry.split()
+        case_id = fields[0]
+        if case_id in entries or case_id in excluded:
+            print(f"check_xfail_ratchet: {label}:{number}: duplicate entry {case_id}", file=sys.stderr)
             raise SystemExit(1)
-        entries.append(entry)
+        if len(fields) == 1:
+            entries.append(case_id)
+            continue
+        # `<case-id> excluded <owner issue URL> <reason>`: the same shape and the same rules as an
+        # excluded SDK in ci/mint/baseline.txt (scripts/check_mint_baseline.sh).
+        if fields[1] != "excluded" or len(fields) < 3 or not OWNER_ISSUE.fullmatch(fields[2]):
+            print(
+                f"check_xfail_ratchet: {label}:{number}: the exclusion of {case_id} names no owner; expected "
+                "`<case-id> excluded <owner issue URL> <reason>` with an issue in rustfs/gateway or rustfs/backlog",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        if len(fields[3:]) < 3:
+            print(
+                f"check_xfail_ratchet: {label}:{number}: the exclusion of {case_id} gives no reason; say in at "
+                "least three words why its outcome cannot be judged",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        excluded[case_id] = fields[2]
     if generation is None:
         print(f"check_xfail_ratchet: {label}: no `# generation: <n>` header", file=sys.stderr)
         raise SystemExit(1)
-    return set(entries), generation
+    return set(entries), excluded, generation
 
 
 previous_path, candidate_path, relative = sys.argv[1], sys.argv[2], sys.argv[3]
-old_entries, old_generation = read(previous_path, f"previous {relative}")
-new_entries, new_generation = read(candidate_path, relative)
+old_entries, old_excluded, old_generation = read(previous_path, f"previous {relative}")
+new_entries, new_excluded, new_generation = read(candidate_path, relative)
+
+# An exclusion is a wider tolerance than an entry: an entry still turns FIXED when the case passes,
+# an exclusion reports nothing either way. So a new exclusion, including an entry turned into one,
+# is a widening that needs the generation, exactly like a new entry.
+added_exclusions = sorted(set(new_excluded) - set(old_excluded))
+if added_exclusions and new_generation == old_generation:
+    print(
+        f"check_xfail_ratchet: {len(added_exclusions)} exclusion(s) were added without raising the generation "
+        f"(still {old_generation}):",
+        file=sys.stderr,
+    )
+    for case_id in added_exclusions[:10]:
+        print(f"  + {case_id} excluded", file=sys.stderr)
+    raise SystemExit(1)
+# An exclusion turned back into a plain entry, or removed, narrows the tolerance: always allowed.
+old_entries = old_entries | set(old_excluded)
 
 failed = False
 if new_generation < old_generation:
@@ -141,6 +183,52 @@ if added and new_generation == old_generation:
     if len(added) > 10:
         print(f"  … and {len(added) - 10} more", file=sys.stderr)
     failed = True
+
+# Rule 4: an entry is backed by a measurement. ci/s3tests/outcomes.txt is the per-case record
+# of the run that measured this generation (ci/s3tests/report.py --outcomes). Every plain
+# entry must be recorded there as failed or errored, and the record must be of this generation.
+# An entry no run ever saw failing is a guess, and a guess in the tolerated set is a regression
+# nobody will ever be told about.
+outcomes_path = Path(candidate_path).with_name("outcomes.txt")
+if new_entries or new_excluded:
+    if not outcomes_path.is_file():
+        print(
+            "check_xfail_ratchet: ci/s3tests/outcomes.txt is missing; a non-empty xfail list needs the "
+            "per-case record of the run that measured it",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    recorded = {}
+    outcomes_generation = None
+    for number, raw in enumerate(outcomes_path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.strip()
+        if line.startswith("# generation:"):
+            outcomes_generation = int(line[len("# generation:"):].strip() or "-1")
+            continue
+        if not line or line.startswith("#"):
+            continue
+        outcome, _, case_id = line.partition(" ")
+        if outcome not in {"passed", "failed", "errored", "skipped"} or not case_id:
+            print(f"check_xfail_ratchet: outcomes.txt:{number}: expected `<outcome> <case-id>`", file=sys.stderr)
+            raise SystemExit(1)
+        recorded[case_id] = outcome
+    if outcomes_generation != new_generation:
+        print(
+            f"check_xfail_ratchet: ci/s3tests/outcomes.txt records generation {outcomes_generation}, but the "
+            f"xfail list is at {new_generation}; refresh them together from one record run",
+            file=sys.stderr,
+        )
+        failed = True
+    unmeasured = sorted(entry for entry in new_entries if recorded.get(entry) not in {"failed", "errored"})
+    if unmeasured:
+        print(
+            f"check_xfail_ratchet: {len(unmeasured)} xfail entr(y/ies) are not recorded as failing in "
+            "ci/s3tests/outcomes.txt:",
+            file=sys.stderr,
+        )
+        for entry in unmeasured[:10]:
+            print(f"  ? {entry} ({recorded.get(entry, 'not recorded')})", file=sys.stderr)
+        failed = True
 
 if failed:
     raise SystemExit(1)

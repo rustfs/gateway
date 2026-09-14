@@ -51,9 +51,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import xml.etree.ElementTree as ElementTree
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 EXIT_OK = 0
@@ -153,12 +154,31 @@ def read_junit(path: Path) -> list[Case]:
     return cases
 
 
-def read_xfail(path: Path) -> tuple[list[str], int]:
-    """Reads the xfail list, returning its entries and its generation number.
+# An exclusion's owner: an issue in one of the two repositories that track this project's work.
+# The same rule as ci/mint/baseline.txt, so both suites hand an exclusion to somebody.
+OWNER_ISSUE = re.compile(r"https://github\.com/rustfs/(?:gateway|backlog)/issues/[1-9][0-9]*")
+MINIMUM_REASON_WORDS = 3
+
+
+@dataclass(frozen=True)
+class Exclusion:
+    """A case taken out of the verdict: `<case-id> excluded <owner issue URL> <reason>`."""
+
+    owner: str
+    reason: str
+
+
+def read_xfail(path: Path) -> tuple[list[str], dict[str, Exclusion], int]:
+    """Reads the xfail list: its tolerated entries, its exclusions, and its generation number.
 
     The generation is the one deliberate way the list may grow: `scripts/check_xfail_ratchet.sh`
     refuses an addition unless the header's `# generation:` number also went up, so widening
     the tolerated set is a visible one-line decision rather than a line somebody appended.
+
+    A plain entry is a case expected to fail: it is KNOWN while it fails and FIXED once it
+    passes. An exclusion is a case whose outcome this run does not judge at all, for a case whose
+    result does not reproduce from run to run. It must name an owner issue and a reason, exactly
+    like an excluded SDK in ci/mint/baseline.txt; an exclusion nobody owns is permanent.
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -167,6 +187,7 @@ def read_xfail(path: Path) -> tuple[list[str], int]:
 
     generation: int | None = None
     entries: list[str] = []
+    excluded: dict[str, Exclusion] = {}
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if line.startswith("# generation:"):
@@ -182,12 +203,30 @@ def read_xfail(path: Path) -> tuple[list[str], int]:
         entry = line.split("#", 1)[0].strip()
         if not entry:
             continue
-        if entry in entries:
-            raise ReportError(f"{path}:{number}: duplicate xfail entry {entry}", EXIT_ENVIRONMENT)
-        entries.append(entry)
+        fields = entry.split()
+        case_id = fields[0]
+        if case_id in entries or case_id in excluded:
+            raise ReportError(f"{path}:{number}: duplicate xfail entry {case_id}", EXIT_ENVIRONMENT)
+        if len(fields) == 1:
+            entries.append(case_id)
+            continue
+        if fields[1] != "excluded" or len(fields) < 3 or not OWNER_ISSUE.fullmatch(fields[2]):
+            raise ReportError(
+                f"{path}:{number}: expected `<case-id>` or `<case-id> excluded <owner issue URL> <reason>`; an "
+                "exclusion's owner is an issue in rustfs/gateway or rustfs/backlog",
+                EXIT_ENVIRONMENT,
+            )
+        reason = " ".join(fields[3:])
+        if len(fields[3:]) < MINIMUM_REASON_WORDS:
+            raise ReportError(
+                f"{path}:{number}: the exclusion of {case_id} needs a reason of at least "
+                f"{MINIMUM_REASON_WORDS} words",
+                EXIT_ENVIRONMENT,
+            )
+        excluded[case_id] = Exclusion(owner=fields[2], reason=reason)
     if generation is None:
         raise ReportError(f"{path}: no `# generation: <n>` header; the ratchet has nothing to compare", EXIT_ENVIRONMENT)
-    return entries, generation
+    return entries, excluded, generation
 
 
 @dataclass
@@ -203,13 +242,35 @@ class Verdict:
     errored: int
     total: int
     generation: int
+    # Excluded cases that were reported, with the outcome this run gave them. Never judged.
+    excluded: list[tuple[str, str]] = field(default_factory=list)
+    exclusions: dict[str, Exclusion] = field(default_factory=dict)
 
     def exit_code(self) -> int:
         return EXIT_REGRESSION if self.regression else EXIT_OK
 
 
-def judge(cases: list[Case], xfail: list[str], generation: int) -> Verdict:
-    """Compares one run against the tolerated set."""
+def judge(
+    cases: list[Case], xfail: list[str], generation: int, exclusions: dict[str, Exclusion] | None = None
+) -> Verdict:
+    """Compares one run against the tolerated set; excluded cases are set aside unjudged."""
+    exclusions = exclusions or {}
+    excluded = [(case.id, case.outcome) for case in cases if case.id in exclusions]
+    cases_judged = [case for case in cases if case.id not in exclusions]
+    verdict = _judge(cases, cases_judged, xfail, generation)
+    verdict.excluded = excluded
+    verdict.exclusions = exclusions
+    reported = {case.id for case in cases}
+    verdict.stale = sorted(set(verdict.stale) | {case_id for case_id in exclusions if case_id not in reported})
+    return verdict
+
+
+def _judge(cases: list[Case], judged: list[Case], xfail: list[str], generation: int) -> Verdict:
+    """Compares the judged (non-excluded) cases against the tolerated set.
+
+    The environment checks look at every reported case, excluded or not: an exclusion must not be
+    what lets a dead service through.
+    """
     if not cases:
         raise ReportError(
             "the run reported no cases at all; that is an environment failure, not a result", EXIT_ENVIRONMENT
@@ -229,7 +290,7 @@ def judge(cases: list[Case], xfail: list[str], generation: int) -> Verdict:
     regression: list[str] = []
     fixed: list[str] = []
     skipped: list[str] = []
-    for case in cases:
+    for case in judged:
         if case.outcome in {"failed", "errored"}:
             (known if case.id in tolerated else regression).append(case.id)
         elif case.outcome == "passed":
@@ -267,7 +328,7 @@ def summary_line(verdict: Verdict) -> str:
     return (
         f"SUMMARY passed={len(verdict.passed)} known={len(verdict.known)} "
         f"regression={len(verdict.regression)} fixed={len(verdict.fixed)} "
-        f"stale={len(verdict.stale)} skipped={len(verdict.skipped)} "
+        f"stale={len(verdict.stale)} skipped={len(verdict.skipped)} excluded={len(verdict.excluded)} "
         f"collected={verdict.total} xfail-generation={verdict.generation}"
     )
 
@@ -300,6 +361,14 @@ def render_markdown(verdict: Verdict, limit: int) -> str:
         lines.append("")
         for case_id in verdict.stale[:limit]:
             lines.append(f"- `{case_id}`")
+        lines.append("")
+
+    if verdict.excluded:
+        lines.append(f"### {len(verdict.excluded)} excluded case(s) — reported, never judged")
+        lines.append("")
+        for case_id, outcome in verdict.excluded[:limit]:
+            exclusion = verdict.exclusions[case_id]
+            lines.append(f"- `{case_id}` {outcome} — {exclusion.reason} ({exclusion.owner})")
         lines.append("")
 
     domains = sorted(
@@ -344,6 +413,14 @@ def render_xfail(verdict: Verdict, generation: int) -> str:
     for domain in sorted(grouped):
         lines.append(f"# --- {domain} ({len(grouped[domain])}) ---")
         lines.extend(grouped[domain])
+        lines.append("")
+    if verdict.exclusions:
+        # Carried over verbatim: a record run measures the judged cases, and has no evidence either
+        # way about a case whose outcome is excluded. Removing one is a reviewed decision.
+        lines.append(f"# --- excluded ({len(verdict.exclusions)}) ---")
+        for case_id in sorted(verdict.exclusions):
+            exclusion = verdict.exclusions[case_id]
+            lines.append(f"{case_id} excluded {exclusion.owner} {exclusion.reason}")
         lines.append("")
     return "\n".join(lines)
 
@@ -404,8 +481,8 @@ def main(argv: list[str]) -> int:
         return EXIT_USAGE
     try:
         cases = read_junit(options.junit)
-        xfail, generation = read_xfail(options.xfail)
-        verdict = judge(cases, xfail, generation)
+        xfail, exclusions, generation = read_xfail(options.xfail)
+        verdict = judge(cases, xfail, generation, exclusions)
     except ReportError as error:
         print(f"report: {error}", file=sys.stderr)
         return error.code
@@ -418,6 +495,8 @@ def main(argv: list[str]) -> int:
         print(f"FIXED {classify(case_id)} {case_id}")
     for case_id in verdict.stale[: options.limit]:
         print(f"STALE {case_id}")
+    for case_id, outcome in verdict.excluded[: options.limit]:
+        print(f"EXCLUDED {classify(case_id)} {case_id} {outcome}")
 
     if options.markdown:
         options.markdown.write_text(markdown, encoding="utf-8")
@@ -434,6 +513,15 @@ def main(argv: list[str]) -> int:
                     "fixed": verdict.fixed,
                     "stale": verdict.stale,
                     "skipped": verdict.skipped,
+                    "excluded": [
+                        {
+                            "id": case_id,
+                            "outcome": outcome,
+                            "owner": verdict.exclusions[case_id].owner,
+                            "reason": verdict.exclusions[case_id].reason,
+                        }
+                        for case_id, outcome in verdict.excluded
+                    ],
                     "by_domain": {
                         "passed": by_domain(verdict.passed),
                         "known": by_domain(verdict.known),

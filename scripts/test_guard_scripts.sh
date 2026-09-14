@@ -12798,17 +12798,28 @@ path.write_text(path.read_text() + sys.argv[1] + "\n")
 PYEOF
 }
 
+# Moves the checked-in generation by a signed offset (+1, +8, -1), so these mutations keep their
+# subject whenever a reviewed baseline raises the generation.
 set_xfail_generation() {
     python3 - "$1" <<'PYEOF'
 import pathlib
+import re
 import sys
 
 path = pathlib.Path("ci/s3tests/xfail.txt")
 text = path.read_text()
-if "# generation:" not in text:
+found = re.search(r"(?m)^# generation: ([0-9]+)$", text)
+if found is None:
     raise SystemExit("xfail generation mutation subject is missing")
-path.write_text(text.replace("# generation: 1", f"# generation: {sys.argv[1]}", 1))
+moved = int(found.group(1)) + int(sys.argv[1])
+if moved < 0:
+    raise SystemExit("xfail generation mutation would go below zero")
+path.write_text(text[: found.start(1)] + str(moved) + text[found.end(1):])
 PYEOF
+}
+
+set_xfail_generation_next() {
+    set_xfail_generation +1
 }
 
 # The cheapest way to turn a red external suite green is to paste its failures into the
@@ -12821,24 +12832,95 @@ expect_fail check_xfail_ratchet.sh \
 
 # The escape has to work, or the ratchet cannot record a first baseline at all and somebody
 # deletes it. Proving it works is also what stops this guard becoming stuck on one answer.
+# The legitimate shape: a newly measured failure, recorded in the refreshed per-case record,
+# added in the same change that raises the generation of both files.
 mut_xfail_entry_added_with_generation() {
-    append_xfail_entry "s3tests_boto3.functional.test_s3::test_multipart_upload_small"
-    set_xfail_generation 2
+    python3 - <<'PYEOF'
+import pathlib, re
+
+outcomes = pathlib.Path("ci/s3tests/outcomes.txt")
+text = outcomes.read_text()
+passing = next(line for line in text.splitlines() if line.startswith("passed "))
+case_id = passing.split(" ", 1)[1]
+text = text.replace(passing + "\n", f"failed {case_id}\n", 1)
+found = re.search(r"(?m)^# generation: ([0-9]+)$", text)
+if found is None:
+    raise SystemExit("outcomes generation mutation subject is missing")
+outcomes.write_text(text[: found.start(1)] + str(int(found.group(1)) + 1) + text[found.end(1):])
+xfail = pathlib.Path("ci/s3tests/xfail.txt")
+xfail.write_text(xfail.read_text() + case_id + "\n")
+PYEOF
+    set_xfail_generation +1
 }
 expect_guard_pass check_xfail_ratchet.sh \
     'a tolerated failure added in the same change that raises the generation' \
     mut_xfail_entry_added_with_generation
 
+# An exclusion is wider than an entry: it reports nothing either way. The same two rules as an
+# excluded SDK in ci/mint/baseline.txt — owned, reasoned, and only with a raised generation.
+mut_xfail_exclusion_added_without_generation() {
+    append_xfail_entry "s3tests.functional.test_s3::test_lifecycle_expiration excluded https://github.com/rustfs/gateway/issues/1 its outcome differs between runs"
+}
+expect_fail check_xfail_ratchet.sh \
+    'an exclusion added without raising the generation' \
+    mut_xfail_exclusion_added_without_generation \
+    'exclusion(s) were added without raising the generation'
+
+mut_xfail_exclusion_without_owner() {
+    append_xfail_entry "s3tests.functional.test_s3::test_lifecycle_expiration excluded somebody its outcome differs between runs"
+    set_xfail_generation_next
+}
+expect_fail check_xfail_ratchet.sh \
+    'an exclusion that names no owner issue, even with the generation raised' \
+    mut_xfail_exclusion_without_owner \
+    'names no owner'
+
+# An xfail entry must be backed by the measured record: a case recorded as passing, pasted
+# into the tolerated set, is a guess, and the generation raise does not make it a measurement.
+mut_xfail_entry_recorded_as_passing() {
+    python3 - <<'PYEOF'
+import pathlib, re
+
+outcomes = pathlib.Path("ci/s3tests/outcomes.txt")
+passing = next(line.split(" ", 1)[1] for line in outcomes.read_text().splitlines() if line.startswith("passed "))
+path = pathlib.Path("ci/s3tests/xfail.txt")
+path.write_text(path.read_text() + passing + "\n")
+PYEOF
+    set_xfail_generation_next
+    python3 - <<'PYEOF'
+import pathlib, re
+
+path = pathlib.Path("ci/s3tests/outcomes.txt")
+text = path.read_text()
+found = re.search(r"(?m)^# generation: ([0-9]+)$", text)
+if found is None:
+    raise SystemExit("outcomes generation mutation subject is missing")
+path.write_text(text[: found.start(1)] + str(int(found.group(1)) + 1) + text[found.end(1):])
+PYEOF
+}
+expect_fail check_xfail_ratchet.sh \
+    'a case recorded as passing added to the tolerated set, even with both generations raised' \
+    mut_xfail_entry_recorded_as_passing \
+    'not recorded as failing in ci/s3tests/outcomes.txt'
+
+mut_xfail_outcomes_generation_lags() {
+    set_xfail_generation_next
+}
+expect_fail check_xfail_ratchet.sh \
+    'the xfail generation raised without refreshing the per-case record it rests on' \
+    mut_xfail_outcomes_generation_lags \
+    'refresh them together from one record run'
+
 mut_xfail_generation_jumped() {
     append_xfail_entry "s3tests_boto3.functional.test_s3::test_multipart_upload_small"
-    set_xfail_generation 9
+    set_xfail_generation +8
 }
 expect_fail check_xfail_ratchet.sh \
     'a generation jumped several steps at once, banking room for later additions' \
     mut_xfail_generation_jumped
 
 mut_xfail_generation_backwards() {
-    set_xfail_generation 0
+    set_xfail_generation -1
 }
 expect_fail check_xfail_ratchet.sh \
     'a generation moved backwards' mut_xfail_generation_backwards

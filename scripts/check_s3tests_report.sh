@@ -181,8 +181,34 @@ probe(
     ["reported no cases"],
 )
 
-# 8. A list with no generation cannot be ratcheted, so it is refused rather than read.
-# The per-case record behind a generation: every reported case, once, with its outcome. A record
+# 8. An exclusion takes a case out of the verdict: failing, it is neither KNOWN nor a REGRESSION.
+EXCLUDED_LINE = f"{LIFECYCLE} excluded https://github.com/rustfs/gateway/issues/1 timing differs between runs"
+probe(
+    "an excluded failure is neither known nor a regression",
+    [(LIFECYCLE, "failed"), (ACL, "passed")],
+    xfail([EXCLUDED_LINE]),
+    0,
+    ["known=0", "regression=0", "excluded=1", f"EXCLUDED lifecycle {LIFECYCLE}"],
+    ["REGRESSION"],
+)
+
+# 9. An exclusion that names no owner issue, or gives no reason, is refused rather than read.
+probe(
+    "an exclusion without an owner issue is refused",
+    [(LIFECYCLE, "failed")],
+    xfail([f"{LIFECYCLE} excluded somebody timing differs between runs"]),
+    3,
+    ["owner issue"],
+)
+probe(
+    "an exclusion without a reason is refused",
+    [(LIFECYCLE, "failed")],
+    xfail([f"{LIFECYCLE} excluded https://github.com/rustfs/gateway/issues/1 flaky"]),
+    3,
+    ["at least 3 words"],
+)
+
+# 10. The per-case record behind a generation: every reported case, once, with its outcome. A record
 # that dropped the skipped or errored cases would hide exactly the cases nobody measured.
 with tempfile.TemporaryDirectory() as directory:
     work = Path(directory)

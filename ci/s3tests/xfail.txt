@@ -11,14 +11,592 @@
 #   other addition. That is deliberate friction: a tolerated failure is a promise nobody
 #   made, and the cheapest way to turn this job green is to paste the failures into it.
 #
+# EXCLUSIONS
+#   `<case-id> excluded <owner issue URL> <reason>` takes a case out of the verdict entirely:
+#   it is still run and reported, but neither KNOWN, FIXED nor REGRESSION. It is for a case whose
+#   outcome does not reproduce from run to run, and it follows the rules for an excluded SDK in
+#   ci/mint/baseline.txt: the owner is an issue in rustfs/gateway or rustfs/backlog, the reason is
+#   at least three words, and adding one needs the generation raised by exactly one. The two
+#   at the end of this file are the only cases the two measuring runs disagreed on.
+#
 # HOW TO PROPOSE A NEW BASELINE
-#   Run the workflow with `mode: record`. It writes a proposed list as a run artifact,
-#   grouped by capability domain, with the generation already raised. Review it, annotate
-#   each group with the implementation issue expected to close the gap, and land it.
+#   Run the workflow with `mode: record`. It writes xfail.proposed.txt and outcomes.proposed.txt
+#   as run artifacts. Attribute every group to an owner before landing it, together with
+#   ci/s3tests/outcomes.txt, the per-case record of the same run.
 #
-# THIS FILE IS EMPTY ON PURPOSE
-#   Nothing has been measured yet: there is no runnable system under test in this repository
-#   (rustfs/gateway#624), so no case has been observed to fail and none may be listed here.
-#   An entry written from a guess is a guarantee quietly withdrawn.
+# GENERATION 2 (rustfs/backlog#1764): THE FIRST MEASURED BASELINE
+#   Generation 1 was an empty list written before anything could run. This is the first one
+#   measured, and so is generation 0 of the measured series: the native amd64 `record` run
+#   https://github.com/rustfs/gateway/actions/runs/34800741795
+#   against a release compat-sut (main, alt and tenant identities, --lc-debug-interval 10) at
+#   the pinned suite commit with the hash-locked client in ci/s3tests/requirements.lock.
+#   passed=169 failed=144 errored=361 skipped=66 collected=740 (filter selects 740 of 1053).
+#   A second `record` run at the same commit,
+#   https://github.com/rustfs/gateway/actions/runs/34801717933, agreed on 736 of 740 cases. The
+#   four that differ follow test_multi_object_delete_key_limit, whose 1001-key DeleteObjects
+#   answered 200 in one run and, after 284 s, 500 (handler deadline) in the other. The half-
+#   emptied bucket then tripped the ListObjectVersions cursor defect in the next three cases'
+#   setup. The two key-limit cases fail either way and are listed; the two that pass or error
+#   depending on that timing are excluded. ci/s3tests/outcomes.txt is the per-case record of
+#   the first run, skips included.
+#   Failing cases by class: gateway-bug 371, fs-gap 49, out-of-scope 71, not-a-defect 10, unattributed 4.
+#     gateway-bug   the gateway or its reference backend answers what the S3 contract does not
+#     fs-gap        the reference fs backend does not implement the feature (rustfs/gateway#812)
+#     out-of-scope  IAM, SigV2, S3 Control, RGW tenancy, or a suite hook RGW also fails
+#     not-a-defect  the answer is what AWS returns; the suite encodes RGW's
+#     unattributed  needs an AWS capture before it can be attributed
+#   361 of the gateway-bug cases are ONE cascade: after a case leaves a bucket the fixture
+#   cannot empty (rustfs/gateway#806, #807), every later case errors in setup or teardown, so
+#   their own outcome is not measured. Fixing those two turns them FIXED or REGRESSION; the
+#   regressions then need their own generation, attributed case by case.
 #
-# generation: 1
+# generation: 2
+
+# --- gateway-bug: cleanup cascade: DeleteBucket refuses pending multipart uploads (354) — https://github.com/rustfs/gateway/issues/806 ---
+s3tests.functional.test_s3::test_100_continue
+s3tests.functional.test_s3::test_100_continue_error_retry
+s3tests.functional.test_s3::test_abort_multipart_upload
+s3tests.functional.test_s3::test_abort_multipart_upload_not_found
+s3tests.functional.test_s3::test_atomic_dual_write_1mb
+s3tests.functional.test_s3::test_atomic_dual_write_4mb
+s3tests.functional.test_s3::test_atomic_dual_write_8mb
+s3tests.functional.test_s3::test_atomic_multipart_upload_write
+s3tests.functional.test_s3::test_atomic_read_1mb
+s3tests.functional.test_s3::test_atomic_read_4mb
+s3tests.functional.test_s3::test_atomic_read_8mb
+s3tests.functional.test_s3::test_atomic_write_1mb
+s3tests.functional.test_s3::test_atomic_write_4mb
+s3tests.functional.test_s3::test_atomic_write_8mb
+s3tests.functional.test_s3::test_block_public_object_canned_acls
+s3tests.functional.test_s3::test_block_public_policy
+s3tests.functional.test_s3::test_block_public_policy_with_principal
+s3tests.functional.test_s3::test_block_public_put_bucket_acls
+s3tests.functional.test_s3::test_block_public_restrict_public_buckets
+s3tests.functional.test_s3::test_bucket_create_delete_bucket_ownership
+s3tests.functional.test_s3::test_bucket_policy
+s3tests.functional.test_s3::test_bucket_policy_acl
+s3tests.functional.test_s3::test_bucket_policy_allow_notprincipal
+s3tests.functional.test_s3::test_bucket_policy_another_bucket
+s3tests.functional.test_s3::test_bucket_policy_deny_self_denied_policy
+s3tests.functional.test_s3::test_bucket_policy_deny_self_denied_policy_confirm_header
+s3tests.functional.test_s3::test_bucket_policy_different_tenant
+s3tests.functional.test_s3::test_bucket_policy_get_obj_acl_existing_tag
+s3tests.functional.test_s3::test_bucket_policy_get_obj_existing_tag
+s3tests.functional.test_s3::test_bucket_policy_get_obj_tagging_existing_tag
+s3tests.functional.test_s3::test_bucket_policy_multipart
+s3tests.functional.test_s3::test_bucket_policy_put_obj_acl
+s3tests.functional.test_s3::test_bucket_policy_put_obj_copy_source
+s3tests.functional.test_s3::test_bucket_policy_put_obj_copy_source_meta
+s3tests.functional.test_s3::test_bucket_policy_put_obj_grant
+s3tests.functional.test_s3::test_bucket_policy_put_obj_kms_noenc
+s3tests.functional.test_s3::test_bucket_policy_put_obj_kms_s3
+s3tests.functional.test_s3::test_bucket_policy_put_obj_request_obj_tag
+s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_incorrect_algo_sse_s3
+s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_kms
+s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_noenc
+s3tests.functional.test_s3::test_bucket_policy_put_obj_tagging_existing_tag
+s3tests.functional.test_s3::test_bucket_policy_set_condition_operator_end_with_IfExists
+s3tests.functional.test_s3::test_bucket_policy_tenanted_bucket
+s3tests.functional.test_s3::test_bucket_policy_upload_part_copy
+s3tests.functional.test_s3::test_bucketv2_policy
+s3tests.functional.test_s3::test_bucketv2_policy_acl
+s3tests.functional.test_s3::test_bucketv2_policy_another_bucket
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-kms-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-kms-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-kms-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-kms-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-s3-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-s3-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-s3-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-s3-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-kms-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-kms-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-kms-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-kms-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-s3-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-s3-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-s3-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-s3-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_object_ifmatch_failed
+s3tests.functional.test_s3::test_copy_object_ifmatch_good
+s3tests.functional.test_s3::test_copy_object_ifnonematch_failed
+s3tests.functional.test_s3::test_copy_object_ifnonematch_good
+s3tests.functional.test_s3::test_copy_part_enc[sse-c-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-c-sse-kms-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-c-sse-s3-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-kms-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-kms-sse-kms-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-kms-sse-s3-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-s3-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-s3-sse-kms-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-s3-sse-s3-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_cors_header_option
+s3tests.functional.test_s3::test_cors_origin_response
+s3tests.functional.test_s3::test_cors_origin_wildcard
+s3tests.functional.test_s3::test_cors_presigned_get_object
+s3tests.functional.test_s3::test_cors_presigned_get_object_tenant
+s3tests.functional.test_s3::test_cors_presigned_get_object_tenant_v2
+s3tests.functional.test_s3::test_cors_presigned_get_object_v2
+s3tests.functional.test_s3::test_cors_presigned_put_object
+s3tests.functional.test_s3::test_cors_presigned_put_object_tenant
+s3tests.functional.test_s3::test_cors_presigned_put_object_tenant_v2
+s3tests.functional.test_s3::test_cors_presigned_put_object_tenant_with_acl
+s3tests.functional.test_s3::test_cors_presigned_put_object_v2
+s3tests.functional.test_s3::test_cors_presigned_put_object_with_acl
+s3tests.functional.test_s3::test_create_bucket_bucket_owner_enforced
+s3tests.functional.test_s3::test_create_bucket_bucket_owner_preferred
+s3tests.functional.test_s3::test_create_bucket_object_writer
+s3tests.functional.test_s3::test_delete_bucket_encryption_kms
+s3tests.functional.test_s3::test_delete_bucket_encryption_s3
+s3tests.functional.test_s3::test_delete_marker_expiration
+s3tests.functional.test_s3::test_delete_marker_nonversioned
+s3tests.functional.test_s3::test_delete_marker_suspended
+s3tests.functional.test_s3::test_delete_marker_versioned
+s3tests.functional.test_s3::test_delete_tags_obj_public
+s3tests.functional.test_s3::test_encrypted_transfer_13b
+s3tests.functional.test_s3::test_encrypted_transfer_1MB
+s3tests.functional.test_s3::test_encrypted_transfer_1b
+s3tests.functional.test_s3::test_encrypted_transfer_1kb
+s3tests.functional.test_s3::test_encryption_key_no_sse_c
+s3tests.functional.test_s3::test_encryption_sse_c_deny_algo_with_bucket_policy
+s3tests.functional.test_s3::test_encryption_sse_c_enforced_with_bucket_policy
+s3tests.functional.test_s3::test_encryption_sse_c_invalid_md5
+s3tests.functional.test_s3::test_encryption_sse_c_method_head
+s3tests.functional.test_s3::test_encryption_sse_c_multipart_bad_download
+s3tests.functional.test_s3::test_encryption_sse_c_multipart_invalid_chunks_1
+s3tests.functional.test_s3::test_encryption_sse_c_multipart_invalid_chunks_2
+s3tests.functional.test_s3::test_encryption_sse_c_multipart_upload
+s3tests.functional.test_s3::test_encryption_sse_c_no_key
+s3tests.functional.test_s3::test_encryption_sse_c_no_md5
+s3tests.functional.test_s3::test_encryption_sse_c_other_key
+s3tests.functional.test_s3::test_encryption_sse_c_post_object_authenticated_request
+s3tests.functional.test_s3::test_encryption_sse_c_present
+s3tests.functional.test_s3::test_encryption_sse_c_unaligned_multipart_upload
+s3tests.functional.test_s3::test_get_authpublic_acl_bucket_policy_status
+s3tests.functional.test_s3::test_get_bucket_encryption_kms
+s3tests.functional.test_s3::test_get_bucket_encryption_s3
+s3tests.functional.test_s3::test_get_bucket_policy_status
+s3tests.functional.test_s3::test_get_checksum_object_attributes
+s3tests.functional.test_s3::test_get_multipart_checksum_object_attributes
+s3tests.functional.test_s3::test_get_multipart_object_attributes
+s3tests.functional.test_s3::test_get_nonpublicpolicy_acl_bucket_policy_status
+s3tests.functional.test_s3::test_get_nonpublicpolicy_principal_bucket_policy_status
+s3tests.functional.test_s3::test_get_obj_head_tagging
+s3tests.functional.test_s3::test_get_obj_tagging
+s3tests.functional.test_s3::test_get_object_attributes
+s3tests.functional.test_s3::test_get_object_torrent
+s3tests.functional.test_s3::test_get_paginated_multipart_object_attributes
+s3tests.functional.test_s3::test_get_public_acl_bucket_policy_status
+s3tests.functional.test_s3::test_get_public_block_deny_bucket_policy
+s3tests.functional.test_s3::test_get_publicpolicy_acl_bucket_policy_status
+s3tests.functional.test_s3::test_get_single_multipart_object_attributes
+s3tests.functional.test_s3::test_get_sse_c_encrypted_object_attributes
+s3tests.functional.test_s3::test_get_tags_acl_public
+s3tests.functional.test_s3::test_get_undefined_public_block
+s3tests.functional.test_s3::test_get_versioned_object_attributes
+s3tests.functional.test_s3::test_head_object_404_with_policy_prefix
+s3tests.functional.test_s3::test_ignore_public_acls
+s3tests.functional.test_s3::test_lifecycle_delete
+s3tests.functional.test_s3::test_lifecycle_expiration_days0
+s3tests.functional.test_s3::test_lifecycle_expiration_header_and_tags_head
+s3tests.functional.test_s3::test_lifecycle_expiration_header_head
+s3tests.functional.test_s3::test_lifecycle_expiration_header_put
+s3tests.functional.test_s3::test_lifecycle_expiration_header_tags_head
+s3tests.functional.test_s3::test_lifecycle_get
+s3tests.functional.test_s3::test_lifecycle_get_no_id
+s3tests.functional.test_s3::test_lifecycle_id_too_long
+s3tests.functional.test_s3::test_lifecycle_invalid_status
+s3tests.functional.test_s3::test_lifecycle_plain_null_version_current_transition
+s3tests.functional.test_s3::test_lifecycle_same_id
+s3tests.functional.test_s3::test_lifecycle_set
+s3tests.functional.test_s3::test_lifecycle_set_date
+s3tests.functional.test_s3::test_lifecycle_set_deletemarker
+s3tests.functional.test_s3::test_lifecycle_set_empty_filter
+s3tests.functional.test_s3::test_lifecycle_set_filter
+s3tests.functional.test_s3::test_lifecycle_set_invalid_date
+s3tests.functional.test_s3::test_lifecycle_set_multipart
+s3tests.functional.test_s3::test_lifecycle_set_noncurrent
+s3tests.functional.test_s3::test_lifecycle_set_noncurrent_transition
+s3tests.functional.test_s3::test_lifecycle_transition_set_invalid_date
+s3tests.functional.test_s3::test_list_multipart_upload
+s3tests.functional.test_s3::test_list_multipart_upload_owner
+s3tests.functional.test_s3::test_multipart_checksum_sha256
+s3tests.functional.test_s3::test_multipart_copy_improper_range
+s3tests.functional.test_s3::test_multipart_copy_invalid_range
+s3tests.functional.test_s3::test_multipart_copy_multiple_sizes
+s3tests.functional.test_s3::test_multipart_copy_small
+s3tests.functional.test_s3::test_multipart_copy_special_names
+s3tests.functional.test_s3::test_multipart_copy_versioned
+s3tests.functional.test_s3::test_multipart_copy_without_range
+s3tests.functional.test_s3::test_multipart_get_part
+s3tests.functional.test_s3::test_multipart_put_current_object_if_match
+s3tests.functional.test_s3::test_multipart_put_current_object_if_none_match
+s3tests.functional.test_s3::test_multipart_put_object_if_match
+s3tests.functional.test_s3::test_multipart_resend_first_finishes_last
+s3tests.functional.test_s3::test_multipart_reupload_checksum_and_etag
+s3tests.functional.test_s3::test_multipart_single_get_part
+s3tests.functional.test_s3::test_multipart_sse_c_get_part
+s3tests.functional.test_s3::test_multipart_upload
+s3tests.functional.test_s3::test_multipart_upload_complete_without_create
+s3tests.functional.test_s3::test_multipart_upload_contents
+s3tests.functional.test_s3::test_multipart_upload_empty
+s3tests.functional.test_s3::test_multipart_upload_incorrect_etag
+s3tests.functional.test_s3::test_multipart_upload_missing_part
+s3tests.functional.test_s3::test_multipart_upload_multiple_sizes
+s3tests.functional.test_s3::test_multipart_upload_on_a_bucket_with_policy
+s3tests.functional.test_s3::test_multipart_upload_overwrite_existing_object
+s3tests.functional.test_s3::test_multipart_upload_resend_part
+s3tests.functional.test_s3::test_multipart_upload_size_too_small
+s3tests.functional.test_s3::test_multipart_upload_small
+s3tests.functional.test_s3::test_multipart_use_cksum_helper_crc32
+s3tests.functional.test_s3::test_multipart_use_cksum_helper_crc32c
+s3tests.functional.test_s3::test_multipart_use_cksum_helper_crc64nvme
+s3tests.functional.test_s3::test_multipart_use_cksum_helper_sha1
+s3tests.functional.test_s3::test_multipart_use_cksum_helper_sha256
+s3tests.functional.test_s3::test_non_multipart_get_part
+s3tests.functional.test_s3::test_non_multipart_sse_c_get_part
+s3tests.functional.test_s3::test_object_checksum_crc64nvme
+s3tests.functional.test_s3::test_object_checksum_sha256
+s3tests.functional.test_s3::test_object_lock_changing_mode_from_compliance
+s3tests.functional.test_s3::test_object_lock_changing_mode_from_governance_with_bypass
+s3tests.functional.test_s3::test_object_lock_changing_mode_from_governance_without_bypass
+s3tests.functional.test_s3::test_object_lock_delete_multipart_object_with_legal_hold_on
+s3tests.functional.test_s3::test_object_lock_delete_multipart_object_with_retention
+s3tests.functional.test_s3::test_object_lock_delete_object_with_legal_hold_off
+s3tests.functional.test_s3::test_object_lock_delete_object_with_legal_hold_on
+s3tests.functional.test_s3::test_object_lock_delete_object_with_retention
+s3tests.functional.test_s3::test_object_lock_delete_object_with_retention_and_marker
+s3tests.functional.test_s3::test_object_lock_get_legal_hold
+s3tests.functional.test_s3::test_object_lock_get_legal_hold_invalid_bucket
+s3tests.functional.test_s3::test_object_lock_get_obj_lock
+s3tests.functional.test_s3::test_object_lock_get_obj_lock_invalid_bucket
+s3tests.functional.test_s3::test_object_lock_get_obj_metadata
+s3tests.functional.test_s3::test_object_lock_get_obj_retention
+s3tests.functional.test_s3::test_object_lock_get_obj_retention_invalid_bucket
+s3tests.functional.test_s3::test_object_lock_get_obj_retention_iso8601
+s3tests.functional.test_s3::test_object_lock_multi_delete_object_with_retention
+s3tests.functional.test_s3::test_object_lock_put_legal_hold
+s3tests.functional.test_s3::test_object_lock_put_legal_hold_invalid_bucket
+s3tests.functional.test_s3::test_object_lock_put_legal_hold_invalid_status
+s3tests.functional.test_s3::test_object_lock_put_obj_lock
+s3tests.functional.test_s3::test_object_lock_put_obj_lock_enable_after_create
+s3tests.functional.test_s3::test_object_lock_put_obj_lock_invalid_bucket
+s3tests.functional.test_s3::test_object_lock_put_obj_lock_invalid_days
+s3tests.functional.test_s3::test_object_lock_put_obj_lock_invalid_mode
+s3tests.functional.test_s3::test_object_lock_put_obj_lock_invalid_status
+s3tests.functional.test_s3::test_object_lock_put_obj_lock_invalid_years
+s3tests.functional.test_s3::test_object_lock_put_obj_lock_with_days_and_years
+s3tests.functional.test_s3::test_object_lock_put_obj_retention
+s3tests.functional.test_s3::test_object_lock_put_obj_retention_increase_period
+s3tests.functional.test_s3::test_object_lock_put_obj_retention_invalid_bucket
+s3tests.functional.test_s3::test_object_lock_put_obj_retention_invalid_mode
+s3tests.functional.test_s3::test_object_lock_put_obj_retention_override_default_retention
+s3tests.functional.test_s3::test_object_lock_put_obj_retention_shorten_period
+s3tests.functional.test_s3::test_object_lock_put_obj_retention_shorten_period_bypass
+s3tests.functional.test_s3::test_object_lock_put_obj_retention_versionid
+s3tests.functional.test_s3::test_object_lock_suspend_versioning
+s3tests.functional.test_s3::test_object_lock_uploading_obj
+s3tests.functional.test_s3::test_object_read_unreadable
+s3tests.functional.test_s3::test_post_object_tags_anonymous_request
+s3tests.functional.test_s3::test_post_object_tags_authenticated_request
+s3tests.functional.test_s3::test_post_object_upload_checksum
+s3tests.functional.test_s3::test_put_bucket_encryption_kms
+s3tests.functional.test_s3::test_put_bucket_encryption_s3
+s3tests.functional.test_s3::test_put_bucket_ownership_bucket_owner_enforced
+s3tests.functional.test_s3::test_put_bucket_ownership_bucket_owner_preferred
+s3tests.functional.test_s3::test_put_bucket_ownership_object_writer
+s3tests.functional.test_s3::test_put_current_object_if_match
+s3tests.functional.test_s3::test_put_current_object_if_none_match
+s3tests.functional.test_s3::test_put_delete_tags
+s3tests.functional.test_s3::test_put_excess_key_tags
+s3tests.functional.test_s3::test_put_excess_tags
+s3tests.functional.test_s3::test_put_excess_val_tags
+s3tests.functional.test_s3::test_put_get_delete_public_block
+s3tests.functional.test_s3::test_put_max_kvsize_tags
+s3tests.functional.test_s3::test_put_max_tags
+s3tests.functional.test_s3::test_put_modify_tags
+s3tests.functional.test_s3::test_put_obj_enc_conflict_bad_enc_kms
+s3tests.functional.test_s3::test_put_obj_enc_conflict_c_kms
+s3tests.functional.test_s3::test_put_obj_enc_conflict_c_s3
+s3tests.functional.test_s3::test_put_obj_enc_conflict_s3_kms
+s3tests.functional.test_s3::test_put_obj_with_tags
+s3tests.functional.test_s3::test_put_object_current_if_match
+s3tests.functional.test_s3::test_put_object_if_match
+s3tests.functional.test_s3::test_put_public_block
+s3tests.functional.test_s3::test_put_tags_acl_public
+s3tests.functional.test_s3::test_ranged_big_request_response_code
+s3tests.functional.test_s3::test_ranged_request_empty_object
+s3tests.functional.test_s3::test_ranged_request_invalid_range
+s3tests.functional.test_s3::test_ranged_request_response_code
+s3tests.functional.test_s3::test_ranged_request_return_trailing_bytes_response_code
+s3tests.functional.test_s3::test_ranged_request_skip_leading_bytes_response_code
+s3tests.functional.test_s3::test_set_bucket_tagging
+s3tests.functional.test_s3::test_set_cors
+s3tests.functional.test_s3::test_set_get_del_bucket_policy
+s3tests.functional.test_s3::test_set_multipart_tagging
+s3tests.functional.test_s3::test_sse_kms_default_post_object_authenticated_request
+s3tests.functional.test_s3::test_sse_kms_default_upload_1b
+s3tests.functional.test_s3::test_sse_kms_default_upload_1kb
+s3tests.functional.test_s3::test_sse_kms_default_upload_1mb
+s3tests.functional.test_s3::test_sse_kms_default_upload_8mb
+s3tests.functional.test_s3::test_sse_kms_method_head
+s3tests.functional.test_s3::test_sse_kms_multipart_invalid_chunks_1
+s3tests.functional.test_s3::test_sse_kms_multipart_invalid_chunks_2
+s3tests.functional.test_s3::test_sse_kms_multipart_upload
+s3tests.functional.test_s3::test_sse_kms_no_key
+s3tests.functional.test_s3::test_sse_kms_not_declared
+s3tests.functional.test_s3::test_sse_kms_post_object_authenticated_request
+s3tests.functional.test_s3::test_sse_kms_present
+s3tests.functional.test_s3::test_sse_kms_read_declare
+s3tests.functional.test_s3::test_sse_kms_transfer_13b
+s3tests.functional.test_s3::test_sse_kms_transfer_1MB
+s3tests.functional.test_s3::test_sse_kms_transfer_1b
+s3tests.functional.test_s3::test_sse_kms_transfer_1kb
+s3tests.functional.test_s3::test_sse_s3_default_method_head
+s3tests.functional.test_s3::test_sse_s3_default_multipart_upload
+s3tests.functional.test_s3::test_sse_s3_default_post_object_authenticated_request
+s3tests.functional.test_s3::test_sse_s3_default_upload_1b
+s3tests.functional.test_s3::test_sse_s3_default_upload_1kb
+s3tests.functional.test_s3::test_sse_s3_default_upload_1mb
+s3tests.functional.test_s3::test_sse_s3_default_upload_8mb
+s3tests.functional.test_s3::test_sse_s3_encrypted_upload_1b
+s3tests.functional.test_s3::test_sse_s3_encrypted_upload_1kb
+s3tests.functional.test_s3::test_sse_s3_encrypted_upload_1mb
+s3tests.functional.test_s3::test_sse_s3_encrypted_upload_8mb
+s3tests.functional.test_s3::test_upload_part_copy_percent_encoded_key
+s3tests.functional.test_s3::test_versioned_concurrent_object_create_and_remove
+s3tests.functional.test_s3::test_versioned_concurrent_object_create_concurrent_remove
+s3tests.functional.test_s3::test_versioned_object_acl
+s3tests.functional.test_s3::test_versioned_object_acl_no_version_specified
+s3tests.functional.test_s3::test_versioning_bucket_atomic_upload_return_version_id
+s3tests.functional.test_s3::test_versioning_bucket_create_suspend
+s3tests.functional.test_s3::test_versioning_bucket_multipart_upload_return_version_id
+s3tests.functional.test_s3::test_versioning_copy_obj_version
+s3tests.functional.test_s3::test_versioning_multi_object_delete
+s3tests.functional.test_s3::test_versioning_multi_object_delete_with_marker
+s3tests.functional.test_s3::test_versioning_multi_object_delete_with_marker_create
+s3tests.functional.test_s3::test_versioning_obj_create_overwrite_multipart
+s3tests.functional.test_s3::test_versioning_obj_create_read_remove
+s3tests.functional.test_s3::test_versioning_obj_create_read_remove_head
+s3tests.functional.test_s3::test_versioning_obj_create_versions_remove_all
+s3tests.functional.test_s3::test_versioning_obj_create_versions_remove_special_names
+s3tests.functional.test_s3::test_versioning_obj_list_marker
+s3tests.functional.test_s3::test_versioning_obj_plain_null_version_overwrite
+s3tests.functional.test_s3::test_versioning_obj_plain_null_version_overwrite_suspended
+s3tests.functional.test_s3::test_versioning_obj_plain_null_version_removal
+s3tests.functional.test_s3::test_versioning_obj_suspend_versions
+s3tests.functional.test_s3::test_versioning_obj_suspended_copy
+s3tests.functional.test_s3::test_versioning_stack_delete_merkers
+
+# --- gateway-bug: cleanup cascade: ListObjectVersions refuses a deleted marker (7) — https://github.com/rustfs/gateway/issues/807 ---
+s3tests.functional.test_s3::test_bucket_list_delimiter_not_skip_special
+s3tests.functional.test_s3::test_bucket_list_prefix_alt
+s3tests.functional.test_s3::test_bucket_list_prefix_basic
+s3tests.functional.test_s3::test_bucket_list_prefix_empty
+s3tests.functional.test_s3::test_bucket_listv2_prefix_alt
+s3tests.functional.test_s3::test_bucket_listv2_prefix_basic
+s3tests.functional.test_s3::test_bucket_listv2_prefix_empty
+
+# --- gateway-bug: GET/PUT conditional headers ignored (5) — https://github.com/rustfs/gateway/issues/808 ---
+s3tests.functional.test_s3::test_get_object_ifmatch_failed
+s3tests.functional.test_s3::test_get_object_ifmodifiedsince_failed
+s3tests.functional.test_s3::test_get_object_ifnonematch_good
+s3tests.functional.test_s3::test_get_object_ifunmodifiedsince_good
+s3tests.functional.test_s3::test_put_object_ifmatch_failed
+
+# --- gateway-bug: DeleteObjects accepts >1000 keys (2) — https://github.com/rustfs/gateway/issues/810 ---
+s3tests.functional.test_s3::test_multi_object_delete_key_limit
+s3tests.functional.test_s3::test_multi_objectv2_delete_key_limit
+
+# --- gateway-bug: CreateBucket by another identity returns 200 (1) — https://github.com/rustfs/gateway/issues/811 ---
+s3tests.functional.test_s3::test_bucket_create_exists_nonowner
+
+# --- gateway-bug: SigV4 Date-header timestamp refused (1) — https://github.com/rustfs/gateway/issues/809 ---
+s3tests.functional.test_headers::test_object_create_date_and_amz_date
+
+# --- gateway-bug: stored Content-Encoding keeps aws-chunked (1) — https://github.com/rustfs/gateway/issues/813 ---
+s3tests.functional.test_s3::test_object_content_encoding_aws_chunked
+
+# --- fs-gap: ACL / ownership controls not implemented (44) — https://github.com/rustfs/gateway/issues/812 ---
+s3tests.functional.test_headers::test_bucket_put_bad_canned_acl
+s3tests.functional.test_s3::test_access_bucket_private_object_private
+s3tests.functional.test_s3::test_access_bucket_private_object_publicread
+s3tests.functional.test_s3::test_access_bucket_private_object_publicreadwrite
+s3tests.functional.test_s3::test_access_bucket_private_objectv2_private
+s3tests.functional.test_s3::test_access_bucket_private_objectv2_publicread
+s3tests.functional.test_s3::test_access_bucket_private_objectv2_publicreadwrite
+s3tests.functional.test_s3::test_access_bucket_publicread_object_private
+s3tests.functional.test_s3::test_access_bucket_publicread_object_publicread
+s3tests.functional.test_s3::test_access_bucket_publicread_object_publicreadwrite
+s3tests.functional.test_s3::test_access_bucket_publicreadwrite_object_private
+s3tests.functional.test_s3::test_access_bucket_publicreadwrite_object_publicread
+s3tests.functional.test_s3::test_access_bucket_publicreadwrite_object_publicreadwrite
+s3tests.functional.test_s3::test_bucket_acl_canned
+s3tests.functional.test_s3::test_bucket_acl_canned_authenticatedread
+s3tests.functional.test_s3::test_bucket_acl_canned_private_to_private
+s3tests.functional.test_s3::test_bucket_acl_canned_publicreadwrite
+s3tests.functional.test_s3::test_bucket_acl_default
+s3tests.functional.test_s3::test_bucket_acl_grant_email_not_exist
+s3tests.functional.test_s3::test_bucket_acl_grant_nonexist_user
+s3tests.functional.test_s3::test_bucket_acl_revoke_all
+s3tests.functional.test_s3::test_bucket_concurrent_set_canned_acl
+s3tests.functional.test_s3::test_bucket_create_special_key_names
+s3tests.functional.test_s3::test_bucket_list_objects_anonymous
+s3tests.functional.test_s3::test_bucket_list_return_data
+s3tests.functional.test_s3::test_bucket_list_return_data_versioning
+s3tests.functional.test_s3::test_bucket_listv2_objects_anonymous
+s3tests.functional.test_s3::test_bucket_recreate_new_acl
+s3tests.functional.test_s3::test_bucket_recreate_overwrite_acl
+s3tests.functional.test_s3::test_expected_bucket_owner
+s3tests.functional.test_s3::test_object_acl_canned
+s3tests.functional.test_s3::test_object_acl_canned_authenticatedread
+s3tests.functional.test_s3::test_object_acl_canned_bucketownerfullcontrol
+s3tests.functional.test_s3::test_object_acl_canned_bucketownerread
+s3tests.functional.test_s3::test_object_acl_canned_during_create
+s3tests.functional.test_s3::test_object_acl_canned_publicreadwrite
+s3tests.functional.test_s3::test_object_acl_default
+s3tests.functional.test_s3::test_object_acl_full_control_verify_attributes
+s3tests.functional.test_s3::test_object_copy_canned_acl
+s3tests.functional.test_s3::test_object_copy_not_owned_object_bucket
+s3tests.functional.test_s3::test_object_put_acl_mtime
+s3tests.functional.test_s3::test_object_raw_get_bucket_acl
+s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_not_expired
+s3tests.functional.test_s3::test_put_bucket_acl_grant_group_read
+
+# --- fs-gap: anonymous access needs a public ACL (5) — https://github.com/rustfs/gateway/issues/812 ---
+s3tests.functional.test_s3::test_object_anon_put_write_access
+s3tests.functional.test_s3::test_object_delete_key_bucket_gone
+s3tests.functional.test_s3::test_object_raw_get
+s3tests.functional.test_s3::test_object_raw_get_bucket_gone
+s3tests.functional.test_s3::test_object_raw_get_object_gone
+
+# --- out-of-scope: SigV2 (header or POST form) refused by design (34) — https://github.com/rustfs/gateway/issues/765 ---
+s3tests.functional.test_headers::test_bucket_create_bad_authorization_invalid_aws2
+s3tests.functional.test_headers::test_bucket_create_bad_date_before_epoch_aws2
+s3tests.functional.test_headers::test_bucket_create_bad_date_none_aws2
+s3tests.functional.test_headers::test_bucket_create_bad_ua_empty_aws2
+s3tests.functional.test_headers::test_bucket_create_bad_ua_none_aws2
+s3tests.functional.test_headers::test_object_create_bad_authorization_incorrect_aws2
+s3tests.functional.test_headers::test_object_create_bad_authorization_invalid_aws2
+s3tests.functional.test_headers::test_object_create_bad_contentlength_mismatch_below_aws2
+s3tests.functional.test_headers::test_object_create_bad_date_before_epoch_aws2
+s3tests.functional.test_headers::test_object_create_bad_date_none_aws2
+s3tests.functional.test_s3::test_post_object_anonymous_request
+s3tests.functional.test_s3::test_post_object_authenticated_no_content_type
+s3tests.functional.test_s3::test_post_object_authenticated_request
+s3tests.functional.test_s3::test_post_object_case_insensitive_condition_fields
+s3tests.functional.test_s3::test_post_object_condition_is_case_sensitive
+s3tests.functional.test_s3::test_post_object_empty_conditions
+s3tests.functional.test_s3::test_post_object_escaped_field_values
+s3tests.functional.test_s3::test_post_object_expires_is_case_sensitive
+s3tests.functional.test_s3::test_post_object_ignored_header
+s3tests.functional.test_s3::test_post_object_invalid_content_length_argument
+s3tests.functional.test_s3::test_post_object_invalid_date_format
+s3tests.functional.test_s3::test_post_object_missing_conditions_list
+s3tests.functional.test_s3::test_post_object_missing_content_length_argument
+s3tests.functional.test_s3::test_post_object_missing_expires_condition
+s3tests.functional.test_s3::test_post_object_no_key_specified
+s3tests.functional.test_s3::test_post_object_set_invalid_success_code
+s3tests.functional.test_s3::test_post_object_set_key_from_filename
+s3tests.functional.test_s3::test_post_object_set_success_code
+s3tests.functional.test_s3::test_post_object_success_redirect_action
+s3tests.functional.test_s3::test_post_object_upload_larger_than_chunk
+s3tests.functional.test_s3::test_post_object_upload_size_below_minimum
+s3tests.functional.test_s3::test_post_object_upload_size_limit_exceeded
+s3tests.functional.test_s3::test_post_object_upload_size_rgw_chunk_size_bug
+s3tests.functional.test_s3::test_post_object_user_specified_header
+
+# --- out-of-scope: IAM API (user policies) is not an S3 gateway surface (27) — https://github.com/rustfs/backlog/issues/1746 ---
+s3tests.functional.test_iam::test_allow_bucket_actions_in_user_policy
+s3tests.functional.test_iam::test_allow_multipart_actions_in_user_policy
+s3tests.functional.test_iam::test_allow_object_actions_in_user_policy
+s3tests.functional.test_iam::test_allow_tagging_actions_in_user_policy
+s3tests.functional.test_iam::test_delete_user_policy
+s3tests.functional.test_iam::test_delete_user_policy_from_multiple_policies
+s3tests.functional.test_iam::test_delete_user_policy_invalid_policy_name
+s3tests.functional.test_iam::test_delete_user_policy_invalid_user
+s3tests.functional.test_iam::test_deny_bucket_actions_in_user_policy
+s3tests.functional.test_iam::test_deny_multipart_actions_in_user_policy
+s3tests.functional.test_iam::test_deny_object_actions_in_user_policy
+s3tests.functional.test_iam::test_deny_tagging_actions_in_user_policy
+s3tests.functional.test_iam::test_get_deleted_user_policy
+s3tests.functional.test_iam::test_get_user_policy
+s3tests.functional.test_iam::test_get_user_policy_from_multiple_policies
+s3tests.functional.test_iam::test_get_user_policy_invalid_policy_name
+s3tests.functional.test_iam::test_get_user_policy_invalid_user
+s3tests.functional.test_iam::test_list_user_policy
+s3tests.functional.test_iam::test_list_user_policy_invalid_user
+s3tests.functional.test_iam::test_put_existing_user_policy
+s3tests.functional.test_iam::test_put_user_policy
+s3tests.functional.test_iam::test_put_user_policy_invalid_element
+s3tests.functional.test_iam::test_put_user_policy_invalid_user
+s3tests.functional.test_iam::test_put_user_policy_parameter_limit
+s3tests.functional.test_iam::test_verify_allow_iam_actions
+s3tests.functional.test_iam::test_verify_conflicting_user_policies
+s3tests.functional.test_iam::test_verify_conflicting_user_policy_statements
+
+# --- out-of-scope: suite header hook rewritten by the signer (marked fails_on_rgw) (7) ---
+s3tests.functional.test_headers::test_bucket_create_bad_authorization_empty
+s3tests.functional.test_headers::test_bucket_create_bad_authorization_none
+s3tests.functional.test_headers::test_object_acl_create_contentlength_none
+s3tests.functional.test_headers::test_object_create_amz_date_and_no_date
+s3tests.functional.test_headers::test_object_create_bad_authorization_empty
+s3tests.functional.test_headers::test_object_create_bad_authorization_none
+s3tests.functional.test_headers::test_object_create_bad_contentlength_none
+
+# --- out-of-scope: RGW tenant:bucket naming (2) ---
+s3tests.functional.test_s3::test_object_presigned_put_object_with_acl_tenant
+s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_not_expired_tenant
+
+# --- out-of-scope: S3 Control endpoint (1) ---
+s3tests.functional.test_s3control::test_account_public_access_block
+
+# --- not-a-defect: encoding-type=url also encodes Delimiter/Prefix (AWS) (4) ---
+s3tests.functional.test_s3::test_bucket_list_encoding_basic
+s3tests.functional.test_s3::test_bucket_list_prefix_delimiter_basic
+s3tests.functional.test_s3::test_bucket_list_prefix_unreadable
+s3tests.functional.test_s3::test_bucket_listv2_encoding_basic
+
+# --- not-a-defect: out-of-range X-Amz-Expires is 400 AuthorizationQueryParametersError (AWS) (3) ---
+s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_out_max_range
+s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_out_positive_range
+s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_out_range_zero
+
+# --- not-a-defect: PUT without Content-Length refused with 411 (AWS) (1) ---
+s3tests.functional.test_s3::test_object_write_with_chunked_transfer_encoding
+
+# --- not-a-defect: explicit us-east-1 LocationConstraint refused (AWS) (1) ---
+s3tests.functional.test_s3::test_bucket_get_location
+
+# --- not-a-defect: non-ASCII metadata returned RFC 2047-encoded (AWS) (1) ---
+s3tests.functional.test_s3::test_object_set_get_unicode_metadata
+
+# --- unattributed: needs an AWS capture to attribute (4) ---
+s3tests.functional.test_s3::test_bucket_list_delimiter_empty
+s3tests.functional.test_s3::test_bucket_listv2_continuationtoken_empty
+s3tests.functional.test_s3::test_bucket_listv2_delimiter_empty
+s3tests.functional.test_s3::test_object_raw_put_authenticated_expired
+
+# --- excluded: outcome depends on how long the preceding 1001-key DeleteObjects takes ---
+s3tests.functional.test_s3::test_object_head_zero_bytes excluded https://github.com/rustfs/gateway/issues/810 passes, or errors in setup when the preceding oversized DeleteObjects hits the handler deadline and leaves a bucket the fixture cannot empty
+s3tests.functional.test_s3::test_object_write_check_etag excluded https://github.com/rustfs/gateway/issues/810 passes, or errors in setup when the preceding oversized DeleteObjects hits the handler deadline and leaves a bucket the fixture cannot empty
