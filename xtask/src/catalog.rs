@@ -93,6 +93,17 @@ pub(crate) fn verify_entry(name: &str) -> Result<VerifyEntry, String> {
 #[cfg(feature = "operation")]
 pub(crate) fn verify_operation_contract(name: &str, mapped_cases: &[String]) -> Result<(), String> {
     let cases = operation_cases(&repo_root().join("conformance/cases"))?;
+    verify_operation_contract_with(name, mapped_cases, &cases)
+}
+
+/// [`verify_operation_contract`] against a case corpus already read, so a caller checking every
+/// operation reads the corpus once rather than once per operation.
+#[cfg(feature = "operation")]
+fn verify_operation_contract_with(
+    name: &str,
+    mapped_cases: &[String],
+    cases: &BTreeMap<String, Vec<String>>,
+) -> Result<(), String> {
     let discovered = cases.get(name).map(Vec::as_slice).unwrap_or_default();
     verify_case_mapping(name, mapped_cases, discovered)?;
     crate::route_contract::verify_operation_route(name)
@@ -289,20 +300,49 @@ mod tests {
         assert!(manual.is_disjoint(&route_only));
     }
 
+    /// Every operation's case mapping and runtime route witness. The corpus and the verify map are
+    /// read once; each operation's witness still builds the runtime table as `verify --operation`
+    /// does, so the operations are spread across the machine's cores instead of checked one after
+    /// another, which cost this test about 20 seconds of the crate's 30-second loop.
     #[test]
     fn selected_operation_has_runtime_route_contract() {
         let selected = std::env::var("RUSTFS_GATEWAY_VERIFY_OPERATION").ok();
         let operations = operations().expect("the operation catalog must load");
-        let names = operations
+        let names: Vec<&str> = operations
             .iter()
             .map(|operation| operation.operation.as_str())
-            .filter(|name| selected.as_deref().is_none_or(|selected| selected == *name));
-        let mut checked = 0;
-        for name in names {
-            let entry = verify_entry(name).expect("the operation must have a generated verification entry");
-            verify_operation_contract(name, &entry.cases).unwrap_or_else(|error| panic!("{name}: {error}"));
-            checked += 1;
-        }
+            .filter(|name| selected.as_deref().is_none_or(|selected| selected == *name))
+            .collect();
+        let cases = operation_cases(&repo_root().join("conformance/cases")).expect("the repository case catalog must load");
+        let body = fs::read_to_string(verify_map_path()).expect("the checked-in verify map must load");
+        let entries = parse_verify_map(&body);
+        let lanes = std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get);
+        let per_lane = names.len().div_ceil(lanes).max(1);
+        let checked: usize = std::thread::scope(|scope| {
+            let lanes: Vec<_> = names
+                .chunks(per_lane)
+                .map(|lane| {
+                    let (cases, entries) = (&cases, &entries);
+                    scope.spawn(move || {
+                        let mut done = 0;
+                        for name in lane {
+                            let entry = entries
+                                .iter()
+                                .find(|entry| entry.name == *name)
+                                .unwrap_or_else(|| panic!("{name}: the operation must have a generated verification entry"));
+                            verify_operation_contract_with(name, &entry.cases, cases)
+                                .unwrap_or_else(|error| panic!("{name}: {error}"));
+                            done += 1;
+                        }
+                        done
+                    })
+                })
+                .collect();
+            lanes
+                .into_iter()
+                .map(|lane| lane.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+                .sum()
+        });
         assert_eq!(checked, selected.as_ref().map_or(operations.len(), |_| 1));
     }
 }
