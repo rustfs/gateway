@@ -20,7 +20,8 @@
 #   2. render ci/s3tests/s3tests.conf.tmpl against the environment
 #   3. clone ceph/s3-tests and check out the pinned commit
 #   4. ASSERT the checked-out commit is exactly the pinned one
-#   5. run the suite through tox with the checked-in marker filter
+#   5. install ci/s3tests/requirements.lock (hash-locked) into a venv and run the suite
+#      with pytest and the checked-in marker filter
 #   6. judge the JUnit document against ci/s3tests/xfail.txt
 #
 # The logic lives here rather than in workflow YAML so it can be read, grepped and run by
@@ -178,6 +179,10 @@ export S3TESTS_IAM_ALT_ROOT_ACCESS_KEY S3TESTS_IAM_ALT_ROOT_SECRET_KEY S3TESTS_I
     --alt-secret-key \"\$S3TESTS_ALT_SECRET_KEY\" \
     --alt-owner-id \"\$S3TESTS_ALT_USER_ID\" \
     --alt-display-name \"\$S3TESTS_ALT_DISPLAY_NAME\" \
+    --tenant-access-key \"\$S3TESTS_TENANT_ACCESS_KEY\" \
+    --tenant-secret-key \"\$S3TESTS_TENANT_SECRET_KEY\" \
+    --tenant-owner-id \"\$S3TESTS_TENANT_USER_ID\" \
+    --tenant-display-name \"\$S3TESTS_TENANT_DISPLAY_NAME\" \
     --lc-debug-interval \"\$S3TESTS_LC_DEBUG_INTERVAL\"}"
 export GATEWAY_SUT_COMMAND
 export GATEWAY_SUT_HOST="${GATEWAY_SUT_HOST:-$S3TESTS_HOST}"
@@ -216,14 +221,33 @@ printf 'run: ceph/s3-tests is at the pinned commit %s\n' "$CHECKED_OUT"
 JUNIT="${OUT_DIR}/s3tests-junit.xml"
 COLLECT_LOG="${OUT_DIR}/collected.txt"
 
-command -v tox >/dev/null 2>&1 || sut_die "tox is not installed; the suite is run through its own tox environment"
+# --- the suite's Python environment --------------------------------------------------------
+# Built from ci/s3tests/requirements.lock and nothing else. The suite's own requirements.txt
+# floats (no upper bound on boto3, botocore or pytest), and tox installs from it, so the
+# client half of the measurement moved whenever PyPI did. --require-hashes refuses any
+# distribution the lock does not hash; --no-deps refuses any package it does not name.
+LOCK="${ROOT_DIR}/ci/s3tests/requirements.lock"
+VENV="${WORK_DIR}/venv"
+[[ -f "$LOCK" ]] || sut_die "the dependency lock is missing: ${LOCK}"
+if [[ ! -x "${VENV}/bin/python" ]]; then
+    python3 -m venv "$VENV" || sut_die "cannot create a virtual environment at ${VENV}"
+fi
+VENV_PYTHON_VERSION="$("${VENV}/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+if [[ "$VENV_PYTHON_VERSION" != "$S3TESTS_PYTHON" ]]; then
+    sut_die "the suite environment runs Python ${VENV_PYTHON_VERSION}, but ci/s3tests/pins.env and
+  ci/s3tests/requirements.lock are for Python ${S3TESTS_PYTHON}"
+fi
+"${VENV}/bin/python" -m pip install --quiet --disable-pip-version-check \
+    --require-hashes --no-deps -r "$LOCK" ||
+    sut_die "cannot install the hash-locked suite dependencies from ${LOCK}"
+SUITE_PYTHON="${VENV}/bin/python"
 
 # Collection is reported separately so the summary can state how many cases the filter
 # actually selected. A filter that silently selects nothing is the failure mode that makes
 # an all-green report meaningless.
 (
     cd "$SUITE_DIR"
-    S3TEST_CONF="$CONF" S3_USE_SIGV4=1 tox -- --collect-only -q -m "$FILTER"
+    S3TEST_CONF="$CONF" S3_USE_SIGV4=1 "$SUITE_PYTHON" -m pytest --collect-only -q -m "$FILTER"
 ) >"$COLLECT_LOG" 2>&1 || true
 # Two independent readings of the same number: pytest's own trailing "N tests collected"
 # line, and a count of the collected node ids. If the first is absent the format changed,
@@ -251,7 +275,7 @@ fi
 set +e
 (
     cd "$SUITE_DIR"
-    S3TEST_CONF="$CONF" S3_USE_SIGV4=1 tox -- -m "$FILTER" --junitxml="$JUNIT"
+    S3TEST_CONF="$CONF" S3_USE_SIGV4=1 "$SUITE_PYTHON" -m pytest -m "$FILTER" --junitxml="$JUNIT"
 )
 SUITE_STATUS="$?"
 set -e

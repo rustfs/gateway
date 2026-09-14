@@ -98,19 +98,15 @@ jobs:
         with:
           python-version: ${{ steps.pin.outputs.python }}
 
-      # The suite's own dependency set is ~5 minutes of every run. Keyed on the
-      # pinned commit, so a pin bump invalidates it rather than silently reusing
-      # the previous revision's wheels.
-      - name: Cache the suite's tox environment
+      # Only downloaded wheels are cached. ci/s3tests/run.sh installs them with
+      # --require-hashes from ci/s3tests/requirements.lock, so a cache entry can
+      # save a download but can never change what is installed. Keyed on the lock
+      # and the suite commit, so moving either starts from an empty cache.
+      - name: Cache the suite's locked wheels
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: |
-            ~/.cache/pip
-            ${{ runner.temp }}/s3tests-work/s3-tests/.tox
-          key: s3tests-tox-${{ runner.os }}-py${{ steps.pin.outputs.python }}-${{ steps.pin.outputs.sha }}
-
-      - name: Install tox
-        run: python3 -m pip install --disable-pip-version-check tox
+          path: ~/.cache/pip
+          key: s3tests-pip-${{ runner.os }}-py${{ steps.pin.outputs.python }}-${{ steps.pin.outputs.sha }}-${{ hashFiles('ci/s3tests/requirements.lock') }}
 
       - name: Run the suite
         id: suite

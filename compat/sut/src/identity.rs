@@ -14,8 +14,8 @@
 
 //! The credential identities the launcher serves, and what makes the second one a real principal.
 //!
-//! Responsible for: turning the credential command-line arguments into one or two [`Account`]
-//! values, refusing every way two accounts can collapse into one, and resolving a verified access
+//! Responsible for: turning the credential command-line arguments into one to three [`Account`]
+//! values (main, alt, tenant), refusing every way two accounts can collapse into one, and resolving a verified access
 //! key id back to the account that owns it.
 //! NOT responsible for: verifying a signature (`rustfs-gateway-sig` does that), deciding what an
 //! account may do (`crate::ownership`), or persisting anything.
@@ -78,42 +78,57 @@ const DEFAULT_SECRET_KEY: &str = "secret";
 #[derive(Clone, Debug)]
 pub(crate) struct Accounts {
     primary: Account,
-    secondary: Option<Account>,
+    /// The identities besides the primary one, in command-line order, each with the role its
+    /// banner line names: `alt` for the cross-account cases, `tenant` for the Ceph s3-tests
+    /// `[s3 tenant]` section.
+    others: Vec<(&'static str, Account)>,
 }
 
 impl Accounts {
     /// Builds the served identity set from the raw arguments.
     ///
-    /// The second identity exists only when the operator named it. When it does exist, it must be
-    /// distinct from the first in every field that could otherwise make the two the same
-    /// principal.
+    /// The second (`alt`) and third (`tenant`) identities exist only when the operator named them.
+    /// Each one that does exist must be distinct from every other in every field that could
+    /// otherwise make two of them the same principal.
+    ///
+    /// The third identity exists because Ceph s3-tests sweeps its bucket prefix as `[s3 tenant]`
+    /// before and after **every** case. Against a service that does not know that key, all but a
+    /// handful of the ~740 selected cases error in setup and nothing is measured (rustfs/backlog#1764).
     ///
     /// # Errors
     ///
-    /// [`io::ErrorKind::InvalidInput`] when a second identity is mentioned without both halves of
-    /// its credential pair, when a supplied value is empty, or when the two identities share an
+    /// [`io::ErrorKind::InvalidInput`] when an additional identity is mentioned without both halves
+    /// of its credential pair, when a supplied value is empty, or when two identities share an
     /// access key, a secret, an owner id or a display name.
-    pub(crate) fn build(primary: AccountArgs, secondary: AccountArgs) -> Result<Self, io::Error> {
+    pub(crate) fn build(primary: AccountArgs, secondary: AccountArgs, tenant: AccountArgs) -> Result<Self, io::Error> {
         let primary = complete(primary, DEFAULT_ACCESS_KEY, DEFAULT_SECRET_KEY, "--access-key", "--secret-key")?;
-        let Some(secondary) = secondary.is_mentioned().then(|| complete_second(secondary)).transpose()? else {
-            return Ok(Self {
-                primary,
-                secondary: None,
-            });
-        };
-        refuse_collapse("access key", &primary.access_key, &secondary.access_key)?;
-        refuse_collapse("secret key", &primary.secret_key, &secondary.secret_key)?;
-        refuse_collapse("owner id", &primary.owner_id, &secondary.owner_id)?;
-        refuse_collapse("display name", &primary.display_name, &secondary.display_name)?;
-        Ok(Self {
-            primary,
-            secondary: Some(secondary),
-        })
+        let mut served: Vec<(&'static str, Account)> = vec![("main", primary)];
+        for (role, args, access_key_flag, secret_key_flag) in [
+            ("alt", secondary, "--alt-access-key", "--alt-secret-key"),
+            ("tenant", tenant, "--tenant-access-key", "--tenant-secret-key"),
+        ] {
+            if !args.is_mentioned() {
+                continue;
+            }
+            let account = complete_other(role, args, access_key_flag, secret_key_flag)?;
+            for (served_role, served_account) in &served {
+                refuse_collapse(served_role, served_account, role, &account)?;
+            }
+            served.push((role, account));
+        }
+        let (_, primary) = served.remove(0);
+        Ok(Self { primary, others: served })
     }
 
     /// Every configured identity, the bucket-owning one first.
     pub(crate) fn all(&self) -> impl Iterator<Item = &Account> {
-        std::iter::once(&self.primary).chain(self.secondary.as_ref())
+        self.roles().map(|(_, account)| account)
+    }
+
+    /// Every configured identity with the role name its banner line uses, the primary (`main`)
+    /// first.
+    pub(crate) fn roles(&self) -> impl Iterator<Item = (&'static str, &Account)> {
+        std::iter::once(("main", &self.primary)).chain(self.others.iter().map(|(role, account)| (*role, account)))
     }
 
     /// The primary owner this single-tenant data root reports for every bucket and object.
@@ -159,18 +174,19 @@ fn complete(
     })
 }
 
-/// Completes the second identity, which has no defaults for its credential pair.
-fn complete_second(args: AccountArgs) -> Result<Account, io::Error> {
+/// Completes an additional identity, which has no defaults for its credential pair.
+fn complete_other(role: &str, args: AccountArgs, access_key_flag: &str, secret_key_flag: &str) -> Result<Account, io::Error> {
     if args.access_key.is_none() || args.secret_key.is_none() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "a second identity needs both --alt-access-key and --alt-secret-key; half a credential \
-             pair cannot sign anything, and the cross-account cases would report a signature \
-             failure rather than the authorization difference they are measuring",
+            format!(
+                "the {role} identity needs both {access_key_flag} and {secret_key_flag}; half a \
+                 credential pair cannot sign anything, and the cases that use it would report a \
+                 signature failure rather than the authorization difference they are measuring"
+            ),
         ));
     }
-    let account = complete(args, "", "", "--alt-access-key", "--alt-secret-key")?;
-    Ok(account)
+    complete(args, "", "", access_key_flag, secret_key_flag)
 }
 
 /// Refuses an empty value for a named flag.
@@ -181,20 +197,28 @@ fn refuse_empty(flag: &str, value: &str) -> Result<(), io::Error> {
     Ok(())
 }
 
-/// Refuses two identities that share the named field.
+/// Refuses two identities that share an access key, a secret, an owner id or a display name.
 ///
 /// The message says what a shared value costs, because the cost is not obvious: nothing fails, and
 /// the cases that exist to measure the difference between the two identities go green.
-fn refuse_collapse(field: &str, primary: &str, secondary: &str) -> Result<(), io::Error> {
-    if primary == secondary {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "the two identities share a {field}. They would be one principal, and every \
-                 cross-account and ACL case measured against them would pass without the service \
-                 ever making the distinction they are written to measure"
-            ),
-        ));
+fn refuse_collapse(first_role: &str, first: &Account, second_role: &str, second: &Account) -> Result<(), io::Error> {
+    for (field, left, right) in [
+        ("access key", &first.access_key, &second.access_key),
+        ("secret key", &first.secret_key, &second.secret_key),
+        ("owner id", &first.owner_id, &second.owner_id),
+        ("display name", &first.display_name, &second.display_name),
+    ] {
+        if left == right {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "the {first_role} and {second_role} identities share a {field}. They would be one \
+                     principal, and every cross-account, cross-tenant and ACL case measured against \
+                     them would pass without the service ever making the distinction they are \
+                     written to measure"
+                ),
+            ));
+        }
     }
     Ok(())
 }
@@ -219,7 +243,8 @@ mod tests {
     /// Positive — one identity is still a valid configuration, and it keeps the original defaults.
     #[test]
     fn a_single_identity_keeps_the_original_defaults() {
-        let accounts = Accounts::build(AccountArgs::default(), AccountArgs::default()).expect("no argument is valid");
+        let accounts = Accounts::build(AccountArgs::default(), AccountArgs::default(), AccountArgs::default())
+            .expect("no argument is valid");
         let served = served(&accounts);
         assert_eq!(served.len(), 1);
         assert_eq!(served[0].access_key, "AKIDEXAMPLE");
@@ -229,7 +254,8 @@ mod tests {
     /// Positive — an unnamed owner id follows the access key, so two identities never share one.
     #[test]
     fn an_unnamed_owner_id_follows_the_access_key() {
-        let accounts = Accounts::build(args("MAIN", "main-secret"), args("ALT", "alt-secret")).expect("two distinct pairs");
+        let accounts = Accounts::build(args("MAIN", "main-secret"), args("ALT", "alt-secret"), AccountArgs::default())
+            .expect("two distinct pairs");
         let served = served(&accounts);
         assert_eq!(served.len(), 2);
         assert_eq!(served[0].owner_id, "MAIN");
@@ -247,7 +273,7 @@ mod tests {
         let mut primary = args("MAIN", "main-secret");
         primary.owner_id = Some("s3gate-main".to_owned());
         primary.display_name = Some("s3gate-main".to_owned());
-        let accounts = Accounts::build(primary, secondary).expect("two distinct identities");
+        let accounts = Accounts::build(primary, secondary, AccountArgs::default()).expect("two distinct identities");
         assert_eq!(accounts.owner_of("MAIN"), Some("s3gate-main"));
         assert_eq!(accounts.owner_of("ALT"), Some("s3gate-alt"));
         assert_eq!(accounts.owner_of("NEITHER"), None);
@@ -256,14 +282,16 @@ mod tests {
     /// Negative — a shared access key is the plainest way to make two identities one principal.
     #[test]
     fn n_a_shared_access_key_is_refused() {
-        let error = Accounts::build(args("SAME", "main-secret"), args("SAME", "alt-secret")).expect_err("a collapse");
+        let error = Accounts::build(args("SAME", "main-secret"), args("SAME", "alt-secret"), AccountArgs::default())
+            .expect_err("a collapse");
         assert!(error.to_string().contains("access key"), "{error}");
     }
 
     /// Negative — a shared secret makes one leaked value authenticate as both principals.
     #[test]
     fn n_a_shared_secret_is_refused() {
-        let error = Accounts::build(args("MAIN", "same-secret"), args("ALT", "same-secret")).expect_err("a collapse");
+        let error = Accounts::build(args("MAIN", "same-secret"), args("ALT", "same-secret"), AccountArgs::default())
+            .expect_err("a collapse");
         assert!(error.to_string().contains("secret key"), "{error}");
     }
 
@@ -274,7 +302,7 @@ mod tests {
         primary.owner_id = Some("one-account".to_owned());
         let mut secondary = args("ALT", "alt-secret");
         secondary.owner_id = Some("one-account".to_owned());
-        let error = Accounts::build(primary, secondary).expect_err("a collapse");
+        let error = Accounts::build(primary, secondary, AccountArgs::default()).expect_err("a collapse");
         assert!(error.to_string().contains("owner id"), "{error}");
     }
 
@@ -285,7 +313,7 @@ mod tests {
         primary.display_name = Some("one-name".to_owned());
         let mut secondary = args("ALT", "alt-secret");
         secondary.display_name = Some("one-name".to_owned());
-        let error = Accounts::build(primary, secondary).expect_err("a collapse");
+        let error = Accounts::build(primary, secondary, AccountArgs::default()).expect_err("a collapse");
         assert!(error.to_string().contains("display name"), "{error}");
     }
 
@@ -302,14 +330,14 @@ mod tests {
             access_key: Some("ALT".to_owned()),
             ..AccountArgs::default()
         };
-        let error = Accounts::build(AccountArgs::default(), secondary).expect_err("half a pair");
+        let error = Accounts::build(AccountArgs::default(), secondary, AccountArgs::default()).expect_err("half a pair");
         assert!(error.to_string().contains("needs both --alt-access-key and --alt-secret-key"), "{error}");
 
         let secondary = AccountArgs {
             owner_id: Some("s3gate-alt".to_owned()),
             ..AccountArgs::default()
         };
-        let error = Accounts::build(AccountArgs::default(), secondary).expect_err("an owner id alone");
+        let error = Accounts::build(AccountArgs::default(), secondary, AccountArgs::default()).expect_err("an owner id alone");
         assert!(error.to_string().contains("needs both --alt-access-key and --alt-secret-key"), "{error}");
 
         // The other mistake, and the other diagnosis: the flag was given, and given as nothing.
@@ -318,7 +346,7 @@ mod tests {
             secret_key: Some(String::new()),
             ..AccountArgs::default()
         };
-        let error = Accounts::build(AccountArgs::default(), secondary).expect_err("an empty secret");
+        let error = Accounts::build(AccountArgs::default(), secondary, AccountArgs::default()).expect_err("an empty secret");
         assert!(error.to_string().contains("--alt-secret-key must not be empty"), "{error}");
     }
 
@@ -329,10 +357,65 @@ mod tests {
             access_key: Some(String::new()),
             ..AccountArgs::default()
         };
-        assert!(Accounts::build(primary, AccountArgs::default()).is_err());
+        assert!(Accounts::build(primary, AccountArgs::default(), AccountArgs::default()).is_err());
 
         let mut primary = args("MAIN", "main-secret");
         primary.owner_id = Some(String::new());
-        assert!(Accounts::build(primary, AccountArgs::default()).is_err());
+        assert!(Accounts::build(primary, AccountArgs::default(), AccountArgs::default()).is_err());
+    }
+
+    /// Positive — a third (tenant) identity is served, resolves to its own owner, and is named
+    /// `tenant` in the banner roles.
+    #[test]
+    fn a_tenant_identity_is_served_as_its_own_principal() {
+        let accounts = Accounts::build(args("MAIN", "main-secret"), args("ALT", "alt-secret"), args("TENANT", "tenant-secret"))
+            .expect("three distinct identities");
+        let roles: Vec<&str> = accounts.roles().map(|(role, _)| role).collect();
+        assert_eq!(roles, ["main", "alt", "tenant"]);
+        assert_eq!(accounts.owner_of("TENANT"), Some("TENANT"));
+        assert_eq!(accounts.owner_of("ALT"), Some("ALT"));
+        assert_eq!(accounts.data_root_owner().0, "MAIN");
+    }
+
+    /// Positive — the tenant role label follows the tenant, not its position, when no alt is given.
+    #[test]
+    fn a_tenant_without_an_alt_is_still_labelled_tenant() {
+        let accounts = Accounts::build(args("MAIN", "main-secret"), AccountArgs::default(), args("TENANT", "t-secret"))
+            .expect("two distinct identities");
+        let roles: Vec<&str> = accounts.roles().map(|(role, _)| role).collect();
+        assert_eq!(roles, ["main", "tenant"]);
+    }
+
+    /// Negative — the tenant may not collapse into the alt identity any more than into the main
+    /// one; the cross-tenant cases would then pass for the wrong reason.
+    #[test]
+    fn n_a_tenant_sharing_the_alt_owner_id_is_refused() {
+        let mut secondary = args("ALT", "alt-secret");
+        secondary.owner_id = Some("one-account".to_owned());
+        let mut tenant = args("TENANT", "tenant-secret");
+        tenant.owner_id = Some("one-account".to_owned());
+        let error = Accounts::build(args("MAIN", "main-secret"), secondary, tenant).expect_err("a tenant/alt collapse");
+        let message = error.to_string();
+        assert!(message.contains("alt and tenant identities share a owner id"), "{message}");
+
+        let error = Accounts::build(args("MAIN", "main-secret"), AccountArgs::default(), args("MAIN", "t-secret"))
+            .expect_err("a tenant/main collapse");
+        assert!(error.to_string().contains("main and tenant identities share a access key"), "{error}");
+    }
+
+    /// Negative — half a tenant credential pair is refused and names the tenant flags.
+    #[test]
+    fn n_a_half_supplied_tenant_identity_is_refused() {
+        let tenant = AccountArgs {
+            access_key: Some("TENANT".to_owned()),
+            ..AccountArgs::default()
+        };
+        let error = Accounts::build(AccountArgs::default(), AccountArgs::default(), tenant).expect_err("half a pair");
+        assert!(
+            error
+                .to_string()
+                .contains("needs both --tenant-access-key and --tenant-secret-key"),
+            "{error}"
+        );
     }
 }
