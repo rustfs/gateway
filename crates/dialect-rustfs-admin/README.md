@@ -1,6 +1,6 @@
 # rustfs-gateway-dialect-rustfs-admin
 
-RustFS's admin API as gateway dialect operations (rustfs/backlog#1744, ADR-0024 to ADR-0027).
+RustFS's admin API as gateway dialect operations (rustfs/backlog#1744, ADR-0024 to ADR-0028).
 
 RustFS consumes this crate: it installs the dialect and registers its own handlers. Nothing here
 depends on RustFS, and no handler lives here.
@@ -25,6 +25,20 @@ service-level, and its handler reads the decoded value from `RequestContextView:
 `POST tier/{tiername}`), the literal's operation declares that it stands in front, as RustFS's
 router decides.
 
+An operation that acts on an account says whose (ADR-0025, ADR-0026, ADR-0028), and the facade
+reads it once, before authentication:
+
+- **The caller's own** (`account/*`, `mfa/challenge`, `accountinfo`): the request cannot name
+  another account, and the action is the operation's own `rustfs:` label, because RustFS makes no
+  IAM check there. The authorizer is still asked.
+- **One account named in the query** (`accessKey`, `user` or `userDN`): an absent account is the
+  caller or a `400`, as RustFS answers it. The handler reads `RequestContextView::subject()` and
+  never the query.
+- **A set** (`list-access-keys-bulk` and its LDAP and OpenID variants): each `users` account is
+  asked about, and `all=true` also needs `admin:ListUsers`. The handler reads
+  `RequestContextView::subjects()`. A signed request cannot repeat `users` today (ADR-0026 (d)),
+  so naming several accounts fails closed.
+
 ```rust,ignore
 let dialect = rustfs_admin_dialect().expect("the generated record and declarations agree");
 let service = ServiceBuilder::new()
@@ -37,6 +51,6 @@ let service = ServiceBuilder::new()
 Regenerate after the inventory changes:
 
 ```text
-cargo xtask rustfs-admin-dialect          # writes src/ops/*.rs and src/table.rs
+cargo xtask rustfs-admin-dialect          # writes src/ops/*.rs, src/table.rs and src/table/*.rs
 cargo xtask rustfs-admin-dialect --check  # fails when a generated file is stale
 ```

@@ -37,6 +37,7 @@
 //! secret up a second time. The accepted `WireRequest` and the host classification are still built
 //! beside the service, for the input decode the GetBucketLocation proof compares.
 
+mod admin_request;
 mod answers;
 mod body_parity;
 mod error_parity;

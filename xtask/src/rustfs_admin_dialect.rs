@@ -16,10 +16,11 @@
 //! recorded route inventory (rustfs/backlog#1744).
 //!
 //! Responsible for: reading `crates/goldens/src/migration_inventory/rustfs_admin_routes.json`,
-//! choosing the routes of the groups ADR-0024's plan has migrated, applying ADR-0025's rulings to
-//! the custom-auth ones and ADR-0027's to templates and overlaps, refusing any route it has no
-//! rule for, and writing one operation module per declared operation, the module list and the
-//! dialect's table, each through rustfmt.
+//! choosing the routes of the groups ADR-0024's plan has migrated, applying the rulings
+//! (`rulings.rs`: ADR-0025's, ADR-0026's and ADR-0028's) to the custom-auth ones and ADR-0027's to
+//! templates and overlaps, refusing any route it has no rule for and any rule outside those ADRs'
+//! shapes, and writing one operation module per declared operation, the module list and the
+//! dialect's table files, each through rustfmt.
 //! `--check` compares instead, and fails on a stale, missing or extra file.
 //! NOT responsible for: validating the inventory (goldens' strict reader does, and binds the
 //! generated operations back to it), the claims or the shared shapes
@@ -33,19 +34,27 @@ use std::process::{Command, ExitCode, Stdio};
 
 use serde::Deserialize;
 
-use self::render::{render_mod, render_operation, render_table};
+use self::render::{render_mod, render_operation, render_tables};
+use self::rulings::{About, Absent, RULINGS, Ruled, Ruling};
 use crate::repo_root::repo_root;
 
 mod render;
+mod rulings;
 
 const INVENTORY: &str = "crates/goldens/src/migration_inventory/rustfs_admin_routes.json";
 const FORMAT: &str = "rustfs-admin-route-inventory/1";
-/// Where the generated files go. `ops/` is wholly generated; `table.rs` is the one other file.
+/// Where the generated files go. `ops/` and `table/` are wholly generated; `table.rs` is the one
+/// other file.
 const OUTPUT: &str = "crates/dialect-rustfs-admin/src";
+/// The directories under [`OUTPUT`] that hold nothing but generated files.
+const GENERATED_DIRS: [&str; 2] = ["ops", "table"];
 /// RustFS's admin router, whose `matchit` matcher tries a literal segment before a parameter.
 const RUSTFS_ROUTER: &str = "rustfs/src/admin/router.rs";
 const ADMIN_PREFIX: &str = "/rustfs/admin/";
 const MINIO_PREFIX: &str = "/minio/admin/";
+/// The dialect's vendor namespace: its operation names, and the only namespace an own-account
+/// operation's label may be in (ADR-0025).
+const VENDOR: &str = "rustfs";
 const FIRST_PRECEDENCE: u16 = 100;
 
 /// ADR-0024's migration plan: every registration group and its order. A group the inventory
@@ -92,99 +101,11 @@ const PLAN: &[(&str, u8)] = &[
 ];
 
 /// The last migrated order: groups at or below it are declared, the rest are pending.
-const MIGRATED_THROUGH: u8 = 3;
+const MIGRATED_THROUGH: u8 = 4;
 
 /// The template parameters ADR-0025 binds as the authorisation bucket. A route that carries one
 /// waits for its group to take that binding; every other parameter is service-level (ADR-0027).
 const BUCKET_PARAMS: &[&str] = &["bucket", "warehouse"];
-
-/// An action rule a ruling decides.
-#[derive(Clone, Copy)]
-enum Ruled {
-    One(&'static str),
-    AnyOf(&'static [&'static str]),
-}
-
-/// One form of a ruled route: the query value that selects it, and its action.
-struct Form {
-    query: Option<(&'static str, &'static str)>,
-    rule: Ruled,
-}
-
-/// ADR-0025's ruling for a custom-auth route, which the inventory records without an action.
-struct Ruling {
-    method: &'static str,
-    path: &'static str,
-    /// The custom-auth class the inventory must still record, so a changed row reopens the ruling.
-    auth_detail: &'static str,
-    forms: &'static [Form],
-}
-
-const fn one(action: &'static str) -> Form {
-    Form {
-        query: None,
-        rule: Ruled::One(action),
-    }
-}
-
-const fn any_of(actions: &'static [&'static str]) -> Form {
-    Form {
-        query: None,
-        rule: Ruled::AnyOf(actions),
-    }
-}
-
-const fn service(value: &'static str, action: &'static str) -> Form {
-    Form {
-        query: Some(("action", value)),
-        rule: Ruled::One(action),
-    }
-}
-
-/// ADR-0025's rulings for the migrated groups' custom-auth routes.
-const RULINGS: &[Ruling] = &[
-    Ruling {
-        method: "GET",
-        path: "/rustfs/admin/v3/datausageinfo",
-        auth_detail: "MultipleActions",
-        forms: &[any_of(&["admin:DataUsageInfo", "s3:ListBucket"])],
-    },
-    Ruling {
-        method: "GET",
-        path: "/rustfs/admin/v3/inspect-data",
-        auth_detail: "NotImplemented",
-        forms: &[one("admin:InspectData")],
-    },
-    Ruling {
-        method: "POST",
-        path: "/rustfs/admin/v3/inspect-data",
-        auth_detail: "NotImplemented",
-        forms: &[one("admin:InspectData")],
-    },
-    Ruling {
-        method: "POST",
-        path: "/rustfs/admin/v3/service",
-        auth_detail: "NotImplemented",
-        forms: &[
-            service("restart", "admin:ServiceRestart"),
-            service("stop", "admin:ServiceStop"),
-            service("freeze", "admin:ServiceFreeze"),
-            service("unfreeze", "admin:ServiceFreeze"),
-        ],
-    },
-    Ruling {
-        method: "GET",
-        path: "/rustfs/admin/v3/pools/list",
-        auth_detail: "MultipleActions",
-        forms: &[any_of(&["admin:ServerInfo", "admin:Decommission"])],
-    },
-    Ruling {
-        method: "GET",
-        path: "/rustfs/admin/v3/pools/status",
-        auth_detail: "MultipleActions",
-        forms: &[any_of(&["admin:ServerInfo", "admin:Decommission"])],
-    },
-];
 
 #[derive(Deserialize)]
 struct Inventory {
@@ -216,31 +137,163 @@ struct Route {
     response_body: String,
 }
 
-/// An action rule, owned.
-enum Rule {
+/// The actions of a rule, owned.
+enum Actions {
     One(String),
     AnyOf(Vec<String>),
 }
 
+/// An action rule, owned, and whose account it is about.
+struct Rule {
+    actions: Actions,
+    about: Option<About>,
+}
+
 impl Rule {
-    /// As the overlay records it, which is how `AuthRequirement::render` spells it.
-    fn render(&self) -> String {
-        match self {
-            Self::One(action) => action.clone(),
-            Self::AnyOf(actions) => format!("anyOf({})", actions.join(", ")),
+    fn plain(action: String) -> Self {
+        Self {
+            actions: Actions::One(action),
+            about: None,
         }
     }
 
-    /// As a Rust expression.
+    fn ruled(ruled: Ruled, about: Option<About>) -> Self {
+        let actions = match ruled {
+            Ruled::One(action) => Actions::One(action.to_owned()),
+            Ruled::AnyOf(actions) => Actions::AnyOf(actions.iter().map(|action| (*action).to_owned()).collect()),
+        };
+        Self { actions, about }
+    }
+
+    /// Every action asked about a named account, in order.
+    fn actions(&self) -> Vec<&str> {
+        match &self.actions {
+            Actions::One(action) => vec![action.as_str()],
+            Actions::AnyOf(actions) => actions.iter().map(String::as_str).collect(),
+        }
+    }
+
+    /// As the overlay records it, which is how `AuthRequirement::render` spells it.
+    fn render(&self) -> String {
+        let mut rendered = match &self.actions {
+            Actions::One(action) => action.clone(),
+            Actions::AnyOf(actions) => format!("anyOf({})", actions.join(", ")),
+        };
+        match self.about {
+            Some(About::Caller) => rendered.push_str(" about caller"),
+            Some(About::Query { param, absent }) => {
+                let absent = match absent {
+                    Absent::Caller => "caller",
+                    Absent::Refuse => "refused",
+                };
+                rendered.push_str(&format!(" about query({param}, absent={absent})"));
+            }
+            Some(About::Set {
+                param,
+                everyone: Some((flag, action)),
+            }) => rendered.push_str(&format!(" about each({param}, everyone={flag} ⇒ {action})")),
+            Some(About::Set { param, everyone: None }) => rendered.push_str(&format!(" about each({param})")),
+            None => {}
+        }
+        rendered
+    }
+
+    /// The subject rule as a Rust expression, when there is one.
+    fn subject_expression(&self) -> Option<String> {
+        self.about.map(|about| match about {
+            About::Caller => "SubjectRule::Caller".to_owned(),
+            About::Query { param, absent } => {
+                format!("SubjectRule::Query {{ param: {param:?}, when_absent: WhenAbsent::{absent:?} }}")
+            }
+            About::Set {
+                param,
+                everyone: Some((flag, action)),
+            } => format!(
+                "SubjectRule::Set {{ param: {param:?}, everyone: Some(Everyone {{ param: {flag:?}, action: {action:?} }}) }}"
+            ),
+            About::Set { param, everyone: None } => format!("SubjectRule::Set {{ param: {param:?}, everyone: None }}"),
+        })
+    }
+
+    /// As a Rust expression; a subject rule is the module's `SUBJECT`.
     fn expression(&self) -> String {
-        match self {
-            Self::One(action) => format!("AuthRequirement::new({action:?}, ResourceShape::Service)"),
-            Self::AnyOf(actions) => {
+        let requirement = match &self.actions {
+            Actions::One(action) => format!("AuthRequirement::new({action:?}, ResourceShape::Service)"),
+            Actions::AnyOf(actions) => {
                 let listed: Vec<String> = actions.iter().map(|action| format!("{action:?}")).collect();
                 format!("AuthRequirement::any_of(&[{}], ResourceShape::Service)", listed.join(", "))
             }
+        };
+        match self.about {
+            Some(_) => format!("{requirement}.about_subject(SUBJECT)"),
+            None => requirement,
         }
     }
+
+    /// Why this rule is outside ADR-0025's and ADR-0026's shapes, or `None`. Registration refuses
+    /// most of these too; refusing them here keeps a bad ruling from ever being generated.
+    fn fault(&self, query: Option<(&str, &str)>) -> Option<&'static str> {
+        let actions = self.actions();
+        if !actions.iter().copied().all(is_action) {
+            return Some("an action is spelled `service:Action`");
+        }
+        if let Actions::AnyOf(listed) = &self.actions
+            && (listed.len() < 2
+                || listed
+                    .iter()
+                    .enumerate()
+                    .any(|(index, action)| listed[..index].contains(action)))
+        {
+            return Some("an any-of rule names at least two actions, each once");
+        }
+        let own = |action: &str| action.split_once(':').is_some_and(|(service, _)| service == VENDOR);
+        match self.about {
+            Some(About::Caller) => {
+                return match &self.actions {
+                    Actions::One(label) if own(label) => None,
+                    _ => Some("an own-account operation names exactly one action, a label in the dialect's own namespace"),
+                };
+            }
+            _ if actions.iter().copied().any(own) => {
+                return Some("a label in the dialect's own namespace authorises only an own-account operation");
+            }
+            Some(About::Query { param, .. } | About::Set { param, .. }) if !is_parameter(param) => {
+                return Some("a subject parameter is spelled in RFC 3986 unreserved characters");
+            }
+            Some(About::Query { param, .. } | About::Set { param, .. }) if query.is_some_and(|(key, _)| key == param) => {
+                return Some("a subject parameter is not the query key that selects the form");
+            }
+            Some(About::Set {
+                param,
+                everyone: Some((flag, action)),
+            }) => {
+                if !is_parameter(flag) || flag == param {
+                    return Some("a set rule's every-account flag is an unreserved parameter of its own");
+                }
+                if !is_action(action) || own(action) {
+                    return Some("a set rule's every-account action is an IAM action spelled `service:Action`");
+                }
+                if matches!(self.actions, Actions::One(_)) && actions.contains(&action) {
+                    return Some("a set rule's every-account action is one no named-account question already asks");
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+}
+
+fn is_action(action: &str) -> bool {
+    action
+        .split_once(':')
+        .is_some_and(|(service, name)| !service.is_empty() && !name.is_empty() && !name.contains(':'))
+}
+
+fn is_parameter(param: &str) -> bool {
+    !param.is_empty()
+        && param
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~'))
 }
 
 /// One form a route is declared as: the query that selects it, its rule, and the custom-auth
@@ -436,6 +489,50 @@ fn shadowing(declared: &[Declared]) -> Result<Vec<(usize, usize, Shadow)>, Strin
     Ok(pairs)
 }
 
+/// The forms `route` is declared as: its own action, or its ruling's forms.
+fn forms(route: &Route, at: &str, rulings: &[Ruling], used: &mut BTreeSet<usize>) -> Result<Vec<Planned>, String> {
+    let ruling = rulings
+        .iter()
+        .position(|ruling| ruling.method == route.method && ruling.path == route.path);
+    match (route.auth_mode.as_str(), ruling) {
+        ("sigv4-admin", None) => {
+            let action = route
+                .iam_action_wire
+                .clone()
+                .ok_or_else(|| format!("{at}: a sigv4-admin route records no action"))?;
+            let rule = Rule::plain(action);
+            match rule.fault(None) {
+                Some(why) => Err(format!("{at}: {why}")),
+                None => Ok(vec![(None, rule, None)]),
+            }
+        }
+        ("custom", Some(index)) => {
+            let ruling = &rulings[index];
+            used.insert(index);
+            if route.auth_detail.as_deref() != Some(ruling.auth_detail) {
+                return Err(format!(
+                    "{at}: ruled as {:?}, but the inventory now records {:?}",
+                    ruling.auth_detail, route.auth_detail
+                ));
+            }
+            ruling
+                .forms
+                .iter()
+                .map(|form| {
+                    let rule = Rule::ruled(form.rule, form.about);
+                    match rule.fault(form.query) {
+                        Some(why) => Err(format!("{at}: {why}")),
+                        None => Ok((form.query, rule, Some(ruling.auth_detail.to_owned()))),
+                    }
+                })
+                .collect()
+        }
+        ("sigv4-admin", Some(_)) => Err(format!("{at}: a ruling for a route the inventory authorises itself")),
+        (mode, None) => Err(format!("{at}: a {mode} route in a migrated group has no ruling")),
+        (mode, Some(_)) => Err(format!("{at}: a {mode} route cannot be ruled by action alone")),
+    }
+}
+
 /// Chooses and rules the routes, refusing every one it has no rule for.
 fn plan(inventory: &Inventory, rulings: &[Ruling]) -> Result<Plan, String> {
     if inventory.format != FORMAT {
@@ -456,42 +553,7 @@ fn plan(inventory: &Inventory, rulings: &[Ruling]) -> Result<Plan, String> {
         if !route.query_discriminators.is_empty() {
             return Err(format!("{at}: a query-discriminated route needs a ruling on its selector first"));
         }
-        let ruling = rulings
-            .iter()
-            .position(|ruling| ruling.method == route.method && ruling.path == route.path);
-        let forms: Vec<Planned> = match (route.auth_mode.as_str(), ruling) {
-            ("sigv4-admin", None) => {
-                let action = route
-                    .iam_action_wire
-                    .clone()
-                    .ok_or_else(|| format!("{at}: a sigv4-admin route records no action"))?;
-                vec![(None, Rule::One(action), None)]
-            }
-            ("custom", Some(index)) => {
-                let ruling = &rulings[index];
-                used.insert(index);
-                if route.auth_detail.as_deref() != Some(ruling.auth_detail) {
-                    return Err(format!(
-                        "{at}: ruled as {:?}, but the inventory now records {:?}",
-                        ruling.auth_detail, route.auth_detail
-                    ));
-                }
-                ruling
-                    .forms
-                    .iter()
-                    .map(|form| {
-                        let rule = match form.rule {
-                            Ruled::One(action) => Rule::One(action.to_owned()),
-                            Ruled::AnyOf(actions) => Rule::AnyOf(actions.iter().map(|action| (*action).to_owned()).collect()),
-                        };
-                        (form.query, rule, Some(ruling.auth_detail.to_owned()))
-                    })
-                    .collect()
-            }
-            ("sigv4-admin", Some(_)) => return Err(format!("{at}: a ruling for a route the inventory authorises itself")),
-            (mode, None) => return Err(format!("{at}: a {mode} route in a migrated group has no ruling")),
-            (mode, Some(_)) => return Err(format!("{at}: a {mode} route cannot be ruled by action alone")),
-        };
+        let forms = forms(route, &at, rulings, &mut used)?;
         let alias = match (route.minio_admin_alias, route.path.strip_prefix(ADMIN_PREFIX)) {
             (_, None) => return Err(format!("{at}: not under {ADMIN_PREFIX}")),
             (true, Some(rest)) => Some(format!("{MINIO_PREFIX}{rest}")),
@@ -510,7 +572,7 @@ fn plan(inventory: &Inventory, rulings: &[Ruling]) -> Result<Plan, String> {
                 .ok_or_else(|| format!("{at}: out of precedences"))?;
             declared.push(Declared {
                 stem: snake(&type_name),
-                name: format!("rustfs:{type_name}"),
+                name: format!("{VENDOR}:{type_name}"),
                 type_name,
                 group: route.group.clone(),
                 order,
@@ -578,6 +640,31 @@ fn rustfmt(root: &Path, source: &str) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|_| "rustfmt wrote non-UTF-8".to_owned())
 }
 
+/// Every file through rustfmt, one rustfmt process per file, spread across the machine's cores:
+/// one after another they cost the drift check most of its time.
+fn format_all(root: &Path, files: BTreeMap<PathBuf, String>) -> Result<BTreeMap<PathBuf, String>, String> {
+    let files: Vec<(PathBuf, String)> = files.into_iter().collect();
+    let lanes = std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get);
+    let per_lane = files.len().div_ceil(lanes).max(1);
+    std::thread::scope(|scope| {
+        let lanes: Vec<_> = files
+            .chunks(per_lane)
+            .map(|lane| {
+                scope.spawn(move || {
+                    lane.iter()
+                        .map(|(path, source)| rustfmt(root, source).map(|formatted| (path.clone(), formatted)))
+                        .collect::<Result<Vec<_>, String>>()
+                })
+            })
+            .collect();
+        let mut formatted = BTreeMap::new();
+        for lane in lanes {
+            formatted.extend(lane.join().map_err(|_| "a rustfmt lane panicked".to_owned())??);
+        }
+        Ok(formatted)
+    })
+}
+
 /// Every generated file, by its path under the repository root.
 fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
     let recorded = std::fs::read_to_string(root.join(INVENTORY)).map_err(|error| format!("cannot read {INVENTORY}: {error}"))?;
@@ -589,11 +676,10 @@ fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
         files.insert(output.join("ops").join(format!("{}.rs", declared.stem)), render_operation(declared));
     }
     files.insert(output.join("ops/mod.rs"), render_mod(&plan));
-    files.insert(output.join("table.rs"), render_table(&plan, &inventory.source.commit));
-    files
-        .into_iter()
-        .map(|(path, source)| rustfmt(root, &source).map(|formatted| (path, formatted)))
-        .collect()
+    for (path, source) in render_tables(&plan, &inventory.source.commit) {
+        files.insert(output.join(path), source);
+    }
+    format_all(root, files)
 }
 
 /// Every generated file that differs from the committed one, is missing, or is committed without
@@ -607,12 +693,14 @@ fn drift(root: &Path, files: &BTreeMap<PathBuf, String>) -> Vec<String> {
             Err(_) => drifted.push(format!("{} is missing", path.display())),
         }
     }
-    let ops = Path::new(OUTPUT).join("ops");
-    if let Ok(entries) = std::fs::read_dir(root.join(&ops)) {
-        for entry in entries.flatten() {
-            let path = ops.join(entry.file_name());
-            if !files.contains_key(&path) {
-                drifted.push(format!("{} is not generated", path.display()));
+    for dir in GENERATED_DIRS {
+        let dir = Path::new(OUTPUT).join(dir);
+        if let Ok(entries) = std::fs::read_dir(root.join(&dir)) {
+            for entry in entries.flatten() {
+                let path = dir.join(entry.file_name());
+                if !files.contains_key(&path) {
+                    drifted.push(format!("{} is not generated", path.display()));
+                }
             }
         }
     }

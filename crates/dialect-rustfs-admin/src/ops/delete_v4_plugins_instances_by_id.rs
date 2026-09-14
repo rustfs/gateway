@@ -114,7 +114,7 @@ impl AdminOperation for DeleteV4PluginsInstancesById {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 107,
+    precedence: 116,
     selector: "PathTemplate(\"/rustfs/admin/v4/plugins/instances/{id}\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v4/plugins/instances/{id}\") ∧ Method(DELETE)",
     action: "admin:SetBucketTarget",
     resource: ResourceShape::Service,
@@ -138,6 +138,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:SetBucketTarget",
     ruled: None,
+    subject: None,
     rustfs_handler: "DeletePluginInstanceHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

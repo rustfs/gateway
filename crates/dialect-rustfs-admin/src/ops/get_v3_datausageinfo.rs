@@ -113,7 +113,7 @@ impl AdminOperation for GetV3Datausageinfo {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 114,
+    precedence: 126,
     selector: "PathTemplate(\"/rustfs/admin/v3/datausageinfo\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/datausageinfo\") ∧ Method(GET)",
     action: "anyOf(admin:DataUsageInfo, s3:ListBucket)",
     resource: ResourceShape::Service,
@@ -137,6 +137,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "anyOf(admin:DataUsageInfo, s3:ListBucket)",
     ruled: Some("MultipleActions"),
+    subject: None,
     rustfs_handler: "DataUsageInfoHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

@@ -134,6 +134,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:ConfigUpdate",
     ruled: None,
+    subject: None,
     rustfs_handler: "ClearConfigHistoryKVHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

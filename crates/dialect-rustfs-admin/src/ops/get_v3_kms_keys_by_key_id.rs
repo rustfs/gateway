@@ -114,7 +114,7 @@ impl AdminOperation for GetV3KmsKeysByKeyId {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 137,
+    precedence: 162,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/keys/{key_id}\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/kms/keys/{key_id}\") ∧ Method(GET)",
     action: "kms:DescribeKey",
     resource: ResourceShape::Service,
@@ -138,6 +138,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "kms:DescribeKey",
     ruled: None,
+    subject: None,
     rustfs_handler: "DescribeKmsKeyHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

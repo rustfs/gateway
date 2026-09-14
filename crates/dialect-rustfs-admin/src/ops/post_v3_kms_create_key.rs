@@ -112,7 +112,7 @@ impl AdminOperation for PostV3KmsCreateKey {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 183,
+    precedence: 230,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/create-key\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/create-key\") ∧ Method(POST)",
     action: "kms:Configure",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "kms:Configure",
     ruled: None,
+    subject: None,
     rustfs_handler: "CreateKeyHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

@@ -114,7 +114,7 @@ impl AdminOperation for DeleteV3IlmTransitionJobsByJobId {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 104,
+    precedence: 108,
     selector: "PathTemplate(\"/rustfs/admin/v3/ilm/transition/jobs/{job_id}\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/ilm/transition/jobs/{job_id}\") ∧ Method(DELETE)",
     action: "admin:SetTier",
     resource: ResourceShape::Service,
@@ -138,6 +138,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:SetTier",
     ruled: None,
+    subject: None,
     rustfs_handler: "ManualTransitionJobCancelHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

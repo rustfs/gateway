@@ -111,7 +111,7 @@ impl AdminOperation for PutV3SiteReplicationPeerIamItem {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 246,
+    precedence: 310,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/peer/iam-item\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/site-replication/peer/iam-item\") ∧ Method(PUT)",
     action: "admin:SiteReplicationOperation",
     resource: ResourceShape::Service,
@@ -134,6 +134,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:SiteReplicationOperation",
     ruled: None,
+    subject: None,
     rustfs_handler: "SRPeerReplicateIAMItemHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

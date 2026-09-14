@@ -115,7 +115,7 @@ impl AdminOperation for PostV3IlmTransitionReconcileByTransactionId {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 176,
+    precedence: 223,
     selector: "PathTemplate(\"/rustfs/admin/v3/ilm/transition/reconcile/{transaction_id}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/ilm/transition/reconcile/{transaction_id}\") ∧ Method(POST)",
     action: "admin:SetTier",
     resource: ResourceShape::Service,
@@ -139,6 +139,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     query: None,
     action: "admin:SetTier",
     ruled: None,
+    subject: None,
     rustfs_handler: "TransitionReconcileApplyHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

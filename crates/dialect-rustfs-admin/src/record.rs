@@ -21,15 +21,24 @@
 //! Upstream: nothing. Downstream: `crate::table`, the tests, and a deployment that reports which
 //! admin routes the gateway serves.
 
+use rustfs_gateway_core::SubjectRule;
+
 /// The migration issue, which every overlay row cites.
 pub(crate) const ISSUE: &str = "https://github.com/rustfs/backlog/issues/1744";
 
 /// ADR-0025, which every row whose action is a ruling cites.
 pub(crate) const ADR_0025: &str = "https://github.com/rustfs/gateway/blob/main/docs/adr/0025-admin-authorization-classes.md";
 
+/// ADR-0026, which every row about a set of accounts cites.
+pub(crate) const ADR_0026: &str =
+    "https://github.com/rustfs/gateway/blob/main/docs/adr/0026-account-sets-query-buckets-and-anonymous-bootstrap.md";
+
 /// ADR-0027, which every row with a path parameter or a shadowing declaration cites.
 pub(crate) const ADR_0027: &str =
     "https://github.com/rustfs/gateway/blob/main/docs/adr/0027-service-level-admin-template-parameters.md";
+
+/// ADR-0028, which every row with a subject rule cites.
+pub(crate) const ADR_0028: &str = "https://github.com/rustfs/gateway/blob/main/docs/adr/0028-order-four-admin-subject-rules.md";
 
 /// How RustFS reads or writes one side of a route's body, as the inventory records it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -66,6 +75,10 @@ pub struct RouteRecord {
     /// The inventory's custom-auth class, when the action is ADR-0025's ruling rather than the
     /// inventory's own action.
     pub ruled: Option<&'static str>,
+    /// Whose account the operation acts on, when that is part of its authorisation: the caller's
+    /// own, one named in the query, or a set (ADR-0025, ADR-0026, ADR-0028). The same rule the
+    /// operation's `AuthRequirement` carries.
+    pub subject: Option<SubjectRule>,
     /// The RustFS handler the inventory names.
     pub rustfs_handler: &'static str,
     /// How RustFS reads the request body.
