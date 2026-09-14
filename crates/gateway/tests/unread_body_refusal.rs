@@ -36,8 +36,8 @@ use std::time::Duration;
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use rustfs_gateway::{
-    ConnectionIntent, Handler, HandlerError, HandlerErrorContext, HandlerResult, ObservedBody, Req, RequestBodyDeadlineConfig,
-    Resp, RunningServer, S3Service, SelfHeldHttp1Driver, dto,
+    ConnectionIntent, Handler, HandlerError, HandlerErrorContext, HandlerResult, ObservedBody, OperationSetEnd, OperationSetNode,
+    Req, RequestBodyDeadlineConfig, Resp, RunningServer, S3Service, SelfHeldHttp1Driver, dto,
 };
 use rustfs_gateway_server::{Server, ServerConfig, UnfinishedRequestBody};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -190,6 +190,23 @@ async fn an_upload_part_refused_before_its_body_is_read_answers_the_refusal_in_p
     let request = signed_put("/bucket/key?partNumber=1&uploadId=missing-upload");
     let answer = answer_of(object_service().call_bytes(request).await).await;
     assert_eq!(answer, refused_as_itself());
+}
+
+/// rustfs/gateway#794 on the sealed monomorphic path, which settles the unread body in its own
+/// handler wrapper. Negative — both operations, both race orders, answer as themselves there too.
+#[tokio::test]
+async fn the_monomorphic_path_answers_a_refusal_before_the_body_as_itself() {
+    type Operations = OperationSetNode<dto::PutObject, OperationSetNode<dto::UploadPart, OperationSetEnd>>;
+    let backend = Arc::new(RefusesUnread);
+    let service = support::wired_at_signed_time()
+        .register::<dto::PutObject, _>(Arc::clone(&backend))
+        .register::<dto::UploadPart, _>(Arc::clone(&backend))
+        .build_monomorphic::<_, Operations>(backend)
+        .expect("a static PutObject and UploadPart assembly");
+    for target in ["/bucket/key", "/bucket/key?partNumber=1&uploadId=missing-upload"] {
+        let answer = answer_of(service.call_bytes(signed_put(target)).await).await;
+        assert_eq!(answer, refused_as_itself(), "{target}");
+    }
 }
 
 /// Negative control — a handler that read the first frame and then abandoned the body is still
