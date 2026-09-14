@@ -30,6 +30,7 @@
 //! false negative.
 
 pub mod apply;
+pub mod default_document;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -103,6 +104,9 @@ pub const ABSENT_NOT_CONFIGURED_MUTANT: &str = "NoSuchLifecycleConfiguration";
 /// The lowered-IR path suffix whose absence is itself the rule.
 const NOT_CONFIGURED_SUFFIX: &str = ".errors.not_configured";
 
+/// The field property a required structure's optionality mutation is written to; see [`plan`].
+pub const DEFAULT_DOCUMENT_PROPERTY: &str = "default_document";
+
 /// Prefix for a mutation that targets a typed runtime contract instead of lowered operation IR.
 const CONTRACT_PATH_PREFIX: &str = "@contract.";
 
@@ -121,7 +125,31 @@ const CODEC_PATH_PREFIX: &str = "@codec.";
 /// Returns the reason when the dimension and the value shape admit no single obvious alternative.
 /// An unplannable source is reported as such by the command; it never counts as a killed mutant and
 /// never counts as a covered rule.
+///
+/// # A required structure is violated by defaulting it, not by making it optional
+///
+/// The mechanical opposite of `required = true` is `required = false`, and for a structure member
+/// that opposite is ill-formed as a *measurement*: the dto member turns from `T` into `Option<T>`,
+/// so the conformance fixture, the persistence bridge and every shared validator that reads the
+/// member bare stop compiling, and the row reads `KILLED_BY_COMPILE` without a case ever running
+/// (`q-lock-0007`, `q-restore-0006`, `q-web-0004`; rustfs/backlog#1726). What those rules refuse
+/// on the wire is not "the member is typed as optional" but "an absent document is read as a
+/// defaulted one", which is the upstream defect they cite. So a required structure is planned onto
+/// the sibling `default_document` property instead: the member keeps its type and only the
+/// decoder's answer to absence changes. Every other `required` source keeps the boolean flip.
 pub fn plan(quirk: &str, dimension: MutationDimension, source: &ResolvedSource) -> std::result::Result<Mutation, String> {
+    if dimension == MutationDimension::Optionality
+        && source.request_structure
+        && source.current == SourceValue::Bool(true)
+        && let Some(member) = source.path.strip_suffix(".required")
+    {
+        return Mutation::new(
+            quirk,
+            &format!("{member}.{DEFAULT_DOCUMENT_PROPERTY}"),
+            SourceValue::Bool(false),
+            SourceValue::Bool(true),
+        );
+    }
     let to = alternative(dimension, &source.current, &source.path)?;
     Mutation::new(quirk, &source.path, source.current.clone(), to)
 }

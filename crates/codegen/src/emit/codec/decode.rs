@@ -321,7 +321,16 @@ fn one_field(
                 // An optional payload means the request may carry no body at all (CreateBucket):
                 // zero bytes decode to the absent member, and anything else must still be the
                 // declared document — an empty body is the one spelling that skips the parser.
-                let (indent, close) = if field.required {
+                //
+                // A required payload whose absence reads as the default document is never in the
+                // lowered model; it is the mutation that violates a required body without changing
+                // the member's type (`crate::mutate::plan`), and it takes the same branch shape.
+                let (indent, close) = if crate::emit::reads_default_document(field) {
+                    let _ = writeln!(out, "        if raw_body.as_ref().is_empty() {{");
+                    let _ = writeln!(out, "            {target} = Default::default();");
+                    out.push_str("        } else {\n");
+                    ("            ", "        }\n")
+                } else if field.required {
                     ("        ", "")
                 } else {
                     let _ = writeln!(out, "        if raw_body.as_ref().is_empty() {{");
@@ -845,9 +854,13 @@ fn union_reader(ir: &OperationIr, name: &str, shape: &Shape, rules: &CodecRules)
 /// the placeholder default, and the decoder's exit check turned a client's malformed document
 /// into this side's `500 InternalError`; the omission of a required element is a schema
 /// violation and answers `MalformedXML` like every other one.
+///
+/// A member whose absence reads as the default document is left holding that default instead:
+/// that is the mutation violating the requirement without changing the member's type
+/// (`crate::mutate::plan`), and the lowered model never carries it.
 fn required_member_refusal(field: &Field, wire: &str, indent: usize) -> String {
     let pad = " ".repeat(indent);
-    if !field.required {
+    if !field.required || crate::emit::reads_default_document(field) {
         return format!("{pad}}}\n");
     }
     let mut out = String::new();

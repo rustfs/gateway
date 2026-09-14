@@ -60,6 +60,8 @@ pub struct ResolvedSource {
     pub path: String,
     /// Current value at that path.
     pub current: SourceValue,
+    /// Whether this is a structure's `required` flag; see [`crate::mutate::default_document`].
+    pub request_structure: bool,
 }
 
 /// Resolves every declared source against the same lowered IR passed to code generation.
@@ -112,10 +114,6 @@ fn resolve_source(operations: &[OperationIr], path: &str) -> Result<ResolvedSour
                 .as_str()
                 .to_owned(),
         ),
-        [_, side @ ("input" | "output"), field, "required"] => {
-            let field = operation_field(operation, side, field, path)?;
-            SourceValue::Bool(field.required)
-        }
         [_, side @ ("input" | "output"), field, property] => {
             let field = operation_field(operation, side, field, path)?;
             field_source(field, property, path)?
@@ -169,6 +167,7 @@ fn resolve_source(operations: &[OperationIr], path: &str) -> Result<ResolvedSour
     Ok(ResolvedSource {
         path: path.to_owned(),
         current,
+        request_structure: crate::mutate::default_document::applies(operations, path),
     })
 }
 
@@ -209,6 +208,7 @@ fn field_source(field: &Field, property: &str, path: &str) -> Result<SourceValue
             _ => Err(format!("mutation source `{path}` is not a list")),
         },
         "omit_when" => Ok(SourceValue::OptionalText(field.omit_when.as_ref().map(omit_when))),
+        "default_document" => crate::mutate::default_document::read(field, path),
         "default_int" => match field.default {
             Some(Value::Int(value)) => Ok(SourceValue::Int(value)),
             _ => Err(format!("mutation source `{path}` has no current integer default")),
