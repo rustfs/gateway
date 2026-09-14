@@ -23,6 +23,8 @@ commands:
   sigsuite <fetch|run>      fetch and run the pinned official signing suite
   new-op <Operation>        create an intentionally-red operation scaffold
   bootstrap                 prepare a fresh checkout for work (<=5 minutes)
+  rustfs-admin-dialect [--check]
+                            regenerate the RustFS admin dialect's operations from the route inventory
   conformance <run|validate|baseline> [--filter <glob>] [--transport hyper|conn]
               [--profile aws|minio|strict] [--baseline <f>] [--json <f>] [--junit <f>]
   conformance mutate (--family <name> | --quirk <id>) [--filter <glob>]
