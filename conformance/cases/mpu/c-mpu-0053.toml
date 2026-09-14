@@ -1,0 +1,68 @@
+# c-mpu-0053 — a backend refusal that never reads the streaming body is the refusal the client sees.
+#
+# Schema dimensions exercised: a handler refusal before the body is read, the connection verdict
+# after a small unread body.
+
+[case]
+id = "c-mpu-0053"
+schema_version = 1
+title = "A part upload the backend refuses before reading its body answers the backend's refusal"
+rationale = """
+A backend may refuse a streaming upload before reading a byte of it — the bucket is gone, the \
+caller may not write, a quota is spent — and RustFS's handlers do exactly that. The client must \
+be told that refusal: `404 NoSuchBucket` is an answer an SDK acts on, while `400 IncompleteBody` \
+blames the client's framing for a body the server chose not to read, and invites a retry that \
+fails the same way. Both production drivers answer the backend's refusal and keep the connection, \
+lingering over the few unread octets as they do for a refusal before the body (c-object-0051). The \
+error-document differential against the pinned s3s found the in-process service answering \
+IncompleteBody for the same refusal (rustfs/gateway#794); this case holds the wire answer while \
+that gap is closed."""
+polarity = "negative"
+operation = "UploadPart"
+tags = ["multipart", "streaming", "error-shape"]
+quirks = []
+timeout_ms = 10000
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "NoSuchBucket is 404 and names a missing bucket; IncompleteBody is 400 and names a body shorter than its Content-Length."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9112#section-9.3"
+summary = "A server that does not read the whole request body closes the connection after the response."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/backlog/issues/1762"
+summary = "The error-document differential saw a PutObject body refusal replaced by IncompleteBody on the gateway while the pinned s3s wrote the body's own code."
+kind = "observed"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = false
+
+[request]
+method = "PUT"
+target = "/conf-mpu-absent/part?partNumber=1&uploadId=missing-upload"
+body = { utf8 = "a part the backend never reads" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+headers_absent = ["etag"]
+connection_after = "open"
+
+[expect.error]
+code = "NoSuchBucket"
+request_id_present = true
+
+[expect.timing]
+terminate_within_ms = 5000
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>NoSuchBucket</Code>"]
