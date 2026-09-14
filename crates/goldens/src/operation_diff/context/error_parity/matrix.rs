@@ -64,6 +64,10 @@ pub(super) fn object_put(body: &[u8]) -> ContextRequest {
     ContextRequest::put(PATH_HOST, "/photos/a.txt", body)
 }
 
+pub(super) fn part_put(body: &[u8]) -> ContextRequest {
+    ContextRequest::new(Method::PUT, PATH_HOST, "/photos/a.txt", "partNumber=1&uploadId=missing-upload", body)
+}
+
 /// How the two `<Message>`s relate.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Message {

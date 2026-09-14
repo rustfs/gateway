@@ -84,7 +84,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/sse_runtime.rs`, `tests/sse_runtime/context.rs` | TLS gate, key hygiene, multipart consistency and JSON context admission |
 | `tests/vhost_resolution.rs`, `tests/host_resolve_replay.rs` | Host boundary and fallback behavior; the `host_resolve` fuzz property over its committed seeds and 100,000 fixed-seed samples |
 | `tests/connection_teardown.rs`, `tests/self_held_http1.rs` | Connection intent and production self-held HTTP/1.1 wire controls |
-| `tests/payload_transport.rs` | Payload framing and cancellation observed through real HTTP/1 sockets |
+| `tests/payload_transport.rs`, `tests/unread_body_refusal.rs` | Payload framing and cancellation observed through real HTTP/1 sockets; a handler refusal before the body is read is the answer on every entry |
 | `tests/compat_aliases.rs` | Input-parameterized compatibility aliases remain identical to operation requests |
 | `tests/refusal_order_guards.rs` | Body-proof source guards |
 | `tests/precondition_contract.rs` | Real adapter controls for conditional-race and completed-part contract inputs |

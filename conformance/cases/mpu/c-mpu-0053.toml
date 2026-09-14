@@ -12,11 +12,11 @@ A backend may refuse a streaming upload before reading a byte of it — the buck
 caller may not write, a quota is spent — and RustFS's handlers do exactly that. The client must \
 be told that refusal: `404 NoSuchBucket` is an answer an SDK acts on, while `400 IncompleteBody` \
 blames the client's framing for a body the server chose not to read, and invites a retry that \
-fails the same way. Both production drivers answer the backend's refusal and keep the connection, \
-lingering over the few unread octets as they do for a refusal before the body (c-object-0051). The \
-error-document differential against the pinned s3s found the in-process service answering \
-IncompleteBody for the same refusal (rustfs/gateway#794); this case holds the wire answer while \
-that gap is closed."""
+fails the same way. The service answers the backend's refusal and keeps the connection, lingering \
+over the few unread octets as it does for a refusal before the body (c-object-0051). The fixture \
+checks the bucket before it drains the part, so the body is genuinely unread when the refusal is \
+made: until rustfs/gateway#794 every entry, both production drivers included, answered \
+IncompleteBody for such a refusal, and an earlier fixture that drained first hid it."""
 polarity = "negative"
 operation = "UploadPart"
 tags = ["multipart", "streaming", "error-shape"]

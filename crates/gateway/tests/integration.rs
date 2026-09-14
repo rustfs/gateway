@@ -144,6 +144,8 @@ mod streaming_without_length;
 mod tagging_reachability;
 #[path = "throughput_request.rs"]
 mod throughput_request;
+#[path = "unread_body_refusal.rs"]
+mod unread_body_refusal;
 #[path = "verified_scope_runtime.rs"]
 mod verified_scope_runtime;
 #[path = "vhost_resolution.rs"]

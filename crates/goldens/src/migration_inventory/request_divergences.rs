@@ -123,7 +123,6 @@ const API_GET_BUCKET_LOCATION: &str = "https://docs.aws.amazon.com/AmazonS3/late
 const ERROR_RESPONSES: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html";
 const M1_ADAPTER: &str = "https://github.com/rustfs/backlog/issues/1752";
 const ADAPTER_SEAM: &str = "https://github.com/rustfs/gateway/issues/753";
-const UNREAD_BODY_REFUSAL: &str = "https://github.com/rustfs/gateway/issues/794";
 const SEAM_FACTS: &str = "https://github.com/rustfs/gateway/issues/795";
 
 /// Every decided request divergence.
@@ -492,17 +491,18 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 29] = [
     RequestDivergence {
         id: "rd-err-0004",
         operation: "PutObject",
-        request: "an app body that refuses before reading a non-empty streaming body, through S3Service::call with a Full body",
+        request: "an app body that refuses before reading a non-empty streaming body (PutObject, UploadPart)",
         aws: "the handler's refusal is the answer, whatever happened to the body",
         aws_evidence: ERROR_RESPONSES,
         s3s: "writes the app body's refusal",
-        gateway: "in process, 400 IncompleteBody and a close: the dropped body's verdict wins the race with the handler result \
-                  (request_deadline::handler_with_body_monitor). Both production drivers answer the handler's refusal (c-mpu-0053)",
-        client_impact: "a bucket, access or throttling refusal would read as a framing fault the client did not commit, which SDKs retry",
+        gateway: "writes the app body's refusal, in process and on both production drivers, and keeps the connection with the \
+                  unread octets left to the transport's linger (request_deadline::unread_body_answer, rustfs/gateway#794). A \
+                  body dropped after it was read, and a success over one never read, are still 400 IncompleteBody",
+        client_impact: "none: the bucket, access or throttling refusal reaches the client as itself",
         ruling: DivergenceRuling::AlignS3s,
-        follow_up: DivergenceFollowUp::Open(UNREAD_BODY_REFUSAL),
+        follow_up: DivergenceFollowUp::Landed("c-mpu-0053"),
         test_file: ERROR_PARITY,
-        test: "the_app_bodys_refusal_before_reading_a_put_body_is_replaced_in_process",
+        test: "the_app_bodys_refusal_before_reading_a_streaming_body_is_the_answer_on_both_stacks",
     },
     RequestDivergence {
         id: "rd-err-0005",

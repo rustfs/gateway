@@ -148,6 +148,13 @@ pub(crate) struct BodyVerified;
 
 pub(crate) enum BodyEvent {
     Complete(Result<BodyVerified, S3Error>),
+    /// The handler dropped the stream before one wire octet of it was read.
+    ///
+    /// Not a verdict on its own, because what it means depends on the handler's answer, which only
+    /// the caller sees: a refusal made without reading the body is the answer the client gets, and
+    /// a success over a body that never arrived is refused like any other (`c-ck-0062`).
+    /// rustfs/gateway#794.
+    Unread(WireProgress),
     Quota(WireProgress),
     Idle(WireProgress),
     Throughput(WireProgress),
@@ -155,6 +162,8 @@ pub(crate) enum BodyEvent {
 
 pub(crate) enum BodyTerminal {
     Complete(Result<BodyVerified, S3Error>),
+    /// Dropped with nothing read; see [`BodyEvent::Unread`].
+    Unread,
     Quota,
 }
 
@@ -197,6 +206,7 @@ impl BodyMonitor {
             };
             match wake {
                 Wake::Terminal(Ok(BodyTerminal::Complete(verdict))) => return BodyEvent::Complete(verdict),
+                Wake::Terminal(Ok(BodyTerminal::Unread)) => return BodyEvent::Unread(self.wire_progress.clone()),
                 Wake::Terminal(Ok(BodyTerminal::Quota)) => return BodyEvent::Quota(self.wire_progress.clone()),
                 Wake::Terminal(Err(_)) | Wake::Progress(Err(_)) => {
                     return BodyEvent::Complete(Err(crate::gate::incomplete()));
@@ -230,6 +240,7 @@ impl BodyMonitor {
     pub(crate) async fn wait(mut self) -> Result<BodyVerified, S3Error> {
         match self.next_event().await {
             BodyEvent::Complete(verdict) => verdict,
+            BodyEvent::Unread(_) => Err(crate::gate::incomplete()),
             BodyEvent::Quota(progress) => Err(crate::gate::body_quota_refusal(progress.request_body_unfinished())),
             BodyEvent::Idle(progress) => Err(crate::gate::body_idle_timeout(progress.request_body_unfinished())),
             BodyEvent::Throughput(progress) => Err(crate::gate::body_throughput_timeout(progress.request_body_unfinished())),
@@ -414,7 +425,15 @@ where
 impl<B> Drop for VerifiedRequestBody<B> {
     fn drop(&mut self) {
         if let Some(terminal) = self.terminal.take() {
-            let _ = terminal.send(BodyTerminal::Complete(Err(crate::gate::incomplete())));
+            // Two different drops. Nothing read is a body the handler declined, and its refusal may
+            // be the answer; anything read is a body it began and left in a state the wire cannot
+            // resynchronise from, which stays a refusal of its own (rustfs/gateway#794).
+            let verdict = if self.progress.seen() == 0 {
+                BodyTerminal::Unread
+            } else {
+                BodyTerminal::Complete(Err(crate::gate::incomplete()))
+            };
+            let _ = terminal.send(verdict);
         }
     }
 }

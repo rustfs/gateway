@@ -2629,10 +2629,11 @@ async fn drain(body: Option<ByteStream>) -> Result<Vec<u8>, HandlerError> {
 }
 
 async fn upload_part(state: &Arc<Mutex<Fixture>>, input: dto::UploadPartInput) -> HandlerResult<dto::UploadPart> {
+    // The bucket before the part, as RustFS checks it: c-mpu-0053 must observe a body never read.
+    let poisoned = || HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange");
+    require_bucket(&*state.lock().map_err(|_| poisoned())?, &input.bucket)?;
     let bytes = drain(input.body).await?;
-    let mut fixture = state
-        .lock()
-        .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
+    let mut fixture = state.lock().map_err(|_| poisoned())?;
     require_bucket(&fixture, &input.bucket)?;
     let (handle, upload) = require_upload(&fixture, &input.upload_id, &input.bucket, &input.key)?;
     // Before a single byte is recorded: a part that failed its own integrity claim must not be
