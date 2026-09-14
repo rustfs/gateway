@@ -57,7 +57,7 @@ mod table;
 
 pub use self::claim::{ClaimRejection, PathClaim, PathParamError, PathParams, PathTemplate, TemplateRejection};
 pub(crate) use self::claimed::claimed_selector_fault;
-pub use self::claimed::{ClaimLookup, ClaimedEntry, ClaimedTable, InstalledClaim, render_claimed_row};
+pub use self::claimed::{BucketParam, ClaimLookup, ClaimedEntry, ClaimedTable, InstalledClaim, render_claimed_row};
 pub use self::compiled::{CompiledRouter, OpId, RouteBucket};
 pub use self::explain::{Explained, Explanation};
 pub use self::generated::{ROUTES, RoutePredicate, RouteRow, RowError, generated_entries, row_of};

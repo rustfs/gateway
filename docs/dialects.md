@@ -242,6 +242,24 @@ operation at one or more `ClaimedRow { template, selector }` inside it.
   path-style S3 bucket rules before authentication, and the governor, the authorizer and the
   handler see that bucket. The overlay's selector ends in `⇒ BucketParam("bucket")`.
 
+## Account sets, query-bound buckets and anonymous bootstrap (ADR-0026)
+
+- **A set of accounts.** `.about_subject(SubjectRule::Set { param: "users", everyone: Some(Everyone
+  { param: "all", action: "admin:ListUsers" }) })`. Every named account is asked about under every
+  action, and one refusal refuses the request; `all=true` asks the actions and the broader action
+  about no subject. A set is decoded once and refused when a member is empty or repeated, when it
+  names more than `MAX_SUBJECTS`, when the flag is not exactly `true` or `false`, or when it names
+  accounts beside `all=true`. The handler reads `context.subjects()`. The overlay spells it:
+  `admin:ListServiceAccounts about each(users, everyone=all ⇒ admin:ListUsers)`. A signed request
+  that repeats the parameter is refused by SigV4 canonicalisation today (ADR-0026 (d)).
+- **A bucket named in the query.** `ClaimedRoute { bucket_param: Some(BucketParam::Query("bucket")),
+  .. }`. The one occurrence of the parameter is read strictly, and its raw value meets the same
+  S3 bucket rules as `/{bucket}`, before authentication. The overlay's selector ends in
+  `⇒ BucketQuery("bucket")`.
+- **Anonymous bootstrap.** An operation that must be anonymous opts in on its own floor with
+  `allow_anonymous_after_listing_in_the_posture_report()`, its overlay row sets `anonymous: true`,
+  and its action is its own vendor label; the authorizer is still asked.
+
 ## Clean-room policy
 
 **Never read MinIO server source when implementing MinIO-compatible behaviour.** The same applies to

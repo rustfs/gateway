@@ -229,6 +229,19 @@ impl AuthRequirement {
             Some(SubjectRule::Caller) if self.resource != ResourceShape::Service => {
                 Some("an own-account operation is about the caller, not a bucket or an object")
             }
+            // ADR-0026: every account needs an action no answer about named accounts implies.
+            Some(subject @ SubjectRule::Set { everyone, .. }) => subject.fault().or_else(|| match everyone {
+                Some(everyone) if !is_well_formed_action(everyone.action) => {
+                    Some("a set rule's every-account action is spelled `service:Action`")
+                }
+                Some(everyone) if !matches!(self.rule, ActionRule::AnyOf(_)) && self.actions().contains(&everyone.action) => {
+                    Some(
+                        "a set rule's every-account action is one no named-account question already requires, so every \
+                         account needs more than any named one",
+                    )
+                }
+                _ => None,
+            }),
             Some(subject) => subject.fault(),
             None => None,
         }
@@ -252,6 +265,12 @@ impl AuthRequirement {
                 };
                 rendered.push_str(&format!(" about query({param}, absent={absent})"));
             }
+            Some(SubjectRule::Set { param, everyone }) => match everyone {
+                Some(everyone) => {
+                    rendered.push_str(&format!(" about each({param}, everyone={} ⇒ {})", everyone.param, everyone.action))
+                }
+                None => rendered.push_str(&format!(" about each({param})")),
+            },
             None => {}
         }
         rendered

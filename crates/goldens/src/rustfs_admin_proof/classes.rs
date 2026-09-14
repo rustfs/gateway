@@ -12,36 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! One RustFS admin route from each custom-auth class of the inventory, and one bound-bucket
-//! route, as proof operations on ADR-0025's rules.
+//! One RustFS admin route from each custom-auth class of the inventory, one bound-bucket route,
+//! the three bulk access-key routes, the query-bound quota route and the four anonymous OIDC
+//! bootstrap routes, as proof operations on ADR-0025's and ADR-0026's rules.
 //!
-//! Responsible for: five `rustfs:` operations, their rows and their handler:
+//! Responsible for: thirteen `rustfs:` operations, their rows (each with its `/minio/admin`
+//! alias) and their one generic handler:
 //!
-//! - `MultipleActions`: [`ListPools`], `GET /rustfs/admin/v3/pools/list`, allowed when either
-//!   `admin:ServerInfo` or `admin:Decommission` is (RustFS's `evaluate_admin_actions` is any-of).
-//! - `CredentialOnly`: [`SelfAccountInfo`], `GET /rustfs/admin/v3/account/info`, about the caller
-//!   only, under the own-account label `rustfs:SelfAccountInfo`.
-//! - `ContextualAuthorization`: [`GetUserInfo`], `GET /rustfs/admin/v3/user-info?accessKey=…`,
-//!   under `admin:GetUser` about the account `accessKey` names; absent is a `400`, as in RustFS.
-//! - `S3Action`, and the bound bucket: [`GetBucketQuota`], `GET /rustfs/admin/v3/quota/{bucket}`,
-//!   under `s3:GetBucketQuota` on the bucket its template parameter names.
-//! - `NotImplemented`: [`ServiceRestart`], `POST /rustfs/admin/v3/service?action=restart`. The
-//!   inventory's label is stale — RustFS implements the route and picks the action by the query —
-//!   so the proof splits it by a query predicate, and any other `action` is the claim's `501`.
+//! - `MultipleActions`: [`ListPools`], any-of `admin:ServerInfo` / `admin:Decommission`.
+//! - `CredentialOnly`: [`SelfAccountInfo`], about the caller under `rustfs:SelfAccountInfo`.
+//! - `ContextualAuthorization`: [`GetUserInfo`], `admin:GetUser` about `accessKey` (absent: `400`).
+//! - `S3Action`: [`GetBucketQuota`], `s3:GetBucketQuota` on the `{bucket}` template parameter, and
+//!   [`GetBucketQuotaByQuery`], the same on the `bucket` query parameter (ADR-0026).
+//! - `NotImplemented` (a stale label): [`ServiceRestart`], `POST service?action=restart`; any
+//!   other `action` is the claim's `501`.
+//! - Bulk listings (ADR-0026): [`ListAccessKeysBulk`], [`ListAccessKeysLdapBulk`] and
+//!   [`ListAccessKeysOpenidBulk`], `admin:ListServiceAccounts` about each `users` account, and
+//!   `admin:ListUsers` as well for `all=true`.
+//! - `OidcBootstrap` (ADR-0026): [`OidcListProviders`], [`OidcAuthorize`], [`OidcCallback`] and
+//!   [`OidcLogout`], each anonymous by its own floor opt-in and still an authorizer question under
+//!   its own vendor label.
 //!
-//! Each is also served at its `/minio/admin` alias. One generic marker and one handler serve all
-//! five, because what is under test is authorisation, not the bodies.
-//! NOT responsible for: the overlay record (`super::overlay`), the assembly (`super`), or what
-//! RustFS answers behind these routes.
+//! NOT responsible for: the overlay record (`super::overlay`), the assembly (`super`), the bodies
+//! (not under test), or what RustFS answers behind these routes.
 //! Upstream: `rustfs-gateway-core`'s rules and dialect types. Downstream: `super::overlay`,
-//! `super::class_tests`.
+//! `super::class_tests`, `super::set_tests`, `super::anonymous_tests`.
 
 use http::Method;
 use rustfs_gateway::{Handler, HandlerContext, HandlerResult, Req, Resp};
-use rustfs_gateway_core::dialect::{ClaimedRoute, ClaimedRow};
+use rustfs_gateway_core::dialect::{BucketParam, ClaimedRoute, ClaimedRow};
 use rustfs_gateway_core::op::{AuthRequirement, ResourceShape};
 use rustfs_gateway_core::route::Predicate;
-use rustfs_gateway_core::{SubjectRule, WhenAbsent};
+use rustfs_gateway_core::{Everyone, Subject, SubjectRule, Subjects, WhenAbsent};
 
 use super::{Backend, json};
 
@@ -77,25 +79,85 @@ pub(crate) const SERVICE_RESTART: &str = "rustfs:ServiceRestart";
 pub(crate) const SERVICE_PATH: &str = "/rustfs/admin/v3/service";
 pub(crate) const SERVICE_RESTART_ACTION: &str = "admin:ServiceRestart";
 
-/// The five names, by marker index.
-const NAMES: [&str; 5] = [
+/// `rustfs:ListAccessKeysBulk`.
+pub(crate) const LIST_ACCESS_KEYS_BULK: &str = "rustfs:ListAccessKeysBulk";
+pub(crate) const LIST_ACCESS_KEYS_BULK_PATH: &str = "/rustfs/admin/v3/list-access-keys-bulk";
+/// `rustfs:ListAccessKeysLdapBulk`.
+pub(crate) const LIST_ACCESS_KEYS_LDAP_BULK: &str = "rustfs:ListAccessKeysLdapBulk";
+pub(crate) const LIST_ACCESS_KEYS_LDAP_BULK_PATH: &str = "/rustfs/admin/v3/idp/ldap/list-access-keys-bulk";
+/// `rustfs:ListAccessKeysOpenidBulk`.
+pub(crate) const LIST_ACCESS_KEYS_OPENID_BULK: &str = "rustfs:ListAccessKeysOpenidBulk";
+pub(crate) const LIST_ACCESS_KEYS_OPENID_BULK_PATH: &str = "/rustfs/admin/v3/idp/openid/list-access-keys-bulk";
+/// Asked about every account a bulk listing names; RustFS evaluates it deny-only for the caller.
+pub(crate) const LIST_ACCESS_KEYS_ACTION: &str = "admin:ListServiceAccounts";
+/// What every account needs on top: RustFS's `all` gate.
+pub(crate) const LIST_USERS_ACTION: &str = "admin:ListUsers";
+/// The accounts a bulk listing names: `users`, repeated, or every account with `all=true`.
+pub(crate) const USERS_SUBJECTS: SubjectRule = SubjectRule::Set {
+    param: "users",
+    everyone: Some(Everyone {
+        param: "all",
+        action: LIST_USERS_ACTION,
+    }),
+};
+
+/// `rustfs:GetBucketQuotaByQuery`.
+pub(crate) const GET_BUCKET_QUOTA_BY_QUERY: &str = "rustfs:GetBucketQuotaByQuery";
+pub(crate) const GET_BUCKET_QUOTA_BY_QUERY_PATH: &str = "/rustfs/admin/v3/get-bucket-quota";
+
+/// `rustfs:OidcListProviders`, and the rest of RustFS's OIDC bootstrap: each action is the
+/// operation's own vendor label, because RustFS evaluates no IAM action on these routes.
+pub(crate) const OIDC_LIST_PROVIDERS: &str = "rustfs:OidcListProviders";
+pub(crate) const OIDC_LIST_PROVIDERS_PATH: &str = "/rustfs/admin/v3/oidc/providers";
+/// `rustfs:OidcAuthorize`.
+pub(crate) const OIDC_AUTHORIZE: &str = "rustfs:OidcAuthorize";
+pub(crate) const OIDC_AUTHORIZE_TEMPLATE: &str = "/rustfs/admin/v3/oidc/authorize/{provider_id}";
+/// `rustfs:OidcCallback`.
+pub(crate) const OIDC_CALLBACK: &str = "rustfs:OidcCallback";
+pub(crate) const OIDC_CALLBACK_TEMPLATE: &str = "/rustfs/admin/v3/oidc/callback/{provider_id}";
+/// `rustfs:OidcLogout`.
+pub(crate) const OIDC_LOGOUT: &str = "rustfs:OidcLogout";
+pub(crate) const OIDC_LOGOUT_PATH: &str = "/rustfs/admin/v3/oidc/logout";
+/// The four anonymous operations, which the posture report must name and nothing else here may add.
+pub(crate) const OIDC_BOOTSTRAP: [&str; 4] = [OIDC_AUTHORIZE, OIDC_CALLBACK, OIDC_LIST_PROVIDERS, OIDC_LOGOUT];
+
+/// The thirteen names, by marker index.
+const NAMES: [&str; 13] = [
     LIST_POOLS,
     SELF_ACCOUNT_INFO,
     GET_USER_INFO,
     GET_BUCKET_QUOTA,
     SERVICE_RESTART,
+    LIST_ACCESS_KEYS_BULK,
+    LIST_ACCESS_KEYS_LDAP_BULK,
+    LIST_ACCESS_KEYS_OPENID_BULK,
+    GET_BUCKET_QUOTA_BY_QUERY,
+    OIDC_LIST_PROVIDERS,
+    OIDC_AUTHORIZE,
+    OIDC_CALLBACK,
+    OIDC_LOGOUT,
 ];
 
-/// The five requirements, by marker index.
-pub(crate) const REQUIREMENTS: [AuthRequirement; 5] = [
+const BULK: AuthRequirement = AuthRequirement::new(LIST_ACCESS_KEYS_ACTION, ResourceShape::Service).about_subject(USERS_SUBJECTS);
+
+/// The thirteen requirements, by marker index.
+pub(crate) const REQUIREMENTS: [AuthRequirement; 13] = [
     AuthRequirement::any_of(LIST_POOLS_ACTIONS, ResourceShape::Service),
     AuthRequirement::new(SELF_ACCOUNT_INFO_ACTION, ResourceShape::Service).about_subject(SubjectRule::Caller),
     AuthRequirement::new(GET_USER_INFO_ACTION, ResourceShape::Service).about_subject(USER_SUBJECT),
     AuthRequirement::new(GET_BUCKET_QUOTA_ACTION, ResourceShape::Bucket),
     AuthRequirement::new(SERVICE_RESTART_ACTION, ResourceShape::Service),
+    BULK,
+    BULK,
+    BULK,
+    AuthRequirement::new(GET_BUCKET_QUOTA_ACTION, ResourceShape::Bucket),
+    AuthRequirement::new(OIDC_LIST_PROVIDERS, ResourceShape::Service),
+    AuthRequirement::new(OIDC_AUTHORIZE, ResourceShape::Service),
+    AuthRequirement::new(OIDC_CALLBACK, ResourceShape::Service),
+    AuthRequirement::new(OIDC_LOGOUT, ResourceShape::Service),
 ];
 
-/// The first precedence; the five take the next five.
+/// The first precedence; the thirteen take the next thirteen.
 pub(crate) const FIRST_PRECEDENCE: u16 = 20;
 
 pub(crate) use operations::Class;
@@ -110,6 +172,22 @@ pub(crate) type GetUserInfo = Class<2>;
 pub(crate) type GetBucketQuota = Class<3>;
 /// `NotImplemented`, as implemented today.
 pub(crate) type ServiceRestart = Class<4>;
+/// `MultipleActions`, about a set of accounts.
+pub(crate) type ListAccessKeysBulk = Class<5>;
+/// The LDAP variant.
+pub(crate) type ListAccessKeysLdapBulk = Class<6>;
+/// The OpenID variant.
+pub(crate) type ListAccessKeysOpenidBulk = Class<7>;
+/// `S3Action`, with the bucket in the query.
+pub(crate) type GetBucketQuotaByQuery = Class<8>;
+/// `OidcBootstrap`: the provider listing.
+pub(crate) type OidcListProviders = Class<9>;
+/// `OidcBootstrap`: the redirect to the provider.
+pub(crate) type OidcAuthorize = Class<10>;
+/// `OidcBootstrap`: the provider's redirect back.
+pub(crate) type OidcCallback = Class<11>;
+/// `OidcBootstrap`: the logout redirect.
+pub(crate) type OidcLogout = Class<12>;
 
 // ── the rows ──────────────────────────────────────────────────────────────────────────────────
 
@@ -128,9 +206,37 @@ static GET_BUCKET_QUOTA_ROWS: &[ClaimedRow] = &[
     row("/minio/admin/v3/quota/{bucket}", GET),
 ];
 static SERVICE_RESTART_ROWS: &[ClaimedRow] = &[row(SERVICE_PATH, RESTART), row("/minio/admin/v3/service", RESTART)];
+static LIST_ACCESS_KEYS_BULK_ROWS: &[ClaimedRow] = &[
+    row(LIST_ACCESS_KEYS_BULK_PATH, GET),
+    row("/minio/admin/v3/list-access-keys-bulk", GET),
+];
+static LIST_ACCESS_KEYS_LDAP_BULK_ROWS: &[ClaimedRow] = &[
+    row(LIST_ACCESS_KEYS_LDAP_BULK_PATH, GET),
+    row("/minio/admin/v3/idp/ldap/list-access-keys-bulk", GET),
+];
+static LIST_ACCESS_KEYS_OPENID_BULK_ROWS: &[ClaimedRow] = &[
+    row(LIST_ACCESS_KEYS_OPENID_BULK_PATH, GET),
+    row("/minio/admin/v3/idp/openid/list-access-keys-bulk", GET),
+];
+static GET_BUCKET_QUOTA_BY_QUERY_ROWS: &[ClaimedRow] = &[
+    row(GET_BUCKET_QUOTA_BY_QUERY_PATH, GET),
+    row("/minio/admin/v3/get-bucket-quota", GET),
+];
+static OIDC_LIST_PROVIDERS_ROWS: &[ClaimedRow] =
+    &[row(OIDC_LIST_PROVIDERS_PATH, GET), row("/minio/admin/v3/oidc/providers", GET)];
+static OIDC_AUTHORIZE_ROWS: &[ClaimedRow] = &[
+    row(OIDC_AUTHORIZE_TEMPLATE, GET),
+    row("/minio/admin/v3/oidc/authorize/{provider_id}", GET),
+];
+static OIDC_CALLBACK_ROWS: &[ClaimedRow] = &[
+    row(OIDC_CALLBACK_TEMPLATE, GET),
+    row("/minio/admin/v3/oidc/callback/{provider_id}", GET),
+];
+static OIDC_LOGOUT_ROWS: &[ClaimedRow] = &[row(OIDC_LOGOUT_PATH, GET), row("/minio/admin/v3/oidc/logout", GET)];
 
-/// The five routes, by marker index; `bucket` is the quota route's binding, which tests swap.
-pub(crate) fn routes(bucket: Option<&'static str>) -> [ClaimedRoute; 5] {
+/// The thirteen routes, by marker index. `quota` is the template-bound quota route's binding and
+/// `by_query` the query-bound one's; tests swap either.
+pub(crate) fn routes(quota: Option<BucketParam>, by_query: Option<BucketParam>) -> [ClaimedRoute; 13] {
     let route = |index: u16, rows, bucket_param| ClaimedRoute {
         precedence: FIRST_PRECEDENCE + index,
         rows,
@@ -141,15 +247,35 @@ pub(crate) fn routes(bucket: Option<&'static str>) -> [ClaimedRoute; 5] {
         route(0, LIST_POOLS_ROWS, None),
         route(1, SELF_ACCOUNT_INFO_ROWS, None),
         route(2, GET_USER_INFO_ROWS, None),
-        route(3, GET_BUCKET_QUOTA_ROWS, bucket),
+        route(3, GET_BUCKET_QUOTA_ROWS, quota),
         route(4, SERVICE_RESTART_ROWS, None),
+        route(5, LIST_ACCESS_KEYS_BULK_ROWS, None),
+        route(6, LIST_ACCESS_KEYS_LDAP_BULK_ROWS, None),
+        route(7, LIST_ACCESS_KEYS_OPENID_BULK_ROWS, None),
+        route(8, GET_BUCKET_QUOTA_BY_QUERY_ROWS, by_query),
+        route(9, OIDC_LIST_PROVIDERS_ROWS, None),
+        route(10, OIDC_AUTHORIZE_ROWS, None),
+        route(11, OIDC_CALLBACK_ROWS, None),
+        route(12, OIDC_LOGOUT_ROWS, None),
     ]
 }
 
 // ── the handler ───────────────────────────────────────────────────────────────────────────────
 
+/// The accounts a context carries, as the handler answers them: `"caller"`, the named accounts
+/// in order, or `"everyone"`.
+fn subjects_json(subjects: Option<&Subjects>) -> serde_json::Value {
+    match subjects {
+        None => serde_json::Value::Null,
+        Some(Subjects::One(Subject::Caller)) => serde_json::json!("caller"),
+        Some(Subjects::One(subject)) => serde_json::json!([subject.name()]),
+        Some(Subjects::Each(each)) => serde_json::json!(each.iter().filter_map(Subject::name).collect::<Vec<_>>()),
+        Some(Subjects::Everyone) => serde_json::json!("everyone"),
+    }
+}
+
 impl Backend {
-    /// Records what it was handed and answers with the bucket and subject it acts on, read from
+    /// Records what it was handed and answers with the bucket and accounts it acts on, read from
     /// the context and never from the query.
     fn class<const N: usize>(&self, request: &Req<Class<N>>) -> HandlerResult<Class<N>> {
         let context = request.context();
@@ -158,6 +284,7 @@ impl Backend {
             "operation": context.operation(),
             "bucket": context.bucket().map(|bucket| bucket.as_str().to_owned()),
             "subject": context.subject().and_then(|subject| subject.name().map(str::to_owned)),
+            "subjects": subjects_json(context.subjects()),
         }))))
     }
 }
@@ -195,15 +322,39 @@ mod operations {
             .build()
     }
 
-    static SPECS: [OperationSpec; 5] = [spec(0), spec(1), spec(2), spec(3), spec(4)];
+    static SPECS: [OperationSpec; 13] = [
+        spec(0),
+        spec(1),
+        spec(2),
+        spec(3),
+        spec(4),
+        spec(5),
+        spec(6),
+        spec(7),
+        spec(8),
+        spec(9),
+        spec(10),
+        spec(11),
+        spec(12),
+    ];
 
-    /// Privileged and header-signed only, like every claimed operation until a client presigns.
-    static FLOORS: [OperationFloor; 5] = [
+    /// Privileged and header-signed only, like every claimed operation until a client presigns;
+    /// the four OIDC bootstrap operations also admit anonymous requests, each by its own opt-in,
+    /// which the posture report lists and the overlay acknowledges.
+    static FLOORS: [OperationFloor; 13] = [
         OperationFloor::custom(NAMES[0], SigService::S3),
         OperationFloor::custom(NAMES[1], SigService::S3),
         OperationFloor::custom(NAMES[2], SigService::S3),
         OperationFloor::custom(NAMES[3], SigService::S3),
         OperationFloor::custom(NAMES[4], SigService::S3),
+        OperationFloor::custom(NAMES[5], SigService::S3),
+        OperationFloor::custom(NAMES[6], SigService::S3),
+        OperationFloor::custom(NAMES[7], SigService::S3),
+        OperationFloor::custom(NAMES[8], SigService::S3),
+        OperationFloor::custom(NAMES[9], SigService::S3).allow_anonymous_after_listing_in_the_posture_report(),
+        OperationFloor::custom(NAMES[10], SigService::S3).allow_anonymous_after_listing_in_the_posture_report(),
+        OperationFloor::custom(NAMES[11], SigService::S3).allow_anonymous_after_listing_in_the_posture_report(),
+        OperationFloor::custom(NAMES[12], SigService::S3).allow_anonymous_after_listing_in_the_posture_report(),
     ];
 
     impl<const N: usize> Operation for Class<N> {

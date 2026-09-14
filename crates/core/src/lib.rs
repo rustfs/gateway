@@ -116,9 +116,9 @@ pub mod sse;
 mod static_dispatch;
 
 pub use crate::authz::{
-    ActionRule, Authorized, AuthorizedRead, Combined, Decision, Denied, DerivedResourceError, DerivedResourceSet,
-    MAX_SUBJECT_BYTES, NoDerived, OwnedResource, ResourceIdentity, ResourceRef, Subject, SubjectError, SubjectName, SubjectRule,
-    WhenAbsent,
+    ActionRule, Authorized, AuthorizedRead, Combined, Decision, Denied, DerivedResourceError, DerivedResourceSet, Everyone,
+    MAX_SUBJECT_BYTES, MAX_SUBJECTS, NoDerived, OwnedResource, QueryParamError, Question, ResourceIdentity, ResourceRef, Subject,
+    SubjectError, SubjectName, SubjectRule, Subjects, WhenAbsent, single_raw_value,
 };
 pub use crate::cancellation::{HandlerCancellation, HandlerCancellationSource, HandlerContext};
 pub use crate::codec::{
@@ -128,8 +128,8 @@ pub use crate::codec::{
 pub use crate::committed::{CommitOutcome, CommitWork, CommittedResponse, DeferredOperation, HeadPart, HeadPartError};
 pub use crate::contracts::{copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, error_root_namespace};
 pub use crate::dialect::{
-    ClaimedOperation, ClaimedRoute, ClaimedRow, Dialect, DialectBuilder, DialectError, DialectOperation, DialectOverlay,
-    DialectRoute, OverlayRow,
+    BucketParam, ClaimedOperation, ClaimedRoute, ClaimedRow, Dialect, DialectBuilder, DialectError, DialectOperation,
+    DialectOverlay, DialectRoute, OverlayRow,
 };
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
 pub use crate::error::{DisallowedPreAuthCode, PRE_AUTH_STATUSES, PreAuthError};

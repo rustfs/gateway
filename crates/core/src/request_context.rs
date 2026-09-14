@@ -65,7 +65,7 @@ use rustfs_gateway_http::{HeaderView, WireRequest};
 use rustfs_gateway_sig::{Identity, SecretBytes, SigFamily, SigIdentity, SigLocation, SigService, Verdict, VerifiedScope};
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
-use crate::authz::Subject;
+use crate::authz::{Subject, Subjects};
 use crate::route::PathParams;
 
 /// How the request named its bucket, as the facade's host resolver decided it.
@@ -272,7 +272,7 @@ pub struct RequestContextView {
     headers: HeaderMap,
     principal: Option<RequestPrincipal>,
     path_params: PathParams,
-    subject: Option<Subject>,
+    subjects: Option<Subjects>,
 }
 
 impl RequestContextView {
@@ -324,7 +324,7 @@ impl RequestContextView {
             headers,
             principal,
             path_params: PathParams::none(),
-            subject: None,
+            subjects: None,
         })
     }
 
@@ -338,11 +338,11 @@ impl RequestContextView {
         self
     }
 
-    /// This context, with the subject both authorizer stages judged (ADR-0025). The facade calls
-    /// it once, for an operation whose requirement declares a subject rule.
+    /// This context, with the accounts both authorizer stages judged (ADR-0025, ADR-0026). The
+    /// facade calls it once, for an operation whose requirement declares a subject rule.
     #[must_use]
-    pub fn with_subject(mut self, subject: Option<Subject>) -> Self {
-        self.subject = subject;
+    pub fn with_subjects(mut self, subjects: Option<Subjects>) -> Self {
+        self.subjects = subjects;
         self
     }
 
@@ -367,7 +367,7 @@ impl RequestContextView {
             headers: HeaderMap::new(),
             principal: None,
             path_params: PathParams::none(),
-            subject: None,
+            subjects: None,
         }
     }
 
@@ -452,12 +452,25 @@ impl RequestContextView {
         &self.path_params
     }
 
-    /// The account the request acts on, exactly as both authorizer stages were asked about it;
-    /// `None` for an operation that declares no subject rule (ADR-0025). A handler acts on this
-    /// value and never parses the query for it a second time.
+    /// The one account the request acts on, exactly as both authorizer stages were asked about
+    /// it; `None` for an operation that declares no subject rule (ADR-0025), and for a set rule's
+    /// request, whose accounts are [`Self::subjects`]. A handler acts on this value and never
+    /// parses the query for it a second time.
     #[must_use]
     pub const fn subject(&self) -> Option<&Subject> {
-        self.subject.as_ref()
+        match &self.subjects {
+            Some(subjects) => subjects.one(),
+            None => None,
+        }
+    }
+
+    /// Every account the request acts on, exactly as the route stage was asked about them: one
+    /// subject, each account a set rule named, or every account (ADR-0026); `None` for an
+    /// operation that declares no subject rule. A handler of a set rule acts on exactly these and
+    /// never parses the query for them a second time.
+    #[must_use]
+    pub const fn subjects(&self) -> Option<&Subjects> {
+        self.subjects.as_ref()
     }
 }
 
@@ -485,7 +498,7 @@ impl fmt::Debug for RequestContextView {
             .field("header_names", &HeaderNames(&self.headers))
             .field("principal", &self.principal)
             .field("path_params", &self.path_params)
-            .field("subject", &self.subject)
+            .field("subjects", &self.subjects)
             .finish()
     }
 }

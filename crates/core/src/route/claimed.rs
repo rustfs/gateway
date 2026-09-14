@@ -70,6 +70,29 @@ pub(crate) fn claimed_selector_fault(predicates: &[Predicate]) -> Option<&'stati
     (methods != 1).then_some("a claimed row names exactly one method")
 }
 
+/// Where a claimed route's authorisation bucket comes from (ADR-0025, ADR-0026).
+///
+/// Either way the raw, still-encoded value meets the path-style S3 bucket rules
+/// (`codec::bucket_label`) before anything is authenticated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BucketParam {
+    /// A template parameter: its raw segment is the bucket (`/quota/{bucket}`).
+    Path(&'static str),
+    /// A query parameter, present exactly once: its raw value is the bucket
+    /// (`get-bucket-quota?bucket=`). A repeated, malformed, absent or empty parameter is a `400`.
+    Query(&'static str),
+}
+
+impl BucketParam {
+    /// The parameter's name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Path(name) | Self::Query(name) => name,
+        }
+    }
+}
+
 /// One claimed row: the route entry, its template and the claim it is inside.
 ///
 /// Produced only by [`crate::dialect::DialectBuilder::declare_claimed`], after the overlay review:
@@ -85,7 +108,7 @@ pub struct ClaimedEntry {
     entry: RouteEntry,
     template: PathTemplate,
     claim: PathClaim,
-    bucket_param: Option<&'static str>,
+    bucket_param: Option<BucketParam>,
 }
 
 impl ClaimedEntry {
@@ -98,17 +121,18 @@ impl ClaimedEntry {
         }
     }
 
-    /// This row, binding its template parameter `param` as the authorisation bucket (ADR-0025).
-    /// The dialect checks that the template has the parameter before it builds one.
-    pub(crate) const fn with_bucket_param(mut self, param: Option<&'static str>) -> Self {
+    /// This row, binding `param` as the authorisation bucket (ADR-0025, ADR-0026). The dialect
+    /// checks a template parameter against the template, and a query parameter's spelling, before
+    /// it builds one.
+    pub(crate) const fn with_bucket_param(mut self, param: Option<BucketParam>) -> Self {
         self.bucket_param = param;
         self
     }
 
-    /// The template parameter whose raw segment is the request's bucket, when the operation is
-    /// authorised on a bucket; `None` for a service-level claimed row.
+    /// The parameter whose raw value is the request's bucket, when the operation is authorised on
+    /// a bucket; `None` for a service-level claimed row.
     #[must_use]
-    pub const fn bucket_param(&self) -> Option<&'static str> {
+    pub const fn bucket_param(&self) -> Option<BucketParam> {
         self.bucket_param
     }
 

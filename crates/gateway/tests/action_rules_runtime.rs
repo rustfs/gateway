@@ -18,7 +18,9 @@
 //! Responsible for: an all-of rule asking every action and refusing when any one is refused,
 //! with the input stage re-asking the route's deciding action; and an own-account operation whose
 //! floor admits anonymous requests never asking the authorizer about an anonymous caller, even
-//! with anonymous admission delegated to it.
+//! with anonymous admission delegated to it; and a set-rule operation (ADR-0026) whose floor admits
+//! anonymous requests refusing an anonymous caller without asking, whether it names accounts or asks
+//! for every account, while a signed request for every account is asked the broader action too.
 //! NOT responsible for: the rule functions (`rustfs-gateway-core`'s unit tests), or the RustFS
 //! classes and the bound bucket (`crates/goldens/src/rustfs_admin_proof/class_tests.rs`).
 //! Upstream: `rustfs-gateway`, `rustfs-gateway-core`'s dialect types, `support`. Downstream:
@@ -31,9 +33,9 @@ use rustfs_gateway::sig::{
     AmzDate, PayloadMode, SecurityFloor, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope,
 };
 use rustfs_gateway::{
-    Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Handler, HandlerContext, HandlerResult, InputAuthzRequest,
-    InputDecisions, RegionSet, Req, RequestContext, Resp, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
-    Subject, SubjectRule,
+    Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Everyone, Handler, HandlerContext, HandlerResult,
+    InputAuthzRequest, InputDecisions, RegionSet, Req, RequestContext, Resp, S3Service, ServiceBuilder, SigV4Authenticator,
+    StaticCredentials, Subject, SubjectRule,
 };
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::{
@@ -54,12 +56,16 @@ const MINE: &str = "example:Mine";
 const BOTH_ACTIONS: &[&str] = &["admin:A", "admin:B"];
 const BOTH_PATH: &str = "/example/admin/v1/both";
 const MINE_PATH: &str = "/example/admin/v1/mine";
+const EACH: &str = "example:Each";
+const EACH_PATH: &str = "/example/admin/v1/each";
+const EACH_ACTION: &str = "admin:ListEach";
+const EVERYONE_ACTION: &str = "admin:ListEveryone";
 
 // ── the operations ───────────────────────────────────────────────────────────────────────────
 
 struct Ruled<const N: usize>;
 
-const NAMES: [&str; 2] = [BOTH, MINE];
+const NAMES: [&str; 3] = [BOTH, MINE, EACH];
 
 const fn spec(index: usize, auth: AuthRequirement) -> OperationSpec {
     OperationSpec::builder(NAMES[index], 200, None)
@@ -69,16 +75,27 @@ const fn spec(index: usize, auth: AuthRequirement) -> OperationSpec {
         .build()
 }
 
-static SPECS: [OperationSpec; 2] = [
+static SPECS: [OperationSpec; 3] = [
     spec(0, AuthRequirement::all_of(BOTH_ACTIONS, ResourceShape::Service)),
     spec(1, AuthRequirement::new(MINE, ResourceShape::Service).about_subject(SubjectRule::Caller)),
+    spec(
+        2,
+        AuthRequirement::new(EACH_ACTION, ResourceShape::Service).about_subject(SubjectRule::Set {
+            param: "users",
+            everyone: Some(Everyone {
+                param: "all",
+                action: EVERYONE_ACTION,
+            }),
+        }),
+    ),
 ];
 
 /// `example:Mine` admits anonymous requests at its floor, so only the facade's own guard stands
 /// between an anonymous caller and a question about "its" account.
-static FLOORS: [OperationFloor; 2] = [
+static FLOORS: [OperationFloor; 3] = [
     OperationFloor::custom(BOTH, SigService::S3),
     OperationFloor::custom(MINE, SigService::S3).allow_anonymous_after_listing_in_the_posture_report(),
+    OperationFloor::custom(EACH, SigService::S3).allow_anonymous_after_listing_in_the_posture_report(),
 ];
 
 impl<const N: usize> Operation for Ruled<N> {
@@ -123,6 +140,10 @@ static MINE_ROWS: &[ClaimedRow] = &[ClaimedRow {
     template: MINE_PATH,
     selector: GET,
 }];
+static EACH_ROWS: &[ClaimedRow] = &[ClaimedRow {
+    template: EACH_PATH,
+    selector: GET,
+}];
 
 static OVERLAY: DialectOverlay = DialectOverlay {
     name: "example-rules",
@@ -148,6 +169,16 @@ static OVERLAY: DialectOverlay = DialectOverlay {
             anonymous: true,
             evidence: EVIDENCE,
         },
+        OverlayRow {
+            name: EACH,
+            precedence: 12,
+            selector: "PathTemplate(\"/example/admin/v1/each\") ∧ Method(GET)",
+            action: "admin:ListEach about each(users, everyone=all ⇒ admin:ListEveryone)",
+            resource: ResourceShape::Service,
+            success_status: 200,
+            anonymous: true,
+            evidence: EVIDENCE,
+        },
     ],
     claims: &[PathClaim {
         prefix: "/example/admin",
@@ -166,6 +197,7 @@ fn dialect() -> Dialect {
     Dialect::assemble(&OVERLAY)
         .declare_claimed::<Ruled<0>>(claimed(10, BOTH_ROWS))
         .declare_claimed::<Ruled<1>>(claimed(11, MINE_ROWS))
+        .declare_claimed::<Ruled<2>>(claimed(12, EACH_ROWS))
         .build()
         .expect("the record and the declarations agree")
 }
@@ -257,11 +289,13 @@ fn service(recorder: &Arc<Recorder>) -> S3Service {
         .dialect(&dialect())
         .register::<Ruled<0>, _>(Arc::clone(recorder))
         .register::<Ruled<1>, _>(Arc::clone(recorder))
+        .register::<Ruled<2>, _>(Arc::clone(recorder))
         .build()
         .expect("a complete assembly")
 }
 
-fn signed(path: &str) -> http::Request<Bytes> {
+fn signed(target: &str) -> http::Request<Bytes> {
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let method = http::Method::GET;
     let mut headers = http::HeaderMap::new();
     headers.insert(http::header::HOST, http::HeaderValue::from_static(HOST));
@@ -269,9 +303,9 @@ fn signed(path: &str) -> http::Request<Bytes> {
     let stamp = AmzDate::parse(SIGNED_AT_STAMP).expect("a stamp");
     let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a scope");
     let mut signer = SigV4Signer::new(SigningCredentials::new(ACCESS_KEY, SECRET).expect("credentials"), scope);
-    let signing = SigningRequest::new(&method, path, "", &headers, &raw_host, PayloadMode::Empty, stamp);
+    let signing = SigningRequest::new(&method, path, query, &headers, &raw_host, PayloadMode::Empty, stamp);
     let signed = signer.sign_headers(&signing).expect("a signable request");
-    let mut builder = http::Request::builder().method(method).uri(path);
+    let mut builder = http::Request::builder().method(method).uri(target);
     for (name, value) in signed.headers() {
         builder = builder.header(name, value);
     }
@@ -355,5 +389,43 @@ async fn n_an_anonymous_own_account_request_is_refused_without_asking() {
     let (status, recorder) = run(&[MINE], anonymous(MINE_PATH)).await;
     assert_eq!(status, http::StatusCode::FORBIDDEN);
     assert!(recorder.asked().is_empty(), "{:?}", recorder.asked());
+    assert!(recorder.handled().is_empty());
+}
+
+// ── a set of accounts (ADR-0026) ─────────────────────────────────────────────────────────────
+
+/// Negative — an anonymous caller has no account to list, and is no one to list every account for:
+/// with its floor admitting anonymous requests and anonymous admission delegated to an authorizer
+/// that would allow it, the request is refused without a question, including the every-account
+/// form whose questions are about no subject.
+#[tokio::test]
+async fn n_an_anonymous_set_request_is_refused_without_asking() {
+    for query in ["", "?users=alice", "?users=alice&users=bob", "?all=true"] {
+        let target = format!("{EACH_PATH}{query}");
+        let (status, recorder) = run(&[EACH_ACTION, EVERYONE_ACTION], anonymous(&target)).await;
+        assert_eq!(status, http::StatusCode::FORBIDDEN, "{target}");
+        assert!(recorder.asked().is_empty(), "{target}: {:?}", recorder.asked());
+        assert!(recorder.handled().is_empty(), "{target}");
+    }
+}
+
+/// Positive — a signed request for every account is asked the operation's action and the broader
+/// one, neither about the caller, and the input stage re-asks the operation's own.
+#[tokio::test]
+async fn a_signed_request_for_every_account_asks_the_broader_action_too() {
+    let (status, recorder) = run(&[EACH_ACTION, EVERYONE_ACTION], signed(&format!("{EACH_PATH}?all=true"))).await;
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(route_actions(&recorder), [EACH_ACTION, EVERYONE_ACTION]);
+    assert!(recorder.asked().iter().all(|(_, _, about_caller)| !about_caller));
+    assert!(recorder.asked().contains(&("input", EACH_ACTION.to_owned(), false)));
+    assert_eq!(recorder.handled(), [EACH]);
+}
+
+/// Negative — without the broader action every account is refused, after both were asked.
+#[tokio::test]
+async fn n_every_account_without_the_broader_action_is_refused() {
+    let (status, recorder) = run(&[EACH_ACTION], signed(&format!("{EACH_PATH}?all=true"))).await;
+    assert_eq!(status, http::StatusCode::FORBIDDEN);
+    assert_eq!(route_actions(&recorder), [EACH_ACTION, EVERYONE_ACTION]);
     assert!(recorder.handled().is_empty());
 }

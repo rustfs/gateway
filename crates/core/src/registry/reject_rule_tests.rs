@@ -24,11 +24,11 @@
 use rustfs_gateway_sig::{OperationFloor, SigService};
 
 use super::{RegistryError, check_operation};
-use crate::authz::{SubjectRule, WhenAbsent};
+use crate::authz::{Everyone, SubjectRule, WhenAbsent};
 use crate::dialect::{ClaimedRoute, ClaimedRow, Dialect, DialectError, DialectOverlay, OverlayRow};
 use crate::op::{AuthRequirement, Operation, OperationOrigin, ResourceShape, StandardOperation};
 use crate::registry::{HandlerDeadlineClass, OperationSpec};
-use crate::route::{PathClaim, Predicate};
+use crate::route::{BucketParam, PathClaim, Predicate};
 
 const TWO: &[&str] = &["acme:A", "acme:B"];
 const USER: SubjectRule = SubjectRule::Query {
@@ -36,8 +36,16 @@ const USER: SubjectRule = SubjectRule::Query {
     when_absent: WhenAbsent::Refuse,
 };
 
+/// A set rule over `users` whose every-account flag `all` needs `action` (ADR-0026).
+const fn everyone_needs(action: &'static str) -> SubjectRule {
+    SubjectRule::Set {
+        param: "users",
+        everyone: Some(Everyone { param: "all", action }),
+    }
+}
+
 /// One requirement per index; the first five are registrable, the rest are refused.
-const REQUIREMENTS: [AuthRequirement; 14] = [
+const REQUIREMENTS: [AuthRequirement; 21] = [
     AuthRequirement::any_of(TWO, ResourceShape::Service),
     AuthRequirement::all_of(TWO, ResourceShape::Bucket),
     AuthRequirement::new("acme:Own", ResourceShape::Service).about_subject(SubjectRule::Caller),
@@ -64,11 +72,28 @@ const REQUIREMENTS: [AuthRequirement; 14] = [
     AuthRequirement::new("admin:Own", ResourceShape::Service).about_subject(SubjectRule::Caller),
     // 13: an own-account label from another vendor's namespace.
     AuthRequirement::new("other:Own", ResourceShape::Service).about_subject(SubjectRule::Caller),
+    // 14: a set rule whose every-account action is broader than its own (ADR-0026).
+    AuthRequirement::new("admin:ListServiceAccounts", ResourceShape::Service).about_subject(everyone_needs("admin:ListUsers")),
+    // 15: an any-of set rule whose every-account action narrows it to one alternative.
+    AuthRequirement::any_of(TWO, ResourceShape::Service).about_subject(everyone_needs("acme:A")),
+    // 16: a malformed every-account action.
+    AuthRequirement::new("admin:ListServiceAccounts", ResourceShape::Service).about_subject(everyone_needs("admin ListUsers")),
+    // 17: an every-account action that is the one action every named account is already asked.
+    AuthRequirement::new("acme:A", ResourceShape::Service).about_subject(everyone_needs("acme:A")),
+    // 18: an every-account action an all-of rule already asks about every named account.
+    AuthRequirement::all_of(TWO, ResourceShape::Service).about_subject(everyone_needs("acme:B")),
+    // 19: a set parameter outside the unreserved set.
+    AuthRequirement::new("admin:ListServiceAccounts", ResourceShape::Service).about_subject(SubjectRule::Set {
+        param: "user s",
+        everyone: None,
+    }),
+    // 20: a bucket operation about a named account, for the query-bucket refusals.
+    AuthRequirement::new("s3:GetBucketQuota", ResourceShape::Bucket).about_subject(USER),
 ];
 
-const NAMES: [&str; 14] = [
+const NAMES: [&str; 21] = [
     "acme:R0", "acme:R1", "acme:R2", "acme:R3", "acme:R4", "acme:R5", "acme:R6", "acme:R7", "acme:R8", "acme:R9", "acme:R10",
-    "acme:R11", "acme:R12", "acme:R13",
+    "acme:R11", "acme:R12", "acme:R13", "acme:R14", "acme:R15", "acme:R16", "acme:R17", "acme:R18", "acme:R19", "acme:R20",
 ];
 
 const fn spec(index: usize) -> OperationSpec {
@@ -79,7 +104,7 @@ const fn spec(index: usize) -> OperationSpec {
         .build()
 }
 
-static SPECS: [OperationSpec; 14] = [
+static SPECS: [OperationSpec; 21] = [
     spec(0),
     spec(1),
     spec(2),
@@ -94,9 +119,16 @@ static SPECS: [OperationSpec; 14] = [
     spec(11),
     spec(12),
     spec(13),
+    spec(14),
+    spec(15),
+    spec(16),
+    spec(17),
+    spec(18),
+    spec(19),
+    spec(20),
 ];
 
-static FLOORS: [OperationFloor; 14] = [
+static FLOORS: [OperationFloor; 21] = [
     OperationFloor::custom(NAMES[0], SigService::S3),
     OperationFloor::custom(NAMES[1], SigService::S3),
     OperationFloor::custom(NAMES[2], SigService::S3),
@@ -111,6 +143,13 @@ static FLOORS: [OperationFloor; 14] = [
     OperationFloor::custom(NAMES[11], SigService::S3),
     OperationFloor::custom(NAMES[12], SigService::S3),
     OperationFloor::custom(NAMES[13], SigService::S3),
+    OperationFloor::custom(NAMES[14], SigService::S3),
+    OperationFloor::custom(NAMES[15], SigService::S3),
+    OperationFloor::custom(NAMES[16], SigService::S3),
+    OperationFloor::custom(NAMES[17], SigService::S3),
+    OperationFloor::custom(NAMES[18], SigService::S3),
+    OperationFloor::custom(NAMES[19], SigService::S3),
+    OperationFloor::custom(NAMES[20], SigService::S3),
 ];
 
 // The fixtures sit inside their own `#[cfg(test)]` item for `check_op_file_shape.sh`, which admits
@@ -246,6 +285,31 @@ fn n_a_standard_operation_with_a_rule_is_refused() {
     );
 }
 
+/// Positive — a set rule whose every-account action is broader than its own, and an any-of set
+/// rule whose every-account action narrows it to one alternative, are registrable and rendered in
+/// full (ADR-0026).
+#[test]
+fn set_rules_with_a_broader_every_account_action_are_registrable() {
+    assert_eq!(check_operation::<Rule<14>>(), Ok(()));
+    assert_eq!(check_operation::<Rule<15>>(), Ok(()));
+    assert_eq!(
+        REQUIREMENTS[14].render(),
+        "admin:ListServiceAccounts about each(users, everyone=all ⇒ admin:ListUsers)"
+    );
+    assert_eq!(REQUIREMENTS[14].everyone_action(), Some("admin:ListUsers"));
+    assert_eq!(REQUIREMENTS[3].everyone_action(), None);
+}
+
+/// Negative — every account needs an explicit, well-spelled action that no named-account question
+/// already asks; and a set parameter is a plain query key.
+#[test]
+fn n_a_set_rule_whose_every_account_form_adds_nothing_is_refused() {
+    assert!(why::<16>().contains("spelled"));
+    assert!(why::<17>().contains("already requires"));
+    assert!(why::<18>().contains("already requires"));
+    assert!(why::<19>().contains("unreserved"));
+}
+
 // ── the overlay reads the rendered rule ──────────────────────────────────────────────────────
 
 static GET: &[Predicate] = &[Predicate::Method(http::Method::GET)];
@@ -329,7 +393,7 @@ fn n_a_service_level_operation_that_binds_a_bucket_is_refused() {
             precedence: 10,
             rows: TEMPLATED,
             shadows: &[],
-            bucket_param: Some("bucket"),
+            bucket_param: Some(BucketParam::Path("bucket")),
         })
         .build()
         .expect_err("a service-level operation with a bound bucket");
@@ -337,6 +401,87 @@ fn n_a_service_level_operation_that_binds_a_bucket_is_refused() {
         errors
             .iter()
             .any(|error| matches!(error, DialectError::ClaimedBucketParam { param: "bucket", why, .. } if why.contains("only an operation authorised on a bucket"))),
+        "{errors:?}"
+    );
+}
+
+// ── a bucket named in the query (ADR-0026) ──────────────────────────────────────────────────
+
+/// A record for the all-of bucket operation, bound to `bucket` in the query.
+static RECORDS_A_QUERY_BUCKET: DialectOverlay = DialectOverlay {
+    name: "acme-rules",
+    vendor: "acme",
+    claims: CLAIMS,
+    operations: &[OverlayRow {
+        name: NAMES[1],
+        precedence: 10,
+        selector: "PathTemplate(\"/acme/admin/v1/r0\") ∧ Method(GET) ⇒ BucketQuery(\"bucket\")",
+        action: "allOf(acme:A, acme:B)",
+        resource: ResourceShape::Bucket,
+        success_status: 200,
+        anonymous: false,
+        evidence: EVIDENCE,
+    }],
+};
+
+fn declare_bucket<const N: usize>(bucket_param: Option<BucketParam>) -> Result<Dialect, Vec<DialectError>> {
+    Dialect::assemble(&RECORDS_A_QUERY_BUCKET)
+        .declare_claimed::<Rule<N>>(ClaimedRoute {
+            precedence: 10,
+            rows: ROWS,
+            shadows: &[],
+            bucket_param,
+        })
+        .build()
+}
+
+fn bucket_refusal(errors: &[DialectError], param: &str) -> Option<&'static str> {
+    errors.iter().find_map(|error| match error {
+        DialectError::ClaimedBucketParam { param: refused, why, .. } if *refused == param => Some(*why),
+        _ => None,
+    })
+}
+
+/// Positive — a bucket operation binds a query parameter, and its record says so.
+#[test]
+fn a_bucket_operation_binds_a_query_parameter_its_record_names() {
+    assert!(declare_bucket::<1>(Some(BucketParam::Query("bucket"))).is_ok());
+}
+
+/// Negative — a query binding on a service-level operation, a parameter that is not a plain query
+/// key, or one the operation's own subject rule reads, is refused before the record is read.
+#[test]
+fn n_a_query_binding_outside_its_bounds_is_refused() {
+    let service = declare_bucket::<0>(Some(BucketParam::Query("bucket"))).expect_err("a service-level operation");
+    assert!(
+        bucket_refusal(&service, "bucket").is_some_and(|why| why.contains("only an operation authorised on a bucket")),
+        "{service:?}"
+    );
+    for param in ["", "bu cket", "b&c", "b%41"] {
+        let errors = declare_bucket::<1>(Some(BucketParam::Query(param))).expect_err(param);
+        assert!(
+            bucket_refusal(&errors, param).is_some_and(|why| why.contains("unreserved")),
+            "{param:?}: {errors:?}"
+        );
+    }
+    let shared = declare_bucket::<20>(Some(BucketParam::Query("accessKey"))).expect_err("one parameter, two meanings");
+    assert!(
+        bucket_refusal(&shared, "accessKey").is_some_and(|why| why.contains("different query parameters")),
+        "{shared:?}"
+    );
+    // The control: another parameter is accepted as a binding (the operation is refused only for
+    // the record this overlay does not hold).
+    let other = declare_bucket::<20>(Some(BucketParam::Query("bucket"))).expect_err("no record for this operation");
+    assert_eq!(bucket_refusal(&other, "bucket"), None, "{other:?}");
+}
+
+/// Negative — a template binding still needs the template's parameter; a query binding does not
+/// stand in for one.
+#[test]
+fn n_a_path_binding_without_its_template_parameter_is_refused() {
+    let errors = declare_bucket::<1>(Some(BucketParam::Path("bucket"))).expect_err("a row without {bucket}");
+    assert!(
+        bucket_refusal(&errors, "bucket").is_some_and(|why| why.contains("template has no parameter")),
         "{errors:?}"
     );
 }

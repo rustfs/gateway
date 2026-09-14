@@ -64,6 +64,7 @@ use std::collections::BTreeSet;
 pub use self::claimed::{ClaimedOperation, ClaimedRoute, ClaimedRow, render_claimed_route, render_claimed_rows};
 pub use self::error::DialectError;
 pub use self::overlay::{DialectOverlay, OverlayRow, RESERVED_HOST_CLASSES, vendor_of};
+pub use crate::route::BucketParam;
 
 use crate::op::Operation;
 use crate::registry::reject;
