@@ -102,15 +102,15 @@
                 "id": "q-bkt-0008",
                 "kind": "error_code",
                 "target": "DeleteBucket",
-                "summary": "Deleting a bucket that still holds objects or uploads is refused with 409 BucketNotEmpty rather than performed.",
+                "summary": "Deleting a bucket that still holds an object, an object version or a delete marker is refused with 409 BucketNotEmpty rather than performed; pending multipart uploads are not content, and are discarded with the bucket.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
                                 "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucket.html",
-                                "summary": "The operation requires the bucket to be empty, and the error table maps BucketNotEmpty to 409."
+                                "summary": "The operation requires objects, versions and delete markers to be gone first, names in-progress uploads as blocking only for directory buckets, and the error table maps BucketNotEmpty to 409."
                               }
                             ],
-                "cases": ["c-bkt-0022", "c-bkt-0023"]
+                "cases": ["c-bkt-0022", "c-bkt-0023", "c-bkt-0034"]
               }
             ],
   "ext_points": []

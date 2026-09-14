@@ -128,6 +128,16 @@ fn validate_upload_id_sequence_temp_for_delete(uploads: &Path) -> io::Result<boo
     }
 }
 
+/// Refuses an upload entry that is not a real directory before a recursive removal touches it.
+fn pending_upload_directory(path: &Path) -> Result<(), HandlerError> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|_| storage_error())?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        Ok(())
+    } else {
+        Err(storage_error())
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct UploadChecksum {
     algorithm: ChecksumAlgorithm,
@@ -316,7 +326,14 @@ impl FsBackend {
         Ok(format!("fs-v2-{current:016x}"))
     }
 
-    pub(super) fn upload_directory_is_empty_for_delete(&self, bucket: &str) -> Result<bool, HandlerError> {
+    /// Whether the upload directory lets its bucket be deleted.
+    ///
+    /// A pending upload is not content: a general purpose bucket holding only uploads is deleted
+    /// with them (`q-bkt-0008`, rustfs/gateway#806). Each one must still be a real directory, since
+    /// deletion will remove it recursively; an upload-shaped symlink is corruption and fails closed
+    /// before anything is removed. Any entry that is neither an upload nor the allocator authority
+    /// is unexplained state, and keeps the bucket.
+    pub(super) fn upload_directory_allows_delete(&self, bucket: &str) -> Result<bool, HandlerError> {
         let uploads = self.uploads_path(bucket);
         let entries = std::fs::read_dir(&uploads).map_err(|_| storage_error())?;
         for entry in entries {
@@ -331,10 +348,30 @@ impl FsBackend {
                 UPLOAD_ID_SEQUENCE_TEMP => {
                     validate_upload_id_sequence_temp_for_delete(&uploads).map_err(|_| storage_error())?;
                 }
+                upload if upload.starts_with("u-") => {
+                    pending_upload_directory(&entry.path())?;
+                }
                 _ => return Ok(false),
             }
         }
         Ok(true)
+    }
+
+    /// Removes every pending upload of a bucket that is being deleted, with its parts.
+    ///
+    /// Called only after the content directories are gone, so a refused deletion discards nothing.
+    pub(super) fn discard_pending_uploads_for_delete(&self, bucket: &str) -> Result<(), HandlerError> {
+        let uploads = self.uploads_path(bucket);
+        let entries = std::fs::read_dir(&uploads).map_err(|_| storage_error())?;
+        for entry in entries {
+            let entry = entry.map_err(|_| storage_error())?;
+            if entry.file_name().to_str().is_some_and(|name| name.starts_with("u-")) {
+                let path = entry.path();
+                pending_upload_directory(&path)?;
+                std::fs::remove_dir_all(&path).map_err(|_| storage_error())?;
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn remove_upload_id_authority_for_delete(&self, bucket: &str) -> Result<(), HandlerError> {

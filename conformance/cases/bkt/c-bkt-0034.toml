@@ -1,0 +1,144 @@
+# c-bkt-0034 — pending multipart uploads do not keep a bucket alive.
+#
+# Schema dimensions exercised: multi-exchange with a captured upload id, and a recreation of the same
+# name that proves the deletion took the upload with it.
+
+[case]
+id = "c-bkt-0034"
+schema_version = 1
+title = "A bucket whose only contents are pending multipart uploads is deleted, and the uploads go with it"
+rationale = """
+Emptiness is judged on objects, their versions and their delete markers. An upload that was \
+started and never completed is none of those, so it does not make a general purpose bucket \
+non-empty, and the deletion discards it. A store that counted uploads as content refuses a bucket \
+every cleanup routine believes it has emptied, since those routines delete what a version listing \
+shows and never abort uploads; the first measured Ceph s3-tests run lost 354 cases to exactly that \
+refusal. The last three exchanges are the half that matters: a store that answered 204 but kept the \
+upload would hand it back when the same name is created again, and a part written through the old \
+id would land in a bucket that was deleted."""
+polarity = "positive"
+operation = "DeleteBucket"
+tags = ["multipart"]
+timeout_ms = 10000
+quirks = ["q-bkt-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucket.html"
+summary = "Only objects, versions and delete markers must be removed first; in-progress uploads block deletion for directory buckets alone."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/806"
+summary = "The s3-tests fixture deletes every listed version and then the bucket without aborting uploads, so a refusal here errored every later case."
+kind = "observed"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-bkt-pending"
+
+[[exchanges]]
+name = "initiate"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-bkt-pending/unfinished?uploads"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+upload_id = { xml_text = "UploadId" }
+
+[[exchanges]]
+name = "part-held-by-the-upload"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bkt-pending/unfinished?partNumber=1&uploadId=${capture.upload_id}"
+body = { utf8 = "a part nobody completes" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "deleted"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-bkt-pending"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "the-bucket-is-gone"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-bkt-pending"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[[exchanges]]
+name = "recreated"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bkt-pending"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "no-upload-came-back"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-bkt-pending?uploads"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+not_contains_utf8 = ["<UploadId>", "<Key>unfinished</Key>"]
+
+[[exchanges]]
+name = "the-old-upload-id-names-nothing"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bkt-pending/unfinished?partNumber=2&uploadId=${capture.upload_id}"
+body = { utf8 = "too late" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+
+[exchanges.expect.error]
+code = "NoSuchUpload"
+request_id_present = true

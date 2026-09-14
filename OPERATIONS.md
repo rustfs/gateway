@@ -799,7 +799,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Quirks**
 
 - `q-bkt-0007` (status on `DeleteBucket`) — A successful bucket deletion is a 204 whose body is zero bytes; nothing may be rendered into it.
-- `q-bkt-0008` (error_code on `DeleteBucket`) — Deleting a bucket that still holds objects or uploads is refused with 409 BucketNotEmpty rather than performed.
+- `q-bkt-0008` (error_code on `DeleteBucket`) — Deleting a bucket that still holds an object, an object version or a delete marker is refused with 409 BucketNotEmpty rather than performed; pending multipart uploads are not content, and are discarded with the bucket.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
@@ -3255,7 +3255,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-encoding-0067` (encoding_type on `ListObjects`) — The set of members percent encoded under url encoding is defined per operation, so the first version encodes its marker pair and the version listing encodes its key marker pair instead.
 - `q-maxkeys-0068` (computed_member on `ListObjects.MaxKeys`) — Every listing echoes the page size the request asked for rather than the number of entries it returned, which is what lets a client tell a short page from a last page.
 - `q-interleave-0069` (element_order on `ListObjectVersions`) — Version entries and delete marker entries are one sequence ordered by key and version, not two blocks, so the two element names alternate within a page.
-- `q-marker-0070` (opaque_token on `ListObjectVersions`) — The version listing has two cursors and they are ordered: the version cursor is meaningless without the key cursor, so it alone is a malformed request rather than a page one.
+- `q-marker-0070` (opaque_token on `ListObjectVersions`) — The version listing has two cursors and they are ordered: the version cursor is meaningless without a non-empty key cursor, so it alone is a malformed request rather than a page one; together they name a position, not a version that must still exist, so a pair whose version was deleted resumes at that key's surviving versions.
 - `q-token-form-0075` (wire_form on `ListObjectsV2.ContinuationToken`) — A cursor is a value this service minted, so one longer than anything it mints, one whose percent-decoded bytes are not text, and one spelling a parent traversal are all malformed input refused before the listing runs, rather than opaque bytes carried into whatever the listing does with them.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.

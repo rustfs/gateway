@@ -19,8 +19,8 @@
 //! family's region-header duty for this member.
 //! NOT responsible for: the wire bindings, generated into `generated/codec/ops/delete_bucket.rs`;
 //! or knowing whether the bucket is empty, which only a backend can answer — a bucket that still
-//! holds anything is its `409 BucketNotEmpty`, a bucket that does not exist its `404
-//! NoSuchBucket`.
+//! holds an object, a version or a delete marker is its `409 BucketNotEmpty` (pending uploads
+//! are not content and go with the bucket), a bucket that does not exist its `404 NoSuchBucket`.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
 //! Shares: bucket_region

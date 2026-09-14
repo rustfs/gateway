@@ -31,7 +31,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/multipart_listing.rs` | Restarted upload pages, paired markers, rollup, retirement, and path refusals. | Changing upload listing or its persisted authority. |
 | `tests/crud/multipart_checksums.rs` | Negotiated part validation, restart, retry, and completion checksum evidence. | Changing multipart checksum persistence or verification. |
 | `tests/crud/multipart_sizing.rs` | Multipart minimum-part rejection, retryability, and boundary evidence. | Changing completion part-size validation. |
-| `tests/crud/multipart_upload_ids.rs` | Restarted upload-ID uniqueness and allocator corruption, exhaustion, and symlink refusals. | Changing multipart capability allocation or its durable counter. |
+| `tests/crud/multipart_upload_ids.rs` | Restarted upload-ID uniqueness, allocator corruption, exhaustion, and symlink refusals, and bucket deletion discarding only pending uploads. | Changing multipart capability allocation, its durable counter, or what `DeleteBucket` discards. |
 | `tests/crud/multipart_versioning.rs` | Multipart publication into enabled, suspended, and null version lineages. | Changing completion/version integration or its failure boundaries. |
 | `tests/crud/object_metadata.rs` | Restarted `x-amz-meta-*` persistence, initiation-time multipart metadata, size and storability refusals, and the pre-section record fixture. | Changing user-metadata persistence or the record's compatibility story. |
 | `tests/crud/content_headers.rs` | Restarted `Content-Type` and standard stored headers, the untyped default, per-version answers, multipart initiation headers, and COPY/REPLACE. | Changing stored representation headers. |
@@ -41,7 +41,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/post_object.rs` | Anonymous form uploads stored and read back, versions reported, storage refusals, and a SigV4-signed form without a `bucket` field bound to its routed bucket. | Changing POST Object storage or the signed-form path. |
 | `tests/crud/object_tagging.rs` | Restarted current/version tag operations and lifecycle filter consumption. | Changing object tags or tag-selected lifecycle expiration. |
 | `tests/fixtures/version-record-v0/**` | One version directory captured verbatim from the build that wrote eight-line records. | Proving this build still reads what the pre-metadata-section build wrote. |
-| `tests/crud/versioning.rs` | Enabled, suspended, owner reporting, restart, corruption, symlink, and version-cursor pairing evidence. | Changing versioned object behavior, persistence, or version-listing cursors. |
+| `tests/crud/versioning.rs` | Enabled, suspended, owner reporting, restart, corruption, symlink, version-cursor pairing, and vanished-cursor resume evidence. | Changing versioned object behavior, persistence, or version-listing cursors. |
 
 ## Verify
 

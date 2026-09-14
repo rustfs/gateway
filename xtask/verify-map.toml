@@ -22,7 +22,7 @@ cases = "c-mpu-0004,c-mpu-0006,c-mpu-0007,c-naming-0031"
 
 [[operation]]
 name = "DeleteBucket"
-cases = "c-bkt-0007,c-bkt-0022,c-bkt-0023,c-bkt-0024,c-bkt-0027"
+cases = "c-bkt-0007,c-bkt-0022,c-bkt-0023,c-bkt-0024,c-bkt-0027,c-bkt-0034"
 
 [[operation]]
 name = "DeleteBucketCors"
@@ -246,7 +246,7 @@ cases = ""
 
 [[operation]]
 name = "ListObjectVersions"
-cases = "c-authz-0008,c-authz-1016,c-authz-1017,c-list-0012,c-list-0013,c-list-0014,c-list-0033,c-list-0034"
+cases = "c-authz-0008,c-authz-1016,c-authz-1017,c-list-0012,c-list-0013,c-list-0014,c-list-0033,c-list-0034,c-list-0045,c-list-0046"
 
 [[operation]]
 name = "ListObjects"

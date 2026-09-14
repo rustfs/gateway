@@ -15,7 +15,8 @@
 //! Restart and storage-boundary evidence for multipart upload ID allocation.
 //!
 //! Responsible for: proving that one backend root mints distinct opaque upload capabilities after
-//! reopen and that every minted capability remains active. NOT responsible for: upload listing,
+//! reopen and that every minted capability remains active, and that a bucket deletion discards
+//! pending uploads and nothing else. NOT responsible for: upload listing,
 //! part checksum semantics, or completion. Upstream: the persistent allocator in `uploads`.
 //! Downstream: the filesystem CRUD verification target.
 
@@ -297,4 +298,88 @@ async fn n_delete_bucket_refuses_any_other_upload_directory_entry() {
     let response = delete_bucket_response(&service, "delete-extra-upload-entry").await;
     assert_eq!(response.status(), 409, "{}", String::from_utf8_lossy(response.body()));
     assert!(String::from_utf8_lossy(response.body()).contains("<Code>BucketNotEmpty</Code>"));
+}
+
+/// Positive — a bucket whose only contents are pending uploads is deleted, and the uploads go with
+/// it (rustfs/gateway#806, `c-bkt-0034`). Only objects, versions and delete markers make a
+/// general purpose bucket non-empty; the s3-tests cleanup never aborts an upload before it deletes
+/// the bucket. Recreating the name proves the uploads were discarded rather than orphaned.
+#[tokio::test]
+async fn a_bucket_holding_only_pending_uploads_is_deleted_with_them() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "pending-only").await;
+    let bare = initiate(&service, "pending-only", "same-key").await;
+    let with_part = initiate(&service, "pending-only", "other-key").await;
+    upload_part(&service, "pending-only", "other-key", &with_part, 1, b"a part nobody completes").await;
+
+    let deleted = delete_bucket_response(&service, "pending-only").await;
+    assert_eq!(deleted.status(), 204, "{}", String::from_utf8_lossy(deleted.body()));
+    let head = exchange(&service, signed(http::Method::HEAD, "/pending-only", Bytes::new())).await;
+    assert_eq!(head.status(), 404);
+    assert!(!root.0.join(format!("b-{}", hex::encode("pending-only"))).exists());
+
+    create_bucket(&service, "pending-only").await;
+    assert_no_upload_was_created(&service, "pending-only").await;
+    for (key, upload_id) in [("same-key", &bare), ("other-key", &with_part)] {
+        let late = exchange(
+            &service,
+            signed(
+                http::Method::PUT,
+                &format!("/pending-only/{key}?partNumber=2&uploadId={upload_id}"),
+                Bytes::from_static(b"too late"),
+            ),
+        )
+        .await;
+        assert_eq!(late.status(), 404, "{}", String::from_utf8_lossy(late.body()));
+        assert!(String::from_utf8_lossy(late.body()).contains("<Code>NoSuchUpload</Code>"));
+    }
+}
+
+/// Negative — a pending upload does not make an object disposable: the bucket that also holds an
+/// object is refused, and the refusal discards nothing, so the upload is still active afterwards.
+#[tokio::test]
+async fn n_a_bucket_holding_an_object_and_an_upload_keeps_both() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "object-and-upload").await;
+    let stored = exchange(
+        &service,
+        signed(http::Method::PUT, "/object-and-upload/kept", Bytes::from_static(b"live")),
+    )
+    .await;
+    assert_eq!(stored.status(), 200);
+    let upload_id = initiate(&service, "object-and-upload", "same-key").await;
+
+    let refused = delete_bucket_response(&service, "object-and-upload").await;
+    assert_eq!(refused.status(), 409, "{}", String::from_utf8_lossy(refused.body()));
+    assert!(String::from_utf8_lossy(refused.body()).contains("<Code>BucketNotEmpty</Code>"));
+    upload_part(&service, "object-and-upload", "same-key", &upload_id, 1, b"still active").await;
+    let read = exchange(&service, signed(http::Method::GET, "/object-and-upload/kept", Bytes::new())).await;
+    assert_eq!(read.status(), 200);
+    assert_eq!(read.body().as_ref(), b"live");
+}
+
+/// Negative — an upload-shaped entry that is a symbolic link is storage corruption, not an upload
+/// to discard: the deletion fails closed and never removes what the link points at.
+#[cfg(unix)]
+#[tokio::test]
+async fn n_delete_bucket_refuses_a_symlinked_upload_entry() {
+    use std::os::unix::fs::symlink;
+
+    let root = TestRoot::new();
+    let outside = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "delete-symlinked-upload").await;
+    let target = outside.0.join("victim");
+    std::fs::create_dir_all(&target).expect("create the outside test directory");
+    std::fs::write(target.join("kept"), b"outside\n").expect("initialize the outside test file");
+    symlink(&target, upload_id_authority(&root, "delete-symlinked-upload", "u-linked"))
+        .expect("plant an upload-shaped test symlink");
+
+    let response = delete_bucket_response(&service, "delete-symlinked-upload").await;
+    assert_eq!(response.status(), 500, "{}", String::from_utf8_lossy(response.body()));
+    assert_eq!(std::fs::read(target.join("kept")).expect("read the outside test file"), b"outside\n");
+    let head = exchange(&service, signed(http::Method::HEAD, "/delete-symlinked-upload", Bytes::new())).await;
+    assert_eq!(head.status(), 200);
 }

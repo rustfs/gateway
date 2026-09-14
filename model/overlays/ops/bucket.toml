@@ -107,8 +107,9 @@ output_hot = ["Location"]
 # DeleteBucket
 #
 # `DELETE /{bucket}`, no body either way: the model answers 204 and a 204 carries nothing
-# (q-bkt-0007). A bucket that still holds anything is a 409 BucketNotEmpty (q-bkt-0008), and a
-# bucket that does not exist is the plain 404.
+# (q-bkt-0007). A bucket that still holds an object, version or delete marker is a 409
+# BucketNotEmpty (q-bkt-0008); pending uploads do not count and go with the bucket. A bucket that
+# does not exist is the plain 404.
 # =============================================================================================
 [op.DeleteBucket]
 precedence = 720

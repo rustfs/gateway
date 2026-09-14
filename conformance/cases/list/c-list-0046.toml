@@ -1,0 +1,47 @@
+# c-list-0046 — an empty key cursor is no key cursor.
+#
+# Schema dimensions exercised: a single refusal that has to survive the relaxation in c-list-0045.
+
+[case]
+id = "c-list-0046"
+schema_version = 1
+title = "A version marker paired with an empty key marker is refused like one sent alone"
+rationale = """
+c-list-0045 lets a version cursor resume even when the version it names is gone, by falling back to \
+the position of its key. An empty key cursor names no key, so that fallback would quietly turn a \
+malformed pair into page one: exactly the silent repeat c-list-0034 refuses for a version cursor \
+sent on its own. The empty spelling is the one a client produces when it copies an absent \
+NextKeyMarker into the next request, which is why it is pinned separately rather than assumed to \
+fall under the absent case."""
+polarity = "negative"
+operation = "ListObjectVersions"
+tags = ["list", "versions", "pagination"]
+timeout_ms = 10000
+quirks = ["q-marker-0070"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html"
+summary = "States that the version cursor is only honoured when the key cursor is supplied with it."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-list-empty-key-marker"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-list-empty-key-marker"
+key = "doc.txt"
+body = { utf8 = "v1" }
+
+[request]
+method = "GET"
+target = "/conf-list-empty-key-marker?versions&key-marker=&version-id-marker=abcdef"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true

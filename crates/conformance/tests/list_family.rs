@@ -14,8 +14,8 @@
 
 //! The ledger of the list family, and the one case the family was blocked on.
 //!
-//! Responsible for: pinning the list family as a *closed* set — forty-four identifiers with no gap
-//! and no duplicate, twenty-three negative against twenty-one positive, every one of them carrying
+//! Responsible for: pinning the list family as a *closed* set — forty-six identifiers with no gap
+//! and no duplicate, twenty-four negative against twenty-two positive, every one of them carrying
 //! a verdict in the checked-in baseline — and for proving the family executes against the
 //! in-process target with no regression and with `c-list-0021` green. A family whose size, polarity
 //! and baseline membership are only ever counted by a human is a family that silently loses a case:
@@ -33,12 +33,12 @@ use rustfs_gateway_conformance::runner::{self, RunOptions};
 
 /// The size of the family. A number, not a range: the point of the guard is that growing or
 /// shrinking the family is a decision somebody writes down, and this is where they write it.
-const FAMILY_SIZE: usize = 44;
+const FAMILY_SIZE: usize = 46;
 
 /// The polarity split, in the order `AGENTS.md` states the rule: negatives must outnumber
 /// positives, and here they do by exactly two.
-const NEGATIVE: usize = 23;
-const POSITIVE: usize = 21;
+const NEGATIVE: usize = 24;
+const POSITIVE: usize = 22;
 
 fn corpus() -> Corpus {
     let root = Corpus::discover_root().expect("a corpus sits next to this crate");
@@ -59,12 +59,12 @@ fn baseline() -> Baseline {
     Baseline::from_json(&source).expect("the baseline parses")
 }
 
-/// The list family is a closed ledger: forty-four identifiers, contiguous, each in its own file.
+/// The list family is a closed ledger: forty-six identifiers, contiguous, each in its own file.
 ///
 /// A gap means a case was deleted — which `AGENTS.md` lists as a silently dropped guarantee — and a
 /// duplicate means two files claim one identifier, after which only one of them is ever reported.
 #[test]
-fn the_list_family_is_a_closed_ledger_of_forty_four_identifiers() {
+fn the_list_family_is_a_closed_ledger_of_forty_six_identifiers() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -89,7 +89,7 @@ fn the_list_family_is_a_closed_ledger_of_forty_four_identifiers() {
 /// The corpus-wide check in `tests/corpus.rs` compares two totals over six hundred cases, so a
 /// family that flipped every one of its own cases to positive would still leave it green.
 #[test]
-fn the_list_family_keeps_twenty_three_negative_against_twenty_one_positive() {
+fn the_list_family_keeps_twenty_four_negative_against_twenty_two_positive() {
     let corpus = corpus();
     let cases = family(&corpus);
 
