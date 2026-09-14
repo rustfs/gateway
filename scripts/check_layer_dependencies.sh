@@ -60,6 +60,12 @@ layers = [
         "rustfs-gateway-dialect-minio",
         {"rustfs-gateway-core", "rustfs-gateway-sig", "rustfs-gateway-types", "rustfs-gateway-xml"},
     ),
+    # After core: RustFS's admin routes as claimed dialect operations (rustfs/backlog#1744); RustFS
+    # depends on it, never the reverse.
+    (
+        "rustfs-gateway-dialect-rustfs-admin",
+        {"rustfs-gateway-core", "rustfs-gateway-sig", "rustfs-gateway-stream"},
+    ),
     ("rustfs-gateway-server", set()),
     (
         "rustfs-gateway",

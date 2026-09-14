@@ -39,6 +39,8 @@ mod route;
 #[cfg(feature = "operation")]
 mod route_contract;
 #[cfg(feature = "full")]
+mod rustfs_admin_dialect;
+#[cfg(feature = "full")]
 mod security_posture;
 #[cfg(feature = "full")]
 mod sigsuite;
@@ -77,6 +79,7 @@ fn dispatch(first: Option<String>, rest: Vec<String>) -> ExitCode {
         Some("new-op") => new_op::new_op(&rest),
         Some("check-operation-spec-builder") => operation_spec_guard::check(&rest),
         Some("bootstrap") => bootstrap::bootstrap(&rest),
+        Some("rustfs-admin-dialect") => rustfs_admin_dialect::command(&rest),
         Some("-h" | "--help") => {
             print!("{USAGE}");
             ExitCode::SUCCESS
@@ -156,6 +159,8 @@ commands:
   sigsuite <fetch|run>      fetch and run the pinned official signing suite
   new-op <Operation>        create an intentionally-red operation scaffold
   bootstrap                 prepare a fresh checkout for work (<=5 minutes)
+  rustfs-admin-dialect [--check]
+                            regenerate the RustFS admin dialect's operations from the route inventory
   conformance <run|validate|baseline> [--filter <glob>] [--transport hyper|conn]
               [--profile aws|minio|strict] [--baseline <f>] [--json <f>] [--junit <f>]
   conformance mutate (--family <name> | --quirk <id>) [--filter <glob>]

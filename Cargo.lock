@@ -1855,6 +1855,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustfs-gateway-dialect-rustfs-admin"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "http",
+ "rustfs-gateway-core",
+ "rustfs-gateway-http",
+ "rustfs-gateway-sig",
+ "rustfs-gateway-stream",
+]
+
+[[package]]
 name = "rustfs-gateway-fs"
 version = "0.1.4"
 dependencies = [
@@ -1882,6 +1894,7 @@ dependencies = [
  "rustfs-gateway-core",
  "rustfs-gateway-corpus",
  "rustfs-gateway-dialect-minio",
+ "rustfs-gateway-dialect-rustfs-admin",
  "rustfs-gateway-http",
  "rustfs-gateway-sig",
  "rustfs-gateway-stream",

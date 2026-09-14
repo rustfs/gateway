@@ -45,6 +45,9 @@ rustfs-gateway = { workspace = true }
 rustfs-gateway-sig = { workspace = true }
 # The RustFS profile of rd-put-0007: the replica write decoded through the replication dialect.
 rustfs-gateway-dialect-minio = { path = "../dialect-minio" }
+# The generated RustFS admin dialect, bound back to the recorded inventory it was generated from
+# and driven through the assembled service (rustfs/backlog#1744).
+rustfs-gateway-dialect-rustfs-admin = { path = "../dialect-rustfs-admin" }
 bytes = { workspace = true }
 futures-core = { workspace = true }
 http = { workspace = true }

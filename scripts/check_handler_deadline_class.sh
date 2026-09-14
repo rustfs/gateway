@@ -471,14 +471,17 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # Standard: the `rustfs:` class operations in crates/goldens/src/rustfs_admin_proof/classes.rs, the
 # `acme:R*` rule fixtures in crates/core/src/registry/reject_rule_tests.rs, and the `example:*` pair
 # in crates/gateway/tests/action_rules_runtime.rs.
-if central_builders != 102 or explicit_builders != 39:
+# explicit=40: the 40th is `rustfs-gateway-dialect-rustfs-admin`'s one `const fn spec` in
+# crates/dialect-rustfs-admin/src/admin.rs (rustfs/backlog#1744), which every generated RustFS
+# admin operation is built from. It states Standard for the same reason as the fixtures above.
+if central_builders != 102 or explicit_builders != 40:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=39"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=40"
     )
 
 print(
-    "check_handler_deadline_class: 146 repository builder sites are inventoried "
-    "(141 classified: 102 central standard, 39 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 147 repository builder sites are inventoried "
+    "(142 classified: 102 central standard, 40 explicit; 5 authority tests)"
 )
 PY

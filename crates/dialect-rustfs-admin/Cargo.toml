@@ -1,0 +1,38 @@
+[package]
+name = "rustfs-gateway-dialect-rustfs-admin"
+description = "RustFS admin API routes as RustFS Gateway dialect operations"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+autotests = false
+
+[package.metadata.gateway]
+ring = 1
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# The operations are core's dialect operations: their rows, specs and codecs are core's, their
+# floors the signature crate's, a streamed body the stream crate's, and a row names an
+# `http::Method`. Nothing here depends on RustFS: RustFS depends on this crate.
+bytes = { workspace = true }
+http = { workspace = true }
+rustfs-gateway-core = { workspace = true }
+rustfs-gateway-sig = { workspace = true }
+rustfs-gateway-stream = { workspace = true }
+
+[dev-dependencies]
+rustfs-gateway-http = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
