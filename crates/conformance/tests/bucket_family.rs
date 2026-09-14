@@ -14,8 +14,8 @@
 
 //! The `bkt/` family as a closed ledger, and the status matrix it was commissioned to prove.
 //!
-//! Responsible for: pinning the bucket lifecycle family as a *closed* set — thirty-three
-//! identifiers with no gap and no duplicate, twenty-three negative against ten positive — for
+//! Responsible for: pinning the bucket lifecycle family as a *closed* set — thirty-four
+//! identifiers with no gap and no duplicate, twenty-three negative against eleven positive — for
 //! proving the family really executes against the assembled service rather than being answered
 //! with skips, and for binding each row of the status matrix in rustfs/backlog#1767 §4.5 to the
 //! live artefact that proves it.
@@ -69,12 +69,13 @@ use rustfs_gateway_conformance::inprocess::InProcess;
 use rustfs_gateway_conformance::report::{Report, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
 
-/// The size of the family: the thirty-three cases delivered for rustfs/backlog#1767.
-const FAMILY_SIZE: usize = 33;
+/// The size of the family: the thirty-three cases delivered for rustfs/backlog#1767, and
+/// `c-bkt-0034` for rustfs/gateway#806.
+const FAMILY_SIZE: usize = 34;
 
 /// The polarity split, in the order `AGENTS.md` states the rule: negatives outnumber positives.
 const NEGATIVE: usize = 23;
-const POSITIVE: usize = 10;
+const POSITIVE: usize = 11;
 
 /// The sibling source that owns the half of the matrix the corpus cannot stage.
 const INTEGRATION_SOURCE: &str = "bucket_lifecycle.rs";
@@ -199,13 +200,13 @@ fn integration_source() -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{} is readable: {error}", path.display()))
 }
 
-/// Negative — the bucket family is a closed ledger: thirty-three identifiers, contiguous, one file
+/// Negative — the bucket family is a closed ledger: thirty-four identifiers, contiguous, one file
 /// each.
 ///
 /// A gap means a case was deleted, which `AGENTS.md` lists as a silently dropped guarantee; a
 /// duplicate means two files claim one identifier, after which only one of them is ever reported.
 #[test]
-fn the_bucket_family_is_a_closed_ledger_of_thirty_three_identifiers() {
+fn the_bucket_family_is_a_closed_ledger_of_thirty_four_identifiers() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -225,7 +226,7 @@ fn the_bucket_family_is_a_closed_ledger_of_thirty_three_identifiers() {
 /// The corpus-wide check in `tests/corpus.rs` compares two totals over six hundred cases, so a
 /// family that flipped every one of its own cases to positive would still leave it green.
 #[test]
-fn the_bucket_family_keeps_twenty_three_negative_against_ten_positive() {
+fn the_bucket_family_keeps_twenty_three_negative_against_eleven_positive() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -237,16 +238,16 @@ fn the_bucket_family_keeps_twenty_three_negative_against_ten_positive() {
     assert!(negative > positive, "negatives no longer outnumber positives in the bucket family");
 }
 
-/// Positive — the family executes against the assembled service, and all thirty-three are green.
+/// Positive — the family executes against the assembled service, and all thirty-four are green.
 ///
 /// Three separate things, because each is satisfiable without the others:
 ///
 /// * the filter selects the whole family — otherwise a narrowed filter proves whatever is left;
 /// * nothing is *skipped* — an unregistered operation answers every case with a skip, and a summary
 ///   line renders that identically to a family with nothing wrong with it;
-/// * all thirty-three passed — a count of "not failed" would be satisfied by a family of skips.
+/// * all thirty-four passed — a count of "not failed" would be satisfied by a family of skips.
 #[test]
-fn the_bucket_family_runs_with_all_thirty_three_green_and_nothing_skipped() {
+fn the_bucket_family_runs_with_all_thirty_four_green_and_nothing_skipped() {
     let report = run_bucket_domain();
 
     assert_eq!(report.outcomes.len(), FAMILY_SIZE, "the filter did not select the whole family");

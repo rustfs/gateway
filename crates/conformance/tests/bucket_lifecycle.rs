@@ -376,19 +376,20 @@ fn n_the_redirect_document_also_names_the_region() {
     answer.assert_contains("<Region>eu-west-1</Region>");
 }
 
-/// Negative — a bucket holding an in-progress upload is not empty either, so its deletion is
-/// refused. Objects are the obvious half; an upload is the half a store that counted only committed
-/// keys would delete out from under the parts it is still holding.
+/// Positive — an in-progress upload is not content: a bucket holding only one is deleted, and the
+/// upload goes with it (rustfs/gateway#806, `c-bkt-0034`). The upload's absence is the half that
+/// matters, since a store that answered 204 but kept it would hand it to a recreated bucket.
 #[test]
-fn n_a_bucket_holding_only_an_upload_is_not_empty() {
+fn a_bucket_holding_only_an_upload_is_deleted_with_it() {
     let mut fixture = Fixture::at(NOW);
     fixture.declare_bucket("conf-bkt-mpu", false);
-    fixture.create_upload("conf-bkt-mpu", "pending");
+    let upload = fixture.create_upload("conf-bkt-mpu", "pending");
     let harness = Harness::over(fixture, "us-east-1");
     let answer = harness.send("DELETE", "/conf-bkt-mpu", b"");
-    assert_eq!(answer.status, 409, "{}", answer.body);
-    answer.assert_contains("BucketNotEmpty");
-    assert!(harness.has_bucket("conf-bkt-mpu"));
+    assert_eq!(answer.status, 204, "{}", answer.body);
+    assert!(!harness.has_bucket("conf-bkt-mpu"));
+    let state = harness.state.lock().expect("the fixture is not poisoned");
+    assert!(state.upload(&upload).is_none(), "the discarded upload survived its bucket");
 }
 
 /// Negative — a versioned bucket whose only key is hidden behind a delete marker still holds

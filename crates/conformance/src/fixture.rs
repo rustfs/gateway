@@ -601,16 +601,15 @@ impl Fixture {
     /// Whether a bucket holds nothing a deletion would destroy.
     ///
     /// Versions count even when a delete marker hides them — S3 refuses to delete a bucket whose
-    /// version history is non-empty — and so does an in-progress multipart upload, whose parts
-    /// are bytes the bucket is still holding.
+    /// version history is non-empty. An in-progress multipart upload does not: it is not an
+    /// object, and a general purpose bucket holding only uploads is deleted with them
+    /// (`q-bkt-0008`, `c-bkt-0034`, rustfs/gateway#806).
     #[must_use]
     pub fn bucket_is_empty(&self, name: &str) -> bool {
-        let holds_versions = self
+        !self
             .objects
             .iter()
-            .any(|((bucket, _), versions)| bucket == name && !versions.is_empty());
-        let holds_uploads = self.uploads.values().any(|upload| upload.bucket == name);
-        !holds_versions && !holds_uploads
+            .any(|((bucket, _), versions)| bucket == name && !versions.is_empty())
     }
 
     /// Whether a bucket has object lock on, however it got there.
@@ -911,6 +910,9 @@ impl Fixture {
     pub fn remove_bucket(&mut self, name: &str) {
         self.buckets.remove(name);
         self.objects.retain(|(bucket, _), _| bucket != name);
+        // Pending uploads go with the bucket: one that survived would reappear in a recreated
+        // bucket of the same name and accept parts for an object nobody can complete there.
+        self.uploads.retain(|_, upload| upload.bucket != name);
     }
 
     /// Places an object, answering with the version id it was given.
@@ -4766,8 +4768,9 @@ impl Stub {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
         // A version marker names a position *within* a key, so without a key marker there is no
-        // position for it to name. AWS refuses the pair rather than guessing one.
-        if input.version_id_marker.is_some() && input.key_marker.is_none() {
+        // position for it to name. AWS refuses the pair rather than guessing one. An empty key
+        // marker names no key either (`c-list-0046`).
+        if input.version_id_marker.is_some() && input.key_marker.as_deref().is_none_or(str::is_empty) {
             return Err(HandlerError::new(
                 ErrorCode::INVALID_ARGUMENT,
                 "A version-id marker cannot be specified without a key marker.",
@@ -4783,19 +4786,27 @@ impl Stub {
         let delimiter = delimiter_of(input.delimiter.as_deref());
 
         let all = fixture.versions_in(input.bucket.as_str());
-        let mut resumed = version_marker.is_none();
+        // The pair is a position, not a reference (`c-list-0045`, rustfs/gateway#807): a cleanup
+        // deletes each page before asking for the next, so the version it names is usually gone.
+        // A marker that still stands resumes after itself; one that does not resumes at its key's
+        // surviving versions, which repeats at worst and never strands a version behind the cursor.
+        let marker_stands = version_marker.is_some_and(|marker| {
+            all.iter()
+                .any(|entry| entry.key == key_marker && entry.version.version_id == marker)
+        });
+        let mut resumed = !marker_stands;
         let mut entries: Vec<VersionEntry<'_>> = Vec::new();
         for entry in &all {
             if !entry.key.starts_with(&prefix) {
                 continue;
             }
             if !resumed {
-                // A version marker resumes *after* the entry it names. A marker that names no
-                // entry of this key leaves the key skipped entirely, which is the same answer as
-                // a key marker one character short of it.
                 if entry.key == key_marker && entry.version.version_id == version_marker.unwrap_or_default() {
                     resumed = true;
                 }
+                continue;
+            }
+            if version_marker.is_some() && !marker_stands && entry.key < key_marker {
                 continue;
             }
             if version_marker.is_none() && entry.key <= key_marker {

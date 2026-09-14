@@ -1,5 +1,5 @@
 # path limit issue-url reason
-crates/conformance/src/fixture.rs 6110 https://github.com/rustfs/backlog/issues/1742 Existing fixture corpus, plus the declared-error check on the five unconfigured 200 bucket-config reads (rustfs/backlog#1728); split in a dedicated behavior-reviewed task.
+crates/conformance/src/fixture.rs 6121 https://github.com/rustfs/backlog/issues/1742 Existing fixture corpus, plus the declared-error check on the five unconfigured 200 bucket-config reads (rustfs/backlog#1728), and DeleteBucket discarding pending uploads plus the vanished version cursor (rustfs/gateway#806, #807); split in a dedicated behavior-reviewed task.
 crates/core/tests/route_table.rs 2827 https://github.com/rustfs/backlog/issues/1688 Existing routing contracts plus PostObject's exact selector and production-registration cases; split only in a dedicated behavior-reviewed task.
 crates/conformance/src/socket.rs 1250 https://github.com/rustfs/backlog/issues/1742 Existing socket harness; its tests are split out into socket/tests.rs, the production half still wants splitting.
 crates/conformance/src/inprocess.rs 1700 https://github.com/rustfs/backlog/issues/1742 Existing in-process harness; split in a dedicated behavior-reviewed task.

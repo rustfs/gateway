@@ -797,7 +797,7 @@
                 "id": "q-marker-0070",
                 "kind": "opaque_token",
                 "target": "ListObjectVersions",
-                "summary": "The version listing has two cursors and they are ordered: the version cursor is meaningless without the key cursor, so it alone is a malformed request rather than a page one.",
+                "summary": "The version listing has two cursors and they are ordered: the version cursor is meaningless without a non-empty key cursor, so it alone is a malformed request rather than a page one; together they name a position, not a version that must still exist, so a pair whose version was deleted resumes at that key's surviving versions.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
@@ -805,7 +805,7 @@
                                 "summary": "States that the version cursor is only honoured when the key cursor is supplied with it."
                               }
                             ],
-                "cases": ["c-list-0033", "c-list-0034"]
+                "cases": ["c-list-0033", "c-list-0034", "c-list-0045", "c-list-0046"]
               },
               {
                 "id": "q-token-form-0075",

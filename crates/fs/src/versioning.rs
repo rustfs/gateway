@@ -634,10 +634,9 @@ impl Handler<ListObjectVersions> for FsBackend {
     async fn call(&self, request: Req<ListObjectVersions>) -> HandlerResult<ListObjectVersions> {
         let input = request.input();
         // The version cursor resumes within the key the key cursor names; alone it names nothing,
-        // and answering page one would repeat what the client already has (`c-list-0034`).
-        // An empty key marker needs no rule of its own: no version lives under the empty key, so
-        // the resume lookup below refuses it with the same code.
-        if input.version_id_marker.is_some() && input.key_marker.is_none() {
+        // and answering page one would repeat what the client already has (`c-list-0034`). An
+        // empty key marker names no key either (`c-list-0046`).
+        if input.version_id_marker.is_some() && input.key_marker.as_deref().is_none_or(str::is_empty) {
             return Err(HandlerError::new(
                 ErrorCode::INVALID_ARGUMENT,
                 "a version-id-marker requires a key-marker",
@@ -661,11 +660,16 @@ impl Handler<ListObjectVersions> for FsBackend {
                     .as_ref()
                     .map(|value| value.as_str())
                     .unwrap_or_default();
+                // The pair is a position, not a reference (`c-list-0045`, rustfs/gateway#807): a
+                // cleanup deletes each page before asking for the next, so the named version is
+                // usually gone. Version ids are opaque digests, so a vanished version's place
+                // within its key cannot be recovered; the key's surviving versions are listed
+                // again rather than skipped, because a repeat is harmless to a walker and a skip
+                // silently strands the versions behind the cursor.
                 records
                     .iter()
                     .position(|record| record.key == key && record.version_id == marker)
-                    .map(|position| position + 1)
-                    .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "the version cursor does not exist"))?
+                    .map_or_else(|| records.partition_point(|record| record.key.as_str() < key), |position| position + 1)
             }
         };
         let max_keys = input.max_keys.unwrap_or(1000);

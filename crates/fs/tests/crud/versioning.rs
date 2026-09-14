@@ -461,3 +461,124 @@ async fn a_key_and_version_marker_resume_within_the_key() {
     assert!(text.contains(&format!("<VersionId>{}</VersionId>", ids[1])), "{text}");
     assert!(text.contains(&format!("<VersionId>{}</VersionId>", ids[0])), "{text}");
 }
+
+async fn version_of(service: &S3Service, bucket: &str, key: &str, content: &'static [u8]) -> String {
+    let stored = put(service, bucket, key, content).await;
+    assert_eq!(stored.status(), 200, "{}", body(&stored));
+    header_text(&stored, "x-amz-version-id").expect("a minted version").to_owned()
+}
+
+/// Positive — a version cursor is a position, not a reference that must still exist
+/// (rustfs/gateway#807, `c-list-0045`). A cleanup that deletes each page before asking for the
+/// next sends back a marker whose version is gone; the listing resumes with the key's surviving
+/// versions rather than refusing, returning nothing, or skipping to the next key.
+#[tokio::test]
+async fn a_deleted_version_marker_resumes_at_the_keys_surviving_versions() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "vanished-marker").await;
+    assert_eq!(set_versioning(&service, "vanished-marker", "Enabled").await.status(), 200);
+    let oldest = version_of(&service, "vanished-marker", "a", b"one").await;
+    let middle = version_of(&service, "vanished-marker", "a", b"two").await;
+    let newest = version_of(&service, "vanished-marker", "a", b"three").await;
+    version_of(&service, "vanished-marker", "b", b"next").await;
+
+    let first = list_versions(&service, "vanished-marker", "max-keys=1").await;
+    assert_eq!(first.status(), 200, "{}", body(&first));
+    assert_eq!(element(first.body(), "NextKeyMarker").as_deref(), Some("a"));
+    assert_eq!(element(first.body(), "NextVersionIdMarker").as_deref(), Some(newest.as_str()));
+    let deleted = exchange(
+        &service,
+        signed(http::Method::DELETE, &format!("/vanished-marker/a?versionId={newest}"), Bytes::new()),
+    )
+    .await;
+    assert_eq!(deleted.status(), 204, "{}", body(&deleted));
+
+    let resumed = list_versions(&service, "vanished-marker", &format!("key-marker=a&version-id-marker={newest}")).await;
+    assert_eq!(resumed.status(), 200, "{}", body(&resumed));
+    let text = body(&resumed);
+    // The request's marker is echoed as `<VersionIdMarker>`; no entry may carry it.
+    assert!(!text.contains(&format!("<VersionId>{newest}</VersionId>")), "{text}");
+    let middle_at = text
+        .find(&format!("<VersionId>{middle}</VersionId>"))
+        .expect("the middle version is listed");
+    let oldest_at = text
+        .find(&format!("<VersionId>{oldest}</VersionId>"))
+        .expect("the oldest version is listed");
+    let next_key_at = text.find("<Key>b</Key>").expect("the next key is listed");
+    assert!(middle_at < oldest_at && oldest_at < next_key_at, "{text}");
+    assert!(text.contains("<IsTruncated>false</IsTruncated>"), "{text}");
+}
+
+/// Positive — the s3-tests cleanup shape on a bucket that never had versioning: the `null` marker
+/// of a key whose only version was deleted resumes at the next key.
+#[tokio::test]
+async fn a_deleted_null_version_marker_resumes_at_the_next_key() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "vanished-null").await;
+    for key in ["a", "b", "c"] {
+        assert_eq!(put(&service, "vanished-null", key, b"bytes").await.status(), 200);
+    }
+    let first = list_versions(&service, "vanished-null", "max-keys=1").await;
+    assert_eq!(element(first.body(), "NextKeyMarker").as_deref(), Some("a"), "{}", body(&first));
+    assert_eq!(element(first.body(), "NextVersionIdMarker").as_deref(), Some("null"), "{}", body(&first));
+    let deleted = exchange(&service, signed(http::Method::DELETE, "/vanished-null/a", Bytes::new())).await;
+    assert_eq!(deleted.status(), 204);
+
+    let resumed = list_versions(&service, "vanished-null", "key-marker=a&version-id-marker=null").await;
+    assert_eq!(resumed.status(), 200, "{}", body(&resumed));
+    let text = body(&resumed);
+    assert!(text.contains("<Key>b</Key>") && text.contains("<Key>c</Key>"), "{text}");
+    assert!(!text.contains("<Key>a</Key>"), "{text}");
+    assert!(text.contains("<IsTruncated>false</IsTruncated>"), "{text}");
+}
+
+/// Negative — a version cursor naming no version its key ever had is not refused, and never skips
+/// the key's versions either: repeating is recoverable for a walker, skipping is silent loss.
+#[tokio::test]
+async fn n_an_unknown_version_marker_never_skips_the_keys_versions() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "unknown-marker").await;
+    assert_eq!(set_versioning(&service, "unknown-marker", "Enabled").await.status(), 200);
+    let older = version_of(&service, "unknown-marker", "a", b"one").await;
+    let newer = version_of(&service, "unknown-marker", "a", b"two").await;
+    version_of(&service, "unknown-marker", "b", b"next").await;
+
+    let resumed = list_versions(&service, "unknown-marker", "key-marker=a&version-id-marker=deadbeef").await;
+    assert_eq!(resumed.status(), 200, "{}", body(&resumed));
+    let text = body(&resumed);
+    for expected in [
+        format!("<VersionId>{newer}</VersionId>"),
+        format!("<VersionId>{older}</VersionId>"),
+        "<Key>b</Key>".to_owned(),
+    ] {
+        assert!(text.contains(&expected), "{expected}: {text}");
+    }
+}
+
+/// Negative — a delete marker is content even beside a pending upload: the bucket is refused, and
+/// the refusal discards nothing, so the upload is still active afterwards (rustfs/gateway#806).
+#[tokio::test]
+async fn n_a_delete_marker_beside_a_pending_upload_keeps_the_bucket() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "marker-and-upload").await;
+    assert_eq!(set_versioning(&service, "marker-and-upload", "Enabled").await.status(), 200);
+    let only = version_of(&service, "marker-and-upload", "gone", b"bytes").await;
+    let removed = exchange(
+        &service,
+        signed(http::Method::DELETE, &format!("/marker-and-upload/gone?versionId={only}"), Bytes::new()),
+    )
+    .await;
+    assert_eq!(removed.status(), 204);
+    let hidden = exchange(&service, signed(http::Method::DELETE, "/marker-and-upload/other", Bytes::new())).await;
+    assert_eq!(header_text(&hidden, "x-amz-delete-marker"), Some("true"), "{}", body(&hidden));
+    let upload_id = initiate(&service, "marker-and-upload", "pending").await;
+
+    let refused = exchange(&service, signed(http::Method::DELETE, "/marker-and-upload", Bytes::new())).await;
+    assert_eq!(refused.status(), 409, "{}", body(&refused));
+    assert!(body(&refused).contains("<Code>BucketNotEmpty</Code>"));
+    upload_part(&service, "marker-and-upload", "pending", &upload_id, 1, b"still active").await;
+}
