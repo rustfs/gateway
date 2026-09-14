@@ -181,7 +181,65 @@ probe(
     ["reported no cases"],
 )
 
-# 8. A list with no generation cannot be ratcheted, so it is refused rather than read.
+# 8. An exclusion takes a case out of the verdict: failing, it is neither KNOWN nor a REGRESSION.
+EXCLUDED_LINE = f"{LIFECYCLE} excluded https://github.com/rustfs/gateway/issues/1 timing differs between runs"
+probe(
+    "an excluded failure is neither known nor a regression",
+    [(LIFECYCLE, "failed"), (ACL, "passed")],
+    xfail([EXCLUDED_LINE]),
+    0,
+    ["known=0", "regression=0", "excluded=1", f"EXCLUDED lifecycle {LIFECYCLE}"],
+    ["REGRESSION"],
+)
+
+# 9. An exclusion that names no owner issue, or gives no reason, is refused rather than read.
+probe(
+    "an exclusion without an owner issue is refused",
+    [(LIFECYCLE, "failed")],
+    xfail([f"{LIFECYCLE} excluded somebody timing differs between runs"]),
+    3,
+    ["owner issue"],
+)
+probe(
+    "an exclusion without a reason is refused",
+    [(LIFECYCLE, "failed")],
+    xfail([f"{LIFECYCLE} excluded https://github.com/rustfs/gateway/issues/1 flaky"]),
+    3,
+    ["at least 3 words"],
+)
+
+# 10. The per-case record behind a generation: every reported case, once, with its outcome. A record
+# that dropped the skipped or errored cases would hide exactly the cases nobody measured.
+with tempfile.TemporaryDirectory() as directory:
+    work = Path(directory)
+    (work / "junit.xml").write_text(
+        junit([(MULTIPART, "failed"), (ACL, "passed"), (LIFECYCLE, "skipped"), (MULTIPART + "_x", "errored")]),
+        encoding="utf-8",
+    )
+    (work / "xfail.txt").write_text(xfail([]), encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable, report, "--junit", str(work / "junit.xml"), "--xfail", str(work / "xfail.txt"),
+            "--record", str(work / "proposed.txt"), "--outcomes", str(work / "outcomes.txt"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    recorded = (work / "outcomes.txt").read_text(encoding="utf-8") if (work / "outcomes.txt").exists() else ""
+    rows = [line for line in recorded.splitlines() if line and not line.startswith("#")]
+    expected_rows = [
+        f"passed {ACL}",
+        f"failed {MULTIPART}",
+        f"errored {MULTIPART}_x",
+        f"skipped {LIFECYCLE}",
+    ]
+    if result.returncode != 0 or rows != expected_rows or "# generation: 4" not in recorded:
+        failures.append(
+            "the per-case outcome record must list every reported case once with its outcome, "
+            f"at the proposed generation; exit {result.returncode}, got:\n{recorded}{result.stderr}"
+        )
+
 probe(
     "an xfail list with no generation header is refused",
     [(ACL, "passed")],

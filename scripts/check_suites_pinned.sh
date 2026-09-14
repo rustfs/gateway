@@ -23,6 +23,10 @@ set -euo pipefail
 #     5. The weekly s3-tests workflow builds the local compatibility SUT, and
 #        its runner exports the complete suite configuration before starting an
 #        overridable command with every required identity and endpoint flag.
+#     5b. The suite's Python client is pinned too: ci/s3tests/requirements.lock
+#        names every package at one exact version with a sha256, and the runner
+#        installs it with --require-hashes --no-deps, never through tox (whose
+#        environment follows the suite's floating requirements.txt).
 #
 # WHY
 #   Two consecutive weekly runs are only comparable if they ran the same cases.
@@ -228,6 +232,12 @@ required_flags = (
     "--alt-secret-key",
     "--alt-owner-id",
     "--alt-display-name",
+    # The suite sweeps its bucket prefix as `[s3 tenant]` around every case; a service that
+    # does not know that key errors ~99% of the run in setup (rustfs/backlog#1764).
+    "--tenant-access-key",
+    "--tenant-secret-key",
+    "--tenant-owner-id",
+    "--tenant-display-name",
     "--lc-debug-interval",
 )
 missing_flags = [flag for flag in required_flags if flag not in command_text]
@@ -262,6 +272,65 @@ if endpoint_branch < 0 or command_branch < 0 or endpoint_branch >= command_branc
     failures.append(
         "ci/lib/sut.sh must prefer GATEWAY_SUT_ENDPOINT before requiring "
         "GATEWAY_SUT_COMMAND, so an external endpoint remains authoritative"
+    )
+
+# --- rule 5b: the suite's Python client is pinned as tightly as the suite ----------------
+# The suite's own requirements.txt floats, so a pinned suite commit run through tox still
+# measured whatever boto3/botocore/pytest PyPI served that week. The lock names every package
+# at one exact version with at least one sha256, and the runner installs from it with
+# --require-hashes --no-deps and never through tox.
+lock_path = root / "ci/s3tests/requirements.lock"
+if not lock_path.is_file():
+    failures.append(
+        "ci/s3tests/requirements.lock is missing; without it the suite's client floats with PyPI"
+    )
+else:
+    lock_logical: list[str] = []
+    pending = ""
+    for raw in lock_path.read_text(encoding="utf-8").splitlines():
+        stripped = raw.split("#", 1)[0].strip() if raw.lstrip().startswith("#") else raw.strip()
+        if not stripped:
+            continue
+        if stripped.endswith("\\"):
+            pending += stripped[:-1] + " "
+            continue
+        lock_logical.append(pending + stripped)
+        pending = ""
+    if pending:
+        lock_logical.append(pending)
+    if not lock_logical:
+        failures.append("ci/s3tests/requirements.lock names no requirement at all")
+    for requirement in lock_logical:
+        head = requirement.split()[0]
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9.!+_-]+", head):
+            failures.append(
+                f"ci/s3tests/requirements.lock: `{head}` is not pinned to one exact version with =="
+            )
+        if not re.search(r"--hash=sha256:[0-9a-f]{64}", requirement):
+            failures.append(
+                f"ci/s3tests/requirements.lock: `{head}` carries no sha256 hash, so --require-hashes "
+                "would refuse the whole install"
+            )
+runner_code = "\n".join(
+    line for line in runner_text.splitlines() if not line.lstrip().startswith("#")
+)
+if re.search(r"\btox\b", runner_code):
+    failures.append(
+        "ci/s3tests/run.sh invokes tox, whose environment installs from the suite's floating "
+        "requirements.txt; install ci/s3tests/requirements.lock instead"
+    )
+if not re.search(
+    r"pip install\b[^\n]*(?:\\\n[^\n]*)*--require-hashes[^\n]*(?:\\\n[^\n]*)*"
+    r'-r "\$LOCK"',
+    runner_code,
+) or 'LOCK="${ROOT_DIR}/ci/s3tests/requirements.lock"' not in runner_code:
+    failures.append(
+        "ci/s3tests/run.sh must install the suite environment with "
+        '`pip install --require-hashes --no-deps -r "$LOCK"` from ci/s3tests/requirements.lock'
+    )
+elif "--no-deps" not in runner_code:
+    failures.append(
+        "ci/s3tests/run.sh must pass --no-deps, so nothing outside ci/s3tests/requirements.lock is installed"
     )
 
 # --- rule 6: the MinIO mint runner is complete --------------------------------------------

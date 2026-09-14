@@ -155,7 +155,7 @@ mod tests {
             owner_id: Some("s3gate-alt".to_owned()),
             display_name: Some("s3gate-alt".to_owned()),
         };
-        Accounts::build(primary, secondary).expect("two distinct identities")
+        Accounts::build(primary, secondary, AccountArgs::default()).expect("two distinct identities")
     }
 
     fn request<'a>(operation: &'a str, bucket: Option<&'a BucketName>, identity: Option<&'a Identity>) -> AuthzRequest<'a> {

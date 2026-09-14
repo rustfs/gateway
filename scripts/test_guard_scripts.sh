@@ -12798,17 +12798,28 @@ path.write_text(path.read_text() + sys.argv[1] + "\n")
 PYEOF
 }
 
+# Moves the checked-in generation by a signed offset (+1, +8, -1), so these mutations keep their
+# subject whenever a reviewed baseline raises the generation.
 set_xfail_generation() {
     python3 - "$1" <<'PYEOF'
 import pathlib
+import re
 import sys
 
 path = pathlib.Path("ci/s3tests/xfail.txt")
 text = path.read_text()
-if "# generation:" not in text:
+found = re.search(r"(?m)^# generation: ([0-9]+)$", text)
+if found is None:
     raise SystemExit("xfail generation mutation subject is missing")
-path.write_text(text.replace("# generation: 1", f"# generation: {sys.argv[1]}", 1))
+moved = int(found.group(1)) + int(sys.argv[1])
+if moved < 0:
+    raise SystemExit("xfail generation mutation would go below zero")
+path.write_text(text[: found.start(1)] + str(moved) + text[found.end(1):])
 PYEOF
+}
+
+set_xfail_generation_next() {
+    set_xfail_generation +1
 }
 
 # The cheapest way to turn a red external suite green is to paste its failures into the
@@ -12821,24 +12832,95 @@ expect_fail check_xfail_ratchet.sh \
 
 # The escape has to work, or the ratchet cannot record a first baseline at all and somebody
 # deletes it. Proving it works is also what stops this guard becoming stuck on one answer.
+# The legitimate shape: a newly measured failure, recorded in the refreshed per-case record,
+# added in the same change that raises the generation of both files.
 mut_xfail_entry_added_with_generation() {
-    append_xfail_entry "s3tests_boto3.functional.test_s3::test_multipart_upload_small"
-    set_xfail_generation 2
+    python3 - <<'PYEOF'
+import pathlib, re
+
+outcomes = pathlib.Path("ci/s3tests/outcomes.txt")
+text = outcomes.read_text()
+passing = next(line for line in text.splitlines() if line.startswith("passed "))
+case_id = passing.split(" ", 1)[1]
+text = text.replace(passing + "\n", f"failed {case_id}\n", 1)
+found = re.search(r"(?m)^# generation: ([0-9]+)$", text)
+if found is None:
+    raise SystemExit("outcomes generation mutation subject is missing")
+outcomes.write_text(text[: found.start(1)] + str(int(found.group(1)) + 1) + text[found.end(1):])
+xfail = pathlib.Path("ci/s3tests/xfail.txt")
+xfail.write_text(xfail.read_text() + case_id + "\n")
+PYEOF
+    set_xfail_generation +1
 }
 expect_guard_pass check_xfail_ratchet.sh \
     'a tolerated failure added in the same change that raises the generation' \
     mut_xfail_entry_added_with_generation
 
+# An exclusion is wider than an entry: it reports nothing either way. The same two rules as an
+# excluded SDK in ci/mint/baseline.txt — owned, reasoned, and only with a raised generation.
+mut_xfail_exclusion_added_without_generation() {
+    append_xfail_entry "s3tests.functional.test_s3::test_lifecycle_expiration excluded https://github.com/rustfs/gateway/issues/1 its outcome differs between runs"
+}
+expect_fail check_xfail_ratchet.sh \
+    'an exclusion added without raising the generation' \
+    mut_xfail_exclusion_added_without_generation \
+    'exclusion(s) were added without raising the generation'
+
+mut_xfail_exclusion_without_owner() {
+    append_xfail_entry "s3tests.functional.test_s3::test_lifecycle_expiration excluded somebody its outcome differs between runs"
+    set_xfail_generation_next
+}
+expect_fail check_xfail_ratchet.sh \
+    'an exclusion that names no owner issue, even with the generation raised' \
+    mut_xfail_exclusion_without_owner \
+    'names no owner'
+
+# An xfail entry must be backed by the measured record: a case recorded as passing, pasted
+# into the tolerated set, is a guess, and the generation raise does not make it a measurement.
+mut_xfail_entry_recorded_as_passing() {
+    python3 - <<'PYEOF'
+import pathlib, re
+
+outcomes = pathlib.Path("ci/s3tests/outcomes.txt")
+passing = next(line.split(" ", 1)[1] for line in outcomes.read_text().splitlines() if line.startswith("passed "))
+path = pathlib.Path("ci/s3tests/xfail.txt")
+path.write_text(path.read_text() + passing + "\n")
+PYEOF
+    set_xfail_generation_next
+    python3 - <<'PYEOF'
+import pathlib, re
+
+path = pathlib.Path("ci/s3tests/outcomes.txt")
+text = path.read_text()
+found = re.search(r"(?m)^# generation: ([0-9]+)$", text)
+if found is None:
+    raise SystemExit("outcomes generation mutation subject is missing")
+path.write_text(text[: found.start(1)] + str(int(found.group(1)) + 1) + text[found.end(1):])
+PYEOF
+}
+expect_fail check_xfail_ratchet.sh \
+    'a case recorded as passing added to the tolerated set, even with both generations raised' \
+    mut_xfail_entry_recorded_as_passing \
+    'not recorded as failing in ci/s3tests/outcomes.txt'
+
+mut_xfail_outcomes_generation_lags() {
+    set_xfail_generation_next
+}
+expect_fail check_xfail_ratchet.sh \
+    'the xfail generation raised without refreshing the per-case record it rests on' \
+    mut_xfail_outcomes_generation_lags \
+    'refresh them together from one record run'
+
 mut_xfail_generation_jumped() {
     append_xfail_entry "s3tests_boto3.functional.test_s3::test_multipart_upload_small"
-    set_xfail_generation 9
+    set_xfail_generation +8
 }
 expect_fail check_xfail_ratchet.sh \
     'a generation jumped several steps at once, banking room for later additions' \
     mut_xfail_generation_jumped
 
 mut_xfail_generation_backwards() {
-    set_xfail_generation 0
+    set_xfail_generation -1
 }
 expect_fail check_xfail_ratchet.sh \
     'a generation moved backwards' mut_xfail_generation_backwards
@@ -13135,6 +13217,87 @@ expect_fail check_suites_pinned.sh \
     mut_s3tests_external_endpoint_loses_precedence \
     'must prefer GATEWAY_SUT_ENDPOINT before requiring GATEWAY_SUT_COMMAND'
 
+# The suite's own requirements.txt floats, so a pinned suite commit still measured whatever
+# botocore PyPI served that week until the client was locked (rustfs/backlog#1764). Each of
+# these is a way to let it float again.
+mut_s3tests_lock_entry_floats() {
+    python3 - <<'PYEOF'
+import pathlib, re
+
+path = pathlib.Path("ci/s3tests/requirements.lock")
+text = path.read_text()
+floated, count = re.subn(r"(?m)^botocore==[^ ]+ \\$", "botocore>=1.0.0 \\\\", text, count=1)
+if count != 1:
+    raise SystemExit("lock pin mutation subject is missing")
+path.write_text(floated)
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'a locked suite dependency loosened from == to a floating lower bound' \
+    mut_s3tests_lock_entry_floats \
+    '`botocore>=1.0.0` is not pinned to one exact version'
+
+mut_s3tests_lock_deleted() {
+    rm -f ci/s3tests/requirements.lock
+}
+expect_fail check_suites_pinned.sh \
+    "the suite's dependency lock deleted, so its client floats with PyPI again" \
+    mut_s3tests_lock_deleted \
+    'ci/s3tests/requirements.lock is missing'
+
+mut_s3tests_install_without_hashes() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/run.sh")
+text = path.read_text()
+needle = '    --require-hashes --no-deps -r "$LOCK"'
+if text.count(needle) != 1:
+    raise SystemExit("require-hashes mutation subject is missing or ambiguous")
+path.write_text(text.replace(needle, '    --no-deps -r "$LOCK"', 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'the suite environment installed from the lock without --require-hashes' \
+    mut_s3tests_install_without_hashes \
+    'must install the suite environment with'
+
+mut_s3tests_back_to_tox() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/run.sh")
+text = path.read_text()
+needle = '"$SUITE_PYTHON" -m pytest -m "$FILTER" --junitxml="$JUNIT"'
+if needle not in text:
+    raise SystemExit("tox mutation subject is missing")
+path.write_text(text.replace(needle, 'tox -- -m "$FILTER" --junitxml="$JUNIT"', 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    "the suite run through tox again, whose environment follows the suite's floating requirements" \
+    mut_s3tests_back_to_tox \
+    'invokes tox'
+
+# Without the tenant identity the suite's per-case bucket sweep as `[s3 tenant]` is refused,
+# and 734 of 740 cases error in setup: measured on the first real dispatch, rustfs/backlog#1764.
+mut_s3tests_tenant_flag_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/run.sh")
+text = path.read_text()
+needle = '    --tenant-access-key \\"\\$S3TESTS_TENANT_ACCESS_KEY\\" \\\n'
+if needle not in text:
+    raise SystemExit("tenant flag mutation subject is missing")
+path.write_text(text.replace(needle, "", 1))
+PYEOF
+}
+expect_fail check_suites_pinned.sh \
+    'the tenant identity dropped from the default SUT command, erroring every case in setup' \
+    mut_s3tests_tenant_flag_deleted \
+    'missing required flags: --tenant-access-key'
+
 mut_vendored_suite_tree() {
     mkdir -p tests/s3-tests
     printf 'from setuptools import setup\nsetup(name="s3tests")\n' >tests/s3-tests/setup.py
@@ -13232,6 +13395,32 @@ PYEOF
 expect_fail check_s3tests_report.sh \
     'every failure treated as tolerated, so no regression can ever fail the job' \
     mut_report_tolerates_every_failure
+
+# The per-case record is how a reader tells a passing case from a skipped one. Dropping the
+# skipped rows leaves a record that still reads complete.
+mut_report_outcomes_drop_skipped_cases() {
+    python3 - <<'PYEOF'
+import pathlib
+
+path = pathlib.Path("ci/s3tests/report.py")
+text = path.read_text()
+needle = "    for case in sorted(cases, key=lambda case: (OUTCOMES.index(case.outcome), case.id)):\n"
+if needle not in text:
+    raise SystemExit("report outcome-record mutation subject is missing")
+path.write_text(
+    text.replace(
+        needle,
+        "    for case in sorted((case for case in cases if case.outcome != \"skipped\"), "
+        "key=lambda case: (OUTCOMES.index(case.outcome), case.id)):\n",
+        1,
+    )
+)
+PYEOF
+}
+expect_fail check_s3tests_report.sh \
+    'the per-case outcome record silently dropping the skipped cases' \
+    mut_report_outcomes_drop_skipped_cases \
+    'the per-case outcome record must list every reported case once'
 
 mut_report_records_a_dead_service_as_failures() {
     python3 - <<'PYEOF'

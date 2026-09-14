@@ -31,6 +31,7 @@
 //! compat-sut --data <dir> --port 9100 --probe-log <path>
 //! compat-sut --data <dir> --access-key MAIN --secret-key ... --owner-id s3gate-main \
 //!            --alt-access-key ALT --alt-secret-key ... --alt-owner-id s3gate-alt \
+//!            --tenant-access-key TENANT --tenant-secret-key ... --tenant-owner-id s3gate-tenant \
 //!            --lc-debug-interval 10
 //! compat-sut --data <dir> --port 9100 --tls-port 9443 --tls-self-signed <ca.pem> [--tls-san <name>]
 //! compat-sut --data <dir> --port 9100 --tls-port 9443 --tls-cert <chain.pem> --tls-key <key.pem>
@@ -97,6 +98,7 @@ where
     let mut port = 9100_u16;
     let mut primary = AccountArgs::default();
     let mut secondary = AccountArgs::default();
+    let mut tenant = AccountArgs::default();
     let mut lifecycle_debug_interval = None;
     let mut tls = TlsArgs::default();
     let mut arguments = arguments.into_iter();
@@ -127,6 +129,10 @@ where
             "--alt-secret-key" => secondary.secret_key = Some(value()?),
             "--alt-owner-id" => secondary.owner_id = Some(value()?),
             "--alt-display-name" => secondary.display_name = Some(value()?),
+            "--tenant-access-key" => tenant.access_key = Some(value()?),
+            "--tenant-secret-key" => tenant.secret_key = Some(value()?),
+            "--tenant-owner-id" => tenant.owner_id = Some(value()?),
+            "--tenant-display-name" => tenant.display_name = Some(value()?),
             "--lc-debug-interval" => {
                 let seconds: u64 = value()?.parse().map_err(|_| {
                     io::Error::new(io::ErrorKind::InvalidInput, "--lc-debug-interval requires a number of seconds")
@@ -171,7 +177,7 @@ where
     Ok(Options {
         data,
         address: SocketAddr::new(host, port),
-        accounts: Accounts::build(primary, secondary)?,
+        accounts: Accounts::build(primary, secondary, tenant)?,
         region,
         probe_log,
         lifecycle_debug_interval,
@@ -187,9 +193,8 @@ where
 /// captured to a file by `ci/lib/sut.sh` and attached to a CI run as an artifact.
 fn identity_lines(accounts: &Accounts) -> Vec<String> {
     accounts
-        .all()
-        .zip(["main", "alt"])
-        .map(|(account, role)| {
+        .roles()
+        .map(|(role, account)| {
             format!(
                 "compat-sut identity {role} access-key {} owner-id {} display-name {}",
                 account.access_key, account.owner_id, account.display_name
@@ -354,6 +359,39 @@ mod tests {
         assert_eq!(options.accounts.owner_of("MAIN"), Some("s3gate-main"));
         assert_eq!(options.accounts.owner_of("ALT"), Some("s3gate-alt"));
         assert_eq!(options.accounts.all().count(), 2);
+    }
+
+    /// Positive — the tenant flags reach the served set as a third principal, and the banner names
+    /// it `tenant`, which is the role ci/s3tests/run.sh configures `[s3 tenant]` with.
+    #[test]
+    fn the_tenant_identity_reaches_the_served_set() {
+        let options = parse_options([
+            "--access-key",
+            "MAIN",
+            "--secret-key",
+            "main-secret",
+            "--alt-access-key",
+            "ALT",
+            "--alt-secret-key",
+            "alt-secret",
+            "--tenant-access-key",
+            "TENANT",
+            "--tenant-secret-key",
+            "tenant-secret",
+            "--tenant-owner-id",
+            "s3gate-tenant",
+            "--tenant-display-name",
+            "s3gate-tenant",
+        ])
+        .expect("three distinct identities");
+        assert_eq!(options.accounts.owner_of("TENANT"), Some("s3gate-tenant"));
+        assert_eq!(options.accounts.all().count(), 3);
+        let lines = identity_lines(&options.accounts);
+        assert_eq!(
+            lines.last().map(String::as_str),
+            Some("compat-sut identity tenant access-key TENANT owner-id s3gate-tenant display-name s3gate-tenant")
+        );
+        assert!(parse_options(["--tenant-access-key"]).is_err());
     }
 
     /// Negative — two identities that collapse into one principal are refused at the command line,
