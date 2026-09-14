@@ -710,6 +710,7 @@ gateway_modules = (
     "streaming_without_length",
     "tagging_reachability",
     "throughput_request",
+    "unread_body_refusal",
     "verified_scope_runtime",
     "vhost_resolution",
 )
