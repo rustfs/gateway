@@ -38,6 +38,7 @@
 //! beside the service, for the input decode the GetBucketLocation proof compares.
 
 mod answers;
+mod error_parity;
 mod get_bucket_location;
 mod put_object;
 

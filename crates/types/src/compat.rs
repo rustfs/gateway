@@ -76,9 +76,16 @@ pub mod s3s_f3e17541 {
     /// a harness takes to it.
     pub use ::s3s_candidate as s3s;
 
+    pub mod error;
     pub mod get_bucket_location;
     pub mod put_object;
     pub mod request_context;
+
+    /// `f3e17541` fills a message from the code's default sentence when a body names none, so the
+    /// gateway writes the sentence the s3s document would have carried.
+    fn default_message(code: &s3s::S3ErrorCode) -> Option<&'static str> {
+        code.default_message()
+    }
 
     /// `f3e17541` holds `PutObjectInput.expires` as the wire text, exactly as the gateway keeps it
     /// (`q-timestamp-0005`), so every value crosses unchanged and nothing is refused.
@@ -98,9 +105,17 @@ pub mod s3s_9c4690d8 {
     /// The s3s revision every signature in this module names.
     pub use ::s3s_baseline as s3s;
 
+    pub mod error;
     pub mod get_bucket_location;
     pub mod put_object;
     pub mod request_context;
+
+    /// `9c4690d8` has no default sentences: a body that names no message gets a document with no
+    /// `<Message>`, and the gateway writes an empty one.
+    #[allow(clippy::unnecessary_wraps)] // The signature is the one both revisions' hooks share.
+    const fn default_message(_code: &s3s::S3ErrorCode) -> Option<&'static str> {
+        None
+    }
 
     /// `9c4690d8` holds `PutObjectInput.expires` parsed as an HTTP-date, so the gateway's opaque
     /// text is refused by member name when it is not one (rd-put-0004).
