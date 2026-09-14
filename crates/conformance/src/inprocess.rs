@@ -92,6 +92,7 @@ use std::sync::{Arc, Mutex};
 use std::{collections::BTreeMap, path::PathBuf};
 mod conditional_race;
 pub(crate) mod h2_frames;
+mod payload_literal;
 mod profile;
 mod security;
 mod sigv2;
@@ -1558,15 +1559,15 @@ pub(crate) fn sign_request(
         .map_err(|error| SutError::Environment(format!("the credential scope is not well formed: {error}")))?;
 
     // Every spelling is decided here. A `payload_hash` this target cannot produce is refused rather
-    // than falling through to the computed digest: a case that asked for a streaming or a literal
-    // hash and was silently given the correct one asserts nothing about the hash it named.
+    // than falling through to the computed digest: a case that asked for a streaming hash and was
+    // silently given the correct one asserts nothing about the hash it named.
     let payload = match (mode, sign.read("signSpec.payload_hash").and_then(Value::as_str)) {
         ("sigv4_unsigned_payload" | "presigned_v4", _) | (_, Some("unsigned")) => PayloadMode::Unsigned,
         (_, Some("empty")) => PayloadMode::Empty,
-        (_, Some(other @ ("streaming" | "streaming_trailer" | "base64" | "literal"))) => {
+        (_, Some("literal")) => payload_literal::payload(sign.read("signSpec.payload_hash_literal").and_then(Value::as_str))?,
+        (_, Some(other @ ("streaming" | "streaming_trailer" | "base64"))) => {
             return Err(SutError::Environment(format!(
-                "`sign.payload_hash = \"{other}\"` needs the aws-chunked framing a socket transport \
-                 owns, or a literal the header signer has no way to substitute"
+                "`sign.payload_hash = \"{other}\"` needs a spelling the in-process header signer cannot produce"
             )));
         }
         _ if wire.body.is_empty() => PayloadMode::Empty,

@@ -145,7 +145,7 @@ use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedB
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::panic_boundary::catch_boxed_future;
-use crate::payload_header::{payload_mode, presigned_body_obligation};
+use crate::payload_header::{body_digest_obligation, payload_mode};
 use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
 use crate::render::{
@@ -721,7 +721,7 @@ impl S3Service {
                     Ok(payload) => payload,
                     Err(error) => return outcome.refuse(error),
                 };
-                body_digest = match presigned_body_obligation(&payload, sealed.marker().location()) {
+                body_digest = match body_digest_obligation(&payload, sealed.marker().location()) {
                     Ok(obligation) => obligation,
                     Err(_) => {
                         return outcome.refuse_handler(HandlerError::new(

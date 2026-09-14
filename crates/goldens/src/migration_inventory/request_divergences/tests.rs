@@ -22,17 +22,18 @@
 //! Upstream: `super`, and the four test files it pins. Downstream: nothing.
 
 use super::{
-    CONFIG_DECODE, DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, LOCATION_CONTEXT, PUT_CONTEXT, PUT_DECODE,
+    BODY_PARITY, CONFIG_DECODE, DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, LOCATION_CONTEXT, PUT_CONTEXT, PUT_DECODE,
     REQUEST_DIVERGENCES, RequestDivergence, RequestDivergenceError, build_request_divergences, check_register,
 };
 
 /// The pinned test files, as source, keyed the way register entries name them.
-const PINNED_SOURCES: [(&str, &str); 5] = [
+const PINNED_SOURCES: [(&str, &str); 6] = [
     (PUT_DECODE, include_str!("../../operation_diff/put_object/divergences.rs")),
     (PUT_CONTEXT, include_str!("../../operation_diff/context/put_object.rs")),
     (LOCATION_CONTEXT, include_str!("../../operation_diff/context/get_bucket_location.rs")),
     (CONFIG_DECODE, include_str!("../../operation_diff/put_bucket_versioning.rs")),
     (ERROR_PARITY, include_str!("../../operation_diff/context/error_parity/divergences.rs")),
+    (BODY_PARITY, include_str!("../../operation_diff/context/body_parity/divergences.rs")),
 ];
 
 /// One `#[test]` function read out of a source file.
@@ -148,11 +149,11 @@ fn every_pinned_divergence_test_has_a_ruling_and_every_ruling_a_test() {
 #[test]
 fn the_register_is_valid_and_renders_every_ruling() {
     let report = build_request_divergences();
-    assert_eq!(report.as_ref().map(|report| report.entries().len()), Ok(29));
+    assert_eq!(report.as_ref().map(|report| report.entries().len()), Ok(39));
     let rendered = report.map(|report| report.render()).unwrap_or_default();
     assert!(
         rendered.starts_with(
-            "request divergences: rulings=29 keep-gateway=16 align-s3s=6 align-aws=4 rustfs-profile=3 open-follow-ups=6 landed=10\n"
+            "request divergences: rulings=39 keep-gateway=26 align-s3s=6 align-aws=4 rustfs-profile=3 open-follow-ups=6 landed=10\n"
         ),
         "{rendered}"
     );

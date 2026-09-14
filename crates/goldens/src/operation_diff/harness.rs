@@ -155,7 +155,7 @@ impl BodyProbe {
 /// It is the transport's side of the body: whatever a stack does — stream it, buffer it, read it
 /// twice — shows up here and nowhere else, which is what makes "the body was not read before the
 /// handler" an observation rather than a claim about code.
-struct ProbeSource {
+pub(crate) struct ProbeSource {
     chunks: VecDeque<Bytes>,
     remaining: u64,
     trailers: Option<TrailingHeaders>,
@@ -172,6 +172,21 @@ enum SourceEvent {
 }
 
 impl ProbeSource {
+    /// A source that hands out `pieces` in order, exactly as a transport split them, and then ends
+    /// with no trailer fields: the body both stacks read in the signed-body diff.
+    pub(crate) fn from_pieces(pieces: Vec<Bytes>, probe: Arc<BodyProbe>) -> Self {
+        let chunks: VecDeque<Bytes> = pieces.into_iter().filter(|piece| !piece.is_empty()).collect();
+        let remaining = chunks.iter().map(|chunk| chunk.len() as u64).sum();
+        Self {
+            chunks,
+            remaining,
+            trailers: Some(TrailingHeaders::empty()),
+            fail_after_first_chunk: false,
+            ended: false,
+            probe,
+        }
+    }
+
     fn new(request: &RawRequest, trailers: TrailingHeaders, probe: Arc<BodyProbe>) -> Self {
         let chunks: VecDeque<Bytes> = request.chunks.iter().filter(|chunk| !chunk.is_empty()).cloned().collect();
         let remaining = chunks.iter().map(|chunk| chunk.len() as u64).sum();

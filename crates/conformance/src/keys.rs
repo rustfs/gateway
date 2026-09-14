@@ -320,12 +320,6 @@ pub const DECLARED: &[(&str, Disposition, &str)] = &[
         Disposition::Unexercised("requestSpec.h2_frames"),
         "the pause before a scripted frame is written; honoured as a not-before wait, but no case writes `request.h2_frames` yet",
     ),
-    // -- Read, but out of reach of this corpus ---------------------------------------------------
-    (
-        "signSpec.payload_hash_literal",
-        Disposition::BehindRefusal("signSpec.payload_hash"),
-        "only reachable with `payload_hash = \"literal\"`, which is refused by name",
-    ),
 ];
 
 /// Looks a key up in [`DECLARED`].

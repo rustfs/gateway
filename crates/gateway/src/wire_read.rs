@@ -131,11 +131,11 @@ impl WireProgress {
     /// Opens the accounting for one body, hashing only when a digest was actually promised.
     ///
     /// The hash is fed on both paths even though only the unframed one can carry an obligation
-    /// today — `presigned_body_obligation` refuses a presigned streaming request outright, and it
-    /// is the only place a [`BodyDigestObligation::Sha256`] is minted. Feeding it here rather than
-    /// in the unframed branch is the fail-safe arrangement: the day a header-signed request's
-    /// payload hash is compared — the P2 gap `crate::gate` records — the framed path gets the
-    /// comparison rather than silently skipping it.
+    /// today — a streaming payload declares no digest, and `body_digest_obligation`, the only place
+    /// a [`BodyDigestObligation::Sha256`] is minted, mints one for every signed exact digest and for
+    /// nothing else. Feeding it here rather than in the unframed branch is the fail-safe
+    /// arrangement: should a framed body ever carry a digest, the framed path gets the comparison
+    /// rather than silently skipping it.
     fn new(digest: BodyDigestObligation, reached_eof: bool) -> Self {
         Self {
             state: Arc::new(Mutex::new(WireProgressState {

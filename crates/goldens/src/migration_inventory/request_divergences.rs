@@ -24,7 +24,8 @@
 //! stacks), persisted-byte refusals (the parent module), or implementing a follow-up.
 //! Upstream: the named tests in `operation_diff/put_object/divergences.rs`,
 //! `operation_diff/context/put_object.rs`, `operation_diff/context/get_bucket_location.rs`,
-//! `operation_diff/put_bucket_versioning.rs` and `operation_diff/context/error_parity/divergences.rs`.
+//! `operation_diff/put_bucket_versioning.rs`, `operation_diff/context/error_parity/divergences.rs`
+//! and `operation_diff/context/body_parity/divergences.rs`.
 //! Downstream: `corpus-report`, and the RustFS adapter work
 //! of rustfs/backlog#1752.
 //!
@@ -81,7 +82,7 @@ pub enum DivergenceFollowUp {
 /// One pinned divergence and its ruling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequestDivergence {
-    /// Stable id, `rd-<put|ctx|loc|cfg|err>-NNNN` — the PutObject decode, a request context, the
+    /// Stable id, `rd-<put|ctx|loc|cfg|err|body>-NNNN` — the PutObject decode, a request context, the
     /// GetBucketLocation context, a bucket configuration write, or an error document; the pinned
     /// test's doc carries it as `Ruling: `id``.
     pub id: &'static str,
@@ -114,9 +115,17 @@ const PUT_CONTEXT: &str = "operation_diff/context/put_object.rs";
 const LOCATION_CONTEXT: &str = "operation_diff/context/get_bucket_location.rs";
 const CONFIG_DECODE: &str = "operation_diff/put_bucket_versioning.rs";
 const ERROR_PARITY: &str = "operation_diff/context/error_parity/divergences.rs";
+const BODY_PARITY: &str = "operation_diff/context/body_parity/divergences.rs";
 
 /// The files whose named-divergence sections the register is checked against.
-const PINNED_TEST_FILES: [&str; 5] = [PUT_DECODE, PUT_CONTEXT, LOCATION_CONTEXT, CONFIG_DECODE, ERROR_PARITY];
+const PINNED_TEST_FILES: [&str; 6] = [
+    PUT_DECODE,
+    PUT_CONTEXT,
+    LOCATION_CONTEXT,
+    CONFIG_DECODE,
+    ERROR_PARITY,
+    BODY_PARITY,
+];
 
 const API_PUT_OBJECT: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html";
 const API_GET_BUCKET_LOCATION: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html";
@@ -126,7 +135,7 @@ const ADAPTER_SEAM: &str = "https://github.com/rustfs/gateway/issues/753";
 const SEAM_FACTS: &str = "https://github.com/rustfs/gateway/issues/795";
 
 /// Every decided request divergence.
-pub const REQUEST_DIVERGENCES: [RequestDivergence; 29] = [
+const OPERATION_DIVERGENCES: [RequestDivergence; 29] = [
     RequestDivergence {
         id: "rd-put-0001",
         operation: "PutObject",
@@ -591,10 +600,29 @@ pub const REQUEST_DIVERGENCES: [RequestDivergence; 29] = [
     },
 ];
 
+/// Every pinned divergence, in id order as written: the operation, context, configuration and error
+/// slices above, then the signed-body slice (`body`).
+pub const REQUEST_DIVERGENCES: [RequestDivergence; 39] = concat(OPERATION_DIVERGENCES, body::BODY_DIVERGENCES);
+
+/// `first` then `second`, at compile time; the declared length must be their sum.
+const fn concat<const A: usize, const B: usize, const C: usize>(
+    first: [RequestDivergence; A],
+    second: [RequestDivergence; B],
+) -> [RequestDivergence; C] {
+    assert!(A > 0 && A + B == C, "the register is the sum of its slices");
+    let mut out = [first[0]; C];
+    let mut index = 0;
+    while index < C {
+        out[index] = if index < A { first[index] } else { second[index - A] };
+        index += 1;
+    }
+    out
+}
+
 /// A register entry that does not hold as written.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RequestDivergenceError {
-    /// The id is not `rd-<put|ctx|loc|cfg|err>-NNNN`.
+    /// The id is not `rd-<put|ctx|loc|cfg|err|body>-NNNN`.
     MalformedId(&'static str),
     /// Two entries share an id.
     DuplicateId(&'static str),
@@ -618,7 +646,7 @@ pub enum RequestDivergenceError {
 impl fmt::Display for RequestDivergenceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MalformedId(id) => write!(formatter, "{id} is not an rd-<put|ctx|loc|cfg|err>-NNNN id"),
+            Self::MalformedId(id) => write!(formatter, "{id} is not an rd-<put|ctx|loc|cfg|err|body>-NNNN id"),
             Self::DuplicateId(id) => write!(formatter, "{id} appears twice"),
             Self::MissingText { id, field } => write!(formatter, "{id} leaves {field} empty"),
             Self::EvidenceNotUrl(id) => write!(formatter, "{id} cites AWS evidence that is not a URL"),
@@ -737,7 +765,7 @@ fn check_register(entries: &[RequestDivergence]) -> Result<(), RequestDivergence
 }
 
 fn well_formed_id(id: &str) -> bool {
-    let Some(number) = ["rd-put-", "rd-ctx-", "rd-loc-", "rd-cfg-", "rd-err-"]
+    let Some(number) = ["rd-put-", "rd-ctx-", "rd-loc-", "rd-cfg-", "rd-err-", "rd-body-"]
         .iter()
         .find_map(|prefix| id.strip_prefix(prefix))
     else {
@@ -765,6 +793,8 @@ fn is_case_id(case: &str) -> bool {
             !domain.is_empty() && number.len() == 4 && number.bytes().all(|byte| byte.is_ascii_digit())
         })
 }
+
+mod body;
 
 #[cfg(test)]
 mod tests;
