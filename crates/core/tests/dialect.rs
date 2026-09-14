@@ -360,7 +360,9 @@ vendor_operation!(
     OtherVendor,
     name = "other:HeadObjectReport",
     spec_name = "other:HeadObjectReport",
-    action = Some(AuthRequirement::new("acme:HeadObjectReport", ResourceShape::Object)),
+    // An IAM action, so the vendor is the one thing wrong with it: an `acme:` label on an `other:`
+    // operation is refused first, as an action in another vendor's namespace.
+    action = Some(AuthRequirement::new("s3:HeadObject", ResourceShape::Object)),
     resource = (),
     status = 200,
     anonymous = false
