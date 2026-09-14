@@ -17,7 +17,8 @@
 //!
 //! Responsible for: an absent account refused with a `400` naming the parameter where RustFS
 //! refuses it, and read as the caller where RustFS reads the caller; RustFS's alias spellings
-//! (`access-key`, `user-dn`) naming no account; an own-account operation about the caller whatever
+//! (`access-key`, `user-dn`, `user`) naming the same account as the canonical one, and two
+//! spellings of one account refused (ADR-0029); an own-account operation about the caller whatever
 //! the query names; a repeated, malformed or oversized account refused before authorisation; a
 //! set naming nobody being the caller, every account needing the broader action, a malformed set
 //! refused before authorisation, and a set naming several accounts failing closed at the
@@ -33,6 +34,24 @@ use rustfs_gateway_sig::RequestNow;
 use super::{ACCOUNT, Exchange, declared, in_lanes, paths, signed_with, subject_param, unsigned_with, wire};
 
 const LIST_USERS: &str = "admin:ListUsers";
+
+/// The spellings RustFS reads for each canonical subject parameter, besides the canonical one,
+/// read at `62cc19e9`: `AccessKeyQuery` and `AddUserQuery` take `access-key` as a serde alias,
+/// `SingleUserAccessKeysQuery::parse` takes `user-dn` and `user`, and `ListServiceAccountQuery`
+/// takes `user` alone (ADR-0029).
+const RUSTFS_ALIASES: &[(&str, &[&str])] = &[
+    ("accessKey", &["access-key"]),
+    ("userDN", &["user-dn", "user"]),
+    ("user", &[]),
+];
+
+/// The alias spellings RustFS reads for `param`.
+fn rustfs_aliases(param: &str) -> &'static [&'static str] {
+    RUSTFS_ALIASES
+        .iter()
+        .find(|(canonical, _)| *canonical == param)
+        .map_or(&[], |(_, aliases)| aliases)
+}
 const LIST_SERVICE_ACCOUNTS: &str = "admin:ListServiceAccounts";
 
 /// Every `(record, path, query)` for each row of every operation whose rule `wanted` accepts, and
@@ -107,12 +126,12 @@ const fn reads_absence_as_the_caller(rule: SubjectRule) -> bool {
 
 /// Negative — where RustFS answers `400` to an absent account (`user-info`, `add-user`, and the
 /// service-account info, update and delete routes, ADR-0028 (b)), an absent or empty parameter, or
-/// only RustFS's `access-key` alias spelling, is a `400 InvalidArgument` naming the parameter,
-/// before the authorizer is asked or any handler runs.
+/// an empty `access-key` alias, is a `400 InvalidArgument` naming the canonical parameter, before
+/// the authorizer is asked or any handler runs.
 #[test]
 fn n_a_refused_absence_is_a_400_naming_the_parameter() {
     let cases = cases(refuses_absence, |param| {
-        vec![String::new(), format!("{param}="), format!("access-key={ACCOUNT}")]
+        vec![String::new(), format!("{param}="), "access-key=".to_owned()]
     });
     assert_eq!(cases.len(), 6 * 2 * 3);
     in_lanes(declared, &cases, |assembled, (record, path, query)| {
@@ -122,27 +141,111 @@ fn n_a_refused_absence_is_a_400_naming_the_parameter() {
 }
 
 /// Positive — where RustFS reads an absent account as the caller (`info-access-key`,
-/// `list-service-accounts`, `idp/ldap/list-access-keys`), an absent or empty parameter, RustFS's
-/// alias spellings (`access-key`, `user-dn`), or the parameter in another case, is about the
-/// caller: every question and the handler's context say the caller, so no spelling the facade
-/// does not read names an account it did not authorise (ADR-0028 (c)).
+/// `list-service-accounts`, `idp/ldap/list-access-keys`), an absent or empty parameter, the
+/// parameter in another case, or another rule's alias, is about the caller: every question and the
+/// handler's context say the caller. RustFS's serde and hand-written parsers compare keys exactly,
+/// so it reads none of these as an account either (ADR-0029).
 #[test]
 fn an_absence_is_the_caller_where_ruled() {
     let cases = cases(reads_absence_as_the_caller, |param| {
-        vec![
+        let mut spelled = vec![
             String::new(),
             format!("{param}="),
-            format!("access-key={ACCOUNT}"),
-            format!("user-dn={ACCOUNT}"),
             format!("{}={ACCOUNT}", param.to_ascii_uppercase()),
-        ]
+        ];
+        spelled.extend(
+            ["access-key", "user-dn"]
+                .into_iter()
+                .filter(|other| !rustfs_aliases(param).contains(other))
+                .map(|other| format!("{other}={ACCOUNT}")),
+        );
+        spelled
     });
-    assert_eq!(cases.len(), 3 * 2 * 5);
+    // `info-access-key` takes `user-dn` as someone else's alias, `idp/ldap/list-access-keys`
+    // takes `access-key`, and `list-service-accounts` takes both.
+    assert_eq!(cases.len(), (4 + 4 + 5) * 2);
     let assembled = super::assemble(declared);
     for (record, path, query) in &cases {
         let exchange = assembled.exchange(wire(&signed_with(record, path, query)));
         about_the_caller(&exchange, &format!("{} {path}?{query}", record.method));
     }
+}
+
+/// Positive — every named-account operation declares exactly the alias spellings RustFS reads for
+/// its parameter, so a spelling RustFS gains or loses reopens the ruling (ADR-0029).
+#[test]
+fn the_declared_aliases_are_the_spellings_rustfs_reads() {
+    let mut checked = 0;
+    for record in ROUTES {
+        if let Some(SubjectRule::Query { param, aliases, .. }) = record.subject {
+            assert_eq!(aliases, rustfs_aliases(param), "{}", record.operation);
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 9);
+}
+
+/// Positive — each alias spelling RustFS reads names the same account as the canonical parameter:
+/// every question is about that account and the handler is handed it (ADR-0029).
+#[test]
+fn an_alias_spelling_names_the_account() {
+    let cases = cases(
+        |rule| matches!(rule, SubjectRule::Query { .. }),
+        |param| {
+            rustfs_aliases(param)
+                .iter()
+                .map(|alias| format!("{alias}={ACCOUNT}"))
+                .collect()
+        },
+    );
+    // Seven `accessKey` operations with one alias, `idp/ldap/list-access-keys` with two.
+    assert_eq!(cases.len(), (7 + 2) * 2);
+    in_lanes(declared, &cases, |assembled, (record, path, query)| {
+        let at = format!("{} {path}?{query}", record.method);
+        let exchange = assembled.exchange(wire(&signed_with(record, path, query)));
+        assert_eq!(exchange.status, 200, "{at}: {}", exchange.body);
+        assert!(!exchange.asked.is_empty(), "{at}: nobody was asked");
+        assert!(
+            exchange
+                .asked
+                .iter()
+                .all(|asked| asked.subject == Some(Some(ACCOUNT.to_owned()))),
+            "{at}: {:?}",
+            exchange.asked
+        );
+        assert_eq!(exchange.handed[0].subjects, format!("named:{ACCOUNT}"), "{at}");
+    });
+}
+
+/// Negative — two spellings of one account, the same account or not, an alias repeated, and a
+/// malformed alias value are a `400` naming the canonical parameter before authentication. RustFS's
+/// serde alias refuses the first two as a duplicate field; its LDAP parser keeps the last, which the
+/// gateway refuses instead (ADR-0029). Unsigned on purpose, as the refusal precedes the signature.
+#[test]
+fn n_two_spellings_of_one_account_are_refused_before_authorising() {
+    let cases = cases(
+        |rule| matches!(rule, SubjectRule::Query { .. }),
+        |param| {
+            let aliases = rustfs_aliases(param);
+            let mut spelled = Vec::new();
+            for alias in aliases {
+                spelled.push(format!("{param}={ACCOUNT}&{alias}={ACCOUNT}"));
+                spelled.push(format!("{alias}=a&{param}=b"));
+                spelled.push(format!("{alias}=a&{alias}=b"));
+                spelled.push(format!("{alias}=a+b"));
+            }
+            if let [first, second] = aliases {
+                spelled.push(format!("{first}=a&{second}=b"));
+            }
+            spelled
+        },
+    );
+    assert_eq!(cases.len(), (7 * 4 + 9) * 2);
+    in_lanes(declared, &cases, |assembled, (record, path, query)| {
+        let param = subject_param(record).expect("a named-account operation");
+        let exchange = assembled.exchange(unsigned_with(record, path, query));
+        refused_before_authorising(&exchange, &format!("{} {path}?{query}", record.method), param);
+    });
 }
 
 /// Positive — an own-account operation reads no parameter: whatever account the query names, in

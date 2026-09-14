@@ -48,6 +48,7 @@ pub const NAME: &str = "rustfs:GetV3ListServiceAccounts";
 /// Whose account it acts on, which the facade extracts before authentication.
 pub const SUBJECT: SubjectRule = SubjectRule::Query {
     param: "user",
+    aliases: &[],
     when_absent: WhenAbsent::Caller,
 };
 

@@ -55,6 +55,7 @@ const NAMED_ONLY: AuthRequirement = AuthRequirement::new("admin:X", ResourceShap
 const USER: AuthRequirement =
     AuthRequirement::any_of(&["admin:A", "admin:B"], ResourceShape::Service).about_subject(SubjectRule::Query {
         param: "accessKey",
+        aliases: &[],
         when_absent: WhenAbsent::Refuse,
     });
 const PLAIN: AuthRequirement = AuthRequirement::new("admin:X", ResourceShape::Service);

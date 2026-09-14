@@ -30,6 +30,8 @@
 //! The facade reads it once, strictly, before authentication, and hands it to both authorizer
 //! stages and to the handler as `RequestContextView::subject()`; a handler never reads the query
 //! for it (ADR-0025, ADR-0028).
+//! RustFS also reads it as `user-dn` or `user`, so the facade does too: one spelling, once, or a `400` naming
+//! `userDN` (ADR-0029).
 
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
@@ -48,6 +50,7 @@ pub const NAME: &str = "rustfs:GetV3IdpLdapListAccessKeys";
 /// Whose account it acts on, which the facade extracts before authentication.
 pub const SUBJECT: SubjectRule = SubjectRule::Query {
     param: "userDN",
+    aliases: &["user-dn", "user"],
     when_absent: WhenAbsent::Caller,
 };
 
@@ -127,7 +130,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 140,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp/ldap/list-access-keys\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/idp/ldap/list-access-keys\") ∧ Method(GET)",
-    action: "admin:ListServiceAccounts about query(userDN, absent=caller)",
+    action: "admin:ListServiceAccounts about query(userDN|user-dn|user, absent=caller)",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
@@ -148,7 +151,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     path: "/rustfs/admin/v3/idp/ldap/list-access-keys",
     alias: Some("/minio/admin/v3/idp/ldap/list-access-keys"),
     query: None,
-    action: "admin:ListServiceAccounts about query(userDN, absent=caller)",
+    action: "admin:ListServiceAccounts about query(userDN|user-dn|user, absent=caller)",
     ruled: Some("ContextualAuthorization"),
     subject: Some(SUBJECT),
     rustfs_handler: "ListAccessKeysLdap",

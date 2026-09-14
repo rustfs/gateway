@@ -152,8 +152,11 @@ pub enum SubjectRule {
     Caller,
     /// The account one query parameter names. RustFS's `ContextualAuthorization` routes.
     Query {
-        /// The parameter, spelled in RFC 3986 unreserved characters.
+        /// The canonical parameter, spelled in RFC 3986 unreserved characters. A refusal names it.
         param: &'static str,
+        /// Other spellings of the same parameter, each exact and unreserved, as RustFS reads
+        /// `access-key` for `accessKey` (ADR-0029). At most one spelling may appear, once.
+        aliases: &'static [&'static str],
         /// What its absence means.
         when_absent: WhenAbsent,
     },
@@ -302,7 +305,16 @@ impl SubjectRule {
         const SPELLING: &str = "a subject parameter is spelled in RFC 3986 unreserved characters and is not empty";
         match self {
             Self::Caller => None,
-            Self::Query { param, .. } => (!is_parameter(param)).then_some(SPELLING),
+            Self::Query { param, aliases, .. } => {
+                if !is_parameter(param) || !aliases.iter().all(|alias| is_parameter(alias)) {
+                    return Some(SPELLING);
+                }
+                let spellings = || core::iter::once(param).chain(aliases.iter().copied());
+                spellings()
+                    .enumerate()
+                    .any(|(index, spelling)| spellings().take(index).any(|earlier| earlier == spelling))
+                    .then_some("a subject parameter's spellings are distinct from one another")
+            }
             Self::Set { param, .. } if !is_parameter(param) => Some(SPELLING),
             Self::Set {
                 everyone: Some(everyone),
@@ -342,8 +354,12 @@ impl SubjectRule {
     pub fn extract(self, raw_query: &str) -> Result<Subjects, SubjectError> {
         match self {
             Self::Caller => Ok(Subjects::One(Subject::Caller)),
-            Self::Query { param, when_absent } => {
-                let value = match query::single_raw_value(raw_query, param)? {
+            Self::Query {
+                param,
+                aliases,
+                when_absent,
+            } => {
+                let value = match query::single_raw_value_of(raw_query, param, aliases)? {
                     Some(raw) => query::decode_component(raw)?,
                     None => String::new(),
                 };

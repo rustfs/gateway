@@ -67,9 +67,26 @@ impl fmt::Display for QueryParamError {
 /// [`QueryParamError::Repeated`] when the parameter appears twice in any spelling, and
 /// [`QueryParamError::Malformed`] when any key in the query cannot be decoded strictly.
 pub fn single_raw_value<'q>(raw_query: &'q str, param: &str) -> Result<Option<&'q str>, QueryParamError> {
+    single_raw_value_of(raw_query, param, &[])
+}
+
+/// [`single_raw_value`] for a parameter with alias spellings (ADR-0029): the value of whichever of
+/// `param` and `aliases` the query carries, each compared exactly after decoding.
+///
+/// # Errors
+///
+/// [`QueryParamError::Repeated`] when the spellings appear more than once between them, whether
+/// one spelling twice or two spellings once each, with the same value or not; and
+/// [`QueryParamError::Malformed`] when any key in the query cannot be decoded strictly.
+pub(crate) fn single_raw_value_of<'q>(
+    raw_query: &'q str,
+    param: &str,
+    aliases: &[&str],
+) -> Result<Option<&'q str>, QueryParamError> {
     let mut found = None;
     for (raw_key, raw_value) in pairs(raw_query) {
-        if decode_component(raw_key)? != param {
+        let key = decode_component(raw_key)?;
+        if key != param && !aliases.contains(&key.as_str()) {
             continue;
         }
         if found.replace(raw_value).is_some() {
@@ -140,6 +157,35 @@ mod tests {
         assert_eq!(single_raw_value("bucket=a&bucket=b", "bucket"), Err(QueryParamError::Repeated));
         assert_eq!(single_raw_value("bucket=a&%62ucket=b", "bucket"), Err(QueryParamError::Repeated));
         assert_eq!(single_raw_value("bucket=&bucket=a", "bucket"), Err(QueryParamError::Repeated));
+    }
+
+    /// Positive — an alias spelling is the parameter.
+    #[test]
+    fn an_alias_spelling_is_the_parameter() {
+        let aliases = &["access-key", "ak"];
+        assert_eq!(single_raw_value_of("access-key=a", "accessKey", aliases), Ok(Some("a")));
+        assert_eq!(single_raw_value_of("x=1&ak=%62", "accessKey", aliases), Ok(Some("%62")));
+        assert_eq!(single_raw_value_of("accessKey=c", "accessKey", aliases), Ok(Some("c")));
+        assert_eq!(single_raw_value_of("AccessKey=a&access_key=b", "accessKey", aliases), Ok(None));
+    }
+
+    /// Negative — two spellings between them are a repeat, whatever their values.
+    #[test]
+    fn n_two_spellings_are_a_repeat() {
+        let aliases = &["access-key", "ak"];
+        for query in [
+            "accessKey=a&access-key=a",
+            "access-key=a&accessKey=b",
+            "access-key=a&%61ccess-key=b",
+            "ak=a&access-key=b",
+            "ak=&accessKey=a",
+        ] {
+            assert_eq!(
+                single_raw_value_of(query, "accessKey", aliases),
+                Err(QueryParamError::Repeated),
+                "{query}"
+            );
+        }
     }
 
     #[test]

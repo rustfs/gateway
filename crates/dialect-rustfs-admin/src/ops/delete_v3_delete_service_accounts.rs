@@ -30,6 +30,8 @@
 //! The facade reads it once, strictly, before authentication, and hands it to both authorizer
 //! stages and to the handler as `RequestContextView::subject()`; a handler never reads the query
 //! for it (ADR-0025, ADR-0028).
+//! RustFS also reads it as `access-key`, so the facade does too: one spelling, once, or a `400` naming
+//! `accessKey` (ADR-0029).
 
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
@@ -48,6 +50,7 @@ pub const NAME: &str = "rustfs:DeleteV3DeleteServiceAccounts";
 /// Whose account it acts on, which the facade extracts before authentication.
 pub const SUBJECT: SubjectRule = SubjectRule::Query {
     param: "accessKey",
+    aliases: &["access-key"],
     when_absent: WhenAbsent::Refuse,
 };
 
@@ -127,7 +130,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 105,
     selector: "PathTemplate(\"/rustfs/admin/v3/delete-service-accounts\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/delete-service-accounts\") ∧ Method(DELETE)",
-    action: "admin:RemoveServiceAccount about query(accessKey, absent=refused)",
+    action: "admin:RemoveServiceAccount about query(accessKey|access-key, absent=refused)",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
@@ -148,7 +151,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     path: "/rustfs/admin/v3/delete-service-accounts",
     alias: Some("/minio/admin/v3/delete-service-accounts"),
     query: None,
-    action: "admin:RemoveServiceAccount about query(accessKey, absent=refused)",
+    action: "admin:RemoveServiceAccount about query(accessKey|access-key, absent=refused)",
     ruled: Some("ContextualAuthorization"),
     subject: Some(SUBJECT),
     rustfs_handler: "DeleteServiceAccount",

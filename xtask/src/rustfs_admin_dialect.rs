@@ -181,12 +181,13 @@ impl Rule {
         };
         match self.about {
             Some(About::Caller) => rendered.push_str(" about caller"),
-            Some(About::Query { param, absent }) => {
+            Some(About::Query { param, aliases, absent }) => {
                 let absent = match absent {
                     Absent::Caller => "caller",
                     Absent::Refuse => "refused",
                 };
-                rendered.push_str(&format!(" about query({param}, absent={absent})"));
+                let spellings: Vec<&str> = std::iter::once(param).chain(aliases.iter().copied()).collect();
+                rendered.push_str(&format!(" about query({}, absent={absent})", spellings.join("|")));
             }
             Some(About::Set {
                 param,
@@ -202,8 +203,12 @@ impl Rule {
     fn subject_expression(&self) -> Option<String> {
         self.about.map(|about| match about {
             About::Caller => "SubjectRule::Caller".to_owned(),
-            About::Query { param, absent } => {
-                format!("SubjectRule::Query {{ param: {param:?}, when_absent: WhenAbsent::{absent:?} }}")
+            About::Query { param, aliases, absent } => {
+                let aliases: Vec<String> = aliases.iter().map(|alias| format!("{alias:?}")).collect();
+                format!(
+                    "SubjectRule::Query {{ param: {param:?}, aliases: &[{}], when_absent: WhenAbsent::{absent:?} }}",
+                    aliases.join(", ")
+                )
             }
             About::Set {
                 param,
@@ -262,6 +267,21 @@ impl Rule {
             }
             Some(About::Query { param, .. } | About::Set { param, .. }) if query.is_some_and(|(key, _)| key == param) => {
                 return Some("a subject parameter is not the query key that selects the form");
+            }
+            Some(About::Query { param, aliases, .. }) => {
+                if !aliases.iter().copied().all(is_parameter) {
+                    return Some("a subject parameter is spelled in RFC 3986 unreserved characters");
+                }
+                if aliases
+                    .iter()
+                    .enumerate()
+                    .any(|(index, alias)| *alias == param || aliases[..index].contains(alias))
+                {
+                    return Some("a subject parameter's spellings are distinct from one another");
+                }
+                if query.is_some_and(|(key, _)| aliases.contains(&key)) {
+                    return Some("a subject parameter is not the query key that selects the form");
+                }
             }
             Some(About::Set {
                 param,

@@ -204,15 +204,15 @@ fn a_subject_ruling_is_declared_about_its_subject() {
             "GET",
             "/rustfs/admin/v3/user-info",
             "ContextualAuthorization",
-            "admin:GetUser about query(accessKey, absent=refused)",
-            "SubjectRule::Query { param: \"accessKey\", when_absent: WhenAbsent::Refuse }",
+            "admin:GetUser about query(accessKey|access-key, absent=refused)",
+            "SubjectRule::Query { param: \"accessKey\", aliases: &[\"access-key\"], when_absent: WhenAbsent::Refuse }",
         ),
         (
             "GET",
             "/rustfs/admin/v3/list-service-accounts",
             "ContextualAuthorization",
             "admin:ListServiceAccounts about query(user, absent=caller)",
-            "SubjectRule::Query { param: \"user\", when_absent: WhenAbsent::Caller }",
+            "SubjectRule::Query { param: \"user\", aliases: &[], when_absent: WhenAbsent::Caller }",
         ),
         (
             "GET",
@@ -279,34 +279,37 @@ fn the_recorded_subject_rulings_are_exactly_the_order_four_custom_routes() {
         [
             (
                 "rustfs:DeleteV3DeleteServiceAccount",
-                "admin:RemoveServiceAccount about query(accessKey, absent=refused)"
+                "admin:RemoveServiceAccount about query(accessKey|access-key, absent=refused)"
             ),
             (
                 "rustfs:DeleteV3DeleteServiceAccounts",
-                "admin:RemoveServiceAccount about query(accessKey, absent=refused)"
+                "admin:RemoveServiceAccount about query(accessKey|access-key, absent=refused)"
             ),
             (
                 "rustfs:GetV3IdpLdapListAccessKeys",
-                "admin:ListServiceAccounts about query(userDN, absent=caller)"
+                "admin:ListServiceAccounts about query(userDN|user-dn|user, absent=caller)"
             ),
             (
                 "rustfs:GetV3InfoAccessKey",
-                "admin:ListServiceAccounts about query(accessKey, absent=caller)"
+                "admin:ListServiceAccounts about query(accessKey|access-key, absent=caller)"
             ),
             (
                 "rustfs:GetV3InfoServiceAccount",
-                "admin:ListServiceAccounts about query(accessKey, absent=refused)"
+                "admin:ListServiceAccounts about query(accessKey|access-key, absent=refused)"
             ),
             (
                 "rustfs:GetV3ListServiceAccounts",
                 "admin:ListServiceAccounts about query(user, absent=caller)"
             ),
-            ("rustfs:GetV3UserInfo", "admin:GetUser about query(accessKey, absent=refused)"),
+            ("rustfs:GetV3UserInfo", "admin:GetUser about query(accessKey|access-key, absent=refused)"),
             (
                 "rustfs:PostV3UpdateServiceAccount",
-                "admin:UpdateServiceAccount about query(accessKey, absent=refused)"
+                "admin:UpdateServiceAccount about query(accessKey|access-key, absent=refused)"
             ),
-            ("rustfs:PutV3AddUser", "admin:CreateUser about query(accessKey, absent=refused)"),
+            (
+                "rustfs:PutV3AddUser",
+                "admin:CreateUser about query(accessKey|access-key, absent=refused)"
+            ),
         ]
     );
     let sets: Vec<&str> = about
@@ -341,8 +344,8 @@ fn the_recorded_subject_rulings_are_exactly_the_order_four_custom_routes() {
 
 /// Negative — a rule outside ADR-0025's and ADR-0026's shapes is refused at generation, never
 /// written: an own-account operation under an IAM action, another vendor's label or two actions;
-/// a vendor label on any other operation; a subject parameter outside the unreserved set or
-/// equal to the form's selecting key; and a set whose flag is its own parameter, whose
+/// a vendor label on any other operation; a subject parameter or alias outside the unreserved set
+/// or equal to the form's selecting key, and an alias repeating a spelling (ADR-0029); and a set whose flag is its own parameter, whose
 /// every-account action is malformed, a vendor label, or already asked about each account.
 #[test]
 fn n_a_subject_rule_outside_the_adrs_shapes_is_refused() {
@@ -365,6 +368,7 @@ fn n_a_subject_rule_outside_the_adrs_shapes_is_refused() {
         Ruled::One("rustfs:Anything"),
         About::Query {
             param: "accessKey",
+            aliases: &[],
             absent: Absent::Refuse,
         },
     )];
@@ -372,6 +376,7 @@ fn n_a_subject_rule_outside_the_adrs_shapes_is_refused() {
         Ruled::One("admin:GetUser"),
         About::Query {
             param: "access key",
+            aliases: &[],
             absent: Absent::Refuse,
         },
     )];
@@ -380,6 +385,40 @@ fn n_a_subject_rule_outside_the_adrs_shapes_is_refused() {
         rule: Ruled::One("admin:GetUser"),
         about: Some(About::Query {
             param: "accessKey",
+            aliases: &[],
+            absent: Absent::Caller,
+        }),
+    }];
+    const BAD_ALIAS: &[Form] = &[form(
+        Ruled::One("admin:GetUser"),
+        About::Query {
+            param: "accessKey",
+            aliases: &["access key"],
+            absent: Absent::Refuse,
+        },
+    )];
+    const ALIAS_IS_PARAM: &[Form] = &[form(
+        Ruled::One("admin:GetUser"),
+        About::Query {
+            param: "accessKey",
+            aliases: &["accessKey"],
+            absent: Absent::Refuse,
+        },
+    )];
+    const ALIAS_TWICE: &[Form] = &[form(
+        Ruled::One("admin:GetUser"),
+        About::Query {
+            param: "userDN",
+            aliases: &["user", "user"],
+            absent: Absent::Caller,
+        },
+    )];
+    const SELECTOR_ALIAS: &[Form] = &[Form {
+        query: Some(("access-key", "x")),
+        rule: Ruled::One("admin:GetUser"),
+        about: Some(About::Query {
+            param: "accessKey",
+            aliases: &["access-key"],
             absent: Absent::Caller,
         }),
     }];
@@ -419,6 +458,10 @@ fn n_a_subject_rule_outside_the_adrs_shapes_is_refused() {
         (LABEL_NAMED, "authorises only an own-account operation"),
         (BAD_PARAM, "unreserved characters"),
         (SELECTOR_PARAM, "not the query key that selects the form"),
+        (BAD_ALIAS, "unreserved characters"),
+        (ALIAS_IS_PARAM, "spellings are distinct from one another"),
+        (ALIAS_TWICE, "spellings are distinct from one another"),
+        (SELECTOR_ALIAS, "not the query key that selects the form"),
         (FLAG_IS_PARAM, "an unreserved parameter of its own"),
         (FLAG_ACTION_MALFORMED, "an IAM action spelled"),
         (FLAG_ACTION_LABEL, "an IAM action spelled"),

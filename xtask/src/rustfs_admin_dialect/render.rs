@@ -85,16 +85,28 @@ fn subject_doc(about: About, actions: &[&str]) -> String {
              //! authorizer is still asked (ADR-0025, ADR-0028).\n",
             actions.first().copied().unwrap_or_default()
         ),
-        About::Query { param, absent } => format!(
-            "//! It acts on the account the `{param}` query parameter names; an absent or empty one is {}.\n\
-             //! The facade reads it once, strictly, before authentication, and hands it to both authorizer\n\
-             //! stages and to the handler as `RequestContextView::subject()`; a handler never reads the query\n\
-             //! for it (ADR-0025, ADR-0028).\n",
-            match absent {
-                Absent::Caller => "the caller",
-                Absent::Refuse => "a `400` before authentication",
+        About::Query { param, aliases, absent } => {
+            let mut doc = format!(
+                "//! It acts on the account the `{param}` query parameter names; an absent or empty one is {}.\n\
+                 //! The facade reads it once, strictly, before authentication, and hands it to both authorizer\n\
+                 //! stages and to the handler as `RequestContextView::subject()`; a handler never reads the query\n\
+                 //! for it (ADR-0025, ADR-0028).\n",
+                match absent {
+                    Absent::Caller => "the caller",
+                    Absent::Refuse => "a `400` before authentication",
+                }
+            );
+            if !aliases.is_empty() {
+                let spelled: Vec<String> = aliases.iter().map(|alias| format!("`{alias}`")).collect();
+                let _ = writeln!(
+                    doc,
+                    "//! RustFS also reads it as {}, so the facade does too: one spelling, once, or a `400` naming\n\
+                     //! `{param}` (ADR-0029).",
+                    spelled.join(" or ")
+                );
             }
-        ),
+            doc
+        }
         About::Set { param, everyone } => {
             let mut doc = format!(
                 "//! It acts on each account a `{param}` parameter names, each asked about in turn; naming nobody is the\n\
