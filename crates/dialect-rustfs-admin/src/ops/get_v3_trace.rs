@@ -111,7 +111,7 @@ impl AdminOperation for GetV3Trace {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 120,
+    precedence: 166,
     selector: "PathTemplate(\"/rustfs/admin/v3/trace\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/trace\") ∧ Method(GET)",
     action: "admin:ServerTrace",
     resource: ResourceShape::Service,

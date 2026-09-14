@@ -37,6 +37,7 @@ use rustfs_gateway_core::codec::{CodecError, EncodedResponse, OperationCodec, Re
 use rustfs_gateway_core::dialect::ClaimedRow;
 use rustfs_gateway_core::op::{AuthRequirement, Operation};
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec};
+use rustfs_gateway_core::route::ShadowingDecl;
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_stream::ByteStream;
 
@@ -218,6 +219,12 @@ pub trait AdminOperation: OperationCodec + Operation<Output = AdminResponse> {
 
     /// Its canonical row, then the MinIO alias RustFS serves it under, when there is one.
     fn rows() -> &'static [ClaimedRow];
+
+    /// The later operations it stands in front of, where a literal segment of its path meets
+    /// their parameter (ADR-0027). None for almost every operation.
+    fn shadows() -> &'static [ShadowingDecl] {
+        &[]
+    }
 }
 
 /// A step over every admin operation in turn, carrying a value from one to the next: a dialect

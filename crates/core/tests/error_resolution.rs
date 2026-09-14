@@ -446,3 +446,23 @@ fn a_masked_missing_object_reveals_nothing_through_its_message() {
         assert_eq!(hidden.message(), Some("the request is not allowed"));
     }
 }
+
+/// Positive and negative — a codec refusal may name a claimed row's path parameter spelled with
+/// an underscore (`target_type`, ADR-0024), and still names no member that starts with a digit or
+/// an underscore, carries another separator, or is empty; an error code still admits no
+/// underscore.
+#[test]
+fn a_codec_refusal_names_an_underscored_parameter_but_no_malformed_member() {
+    use rustfs_gateway_core::InvalidErrorContext;
+    use rustfs_gateway_core::codec::CodecError;
+
+    let refusal = |member: &'static str| ErrorContext::codec(CodecError::invalid_argument("the value is refused").about(member));
+    for member in ["target_type", "key_id", "Bucket", "a1_b2"] {
+        let resolution = resolve(refusal(member).expect("an admitted member"), ResponseKind::Other);
+        assert_eq!(resolution.status(), StatusCode::BAD_REQUEST, "{member}");
+    }
+    for member in ["", "_id", "1id", "tier-name", "tier name", "tier.name"] {
+        assert!(matches!(refusal(member), Err(InvalidErrorContext::InvalidDetail)), "{member:?}");
+    }
+    assert!(ErrorContext::codec(CodecError::new(ErrorCode::custom("Bad_Code", StatusCode::BAD_REQUEST), "m")).is_err());
+}

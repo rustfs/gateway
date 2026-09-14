@@ -73,7 +73,8 @@ impl OperationFold for Declare {
         carry.declare_claimed::<O>(ClaimedRoute {
             precedence: O::PRECEDENCE,
             rows: O::rows(),
-            shadows: &[],
+            shadows: O::shadows(),
+            // No template parameter is a bucket: ADR-0027 keeps every migrated one service-level.
             bucket_param: None,
         })
     }

@@ -15,10 +15,12 @@
 //! The generated RustFS admin dialect (rustfs/backlog#1744) through a real assembled service, and
 //! bound back to the recorded inventory it was generated from.
 //!
-//! Responsible for: an assembled service with the facade's SigV4 authenticator, a recording
+//! Responsible for: an assembled service with the facade's SigV4 authenticator (handing the
+//! caller's secret over, so each operation's own opt-in decides who holds it), a recording
 //! authorizer answering by policy, the `rustfs` dialect, and one generic handler registered for
-//! every generated operation through `fold_every_operation`; and the requests the tests send —
-//! signed, unsigned, presigned — for any row of any operation.
+//! every generated operation through `fold_every_operation` that records its path parameters
+//! and whether it holds the secret; and the requests the tests send — signed, unsigned,
+//! presigned, with a concrete or a malformed parameter value — for any row of any operation.
 //! NOT responsible for: the assertions (`tests.rs`), routing without a service (the dialect
 //! crate's own tests), the generator's rules (xtask's), or the hand-written proof
 //! (`rustfs_admin_proof`).
@@ -30,9 +32,9 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use http::{HeaderValue, Method, Request};
 use rustfs_gateway::{
-    Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Governor, GovernorRequest, Handler, HandlerContext,
-    HandlerResult, InputAuthzRequest, InputDecisions, Lease, Req, RequestContext, Resp, S3Service, ServiceBuilder,
-    SigV4Authenticator, StaticCredentials,
+    Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Governor, GovernorRates, GovernorRequest, Handler,
+    HandlerContext, HandlerResult, InputAuthzRequest, InputDecisions, Lease, Rate, Req, RequestContext, RequestContextView, Resp,
+    S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
 };
 use rustfs_gateway_dialect_rustfs_admin::{
     AdminOperation, AdminResponse, OperationFold, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
@@ -44,6 +46,7 @@ use rustfs_gateway_sig::{
 
 use crate::operation_diff::s3s_f3e17541::context::{ACCESS_KEY, ContextRequest, PATH_HOST, REGIONS, SECRET_KEY, amz_date};
 use crate::operation_diff::s3s_f3e17541::harness::block_on;
+use crate::rustfs_admin_proof::same_bytes;
 
 const REGION: &str = "us-east-1";
 
@@ -115,16 +118,44 @@ impl Governor for AdmitAll {
     }
 }
 
-/// One generic handler for every generated operation: it records which operation it served and
-/// answers that operation's name as JSON.
+/// What one handler was handed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Handed {
+    pub(crate) operation: &'static str,
+    /// The decoded path parameters, in path order.
+    pub(crate) params: Vec<(String, String)>,
+    pub(crate) holds_secret: bool,
+    pub(crate) secret_is_the_callers: bool,
+}
+
+impl Handed {
+    fn of(context: &RequestContextView) -> Self {
+        let secret = context
+            .principal()
+            .and_then(|principal| principal.secret_key_from_authenticator_lookup());
+        Self {
+            operation: context.operation(),
+            params: context
+                .path_params()
+                .iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .collect(),
+            holds_secret: secret.is_some(),
+            secret_is_the_callers: secret.is_some_and(|secret| same_bytes(secret.expose_secret(), SECRET_KEY.as_bytes())),
+        }
+    }
+}
+
+/// One generic handler for every generated operation: it records what it was handed and answers
+/// that operation's name as JSON.
 #[derive(Default)]
 struct Admin {
-    reached: Mutex<Vec<&'static str>>,
+    handed: Mutex<Vec<Handed>>,
 }
 
 impl Admin {
     fn serve<O: AdminOperation>(&self, request: &Req<O>) -> HandlerResult<O> {
-        self.reached.lock().expect("uncontended").push(request.context().operation());
+        self.handed.lock().expect("uncontended").push(Handed::of(request.context()));
         Ok(Resp::new(AdminResponse::json(format!("{{\"operation\":\"{}\"}}", O::NAME))))
     }
 }
@@ -157,6 +188,7 @@ pub(crate) struct Exchange {
     pub(crate) body: String,
     pub(crate) asked: Vec<Asked>,
     pub(crate) reached: Vec<&'static str>,
+    pub(crate) handed: Vec<Handed>,
 }
 
 /// The assembled service and what it records.
@@ -171,25 +203,39 @@ impl Assembled {
     pub(crate) fn exchange(&self, request: Request<Bytes>) -> Exchange {
         let response = block_on(self.service.call_bytes(request));
         let collected = block_on(rustfs_gateway::collect(response)).expect("an in-memory body");
+        let handed = std::mem::take(&mut *self.admin.handed.lock().expect("uncontended"));
         Exchange {
             status: collected.status().as_u16(),
             body: String::from_utf8_lossy(collected.body()).into_owned(),
             asked: std::mem::take(&mut *self.asked.lock().expect("uncontended")),
-            reached: std::mem::take(&mut *self.admin.reached.lock().expect("uncontended")),
+            reached: handed.iter().map(|handed| handed.operation).collect(),
+            handed,
         }
     }
 }
 
-/// The facade's SigV4 authenticator over the shared credential, an authorizer answering with
+/// The facade's SigV4 authenticator over the shared credential, handing the caller's secret over
+/// under the assembly's default opted-in scope (ADR-0024), an authorizer answering with
 /// `policy(operation, action)`, the `rustfs` dialect, and the generic handler for every operation.
 pub(crate) fn assemble(policy: impl Fn(&str, &str) -> bool + Send + Sync + 'static) -> Assembled {
     let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("a fixture credential");
     let regions = RegionSet::new(REGIONS).expect("fixture regions");
-    let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions);
+    let authenticator =
+        SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions).hand_caller_secret_to_handlers();
     let asked = Arc::new(Mutex::new(Vec::new()));
     let admin = Arc::new(Admin::default());
     let dialect = rustfs_admin_dialect().expect("the generated record and declarations agree");
+    // The mandatory framework governor stays in force, with room for every row at once: each test
+    // sends all 310 rows from one address-less client back to back, past the default burst of 256.
+    let rates = GovernorRates {
+        per_ip: Rate::new(8_192, 4_096),
+        credential_lookup: Rate::new(8_192, 4_096),
+        unauthenticated: Rate::new(8_192, 4_096),
+        aggregate: Rate::new(16_384, 8_192),
+        ..GovernorRates::default()
+    };
     let builder = ServiceBuilder::new()
+        .framework_governor_rates(rates)
         .authenticator(authenticator)
         .governor(AdmitAll)
         .authorizer(RecordingAuthorizer {
@@ -221,9 +267,44 @@ pub(crate) fn declared(operation: &str, action: &str) -> bool {
         .any(|record| record.operation == operation && actions(record).contains(&action))
 }
 
-/// Every path a record's operation is served at: the canonical one, then the alias.
-pub(crate) fn paths(record: &RouteRecord) -> Vec<&'static str> {
+/// Every template a record's operation is served at: the canonical one, then the alias.
+pub(crate) fn templates(record: &RouteRecord) -> Vec<&'static str> {
     std::iter::once(record.path).chain(record.alias).collect()
+}
+
+/// The parameter a template segment names, if it is one.
+pub(crate) fn param(segment: &str) -> Option<&str> {
+    segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}'))
+}
+
+/// The value every parameter is given in a well-formed request: its name then `-1`.
+pub(crate) fn value_of(name: &str) -> String {
+    format!("{name}-1")
+}
+
+/// `template` with its `index`-th segment spelled `raw`, and every other parameter given its
+/// well-formed value.
+pub(crate) fn with_segment(template: &str, index: Option<usize>, raw: &str) -> String {
+    template
+        .split('/')
+        .enumerate()
+        .map(|(at, segment)| match (Some(at) == index, param(segment)) {
+            (true, _) => raw.to_owned(),
+            (false, Some(name)) => value_of(name),
+            (false, None) => segment.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// `template` with every parameter given its well-formed value.
+pub(crate) fn concrete(template: &str) -> String {
+    with_segment(template, None, "")
+}
+
+/// Every concrete path a record's operation is served at: the canonical one, then the alias.
+pub(crate) fn paths(record: &RouteRecord) -> Vec<String> {
+    templates(record).into_iter().map(concrete).collect()
 }
 
 fn query(record: &RouteRecord) -> String {
@@ -235,6 +316,7 @@ pub(crate) fn signed(record: &RouteRecord, path: &str) -> ContextRequest {
     let request = match record.method {
         "GET" => ContextRequest::get(PATH_HOST, path, &query(record)),
         "POST" => ContextRequest::post(PATH_HOST, path, &query(record)),
+        "DELETE" => ContextRequest::delete(PATH_HOST, path, &query(record)),
         "PUT" if record.query.is_none() => ContextRequest::put(PATH_HOST, path, b"{}"),
         other => panic!("{}: no signed fixture for {other}", record.operation),
     };

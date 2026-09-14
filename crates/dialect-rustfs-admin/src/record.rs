@@ -27,6 +27,10 @@ pub(crate) const ISSUE: &str = "https://github.com/rustfs/backlog/issues/1744";
 /// ADR-0025, which every row whose action is a ruling cites.
 pub(crate) const ADR_0025: &str = "https://github.com/rustfs/gateway/blob/main/docs/adr/0025-admin-authorization-classes.md";
 
+/// ADR-0027, which every row with a path parameter or a shadowing declaration cites.
+pub(crate) const ADR_0027: &str =
+    "https://github.com/rustfs/gateway/blob/main/docs/adr/0027-service-level-admin-template-parameters.md";
+
 /// How RustFS reads or writes one side of a route's body, as the inventory records it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BodyKind {

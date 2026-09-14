@@ -111,7 +111,7 @@ impl AdminOperation for GetV3ExportBucketMetadata {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 105,
+    precedence: 117,
     selector: "PathTemplate(\"/rustfs/admin/v3/export-bucket-metadata\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/export-bucket-metadata\") ∧ Method(GET)",
     action: "admin:ExportBucketMetadata",
     resource: ResourceShape::Service,

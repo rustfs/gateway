@@ -15,7 +15,7 @@ change the inventory or `xtask/src/rustfs_admin_dialect.rs`, then regenerate.
 | `src/table.rs` | Generated: the overlay rows, `ROUTES`, `PENDING` and `fold_every_operation`, each listing the operations in inventory order. | Checking which routes are migrated and which groups are pending. |
 | `src/ops/mod.rs` | Generated: mounts one module per operation. | Never; read one operation file instead. |
 | `src/ops/<operation>.rs` | Generated: one operation's name, rows, action, specification, floor, codec, overlay row and record. | Reviewing one route's declaration. |
-| `tests/integration.rs` | The crate's one test target: every declared route routes, with and without the dialect, and every declaration matches its record. | Changing a row, a selector, or a shared shape. |
+| `tests/integration.rs` | The crate's one test target: every declared route routes, with and without the dialect; every other method, near miss and malformed parameter reaches exactly what an independent model of the rows says; the one shadowing declaration; the secret opt-ins; and every declaration matches its record. | Changing a row, a selector, a template, or a shared shape. |
 
 ## Verify
 

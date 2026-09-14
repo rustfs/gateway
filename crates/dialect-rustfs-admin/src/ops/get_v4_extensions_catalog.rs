@@ -111,7 +111,7 @@ impl AdminOperation for GetV4ExtensionsCatalog {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 122,
+    precedence: 168,
     selector: "PathTemplate(\"/rustfs/admin/v4/extensions/catalog\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v4/extensions/catalog\") ∧ Method(GET)",
     action: "admin:ServerInfo",
     resource: ResourceShape::Service,

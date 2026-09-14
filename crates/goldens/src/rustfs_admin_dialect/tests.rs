@@ -16,9 +16,11 @@
 //!
 //! Responsible for: every declared operation agreeing with its inventory row in both directions,
 //! the pending census adding up to the rest of the inventory, and, for every row of every
-//! operation, SigV4 and then exactly the declared action asked about no bucket and no account;
-//! refusal before the handler when that action is denied, when only other actions are allowed,
-//! and when the request is unsigned, forged, from an unknown key, or presigned.
+//! operation, SigV4 and then exactly the declared action asked about no bucket and no account,
+//! the decoded path parameters and — only on the sealed rows — the caller's secret in the
+//! handler; refusal before the handler when that action is denied, when only other actions are
+//! allowed, when the request is unsigned, forged, from an unknown key, or presigned, and when a
+//! parameter value is malformed.
 //! NOT responsible for: the harness (`super`), routing without a service, or the generator.
 //! Upstream: `super`, the recorded inventory. Downstream: nothing.
 
@@ -26,12 +28,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rustfs_gateway_dialect_rustfs_admin::{BodyKind, PENDING, ROUTES, RouteRecord};
 
-use super::{Exchange, actions, assemble, declared, paths, presigned, signed, unsigned, wire};
+use super::{
+    Exchange, actions, assemble, declared, param, paths, presigned, signed, templates, unsigned, value_of, wire, with_segment,
+};
 use crate::migration_inventory::rustfs_admin_routes::{AdminAuthMode, RequestBodyUse, ResponseBodyUse};
 use crate::operation_diff::s3s_f3e17541::context::ACCESS_KEY;
 use crate::rustfs_admin_route_inventory;
-
-const DATA_USAGE: &str = "rustfs:GetV3Datausageinfo";
 
 const fn request_kind(recorded: RequestBodyUse) -> BodyKind {
     match recorded {
@@ -59,11 +61,23 @@ fn refused_without_asking(exchange: &Exchange, at: &str) {
     assert!(exchange.asked.is_empty(), "{at}: the authorizer was asked {:?}", exchange.asked);
 }
 
-/// Every `(record, path)` pair: every row of every operation.
-fn rows() -> impl Iterator<Item = (&'static RouteRecord, &'static str)> {
+/// Every `(record, path)` pair: every row of every operation, with its parameters filled in.
+fn rows() -> impl Iterator<Item = (&'static RouteRecord, String)> {
     ROUTES
         .iter()
         .flat_map(|record| paths(record).into_iter().map(move |path| (record, path)))
+}
+
+/// Every `(record, template, segment index, parameter)` of every templated row.
+fn parameters() -> impl Iterator<Item = (&'static RouteRecord, &'static str, usize, &'static str)> {
+    ROUTES.iter().flat_map(|record| {
+        templates(record).into_iter().flat_map(move |template| {
+            template
+                .split('/')
+                .enumerate()
+                .filter_map(move |(index, segment)| param(segment).map(|name| (record, template, index, name)))
+        })
+    })
 }
 
 // ── the inventory ───────────────────────────────────────────────────────────────────────────
@@ -112,7 +126,7 @@ fn every_migrated_route_is_declared_as_the_inventory_records_it() {
 }
 
 /// Positive — the pending groups are exactly the inventory's other groups, each with its
-/// inventory route count, so groups 1 and 2 plus the pending ones are the whole inventory.
+/// inventory route count, so the migrated groups plus the pending ones are the whole inventory.
 #[test]
 fn the_pending_groups_are_the_rest_of_the_inventory() {
     let inventory = rustfs_admin_route_inventory().expect("the recorded inventory validates");
@@ -133,17 +147,31 @@ fn the_pending_groups_are_the_rest_of_the_inventory() {
 // ── every row through the assembled service ─────────────────────────────────────────────────
 
 /// Positive — every row of every operation, signed, is authorised by exactly its declared
-/// actions (both, in order, for the any-of rule, whose answers the facade combines) about no
-/// bucket, no key and no account, for the signing caller, and reaches exactly its own handler.
+/// actions (every one, in order, for an any-of rule, whose answers the facade combines) about no
+/// bucket, no key and no account, for the signing caller, and reaches exactly its own handler,
+/// which is handed each path parameter decoded and the caller's secret only when its row is
+/// sealed.
 #[test]
 fn every_row_is_authorised_by_exactly_its_declared_action() {
     let assembled = assemble(declared);
-    for (record, path) in rows() {
+    for (record, template) in ROUTES
+        .iter()
+        .flat_map(|record| templates(record).into_iter().map(move |template| (record, template)))
+    {
+        let path = with_segment(template, None, "");
         let at = format!("{} {path} ({})", record.method, record.operation);
-        let exchange = assembled.exchange(wire(&signed(record, path)));
+        let exchange = assembled.exchange(wire(&signed(record, &path)));
         assert_eq!(exchange.status, 200, "{at}: {}", exchange.body);
         assert_eq!(exchange.reached, [record.operation], "{at}");
         assert!(exchange.body.contains(record.operation), "{at}: {}", exchange.body);
+        let params: Vec<(String, String)> = template
+            .split('/')
+            .filter_map(param)
+            .map(|name| (name.to_owned(), value_of(name)))
+            .collect();
+        let handed = &exchange.handed[0];
+        assert_eq!(handed.params, params, "{at}");
+        assert_eq!(handed.holds_secret, record.caller_secret, "{at}");
         let expected = actions(record);
         let asked_at_route: Vec<&str> = exchange
             .asked
@@ -165,20 +193,48 @@ fn every_row_is_authorised_by_exactly_its_declared_action() {
     }
 }
 
-/// Positive — the one any-of row is authorised by either of its two actions alone.
+/// Positive and negative — with the authenticator handing the secret over, exactly the sixteen
+/// rows of the eight sealed operations hold it, and it is the caller's; no other row's handler
+/// holds any secret.
 #[test]
-fn the_any_of_row_is_authorised_by_either_action() {
-    let record = ROUTES
-        .iter()
-        .find(|record| record.operation == DATA_USAGE)
-        .expect("the data-usage record");
-    assert_eq!(actions(record), ["admin:DataUsageInfo", "s3:ListBucket"]);
-    for allowed in ["admin:DataUsageInfo", "s3:ListBucket"] {
-        let assembled = assemble(move |_, action| action == allowed);
-        for path in paths(record) {
-            let exchange = assembled.exchange(wire(&signed(record, path)));
-            assert_eq!(exchange.status, 200, "{allowed} {path}: {}", exchange.body);
-            assert_eq!(exchange.reached, [DATA_USAGE]);
+fn the_caller_secret_reaches_exactly_the_sealed_rows() {
+    let assembled = assemble(declared);
+    let mut holders = BTreeSet::new();
+    for (record, path) in rows() {
+        let exchange = assembled.exchange(wire(&signed(record, &path)));
+        let handed = exchange.handed.first().unwrap_or_else(|| panic!("{path}: {}", exchange.body));
+        assert_eq!(handed.holds_secret, record.caller_secret, "{path}");
+        assert_eq!(handed.secret_is_the_callers, record.caller_secret, "{path}");
+        if handed.holds_secret {
+            holders.insert((record.method, path));
+        }
+    }
+    assert_eq!(holders.len(), 16, "{holders:?}");
+    assert_eq!(holders.iter().filter(|(_, path)| path.starts_with("/minio/admin/")).count(), 8);
+}
+
+/// Positive — each any-of row is authorised by any one of its actions alone: `datausageinfo`
+/// and both pools routes.
+#[test]
+fn every_any_of_row_is_authorised_by_either_action() {
+    let any_of: Vec<&RouteRecord> = ROUTES.iter().filter(|record| actions(record).len() > 1).collect();
+    let names: Vec<&str> = any_of.iter().map(|record| record.operation).collect();
+    assert_eq!(
+        names,
+        [
+            "rustfs:GetV3Datausageinfo",
+            "rustfs:GetV3PoolsList",
+            "rustfs:GetV3PoolsStatus"
+        ]
+    );
+    for record in any_of {
+        for allowed in actions(record) {
+            let assembled = assemble(move |_, action| action == allowed);
+            for path in paths(record) {
+                let exchange = assembled.exchange(wire(&signed(record, &path)));
+                assert_eq!(exchange.status, 200, "{allowed} {path}: {}", exchange.body);
+                assert_eq!(exchange.reached, [record.operation]);
+            }
         }
     }
 }
@@ -190,7 +246,7 @@ fn n_a_row_whose_action_is_denied_is_refused_before_its_handler() {
     let assembled = assemble(|_, _| false);
     for (record, path) in rows() {
         let at = format!("{} {path}", record.method);
-        let exchange = assembled.exchange(wire(&signed(record, path)));
+        let exchange = assembled.exchange(wire(&signed(record, &path)));
         refused_before_the_handler(&exchange, &at);
         assert!(exchange.body.contains("<Code>AccessDenied</Code>"), "{at}: {}", exchange.body);
         assert_eq!(
@@ -207,7 +263,7 @@ fn n_a_row_whose_action_is_denied_is_refused_before_its_handler() {
 fn n_every_other_action_does_not_authorise_a_row() {
     let assembled = assemble(|operation, action| !declared(operation, action));
     for (record, path) in rows() {
-        let exchange = assembled.exchange(wire(&signed(record, path)));
+        let exchange = assembled.exchange(wire(&signed(record, &path)));
         refused_before_the_handler(&exchange, &format!("{} {path}", record.method));
     }
 }
@@ -217,7 +273,7 @@ fn n_every_other_action_does_not_authorise_a_row() {
 fn n_an_unsigned_row_is_refused_without_asking() {
     let assembled = assemble(|_, _| true);
     for (record, path) in rows() {
-        let exchange = assembled.exchange(unsigned(record, path));
+        let exchange = assembled.exchange(unsigned(record, &path));
         refused_without_asking(&exchange, &format!("{} {path}", record.method));
     }
 }
@@ -232,7 +288,7 @@ fn n_an_unsigned_row_is_refused_without_asking() {
 fn n_a_forged_or_unknown_key_row_is_refused_without_asking() {
     for (record, path) in rows() {
         let assembled = assemble(|_, _| true);
-        for request in [signed(record, path).forged(), signed(record, path).unknown_key()] {
+        for request in [signed(record, &path).forged(), signed(record, &path).unknown_key()] {
             let exchange = assembled.exchange(wire(&request));
             let at = format!("{} {path}", record.method);
             refused_without_asking(&exchange, &at);
@@ -249,10 +305,37 @@ fn n_a_presigned_row_is_refused_without_asking() {
     let mut refused = 0;
     for (record, path) in rows().filter(|(record, _)| record.query.is_none()) {
         let at = format!("{} {path}", record.method);
-        let exchange = assembled.exchange(presigned(record, path));
+        let exchange = assembled.exchange(presigned(record, &path));
         refused_without_asking(&exchange, &at);
         assert!(exchange.body.contains("<Code>AccessDenied</Code>"), "{at}: {}", exchange.body);
         refused += 1;
     }
-    assert_eq!(refused, 88, "every row but the service command's eight");
+    assert_eq!(refused, 302, "every row but the service command's eight");
+}
+
+/// Negative — a signed request whose parameter value does not decode to a plain segment (an
+/// invalid UTF-8 escape, a control character) is a `400 InvalidArgument` naming the parameter,
+/// and one whose value is a dot segment or an encoded separator reaches no row (the claim's
+/// `501`); both before the authorizer is asked or any handler runs.
+#[test]
+fn n_a_malformed_parameter_value_is_refused_before_authorising() {
+    let assembled = assemble(|_, _| true);
+    let mut refused = 0;
+    for (record, template, index, name) in parameters() {
+        for (raw, status) in [("%ff", 400), ("a%01b", 400), ("%c3%28", 400), ("%2e%2e", 501), ("a%2Fb", 501)] {
+            let path = with_segment(template, Some(index), raw);
+            let at = format!("{} {path}", record.method);
+            let exchange = assembled.exchange(wire(&signed(record, &path)));
+            assert_eq!(exchange.status, status, "{at}: {}", exchange.body);
+            assert!(exchange.reached.is_empty(), "{at}: a handler ran");
+            assert!(exchange.asked.is_empty(), "{at}: the authorizer was asked {:?}", exchange.asked);
+            if status == 400 {
+                assert!(exchange.body.contains("<Code>InvalidArgument</Code>"), "{at}: {}", exchange.body);
+                assert!(exchange.body.contains(name), "{at}: {}", exchange.body);
+                assert!(!exchange.body.contains(raw), "{at}: the value is echoed: {}", exchange.body);
+            }
+            refused += 1;
+        }
+    }
+    assert_eq!(refused, 5 * 2 * 19, "19 parameters across 17 templates, each with its alias");
 }
