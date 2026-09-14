@@ -28,7 +28,7 @@
 //! nothing.
 
 use rustfs_gateway::AuthzRequest;
-use rustfs_gateway_core::dialect::DialectError;
+use rustfs_gateway_core::dialect::{BucketParam, DialectError};
 use rustfs_gateway_core::{ActionRule, Subject, SubjectRule};
 
 use super::classes::{
@@ -342,12 +342,14 @@ fn n_an_invalid_bucket_parameter_is_refused_as_s3_refuses_it() {
 /// parameter the template lacks is refused.
 #[test]
 fn n_the_quota_route_needs_its_binding_and_the_binding_needs_its_parameter() {
-    let unbound = admin_dialect_bound(REPLICATION_METRICS_SHADOWS, None).expect_err("an unbound bucket operation");
+    let by_query = Some(BucketParam::Query("bucket"));
+    let unbound = admin_dialect_bound(REPLICATION_METRICS_SHADOWS, None, by_query).expect_err("an unbound bucket operation");
     assert!(unbound.iter().any(|error| matches!(
         error,
         DialectError::ClaimedOperationNamesAResource { name, .. } if *name == GET_BUCKET_QUOTA
     )));
-    let misbound = admin_dialect_bound(REPLICATION_METRICS_SHADOWS, Some("tier")).expect_err("a parameter the rows lack");
+    let misbound = admin_dialect_bound(REPLICATION_METRICS_SHADOWS, Some(BucketParam::Path("tier")), by_query)
+        .expect_err("a parameter the rows lack");
     assert!(misbound.iter().any(|error| matches!(
         error,
         DialectError::ClaimedBucketParam { name, param: "tier", .. } if *name == GET_BUCKET_QUOTA

@@ -35,10 +35,12 @@
 //! that declared a bucket or object resource would be authorised against a resource nothing
 //! supplies, so it is refused.
 
+use crate::authz::SubjectRule;
 use crate::op::{Operation, ResourceShape};
 use crate::registry::reject;
 use crate::route::{
-    ClaimedEntry, PathTemplate, Predicate, RouteEntry, RouteSelector, ShadowingDecl, claimed_selector_fault, render_claimed_row,
+    BucketParam, ClaimedEntry, PathTemplate, Predicate, RouteEntry, RouteSelector, ShadowingDecl, claimed_selector_fault,
+    render_claimed_row,
 };
 
 use super::{DialectBuilder, DialectError, vendor_of};
@@ -64,11 +66,12 @@ pub struct ClaimedRoute {
     /// The overlaps with other claimed rows this placement creates, each with a reason and a
     /// source. Never about an S3 row: a claimed row cannot overlap one.
     pub shadows: &'static [ShadowingDecl],
-    /// The template parameter whose raw segment names the bucket the operation is authorised on
-    /// (ADR-0025), or `None` for a service-level operation. When set, every row's template carries
-    /// the parameter, the operation declares `ResourceShape::Bucket`, and the segment meets the
-    /// S3 bucket-name rules before anything is authenticated.
-    pub bucket_param: Option<&'static str>,
+    /// The parameter that names the bucket the operation is authorised on, or `None` for a
+    /// service-level operation. A [`BucketParam::Path`] names a template parameter every row
+    /// carries (ADR-0025); a [`BucketParam::Query`] names a query parameter read exactly once
+    /// (ADR-0026). Either way the operation declares `ResourceShape::Bucket`, and the raw value
+    /// meets the S3 bucket-name rules before anything is authenticated.
+    pub bucket_param: Option<BucketParam>,
 }
 
 /// One operation a dialect serves inside its claims: its rows and their declarations.
@@ -212,7 +215,8 @@ impl DialectBuilder {
         }
         // The binding before the record: a route whose bucket nothing supplies is refused for that,
         // not for the selector text the missing binding also changes.
-        let resource = O::spec().auth.map(|auth| auth.resource);
+        let auth = O::spec().auth;
+        let resource = auth.map(|auth| auth.resource);
         match (route.bucket_param, resource) {
             (None, Some(ResourceShape::Service) | None) => {}
             (None, Some(resource)) => {
@@ -220,7 +224,7 @@ impl DialectBuilder {
                     .push(DialectError::ClaimedOperationNamesAResource { name, resource });
                 return None;
             }
-            (Some(param), Some(ResourceShape::Bucket)) => {
+            (Some(BucketParam::Path(param)), Some(ResourceShape::Bucket)) => {
                 if entries
                     .iter()
                     .any(|entry| !entry.template().parameters().any(|name| name == param))
@@ -233,10 +237,16 @@ impl DialectBuilder {
                     return None;
                 }
             }
+            (Some(BucketParam::Query(param)), Some(ResourceShape::Bucket)) => {
+                if let Some(why) = query_bucket_fault(param, auth.and_then(|auth| auth.subject())) {
+                    self.errors.push(DialectError::ClaimedBucketParam { name, param, why });
+                    return None;
+                }
+            }
             (Some(param), _) => {
                 self.errors.push(DialectError::ClaimedBucketParam {
                     name,
-                    param,
+                    param: param.name(),
                     why: "only an operation authorised on a bucket binds one; a service-level or object operation \
                           would be asked about a resource it does not declare",
                 });
@@ -256,13 +266,33 @@ impl DialectBuilder {
 }
 
 /// Renders a whole claimed route the way an overlay records it: [`render_claimed_rows`], then,
-/// for a route that binds its bucket, ` ⇒ BucketParam("…")`, so the binding is reviewed with the
-/// rows (ADR-0025).
+/// for a route that binds its bucket, ` ⇒ BucketParam("…")` for a template parameter (ADR-0025) or
+/// ` ⇒ BucketQuery("…")` for a query parameter (ADR-0026), so the binding is reviewed with the rows.
 #[must_use]
 pub fn render_claimed_route(route: &ClaimedRoute) -> String {
     let rows = render_claimed_rows(route.rows);
     match route.bucket_param {
-        Some(param) => format!("{rows} ⇒ BucketParam({param:?})"),
+        Some(BucketParam::Path(param)) => format!("{rows} ⇒ BucketParam({param:?})"),
+        Some(BucketParam::Query(param)) => format!("{rows} ⇒ BucketQuery({param:?})"),
         None => rows,
     }
+}
+
+/// Why a query parameter cannot name a claimed route's bucket, or `None` (ADR-0026): it is a plain
+/// query key, and no subject rule of the same operation reads it, so one value is never both an
+/// account and a bucket.
+fn query_bucket_fault(param: &str, subject: Option<SubjectRule>) -> Option<&'static str> {
+    let unreserved = |byte: u8| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~');
+    if param.is_empty() || !param.bytes().all(unreserved) {
+        return Some("a bucket query parameter is spelled in RFC 3986 unreserved characters and is not empty");
+    }
+    let shared = match subject {
+        Some(SubjectRule::Query { param: account, .. }) => account == param,
+        Some(SubjectRule::Set {
+            param: account,
+            everyone,
+        }) => account == param || everyone.is_some_and(|everyone| everyone.param == param),
+        Some(SubjectRule::Caller) | None => false,
+    };
+    shared.then_some("the bucket and the account are read from different query parameters")
 }

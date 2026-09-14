@@ -197,14 +197,15 @@ pub(crate) struct Inner {
 struct AuthorizedRoute {
     policy: Arc<PolicySnapshot>,
     config: RequestConfig<RouteAuthorized>,
-    /// The action that decided the route stage, which the input stage re-asks (ADR-0025).
-    action: &'static str,
+    /// The index of the question that decided the route stage, which the input stage re-asks
+    /// (ADR-0025, ADR-0026).
+    deciding: usize,
 }
 
 struct ReadForDecode {
     policy: Arc<PolicySnapshot>,
     config: RequestConfig<Guarded>,
-    action: &'static str,
+    deciding: usize,
 }
 
 struct RequestEntryContext {
@@ -593,7 +594,8 @@ impl S3Service {
             Err(refusal) => return outcome.refuse(from_codec(refusal, response_kind)),
         };
         let (service_level, target, hands_caller_secret) = (facts.service_level, facts.target, facts.hands_caller_secret);
-        let (path_params, subject, claimed, bound_bucket) = (facts.path_params, facts.subject, facts.claimed, facts.bound_bucket);
+        let (path_params, subjects, claimed, bound_bucket) =
+            (facts.path_params, facts.subjects, facts.claimed, facts.bound_bucket);
         outcome.operation = Some(operation);
 
         let Some(op) = mode.entry(operation) else {
@@ -886,32 +888,38 @@ impl S3Service {
         let route_verdict = &verdict;
         let route_server_extensions = &server_extensions;
         let route_effective_key = effective_key.as_ref();
-        let route_subject = subject.as_ref();
+        let route_subjects = subjects.as_ref();
         let cors_slot = Mutex::new(None);
         let route_cors = &cors_slot;
         let authorize_route = move || async move {
+            // ADR-0025, ADR-0026: one question per action and per account, all of them asked so the
+            // audit record carries each. The first is the request itself; one question allocates
+            // nothing.
+            let first = requirement.question(route_subjects, 0);
+            let first_action = first.map_or(requirement.action, |question| question.action);
             let route_request = AuthzRequest {
                 operation,
-                action: requirement.action,
+                action: first_action,
                 resource: requirement.resource,
                 bucket: route_meta.bucket(),
                 key: route_effective_key,
                 copy_source_identity: None,
                 version_id: None,
-                route_action: requirement.action,
+                route_action: first_action,
                 route_bucket: route_meta.bucket(),
                 route_key: route_effective_key,
                 identity: route_verdict.identity(),
                 target_origin,
-                subject: route_subject,
+                subject: first.and_then(|question| question.subject),
             };
-            // ADR-0025: one question per action of an any-of or all-of rule, all of them asked so
-            // the audit record carries each; empty, and allocation-free, for one action.
-            let questions: Vec<AuthzRequest<'_>> = if requirement.actions().len() > 1 {
-                (requirement.actions().iter())
-                    .map(|action| AuthzRequest {
-                        action,
-                        route_action: action,
+            let question_count = requirement.question_count(route_subjects);
+            let questions: Vec<AuthzRequest<'_>> = if question_count > 1 {
+                (0..question_count)
+                    .filter_map(|index| requirement.question(route_subjects, index))
+                    .map(|question| AuthzRequest {
+                        action: question.action,
+                        route_action: question.action,
+                        subject: question.subject,
                         ..route_request
                     })
                     .collect()
@@ -923,7 +931,7 @@ impl S3Service {
             } else {
                 questions.as_slice()
             };
-            let mut deciding_action = requirement.action;
+            let mut deciding = 0_usize;
             let policy = match policy_snapshot_with_timeout(
                 route_runtime.policy_source.as_ref(),
                 route_verdict.identity(),
@@ -974,7 +982,7 @@ impl S3Service {
             let mut decisions = Vec::with_capacity(if questions.is_empty() { 0 } else { asked.len() });
             // A subject is an account, and an anonymous caller has none: refused without asking,
             // even when a deployment delegates anonymous admission to the authorizer (ADR-0025).
-            let anonymous_about_a_subject = route_subject.is_some() && route_verdict.identity().is_none();
+            let anonymous_about_a_subject = route_subjects.is_some() && route_verdict.identity().is_none();
             for question in asked {
                 if anonymous_about_a_subject {
                     break;
@@ -993,12 +1001,8 @@ impl S3Service {
             let mut route_decision = if anonymous_about_a_subject {
                 Decision::Deny
             } else {
-                let combined = requirement.rule().combine(&decisions);
-                deciding_action = requirement
-                    .actions()
-                    .get(combined.deciding)
-                    .copied()
-                    .unwrap_or(requirement.action);
+                let combined = requirement.decide(route_subjects, &decisions);
+                deciding = combined.deciding;
                 combined.decision
             };
             if route_decision == Decision::Allow && route_headers.contains_key("x-amz-expected-bucket-owner") {
@@ -1060,7 +1064,7 @@ impl S3Service {
             Ok(AuthorizedRoute {
                 policy,
                 config: config.route_authorized(),
-                action: deciding_action,
+                deciding,
             })
         };
 
@@ -1115,7 +1119,7 @@ impl S3Service {
                 ReadForDecode {
                     policy: state.policy,
                     config: state.config.guarded(sse).with_body_monitor(body_monitor),
-                    action: state.action,
+                    deciding: state.deciding,
                 },
                 body,
             ))
@@ -1129,19 +1133,28 @@ impl S3Service {
         let addressed = resolved.addressed(meta.bucket(), effective_key.as_ref());
         let input_server_extensions = &server_extensions;
         let input_effective_key = effective_key.as_ref();
-        let input_subject = subject.as_ref();
+        let input_subjects = subjects.as_ref();
         let authorize_input = move |state: ReadForDecode, resources: Vec<OwnedResource>| async move {
             let config = state.config.decoded();
-            // The action that decided the route stage: the allowed one of an any-of rule (ADR-0025).
+            // The question that decided the route stage: the allowed action of an any-of rule, about
+            // the account it was asked about (ADR-0025, ADR-0026).
+            let Some(deciding) = requirement.question(input_subjects, state.deciding) else {
+                return Err(from_handler(
+                    HandlerError::internal_error("the route stage decided no question"),
+                    response_kind,
+                    ConnectionIntent::MayKeepAlive,
+                ));
+            };
+            let input_subject = deciding.subject;
             let route_request = AuthzRequest {
                 operation,
-                action: state.action,
+                action: deciding.action,
                 resource: requirement.resource,
                 bucket: input_meta.bucket(),
                 key: input_effective_key,
                 copy_source_identity: None,
                 version_id: None,
-                route_action: state.action,
+                route_action: deciding.action,
                 route_bucket: input_meta.bucket(),
                 route_key: input_effective_key,
                 identity: input_verdict.identity(),
@@ -1165,7 +1178,7 @@ impl S3Service {
                     key: resource.key(),
                     copy_source_identity: resource.identity(),
                     version_id: resource.version_id(),
-                    route_action: state.action,
+                    route_action: deciding.action,
                     route_bucket: input_meta.bucket(),
                     route_key: input_effective_key,
                     identity: input_verdict.identity(),
@@ -1241,7 +1254,7 @@ impl S3Service {
             let map = |error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive);
             let sse = config.sse().cloned().map_err(map)?;
             let context = RequestContextView::from_pipeline(operation, input_wire, addressed, input_verdict, caller_secret)
-                .map(|context| context.with_path_params(path_params).with_subject(input_subject.cloned()));
+                .map(|context| context.with_path_params(path_params).with_subjects(input_subjects.cloned()));
             let context = context.ok_or_else(|| map(HandlerError::internal_error("a rejected request reached its handler")))?;
             Ok((decisions, config, sse, context))
         };

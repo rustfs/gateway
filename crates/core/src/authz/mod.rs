@@ -20,11 +20,18 @@
 //! invoking a handler. Those belong to the deployment, routing, and registry respectively.
 //! Upstream: [`crate::Operation`]. Downstream: `crate::registry` and the facade pipeline.
 
+mod plan;
+mod query;
 mod rule;
 
 use rustfs_gateway_types::{BucketName, ErrorCode, ObjectKey};
 
-pub use self::rule::{ActionRule, Combined, MAX_SUBJECT_BYTES, Subject, SubjectError, SubjectName, SubjectRule, WhenAbsent};
+pub use self::plan::Question;
+pub use self::query::{QueryParamError, single_raw_value};
+pub use self::rule::{
+    ActionRule, Combined, Everyone, MAX_SUBJECT_BYTES, MAX_SUBJECTS, Subject, SubjectError, SubjectName, SubjectRule, Subjects,
+    WhenAbsent,
+};
 
 use crate::Operation;
 

@@ -198,6 +198,7 @@ pub use rustfs_gateway_core::{
     RequestBodyMode, RequiredParam, ResourceIdentity, ResourceShape, ResourceVisibility, Resp, ResponseBody, ResponseKind,
     ResponseOverride, RouteEntry, RouteSelector, RouterBuilder, TargetKind, resolve,
 };
+pub use rustfs_gateway_core::{Everyone, MAX_SUBJECTS, Subjects};
 
 /// Input-parameterized compatibility name for an operation request.
 ///

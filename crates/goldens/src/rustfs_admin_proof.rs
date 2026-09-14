@@ -28,7 +28,9 @@
 //! - [`ReplicationMetricsV2`], `GET /{bucket}?replication-metrics=2`: an S3-shaped read the RustFS
 //!   admin router claims by query value, under `s3:GetReplicationConfiguration` on the bucket.
 //! - One route from each custom-auth class of the inventory, and the bound bucket, on ADR-0025's
-//!   rules: `classes.rs`. The overlay record for all nine is `overlay.rs`.
+//!   rules; the three bulk access-key routes about a set of accounts, and the quota route whose
+//!   bucket is in the query, and RustFS's four anonymous OIDC bootstrap routes, on ADR-0026's:
+//!   `classes.rs`. The overlay record for all seventeen is `overlay.rs`.
 //!
 //! The first three are claimed rows inside the dialect's two path-prefix claims, `/rustfs/admin` and
 //! `/minio/admin`. The fourth is an S3-table row. The service is the facade's own: the SigV4
@@ -640,7 +642,12 @@ handler!(ReplicationMetricsV2, replication_metrics);
 // After the macro, so the classes' module could use it; it serves them with one generic impl.
 mod classes;
 
-pub(crate) use self::classes::{GetBucketQuota, GetUserInfo, ListPools, SelfAccountInfo, ServiceRestart};
+pub(crate) use self::classes::{OidcAuthorize, OidcCallback, OidcListProviders, OidcLogout};
+
+pub(crate) use self::classes::{
+    GetBucketQuota, GetBucketQuotaByQuery, GetUserInfo, ListAccessKeysBulk, ListAccessKeysLdapBulk, ListAccessKeysOpenidBulk,
+    ListPools, SelfAccountInfo, ServiceRestart,
+};
 
 impl Backend {
     fn get_object(&self, request: &Req<dto::GetObject>) -> HandlerResult<dto::GetObject> {
@@ -753,6 +760,14 @@ pub(crate) fn assemble(options: Options, policy: impl Fn(&AuthzRequest<'_>) -> b
         .register::<GetUserInfo, _>(Arc::clone(&backend))
         .register::<GetBucketQuota, _>(Arc::clone(&backend))
         .register::<ServiceRestart, _>(Arc::clone(&backend))
+        .register::<ListAccessKeysBulk, _>(Arc::clone(&backend))
+        .register::<ListAccessKeysLdapBulk, _>(Arc::clone(&backend))
+        .register::<ListAccessKeysOpenidBulk, _>(Arc::clone(&backend))
+        .register::<GetBucketQuotaByQuery, _>(Arc::clone(&backend))
+        .register::<OidcListProviders, _>(Arc::clone(&backend))
+        .register::<OidcAuthorize, _>(Arc::clone(&backend))
+        .register::<OidcCallback, _>(Arc::clone(&backend))
+        .register::<OidcLogout, _>(Arc::clone(&backend))
         .register::<dto::GetObject, _>(Arc::clone(&backend))
         .register::<dto::ListObjects, _>(Arc::clone(&backend));
     if options.delegate_anonymous {
@@ -769,6 +784,10 @@ pub(crate) fn assemble(options: Options, policy: impl Fn(&AuthzRequest<'_>) -> b
 }
 
 #[cfg(test)]
+mod anonymous_tests;
+#[cfg(test)]
 mod class_tests;
+#[cfg(test)]
+mod set_tests;
 #[cfg(test)]
 mod tests;

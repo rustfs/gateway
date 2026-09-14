@@ -48,7 +48,9 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/codec/response.rs` | Encoded response/body allowance. | A response has the wrong body/status shape. |
 | `src/codec/tests/metadata_and_url.rs` | Metadata symmetry and forced listing-encoding regressions. | RFC 2047 or `encoding-type=url` behavior changes. |
 | `src/authz.rs` | Authorization type-state and derived resources. | A handler can run without the intended proof. |
-| `src/authz/rule.rs` | ADR-0025's action rules (any-of, all-of, fail-closed combination) and subject rules (strict single extraction). | Several actions or a named account decide an operation. |
+| `src/authz/rule.rs` | ADR-0025's action rules (any-of, all-of, fail-closed combination) and subject rules, and ADR-0026's set rule (strict single and set extraction into `Subjects`). | Several actions or named accounts decide an operation. |
+| `src/authz/plan.rs` | The route-stage questions for a requirement and its subjects (one per action and account, plus every account's broader action), and their fail-closed settling. | A set, or every account, is authorised wrongly. |
+| `src/authz/query.rs` | The strict one-parameter query reader subjects and a query-bound bucket share. | A query parameter authorisation depends on is read twice or leniently. |
 | `src/registry/reject_rule_tests.rs` | Every registration refusal of an action or subject rule, and the overlay reading the rendered rule. | A rule is refused or admitted wrongly. |
 | `src/cancellation.rs` | Runtime-independent handler cancellation signal and waiter registry. | A handler deadline or rollback signal is lost or amplified. |
 | `src/request_context.rs` | The read-only handler request context (ADR-0022): principal, verified scope, routed target, raw target and header lines, and the explicitly named caller secret. | A handler needs to know who called, or a context value is wrong or leaks. |

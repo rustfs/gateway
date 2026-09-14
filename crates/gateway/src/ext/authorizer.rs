@@ -184,6 +184,11 @@ pub struct AuthzRequest<'a> {
     /// and to the handler. Whether a named subject is the caller, or one of the caller's service
     /// accounts, is this authorizer's decision: only it can look that up. The facade never asks
     /// about a subject for an anonymous caller.
+    ///
+    /// A set rule (ADR-0026) is asked one question per named account and action, every account in
+    /// turn, and is allowed only when every account is. A request for every account is asked
+    /// about no subject (`None`), under the operation's actions and the rule's broader action, so
+    /// no own-account relaxation can answer it.
     pub subject: Option<&'a Subject>,
 }
 

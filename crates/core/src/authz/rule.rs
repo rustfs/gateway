@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! How an operation's actions combine, and whose account it acts on (ADR-0025).
+//! How an operation's actions combine, and whose accounts it acts on (ADR-0025, ADR-0026).
 //!
 //! Responsible for: [`ActionRule`] and its fail-closed [`ActionRule::combine`]; [`SubjectRule`],
-//! its strict [`SubjectRule::extract`], and the [`Subject`] only extraction produces.
-//! NOT responsible for: asking the authorizer (the facade asks one question per action), deciding
-//! whether a named subject is the caller or one of the caller's accounts (the deployment's
-//! `Authorizer`, which holds the identity store), or declaring a rule (`crate::op::AuthRequirement`).
-//! Upstream: `crate::op`. Downstream: `crate::registry::reject`, `crate::request_context`, the facade.
+//! its strict [`SubjectRule::extract`], and the [`Subjects`] only extraction produces.
+//! NOT responsible for: asking the authorizer or settling a set of answers (`super::plan`, and
+//! the facade that asks), deciding whether a named subject is the caller or one of the caller's
+//! accounts (the deployment's `Authorizer`, which holds the identity store), decoding a query
+//! component (`super::query`), or declaring a rule (`crate::op::AuthRequirement`).
+//! Upstream: `crate::op`. Downstream: `super::plan`, `crate::registry::reject`,
+//! `crate::request_context`, the facade.
 //!
 //! # Why the facade combines, and the authorizer is asked one action at a time
 //!
@@ -36,10 +38,19 @@
 //! `+` whose meaning differs between form and URI decoding, a malformed escape or a control
 //! character is refused before anything is authenticated, and the handler reads the decoded value
 //! from its request context rather than parsing the query again.
+//!
+//! # Why a set of accounts is bounded, and every account is asked about (ADR-0026)
+//!
+//! A set rule is the one place a request chooses how many questions the authorizer is asked, so
+//! [`MAX_SUBJECTS`] caps it. A name repeated in the set, or an empty one, is refused rather than
+//! skipped: a handler that dropped or merged it would act on a different set from the one judged.
+//! And "every account" is not a longer list: it is a flag, and it needs a broader action of its
+//! own, because no answer about named accounts can imply one about accounts nobody named.
 
 use core::fmt;
 
 use super::Decision;
+use super::query::{self, QueryParamError};
 
 /// How the actions of an [`crate::AuthRequirement`] combine into one decision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -52,13 +63,13 @@ pub enum ActionRule {
     AnyOf(&'static [&'static str]),
 }
 
-/// The combined decision, and which action decided it.
+/// The combined decision, and which question decided it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Combined {
     /// The one decision the pipeline settles.
     pub decision: Decision,
-    /// The index of the action the second stage re-asks: the first allowed one of an any-of rule,
-    /// the first refused one of a refused rule, and the first action otherwise.
+    /// The index of the question the second stage re-asks: the first allowed one of an any-of
+    /// rule, the first refused one of a refused rule, and the first question otherwise.
     pub deciding: usize,
 }
 
@@ -122,6 +133,17 @@ pub enum WhenAbsent {
     Refuse,
 }
 
+/// A set rule's every-account form (ADR-0026): the flag that asks for it, and the broader action it
+/// needs on top of the operation's own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Everyone {
+    /// The flag parameter, whose value is exactly `true` or `false`: RustFS's `all`.
+    pub param: &'static str,
+    /// The broader action every account needs, distinct from the operation's own actions:
+    /// RustFS's `admin:ListUsers`. Asked about no subject, so no own-account relaxation answers it.
+    pub action: &'static str,
+}
+
 /// Whose account an operation acts on, when that is part of its authorisation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SubjectRule {
@@ -135,10 +157,21 @@ pub enum SubjectRule {
         /// What its absence means.
         when_absent: WhenAbsent,
     },
+    /// The accounts a repeated query parameter names, or every account (ADR-0026). RustFS's bulk
+    /// access-key listings. Naming none is the caller.
+    Set {
+        /// The repeated parameter naming each account: RustFS's `users`.
+        param: &'static str,
+        /// The every-account form, or `None` when the operation never acts on every account.
+        everyone: Option<Everyone>,
+    },
 }
 
 /// The longest decoded subject accepted, in bytes.
 pub const MAX_SUBJECT_BYTES: usize = 1024;
+
+/// The most accounts one set-rule request may name: each is one more question per action.
+pub const MAX_SUBJECTS: usize = 32;
 
 /// The account a request names, decoded once.
 ///
@@ -164,7 +197,7 @@ impl fmt::Debug for SubjectName {
     }
 }
 
-/// Whose account one request acts on.
+/// Whose account one authorizer question is about.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Subject {
     /// The caller's own account: the operation names no other, or the parameter was absent where
@@ -186,19 +219,53 @@ impl Subject {
     }
 }
 
+/// Whose accounts one request acts on, as extraction decided it (ADR-0026).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Subjects {
+    /// One account: every [`SubjectRule::Caller`] and [`SubjectRule::Query`] request, and a set
+    /// request that names nobody, which is about the caller.
+    One(Subject),
+    /// The accounts a set request names, each exactly once, in request order, at most
+    /// [`MAX_SUBJECTS`] of them. Every one is a [`Subject::Named`], and every one is asked about.
+    Each(Box<[Subject]>),
+    /// Every account: a set request's flag. Asked about no subject, under the operation's actions
+    /// and the rule's broader one.
+    Everyone,
+}
+
+impl Subjects {
+    /// The one subject of a single-subject request; `None` for a set of accounts or every account.
+    #[must_use]
+    pub const fn one(&self) -> Option<&Subject> {
+        match self {
+            Self::One(subject) => Some(subject),
+            Self::Each(_) | Self::Everyone => None,
+        }
+    }
+}
+
 /// Why a subject parameter was refused. Every refusal is a `400` before authentication, naming
 /// the parameter and never echoing the value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SubjectError {
     /// The parameter is absent or empty and the rule refuses that.
     Absent,
-    /// The parameter appears more than once.
+    /// The parameter appears more than once where one is expected: a single subject, or a set
+    /// rule's every-account flag.
     Repeated,
-    /// A query key or the value is not strictly decodable, or carries an ambiguous `+` or a
-    /// control character.
+    /// A query key or the value is not strictly decodable, carries an ambiguous `+` or a control
+    /// character, or a set names an empty account.
     Malformed,
     /// The decoded value is longer than [`MAX_SUBJECT_BYTES`].
     TooLong,
+    /// A set names one account twice.
+    Duplicate,
+    /// A set names more than [`MAX_SUBJECTS`] accounts.
+    TooMany,
+    /// A set names accounts and asks for every account at once.
+    Contradictory,
+    /// The every-account flag is neither `true` nor `false`.
+    Flag,
 }
 
 impl SubjectError {
@@ -210,245 +277,145 @@ impl SubjectError {
             Self::Repeated => "the account parameter appears more than once",
             Self::Malformed => "the query cannot be decoded unambiguously",
             Self::TooLong => "the account parameter is too long",
+            Self::Duplicate => "an account is named more than once",
+            Self::TooMany => "the request names more accounts than one request may",
+            Self::Contradictory => "the request names accounts and asks for every account at once",
+            Self::Flag => "the every-account parameter is neither `true` nor `false`",
+        }
+    }
+}
+
+impl From<QueryParamError> for SubjectError {
+    fn from(error: QueryParamError) -> Self {
+        match error {
+            QueryParamError::Repeated => Self::Repeated,
+            QueryParamError::Malformed => Self::Malformed,
         }
     }
 }
 
 impl SubjectRule {
-    /// Why this rule cannot be registered, or `None`.
+    /// Why this rule cannot be registered, or `None`. A set rule's broader action is checked
+    /// against the operation's own actions by `crate::AuthRequirement::fault`.
     #[must_use]
     pub fn fault(self) -> Option<&'static str> {
+        const SPELLING: &str = "a subject parameter is spelled in RFC 3986 unreserved characters and is not empty";
         match self {
             Self::Caller => None,
-            Self::Query { param, .. } if param.is_empty() || !param.bytes().all(is_unreserved) => {
-                Some("a subject parameter is spelled in RFC 3986 unreserved characters and is not empty")
-            }
-            Self::Query { .. } => None,
+            Self::Query { param, .. } => (!is_parameter(param)).then_some(SPELLING),
+            Self::Set { param, .. } if !is_parameter(param) => Some(SPELLING),
+            Self::Set {
+                everyone: Some(everyone),
+                ..
+            } if !is_parameter(everyone.param) => Some(SPELLING),
+            Self::Set {
+                param,
+                everyone: Some(everyone),
+            } if everyone.param == param => Some("a set rule's every-account flag is a parameter of its own"),
+            Self::Set { .. } => None,
         }
     }
 
-    /// The subject one request names.
+    /// The parameter a refusal is about, for the `400` that names it.
+    #[must_use]
+    pub const fn refused_param(self, error: SubjectError) -> Option<&'static str> {
+        match (self, error) {
+            (Self::Caller, _) => None,
+            (Self::Query { param, .. } | Self::Set { param, everyone: None }, _) => Some(param),
+            (
+                Self::Set {
+                    everyone: Some(everyone),
+                    ..
+                },
+                SubjectError::Repeated | SubjectError::Flag,
+            ) => Some(everyone.param),
+            (Self::Set { param, .. }, _) => Some(param),
+        }
+    }
+
+    /// The accounts one request names.
     ///
     /// # Errors
     ///
     /// A [`SubjectError`]: every query key is decoded strictly, so an escaped spelling of the
     /// parameter is the parameter, and a key that cannot be decoded refuses the request.
-    pub fn extract(self, raw_query: &str) -> Result<Subject, SubjectError> {
-        let Self::Query { param, when_absent } = self else {
-            return Ok(Subject::Caller);
-        };
-        let mut found = None;
-        for pair in raw_query.split('&').filter(|pair| !pair.is_empty()) {
-            let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
-            if decode_component(raw_key)? != param {
-                continue;
+    pub fn extract(self, raw_query: &str) -> Result<Subjects, SubjectError> {
+        match self {
+            Self::Caller => Ok(Subjects::One(Subject::Caller)),
+            Self::Query { param, when_absent } => {
+                let value = match query::single_raw_value(raw_query, param)? {
+                    Some(raw) => query::decode_component(raw)?,
+                    None => String::new(),
+                };
+                if value.is_empty() {
+                    return match when_absent {
+                        WhenAbsent::Caller => Ok(Subjects::One(Subject::Caller)),
+                        WhenAbsent::Refuse => Err(SubjectError::Absent),
+                    };
+                }
+                Ok(Subjects::One(named(value)?))
             }
-            if found.replace(raw_value).is_some() {
+            Self::Set { param, everyone } => extract_set(raw_query, param, everyone),
+        }
+    }
+}
+
+/// A set: each `param` value once, at most [`MAX_SUBJECTS`], never empty; the flag at most once
+/// and exactly `true` or `false`; never both a name and `true`.
+fn extract_set(raw_query: &str, param: &str, everyone: Option<Everyone>) -> Result<Subjects, SubjectError> {
+    let mut each: Vec<Subject> = Vec::new();
+    let mut flag = None;
+    for (raw_key, raw_value) in query::pairs(raw_query) {
+        let key = query::decode_component(raw_key)?;
+        if key == param {
+            let value = query::decode_component(raw_value)?;
+            if value.is_empty() {
+                return Err(SubjectError::Malformed);
+            }
+            if each.iter().any(|subject| subject.name() == Some(value.as_str())) {
+                return Err(SubjectError::Duplicate);
+            }
+            if each.len() >= MAX_SUBJECTS {
+                return Err(SubjectError::TooMany);
+            }
+            each.push(named(value)?);
+        } else if let Some(everyone) = everyone
+            && key == everyone.param
+        {
+            let asked = match query::decode_component(raw_value)?.as_str() {
+                "true" => true,
+                "false" => false,
+                _ => return Err(SubjectError::Flag),
+            };
+            if flag.replace(asked).is_some() {
                 return Err(SubjectError::Repeated);
             }
         }
-        let value = match found {
-            Some(raw) => decode_component(raw)?,
-            None => String::new(),
-        };
-        if value.is_empty() {
-            return match when_absent {
-                WhenAbsent::Caller => Ok(Subject::Caller),
-                WhenAbsent::Refuse => Err(SubjectError::Absent),
-            };
-        }
-        if value.len() > MAX_SUBJECT_BYTES {
-            return Err(SubjectError::TooLong);
-        }
-        Ok(Subject::Named(SubjectName(value.into_boxed_str())))
     }
+    match (flag == Some(true), each.is_empty()) {
+        (true, false) => Err(SubjectError::Contradictory),
+        (true, true) => Ok(Subjects::Everyone),
+        (false, true) => Ok(Subjects::One(Subject::Caller)),
+        (false, false) => Ok(Subjects::Each(each.into_boxed_slice())),
+    }
+}
+
+fn named(value: String) -> Result<Subject, SubjectError> {
+    if value.len() > MAX_SUBJECT_BYTES {
+        return Err(SubjectError::TooLong);
+    }
+    Ok(Subject::Named(SubjectName(value.into_boxed_str())))
+}
+
+fn is_parameter(param: &str) -> bool {
+    !param.is_empty() && param.bytes().all(is_unreserved)
 }
 
 const fn is_unreserved(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~')
 }
 
-/// One percent-decode, refusing a malformed escape, invalid UTF-8, a literal `+` and a control
-/// character.
-fn decode_component(raw: &str) -> Result<String, SubjectError> {
-    let mut decoded = Vec::with_capacity(raw.len());
-    let mut bytes = raw.bytes();
-    while let Some(byte) = bytes.next() {
-        match byte {
-            b'+' => return Err(SubjectError::Malformed),
-            b'%' => {
-                let high = bytes.next().and_then(hex_value);
-                let low = bytes.next().and_then(hex_value);
-                let (Some(high), Some(low)) = (high, low) else {
-                    return Err(SubjectError::Malformed);
-                };
-                decoded.push(high << 4 | low);
-            }
-            byte => decoded.push(byte),
-        }
-    }
-    let text = String::from_utf8(decoded).map_err(|_| SubjectError::Malformed)?;
-    if text.chars().any(char::is_control) {
-        return Err(SubjectError::Malformed);
-    }
-    Ok(text)
-}
-
-const fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
-mod tests {
-    use super::*;
-
-    const A: Decision = Decision::Allow;
-    const D: Decision = Decision::Deny;
-    const I: Decision = Decision::Indeterminate;
-    const TWO: &[&str] = &["admin:A", "admin:B"];
-
-    const USER: SubjectRule = SubjectRule::Query {
-        param: "accessKey",
-        when_absent: WhenAbsent::Refuse,
-    };
-    const LIST: SubjectRule = SubjectRule::Query {
-        param: "user",
-        when_absent: WhenAbsent::Caller,
-    };
-
-    fn named(value: &str) -> Subject {
-        Subject::Named(SubjectName(Box::from(value)))
-    }
-
-    #[test]
-    fn any_of_allows_on_any_allow_and_names_the_allowed_action() {
-        assert_eq!(
-            ActionRule::AnyOf(TWO).combine(&[D, A]),
-            Combined {
-                decision: A,
-                deciding: 1
-            }
-        );
-        assert_eq!(
-            ActionRule::AnyOf(TWO).combine(&[A, D]),
-            Combined {
-                decision: A,
-                deciding: 0
-            }
-        );
-        assert_eq!(ActionRule::AnyOf(TWO).combine(&[I, A]).decision, A);
-    }
-
-    #[test]
-    fn n_any_of_with_no_allow_refuses_and_keeps_indeterminate_visible() {
-        assert_eq!(ActionRule::AnyOf(TWO).combine(&[D, D]).decision, D);
-        assert_eq!(ActionRule::AnyOf(TWO).combine(&[D, I]).decision, I);
-        assert_eq!(ActionRule::AnyOf(TWO).combine(&[I, D]).decision, I);
-    }
-
-    #[test]
-    fn all_of_allows_only_when_every_action_is_allowed() {
-        assert_eq!(
-            ActionRule::AllOf(TWO).combine(&[A, A]),
-            Combined {
-                decision: A,
-                deciding: 0
-            }
-        );
-    }
-
-    #[test]
-    fn n_all_of_missing_one_action_is_refused_with_that_actions_decision() {
-        assert_eq!(
-            ActionRule::AllOf(TWO).combine(&[A, D]),
-            Combined {
-                decision: D,
-                deciding: 1
-            }
-        );
-        assert_eq!(
-            ActionRule::AllOf(TWO).combine(&[D, A]),
-            Combined {
-                decision: D,
-                deciding: 0
-            }
-        );
-        assert_eq!(ActionRule::AllOf(TWO).combine(&[A, I]).decision, I);
-    }
-
-    #[test]
-    fn n_a_count_that_does_not_match_the_rule_is_indeterminate() {
-        assert_eq!(ActionRule::AllOf(TWO).combine(&[A]).decision, I);
-        assert_eq!(ActionRule::AnyOf(TWO).combine(&[A, A, A]).decision, I);
-        assert_eq!(ActionRule::One.combine(&[]).decision, I);
-        assert_eq!(ActionRule::One.combine(&[A, A]).decision, I);
-        assert_eq!(ActionRule::One.combine(&[A]).decision, A);
-        assert_eq!(ActionRule::One.combine(&[D]).decision, D);
-    }
-
-    #[test]
-    fn a_named_subject_is_decoded_once() {
-        assert_eq!(USER.extract("accessKey=alice"), Ok(named("alice")));
-        assert_eq!(USER.extract("x=1&accessKey=cn%3Dbob%20smith&y"), Ok(named("cn=bob smith")));
-        assert_eq!(SubjectRule::Caller.extract("accessKey=alice"), Ok(Subject::Caller));
-    }
-
-    #[test]
-    fn n_an_escaped_spelling_of_the_parameter_is_the_parameter() {
-        assert_eq!(USER.extract("access%4Bey=mallory"), Ok(named("mallory")));
-        assert_eq!(USER.extract("accessKey=alice&access%4Bey=mallory"), Err(SubjectError::Repeated));
-    }
-
-    #[test]
-    fn n_a_repeated_parameter_is_refused() {
-        assert_eq!(USER.extract("accessKey=alice&accessKey=mallory"), Err(SubjectError::Repeated));
-        assert_eq!(LIST.extract("user=&user=mallory"), Err(SubjectError::Repeated));
-    }
-
-    #[test]
-    fn absence_means_what_the_rule_says() {
-        assert_eq!(USER.extract(""), Err(SubjectError::Absent));
-        assert_eq!(USER.extract("accessKey="), Err(SubjectError::Absent));
-        assert_eq!(USER.extract("accessKey"), Err(SubjectError::Absent));
-        assert_eq!(LIST.extract(""), Ok(Subject::Caller));
-        assert_eq!(LIST.extract("user="), Ok(Subject::Caller));
-    }
-
-    #[test]
-    fn n_ambiguous_or_malformed_spellings_are_refused() {
-        for query in [
-            "accessKey=a+b",
-            "accessKey=a%2",
-            "accessKey=a%zz",
-            "accessKey=%ff",
-            "accessKey=a%0Ab",
-            "acc%ZZ=1&accessKey=a",
-            "access+Key=a",
-        ] {
-            assert_eq!(USER.extract(query), Err(SubjectError::Malformed), "{query}");
-        }
-        let long = format!("accessKey={}", "a".repeat(MAX_SUBJECT_BYTES + 1));
-        assert_eq!(USER.extract(&long), Err(SubjectError::TooLong));
-        let longest = format!("accessKey={}", "a".repeat(MAX_SUBJECT_BYTES));
-        assert!(USER.extract(&longest).is_ok());
-    }
-
-    #[test]
-    fn n_a_parameter_outside_the_unreserved_set_cannot_be_registered() {
-        for param in ["", "access key", "a&b", "a=b", "a%41"] {
-            let rule = SubjectRule::Query {
-                param,
-                when_absent: WhenAbsent::Refuse,
-            };
-            assert!(rule.fault().is_some(), "{param:?}");
-        }
-        assert_eq!(USER.fault(), None);
-        assert_eq!(SubjectRule::Caller.fault(), None);
-    }
-}
+#[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+#[path = "rule_tests.rs"]
+mod tests;
