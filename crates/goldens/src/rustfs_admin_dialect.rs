@@ -251,6 +251,47 @@ pub(crate) fn assemble(policy: impl Fn(&str, &str) -> bool + Send + Sync + 'stat
     }
 }
 
+/// How many services a refusal test spreads its rows across.
+const LANES: usize = 8;
+
+/// Runs `check` on every row, split across [`LANES`] threads that each assemble their own service
+/// under `policy`. Every refusal holds the security floor's uniform failure latency, which is the
+/// contract under test and is not lowered here, so a test that refuses all 310 rows one after
+/// another waits out 310 floors. The lanes wait them out side by side instead. One service per
+/// lane keeps every exchange's recorded questions its own. A panic in any lane fails the test with
+/// that lane's own message, and the lanes together must have checked every row they were handed.
+pub(crate) fn in_lanes<P>(
+    policy: P,
+    rows: &[(&'static RouteRecord, String)],
+    check: impl Fn(&Assembled, &RouteRecord, &str) + Sync,
+) where
+    P: Fn(&str, &str) -> bool + Copy + Send + Sync + 'static,
+{
+    let per_lane = rows.len().div_ceil(LANES).max(1);
+    let checked: usize = std::thread::scope(|scope| {
+        let lanes: Vec<_> = rows
+            .chunks(per_lane)
+            .map(|lane| {
+                let check = &check;
+                scope.spawn(move || {
+                    let assembled = assemble(policy);
+                    let mut done = 0;
+                    for (record, path) in lane {
+                        check(&assembled, record, path);
+                        done += 1;
+                    }
+                    done
+                })
+            })
+            .collect();
+        lanes
+            .into_iter()
+            .map(|lane| lane.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+            .sum()
+    });
+    assert_eq!(checked, rows.len(), "the lanes checked every row they were handed");
+}
+
 /// The actions a record's rule names, in order.
 pub(crate) fn actions(record: &RouteRecord) -> Vec<&'static str> {
     record

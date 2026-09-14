@@ -29,7 +29,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use rustfs_gateway_dialect_rustfs_admin::{BodyKind, PENDING, ROUTES, RouteRecord};
 
 use super::{
-    Exchange, actions, assemble, declared, param, paths, presigned, signed, templates, unsigned, value_of, wire, with_segment,
+    Exchange, actions, assemble, declared, in_lanes, param, paths, presigned, signed, templates, unsigned, value_of, wire,
+    with_segment,
 };
 use crate::migration_inventory::rustfs_admin_routes::{AdminAuthMode, RequestBodyUse, ResponseBodyUse};
 use crate::operation_diff::s3s_f3e17541::context::ACCESS_KEY;
@@ -243,29 +244,32 @@ fn every_any_of_row_is_authorised_by_either_action() {
 /// asking about that action.
 #[test]
 fn n_a_row_whose_action_is_denied_is_refused_before_its_handler() {
-    let assembled = assemble(|_, _| false);
-    for (record, path) in rows() {
-        let at = format!("{} {path}", record.method);
-        let exchange = assembled.exchange(wire(&signed(record, &path)));
-        refused_before_the_handler(&exchange, &at);
-        assert!(exchange.body.contains("<Code>AccessDenied</Code>"), "{at}: {}", exchange.body);
-        assert_eq!(
-            exchange.asked.first().map(|asked| asked.action.as_str()),
-            Some(actions(record)[0]),
-            "{at}"
-        );
-    }
+    in_lanes(
+        |_, _| false,
+        &rows().collect::<Vec<_>>(),
+        |assembled, record, path| {
+            let at = format!("{} {path}", record.method);
+            let exchange = assembled.exchange(wire(&signed(record, path)));
+            refused_before_the_handler(&exchange, &at);
+            assert!(exchange.body.contains("<Code>AccessDenied</Code>"), "{at}: {}", exchange.body);
+            assert_eq!(
+                exchange.asked.first().map(|asked| asked.action.as_str()),
+                Some(actions(record)[0]),
+                "{at}"
+            );
+        },
+    );
 }
 
 /// Negative — allowing every action but a row's own does not authorise it: the decision is the
 /// declared action's, not any admin permission's.
 #[test]
 fn n_every_other_action_does_not_authorise_a_row() {
-    let assembled = assemble(|operation, action| !declared(operation, action));
-    for (record, path) in rows() {
-        let exchange = assembled.exchange(wire(&signed(record, &path)));
+    let policy = |operation: &str, action: &str| !declared(operation, action);
+    in_lanes(policy, &rows().collect::<Vec<_>>(), |assembled, record, path| {
+        let exchange = assembled.exchange(wire(&signed(record, path)));
         refused_before_the_handler(&exchange, &format!("{} {path}", record.method));
-    }
+    });
 }
 
 /// Negative — an unsigned request for any row is refused without asking the authorizer.
@@ -281,20 +285,22 @@ fn n_an_unsigned_row_is_refused_without_asking() {
 /// Negative — a forged signature or an unknown access key is refused without asking the
 /// authorizer.
 ///
-/// One fresh service per row: the facade's own framework limiter throttles a client that keeps
-/// failing authentication (`SlowDown`, before and independent of the deployment's governor), which
-/// is its job and would otherwise answer the later rows of this burst instead of the verifier.
+/// The assembly's framework rates leave room for the whole burst, so the verifier, not the
+/// framework limiter (`SlowDown`), answers every row; the assertion below holds that apart.
 #[test]
 fn n_a_forged_or_unknown_key_row_is_refused_without_asking() {
-    for (record, path) in rows() {
-        let assembled = assemble(|_, _| true);
-        for request in [signed(record, &path).forged(), signed(record, &path).unknown_key()] {
-            let exchange = assembled.exchange(wire(&request));
-            let at = format!("{} {path}", record.method);
-            refused_without_asking(&exchange, &at);
-            assert!(!exchange.body.contains("<Code>SlowDown</Code>"), "{at}: {}", exchange.body);
-        }
-    }
+    in_lanes(
+        |_, _| true,
+        &rows().collect::<Vec<_>>(),
+        |assembled, record, path| {
+            for request in [signed(record, path).forged(), signed(record, path).unknown_key()] {
+                let exchange = assembled.exchange(wire(&request));
+                let at = format!("{} {path}", record.method);
+                refused_without_asking(&exchange, &at);
+                assert!(!exchange.body.contains("<Code>SlowDown</Code>"), "{at}: {}", exchange.body);
+            }
+        },
+    );
 }
 
 /// Negative — a presigned request for any row no query selects is refused at the floor, as
