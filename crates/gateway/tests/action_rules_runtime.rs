@@ -16,11 +16,11 @@
 //! cannot reach.
 //!
 //! Responsible for: an all-of rule asking every action and refusing when any one is refused,
-//! with the input stage re-asking the route's deciding action; and an own-account operation whose
-//! floor admits anonymous requests never asking the authorizer about an anonymous caller, even
-//! with anonymous admission delegated to it; and a set-rule operation (ADR-0026) whose floor admits
-//! anonymous requests refusing an anonymous caller without asking, whether it names accounts or asks
-//! for every account, while a signed request for every account is asked the broader action too.
+//! with the input stage re-asking the route's deciding action; and an own-account operation an
+//! anonymous request reaches never asking the authorizer about an anonymous caller, even with
+//! anonymous admission delegated to it; and a set-rule operation (ADR-0026) an anonymous request
+//! reaches refusing an anonymous caller without asking, whether it names accounts or asks for
+//! every account, while a signed request for every account is asked the broader action too.
 //! NOT responsible for: the rule functions (`rustfs-gateway-core`'s unit tests), or the RustFS
 //! classes and the bound bucket (`crates/goldens/src/rustfs_admin_proof/class_tests.rs`).
 //! Upstream: `rustfs-gateway`, `rustfs-gateway-core`'s dialect types, `support`. Downstream:
@@ -90,12 +90,14 @@ static SPECS: [OperationSpec; 3] = [
     ),
 ];
 
-/// `example:Mine` admits anonymous requests at its floor, so only the facade's own guard stands
-/// between an anonymous caller and a question about "its" account.
+/// `example:Mine` and `example:Each` are not privileged, so the service's delegated anonymous
+/// admission (ADR-0021) lets an anonymous request reach them, and only the facade's own guard
+/// stands between an anonymous caller and a question about "its" account. Neither opts in on its
+/// own floor: registration refuses an operation that opts in and is about an account at all.
 static FLOORS: [OperationFloor; 3] = [
     OperationFloor::custom(BOTH, SigService::S3),
-    OperationFloor::custom(MINE, SigService::S3).allow_anonymous_after_listing_in_the_posture_report(),
-    OperationFloor::custom(EACH, SigService::S3).allow_anonymous_after_listing_in_the_posture_report(),
+    OperationFloor::builtin(MINE, SigService::S3),
+    OperationFloor::builtin(EACH, SigService::S3),
 ];
 
 impl<const N: usize> Operation for Ruled<N> {
@@ -166,7 +168,7 @@ static OVERLAY: DialectOverlay = DialectOverlay {
             action: "example:Mine about caller",
             resource: ResourceShape::Service,
             success_status: 200,
-            anonymous: true,
+            anonymous: false,
             evidence: EVIDENCE,
         },
         OverlayRow {
@@ -176,7 +178,7 @@ static OVERLAY: DialectOverlay = DialectOverlay {
             action: "admin:ListEach about each(users, everyone=all ⇒ admin:ListEveryone)",
             resource: ResourceShape::Service,
             success_status: 200,
-            anonymous: true,
+            anonymous: false,
             evidence: EVIDENCE,
         },
     ],

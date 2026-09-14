@@ -120,6 +120,8 @@ the dialect boundary's.
 | Malformed action | `notanaction` | An action that is not `service:Action` cannot be matched by a policy |
 | Duplicate name | two registrations | "The last registration wins" is how a plugin loaded later replaces a handler nobody expected it to touch |
 | Wrong vendor | `other:Thing` in the `acme` dialect | Otherwise one dialect vouches for another's operations |
+| An action in another vendor's namespace | `acme:Op` authorised as `other:Thing` | One dialect would answer questions in a namespace another dialect owns. A dialect operation's actions, a set rule's every-account action included, are its own vendor's labels or an IAM service's (`admin`, `iam`, `kms`, `s3`, `s3express`, `sts`) |
+| An IAM action on an anonymous or own-account operation | `acme:Boot` anonymous and authorised as `admin:ServerInfo` | Nothing evaluates an IAM policy there: an anonymous request has no identity, and RustFS answers own-account routes without one. An `admin:` or `s3:` spelling would read as a policy check that never happens, and an authorizer granting it to everyone would open the route. Both take the operation's own vendor label, and an anonymous operation is about no account at all |
 | No overlay row | declared in code only | The row is where the precedence and the evidence are reviewed |
 | No declaration | overlay row only | A row nothing declares reads as a reviewed decision about behaviour that does not exist |
 | Any of the six facts disagreeing | code says 505, overlay says 506 | The record and the behaviour must be one thing |

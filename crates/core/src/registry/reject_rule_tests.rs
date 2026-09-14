@@ -45,7 +45,7 @@ const fn everyone_needs(action: &'static str) -> SubjectRule {
 }
 
 /// One requirement per index; the first five are registrable, the rest are refused.
-const REQUIREMENTS: [AuthRequirement; 21] = [
+const REQUIREMENTS: [AuthRequirement; 31] = [
     AuthRequirement::any_of(TWO, ResourceShape::Service),
     AuthRequirement::all_of(TWO, ResourceShape::Bucket),
     AuthRequirement::new("acme:Own", ResourceShape::Service).about_subject(SubjectRule::Caller),
@@ -89,11 +89,32 @@ const REQUIREMENTS: [AuthRequirement; 21] = [
     }),
     // 20: a bucket operation about a named account, for the query-bucket refusals.
     AuthRequirement::new("s3:GetBucketQuota", ResourceShape::Bucket).about_subject(USER),
+    // 21 to 27 are anonymous by their floors' opt-in. 21: its own vendor's label, about no account.
+    AuthRequirement::new("acme:Boot", ResourceShape::Service),
+    // 22: an anonymous operation borrowing IAM's `admin` namespace.
+    AuthRequirement::new("admin:ServerInfo", ResourceShape::Service),
+    // 23: an anonymous operation borrowing IAM's `s3` namespace.
+    AuthRequirement::new("s3:GetObject", ResourceShape::Bucket),
+    // 24: an anonymous operation in another vendor's namespace.
+    AuthRequirement::new("other:Boot", ResourceShape::Service),
+    // 25: an anonymous any-of rule whose second action is IAM's.
+    AuthRequirement::any_of(&["acme:A", "admin:B"], ResourceShape::Service),
+    // 26: an anonymous operation about a named account.
+    AuthRequirement::new("acme:Boot", ResourceShape::Service).about_subject(USER),
+    // 27: an anonymous operation about the caller's own account.
+    AuthRequirement::new("acme:Own", ResourceShape::Service).about_subject(SubjectRule::Caller),
+    // 28: a signed operation in another vendor's namespace.
+    AuthRequirement::new("other:Thing", ResourceShape::Service),
+    // 29: a signed set rule whose every-account action is another vendor's.
+    AuthRequirement::new("admin:ListServiceAccounts", ResourceShape::Service).about_subject(everyone_needs("other:ListUsers")),
+    // 30: a signed all-of rule whose second action is another vendor's.
+    AuthRequirement::all_of(&["acme:A", "other:B"], ResourceShape::Service),
 ];
 
-const NAMES: [&str; 21] = [
+const NAMES: [&str; 31] = [
     "acme:R0", "acme:R1", "acme:R2", "acme:R3", "acme:R4", "acme:R5", "acme:R6", "acme:R7", "acme:R8", "acme:R9", "acme:R10",
     "acme:R11", "acme:R12", "acme:R13", "acme:R14", "acme:R15", "acme:R16", "acme:R17", "acme:R18", "acme:R19", "acme:R20",
+    "acme:R21", "acme:R22", "acme:R23", "acme:R24", "acme:R25", "acme:R26", "acme:R27", "acme:R28", "acme:R29", "acme:R30",
 ];
 
 const fn spec(index: usize) -> OperationSpec {
@@ -104,7 +125,7 @@ const fn spec(index: usize) -> OperationSpec {
         .build()
 }
 
-static SPECS: [OperationSpec; 21] = [
+static SPECS: [OperationSpec; 31] = [
     spec(0),
     spec(1),
     spec(2),
@@ -126,9 +147,24 @@ static SPECS: [OperationSpec; 21] = [
     spec(18),
     spec(19),
     spec(20),
+    spec(21),
+    spec(22),
+    spec(23),
+    spec(24),
+    spec(25),
+    spec(26),
+    spec(27),
+    spec(28),
+    spec(29),
+    spec(30),
 ];
 
-static FLOORS: [OperationFloor; 21] = [
+/// Anonymous by its own opt-in, as ADR-0026's bootstrap operations are.
+const fn anonymous(index: usize) -> OperationFloor {
+    OperationFloor::custom(NAMES[index], SigService::S3).allow_anonymous_after_listing_in_the_posture_report()
+}
+
+static FLOORS: [OperationFloor; 31] = [
     OperationFloor::custom(NAMES[0], SigService::S3),
     OperationFloor::custom(NAMES[1], SigService::S3),
     OperationFloor::custom(NAMES[2], SigService::S3),
@@ -150,6 +186,16 @@ static FLOORS: [OperationFloor; 21] = [
     OperationFloor::custom(NAMES[18], SigService::S3),
     OperationFloor::custom(NAMES[19], SigService::S3),
     OperationFloor::custom(NAMES[20], SigService::S3),
+    anonymous(21),
+    anonymous(22),
+    anonymous(23),
+    anonymous(24),
+    anonymous(25),
+    anonymous(26),
+    anonymous(27),
+    OperationFloor::custom(NAMES[28], SigService::S3),
+    OperationFloor::custom(NAMES[29], SigService::S3),
+    OperationFloor::custom(NAMES[30], SigService::S3),
 ];
 
 // The fixtures sit inside their own `#[cfg(test)]` item for `check_op_file_shape.sh`, which admits
@@ -308,6 +354,81 @@ fn n_a_set_rule_whose_every_account_form_adds_nothing_is_refused() {
     assert!(why::<17>().contains("already requires"));
     assert!(why::<18>().contains("already requires"));
     assert!(why::<19>().contains("unreserved"));
+}
+
+// ── which namespace an action may be in, by who reaches the operation ───────────────────────
+
+/// Positive — an anonymous operation labelled in its own vendor's namespace, about no account, is
+/// registrable; so are signed operations in their own namespace or an IAM service's (0 to 4, 14).
+#[test]
+fn an_anonymous_operation_under_its_own_label_is_registrable() {
+    assert_eq!(check_operation::<Rule<21>>(), Ok(()));
+    assert_eq!(check_operation::<Rule<3>>(), Ok(()));
+    assert_eq!(check_operation::<Rule<14>>(), Ok(()));
+}
+
+/// Negative — an anonymous operation may not borrow an IAM service's namespace or another
+/// vendor's, for any action of its rule, not only the first.
+#[test]
+fn n_an_anonymous_operation_outside_its_own_namespace_is_refused() {
+    for why in [why::<22>(), why::<23>(), why::<24>(), why::<25>()] {
+        assert_eq!(
+            why,
+            "an anonymous operation's action is in the operation's own vendor namespace, never an IAM service's"
+        );
+    }
+}
+
+/// Negative — an anonymous operation is about no account: neither a named one nor the caller's,
+/// even under its own label.
+#[test]
+fn n_an_anonymous_operation_about_an_account_is_refused() {
+    assert!(why::<26>().starts_with("an anonymous operation is about no account"));
+    assert!(why::<27>().starts_with("an anonymous operation is about no account"));
+}
+
+/// Negative — a signed operation's actions, the every-account action and later members of a rule
+/// included, are its own vendor's or an IAM service's, never another vendor's.
+#[test]
+fn n_a_signed_operation_in_another_vendors_namespace_is_refused() {
+    for why in [why::<28>(), why::<29>(), why::<30>()] {
+        assert_eq!(
+            why,
+            "a dialect operation's action is in its own vendor namespace or an IAM service's, never another vendor's"
+        );
+    }
+}
+
+/// Negative — the same rules hold where a dialect declares the operation, not only where a handler
+/// is registered.
+#[test]
+fn n_a_dialect_declaring_an_anonymous_iam_action_is_refused() {
+    static ANONYMOUS_ROWS: DialectOverlay = DialectOverlay {
+        name: "acme-rules",
+        vendor: "acme",
+        claims: CLAIMS,
+        operations: &[OverlayRow {
+            name: NAMES[22],
+            anonymous: true,
+            action: "admin:ServerInfo",
+            ..row_recording("admin:ServerInfo")
+        }],
+    };
+    let errors = Dialect::assemble(&ANONYMOUS_ROWS)
+        .declare_claimed::<Rule<22>>(ClaimedRoute {
+            precedence: 10,
+            rows: ROWS,
+            shadows: &[],
+            bucket_param: None,
+        })
+        .build()
+        .expect_err("an anonymous admin action");
+    assert!(
+        errors
+            .iter()
+            .any(|error| format!("{error:?}").contains("own vendor namespace, never an IAM")),
+        "{errors:?}"
+    );
 }
 
 // ── the overlay reads the rendered rule ──────────────────────────────────────────────────────

@@ -45,7 +45,8 @@ use crate::error::{DisallowedPreAuthCode, PreAuthError};
 use crate::op::{AuthRequirement, Operation, is_standard_operation_name, standard_operation_name_ignoring_case};
 use crate::registry::OperationSpec;
 
-/// Action namespaces an IAM policy is written in, which an own-account label may not borrow.
+/// Action namespaces an IAM policy is written in, which an own-account or anonymous operation's
+/// label may not borrow.
 const IAM_SERVICES: &[&str] = &["admin", "iam", "kms", "s3", "s3express", "sts"];
 
 /// Why an operation could not be registered.
@@ -250,9 +251,61 @@ pub(crate) fn check_operation<O: Operation>() -> Result<(), RegistryError> {
         if !is_namespaced(name) {
             return Err(RegistryError::NameNotNamespaced { name });
         }
+        check_spec(spec)?;
+        return check_dialect_actions(spec, O::floor().allows_anonymous());
     }
 
     check_spec(spec)
+}
+
+/// Which namespace a dialect operation's actions may be in, by who can reach it.
+///
+/// | The operation | Its actions, the every-account action included |
+/// |---|---|
+/// | anonymous by its own floor's opt-in | its own vendor's labels only, and it is about no account |
+/// | about the caller's own account | its own vendor's label only (checked in [`check_spec`]) |
+/// | any other dialect operation | its own vendor's labels, or an IAM service's actions |
+///
+/// Everything else is refused. An anonymous request carries no identity for an IAM policy to be
+/// evaluated against, so an `admin:` or `s3:` spelling there would read as a policy check that
+/// never happens, and an authorizer that grants it to "everyone" would open an admin surface to
+/// unauthenticated callers. Another vendor's label lets one dialect answer questions in a
+/// namespace another dialect owns. Delegating anonymous admission at service level (ADR-0021) is
+/// not an opt-in: it is the deployment's decision, and its authorizer decides those requests.
+fn check_dialect_actions(spec: &'static OperationSpec, anonymous: bool) -> Result<(), RegistryError> {
+    let name = spec.name;
+    let Some(auth) = spec.auth else {
+        return Err(RegistryError::MissingAuthRequirement { name });
+    };
+    let vendor = name.split_once(':').map(|(vendor, _)| vendor);
+    let service = |action: &'static str| action.split_once(':').map(|(service, _)| service);
+    let is_own_label = |action| service(action) == vendor && vendor.is_some_and(|vendor| !IAM_SERVICES.contains(&vendor));
+    let mut actions = auth.actions().iter().copied().chain(auth.everyone_action());
+    if anonymous {
+        if auth.subject().is_some() {
+            return Err(RegistryError::InvalidAuthRule {
+                name,
+                why: "an anonymous operation is about no account: an anonymous request has no caller, and nobody \
+                      named in it can be authorised against one",
+            });
+        }
+        if !actions.all(is_own_label) {
+            return Err(RegistryError::InvalidAuthRule {
+                name,
+                why: "an anonymous operation's action is in the operation's own vendor namespace, never an IAM \
+                      service's",
+            });
+        }
+        return Ok(());
+    }
+    if !actions.all(|action| is_own_label(action) || service(action).is_some_and(|service| IAM_SERVICES.contains(&service))) {
+        return Err(RegistryError::InvalidAuthRule {
+            name,
+            why: "a dialect operation's action is in its own vendor namespace or an IAM service's, never another \
+                  vendor's",
+        });
+    }
+    Ok(())
 }
 
 /// The rules that hold for a spec whoever declared it.
