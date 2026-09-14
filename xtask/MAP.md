@@ -15,6 +15,7 @@ Agent entry point for repository automation commands.
 | `src/mutate/tests.rs` | Verdict-order controls for the mutation classifier, including the two shapes of ledger row that certify nothing (`UNWITNESSED`) and the live-case control that keeps `SURVIVED` meaning a corpus gap. | A guard in front of `SURVIVED` changes. |
 | `src/new_op.rs` | Intentionally-red operation scaffold. | Scaffold contents or collision checks change. |
 | `src/route.rs` | Route explanation CLI rendering. | `route explain` output changes. |
+| `src/rustfs_admin_dialect.rs` | `rustfs-admin-dialect [--check]`: chooses and rules the RustFS admin inventory's migrated routes, refuses any it has no rule for, and writes or drift-checks `crates/dialect-rustfs-admin/src/{ops,table.rs}` through rustfmt; `render.rs` emits the source, `tests.rs` holds the drift check and every refusal. | Migrating another admin group, adding a ruling, or a generated file drifted. |
 | `src/route_contract.rs` | Bounded operation-route witness shared with the route CLI. | `verify --op` pulls in the production server graph or selects the wrong route. |
 | `src/security_posture.rs` | Fail-closed dry-run preview derived from standard operation-floor sources. | The security-posture command or standard floor inventory changes. |
 | `src/sigsuite.rs` | Pinned external signing-suite fetch and run process boundary. | Official signing-suite checkout or invocation changes. |

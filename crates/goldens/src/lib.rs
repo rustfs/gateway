@@ -56,6 +56,11 @@ mod replication;
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod rustfs_admin_proof;
+// Test-only: the generated RustFS admin dialect's groups 1 and 2, bound to the inventory and driven
+// through a real assembled service (rustfs/backlog#1744).
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod rustfs_admin_dialect;
 mod source_a_boundary;
 mod source_a_census;
 mod source_a_create_defaults;
