@@ -15,7 +15,8 @@
 //! Presigned `PutObject` admission through the assembled public service.
 //!
 //! Responsible for: proving a boto3-shaped SigV4 presigned PUT reaches the real `PutObject`
-//! codec and handler. NOT responsible for: signing primitives, whose own tests live in the
+//! codec and handler, and that an exact payload digest binds the body whether the signature is
+//! presigned or in the headers (c-sig-0596). NOT responsible for: signing primitives, whose own tests live in the
 //! signature crate. Upstream: `rustfs-gateway` assembly and the standard operation registry.
 //! Downstream: the response bytes visible to an SDK.
 
@@ -310,4 +311,55 @@ async fn a_presigned_delete_object_remains_refused_before_the_handler() {
 
     assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
     assert_eq!(calls.delete.load(Ordering::SeqCst), 0, "presigned DeleteObject reached its handler");
+}
+
+/// `PUT /bucket/key` of `body`, signed in its headers under `payload`, which may name the digest of
+/// other bytes.
+fn header_signed_put(body: Bytes, payload: PayloadMode) -> http::Request<Bytes> {
+    let headers = http::HeaderMap::from_iter([
+        (http::header::HOST, http::HeaderValue::from_static("s3.example.com")),
+        (http::header::CONTENT_LENGTH, http::HeaderValue::from(body.len())),
+    ]);
+    let host = rustfs_gateway_http::RawHost::from_host_header(b"s3.example.com").expect("an acceptable host");
+    let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
+    let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("a SigV4 stamp");
+    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
+    let signing = SigningRequest::new(&http::Method::PUT, "/bucket/key", "", &headers, &host, payload, stamp)
+        .with_wire_content_length(body.len() as u64);
+    let signed = SigV4Signer::new(credentials, scope)
+        .sign_headers(&signing)
+        .expect("a signable request");
+    let mut builder = http::Request::builder().method(http::Method::PUT).uri("/bucket/key");
+    for (name, value) in signed.headers() {
+        builder = builder.header(name, value);
+    }
+    builder.body(body).expect("a valid request")
+}
+
+/// Positive — the control for c-sig-0596: a header-signed body that hashes to its signed digest is
+/// committed once.
+#[tokio::test]
+async fn a_header_signed_put_matching_its_exact_payload_is_committed() {
+    let (service, calls) = service_at(support::SIGNED_AT_UNIX_SECONDS);
+    let request = header_signed_put(Bytes::from_static(b"expected"), exact_payload(b"expected"));
+    let response = support::exchange_wire(&service, request).await;
+
+    assert_eq!(response.status(), http::StatusCode::OK, "{:?}", response.body());
+    assert_eq!(calls.put_commits.load(Ordering::SeqCst), 1);
+}
+
+/// Negative — c-sig-0596: the header-signed twin of the presigned case above. The signature is
+/// valid; only the payload comparison catches the substituted body, which until
+/// rustfs/backlog#1762 ran for presigned requests alone.
+#[tokio::test]
+async fn c_sig_0596_a_header_signed_put_with_a_tampered_exact_payload_is_never_committed() {
+    let (service, calls) = service_at(support::SIGNED_AT_UNIX_SECONDS);
+    let request = header_signed_put(Bytes::from_static(b"tampered"), exact_payload(b"expected"));
+    let response = support::exchange_wire(&service, request).await;
+    let body = String::from_utf8_lossy(response.body());
+
+    assert_eq!(response.status(), http::StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.contains("<Code>XAmzContentSHA256Mismatch</Code>"), "{body}");
+    assert_eq!(calls.put_entries.load(Ordering::SeqCst), 1, "the payload obligation was never exercised");
+    assert_eq!(calls.put_commits.load(Ordering::SeqCst), 0, "a mismatched payload was committed");
 }

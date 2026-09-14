@@ -1,0 +1,74 @@
+# c-sig-0596 — a header-signed body that does not hash to its signed x-amz-content-sha256.
+#
+# Schema dimensions exercised: sign.payload_hash = "literal" (a correctly signed digest of other
+# bytes), error shape, connection verdict after a fully read body.
+
+[case]
+id = "c-sig-0596"
+schema_version = 1
+title = "A header-signed PutObject whose body does not match its signed payload hash is refused"
+rationale = """
+The signature covers x-amz-content-sha256, and x-amz-content-sha256 covers the body only if the \
+server compares the two. A server that verifies the signature but never hashes the body accepts any \
+body under a replayed head: the request is authenticated and its payload is not. The head here is \
+signed correctly over the digest of "expected-payload" and the body is "tampered-payload", so the \
+signature verifies and only the payload comparison can refuse it. The refusal is 400 \
+XAmzContentSHA256Mismatch, nothing is stored, and the connection stays usable because the body \
+arrived exactly as HTTP framed it. The presigned twin is c-sig-0430; before this case only the \
+presigned form was compared (rustfs/backlog#1762)."""
+polarity = "negative"
+operation = "PutObject"
+tags = ["signature", "sigv4", "security", "error-shape", "connection"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html"
+summary = "x-amz-content-sha256 carries the payload's SHA-256 so the service can check the payload arrived as signed."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "XAmzContentSHA256Mismatch: the provided x-amz-content-sha256 header does not match what was computed."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/blob/f3e17541f366696bf0cbaf380fcbd8b44c17eba4/crates/s3s/src/ops/signature.rs#L755-L767"
+summary = "s3s wraps a header-signed single-chunk body in a stream that fails on a SHA-256 mismatch."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "payload-hash-mismatch"
+absent = true
+
+[request]
+method = "PUT"
+target = "/conf-sig/payload-hash-mismatch"
+body = { utf8 = "tampered-payload" }
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+payload_hash = "literal"
+# SHA-256 of "expected-payload", not of the body that is sent.
+payload_hash_literal = "c32cace75647e3e184b9dce888af087f63740976550541874c37a1037b196b56"
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-version-id"]
+
+[expect.error]
+code = "XAmzContentSHA256Mismatch"
+request_id_present = true

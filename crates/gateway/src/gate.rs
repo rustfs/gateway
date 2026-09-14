@@ -211,10 +211,9 @@ where
         // contradiction between two claims is not decidable from any number of body bytes.
         integrity: BodyIntegrity,
     ) -> Result<Bytes, S3Error> {
-        // Opened here, closed on every path that reaches a caller with bytes in hand. Not two
-        // halves of one guarantee: `BodyDigestObligation::Sha256` is minted only by
-        // `presigned_body_obligation`, so a header-signed request's payload hash is still not
-        // compared here — a P2 gap this predates and does not close.
+        // Opened here, closed on every path that reaches a caller with bytes in hand.
+        // `crate::payload_header::body_digest_obligation` mints `BodyDigestObligation::Sha256` for
+        // every signed exact digest, header-signed and presigned alike (c-sig-0596, c-sig-0430).
         let progress = WireProgress::for_body(digest, self.body.as_ref());
         // Read only by the unframed arm below, and that is the whole of the rule: under framing
         // the bytes arriving here are chunk headers, signatures and CRLFs, and the object's own
@@ -292,8 +291,8 @@ where
         };
         // After the read rather than before it: under framing the payload hash is only complete
         // once the pipeline has pulled the last frame through. The comparison itself is unchanged,
-        // and a framed body never carries one — `presigned_body_obligation` refuses a presigned
-        // streaming request outright, and that is the only place a `Sha256` obligation is minted.
+        // and a framed body never carries one: a streaming payload declares no digest, and
+        // `body_digest_obligation`, the only place a `Sha256` obligation is minted, mints none for it.
         if !progress.digest_matches() {
             return Err(content_sha256_mismatch());
         }

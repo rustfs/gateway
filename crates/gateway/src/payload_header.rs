@@ -15,7 +15,7 @@
 //! Signature-owned payload declarations read from the request head.
 //!
 //! Responsible for: deriving one complete [`PayloadMode`] from the signed payload and trailer
-//! headers, and turning a presigned exact digest into body-reader work. NOT responsible for:
+//! headers, and turning a signed exact digest into body-reader work. NOT responsible for:
 //! authenticating the declaration or decoding `aws-chunked` framing. Upstream: `crate::service`.
 //! Downstream: `rustfs-gateway-sig` payload parsing and `crate::gate` body validation.
 
@@ -58,18 +58,22 @@ pub(crate) fn payload_mode(headers: &HeaderMap, location: SigLocation) -> Result
     })
 }
 
-/// The body-integrity work a presigned request leaves for the bounded body reader.
-pub(crate) fn presigned_body_obligation(
+/// The body-integrity work a signed payload declaration leaves for the body reader.
+///
+/// An exact digest is an obligation wherever the signature travels: the signature covers
+/// `x-amz-content-sha256`, and only comparing that declaration with the body makes it cover the
+/// body. A header-signed digest that went uncompared authenticated the head and not the payload, so
+/// a replayed head carried any body (c-sig-0596, beside the presigned c-sig-0430). A framed payload
+/// declares no digest — its chain of chunk signatures covers it — and a presigned query cannot seed
+/// that chain, so the presigned streaming form is refused.
+pub(crate) fn body_digest_obligation(
     payload: &PayloadMode,
     location: SigLocation,
 ) -> Result<BodyDigestObligation, StreamingPresignedUnsupported> {
-    if !location.is_presigned() {
-        return Ok(BodyDigestObligation::None);
-    }
     if let Some(digest) = payload.digest() {
         return Ok(BodyDigestObligation::Sha256(*digest));
     }
-    if payload.is_framed() {
+    if location.is_presigned() && payload.is_framed() {
         return Err(StreamingPresignedUnsupported);
     }
     Ok(BodyDigestObligation::None)
