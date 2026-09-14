@@ -362,7 +362,7 @@ cases = ""
 
 [[operation]]
 name = "UploadPart"
-cases = "c-mpu-0018,c-mpu-0024,c-mpu-0025,c-mpu-0027,c-mpu-0028,c-mpu-0029,c-mpu-0030,c-mpu-0031,c-mpu-0043,c-mpu-0044,c-mpu-0045"
+cases = "c-mpu-0018,c-mpu-0024,c-mpu-0025,c-mpu-0027,c-mpu-0028,c-mpu-0029,c-mpu-0030,c-mpu-0031,c-mpu-0043,c-mpu-0044,c-mpu-0045,c-mpu-0053"
 
 [[operation]]
 name = "UploadPartCopy"

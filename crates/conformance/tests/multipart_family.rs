@@ -14,8 +14,8 @@
 
 //! The ledger of the multipart family, and the three entity-tag cases it was blocked on.
 //!
-//! Responsible for: pinning the multipart family as a *closed* set — fifty-two identifiers with
-//! no gap and no duplicate, thirty-five negative against seventeen positive, every one of them
+//! Responsible for: pinning the multipart family as a *closed* set — fifty-three identifiers with
+//! no gap and no duplicate, thirty-six negative against seventeen positive, every one of them
 //! carrying a verdict in the checked-in baseline — and for proving the family executes against the
 //! in-process target with no regression, with every id in `RECOVERED` green,
 //! and with no case skipping that was not already skipping. A family whose size, polarity and
@@ -33,11 +33,11 @@ use rustfs_gateway_conformance::runner::{self, RunOptions};
 
 /// The size of the family. A number, not a range: the point of the guard is that growing or
 /// shrinking the family is a decision somebody writes down, and this is where they write it.
-const FAMILY_SIZE: usize = 52;
+const FAMILY_SIZE: usize = 53;
 
 /// The polarity split, in the order `AGENTS.md` states the rule: negatives must outnumber
-/// positives, and here they do by eighteen.
-const NEGATIVE: usize = 35;
+/// positives, and here they do by nineteen.
+const NEGATIVE: usize = 36;
 const POSITIVE: usize = 17;
 
 /// The cases this family was blocked on. Three are about the entity tag a multipart upload
@@ -80,13 +80,17 @@ const REFUSED_BEFORE_COMMIT: [(&str, u16); 10] = [
 ];
 
 /// The cases the in-process target cannot execute, each for a reason the runner prints with the
-/// skip. Two ask for a fresh connection per exchange, one for a malformed request head that only a
+/// skip. Three ask for a fresh connection per exchange, one for a malformed request head that only a
 /// socket can write, and one for a request the in-process target has no way to shape.
+///
+/// `c-mpu-0053` is the third fresh-connection case: it pins the connection verdict after a refusal
+/// that left a small body unread, which only a socket can observe. It executes over a socket, and
+/// `crates/gateway/tests/unread_body_refusal.rs` pins the same behaviour on the production drivers.
 ///
 /// The set is an upper bound rather than an equality: a case recovered by a transport that grows a
 /// capability must not fail this guard, while a case that quietly *starts* skipping must. Skips may
 /// only go down.
-const KNOWN_SKIPS: [&str; 4] = ["c-mpu-0027", "c-mpu-0039", "c-mpu-0043", "c-mpu-0045"];
+const KNOWN_SKIPS: [&str; 5] = ["c-mpu-0027", "c-mpu-0039", "c-mpu-0043", "c-mpu-0045", "c-mpu-0053"];
 
 fn corpus() -> Corpus {
     let root = Corpus::discover_root().expect("a corpus sits next to this crate");
@@ -107,13 +111,13 @@ fn baseline() -> Baseline {
     Baseline::from_json(&source).expect("the baseline parses")
 }
 
-/// The multipart family is a closed ledger: fifty-two identifiers, contiguous, each in its own
+/// The multipart family is a closed ledger: fifty-three identifiers, contiguous, each in its own
 /// file.
 ///
 /// A gap means a case was deleted — which `AGENTS.md` lists as a silently dropped guarantee — and a
 /// duplicate means two files claim one identifier, after which only one of them is ever reported.
 #[test]
-fn the_multipart_family_is_a_closed_ledger_of_fifty_two_identifiers() {
+fn the_multipart_family_is_a_closed_ledger_of_fifty_three_identifiers() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -143,7 +147,7 @@ fn the_multipart_family_is_a_closed_ledger_of_fifty_two_identifiers() {
 /// The corpus-wide check in `tests/corpus.rs` compares two totals over six hundred cases, so a
 /// family that flipped every one of its own cases to positive would still leave it green.
 #[test]
-fn the_multipart_family_keeps_thirty_five_negative_against_seventeen_positive() {
+fn the_multipart_family_keeps_thirty_six_negative_against_seventeen_positive() {
     let corpus = corpus();
     let cases = family(&corpus);
 
