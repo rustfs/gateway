@@ -1,6 +1,6 @@
 # rustfs-gateway-dialect-rustfs-admin
 
-RustFS's admin API as gateway dialect operations (rustfs/backlog#1744, ADR-0024 to ADR-0026).
+RustFS's admin API as gateway dialect operations (rustfs/backlog#1744, ADR-0024 to ADR-0027).
 
 RustFS consumes this crate: it installs the dialect and registers its own handlers. Nothing here
 depends on RustFS, and no handler lives here.
@@ -18,6 +18,12 @@ depends on RustFS, and no handler lives here.
 
 Every operation is privileged and header-signed only: never anonymous, never presigned, and never
 handed the caller's secret unless its inventory row says RustFS seals a body with it.
+
+A template parameter (`{tiername}`, `{key_id}`, …) names no bucket: the operation stays
+service-level, and its handler reads the decoded value from `RequestContextView::path_params()`
+(ADR-0027). Where a literal segment meets another route's parameter (`POST tier/clear` and
+`POST tier/{tiername}`), the literal's operation declares that it stands in front, as RustFS's
+router decides.
 
 ```rust,ignore
 let dialect = rustfs_admin_dialect().expect("the generated record and declarations agree");

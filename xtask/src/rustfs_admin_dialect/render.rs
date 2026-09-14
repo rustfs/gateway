@@ -93,6 +93,24 @@ pub(super) fn render_operation(declared: &Declared) -> String {
             "//! The inventory records this route as custom-auth (`{class}`); its action is ADR-0025's ruling."
         );
     }
+    if !d.params.is_empty() {
+        let listed: Vec<String> = d.params.iter().map(|param| format!("`{param}`")).collect();
+        out.push_str("//!\n");
+        let _ = writeln!(
+            out,
+            "//! Its path parameters ({}) name no bucket (ADR-0027): the operation stays service-level, and a\n\
+             //! handler reads each decoded value from `RequestContextView::path_params()`.",
+            listed.join(", ")
+        );
+    }
+    for shadow in &d.shadows {
+        out.push_str("//!\n");
+        let _ = writeln!(
+            out,
+            "//! Its literal `{}` segment stands in front of `{}`'s `{{{}}}` parameter (ADR-0027).",
+            shadow.literal, shadow.shadowed, shadow.param
+        );
+    }
     out.push('\n');
     let (input, mode, decode, input_doc) = match d.request_body {
         "NotRead" => ("()", "None", "Ok(())", "RustFS reads no request body."),
@@ -108,7 +126,11 @@ pub(super) fn render_operation(declared: &Declared) -> String {
     out.push_str("use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};\n");
     out.push_str("use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};\n");
     out.push_str("use rustfs_gateway_core::registry::OperationSpec;\n");
-    out.push_str("use rustfs_gateway_core::route::Predicate;\n");
+    if d.shadows.is_empty() {
+        out.push_str("use rustfs_gateway_core::route::Predicate;\n");
+    } else {
+        out.push_str("use rustfs_gateway_core::route::{Predicate, ShadowingDecl};\n");
+    }
     out.push_str("use rustfs_gateway_core::{DerivedResourceError, NoDerived};\n");
     out.push_str("use rustfs_gateway_sig::OperationFloor;\n");
     match input {
@@ -136,6 +158,26 @@ pub(super) fn render_operation(declared: &Declared) -> String {
         "The canonical row; RustFS serves no MinIO alias for it."
     };
     let _ = writeln!(out, "/// {rows_doc}\npub static ROWS: &[ClaimedRow] = &[{rows}];\n");
+    if !d.shadows.is_empty() {
+        out.push_str(
+            "/// The later operations whose parameter meets a literal segment of this one's path: RustFS's router\n\
+             /// tries the literal first, so these requests are this operation (ADR-0027).\n\
+             pub static SHADOWS: &[ShadowingDecl] = &[\n",
+        );
+        for shadow in &d.shadows {
+            let _ = writeln!(
+                out,
+                "ShadowingDecl {{ winner: NAME, shadowed: {shadowed:?}, reason: {reason:?}, evidence: &[{router:?}, record::ADR_0027] }},",
+                shadowed = shadow.shadowed,
+                reason = format!(
+                    "RustFS's router tries a literal segment before a parameter, so `{}` here is this operation, never a `{{{}}}` value.",
+                    shadow.literal, shadow.param
+                ),
+                router = d.router_url,
+            );
+        }
+        out.push_str("];\n\n");
+    }
     let _ = writeln!(out, "/// `{request}`.\n#[derive(Debug)]\npub struct {};\n", d.type_name);
     let _ = writeln!(out, "static SPEC: OperationSpec = admin::spec(NAME, AUTH, {});\n", d.caller_secret);
     out.push_str("/// Privileged and header-signed only: never anonymous, never presigned.\n");
@@ -184,7 +226,7 @@ impl AdminOperation for {ty} {{
     fn rows() -> &'static [ClaimedRow] {{
         ROWS
     }}
-}}
+{shadows_fn}}}
 
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {{
@@ -221,10 +263,21 @@ pub const RECORD: RouteRecord = RouteRecord {{
         group = d.group,
         selector = rendered_selector(d),
         action = d.rule.render(),
-        evidence = if d.ruled.is_some() {
-            format!("&[{:?}, record::ADR_0025, record::ISSUE]", d.handler_url)
+        shadows_fn = if d.shadows.is_empty() {
+            ""
         } else {
-            format!("&[{:?}, record::ISSUE]", d.handler_url)
+            "\n    fn shadows() -> &'static [ShadowingDecl] {\n        SHADOWS\n    }\n"
+        },
+        evidence = {
+            let mut cited = vec![format!("{:?}", d.handler_url)];
+            if d.ruled.is_some() {
+                cited.push("record::ADR_0025".to_owned());
+            }
+            if !d.params.is_empty() || !d.shadows.is_empty() {
+                cited.push("record::ADR_0027".to_owned());
+            }
+            cited.push("record::ISSUE".to_owned());
+            format!("&[{}]", cited.join(", "))
         },
         order = d.order,
         method = d.method,

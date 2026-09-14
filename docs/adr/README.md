@@ -82,6 +82,7 @@ second copy is a second thing to keep in sync.
 | 0024 | Dialect path-prefix claims, path templates, alias rows, a per-operation caller secret and service-level operations | Accepted |
 | 0025 | Action rules, subject rules and bound buckets for RustFS's custom-auth admin routes | Accepted |
 | 0026 | Account sets, query-bound buckets, and anonymous admin bootstrap | Accepted |
+| 0027 | Service-level template parameters, literal-over-parameter shadowing, and the caller secret for RustFS's order-3 admin routes | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

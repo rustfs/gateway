@@ -13,13 +13,15 @@
 // limitations under the License.
 
 //! The crate's one test target: every declared row reaches its operation with the dialect and no
-//! admin operation without it, every near miss reaches none, and every operation declares what
-//! its record says.
+//! admin operation without it, every other request reaches exactly what an independent model of
+//! the rows says, and every operation declares what its record says.
 //!
-//! Responsible for: routing every row of every operation through core's router, and every
-//! operation's declared facts against its record and against each other.
-//! NOT responsible for: authentication and authorisation through an assembled service, or the
-//! binding to the recorded inventory (`rustfs-gateway-goldens`'s `rustfs_admin_dialect`).
+//! Responsible for: routing every row of every operation through core's router — with concrete
+//! values for template parameters, and against a matcher written here from ADR-0024's rule — and
+//! every operation's declared facts against its record and against each other.
+//! NOT responsible for: authentication, authorisation, parameter decoding and the caller's secret
+//! through an assembled service, or the binding to the recorded inventory
+//! (`rustfs-gateway-goldens`'s `rustfs_admin_dialect`).
 //! Upstream: this crate's public surface and `rustfs-gateway-core`'s router. Downstream: nothing.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
@@ -31,7 +33,7 @@ use rustfs_gateway_core::codec::ResponseBody;
 use rustfs_gateway_core::dialect::{ClaimedRow, Dialect};
 use rustfs_gateway_core::op::ResourceShape;
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, RouterBuilder};
-use rustfs_gateway_core::route::{HostClass, Predicate, RouteRequestParts, TargetKind};
+use rustfs_gateway_core::route::{HostClass, Predicate, RouteRequestParts, ShadowingDecl, TargetKind};
 use rustfs_gateway_dialect_rustfs_admin::admin::{self, AdminResponse};
 use rustfs_gateway_dialect_rustfs_admin::{
     AdminOperation, CLAIMS, OVERLAY, OperationFold, PENDING, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
@@ -92,15 +94,59 @@ fn query(record: &RouteRecord) -> String {
         .map_or_else(String::new, |(key, value)| format!("?{key}={value}"))
 }
 
-/// Every path a record's operation is served at: the canonical one, then the alias.
-fn paths(record: &RouteRecord) -> Vec<&'static str> {
+/// Every template a record's operation is served at: the canonical one, then the alias.
+fn templates(record: &RouteRecord) -> Vec<&'static str> {
     std::iter::once(record.path).chain(record.alias).collect()
+}
+
+/// The parameter a template segment names, if it is one.
+fn param(segment: &str) -> Option<&str> {
+    segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}'))
+}
+
+/// `template` with every parameter given a concrete value, its name then `-1`.
+fn concrete(template: &str) -> String {
+    template
+        .split('/')
+        .map(|segment| param(segment).map_or_else(|| segment.to_owned(), |name| format!("{name}-1")))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Every concrete path a record's operation is served at.
+fn paths(record: &RouteRecord) -> Vec<String> {
+    templates(record).into_iter().map(concrete).collect()
+}
+
+/// ADR-0024's rule for a plain value, written here without core: the same number of segments,
+/// each literal equal, each parameter any non-empty segment.
+fn template_matches(template: &str, path: &str) -> bool {
+    let (template, path): (Vec<&str>, Vec<&str>) = (template.split('/').collect(), path.split('/').collect());
+    template.len() == path.len()
+        && template
+            .iter()
+            .zip(&path)
+            .all(|(segment, value)| param(segment).map_or(segment == value, |_| !value.is_empty()))
+}
+
+/// The operation a request must reach: the first record, in precedence order, of its method
+/// whose template matches its path and whose query, when it has one, is exactly the request's.
+fn expected(method: &str, path: &str, query: &str) -> Option<&'static str> {
+    ROUTES
+        .iter()
+        .find(|record| {
+            record.method == method
+                && templates(record).iter().any(|template| template_matches(template, path))
+                && record.query.is_none_or(|(key, value)| query == format!("?{key}={value}"))
+        })
+        .map(|record| record.operation)
 }
 
 /// What each operation declares, read through its own trait implementations.
 struct Declared {
     name: &'static str,
     rows: &'static [ClaimedRow],
+    shadows: &'static [ShadowingDecl],
     precedence: u16,
     group: &'static str,
     action: Option<String>,
@@ -123,6 +169,7 @@ impl OperationFold for Collect {
         carry.push(Declared {
             name: O::NAME,
             rows: O::rows(),
+            shadows: O::shadows(),
             precedence: O::PRECEDENCE,
             group: O::GROUP,
             action: spec.auth.map(|auth| auth.render()),
@@ -143,7 +190,8 @@ fn declared() -> Vec<Declared> {
 
 // ── routing ──────────────────────────────────────────────────────────────────────────────────
 
-/// Positive — every row of every operation, canonical and alias alike, reaches that operation.
+/// Positive — every row of every operation, canonical and alias alike, reaches that operation,
+/// with a concrete value in every template parameter.
 #[test]
 fn every_declared_row_reaches_its_operation() {
     let dialect = dialect();
@@ -156,7 +204,7 @@ fn every_declared_row_reaches_its_operation() {
             rows += 1;
         }
     }
-    assert_eq!(rows, 96, "48 operations, each with its MinIO alias");
+    assert_eq!(rows, 310, "155 operations, each with its MinIO alias");
 }
 
 /// Negative — without the dialect, no row reaches any admin operation.
@@ -176,23 +224,25 @@ fn n_without_the_dialect_no_row_reaches_an_admin_operation() {
     }
 }
 
-/// Negative — inside the claims, a method no operation declares for a path reaches no operation.
+/// Negative — every method on every row's path reaches exactly what the model says: a method no
+/// row of that shape declares reaches no operation, and a literal row is never answered by a
+/// template of another method.
 #[test]
-fn n_a_method_no_row_declares_reaches_no_operation() {
+fn n_every_method_on_every_row_reaches_only_what_the_rows_say() {
     let dialect = dialect();
     let resolve = resolver(Some(&dialect));
-    let declared: BTreeSet<(&str, &str)> = ROUTES.iter().map(|record| (record.method, record.path)).collect();
     let mut refused = 0;
     for record in ROUTES {
-        for method in METHODS.iter().filter(|method| !declared.contains(&(**method, record.path))) {
-            for path in paths(record) {
-                let target = format!("{path}{}", query(record));
-                assert_eq!(resolve(method, &target), None, "{method} {target}");
-                refused += 1;
+        for path in paths(record) {
+            let query = query(record);
+            for method in METHODS {
+                let want = expected(method, &path, &query);
+                assert_eq!(resolve(method, &format!("{path}{query}")), want, "{method} {path}{query}");
+                refused += usize::from(want.is_none());
             }
         }
     }
-    assert!(refused > 400, "{refused}");
+    assert!(refused > 1000, "{refused}");
 }
 
 /// Negative — the service command reaches an operation only through one of its four ruled
@@ -224,28 +274,33 @@ fn n_the_service_command_without_a_ruled_action_reaches_no_operation() {
     }
 }
 
-/// Negative — a near miss of every row reaches no admin operation: a trailing slash, one more
-/// segment, the last segment's case changed, and the same path one character outside the claim.
+/// Negative — a near miss of every row never reaches that row's operation, and reaches exactly
+/// what the model says (a sibling template, at most): a trailing slash, one more segment, the
+/// last literal segment's case changed; and the same path one character outside the claim
+/// reaches no admin operation.
 #[test]
 fn n_a_near_miss_of_a_row_reaches_no_admin_operation() {
     let dialect = dialect();
     let resolve = resolver(Some(&dialect));
     for record in ROUTES {
         let query = query(record);
-        for path in paths(record) {
-            let (head, last) = path.rsplit_once('/').expect("a path with segments");
-            for near in [
-                format!("{path}/{query}"),
-                format!("{path}/x{query}"),
-                format!("{head}/{}{query}", last.to_ascii_uppercase()),
-            ] {
-                assert_eq!(resolve(record.method, &near), None, "{} {near}", record.method);
+        for template in templates(record) {
+            let path = concrete(template);
+            let mut segments: Vec<String> = path.split('/').map(str::to_owned).collect();
+            let last_literal = template
+                .split('/')
+                .collect::<Vec<_>>()
+                .iter()
+                .rposition(|segment| param(segment).is_none())
+                .expect("a literal segment");
+            segments[last_literal] = segments[last_literal].to_ascii_uppercase();
+            for near in [format!("{path}/"), format!("{path}/x"), segments.join("/")] {
+                let reached = resolve(record.method, &format!("{near}{query}"));
+                assert_ne!(reached, Some(record.operation), "{} {near}", record.method);
+                assert_eq!(reached, expected(record.method, &near, &query), "{} {near}", record.method);
             }
-            let outside = format!(
-                "{}x{}{query}",
-                &path[..path.find("/admin").expect("an admin path") + 6],
-                &path[path.find("/admin").expect("an admin path") + 6..]
-            );
+            let at = path.find("/admin").expect("an admin path") + 6;
+            let outside = format!("{}x{}{query}", &path[..at], &path[at..]);
             let reached = resolve(record.method, &outside);
             assert!(
                 reached.is_none_or(|name| !name.starts_with("rustfs:")),
@@ -253,6 +308,67 @@ fn n_a_near_miss_of_a_row_reaches_no_admin_operation() {
                 record.method
             );
         }
+    }
+}
+
+/// Negative — a template parameter never matches a dot segment in any spelling, an encoded
+/// separator, or nothing, so no templated row is reached through one (ADR-0024).
+#[test]
+fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
+    let dialect = dialect();
+    let resolve = resolver(Some(&dialect));
+    let mut refused = 0;
+    for record in ROUTES {
+        for template in templates(record) {
+            let segments: Vec<&str> = template.split('/').collect();
+            for (index, _) in segments.iter().enumerate().filter(|(_, segment)| param(segment).is_some()) {
+                for bad in [
+                    "%2e", "%2E", "%2e%2e", "%2E%2e", ".%2e", "a%2Fb", "a%2fb", "a%5Cb", "a%5cb", "",
+                ] {
+                    let mut path: Vec<String> = segments.iter().map(|segment| concrete(segment)).collect();
+                    path[index] = bad.to_owned();
+                    let target = format!("{}{}", path.join("/"), query(record));
+                    assert_eq!(resolve(record.method, &target), None, "{} {target}", record.method);
+                    refused += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(refused, 10 * 2 * 19, "19 parameters across 17 templates, each with its alias");
+}
+
+/// Positive and negative — `POST tier/clear` stands in front of `POST tier/{tiername}` and is
+/// the one declared shadowing: `clear` is the clear command, every other name is a tier, and
+/// the other methods on `tier/clear` reach their tier templates.
+#[test]
+fn the_literal_tier_clear_stands_in_front_of_the_tier_template() {
+    let declared = declared();
+    let shadows: Vec<(&str, &str, &str, bool)> = declared
+        .iter()
+        .flat_map(|operation| {
+            operation
+                .shadows
+                .iter()
+                .map(move |decl| (operation.name, decl.winner, decl.shadowed, !decl.evidence.is_empty()))
+        })
+        .collect();
+    assert_eq!(
+        shadows,
+        [("rustfs:PostV3TierClear", "rustfs:PostV3TierClear", "rustfs:PostV3TierByTiername", true)]
+    );
+    let dialect = dialect();
+    let resolve = resolver(Some(&dialect));
+    for prefix in ["/rustfs/admin", "/minio/admin"] {
+        assert_eq!(resolve("POST", &format!("{prefix}/v3/tier/clear")), Some("rustfs:PostV3TierClear"));
+        for tier in ["clears", "CLEAR", "clea", "hot", "clear%20"] {
+            let target = format!("{prefix}/v3/tier/{tier}");
+            assert_eq!(resolve("POST", &target), Some("rustfs:PostV3TierByTiername"), "{target}");
+        }
+        assert_eq!(resolve("GET", &format!("{prefix}/v3/tier/clear")), Some("rustfs:GetV3TierByTier"));
+        assert_eq!(
+            resolve("DELETE", &format!("{prefix}/v3/tier/clear")),
+            Some("rustfs:DeleteV3TierByTiername")
+        );
     }
 }
 
@@ -272,8 +388,8 @@ fn every_operation_declares_what_its_record_says() {
         assert_eq!(operation.resource, Some(ResourceShape::Service), "{name}");
         assert_eq!(operation.secret, record.caller_secret, "{name}");
         assert_eq!(operation.deadline, Some(HandlerDeadlineClass::Standard), "{name}");
-        let templates: Vec<&str> = operation.rows.iter().map(|row| row.template).collect();
-        assert_eq!(templates, paths(record), "{name}");
+        let rows: Vec<&str> = operation.rows.iter().map(|row| row.template).collect();
+        assert_eq!(rows, templates(record), "{name}");
         for row in operation.rows {
             match (row.selector, record.query) {
                 ([Predicate::Method(method)], None) => assert_eq!(method.as_str(), record.method, "{name}"),
@@ -286,8 +402,8 @@ fn every_operation_declares_what_its_record_says() {
     }
 }
 
-/// Negative — no operation is reachable without a header signature, none is handed the caller's
-/// secret, and none is authorised by a vendor label: every migrated route is an IAM check.
+/// Negative — no operation is reachable without a header signature, and none is authorised by
+/// a vendor label: every migrated route is an IAM check.
 #[test]
 fn n_no_operation_is_reachable_without_a_header_signature() {
     for operation in declared() {
@@ -295,9 +411,53 @@ fn n_no_operation_is_reachable_without_a_header_signature() {
         assert!(operation.privileged, "{name}");
         assert!(!operation.anonymous, "{name}");
         assert!(!operation.presigned, "{name}");
-        assert!(!operation.secret, "{name}");
         assert!(operation.action.is_some_and(|action| !action.contains("rustfs:")), "{name}");
     }
+}
+
+/// Positive and negative — exactly the eight operations whose body RustFS seals opt in to the
+/// caller's secret; every other operation is never handed it.
+#[test]
+fn only_the_sealed_operations_hold_the_caller_secret() {
+    let holders: Vec<&str> = declared()
+        .iter()
+        .filter(|operation| operation.secret)
+        .map(|operation| operation.name)
+        .collect();
+    assert_eq!(
+        holders,
+        [
+            "rustfs:DeleteV3DelConfigKv",
+            "rustfs:GetV3Config",
+            "rustfs:GetV3GetConfigKv",
+            "rustfs:GetV3ListConfigHistoryKv",
+            "rustfs:PostV3StartJob",
+            "rustfs:PutV3Config",
+            "rustfs:PutV3SetConfigKv",
+            "rustfs:PutV3SiteReplicationEdit",
+        ]
+    );
+}
+
+/// Negative — no template parameter is a bucket: none is named for one, and no claimed entry
+/// binds one, so every templated operation stays service-level (ADR-0027).
+#[test]
+fn n_no_template_parameter_is_a_bucket() {
+    let templated: Vec<&RouteRecord> = ROUTES.iter().filter(|record| record.path.contains('{')).collect();
+    assert_eq!(templated.len(), 17);
+    for record in templated {
+        for segment in record.path.split('/').filter_map(param) {
+            assert!(!["bucket", "warehouse"].contains(&segment), "{}", record.operation);
+        }
+    }
+    let dialect = dialect();
+    let entries: Vec<_> = dialect
+        .claimed_operations()
+        .iter()
+        .flat_map(|operation| operation.entries())
+        .collect();
+    assert_eq!(entries.len(), 310);
+    assert!(entries.iter().all(|entry| entry.bucket_param().is_none()));
 }
 
 /// Positive and negative — names are unique, precedences strictly increase, and the overlay
@@ -330,42 +490,69 @@ fn the_dialect_assembles_with_its_two_claims() {
     assert_eq!(prefixes, ["/rustfs/admin", "/minio/admin"]);
 }
 
-/// Positive — ADR-0024's groups 1 and 2 are declared, each inventory route once (the service
+/// Positive — ADR-0024's orders 1 to 3 are declared, each inventory route once (the service
 /// command as its four forms), and every other group is pending with the rest of the routes.
 #[test]
-fn groups_one_and_two_are_declared_and_the_rest_are_pending() {
+fn orders_one_to_three_are_declared_and_the_rest_are_pending() {
+    let order_three = [
+        "audit",
+        "batch_job",
+        "config_admin",
+        "ilm_transition",
+        "kms",
+        "plugins_instances",
+        "pools",
+        "scanner",
+        "site_replication",
+        "tier",
+    ];
     let mut by_group: BTreeMap<&str, BTreeSet<(&str, &str)>> = BTreeMap::new();
     for record in ROUTES {
         by_group.entry(record.group).or_default().insert((record.method, record.path));
-        assert_eq!(record.order, if record.group == "system" { 1 } else { 2 }, "{}", record.operation);
+        let order = match record.group {
+            "system" => 1,
+            group if order_three.contains(&group) => 3,
+            _ => 2,
+        };
+        assert_eq!(record.order, order, "{}", record.operation);
     }
     let counts: Vec<(&str, usize)> = by_group.iter().map(|(group, routes)| (*group, routes.len())).collect();
     assert_eq!(
         counts,
         [
+            ("audit", 3),
+            ("batch_job", 5),
             ("bucket_meta", 4),
             ("cluster_snapshot", 1),
+            ("config_admin", 9),
             ("diagnostics", 12),
             ("extensions", 2),
             ("gateway_key_inventory", 1),
+            ("ilm_transition", 11),
             ("inspect_archive", 1),
+            ("kms", 35),
             ("module_switch", 2),
             ("object_data_cache", 2),
             ("plugins_catalog", 1),
+            ("plugins_instances", 4),
+            ("pools", 6),
             ("profile_admin", 6),
             ("rebalance", 3),
+            ("scanner", 5),
+            ("site_replication", 22),
             ("system", 9),
+            ("tier", 7),
             ("tls_debug", 1),
         ]
     );
-    assert_eq!(ROUTES.len(), 48);
+    assert_eq!(ROUTES.len(), 155);
     assert!(
         PENDING
             .iter()
-            .all(|pending| pending.order > 2 && !by_group.contains_key(pending.group))
+            .all(|pending| pending.order > 3 && !by_group.contains_key(pending.group))
     );
-    assert_eq!(PENDING.len(), 25);
-    assert_eq!(PENDING.iter().map(|pending| usize::from(pending.routes)).sum::<usize>(), 356 - 45);
+    assert_eq!(PENDING.len(), 15);
+    assert_eq!(PENDING.iter().map(|pending| usize::from(pending.routes)).sum::<usize>(), 356 - 152);
 }
 
 // ── the answer ───────────────────────────────────────────────────────────────────────────────

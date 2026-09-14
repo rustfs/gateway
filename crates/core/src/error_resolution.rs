@@ -166,7 +166,7 @@ impl ErrorContext {
         }
         validate_message(error.message())?;
         if let Some(resource) = error.member()
-            && !valid_identifier(resource, MAX_RESOURCE_BYTES)
+            && !valid_identifier(resource, MAX_RESOURCE_BYTES, Some(b'_'))
         {
             return Err(InvalidErrorContext::InvalidDetail);
         }
@@ -670,19 +670,23 @@ fn ordinary_parts(
 }
 
 fn validate_code(code: &ErrorCode) -> Result<(), InvalidErrorContext> {
-    if code.is_known() || valid_identifier(code.as_str(), MAX_CODE_BYTES) {
+    if code.is_known() || valid_identifier(code.as_str(), MAX_CODE_BYTES, None) {
         Ok(())
     } else {
         Err(InvalidErrorContext::InvalidCode)
     }
 }
 
-fn valid_identifier(value: &str, max: usize) -> bool {
+/// A letter, then letters, digits and `also`: an error code admits nothing more, and a codec
+/// refusal's member also admits `_`, because it may name a claimed row's path parameter
+/// (`target_type`, ADR-0024 and ADR-0027).
+fn valid_identifier(value: &str, max: usize, also: Option<u8>) -> bool {
     if value.is_empty() || value.len() > max || !is_xml_representable(value) {
         return false;
     }
     let mut bytes = value.bytes();
-    bytes.next().is_some_and(|first| first.is_ascii_alphabetic()) && bytes.all(|byte| byte.is_ascii_alphanumeric())
+    bytes.next().is_some_and(|first| first.is_ascii_alphabetic())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || Some(byte) == also)
 }
 
 fn validate_message(message: &str) -> Result<(), InvalidErrorContext> {
