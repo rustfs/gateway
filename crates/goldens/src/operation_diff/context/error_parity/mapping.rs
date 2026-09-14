@@ -21,8 +21,8 @@
 //! NOT responsible for: the refusals a stack makes before its handler (`super::matrix`).
 //! Upstream: `super`, `super::matrix`, `compat::error`. Downstream: nothing.
 //!
-//! PutObject rows send an empty body: a body the app refuses without reading is a separate
-//! divergence (rd-err-0004), and here the mapping alone is measured.
+//! PutObject rows send an empty body: a body the app refuses without reading is rd-err-0004's own
+//! row, and here the mapping alone is measured.
 
 use super::super::super::SEAM_REVISION;
 use super::super::super::seam::error::{CONTEXTUAL_CODES, MAX_MESSAGE_BYTES, NEEDS_FACTS_CODES, Refusal, refusal_from_s3s};

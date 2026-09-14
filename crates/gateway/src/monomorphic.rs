@@ -110,7 +110,7 @@ pub(crate) mod sealed {
     use crate::request_config::{Authorized, RequestConfig};
     use crate::request_deadline::{
         BodyMonitoredOutcome, HandlerCancellationOutcome, commit_with_progress_deadline, handler_with_body_monitor,
-        handler_with_request_cancellation,
+        handler_with_request_cancellation, response_kind_of, unread_body_answer,
     };
 
     pub trait HandlerDeadlinePolicy: Send {
@@ -325,6 +325,7 @@ pub(crate) mod sealed {
                 + 'a,
         {
             if operation == O::NAME {
+                let response_kind = response_kind_of(meta.method());
                 Box::pin(StaticOperation::<O>::dispatch_with_handler(
                     operation,
                     meta,
@@ -332,7 +333,7 @@ pub(crate) mod sealed {
                     authorize_route,
                     read_body,
                     authorize_input,
-                    |backend, request, mut request_config| async move {
+                    move |backend, request, mut request_config| async move {
                         let Some(deadline_class) = O::spec().deadline_class() else {
                             return Err(StaticDispatchError::Handler(HandlerError::internal_error(
                                 "handler deadline class is missing",
@@ -358,9 +359,10 @@ pub(crate) mod sealed {
                             )
                             .await
                         });
-                        let managed =
+                        let (managed, unread) =
                             match handler_with_body_monitor(managed, body_cancellation, cleanup_grace, body_monitor).await {
-                                BodyMonitoredOutcome::Completed(outcome) => outcome,
+                                BodyMonitoredOutcome::Completed(outcome) => (outcome, None),
+                                BodyMonitoredOutcome::Unread { output, body_unfinished } => (output, Some(body_unfinished)),
                                 BodyMonitoredOutcome::Failed(error) => {
                                     return Err(StaticDispatchError::Body(E::from(error)));
                                 }
@@ -386,15 +388,19 @@ pub(crate) mod sealed {
                                 Err(HandlerError::internal_error(message))
                             }
                         };
+                        let response = response.map_err(|error| {
+                            if hide_missing_object {
+                                error.hide_missing_object()
+                            } else {
+                                error
+                            }
+                        });
+                        if let Some(body_unfinished) = unread {
+                            let settled = unread_body_answer(response, response_kind, body_unfinished);
+                            return Err(StaticDispatchError::Body(E::from(settled)));
+                        }
                         response
                             .map(|response| response.map_commit_work(|work| commit_with_progress_deadline(work, commit_progress)))
-                            .map_err(|error| {
-                                if hide_missing_object {
-                                    error.hide_missing_object()
-                                } else {
-                                    error
-                                }
-                            })
                             .map_err(StaticDispatchError::Handler)
                     },
                 ))

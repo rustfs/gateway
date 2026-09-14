@@ -23,7 +23,8 @@
 
 use super::super::{ContextRequest, PATH_HOST};
 use super::matrix::{
-    Expect, NOT_ALLOWED, NOT_AUTHENTICATED, SKEWED, UNREPRESENTABLE, identifiers, location, object_get, object_put, refused_alike,
+    Expect, NOT_ALLOWED, NOT_AUTHENTICATED, SKEWED, UNREPRESENTABLE, identifiers, location, object_get, object_put, part_put,
+    refused_alike,
 };
 use super::s3s;
 use super::{Pair, SEAM_REFUSED, Scenario, both};
@@ -76,25 +77,22 @@ fn a_refusal_that_leaves_its_body_owed_closes_only_on_the_gateway() {
     refused_alike(&Scenario::new(object_put(b"").signed("us-east-1").forged()), forged);
 }
 
-/// The RustFS body refuses a non-empty PutObject without reading it. In process the gateway's
-/// body verdict replaces the refusal; with nothing to read the refusal crosses as itself.
+/// The RustFS body refuses a non-empty PutObject or UploadPart without reading it, as it does for
+/// a missing bucket, its own access check, quota and throttling. Both stacks answer the body's
+/// refusal, and the gateway keeps the connection: the unread octets are the transport's to linger
+/// over, not a framing fault to close on. The empty body is the control that never had a body to
+/// drop.
 ///
 /// Ruling: `rd-err-0004`
 #[test]
-fn the_app_bodys_refusal_before_reading_a_put_body_is_replaced_in_process() {
+fn the_app_bodys_refusal_before_reading_a_streaming_body_is_the_answer_on_both_stacks() {
     let refused = || S3Error::with_message(S3ErrorCode::AccessDenied, "Access Denied.");
-    let pair = answered(&Scenario::new(object_put(b"hello").signed("us-east-1")).app_refuses(refused));
-    assert!(pair.gateway.reached, "{pair:#?}");
-    assert_eq!(
-        (pair.gateway.status, pair.gateway.code(), pair.gateway.closes),
-        (400, Some("IncompleteBody"), Some(true)),
-        "{pair:#?}"
-    );
-    assert_eq!((pair.oracle.status, pair.oracle.code()), (403, Some("AccessDenied")), "{pair:#?}");
-    refused_alike(
-        &Scenario::new(object_put(b"").signed("us-east-1")).app_refuses(refused),
-        Expect::app_body(403, "AccessDenied"),
-    );
+    for request in [object_put(b"hello"), part_put(b"hello"), object_put(b"")] {
+        refused_alike(
+            &Scenario::new(request.signed("us-east-1")).app_refuses(refused),
+            Expect::app_body(403, "AccessDenied"),
+        );
+    }
 }
 
 /// RustFS answers `304` with no entity tag; the seam cannot hand over what the error does not

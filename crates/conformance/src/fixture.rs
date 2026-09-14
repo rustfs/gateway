@@ -2629,6 +2629,16 @@ async fn drain(body: Option<ByteStream>) -> Result<Vec<u8>, HandlerError> {
 }
 
 async fn upload_part(state: &Arc<Mutex<Fixture>>, input: dto::UploadPartInput) -> HandlerResult<dto::UploadPart> {
+    // The bucket before the body, as the RustFS body checks it: a refusal decidable from the request
+    // alone is made without reading the part, which is the shape c-mpu-0053 exists to observe. A
+    // fixture that drained first would answer the same code over a body it had read, and the case
+    // could not tell the two apart (rustfs/gateway#794).
+    require_bucket(
+        &*state
+            .lock()
+            .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?,
+        &input.bucket,
+    )?;
     let bytes = drain(input.body).await?;
     let mut fixture = state
         .lock()

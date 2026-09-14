@@ -31,7 +31,7 @@ use crate::dispatch::{DispatchTable, ErasedAnswer};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::render::S3Error;
 use crate::request_config::{Authorized, RequestConfig};
-use crate::request_deadline::{BodyMonitoredOutcome, handler_with_body_monitor};
+use crate::request_deadline::{BodyMonitoredOutcome, handler_with_body_monitor, response_kind_of, unread_body_answer};
 
 pub(crate) trait OperationMode {
     type Entry: Send;
@@ -146,20 +146,23 @@ impl OperationMode for DynamicMode<'_> {
                 .invoke(authorized, request_config, request_context)
                 .map_err(StaticDispatchError::Handler)?;
             let body_cancellation = invocation.cancellation_source();
+            let hide = |error: rustfs_gateway_core::HandlerError| {
+                if hide_missing_object {
+                    error.hide_missing_object()
+                } else {
+                    error
+                }
+            };
             let answer =
                 match handler_with_body_monitor(Box::pin(invocation), body_cancellation, cleanup_grace, body_monitor).await {
                     BodyMonitoredOutcome::Completed(answer) => answer,
+                    BodyMonitoredOutcome::Unread { output, body_unfinished } => {
+                        let settled = unread_body_answer(output.map_err(hide), response_kind_of(meta.method()), body_unfinished);
+                        return Err(StaticDispatchError::Body(E::from(settled)));
+                    }
                     BodyMonitoredOutcome::Failed(error) => return Err(StaticDispatchError::Body(E::from(error))),
                 };
-            let (answer, status) = answer
-                .map_err(|error| {
-                    if hide_missing_object {
-                        error.hide_missing_object()
-                    } else {
-                        error
-                    }
-                })
-                .map_err(StaticDispatchError::Handler)?;
+            let (answer, status) = answer.map_err(hide).map_err(StaticDispatchError::Handler)?;
             match answer {
                 ErasedAnswer::Settled(output) => entry
                     .encode(output, meta, status)

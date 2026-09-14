@@ -28,13 +28,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::Poll;
 use std::time::Duration;
 
-use rustfs_gateway_core::{BoxFuture, HandlerCancellation, HandlerCancellationSource};
+use rustfs_gateway_core::{BoxFuture, HandlerCancellation, HandlerCancellationSource, HandlerError, ResponseKind};
 use rustfs_gateway_sig::timing::FailureFloor;
 
 use crate::clock::{MonotonicClock, MonotonicNow};
+use crate::close::ConnectionIntent;
 use crate::ext::{PolicyError, PolicySnapshot, PolicySource};
 use crate::render::S3Error;
 use crate::request_body::{BodyEvent, BodyMonitor};
+use crate::wire_read::RequestBodyUnfinished;
 
 pub(crate) enum HandlerCancellationOutcome<T> {
     Completed(T),
@@ -44,7 +46,48 @@ pub(crate) enum HandlerCancellationOutcome<T> {
 
 pub(crate) enum BodyMonitoredOutcome<T> {
     Completed(T),
+    /// The handler answered, and dropped its body before one octet of it was read; the caller
+    /// settles the answer with [`unread_body_answer`].
+    Unread {
+        output: T,
+        body_unfinished: Option<RequestBodyUnfinished>,
+    },
     Failed(S3Error),
+}
+
+/// The response kind the service renders a handler refusal for.
+pub(crate) fn response_kind_of(method: &http::Method) -> ResponseKind {
+    if *method == http::Method::HEAD {
+        ResponseKind::Head
+    } else {
+        ResponseKind::Other
+    }
+}
+
+/// What a handler's answer over a body it dropped unread becomes (rustfs/gateway#794).
+///
+/// A refusal is the answer. The handler made it without reading the body — the bucket is gone,
+/// the caller may not write, a quota is spent — and a `400 IncompleteBody` in its place would
+/// blame the client's framing for octets the server chose not to read, inviting a retry that
+/// fails the same way. It is rendered exactly as the service renders every handler refusal, plus
+/// the proof that the body is still owed, so the transport treats the remainder as it treats any
+/// refusal made before the body: lingering over it rather than reading it as the next request
+/// (`crate::close::attach_lingering_read`, c-object-0051).
+///
+/// A success is refused: nothing may be committed from a body that never arrived (`c-ck-0062`).
+pub(crate) fn unread_body_answer<X>(
+    answer: Result<X, HandlerError>,
+    response: ResponseKind,
+    body_unfinished: Option<RequestBodyUnfinished>,
+) -> S3Error {
+    match answer {
+        Err(refusal) => {
+            let mut refusal = crate::render::from_handler(refusal, response, ConnectionIntent::MayKeepAlive);
+            refusal.body_unfinished = body_unfinished;
+            refusal
+        }
+        Ok(_) => crate::gate::incomplete(),
+    }
 }
 
 pub(crate) async fn handler_with_body_monitor<T>(
@@ -58,7 +101,8 @@ pub(crate) async fn handler_with_body_monitor<T>(
     };
     let mut body_event = Box::pin(monitor.next_event());
     let raced = poll_fn(|context| {
-        // The terminal body verdict wins a wake shared with the handler result.
+        // The terminal body verdict wins a wake shared with the handler result. An unread drop is
+        // not a verdict: both orders end in `Unread`, and the handler's answer decides it.
         if let Poll::Ready(event) = body_event.as_mut().poll(context) {
             return Poll::Ready(Err(event));
         }
@@ -72,6 +116,10 @@ pub(crate) async fn handler_with_body_monitor<T>(
         Ok(output) => match body_event.await {
             BodyEvent::Complete(Ok(_)) => BodyMonitoredOutcome::Completed(output),
             BodyEvent::Complete(Err(error)) => BodyMonitoredOutcome::Failed(error),
+            BodyEvent::Unread(progress) => BodyMonitoredOutcome::Unread {
+                output,
+                body_unfinished: progress.request_body_unfinished(),
+            },
             BodyEvent::Idle(progress) => {
                 BodyMonitoredOutcome::Failed(crate::gate::body_idle_timeout(progress.request_body_unfinished()))
             }
@@ -85,6 +133,10 @@ pub(crate) async fn handler_with_body_monitor<T>(
         },
         Err(BodyEvent::Complete(Ok(_))) => BodyMonitoredOutcome::Completed(handler.await),
         Err(BodyEvent::Complete(Err(error))) => BodyMonitoredOutcome::Failed(error),
+        Err(BodyEvent::Unread(progress)) => BodyMonitoredOutcome::Unread {
+            output: handler.await,
+            body_unfinished: progress.request_body_unfinished(),
+        },
         Err(BodyEvent::Quota(progress)) => {
             cancellation.cancel(HandlerCancellation::BodyQuota);
             let mut grace = Box::pin(futures_timer::Delay::new(cleanup_grace));
