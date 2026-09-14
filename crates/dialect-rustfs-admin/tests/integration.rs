@@ -27,10 +27,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use http::Request;
+use rustfs_gateway_core::codec::ResponseBody;
 use rustfs_gateway_core::dialect::{ClaimedRow, Dialect};
 use rustfs_gateway_core::op::ResourceShape;
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, RouterBuilder};
 use rustfs_gateway_core::route::{HostClass, Predicate, RouteRequestParts, TargetKind};
+use rustfs_gateway_dialect_rustfs_admin::admin::{self, AdminResponse};
 use rustfs_gateway_dialect_rustfs_admin::{
     AdminOperation, CLAIMS, OVERLAY, OperationFold, PENDING, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
 };
@@ -364,4 +366,30 @@ fn groups_one_and_two_are_declared_and_the_rest_are_pending() {
     );
     assert_eq!(PENDING.len(), 25);
     assert_eq!(PENDING.iter().map(|pending| usize::from(pending.routes)).sum::<usize>(), 356 - 45);
+}
+
+// ── the answer ───────────────────────────────────────────────────────────────────────────────
+
+/// Negative — a handler's answer cannot set a framing header or override its content type, a
+/// value HTTP cannot carry is dropped rather than sent, and an empty answer carries no body.
+#[test]
+fn n_an_answer_cannot_set_framing_headers() {
+    let answer = AdminResponse::json("{}")
+        .with_header("content-length", "999")
+        .with_header("Transfer-Encoding", "chunked")
+        .with_header("connection", "close")
+        .with_header("content-type", "text/html")
+        .with_header("x-bad", "a\r\nb")
+        .with_header("content-disposition", "attachment; filename=\"a.zip\"");
+    let encoded = admin::encode(answer, 200).expect("an answer encodes");
+    let names: BTreeSet<&str> = encoded.headers.keys().map(http::HeaderName::as_str).collect();
+    assert_eq!(names, BTreeSet::from(["content-disposition", "content-type"]));
+    assert_eq!(
+        encoded.headers.get("content-type").map(http::HeaderValue::as_bytes),
+        Some(&b"application/json"[..])
+    );
+    assert!(matches!(&encoded.body, ResponseBody::Complete(bytes) if bytes.as_slice() == b"{}"));
+    let empty = admin::encode(AdminResponse::empty(), 200).expect("an empty answer encodes");
+    assert!(empty.headers.is_empty());
+    assert!(matches!(empty.body, ResponseBody::Empty));
 }
