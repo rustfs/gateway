@@ -287,7 +287,9 @@ fn query_bucket_fault(param: &str, subject: Option<SubjectRule>) -> Option<&'sta
         return Some("a bucket query parameter is spelled in RFC 3986 unreserved characters and is not empty");
     }
     let shared = match subject {
-        Some(SubjectRule::Query { param: account, .. }) => account == param,
+        Some(SubjectRule::Query {
+            param: account, aliases, ..
+        }) => account == param || aliases.contains(&param),
         Some(SubjectRule::Set {
             param: account,
             everyone,

@@ -66,6 +66,7 @@ pub(crate) const GET_USER_INFO_ACTION: &str = "admin:GetUser";
 /// The account `user-info` is about.
 pub(crate) const USER_SUBJECT: SubjectRule = SubjectRule::Query {
     param: "accessKey",
+    aliases: &[],
     when_absent: WhenAbsent::Refuse,
 };
 

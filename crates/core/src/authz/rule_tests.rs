@@ -30,10 +30,12 @@ const TWO: &[&str] = &["admin:A", "admin:B"];
 
 const USER: SubjectRule = SubjectRule::Query {
     param: "accessKey",
+    aliases: &[],
     when_absent: WhenAbsent::Refuse,
 };
 const LIST: SubjectRule = SubjectRule::Query {
     param: "user",
+    aliases: &[],
     when_absent: WhenAbsent::Caller,
 };
 const BULK: SubjectRule = SubjectRule::Set {
@@ -185,12 +187,89 @@ fn n_a_parameter_outside_the_unreserved_set_cannot_be_registered() {
     for param in ["", "access key", "a&b", "a=b", "a%41"] {
         let rule = SubjectRule::Query {
             param,
+            aliases: &[],
             when_absent: WhenAbsent::Refuse,
         };
         assert!(rule.fault().is_some(), "{param:?}");
     }
     assert_eq!(USER.fault(), None);
     assert_eq!(SubjectRule::Caller.fault(), None);
+}
+
+// ── alias spellings (ADR-0029) ──────────────────────────────────────────────────────────────
+
+/// RustFS's `access-key` for `accessKey`, as `AccessKeyQuery` reads it.
+const ALIASED: SubjectRule = SubjectRule::Query {
+    param: "accessKey",
+    aliases: &["access-key"],
+    when_absent: WhenAbsent::Caller,
+};
+/// RustFS's `user-dn` and `user` for `userDN`, as `SingleUserAccessKeysQuery` reads them.
+const LDAP: SubjectRule = SubjectRule::Query {
+    param: "userDN",
+    aliases: &["user-dn", "user"],
+    when_absent: WhenAbsent::Refuse,
+};
+
+/// Positive — each alias names the account the canonical parameter would, decoded the same way;
+/// an empty alias is an absence, and another case or another rule's alias is no spelling at all.
+#[test]
+fn an_alias_names_the_same_account() {
+    assert_eq!(ALIASED.extract("access-key=alice"), Ok(one("alice")));
+    assert_eq!(ALIASED.extract("access%2Dkey=cn%3Dbob"), Ok(one("cn=bob")));
+    assert_eq!(ALIASED.extract("accessKey=alice"), Ok(one("alice")));
+    assert_eq!(LDAP.extract("user-dn=cn%3Dbob"), Ok(one("cn=bob")));
+    assert_eq!(LDAP.extract("user=cn%3Dbob"), Ok(one("cn=bob")));
+    assert_eq!(ALIASED.extract("access-key="), Ok(CALLER));
+    assert_eq!(LDAP.extract("user-dn="), Err(SubjectError::Absent));
+    assert_eq!(ALIASED.extract("Access-Key=alice&user-dn=bob&access_key=carol"), Ok(CALLER));
+    assert_eq!(USER.extract("access-key=alice"), Err(SubjectError::Absent));
+}
+
+/// Negative — two spellings between them are one account named twice, whatever the values, and
+/// an alias's value is decoded as strictly as the parameter's.
+#[test]
+fn n_two_spellings_of_one_account_are_refused() {
+    for query in [
+        "accessKey=alice&access-key=alice",
+        "access-key=alice&accessKey=mallory",
+        "access-key=alice&access-key=mallory",
+        "access-key=&accessKey=mallory",
+    ] {
+        assert_eq!(ALIASED.extract(query), Err(SubjectError::Repeated), "{query}");
+    }
+    assert_eq!(LDAP.extract("user-dn=a&user=b"), Err(SubjectError::Repeated));
+    assert_eq!(LDAP.extract("userDN=a&user=a"), Err(SubjectError::Repeated));
+    assert_eq!(ALIASED.extract("access-key=a+b"), Err(SubjectError::Malformed));
+    assert_eq!(ALIASED.refused_param(SubjectError::Repeated), Some("accessKey"));
+}
+
+/// Negative — an alias is spelled like a parameter and differs from every other spelling.
+#[test]
+fn n_an_alias_spelled_wrongly_cannot_be_registered() {
+    let aliased = |aliases| SubjectRule::Query {
+        param: "accessKey",
+        aliases,
+        when_absent: WhenAbsent::Refuse,
+    };
+    for aliases in [&[""][..], &["access key"], &["a%41"], &["accessKey"], &["ak", "ak"]] {
+        assert!(aliased(aliases).fault().is_some(), "{aliases:?}");
+    }
+    assert_eq!(ALIASED.fault(), None);
+    assert_eq!(LDAP.fault(), None);
+}
+
+/// Positive — the overlay spells every alias after the canonical parameter.
+#[test]
+fn an_alias_is_rendered_with_its_parameter() {
+    let render = |rule| {
+        crate::AuthRequirement::new("admin:GetUser", crate::ResourceShape::Service)
+            .about_subject(rule)
+            .render()
+    };
+    assert_eq!(render(ALIASED), "admin:GetUser about query(accessKey|access-key, absent=caller)");
+    assert_eq!(render(LDAP), "admin:GetUser about query(userDN|user-dn|user, absent=refused)");
+    assert_eq!(render(USER), "admin:GetUser about query(accessKey, absent=refused)");
 }
 
 // ── a set of subjects (ADR-0026) ────────────────────────────────────────────────────────────

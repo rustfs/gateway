@@ -33,6 +33,7 @@ use crate::route::{BucketParam, PathClaim, Predicate};
 const TWO: &[&str] = &["acme:A", "acme:B"];
 const USER: SubjectRule = SubjectRule::Query {
     param: "accessKey",
+    aliases: &["access-key"],
     when_absent: WhenAbsent::Refuse,
 };
 
@@ -62,6 +63,7 @@ const REQUIREMENTS: [AuthRequirement; 31] = [
     // 9: a subject parameter outside the unreserved set.
     AuthRequirement::new("admin:GetUser", ResourceShape::Service).about_subject(SubjectRule::Query {
         param: "access key",
+        aliases: &[],
         when_absent: WhenAbsent::Caller,
     }),
     // 10: an own-account operation with several actions.
@@ -589,6 +591,12 @@ fn n_a_query_binding_outside_its_bounds_is_refused() {
     assert!(
         bucket_refusal(&shared, "accessKey").is_some_and(|why| why.contains("different query parameters")),
         "{shared:?}"
+    );
+    // An alias of the account parameter is the account parameter (ADR-0029).
+    let alias = declare_bucket::<20>(Some(BucketParam::Query("access-key"))).expect_err("an alias, two meanings");
+    assert!(
+        bucket_refusal(&alias, "access-key").is_some_and(|why| why.contains("different query parameters")),
+        "{alias:?}"
     );
     // The control: another parameter is accepted as a binding (the operation is refused only for
     // the record this overlay does not hold).

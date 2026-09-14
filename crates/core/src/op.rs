@@ -258,12 +258,17 @@ impl AuthRequirement {
         };
         match self.subject {
             Some(SubjectRule::Caller) => rendered.push_str(" about caller"),
-            Some(SubjectRule::Query { param, when_absent }) => {
+            Some(SubjectRule::Query {
+                param,
+                aliases,
+                when_absent,
+            }) => {
                 let absent = match when_absent {
                     WhenAbsent::Caller => "caller",
                     WhenAbsent::Refuse => "refused",
                 };
-                rendered.push_str(&format!(" about query({param}, absent={absent})"));
+                let spellings: Vec<&str> = core::iter::once(param).chain(aliases.iter().copied()).collect();
+                rendered.push_str(&format!(" about query({}, absent={absent})", spellings.join("|")));
             }
             Some(SubjectRule::Set { param, everyone }) => match everyone {
                 Some(everyone) => {

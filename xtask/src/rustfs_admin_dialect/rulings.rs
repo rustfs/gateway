@@ -45,8 +45,13 @@ pub(super) enum Absent {
 pub(super) enum About {
     /// Only the caller's own account, under the operation's own vendor label (ADR-0025).
     Caller,
-    /// The account one query parameter names (ADR-0025).
-    Query { param: &'static str, absent: Absent },
+    /// The account one query parameter names, under its canonical spelling or one of RustFS's
+    /// alias spellings (ADR-0025, ADR-0029).
+    Query {
+        param: &'static str,
+        aliases: &'static [&'static str],
+        absent: Absent,
+    },
     /// Each account a repeated parameter names, or every account under a flag that needs a
     /// broader action on top: `(flag, action)` (ADR-0026).
     Set {
@@ -106,14 +111,20 @@ const fn own(label: &'static str) -> Form {
     }
 }
 
-/// `action` about the account the query parameter `param` names (ADR-0025 (d), ADR-0028 (b)).
-const fn named(action: &'static str, param: &'static str, absent: Absent) -> Form {
+/// `action` about the account the query parameter `param`, or one of its `aliases`, names
+/// (ADR-0025 (d), ADR-0028 (b), ADR-0029).
+const fn named(action: &'static str, param: &'static str, aliases: &'static [&'static str], absent: Absent) -> Form {
     Form {
         query: None,
         rule: Ruled::One(action),
-        about: Some(About::Query { param, absent }),
+        about: Some(About::Query { param, aliases, absent }),
     }
 }
+
+/// `accessKey` and RustFS's serde alias for it, `access-key` (`AccessKeyQuery`, `AddUserQuery`).
+const ACCESS_KEY: &[&str] = &["access-key"];
+/// RustFS's `SingleUserAccessKeysQuery` reads the DN as `userDN`, `user-dn` or `user`.
+const USER_DN: &[&str] = &["user-dn", "user"];
 
 /// The three bulk access-key listings: `admin:ListServiceAccounts` about each `users` account,
 /// and `admin:ListUsers` on top for `all=true` (ADR-0026 (c)).
@@ -215,60 +226,61 @@ pub(super) const RULINGS: &[Ruling] = &[
         "CredentialOnly",
         &[one("admin:GetBucketTarget")],
     ),
-    // ── order 4: the account a query parameter names (ADR-0025 (d), ADR-0028 (b)) ──
+    // ── order 4: the account a query parameter names (ADR-0025 (d), ADR-0028 (b)), in every
+    //    spelling RustFS reads (ADR-0029) ──
     ruling(
         "DELETE",
         "/rustfs/admin/v3/delete-service-account",
         "ContextualAuthorization",
-        &[named("admin:RemoveServiceAccount", "accessKey", Absent::Refuse)],
+        &[named("admin:RemoveServiceAccount", "accessKey", ACCESS_KEY, Absent::Refuse)],
     ),
     ruling(
         "DELETE",
         "/rustfs/admin/v3/delete-service-accounts",
         "ContextualAuthorization",
-        &[named("admin:RemoveServiceAccount", "accessKey", Absent::Refuse)],
+        &[named("admin:RemoveServiceAccount", "accessKey", ACCESS_KEY, Absent::Refuse)],
     ),
     ruling(
         "GET",
         "/rustfs/admin/v3/idp/ldap/list-access-keys",
         "ContextualAuthorization",
-        &[named("admin:ListServiceAccounts", "userDN", Absent::Caller)],
+        &[named("admin:ListServiceAccounts", "userDN", USER_DN, Absent::Caller)],
     ),
     ruling(
         "GET",
         "/rustfs/admin/v3/info-access-key",
         "ContextualAuthorization",
-        &[named("admin:ListServiceAccounts", "accessKey", Absent::Caller)],
+        &[named("admin:ListServiceAccounts", "accessKey", ACCESS_KEY, Absent::Caller)],
     ),
     ruling(
         "GET",
         "/rustfs/admin/v3/info-service-account",
         "ContextualAuthorization",
-        &[named("admin:ListServiceAccounts", "accessKey", Absent::Refuse)],
+        &[named("admin:ListServiceAccounts", "accessKey", ACCESS_KEY, Absent::Refuse)],
     ),
     ruling(
         "GET",
         "/rustfs/admin/v3/list-service-accounts",
         "ContextualAuthorization",
-        &[named("admin:ListServiceAccounts", "user", Absent::Caller)],
+        &[named("admin:ListServiceAccounts", "user", &[], Absent::Caller)],
     ),
     ruling(
         "GET",
         "/rustfs/admin/v3/user-info",
         "ContextualAuthorization",
-        &[named("admin:GetUser", "accessKey", Absent::Refuse)],
+        &[named("admin:GetUser", "accessKey", ACCESS_KEY, Absent::Refuse)],
     ),
     ruling(
         "POST",
         "/rustfs/admin/v3/update-service-account",
         "ContextualAuthorization",
-        &[named("admin:UpdateServiceAccount", "accessKey", Absent::Refuse)],
+        &[named("admin:UpdateServiceAccount", "accessKey", ACCESS_KEY, Absent::Refuse)],
     ),
     ruling(
         "PUT",
         "/rustfs/admin/v3/add-user",
         "ContextualAuthorization",
-        &[named("admin:CreateUser", "accessKey", Absent::Refuse)],
+        &[named("admin:CreateUser", "accessKey", ACCESS_KEY, Absent::Refuse)],
     ),
     // ── order 4: any-of listings and account sets (ADR-0025 (d), ADR-0026 (c)) ──
     ruling("GET", "/rustfs/admin/v3/idp/builtin/policy-entities", "MultipleActions", POLICY_ENTITIES),
