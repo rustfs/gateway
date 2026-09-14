@@ -123,9 +123,13 @@ const GATES: &[(&str, Wiring)] = &[
     ("list", Wiring::Runs(&[])),
     ("location", Wiring::Runs(&[])),
     ("lock", Wiring::Runs(&[])),
-    // The four in `multipart_family.rs`'s `KNOWN_SKIPS`: two want a fresh connection per exchange,
-    // one a stalled chunk, one a malformed request head. All four execute over a socket.
-    ("mpu", Wiring::Runs(&["c-mpu-0027", "c-mpu-0039", "c-mpu-0043", "c-mpu-0045"])),
+    // The five in `multipart_family.rs`'s `KNOWN_SKIPS`: three want a fresh connection per exchange
+    // (`c-mpu-0053` for the connection verdict after a refusal left the body unread), one a stalled
+    // chunk, one a malformed request head. All five execute over a socket.
+    (
+        "mpu",
+        Wiring::Runs(&["c-mpu-0027", "c-mpu-0039", "c-mpu-0043", "c-mpu-0045", "c-mpu-0053"]),
+    ),
     // The default CI run claims AWS. These MinIO-only cases (the slash-collapse trio and
     // c-naming-0032's dot-dot DeleteObject refusal, rustfs/gateway#772) are executed by the
     // dedicated profile command and are the deliberate profile-gated skips here.
