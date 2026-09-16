@@ -111,7 +111,7 @@ impl AdminOperation for DeleteV3CancelJob {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 102,
+    precedence: 107,
     selector: "PathTemplate(\"/rustfs/admin/v3/cancel-job\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/cancel-job\") ∧ Method(DELETE)",
     action: "admin:CancelBatchJob",
     resource: ResourceShape::Service,

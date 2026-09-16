@@ -121,7 +121,7 @@ impl AdminOperation for PostV3AccountPassword {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 228,
+    precedence: 272,
     selector: "PathTemplate(\"/rustfs/admin/v3/account/password\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/account/password\") ∧ Method(POST)",
     action: "rustfs:ChangeOwnPassword about caller",
     resource: ResourceShape::Service,

@@ -112,7 +112,7 @@ impl AdminOperation for PutImportBucketMetadata {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 300,
+    precedence: 349,
     selector: "PathTemplate(\"/rustfs/admin/import-bucket-metadata\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/import-bucket-metadata\") ∧ Method(PUT)",
     action: "admin:ImportBucketMetadata",
     resource: ResourceShape::Service,

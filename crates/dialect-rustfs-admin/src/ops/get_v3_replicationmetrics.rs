@@ -111,7 +111,7 @@ impl AdminOperation for GetV3Replicationmetrics {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 194,
+    precedence: 217,
     selector: "PathTemplate(\"/rustfs/admin/v3/replicationmetrics\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/replicationmetrics\") ∧ Method(GET)",
     action: "admin:GetReplicationMetrics",
     resource: ResourceShape::Service,

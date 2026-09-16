@@ -114,7 +114,7 @@ impl AdminOperation for GetV3IlmTransitionJobsByJobId {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 153,
+    precedence: 176,
     selector: "PathTemplate(\"/rustfs/admin/v3/ilm/transition/jobs/{job_id}\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/ilm/transition/jobs/{job_id}\") ∧ Method(GET)",
     action: "admin:SetTier",
     resource: ResourceShape::Service,

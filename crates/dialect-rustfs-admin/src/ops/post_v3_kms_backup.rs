@@ -112,7 +112,7 @@ impl AdminOperation for PostV3KmsBackup {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 243,
+    precedence: 287,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/backup\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/backup\") ∧ Method(POST)",
     action: "kms:Backup",
     resource: ResourceShape::Service,

@@ -112,7 +112,7 @@ impl AdminOperation for PutV3SetUserSecretKey {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 323,
+    precedence: 372,
     selector: "PathTemplate(\"/rustfs/admin/v3/set-user-secret-key\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/set-user-secret-key\") ∧ Method(PUT)",
     action: "admin:CreateUser",
     resource: ResourceShape::Service,

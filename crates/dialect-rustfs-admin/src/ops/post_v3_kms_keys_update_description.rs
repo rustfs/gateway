@@ -112,7 +112,7 @@ impl AdminOperation for PostV3KmsKeysUpdateDescription {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 258,
+    precedence: 302,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/keys/update-description\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/keys/update-description\") ∧ Method(POST)",
     action: "kms:UpdateKeyDescription",
     resource: ResourceShape::Service,

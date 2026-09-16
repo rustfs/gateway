@@ -111,7 +111,7 @@ impl AdminOperation for PutV3SetPolicy {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 320,
+    precedence: 369,
     selector: "PathTemplate(\"/rustfs/admin/v3/set-policy\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/set-policy\") ∧ Method(PUT)",
     action: "admin:AttachUserOrGroupPolicy",
     resource: ResourceShape::Service,

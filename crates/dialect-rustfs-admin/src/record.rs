@@ -44,6 +44,10 @@ pub(crate) const ADR_0028: &str = "https://github.com/rustfs/gateway/blob/main/d
 /// ADR-0030, which every row that binds its bucket, and the trailing-slash heal row, cite.
 pub(crate) const ADR_0030: &str = "https://github.com/rustfs/gateway/blob/main/docs/adr/0030-order-five-admin-bound-buckets.md";
 
+/// ADR-0031, which every table-catalog row cites: the surface's claims, its compat alias rows,
+/// and the first-divergence shadowing rule.
+pub(crate) const ADR_0031: &str = "https://github.com/rustfs/gateway/blob/main/docs/adr/0031-order-six-table-catalog-surfaces.md";
+
 /// How RustFS reads or writes one side of a route's body, as the inventory records it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BodyKind {
@@ -68,9 +72,10 @@ pub struct RouteRecord {
     pub order: u8,
     /// The method.
     pub method: &'static str,
-    /// The canonical path, under `/rustfs/admin`.
+    /// The canonical path, under `/rustfs/admin` or `/_iceberg/v1`.
     pub path: &'static str,
-    /// The MinIO alias, under `/minio/admin`, when RustFS serves one.
+    /// The compat row RustFS serves the same route under, when it does: the MinIO alias under
+    /// `/minio/admin`, or the table catalog's `/iceberg/v1` twin (ADR-0024 (c), ADR-0031 (b)).
     pub alias: Option<&'static str>,
     /// The query key and value that select this operation, when one route is split by its query.
     pub query: Option<(&'static str, &'static str)>,

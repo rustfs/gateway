@@ -111,7 +111,7 @@ impl AdminOperation for GetV3ListJobs {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 174,
+    precedence: 197,
     selector: "PathTemplate(\"/rustfs/admin/v3/list-jobs\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/list-jobs\") ∧ Method(GET)",
     action: "admin:ListBatchJobs",
     resource: ResourceShape::Service,

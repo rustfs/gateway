@@ -18,8 +18,9 @@
 //! Responsible for: reading `crates/goldens/src/migration_inventory/rustfs_admin_routes.json`,
 //! choosing the routes of the groups ADR-0024's plan has migrated, applying the rulings
 //! (`rulings.rs`: ADR-0025's, ADR-0026's, ADR-0028's and ADR-0030's) to the custom-auth ones,
-//! ADR-0027's to templates and overlaps and ADR-0030's bucket binding to `{bucket}` templates and
-//! the listed query parameters (`template.rs`), refusing any route it has no rule for and any rule
+//! ADR-0027's to templates and overlaps, ADR-0030's bucket binding to `{bucket}` and `{warehouse}`
+//! templates and the listed query parameters (`template.rs`), and ADR-0031's surfaces (the table
+//! catalog's `/_iceberg/v1` with its `/iceberg/v1` compat rows as aliases), refusing any route it has no rule for and any rule
 //! outside those ADRs' shapes, and writing one operation module per declared operation, the
 //! module list and the dialect's table files, each through rustfmt.
 //! `--check` compares instead, and fails on a stale, missing or extra file.
@@ -38,6 +39,7 @@ use serde::Deserialize;
 use self::render::{render_mod, render_operation, render_tables};
 use self::rulings::{About, Absent, QUERY_BUCKETS, RULINGS, Ruled, Ruling};
 use self::template::{Shadow, Template, shadowing, snake, template_params, type_name};
+
 use crate::repo_root::repo_root;
 
 mod render;
@@ -53,8 +55,43 @@ const OUTPUT: &str = "crates/dialect-rustfs-admin/src";
 const GENERATED_DIRS: [&str; 2] = ["ops", "table"];
 /// RustFS's admin router, whose `matchit` matcher tries a literal segment before a parameter.
 const RUSTFS_ROUTER: &str = "rustfs/src/admin/router.rs";
-const ADMIN_PREFIX: &str = "/rustfs/admin/";
-const MINIO_PREFIX: &str = "/minio/admin/";
+/// One prefix RustFS serves admin routes under, its compat prefix, and how the inventory records
+/// the compat spelling (ADR-0024 (c), ADR-0031 (b)).
+struct Surface {
+    /// The canonical prefix, with its trailing `/`.
+    prefix: &'static str,
+    /// The compat prefix RustFS serves the same routes under.
+    alias: &'static str,
+    /// The word after the method in an operation name, or nothing.
+    tag: &'static str,
+    /// Where the alias comes from.
+    alias_from: AliasFrom,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AliasFrom {
+    /// The route's own `minio_admin_alias` flag: RustFS registers the alias from the same row.
+    Flag,
+    /// A second inventory row under the compat prefix, identical in every other fact; it is the
+    /// operation's alias row and is declared as no operation of its own.
+    Twin,
+}
+
+/// The surfaces the dialect serves, each a pair of claims (`crate::dialect::CLAIMS`).
+const SURFACES: &[Surface] = &[
+    Surface {
+        prefix: "/rustfs/admin/",
+        alias: "/minio/admin/",
+        tag: "",
+        alias_from: AliasFrom::Flag,
+    },
+    Surface {
+        prefix: "/_iceberg/v1/",
+        alias: "/iceberg/v1/",
+        tag: "Iceberg",
+        alias_from: AliasFrom::Twin,
+    },
+];
 /// The dialect's vendor namespace: its operation names, and the only namespace an own-account
 /// operation's label may be in (ADR-0025).
 const VENDOR: &str = "rustfs";
@@ -104,7 +141,7 @@ const PLAN: &[(&str, u8)] = &[
 ];
 
 /// The last migrated order: groups at or below it are declared, the rest are pending.
-const MIGRATED_THROUGH: u8 = 5;
+const MIGRATED_THROUGH: u8 = 6;
 
 #[derive(Deserialize)]
 struct Inventory {
@@ -448,6 +485,28 @@ fn forms(route: &Route, at: &str, rulings: &[Ruling], used: &mut BTreeSet<usize>
     }
 }
 
+/// The index of the route identical to `route` in every fact but its prefix, with `from` spelled
+/// as `to`, or `None` (ADR-0031 (b)).
+fn twin_of(inventory: &Inventory, route: &Route, from: &str, to: &str) -> Option<usize> {
+    let rest = route.path.strip_prefix(from)?;
+    let path = format!("{to}{rest}");
+    inventory.routes.iter().position(|other| {
+        other.method == route.method
+            && other.path == path
+            && other.group == route.group
+            && other.path_params == route.path_params
+            && other.query_discriminators == route.query_discriminators
+            && other.auth_mode == route.auth_mode
+            && other.iam_action_wire == route.iam_action_wire
+            && other.auth_detail == route.auth_detail
+            && other.handler == route.handler
+            && other.caller_secret_body == route.caller_secret_body
+            && other.request_body == route.request_body
+            && other.response_body == route.response_body
+            && !other.minio_admin_alias
+    })
+}
+
 /// Chooses and rules the routes, refusing every one it has no rule for; `query_buckets` lists the
 /// routes whose bucket is a query parameter (ADR-0030).
 fn plan(inventory: &Inventory, rulings: &[Ruling], query_buckets: &[(&str, &str, &'static str)]) -> Result<Plan, String> {
@@ -459,11 +518,23 @@ fn plan(inventory: &Inventory, rulings: &[Ruling], query_buckets: &[(&str, &str,
     let mut used_query_buckets = BTreeSet::new();
     let mut declared = Vec::new();
     let mut pending: BTreeMap<String, (u8, usize)> = BTreeMap::new();
+    let mut twins_used = BTreeSet::new();
     for route in &inventory.routes {
         let at = format!("{} {}", route.method, route.path);
         let order = order_of(&route.group).ok_or_else(|| format!("{at}: group {:?} has no place in the plan", route.group))?;
         if order > MIGRATED_THROUGH {
             pending.entry(route.group.clone()).or_insert((order, 0)).1 += 1;
+            continue;
+        }
+        let surface = SURFACES
+            .iter()
+            .find(|surface| route.path.starts_with(surface.prefix) || route.path.starts_with(surface.alias))
+            .ok_or_else(|| format!("{at}: under no surface the dialect serves"))?;
+        if surface.alias_from == AliasFrom::Twin && route.path.starts_with(surface.alias) {
+            // The compat row of a canonical route: declared as that route's alias, below.
+            let canonical = twin_of(inventory, route, surface.alias, surface.prefix)
+                .ok_or_else(|| format!("{at}: a compat row whose canonical route the inventory does not record"))?;
+            twins_used.insert(canonical);
             continue;
         }
         let Template { params, bucket } = template_params(route, &at)?;
@@ -487,10 +558,18 @@ fn plan(inventory: &Inventory, rulings: &[Ruling], query_buckets: &[(&str, &str,
             (None, None) => None,
         };
         let forms = forms(route, &at, rulings, &mut used)?;
-        let alias = match (route.minio_admin_alias, route.path.strip_prefix(ADMIN_PREFIX)) {
-            (_, None) => return Err(format!("{at}: not under {ADMIN_PREFIX}")),
-            (true, Some(rest)) => Some(format!("{MINIO_PREFIX}{rest}")),
-            (false, Some(_)) => None,
+        let rest = route
+            .path
+            .strip_prefix(surface.prefix)
+            .ok_or_else(|| format!("{at}: not under {}", surface.prefix))?;
+        let alias = match surface.alias_from {
+            AliasFrom::Flag if route.minio_admin_alias => Some(format!("{}{rest}", surface.alias)),
+            AliasFrom::Flag => None,
+            AliasFrom::Twin => {
+                let twin = twin_of(inventory, route, surface.prefix, surface.alias)
+                    .ok_or_else(|| format!("{at}: RustFS serves no identical route under {}", surface.alias))?;
+                Some(inventory.routes[twin].path.clone())
+            }
         };
         let caller_secret = match route.caller_secret_body.as_str() {
             "none" => false,
@@ -506,7 +585,8 @@ fn plan(inventory: &Inventory, rulings: &[Ruling], query_buckets: &[(&str, &str,
                     return Err(format!("{at}: the bucket and the account are read from different query parameters"));
                 }
             }
-            let type_name = type_name(&route.method, &route.path, query).ok_or_else(|| format!("{at}: no operation name"))?;
+            let type_name =
+                type_name(&route.method, surface, &route.path, query).ok_or_else(|| format!("{at}: no operation name"))?;
             let precedence = u16::try_from(declared.len())
                 .ok()
                 .and_then(|index| FIRST_PRECEDENCE.checked_add(index))
@@ -539,6 +619,7 @@ fn plan(inventory: &Inventory, rulings: &[Ruling], query_buckets: &[(&str, &str,
     for (winner, _, shadow) in shadowing(&declared)? {
         declared[winner].shadows.push(shadow);
     }
+    let _ = twins_used;
     if let Some(stale) = (0..rulings.len()).find(|index| !used.contains(index)) {
         return Err(format!(
             "the ruling for {} {} names no custom-auth route of a migrated group",

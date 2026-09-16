@@ -111,7 +111,7 @@ impl AdminOperation for GetV3TargetArns {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 205,
+    precedence: 228,
     selector: "PathTemplate(\"/rustfs/admin/v3/target/arns\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/target/arns\") ∧ Method(GET)",
     action: "admin:GetBucketTarget",
     resource: ResourceShape::Service,

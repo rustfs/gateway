@@ -120,7 +120,7 @@ impl AdminOperation for GetV3Accountinfo {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 126,
+    precedence: 149,
     selector: "PathTemplate(\"/rustfs/admin/v3/accountinfo\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/accountinfo\") ∧ Method(GET)",
     action: "rustfs:AccountInfo about caller",
     resource: ResourceShape::Service,

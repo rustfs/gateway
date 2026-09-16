@@ -122,7 +122,7 @@ impl AdminOperation for PostV3HealByBucket {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 232,
+    precedence: 276,
     selector: "PathTemplate(\"/rustfs/admin/v3/heal/{bucket}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/heal/{bucket}\") ∧ Method(POST) ⇒ BucketParam(\"bucket\")",
     action: "admin:Heal",
     resource: ResourceShape::Bucket,

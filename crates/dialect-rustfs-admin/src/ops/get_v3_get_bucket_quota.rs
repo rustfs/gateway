@@ -122,7 +122,7 @@ impl AdminOperation for GetV3GetBucketQuota {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 136,
+    precedence: 159,
     selector: "PathTemplate(\"/rustfs/admin/v3/get-bucket-quota\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/get-bucket-quota\") ∧ Method(GET) ⇒ BucketQuery(\"bucket\")",
     action: "s3:GetBucketQuota",
     resource: ResourceShape::Bucket,

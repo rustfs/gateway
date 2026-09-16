@@ -129,7 +129,7 @@ impl AdminOperation for GetV3IdpLdapListAccessKeysBulk {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 146,
+    precedence: 169,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp/ldap/list-access-keys-bulk\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/idp/ldap/list-access-keys-bulk\") ∧ Method(GET)",
     action: "admin:ListServiceAccounts about each(users, everyone=all ⇒ admin:ListUsers)",
     resource: ResourceShape::Service,

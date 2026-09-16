@@ -113,7 +113,7 @@ impl AdminOperation for GetV3PoolsList {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 187,
+    precedence: 210,
     selector: "PathTemplate(\"/rustfs/admin/v3/pools/list\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/pools/list\") ∧ Method(GET)",
     action: "anyOf(admin:ServerInfo, admin:Decommission)",
     resource: ResourceShape::Service,

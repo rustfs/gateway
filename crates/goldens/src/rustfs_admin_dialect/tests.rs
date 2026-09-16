@@ -88,26 +88,48 @@ fn parameters() -> impl Iterator<Item = (&'static RouteRecord, &'static str, usi
 
 /// Positive — every route of a migrated group is declared as its inventory row records it:
 /// group, alias, handler, body kinds, secret, and the recorded action or ADR-0025's ruling of its
-/// custom class; and every declared operation is bound to exactly one inventory route.
+/// custom class; a `/iceberg/v1` compat row is the alias of its `/_iceberg/v1` route and no
+/// operation of its own (ADR-0031 (b)); and every declared operation is bound to exactly one
+/// canonical inventory route.
 #[test]
 fn every_migrated_route_is_declared_as_the_inventory_records_it() {
     let inventory = rustfs_admin_route_inventory().expect("the recorded inventory validates");
     let migrated: BTreeSet<&str> = ROUTES.iter().map(|record| record.group).collect();
-    let mut bound = 0;
+    let mut canonical = 0;
+    let mut compat = 0;
     for route in inventory
         .routes()
         .iter()
         .filter(|route| migrated.contains(route.group.as_str()))
     {
         let at = route.key();
+        if route.path.starts_with("/iceberg/v1/") {
+            let by_alias: Vec<&RouteRecord> = ROUTES
+                .iter()
+                .filter(|record| record.method == route.method.as_str() && record.alias == Some(route.path.as_str()))
+                .collect();
+            assert_eq!(by_alias.len(), 1, "{at}: a compat row is exactly one operation's alias");
+            assert!(
+                !ROUTES.iter().any(|record| record.path == route.path),
+                "{at}: a compat row is no operation"
+            );
+            assert_eq!(by_alias[0].rustfs_handler, route.handler, "{at}");
+            compat += 1;
+            continue;
+        }
         let records: Vec<&RouteRecord> = ROUTES
             .iter()
             .filter(|record| record.method == route.method.as_str() && record.path == route.path)
             .collect();
         assert!(!records.is_empty(), "{at} is not declared");
-        let alias = route
-            .minio_admin_alias
-            .then(|| route.path.replacen("/rustfs/admin/", "/minio/admin/", 1));
+        let alias = if route.minio_admin_alias {
+            Some(route.path.replacen("/rustfs/admin/", "/minio/admin/", 1))
+        } else {
+            route
+                .path
+                .starts_with("/_iceberg/v1/")
+                .then(|| route.path.replacen("/_iceberg/", "/iceberg/", 1))
+        };
         for record in &records {
             assert_eq!(record.group, route.group, "{at}");
             assert_eq!(record.alias.map(str::to_owned), alias, "{at}");
@@ -124,9 +146,10 @@ fn every_migrated_route_is_declared_as_the_inventory_records_it() {
                 AdminAuthMode::Anonymous => panic!("{at}: an anonymous route was declared"),
             }
         }
-        bound += records.len();
+        canonical += records.len();
     }
-    assert_eq!(bound, ROUTES.len(), "a declared operation has no inventory route");
+    assert_eq!(canonical, ROUTES.len(), "a declared operation has no inventory route");
+    assert_eq!(compat, 49, "every table-catalog route has its compat row");
 }
 
 /// Positive — the pending groups are exactly the inventory's other groups, each with its
@@ -143,7 +166,19 @@ fn the_pending_groups_are_the_rest_of_the_inventory() {
     }
     let pending: BTreeMap<&str, u16> = PENDING.iter().map(|pending| (pending.group, pending.routes)).collect();
     assert_eq!(pending, rest);
-    let declared_routes: BTreeSet<(&str, &str)> = ROUTES.iter().map(|record| (record.method, record.path)).collect();
+    // Every declared canonical route, plus every alias that is itself an inventory row (the
+    // `/iceberg/v1` compat rows), plus every pending route, is the inventory.
+    let declared_routes: BTreeSet<(&str, &str)> = ROUTES
+        .iter()
+        .flat_map(|record| {
+            std::iter::once((record.method, record.path)).chain(
+                record
+                    .alias
+                    .filter(|alias| alias.starts_with("/iceberg/v1/"))
+                    .map(|alias| (record.method, alias)),
+            )
+        })
+        .collect();
     let pending_routes: usize = PENDING.iter().map(|pending| usize::from(pending.routes)).sum();
     assert_eq!(declared_routes.len() + pending_routes, inventory.routes().len());
 }
@@ -169,7 +204,12 @@ fn every_row_is_authorised_by_exactly_its_declared_action() {
         let exchange = assembled.exchange(wire(&signed(record, &path)));
         assert_eq!(exchange.status, 200, "{at}: {}", exchange.body);
         assert_eq!(exchange.reached, [record.operation], "{at}");
-        assert!(exchange.body.contains(record.operation), "{at}: {}", exchange.body);
+        // A HEAD answer carries no body; the handler's reach is recorded above.
+        assert!(
+            record.method == "HEAD" || exchange.body.contains(record.operation),
+            "{at}: {}",
+            exchange.body
+        );
         let params: Vec<(String, String)> = template
             .split('/')
             .filter_map(param)
@@ -261,7 +301,12 @@ fn n_a_row_whose_action_is_denied_is_refused_before_its_handler() {
             let at = format!("{} {path}", record.method);
             let exchange = assembled.exchange(wire(&signed(record, path)));
             refused_before_the_handler(&exchange, &at);
-            assert!(exchange.body.contains("<Code>AccessDenied</Code>"), "{at}: {}", exchange.body);
+            // A HEAD response carries no body to read the code from.
+            assert!(
+                record.method == "HEAD" || exchange.body.contains("<Code>AccessDenied</Code>"),
+                "{at}: {}",
+                exchange.body
+            );
             assert_eq!(
                 exchange.asked.first().map(|asked| asked.action.as_str()),
                 Some(actions(record)[0]),
@@ -322,7 +367,7 @@ fn n_a_forged_or_unknown_key_row_is_refused_without_asking() {
 #[test]
 fn n_a_presigned_row_is_refused_without_asking() {
     let presignable: Vec<_> = rows().filter(|(record, _)| record.query.is_none()).collect();
-    assert_eq!(presignable.len(), 478, "every row but the service command's eight");
+    assert_eq!(presignable.len(), 576, "every row but the service command's eight");
     in_lanes(
         |_, _| true,
         &presignable,
@@ -330,7 +375,12 @@ fn n_a_presigned_row_is_refused_without_asking() {
             let at = format!("{} {path}", record.method);
             let exchange = assembled.exchange(presigned(record, path));
             refused_without_asking(&exchange, &at);
-            assert!(exchange.body.contains("<Code>AccessDenied</Code>"), "{at}: {}", exchange.body);
+            // A HEAD response carries no body to read the code from.
+            assert!(
+                record.method == "HEAD" || exchange.body.contains("<Code>AccessDenied</Code>"),
+                "{at}: {}",
+                exchange.body
+            );
         },
     );
 }
@@ -347,7 +397,7 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
                 .map(|(raw, status)| (record, with_segment(template, Some(index), raw), name, raw, status))
         })
         .collect();
-    assert_eq!(cases.len(), 5 * 2 * 53, "53 parameters across 44 templates, each with its alias");
+    assert_eq!(cases.len(), 5 * 2 * 177, "177 parameters across 92 templates, each with its alias");
     in_lanes(
         |_, _| true,
         &cases,
@@ -357,7 +407,7 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
             assert_eq!(exchange.status, *status, "{at}: {}", exchange.body);
             assert!(exchange.reached.is_empty(), "{at}: a handler ran");
             assert!(exchange.asked.is_empty(), "{at}: the authorizer was asked {:?}", exchange.asked);
-            if *status == 400 {
+            if *status == 400 && record.method != "HEAD" {
                 assert!(exchange.body.contains("<Code>InvalidArgument</Code>"), "{at}: {}", exchange.body);
                 assert!(exchange.body.contains(name), "{at}: {}", exchange.body);
                 assert!(!exchange.body.contains(raw), "{at}: the value is echoed: {}", exchange.body);

@@ -23,10 +23,10 @@
 //! deployment that installs the dialect with `ServiceBuilder::dialect`.
 //!
 //! A claimed row cannot overlap an S3 row: the router asks the claim first, and a request inside
-//! `/rustfs/admin` or `/minio/admin` is answered by a claimed row or by nothing, which is how
-//! RustFS's own router takes the whole admin prefix ahead of its S3 service. So no operation here
-//! declares a shadowing decision, and a path-style bucket named `rustfs` or `minio` loses these
-//! two prefixes, as it does on RustFS today.
+//! `/rustfs/admin`, `/minio/admin`, `/_iceberg/v1` or `/iceberg/v1` is answered by a claimed row or
+//! by nothing, which is how RustFS's own router takes those prefixes ahead of its S3 service. So
+//! no operation here declares a shadowing decision against S3, and a path-style bucket named
+//! `rustfs`, `minio` or `iceberg` loses these keys, as it does on RustFS today (ADR-0024, ADR-0031).
 
 use rustfs_gateway_core::dialect::{ClaimedRoute, Dialect, DialectBuilder, DialectError, DialectOverlay};
 use rustfs_gateway_core::route::PathClaim;
@@ -40,7 +40,9 @@ const RUSTFS_ROUTER: &str =
     "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/router.rs";
 const ROUTER_EVIDENCE: &[&str] = &[RUSTFS_ROUTER];
 
-/// The two prefixes the dialect takes away from S3 routing.
+/// The four prefixes the dialect takes away from S3 routing: the admin API under its RustFS and
+/// MinIO spellings, and the Iceberg REST table catalog under its RustFS and compat spellings
+/// (ADR-0024, ADR-0031).
 pub static CLAIMS: &[PathClaim] = &[
     PathClaim {
         prefix: "/rustfs/admin",
@@ -53,9 +55,21 @@ pub static CLAIMS: &[PathClaim] = &[
         reason: "RustFS serves its admin API a second time under the MinIO prefix, for MinIO admin clients.",
         evidence: ROUTER_EVIDENCE,
     },
+    PathClaim {
+        prefix: "/_iceberg/v1",
+        reason: "RustFS's admin router answers the Iceberg REST table catalog under this prefix before its S3 \
+                 service; `_iceberg` is no legal bucket name, so no bucket loses a key.",
+        evidence: ROUTER_EVIDENCE,
+    },
+    PathClaim {
+        prefix: "/iceberg/v1",
+        reason: "RustFS serves the table catalog a second time under this compat prefix, so a path-style bucket \
+                 named `iceberg` loses its `v1/…` keys, as it does on RustFS today.",
+        evidence: ROUTER_EVIDENCE,
+    },
 ];
 
-/// The reviewed record: the two claims and every generated operation.
+/// The reviewed record: the four claims and every generated operation.
 pub static OVERLAY: DialectOverlay = DialectOverlay {
     name: "rustfs-admin",
     vendor: "rustfs",

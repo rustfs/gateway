@@ -114,7 +114,7 @@ impl AdminOperation for GetV3IdpLdapPolicyEntities {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 147,
+    precedence: 170,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp/ldap/policy-entities\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/idp/ldap/policy-entities\") ∧ Method(GET)",
     action: "anyOf(admin:ListGroups, admin:ListUsers, admin:ListUserPolicies)",
     resource: ResourceShape::Service,

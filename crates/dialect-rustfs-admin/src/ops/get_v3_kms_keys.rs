@@ -111,7 +111,7 @@ impl AdminOperation for GetV3KmsKeys {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 165,
+    precedence: 188,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/keys\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/kms/keys\") ∧ Method(GET)",
     action: "kms:ListKeys",
     resource: ResourceShape::Service,

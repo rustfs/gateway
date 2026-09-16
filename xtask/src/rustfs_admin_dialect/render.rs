@@ -155,6 +155,9 @@ fn evidence(d: &Declared) -> String {
     if d.bucket.is_some() || d.path.ends_with('/') {
         cited.push("record::ADR_0030".to_owned());
     }
+    if d.path.starts_with("/_iceberg/") {
+        cited.push("record::ADR_0031".to_owned());
+    }
     cited.push("record::ISSUE".to_owned());
     format!("&[{}]", cited.join(", "))
 }
@@ -255,6 +258,12 @@ pub(super) fn render_operation(declared: &Declared) -> String {
             "admin::buffered(body)",
             "The body as it arrived, which RustFS buffers and parses.",
         ),
+        "HandedOn" => (
+            "ByteStream",
+            "Streaming",
+            "admin::streamed(body)",
+            "The live body, which RustFS hands on unread to the table catalog.",
+        ),
         _ => ("ByteStream", "Streaming", "admin::streamed(body)", "The live body, which RustFS streams."),
     };
     out.push_str("use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};\n");
@@ -309,10 +318,10 @@ pub(super) fn render_operation(declared: &Declared) -> String {
     if let Some(alias) = &d.alias {
         let _ = write!(rows, ", ClaimedRow {{ template: {alias:?}, selector: SELECTOR }}");
     }
-    let rows_doc = if d.alias.is_some() {
-        "The canonical row, then the MinIO alias RustFS serves it under."
-    } else {
-        "The canonical row; RustFS serves no MinIO alias for it."
+    let rows_doc = match &d.alias {
+        Some(alias) if alias.starts_with("/iceberg/") => "The canonical row, then the compat row RustFS serves it under.",
+        Some(_) => "The canonical row, then the MinIO alias RustFS serves it under.",
+        None => "The canonical row; RustFS serves no MinIO alias for it.",
     };
     let _ = writeln!(out, "/// {rows_doc}\npub static ROWS: &[ClaimedRow] = &[{rows}];\n");
     if !d.shadows.is_empty() {
@@ -324,13 +333,18 @@ pub(super) fn render_operation(declared: &Declared) -> String {
         for shadow in &d.shadows {
             let _ = writeln!(
                 out,
-                "ShadowingDecl {{ winner: NAME, shadowed: {shadowed:?}, reason: {reason:?}, evidence: &[{router:?}, record::ADR_0027] }},",
+                "ShadowingDecl {{ winner: NAME, shadowed: {shadowed:?}, reason: {reason:?}, evidence: &[{router:?}, record::ADR_0027{more}] }},",
                 shadowed = shadow.shadowed,
                 reason = format!(
                     "RustFS's router tries a literal segment before a parameter, so `{}` here is this operation, never a `{{{}}}` value.",
                     shadow.literal, shadow.param
                 ),
                 router = d.router_url,
+                more = if d.path.starts_with("/_iceberg/") {
+                    ", record::ADR_0031"
+                } else {
+                    ""
+                },
             );
         }
         out.push_str("];\n\n");

@@ -123,7 +123,7 @@ impl AdminOperation for GetV3UsageByBucket {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 213,
+    precedence: 236,
     selector: "PathTemplate(\"/rustfs/admin/v3/usage/{bucket}\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/usage/{bucket}\") ∧ Method(GET) ⇒ BucketParam(\"bucket\")",
     action: "anyOf(admin:DataUsageInfo, s3:ListBucket)",
     resource: ResourceShape::Bucket,

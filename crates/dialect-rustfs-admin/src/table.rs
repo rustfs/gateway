@@ -60,9 +60,4 @@ pub static PENDING: &[PendingGroup] = &[
         order: 7,
         routes: 2,
     },
-    PendingGroup {
-        group: "table_catalog",
-        order: 6,
-        routes: 98,
-    },
 ];

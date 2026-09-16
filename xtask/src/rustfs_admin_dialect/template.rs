@@ -17,11 +17,11 @@
 //! name a route gets.
 //!
 //! Responsible for: [`template_params`] under ADR-0027's rule and ADR-0030's bucket binding,
-//! [`shadowing`] under ADR-0027 (b), and [`type_name`] with its file stem [`snake`].
+//! [`shadowing`] under ADR-0027 (b) and ADR-0031 (d), and [`type_name`] with its file stem [`snake`].
 //! NOT responsible for: choosing or ruling the routes, or rendering anything (`super`).
 //! Upstream: `super::Route` and `super::Declared`. Downstream: `super::plan`.
 
-use super::{ADMIN_PREFIX, Declared, Route};
+use super::{Declared, Route, Surface};
 
 /// The template parameters ADR-0025 (c) binds as the authorisation bucket (ADR-0030); every other
 /// parameter is service-level (ADR-0027).
@@ -101,9 +101,11 @@ pub(super) fn template_params(route: &Route, at: &str) -> Result<Template, Strin
 }
 
 /// Every pair of declared operations whose rows overlap, as `(winner, shadowed)` indices, under
-/// ADR-0027's rule: a literal segment wins over a parameter, as in RustFS's router, and the
-/// winner comes first in inventory order, so it has the lower precedence. An overlap that no
-/// literal orders, or one whose literal comes later, is refused.
+/// ADR-0027's rule as ADR-0031 (d) completes it: at the first position where one route has a
+/// literal segment and the other a parameter, the literal wins, as in RustFS's `matchit` router;
+/// the winner must come first in inventory order, so it has the lower precedence. An overlap no
+/// literal orders, or one whose literal route comes later, is refused. A trailing `/` meets no
+/// parameter (ADR-0030).
 pub(super) fn shadowing(declared: &[Declared]) -> Result<Vec<(usize, usize, Shadow)>, String> {
     let mut pairs = Vec::new();
     for (a, first) in declared.iter().enumerate() {
@@ -117,24 +119,21 @@ pub(super) fn shadowing(declared: &[Declared]) -> Result<Vec<(usize, usize, Shad
             if x.len() != y.len() {
                 continue;
             }
-            let (mut literal, mut first_wins, mut second_wins, mut disjoint) = (None, false, false, false);
+            // `Some(true)` when the first route's literal decides, `Some(false)` when the second's.
+            let mut decided: Option<(bool, &str, &str)> = None;
+            let mut disjoint = false;
             for pair in x.iter().zip(&y) {
                 match pair {
                     (Segment::Literal(l), Segment::Literal(m)) if l != m => disjoint = true,
-                    // A parameter never matches an empty segment, so a trailing `/` meets no
-                    // parameter (ADR-0030).
                     (Segment::Literal(""), Segment::Param(_)) | (Segment::Param(_), Segment::Literal("")) => disjoint = true,
-                    (Segment::Literal(l), Segment::Param(p)) => {
-                        first_wins = true;
-                        literal = literal.or(Some((*l, *p)));
-                    }
-                    (Segment::Param(_), Segment::Literal(_)) => second_wins = true,
+                    (Segment::Literal(l), Segment::Param(p)) if decided.is_none() => decided = Some((true, l, p)),
+                    (Segment::Param(p), Segment::Literal(l)) if decided.is_none() => decided = Some((false, l, p)),
                     _ => {}
                 }
             }
-            match (disjoint, first_wins, second_wins, literal) {
-                (true, ..) => {}
-                (false, true, false, Some((literal, param))) => pairs.push((
+            match (disjoint, decided) {
+                (true, _) => {}
+                (false, Some((true, literal, param))) => pairs.push((
                     a,
                     b,
                     Shadow {
@@ -143,24 +142,27 @@ pub(super) fn shadowing(declared: &[Declared]) -> Result<Vec<(usize, usize, Shad
                         param: param.to_owned(),
                     },
                 )),
-                (false, false, true, _) => {
+                (false, Some((false, ..))) => {
                     return Err(format!(
                         "{} is shadowed by the later {}: a literal must come before the parameter it meets",
                         first.name, second.name
                     ));
                 }
-                _ => return Err(format!("{} and {} overlap, and no literal segment orders them", first.name, second.name)),
+                (false, None) => {
+                    return Err(format!("{} and {} overlap, and no literal segment orders them", first.name, second.name));
+                }
             }
         }
     }
     Ok(pairs)
 }
 
-/// `Get` for `GET`, and each path word after `/rustfs/admin/` capitalised (a `{parameter}` as `By`
+/// `Get` for `GET`, the surface's name tag (`Iceberg` for the table catalog, nothing for the
+/// admin API), and each path word after the surface's prefix capitalised (a `{parameter}` as `By`
 /// and its words), then the query value.
-pub(super) fn type_name(method: &str, path: &str, query: Option<(&str, &str)>) -> Option<String> {
-    let rest = path.strip_prefix(ADMIN_PREFIX)?;
-    let mut words = vec![method];
+pub(super) fn type_name(method: &str, surface: &Surface, path: &str, query: Option<(&str, &str)>) -> Option<String> {
+    let rest = path.strip_prefix(surface.prefix)?;
+    let mut words = vec![method, surface.tag];
     for segment in segments(rest) {
         match segment {
             Segment::Param(param) => {

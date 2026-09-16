@@ -122,7 +122,7 @@ impl AdminOperation for PostV3OnDemandMigrationByBucketBackfill {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 268,
+    precedence: 312,
     selector: "PathTemplate(\"/rustfs/admin/v3/on-demand-migration/{bucket}/backfill\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/on-demand-migration/{bucket}/backfill\") ∧ Method(POST) ⇒ BucketParam(\"bucket\")",
     action: "admin:SetBucketOnDemandMigration",
     resource: ResourceShape::Bucket,

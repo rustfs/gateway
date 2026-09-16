@@ -111,7 +111,7 @@ impl AdminOperation for GetV3ModuleSwitches {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 181,
+    precedence: 204,
     selector: "PathTemplate(\"/rustfs/admin/v3/module-switches\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/module-switches\") ∧ Method(GET)",
     action: "admin:ServerInfo",
     resource: ResourceShape::Service,

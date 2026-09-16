@@ -112,7 +112,7 @@ impl AdminOperation for DeleteV3DelConfigKv {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 104,
+    precedence: 109,
     selector: "PathTemplate(\"/rustfs/admin/v3/del-config-kv\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/del-config-kv\") ∧ Method(DELETE)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,
