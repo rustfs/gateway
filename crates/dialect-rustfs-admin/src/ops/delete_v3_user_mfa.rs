@@ -111,7 +111,7 @@ impl AdminOperation for DeleteV3UserMfa {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 115,
+    precedence: 118,
     selector: "PathTemplate(\"/rustfs/admin/v3/user/mfa\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/user/mfa\") ∧ Method(DELETE)",
     action: "admin:EnableUser",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:EnableUser",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "UserMfaResetHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

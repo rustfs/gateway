@@ -20,8 +20,9 @@
 //! authorizer answering by policy, the `rustfs` dialect, and one generic handler registered for
 //! every generated operation through `fold_every_operation` that records its path parameters
 //! and whether it holds the secret; and the requests the tests send — signed, unsigned,
-//! presigned, with a concrete or a malformed parameter value — for any row of any operation.
-//! NOT responsible for: the assertions (`tests.rs`), routing without a service (the dialect
+//! presigned, with a concrete or a malformed parameter value, with or without the bucket a
+//! query-bound operation names — for any row of any operation.
+//! NOT responsible for: the assertions (`tests.rs`, `subject_tests.rs`, `bucket_tests.rs`), routing without a service (the dialect
 //! crate's own tests), the generator's rules (xtask's), or the hand-written proof
 //! (`rustfs_admin_proof`).
 //! Upstream: `rustfs-gateway-dialect-rustfs-admin`, the facade, `operation_diff::context`'s
@@ -36,6 +37,7 @@ use rustfs_gateway::{
     HandlerContext, HandlerResult, InputAuthzRequest, InputDecisions, Lease, Rate, Req, RequestContext, RequestContextView, Resp,
     S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
 };
+use rustfs_gateway_core::dialect::BucketParam;
 use rustfs_gateway_core::{Subject, SubjectRule, Subjects};
 use rustfs_gateway_dialect_rustfs_admin::{
     AdminOperation, AdminResponse, OperationFold, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
@@ -135,6 +137,9 @@ pub(crate) struct Handed {
     /// Whether `RequestContextView::subject()` holds one account, which it must only for a
     /// single-subject request.
     pub(crate) has_one_subject: bool,
+    /// The bucket the context carries: the bound one (ADR-0030), or none for a service-level
+    /// operation.
+    pub(crate) bucket: Option<String>,
 }
 
 /// The accounts a context carries, spelled as [`Handed::subjects`] records them.
@@ -156,6 +161,7 @@ impl Handed {
         Self {
             subjects: subjects_of(context),
             has_one_subject: context.subject().is_some(),
+            bucket: context.bucket().map(|bucket| bucket.as_str().to_owned()),
             operation: context.operation(),
             params: context
                 .path_params()
@@ -323,6 +329,25 @@ pub(crate) fn actions(record: &RouteRecord) -> Vec<&'static str> {
 /// The account every well-formed request for a named-account or set operation names.
 pub(crate) const ACCOUNT: &str = "account-1";
 
+/// The bucket every well-formed request for a bucket-bound operation names: the value the
+/// `{bucket}` parameter is given ([`value_of`]), and the value a query-bound operation's `bucket`
+/// parameter is given.
+pub(crate) const BUCKET: &str = "bucket-1";
+
+/// The query parameter a record's bucket binding reads, if it is a query one.
+pub(crate) const fn bucket_query_param(record: &RouteRecord) -> Option<&'static str> {
+    match record.bucket {
+        Some(BucketParam::Query(param)) => Some(param),
+        Some(BucketParam::Path(_)) | None => None,
+    }
+}
+
+/// The bucket a well-formed request for `record` is authorised on and hands its handler, as
+/// [`Asked::bucket`] and [`Handed::bucket`] record it.
+pub(crate) fn expected_bucket(record: &RouteRecord) -> Option<String> {
+    record.bucket.map(|_| BUCKET.to_owned())
+}
+
 /// The query parameter a record's subject rule reads, if any.
 pub(crate) const fn subject_param(record: &RouteRecord) -> Option<&'static str> {
     match record.subject {
@@ -398,14 +423,15 @@ pub(crate) fn paths(record: &RouteRecord) -> Vec<String> {
     templates(record).into_iter().map(concrete).collect()
 }
 
-/// A well-formed query for a record's operation: the value that selects it, and the account its
-/// subject rule reads, when it has either.
+/// A well-formed query for a record's operation: the value that selects it, the account its
+/// subject rule reads, and the bucket its query binding reads, when it has any of them.
 pub(crate) fn query(record: &RouteRecord) -> String {
     record
         .query
         .map(|(key, value)| format!("{key}={value}"))
         .into_iter()
         .chain(subject_param(record).map(|param| format!("{param}={ACCOUNT}")))
+        .chain(bucket_query_param(record).map(|param| format!("{param}={BUCKET}")))
         .collect::<Vec<_>>()
         .join("&")
 }
@@ -478,5 +504,6 @@ pub(crate) fn presigned(record: &RouteRecord, path: &str) -> Request<Bytes> {
     builder.body(Bytes::new()).expect("a request")
 }
 
+mod bucket_tests;
 mod subject_tests;
 mod tests;

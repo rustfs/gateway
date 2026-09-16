@@ -112,7 +112,7 @@ impl AdminOperation for PostV3KmsKeysRekey {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 237,
+    precedence: 253,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/keys/rekey\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/keys/rekey\") ∧ Method(POST)",
     action: "kms:Rekey",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "kms:Rekey",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "StartKmsRekeyHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

@@ -206,7 +206,7 @@ fn n_an_s3_table_row_inside_a_claim_refuses_the_router() {
 fn n_a_malformed_template_is_refused_with_its_reason() {
     for (template, expected) in [
         ("acme/admin/v1/x", TemplateRejection::NotAbsolute),
-        ("/acme/admin/v1/x/", TemplateRejection::TrailingSlash),
+        ("/acme/admin/v1/x//", TemplateRejection::EmptySegment),
         ("/acme/admin//x", TemplateRejection::EmptySegment),
         ("/acme/admin/v1/..", TemplateRejection::DotSegment),
         ("/acme/admin/v1/%78", TemplateRejection::ForbiddenCharacter),

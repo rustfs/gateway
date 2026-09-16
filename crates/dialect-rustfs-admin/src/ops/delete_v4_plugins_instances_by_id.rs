@@ -24,8 +24,8 @@
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`DeleteV4PluginsInstancesById`].
 //!
-//! Its path parameters (`id`) name no bucket (ADR-0027): the operation stays service-level, and a
-//! handler reads each decoded value from `RequestContextView::path_params()`.
+//! Its path parameter (`id`) names no bucket (ADR-0027): a handler reads each decoded value from
+//! `RequestContextView::path_params()`.
 
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
@@ -114,7 +114,7 @@ impl AdminOperation for DeleteV4PluginsInstancesById {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 116,
+    precedence: 119,
     selector: "PathTemplate(\"/rustfs/admin/v4/plugins/instances/{id}\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v4/plugins/instances/{id}\") ∧ Method(DELETE)",
     action: "admin:SetBucketTarget",
     resource: ResourceShape::Service,
@@ -139,6 +139,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:SetBucketTarget",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "DeletePluginInstanceHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

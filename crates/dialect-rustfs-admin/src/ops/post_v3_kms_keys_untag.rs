@@ -112,7 +112,7 @@ impl AdminOperation for PostV3KmsKeysUntag {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 241,
+    precedence: 257,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/keys/untag\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/keys/untag\") ∧ Method(POST)",
     action: "kms:UntagResource",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "kms:UntagResource",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "UntagKmsKeyHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

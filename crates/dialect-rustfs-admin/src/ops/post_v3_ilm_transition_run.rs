@@ -111,7 +111,7 @@ impl AdminOperation for PostV3IlmTransitionRun {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 224,
+    precedence: 240,
     selector: "PathTemplate(\"/rustfs/admin/v3/ilm/transition/run\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/ilm/transition/run\") ∧ Method(POST)",
     action: "admin:SetTier",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:SetTier",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "ManualTransitionRunHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

@@ -28,6 +28,7 @@ use crate::ops;
 /// Takes `fold`'s step for every operation in turn, in [`crate::ROUTES`] order.
 pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> F::Carry {
     let carry = fold.step::<ops::delete_v3_audit_target_by_target_type_by_target_name_reset::DeleteV3AuditTargetByTargetTypeByTargetNameReset>(carry);
+    let carry = fold.step::<ops::delete_v3_bucket_durability_by_bucket::DeleteV3BucketDurabilityByBucket>(carry);
     let carry = fold.step::<ops::delete_v3_cancel_job::DeleteV3CancelJob>(carry);
     let carry = fold.step::<ops::delete_v3_clear_config_history_kv::DeleteV3ClearConfigHistoryKv>(carry);
     let carry = fold.step::<ops::delete_v3_del_config_kv::DeleteV3DelConfigKv>(carry);
@@ -37,6 +38,8 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::delete_v3_idp_config_by_idp_type_by_name::DeleteV3IdpConfigByIdpTypeByName>(carry);
     let carry = fold.step::<ops::delete_v3_ilm_transition_jobs_by_job_id::DeleteV3IlmTransitionJobsByJobId>(carry);
     let carry = fold.step::<ops::delete_v3_kms_keys_delete::DeleteV3KmsKeysDelete>(carry);
+    let carry = fold.step::<ops::delete_v3_on_demand_migration_by_bucket::DeleteV3OnDemandMigrationByBucket>(carry);
+    let carry = fold.step::<ops::delete_v3_quota_by_bucket::DeleteV3QuotaByBucket>(carry);
     let carry = fold.step::<ops::delete_v3_remove_canned_policy::DeleteV3RemoveCannedPolicy>(carry);
     let carry = fold.step::<ops::delete_v3_remove_remote_target::DeleteV3RemoveRemoteTarget>(carry);
     let carry = fold.step::<ops::delete_v3_remove_user::DeleteV3RemoveUser>(carry);
@@ -53,6 +56,7 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::get_v3_account_mfa::GetV3AccountMfa>(carry);
     let carry = fold.step::<ops::get_v3_accountinfo::GetV3Accountinfo>(carry);
     let carry = fold.step::<ops::get_v3_audit_target_list::GetV3AuditTargetList>(carry);
+    let carry = fold.step::<ops::get_v3_bucket_durability_by_bucket::GetV3BucketDurabilityByBucket>(carry);
     let carry = fold.step::<ops::get_v3_config::GetV3Config>(carry);
     let carry = fold.step::<ops::get_v3_datausageinfo::GetV3Datausageinfo>(carry);
     let carry = fold.step::<ops::get_v3_decommission_status::GetV3DecommissionStatus>(carry);
@@ -60,6 +64,7 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::get_v3_export_bucket_metadata::GetV3ExportBucketMetadata>(carry);
     let carry = fold.step::<ops::get_v3_export_iam::GetV3ExportIam>(carry);
     let carry = fold.step::<ops::get_v3_gateway_key_inventory::GetV3GatewayKeyInventory>(carry);
+    let carry = fold.step::<ops::get_v3_get_bucket_quota::GetV3GetBucketQuota>(carry);
     let carry = fold.step::<ops::get_v3_get_config_kv::GetV3GetConfigKv>(carry);
     let carry = fold.step::<ops::get_v3_group::GetV3Group>(carry);
     let carry = fold.step::<ops::get_v3_groups::GetV3Groups>(carry);
@@ -108,9 +113,14 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::get_v3_module_switches::GetV3ModuleSwitches>(carry);
     let carry = fold.step::<ops::get_v3_obdinfo::GetV3Obdinfo>(carry);
     let carry = fold.step::<ops::get_v3_object_data_cache_stats::GetV3ObjectDataCacheStats>(carry);
+    let carry = fold.step::<ops::get_v3_on_demand_migration_by_bucket::GetV3OnDemandMigrationByBucket>(carry);
+    let carry = fold.step::<ops::get_v3_on_demand_migration_by_bucket_backfill::GetV3OnDemandMigrationByBucketBackfill>(carry);
+    let carry = fold.step::<ops::get_v3_on_demand_migration_by_bucket_status::GetV3OnDemandMigrationByBucketStatus>(carry);
     let carry = fold.step::<ops::get_v3_pools_list::GetV3PoolsList>(carry);
     let carry = fold.step::<ops::get_v3_pools_status::GetV3PoolsStatus>(carry);
     let carry = fold.step::<ops::get_v3_profiling_download::GetV3ProfilingDownload>(carry);
+    let carry = fold.step::<ops::get_v3_quota_stats_by_bucket::GetV3QuotaStatsByBucket>(carry);
+    let carry = fold.step::<ops::get_v3_quota_by_bucket::GetV3QuotaByBucket>(carry);
     let carry = fold.step::<ops::get_v3_rebalance_status::GetV3RebalanceStatus>(carry);
     let carry = fold.step::<ops::get_v3_replication_mrf::GetV3ReplicationMrf>(carry);
     let carry = fold.step::<ops::get_v3_replicationmetrics::GetV3Replicationmetrics>(carry);
@@ -135,11 +145,13 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::get_v3_tier_by_tier::GetV3TierByTier>(carry);
     let carry = fold.step::<ops::get_v3_top_locks::GetV3TopLocks>(carry);
     let carry = fold.step::<ops::get_v3_trace::GetV3Trace>(carry);
+    let carry = fold.step::<ops::get_v3_usage_by_bucket::GetV3UsageByBucket>(carry);
     let carry = fold.step::<ops::get_v3_user_info::GetV3UserInfo>(carry);
     let carry = fold.step::<ops::get_v3_user_mfa::GetV3UserMfa>(carry);
     let carry = fold.step::<ops::get_v4_cluster_snapshot::GetV4ClusterSnapshot>(carry);
     let carry = fold.step::<ops::get_v4_extensions_catalog::GetV4ExtensionsCatalog>(carry);
     let carry = fold.step::<ops::get_v4_extensions_instances::GetV4ExtensionsInstances>(carry);
+    let carry = fold.step::<ops::get_v4_heal_replacement_recovery::GetV4HealReplacementRecovery>(carry);
     let carry = fold.step::<ops::get_v4_plugins_catalog::GetV4PluginsCatalog>(carry);
     let carry = fold.step::<ops::get_v4_plugins_instances::GetV4PluginsInstances>(carry);
     let carry = fold.step::<ops::get_v4_plugins_instances_by_id::GetV4PluginsInstancesById>(carry);
@@ -149,7 +161,11 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::post_v3_account_mfa_enroll::PostV3AccountMfaEnroll>(carry);
     let carry = fold.step::<ops::post_v3_account_mfa_recovery_codes::PostV3AccountMfaRecoveryCodes>(carry);
     let carry = fold.step::<ops::post_v3_account_password::PostV3AccountPassword>(carry);
+    let carry = fold.step::<ops::post_v3_background_heal_status::PostV3BackgroundHealStatus>(carry);
     let carry = fold.step::<ops::post_v3_force_unlock::PostV3ForceUnlock>(carry);
+    let carry = fold.step::<ops::post_v3_heal::PostV3Heal>(carry);
+    let carry = fold.step::<ops::post_v3_heal_by_bucket::PostV3HealByBucket>(carry);
+    let carry = fold.step::<ops::post_v3_heal_by_bucket_by_prefix::PostV3HealByBucketByPrefix>(carry);
     let carry = fold.step::<ops::post_v3_idp_config_by_idp_type_by_name::PostV3IdpConfigByIdpTypeByName>(carry);
     let carry = fold.step::<ops::post_v3_idp_builtin_policy_attach::PostV3IdpBuiltinPolicyAttach>(carry);
     let carry = fold.step::<ops::post_v3_idp_builtin_policy_detach::PostV3IdpBuiltinPolicyDetach>(carry);
@@ -185,11 +201,13 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::post_v3_kms_status::PostV3KmsStatus>(carry);
     let carry = fold.step::<ops::post_v3_kms_stop::PostV3KmsStop>(carry);
     let carry = fold.step::<ops::post_v3_object_data_cache_flush::PostV3ObjectDataCacheFlush>(carry);
+    let carry = fold.step::<ops::post_v3_on_demand_migration_by_bucket_backfill::PostV3OnDemandMigrationByBucketBackfill>(carry);
     let carry = fold.step::<ops::post_v3_pools_cancel::PostV3PoolsCancel>(carry);
     let carry = fold.step::<ops::post_v3_pools_clear::PostV3PoolsClear>(carry);
     let carry = fold.step::<ops::post_v3_pools_decommission::PostV3PoolsDecommission>(carry);
     let carry = fold.step::<ops::post_v3_profile::PostV3Profile>(carry);
     let carry = fold.step::<ops::post_v3_profiling_start::PostV3ProfilingStart>(carry);
+    let carry = fold.step::<ops::post_v3_quota_check_by_bucket::PostV3QuotaCheckByBucket>(carry);
     let carry = fold.step::<ops::post_v3_rebalance_start::PostV3RebalanceStart>(carry);
     let carry = fold.step::<ops::post_v3_rebalance_stop::PostV3RebalanceStop>(carry);
     let carry = fold.step::<ops::post_v3_replication_diff::PostV3ReplicationDiff>(carry);
@@ -222,6 +240,7 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::put_v3_add_user::PutV3AddUser>(carry);
     let carry =
         fold.step::<ops::put_v3_audit_target_by_target_type_by_target_name::PutV3AuditTargetByTargetTypeByTargetName>(carry);
+    let carry = fold.step::<ops::put_v3_bucket_durability_by_bucket::PutV3BucketDurabilityByBucket>(carry);
     let carry = fold.step::<ops::put_v3_config::PutV3Config>(carry);
     let carry = fold.step::<ops::put_v3_idp_config_by_idp_type_by_name::PutV3IdpConfigByIdpTypeByName>(carry);
     let carry = fold.step::<ops::put_v3_idp_ldap_add_service_account::PutV3IdpLdapAddServiceAccount>(carry);
@@ -229,7 +248,10 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::put_v3_import_iam::PutV3ImportIam>(carry);
     let carry = fold.step::<ops::put_v3_import_iam_v2::PutV3ImportIamV2>(carry);
     let carry = fold.step::<ops::put_v3_module_switches::PutV3ModuleSwitches>(carry);
+    let carry = fold.step::<ops::put_v3_on_demand_migration_by_bucket::PutV3OnDemandMigrationByBucket>(carry);
+    let carry = fold.step::<ops::put_v3_quota_by_bucket::PutV3QuotaByBucket>(carry);
     let carry = fold.step::<ops::put_v3_restore_config_history_kv::PutV3RestoreConfigHistoryKv>(carry);
+    let carry = fold.step::<ops::put_v3_set_bucket_quota::PutV3SetBucketQuota>(carry);
     let carry = fold.step::<ops::put_v3_set_config_kv::PutV3SetConfigKv>(carry);
     let carry = fold.step::<ops::put_v3_set_group_status::PutV3SetGroupStatus>(carry);
     let carry = fold.step::<ops::put_v3_set_policy::PutV3SetPolicy>(carry);

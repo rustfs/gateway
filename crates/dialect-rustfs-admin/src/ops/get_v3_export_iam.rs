@@ -111,7 +111,7 @@ impl AdminOperation for GetV3ExportIam {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 130,
+    precedence: 134,
     selector: "PathTemplate(\"/rustfs/admin/v3/export-iam\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/export-iam\") ∧ Method(GET)",
     action: "admin:ExportIAM",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:ExportIAM",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "ExportIam",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

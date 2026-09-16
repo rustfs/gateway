@@ -13,14 +13,15 @@
 // limitations under the License.
 
 //! The rulings for the migrated groups' custom-auth routes, which the inventory records without an
-//! action: ADR-0025's action and subject rules, ADR-0026's account set, and ADR-0028's order-4
-//! readings of both.
+//! action: ADR-0025's action and subject rules, ADR-0026's account set, ADR-0028's order-4
+//! readings of both, and ADR-0030's order-5 bucket rulings; and the routes whose bucket is a query
+//! parameter (ADR-0026 (e), ADR-0030).
 //!
 //! Responsible for: [`RULINGS`], one per custom-auth route of a migrated group, and the shapes a
 //! ruling is written in: an action rule, an optional subject rule, and the query value that
-//! selects a form.
-//! NOT responsible for: matching a ruling to its route, refusing a stale or missing one, or
-//! checking a rule's shape (`super::plan` and `super::Rule::fault`).
+//! selects a form; and [`QUERY_BUCKETS`], the routes that name their bucket in the query.
+//! NOT responsible for: matching a ruling or a query bucket to its route, refusing a stale or
+//! missing one, or checking a rule's shape (`super::plan` and `super::Rule::fault`).
 //! Upstream: the ADRs, read against RustFS's handlers at the inventory's commit. Downstream:
 //! `super::plan`.
 
@@ -148,6 +149,16 @@ const fn ruling(method: &'static str, path: &'static str, auth_detail: &'static 
         forms,
     }
 }
+
+/// The routes that name their bucket in a query parameter, read exactly once before
+/// authentication (`BucketParam::Query`, ADR-0026 (e), ADR-0030 (b)): `(method, path, parameter)`.
+/// Both are the `quota_handler` group's compat spellings of the `quota/{bucket}` routes, whose
+/// handlers read `bucket` from the query when the template has none (`quota.rs`,
+/// `bucket_from_params_or_query`).
+pub(super) const QUERY_BUCKETS: &[(&str, &str, &str)] = &[
+    ("GET", "/rustfs/admin/v3/get-bucket-quota", "bucket"),
+    ("PUT", "/rustfs/admin/v3/set-bucket-quota", "bucket"),
+];
 
 /// The rulings for the migrated groups' custom-auth routes, in the inventory's order within each
 /// migrated order.
@@ -288,4 +299,16 @@ pub(super) const RULINGS: &[Ruling] = &[
     ruling("GET", "/rustfs/admin/v3/list-access-keys-bulk", "MultipleActions", BULK),
     ruling("GET", "/rustfs/admin/v3/idp/ldap/list-access-keys-bulk", "MultipleActions", BULK),
     ruling("GET", "/rustfs/admin/v3/idp/openid/list-access-keys-bulk", "MultipleActions", BULK),
+    // ── order 5: the S3 quota action on the bound bucket (ADR-0025 (d), ADR-0030) ──
+    ruling("GET", "/rustfs/admin/v3/get-bucket-quota", "S3Action", &[one("s3:GetBucketQuota")]),
+    ruling("GET", "/rustfs/admin/v3/quota-stats/{bucket}", "S3Action", &[one("s3:GetBucketQuota")]),
+    ruling("GET", "/rustfs/admin/v3/quota/{bucket}", "S3Action", &[one("s3:GetBucketQuota")]),
+    ruling("POST", "/rustfs/admin/v3/quota-check/{bucket}", "S3Action", &[one("s3:GetBucketQuota")]),
+    // ── order 5: the usage gate, any-of and bound to the bucket RustFS ignores (ADR-0025 (d)) ──
+    ruling(
+        "GET",
+        "/rustfs/admin/v3/usage/{bucket}",
+        "MultipleActions",
+        &[any_of(&["admin:DataUsageInfo", "s3:ListBucket"])],
+    ),
 ];

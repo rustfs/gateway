@@ -17,10 +17,11 @@
 //!
 //! Responsible for: reading `crates/goldens/src/migration_inventory/rustfs_admin_routes.json`,
 //! choosing the routes of the groups ADR-0024's plan has migrated, applying the rulings
-//! (`rulings.rs`: ADR-0025's, ADR-0026's and ADR-0028's) to the custom-auth ones and ADR-0027's to
-//! templates and overlaps, refusing any route it has no rule for and any rule outside those ADRs'
-//! shapes, and writing one operation module per declared operation, the module list and the
-//! dialect's table files, each through rustfmt.
+//! (`rulings.rs`: ADR-0025's, ADR-0026's, ADR-0028's and ADR-0030's) to the custom-auth ones,
+//! ADR-0027's to templates and overlaps and ADR-0030's bucket binding to `{bucket}` templates and
+//! the listed query parameters (`template.rs`), refusing any route it has no rule for and any rule
+//! outside those ADRs' shapes, and writing one operation module per declared operation, the
+//! module list and the dialect's table files, each through rustfmt.
 //! `--check` compares instead, and fails on a stale, missing or extra file.
 //! NOT responsible for: validating the inventory (goldens' strict reader does, and binds the
 //! generated operations back to it), the claims or the shared shapes
@@ -35,11 +36,13 @@ use std::process::{Command, ExitCode, Stdio};
 use serde::Deserialize;
 
 use self::render::{render_mod, render_operation, render_tables};
-use self::rulings::{About, Absent, RULINGS, Ruled, Ruling};
+use self::rulings::{About, Absent, QUERY_BUCKETS, RULINGS, Ruled, Ruling};
+use self::template::{Shadow, Template, shadowing, snake, template_params, type_name};
 use crate::repo_root::repo_root;
 
 mod render;
 mod rulings;
+mod template;
 
 const INVENTORY: &str = "crates/goldens/src/migration_inventory/rustfs_admin_routes.json";
 const FORMAT: &str = "rustfs-admin-route-inventory/1";
@@ -101,11 +104,7 @@ const PLAN: &[(&str, u8)] = &[
 ];
 
 /// The last migrated order: groups at or below it are declared, the rest are pending.
-const MIGRATED_THROUGH: u8 = 4;
-
-/// The template parameters ADR-0025 binds as the authorisation bucket. A route that carries one
-/// waits for its group to take that binding; every other parameter is service-level (ADR-0027).
-const BUCKET_PARAMS: &[&str] = &["bucket", "warehouse"];
+const MIGRATED_THROUGH: u8 = 5;
 
 #[derive(Deserialize)]
 struct Inventory {
@@ -220,13 +219,28 @@ impl Rule {
         })
     }
 
-    /// As a Rust expression; a subject rule is the module's `SUBJECT`.
-    fn expression(&self) -> String {
+    /// Whether the rule reads the query parameter `param` for an account, under any spelling.
+    fn reads(&self, param: &str) -> bool {
+        match self.about {
+            Some(About::Query {
+                param: account, aliases, ..
+            }) => account == param || aliases.contains(&param),
+            Some(About::Set {
+                param: account,
+                everyone,
+            }) => account == param || everyone.is_some_and(|(flag, _)| flag == param),
+            Some(About::Caller) | None => false,
+        }
+    }
+
+    /// As a Rust expression on `resource` (`ResourceShape::Service` or `ResourceShape::Bucket`);
+    /// a subject rule is the module's `SUBJECT`.
+    fn expression(&self, resource: &str) -> String {
         let requirement = match &self.actions {
-            Actions::One(action) => format!("AuthRequirement::new({action:?}, ResourceShape::Service)"),
+            Actions::One(action) => format!("AuthRequirement::new({action:?}, {resource})"),
             Actions::AnyOf(actions) => {
                 let listed: Vec<String> = actions.iter().map(|action| format!("{action:?}")).collect();
-                format!("AuthRequirement::any_of(&[{}], ResourceShape::Service)", listed.join(", "))
+                format!("AuthRequirement::any_of(&[{}], {resource})", listed.join(", "))
             }
         };
         match self.about {
@@ -340,32 +354,38 @@ struct Declared {
     request_body: &'static str,
     response_body: &'static str,
     precedence: u16,
-    /// The template's parameters, in path order: service-level, never a bucket (ADR-0027).
+    /// The template's parameters, in path order, the bound bucket included (ADR-0027, ADR-0030).
     params: Vec<String>,
+    /// The bucket the operation is authorised on, when it has one (ADR-0030).
+    bucket: Option<Bound>,
     /// The later operations this one stands in front of (ADR-0027).
     shadows: Vec<Shadow>,
 }
 
-/// A later operation whose parameter meets this operation's literal segment.
-struct Shadow {
-    shadowed: String,
-    literal: String,
-    param: String,
+/// How an operation's bucket is named: a template parameter every row carries (ADR-0025 (c)) or a
+/// query parameter read exactly once (ADR-0026 (e)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Bound {
+    Path(String),
+    Query(&'static str),
 }
 
-/// One segment of an inventory path: literal text, or a whole-segment `{parameter}`.
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum Segment<'a> {
-    Literal(&'a str),
-    Param(&'a str),
-}
+impl Bound {
+    /// The core value, as a Rust expression.
+    fn expression(&self) -> String {
+        match self {
+            Self::Path(param) => format!("BucketParam::Path({param:?})"),
+            Self::Query(param) => format!("BucketParam::Query({param:?})"),
+        }
+    }
 
-fn segments(path: &str) -> impl Iterator<Item = Segment<'_>> {
-    path.split('/')
-        .map(|segment| match segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}')) {
-            Some(name) => Segment::Param(name),
-            None => Segment::Literal(segment),
-        })
+    /// As `render_claimed_route` appends it to the rows.
+    fn rendered(&self) -> String {
+        match self {
+            Self::Path(param) => format!(" ⇒ BucketParam({param:?})"),
+            Self::Query(param) => format!(" ⇒ BucketQuery({param:?})"),
+        }
+    }
 }
 
 /// Every declared operation, and every pending group with its route count.
@@ -382,131 +402,6 @@ fn body_kind(recorded: &str, route: &Route) -> Result<&'static str, String> {
         "handed-on" => Ok("HandedOn"),
         other => Err(format!("{} {}: unknown body kind {other:?}", route.method, route.path)),
     }
-}
-
-/// `Get` for `GET`, and each path word after `/rustfs/admin/` capitalised (a `{parameter}` as `By`
-/// and its words), then the query value.
-fn type_name(method: &str, path: &str, query: Option<(&str, &str)>) -> Option<String> {
-    let rest = path.strip_prefix(ADMIN_PREFIX)?;
-    let mut words = vec![method];
-    for segment in segments(rest) {
-        match segment {
-            Segment::Param(param) => {
-                words.push("By");
-                words.extend(param.split('_'));
-            }
-            Segment::Literal(text) => words.extend(text.split(['-', '_', '.'])),
-        }
-    }
-    words.extend(query.map(|(_, value)| value));
-    let mut name = String::new();
-    for word in words.into_iter().filter(|word| !word.is_empty()) {
-        let mut chars = word.chars();
-        let first = chars.next()?;
-        if !first.is_ascii_alphanumeric() || !chars.as_str().chars().all(|c| c.is_ascii_alphanumeric()) {
-            return None;
-        }
-        name.push(first.to_ascii_uppercase());
-        name.push_str(&chars.as_str().to_ascii_lowercase());
-    }
-    name.starts_with(|c: char| c.is_ascii_uppercase()).then_some(name)
-}
-
-/// The file stem `check_op_file_shape.sh` expects: an underscore before every capital but the
-/// first, then lowercase.
-fn snake(name: &str) -> String {
-    let mut stem = String::new();
-    for (index, c) in name.chars().enumerate() {
-        if index > 0 && c.is_ascii_uppercase() {
-            stem.push('_');
-        }
-        stem.push(c.to_ascii_lowercase());
-    }
-    stem
-}
-
-/// A route's template parameters, in path order, under ADR-0027's rule: each is a whole segment
-/// named by a lowercase identifier, the inventory lists exactly these, none repeats, and none is a
-/// bucket, which waits for ADR-0025's binding.
-fn template_params(route: &Route, at: &str) -> Result<Vec<String>, String> {
-    let mut params: Vec<String> = Vec::new();
-    for segment in segments(&route.path) {
-        match segment {
-            Segment::Literal(text) if text.contains(['{', '}']) => {
-                return Err(format!("{at}: a parameter shares its segment with literal text"));
-            }
-            Segment::Literal(_) => {}
-            Segment::Param(name) => {
-                if name.is_empty() || !name.bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'_') {
-                    return Err(format!("{at}: the parameter {{{name}}} is not a lowercase identifier"));
-                }
-                if BUCKET_PARAMS.contains(&name) {
-                    return Err(format!("{at}: {{{name}}} is a bucket, which waits for ADR-0025's bucket binding"));
-                }
-                if params.iter().any(|seen| seen == name) {
-                    return Err(format!("{at}: the parameter {{{name}}} appears twice"));
-                }
-                params.push(name.to_owned());
-            }
-        }
-    }
-    if params != route.path_params {
-        return Err(format!("{at}: the template names {params:?}, the inventory {:?}", route.path_params));
-    }
-    Ok(params)
-}
-
-/// Every pair of declared operations whose rows overlap, as `(winner, shadowed)` indices, under
-/// ADR-0027's rule: a literal segment wins over a parameter, as in RustFS's router, and the
-/// winner comes first in inventory order, so it has the lower precedence. An overlap that no
-/// literal orders, or one whose literal comes later, is refused.
-fn shadowing(declared: &[Declared]) -> Result<Vec<(usize, usize, Shadow)>, String> {
-    let mut pairs = Vec::new();
-    for (a, first) in declared.iter().enumerate() {
-        for (b, second) in declared.iter().enumerate().skip(a + 1) {
-            let queries_differ = matches!((first.query, second.query), (Some(x), Some(y)) if x != y);
-            if first.method != second.method || queries_differ {
-                continue;
-            }
-            let (x, y): (Vec<Segment<'_>>, Vec<Segment<'_>>) =
-                (segments(&first.path).collect(), segments(&second.path).collect());
-            if x.len() != y.len() {
-                continue;
-            }
-            let (mut literal, mut first_wins, mut second_wins, mut disjoint) = (None, false, false, false);
-            for pair in x.iter().zip(&y) {
-                match pair {
-                    (Segment::Literal(l), Segment::Literal(m)) if l != m => disjoint = true,
-                    (Segment::Literal(l), Segment::Param(p)) => {
-                        first_wins = true;
-                        literal = literal.or(Some((*l, *p)));
-                    }
-                    (Segment::Param(_), Segment::Literal(_)) => second_wins = true,
-                    _ => {}
-                }
-            }
-            match (disjoint, first_wins, second_wins, literal) {
-                (true, ..) => {}
-                (false, true, false, Some((literal, param))) => pairs.push((
-                    a,
-                    b,
-                    Shadow {
-                        shadowed: second.name.clone(),
-                        literal: literal.to_owned(),
-                        param: param.to_owned(),
-                    },
-                )),
-                (false, false, true, _) => {
-                    return Err(format!(
-                        "{} is shadowed by the later {}: a literal must come before the parameter it meets",
-                        first.name, second.name
-                    ));
-                }
-                _ => return Err(format!("{} and {} overlap, and no literal segment orders them", first.name, second.name)),
-            }
-        }
-    }
-    Ok(pairs)
 }
 
 /// The forms `route` is declared as: its own action, or its ruling's forms.
@@ -553,13 +448,15 @@ fn forms(route: &Route, at: &str, rulings: &[Ruling], used: &mut BTreeSet<usize>
     }
 }
 
-/// Chooses and rules the routes, refusing every one it has no rule for.
-fn plan(inventory: &Inventory, rulings: &[Ruling]) -> Result<Plan, String> {
+/// Chooses and rules the routes, refusing every one it has no rule for; `query_buckets` lists the
+/// routes whose bucket is a query parameter (ADR-0030).
+fn plan(inventory: &Inventory, rulings: &[Ruling], query_buckets: &[(&str, &str, &'static str)]) -> Result<Plan, String> {
     if inventory.format != FORMAT {
         return Err(format!("the inventory is {:?}, not {FORMAT:?}", inventory.format));
     }
     let order_of = |group: &str| PLAN.iter().find(|(name, _)| *name == group).map(|(_, order)| *order);
     let mut used = BTreeSet::new();
+    let mut used_query_buckets = BTreeSet::new();
     let mut declared = Vec::new();
     let mut pending: BTreeMap<String, (u8, usize)> = BTreeMap::new();
     for route in &inventory.routes {
@@ -569,10 +466,26 @@ fn plan(inventory: &Inventory, rulings: &[Ruling]) -> Result<Plan, String> {
             pending.entry(route.group.clone()).or_insert((order, 0)).1 += 1;
             continue;
         }
-        let params = template_params(route, &at)?;
+        let Template { params, bucket } = template_params(route, &at)?;
         if !route.query_discriminators.is_empty() {
             return Err(format!("{at}: a query-discriminated route needs a ruling on its selector first"));
         }
+        let query_bucket = query_buckets
+            .iter()
+            .position(|(method, path, _)| *method == route.method && *path == route.path)
+            .map(|index| {
+                used_query_buckets.insert(index);
+                query_buckets[index].2
+            });
+        let bucket = match (bucket, query_bucket) {
+            (Some(_), Some(_)) => return Err(format!("{at}: names its bucket twice, in the template and in the query")),
+            (Some(param), None) => Some(Bound::Path(param)),
+            (None, Some(param)) if !is_parameter(param) => {
+                return Err(format!("{at}: a bucket query parameter is spelled in RFC 3986 unreserved characters"));
+            }
+            (None, Some(param)) => Some(Bound::Query(param)),
+            (None, None) => None,
+        };
         let forms = forms(route, &at, rulings, &mut used)?;
         let alias = match (route.minio_admin_alias, route.path.strip_prefix(ADMIN_PREFIX)) {
             (_, None) => return Err(format!("{at}: not under {ADMIN_PREFIX}")),
@@ -585,6 +498,14 @@ fn plan(inventory: &Inventory, rulings: &[Ruling]) -> Result<Plan, String> {
             other => return Err(format!("{at}: unknown caller-secret class {other:?}")),
         };
         for (query, rule, ruled) in forms {
+            if let Some(Bound::Query(param)) = &bucket {
+                if query.is_some_and(|(key, _)| key == *param) {
+                    return Err(format!("{at}: a bucket query parameter is not the query key that selects the form"));
+                }
+                if rule.reads(param) {
+                    return Err(format!("{at}: the bucket and the account are read from different query parameters"));
+                }
+            }
             let type_name = type_name(&route.method, &route.path, query).ok_or_else(|| format!("{at}: no operation name"))?;
             let precedence = u16::try_from(declared.len())
                 .ok()
@@ -610,6 +531,7 @@ fn plan(inventory: &Inventory, rulings: &[Ruling]) -> Result<Plan, String> {
                 response_body: body_kind(&route.response_body, route)?,
                 precedence,
                 params: params.clone(),
+                bucket: bucket.clone(),
                 shadows: Vec::new(),
             });
         }
@@ -622,6 +544,10 @@ fn plan(inventory: &Inventory, rulings: &[Ruling]) -> Result<Plan, String> {
             "the ruling for {} {} names no custom-auth route of a migrated group",
             rulings[stale].method, rulings[stale].path
         ));
+    }
+    if let Some(stale) = (0..query_buckets.len()).find(|index| !used_query_buckets.contains(index)) {
+        let (method, path, _) = query_buckets[stale];
+        return Err(format!("the query bucket for {method} {path} names no route of a migrated group"));
     }
     let mut names = BTreeSet::new();
     if let Some(twice) = declared.iter().find(|declared| !names.insert(declared.stem.clone())) {
@@ -689,7 +615,7 @@ fn format_all(root: &Path, files: BTreeMap<PathBuf, String>) -> Result<BTreeMap<
 fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
     let recorded = std::fs::read_to_string(root.join(INVENTORY)).map_err(|error| format!("cannot read {INVENTORY}: {error}"))?;
     let inventory: Inventory = serde_json::from_str(&recorded).map_err(|error| format!("cannot parse {INVENTORY}: {error}"))?;
-    let plan = plan(&inventory, RULINGS)?;
+    let plan = plan(&inventory, RULINGS, QUERY_BUCKETS)?;
     let output = Path::new(OUTPUT);
     let mut files = BTreeMap::new();
     for declared in &plan.declared {
@@ -780,6 +706,9 @@ pub(crate) fn command(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+#[cfg(test)]
+#[path = "rustfs_admin_dialect/bucket_tests.rs"]
+mod bucket_tests;
 #[cfg(test)]
 #[path = "rustfs_admin_dialect/tests.rs"]
 mod tests;

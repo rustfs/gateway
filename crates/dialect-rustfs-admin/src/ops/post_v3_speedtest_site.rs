@@ -112,7 +112,7 @@ impl AdminOperation for PostV3SpeedtestSite {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 275,
+    precedence: 293,
     selector: "PathTemplate(\"/rustfs/admin/v3/speedtest/site\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/speedtest/site\") ∧ Method(POST)",
     action: "admin:OBDInfo",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:OBDInfo",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "SpeedtestHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

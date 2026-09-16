@@ -111,7 +111,7 @@ impl AdminOperation for PutV3SiteReplicationStateEdit {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 316,
+    precedence: 338,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/state/edit\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/site-replication/state/edit\") ∧ Method(PUT)",
     action: "admin:SiteReplicationOperation",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:SiteReplicationOperation",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "SRStateEditHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

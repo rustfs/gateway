@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use http::Request;
 use rustfs_gateway_core::codec::ResponseBody;
-use rustfs_gateway_core::dialect::{ClaimedRow, Dialect};
+use rustfs_gateway_core::dialect::{BucketParam, ClaimedRow, Dialect};
 use rustfs_gateway_core::op::ResourceShape;
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, RouterBuilder};
 use rustfs_gateway_core::route::{HostClass, Predicate, RouteRequestParts, ShadowingDecl, TargetKind};
@@ -153,6 +153,7 @@ struct Declared {
     action: Option<String>,
     subject: Option<SubjectRule>,
     resource: Option<ResourceShape>,
+    bucket: Option<BucketParam>,
     privileged: bool,
     anonymous: bool,
     presigned: bool,
@@ -177,6 +178,7 @@ impl OperationFold for Collect {
             action: spec.auth.map(|auth| auth.render()),
             subject: spec.auth.and_then(|auth| auth.subject()),
             resource: spec.auth.map(|auth| auth.resource),
+            bucket: O::BUCKET,
             privileged: floor.privileged(),
             anonymous: floor.allows_anonymous(),
             presigned: floor.allowed_schemes().allows_presigned(),
@@ -207,7 +209,7 @@ fn every_declared_row_reaches_its_operation() {
             rows += 1;
         }
     }
-    assert_eq!(rows, 442, "221 operations, each with its MinIO alias");
+    assert_eq!(rows, 486, "243 operations, each with its MinIO alias");
 }
 
 /// Negative — without the dialect, no row reaches any admin operation.
@@ -294,7 +296,7 @@ fn n_a_near_miss_of_a_row_reaches_no_admin_operation() {
                 .split('/')
                 .collect::<Vec<_>>()
                 .iter()
-                .rposition(|segment| param(segment).is_none())
+                .rposition(|segment| param(segment).is_none() && !segment.is_empty())
                 .expect("a literal segment");
             segments[last_literal] = segments[last_literal].to_ascii_uppercase();
             for near in [format!("{path}/"), format!("{path}/x"), segments.join("/")] {
@@ -315,12 +317,16 @@ fn n_a_near_miss_of_a_row_reaches_no_admin_operation() {
 }
 
 /// Negative — a template parameter never matches a dot segment in any spelling, an encoded
-/// separator, or nothing, so no templated row is reached through one (ADR-0024).
+/// separator, or nothing, so no templated row is reached through one (ADR-0024). The one path an
+/// empty parameter spells that is another row — `heal/{bucket}` with nothing in the bucket is the
+/// trailing-slash `heal/` row (ADR-0030) — reaches that row, canonical and alias alike, and never
+/// the parameter's operation.
 #[test]
 fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
     let dialect = dialect();
     let resolve = resolver(Some(&dialect));
     let mut refused = 0;
+    let mut elsewhere = Vec::new();
     for record in ROUTES {
         for template in templates(record) {
             let segments: Vec<&str> = template.split('/').collect();
@@ -330,14 +336,62 @@ fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
                 ] {
                     let mut path: Vec<String> = segments.iter().map(|segment| concrete(segment)).collect();
                     path[index] = bad.to_owned();
-                    let target = format!("{}{}", path.join("/"), query(record));
-                    assert_eq!(resolve(record.method, &target), None, "{} {target}", record.method);
+                    let path = path.join("/");
+                    let target = format!("{path}{}", query(record));
+                    let reached = resolve(record.method, &target);
+                    if bad.is_empty() {
+                        // Nothing in the parameter may spell another row's path; the model says which.
+                        assert_ne!(reached, Some(record.operation), "{} {target}", record.method);
+                        assert_eq!(reached, expected(record.method, &path, &query(record)), "{} {target}", record.method);
+                        if let Some(other) = reached {
+                            elsewhere.push((record.operation, path, other));
+                        }
+                    } else {
+                        assert_eq!(reached, None, "{} {target}", record.method);
+                    }
                     refused += 1;
                 }
             }
         }
     }
-    assert_eq!(refused, 10 * 2 * 35, "35 parameters across 27 templates, each with its alias");
+    assert_eq!(refused, 10 * 2 * 53, "53 parameters across 44 templates, each with its alias");
+    assert_eq!(
+        elsewhere,
+        [
+            ("rustfs:PostV3HealByBucket", "/rustfs/admin/v3/heal/".to_owned(), "rustfs:PostV3Heal"),
+            ("rustfs:PostV3HealByBucket", "/minio/admin/v3/heal/".to_owned(), "rustfs:PostV3Heal"),
+        ]
+    );
+}
+
+/// Positive and negative — RustFS registers `POST heal/` with its trailing `/`, and so does the
+/// row: exactly that path reaches it, canonical and alias alike; the path without the `/`, with a
+/// second `/`, or with a bucket reaches something else or nothing (ADR-0030).
+#[test]
+fn the_trailing_slash_heal_row_matches_exactly_its_path() {
+    let dialect = dialect();
+    let resolve = resolver(Some(&dialect));
+    let refused = [
+        ("POST", ""),
+        ("POST", "//"),
+        ("POST", "/%2f"),
+        ("GET", "/"),
+        ("POST", "/photos/"),
+    ];
+    for prefix in ["/rustfs/admin", "/minio/admin"] {
+        let heal = |method: &str, rest: &str| resolve(method, &format!("{prefix}/v3/heal{rest}"));
+        assert_eq!(heal("POST", "/"), Some("rustfs:PostV3Heal"), "{prefix}");
+        assert_eq!(heal("POST", "/photos"), Some("rustfs:PostV3HealByBucket"), "{prefix}");
+        assert_eq!(heal("POST", "/photos/logs"), Some("rustfs:PostV3HealByBucketByPrefix"), "{prefix}");
+        for (method, rest) in refused {
+            assert_eq!(heal(method, rest), None, "{prefix} {method} {rest}");
+        }
+    }
+    let heal = ROUTES.iter().find(|record| record.operation == "rustfs:PostV3Heal");
+    assert_eq!(
+        heal.map(|record| (record.alias, record.bucket)),
+        Some((Some("/minio/admin/v3/heal/"), None))
+    );
 }
 
 /// Positive and negative — `POST tier/clear` stands in front of `POST tier/{tiername}` and is
@@ -389,7 +443,13 @@ fn every_operation_declares_what_its_record_says() {
         assert_eq!(operation.group, record.group, "{name}");
         assert_eq!(operation.action.as_deref(), Some(record.action), "{name}");
         assert_eq!(operation.subject, record.subject, "{name}");
-        assert_eq!(operation.resource, Some(ResourceShape::Service), "{name}");
+        assert_eq!(operation.bucket, record.bucket, "{name}");
+        let resource = if record.bucket.is_some() {
+            ResourceShape::Bucket
+        } else {
+            ResourceShape::Service
+        };
+        assert_eq!(operation.resource, Some(resource), "{name}");
         assert_eq!(operation.secret, record.caller_secret, "{name}");
         assert_eq!(operation.deadline, Some(HandlerDeadlineClass::Standard), "{name}");
         let rows: Vec<&str> = operation.rows.iter().map(|row| row.template).collect();
@@ -516,9 +576,9 @@ fn n_a_subject_parameter_does_not_change_the_route() {
     assert_eq!(checked, 21 * 2 * 5);
 }
 
-/// Positive and negative — exactly the twenty-nine operations whose body RustFS seals opt in to
-/// the caller's secret, eight of order 3 and twenty-one of order 4 (xtask pins each name against
-/// the inventory); every other operation is never handed it.
+/// Positive and negative — exactly the thirty-one operations whose body RustFS seals opt in to
+/// the caller's secret, eight of order 3, twenty-one of order 4 and two of order 5 (xtask pins each
+/// name against the inventory); every other operation is never handed it.
 #[test]
 fn only_the_sealed_operations_hold_the_caller_secret() {
     let holders: Vec<(&str, u8)> = declared()
@@ -527,15 +587,18 @@ fn only_the_sealed_operations_hold_the_caller_secret() {
         .filter(|(operation, _)| operation.secret)
         .map(|(operation, record)| (operation.name, record.order))
         .collect();
-    assert_eq!(holders.len(), 29);
+    assert_eq!(holders.len(), 31);
     assert_eq!(holders.iter().filter(|(_, order)| *order == 3).count(), 8);
     assert_eq!(holders.iter().filter(|(_, order)| *order == 4).count(), 21);
+    assert_eq!(holders.iter().filter(|(_, order)| *order == 5).count(), 2);
     for name in [
         "rustfs:GetV3Config",
         "rustfs:PutV3SiteReplicationEdit",
         "rustfs:PostV3AccountPassword",
         "rustfs:GetV3ListAccessKeysBulk",
         "rustfs:PutV3AddUser",
+        "rustfs:PutV3OnDemandMigrationByBucket",
+        "rustfs:PostV3OnDemandMigrationByBucketBackfill",
     ] {
         assert!(holders.iter().any(|(holder, _)| *holder == name), "{name}");
     }
@@ -548,25 +611,51 @@ fn only_the_sealed_operations_hold_the_caller_secret() {
     }
 }
 
-/// Negative — no template parameter is a bucket: none is named for one, and no claimed entry
-/// binds one, so every templated operation stays service-level (ADR-0027).
+/// Positive and negative — exactly the seventeen `{bucket}` templates bind their bucket
+/// (`BucketParam::Path`) and exactly the two compat quota routes bind a `bucket` query parameter
+/// (`BucketParam::Query`), all of order 5; every other operation, `{prefix}` and `{warehouse}`-less
+/// templates included, stays service-level; and every claimed entry carries its operation's
+/// binding, canonical row and alias alike (ADR-0025 (c), ADR-0026 (e), ADR-0027, ADR-0030).
 #[test]
-fn n_no_template_parameter_is_a_bucket() {
+fn exactly_the_order_five_bucket_routes_bind_their_bucket() {
     let templated: Vec<&RouteRecord> = ROUTES.iter().filter(|record| record.path.contains('{')).collect();
-    assert_eq!(templated.len(), 27);
-    for record in templated {
-        for segment in record.path.split('/').filter_map(param) {
-            assert!(!["bucket", "warehouse"].contains(&segment), "{}", record.operation);
+    assert_eq!(templated.len(), 44);
+    let mut by_path = 0;
+    let mut by_query = 0;
+    for record in ROUTES {
+        let names_bucket = record.path.split('/').filter_map(param).any(|segment| segment == "bucket");
+        assert!(!record.path.contains("{warehouse}"), "{}", record.operation);
+        let expected = match (names_bucket, record.path) {
+            (true, _) => Some(BucketParam::Path("bucket")),
+            (false, "/rustfs/admin/v3/get-bucket-quota" | "/rustfs/admin/v3/set-bucket-quota") => {
+                Some(BucketParam::Query("bucket"))
+            }
+            (false, _) => None,
+        };
+        assert_eq!(record.bucket, expected, "{}", record.operation);
+        match record.bucket {
+            Some(BucketParam::Path(_)) => by_path += 1,
+            Some(BucketParam::Query(_)) => by_query += 1,
+            None => {}
+        }
+        if record.bucket.is_some() {
+            assert_eq!(record.order, 5, "{}", record.operation);
         }
     }
+    assert_eq!((by_path, by_query), (17, 2));
     let dialect = dialect();
-    let entries: Vec<_> = dialect
-        .claimed_operations()
-        .iter()
-        .flat_map(|operation| operation.entries())
-        .collect();
-    assert_eq!(entries.len(), 442);
-    assert!(entries.iter().all(|entry| entry.bucket_param().is_none()));
+    let mut entries = 0;
+    for operation in dialect.claimed_operations() {
+        let record = ROUTES
+            .iter()
+            .find(|record| record.operation == operation.name())
+            .expect("a record per claimed operation");
+        for entry in operation.entries() {
+            assert_eq!(entry.bucket_param(), record.bucket, "{}", record.operation);
+            entries += 1;
+        }
+    }
+    assert_eq!(entries, 486);
 }
 
 /// Positive and negative — names are unique, precedences strictly increase, and the overlay
@@ -602,7 +691,14 @@ fn the_dialect_assembles_with_its_two_claims() {
 /// Positive — ADR-0024's orders 1 to 4 are declared, each inventory route once (the service
 /// command as its four forms), and every other group is pending with the rest of the routes.
 #[test]
-fn orders_one_to_four_are_declared_and_the_rest_are_pending() {
+fn orders_one_to_five_are_declared_and_the_rest_are_pending() {
+    let order_five = [
+        "durability_handler",
+        "heal",
+        "on_demand_migration",
+        "quota_handler",
+        "usage_prefix",
+    ];
     let order_four = ["account", "idp_compat", "mfa", "replication_handler", "user"];
     let order_three = [
         "audit",
@@ -623,6 +719,7 @@ fn orders_one_to_four_are_declared_and_the_rest_are_pending() {
             "system" => 1,
             group if order_three.contains(&group) => 3,
             group if order_four.contains(&group) => 4,
+            group if order_five.contains(&group) => 5,
             _ => 2,
         };
         assert_eq!(record.order, order, "{}", record.operation);
@@ -638,8 +735,10 @@ fn orders_one_to_four_are_declared_and_the_rest_are_pending() {
             ("cluster_snapshot", 1),
             ("config_admin", 9),
             ("diagnostics", 12),
+            ("durability_handler", 3),
             ("extensions", 2),
             ("gateway_key_inventory", 1),
+            ("heal", 5),
             ("idp_compat", 13),
             ("ilm_transition", 11),
             ("inspect_archive", 1),
@@ -647,10 +746,12 @@ fn orders_one_to_four_are_declared_and_the_rest_are_pending() {
             ("mfa", 8),
             ("module_switch", 2),
             ("object_data_cache", 2),
+            ("on_demand_migration", 6),
             ("plugins_catalog", 1),
             ("plugins_instances", 4),
             ("pools", 6),
             ("profile_admin", 6),
+            ("quota_handler", 7),
             ("rebalance", 3),
             ("replication_handler", 6),
             ("scanner", 5),
@@ -658,17 +759,18 @@ fn orders_one_to_four_are_declared_and_the_rest_are_pending() {
             ("system", 9),
             ("tier", 7),
             ("tls_debug", 1),
+            ("usage_prefix", 1),
             ("user", 37),
         ]
     );
-    assert_eq!(ROUTES.len(), 221);
+    assert_eq!(ROUTES.len(), 243);
     assert!(
         PENDING
             .iter()
-            .all(|pending| pending.order > 4 && !by_group.contains_key(pending.group))
+            .all(|pending| pending.order > 5 && !by_group.contains_key(pending.group))
     );
-    assert_eq!(PENDING.len(), 10);
-    assert_eq!(PENDING.iter().map(|pending| usize::from(pending.routes)).sum::<usize>(), 356 - 218);
+    assert_eq!(PENDING.len(), 5);
+    assert_eq!(PENDING.iter().map(|pending| usize::from(pending.routes)).sum::<usize>(), 356 - 240);
 }
 
 // ── the answer ───────────────────────────────────────────────────────────────────────────────

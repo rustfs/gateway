@@ -18,7 +18,7 @@
 //! Responsible for: the drift check the gate runs, the naming rule, the service route's four
 //! forms, the pools rulings, template parameters, literal-over-parameter shadowing, the
 //! caller-secret mapping, the order-4 subject rulings (own-account, named-account, account set),
-//! and each refusal.
+//! and each refusal; the order-5 bucket bindings are `bucket_tests.rs`'s.
 //! NOT responsible for: the inventory's validity (goldens' strict reader) or what the generated
 //! operations do (the dialect crate's tests and goldens' `rustfs_admin_dialect`).
 //! Upstream: `super`. Downstream: nothing.
@@ -27,11 +27,11 @@
 
 use super::rulings::Form;
 use super::{
-    About, Absent, FIRST_PRECEDENCE, FORMAT, INVENTORY, Inventory, Plan, RULINGS, Route, Ruled, Ruling, Source, drift, generate,
-    plan, repo_root, snake, type_name,
+    About, Absent, FIRST_PRECEDENCE, FORMAT, INVENTORY, Inventory, Plan, QUERY_BUCKETS, RULINGS, Route, Ruled, Ruling, Source,
+    drift, generate, plan, repo_root, snake, type_name,
 };
 
-fn route(method: &str, path: &str, group: &str, auth_mode: &str, action: Option<&str>) -> Route {
+pub(super) fn route(method: &str, path: &str, group: &str, auth_mode: &str, action: Option<&str>) -> Route {
     Route {
         method: method.to_owned(),
         path: path.to_owned(),
@@ -51,38 +51,46 @@ fn route(method: &str, path: &str, group: &str, auth_mode: &str, action: Option<
 }
 
 /// A `sigv4-admin` route of a migrated group whose template names `params`.
-fn templated(method: &str, path: &str, params: &[&str]) -> Route {
+pub(super) fn templated(method: &str, path: &str, params: &[&str]) -> Route {
     let mut route = route(method, path, "tier", "sigv4-admin", Some("admin:SetTier"));
     route.path_params = params.iter().map(|param| (*param).to_owned()).collect();
     route
 }
 
-fn planned(routes: Vec<Route>, rulings: &[Ruling]) -> Plan {
-    let inventory = Inventory {
+pub(super) fn inventory(routes: Vec<Route>) -> Inventory {
+    Inventory {
         format: FORMAT.to_owned(),
         source: Source { commit: "c".to_owned() },
         routes,
-    };
-    match plan(&inventory, rulings) {
+    }
+}
+
+pub(super) fn planned(routes: Vec<Route>, rulings: &[Ruling]) -> Plan {
+    planned_with(routes, rulings, &[])
+}
+
+/// The plan of `routes` under `rulings` and `query_buckets`.
+pub(super) fn planned_with(routes: Vec<Route>, rulings: &[Ruling], query_buckets: &[(&str, &str, &'static str)]) -> Plan {
+    match plan(&inventory(routes), rulings, query_buckets) {
         Ok(plan) => plan,
         Err(error) => panic!("refused: {error}"),
     }
 }
 
-fn refusal(routes: Vec<Route>, rulings: &[Ruling]) -> String {
-    let inventory = Inventory {
-        format: FORMAT.to_owned(),
-        source: Source { commit: "c".to_owned() },
-        routes,
-    };
-    match plan(&inventory, rulings) {
+pub(super) fn refusal(routes: Vec<Route>, rulings: &[Ruling]) -> String {
+    refusal_with(routes, rulings, &[])
+}
+
+/// Why `routes` under `rulings` and `query_buckets` are refused.
+pub(super) fn refusal_with(routes: Vec<Route>, rulings: &[Ruling], query_buckets: &[(&str, &str, &'static str)]) -> String {
+    match plan(&inventory(routes), rulings, query_buckets) {
         Ok(plan) => panic!("planned {} operation(s)", plan.declared.len()),
         Err(error) => error,
     }
 }
 
 /// The one ruling for `path`.
-fn ruling_for(path: &str) -> &'static [Ruling] {
+pub(super) fn ruling_for(path: &str) -> &'static [Ruling] {
     let index = RULINGS
         .iter()
         .position(|ruling| ruling.path == path)
@@ -90,7 +98,7 @@ fn ruling_for(path: &str) -> &'static [Ruling] {
     &RULINGS[index..=index]
 }
 
-fn service_route() -> Route {
+pub(super) fn service_route() -> Route {
     route("POST", "/rustfs/admin/v3/service", "system", "custom", None)
 }
 
@@ -101,7 +109,7 @@ fn the_committed_dialect_is_what_the_inventory_generates() {
     let root = repo_root();
     let files = generate(&root).expect("the recorded inventory generates");
     assert_eq!(drift(&root, &files), Vec::<String>::new());
-    assert_eq!(files.len(), 226, "221 operations, the module list and the table's four files");
+    assert_eq!(files.len(), 248, "243 operations, the module list and the table's four files");
 }
 
 /// Negative — a file committed under a wholly generated directory without being generated, in
@@ -157,7 +165,13 @@ fn a_plain_route_is_declared_and_a_later_group_is_pending() {
     let plan = planned(
         vec![
             route("GET", "/rustfs/admin/v3/kms/status", "kms", "sigv4-admin", Some("kms:ServiceControl")),
-            route("GET", "/rustfs/admin/v3/heal/status", "heal", "sigv4-admin", Some("admin:Heal")),
+            route(
+                "GET",
+                "/rustfs/admin/v3/tables/status",
+                "table_catalog",
+                "sigv4-admin",
+                Some("admin:ServerInfo"),
+            ),
         ],
         &[],
     );
@@ -168,22 +182,22 @@ fn a_plain_route_is_declared_and_a_later_group_is_pending() {
     assert_eq!(declared.rule.render(), "kms:ServiceControl");
     assert_eq!(declared.precedence, FIRST_PRECEDENCE);
     assert!(!declared.caller_secret && declared.params.is_empty() && declared.shadows.is_empty());
-    assert!(declared.rule.about.is_none());
-    assert_eq!(plan.pending, vec![("heal".to_owned(), 5, 1)]);
+    assert!(declared.rule.about.is_none() && declared.bucket.is_none());
+    assert_eq!(plan.pending, vec![("table_catalog".to_owned(), 6, 1)]);
 }
 
 /// A custom-auth route of an order-4 group, classed `detail`.
-fn custom(method: &str, path: &str, detail: &str) -> Route {
+pub(super) fn custom(method: &str, path: &str, detail: &str) -> Route {
     let mut route = route(method, path, "user", "custom", None);
     route.auth_detail = Some(detail.to_owned());
     route
 }
 
 /// The recorded inventory's plan.
-fn recorded_plan() -> Plan {
+pub(super) fn recorded_plan() -> Plan {
     let recorded = std::fs::read_to_string(repo_root().join(INVENTORY)).expect("the inventory");
     let inventory: Inventory = serde_json::from_str(&recorded).expect("the inventory parses");
-    plan(&inventory, RULINGS).expect("the recorded inventory plans")
+    plan(&inventory, RULINGS, QUERY_BUCKETS).expect("the recorded inventory plans")
 }
 
 /// Positive — the own-account routes are about the caller under their vendor label, the
@@ -226,7 +240,13 @@ fn a_subject_ruling_is_declared_about_its_subject() {
         let declared = &plan.declared[0];
         assert_eq!(declared.rule.render(), rendered, "{path}");
         assert_eq!(declared.rule.subject_expression().as_deref(), Some(expression), "{path}");
-        assert!(declared.rule.expression().ends_with(".about_subject(SUBJECT)"), "{path}");
+        assert!(
+            declared
+                .rule
+                .expression("ResourceShape::Service")
+                .ends_with(".about_subject(SUBJECT)"),
+            "{path}"
+        );
         assert_eq!(declared.ruled.as_deref(), Some(detail), "{path}");
     }
 }
@@ -630,17 +650,19 @@ fn a_templated_route_is_declared_with_its_parameters() {
     );
 }
 
-/// Negative — a bucket parameter, an affixed parameter, a parameter that is not a lowercase
-/// identifier, a repeated one, and a template the inventory's list disagrees with are refused.
+/// Negative — two bucket parameters, an empty segment that is not a trailing `/`, an affixed
+/// parameter, a parameter that is not a lowercase identifier, a repeated one, and a template the
+/// inventory's list disagrees with are refused.
 #[test]
 fn n_a_template_outside_the_rule_is_refused() {
     for (path, params, why) in [
-        ("/rustfs/admin/v3/quota/{bucket}", &["bucket"][..], "waits for ADR-0025's bucket binding"),
         (
-            "/rustfs/admin/v3/tables/{warehouse}",
-            &["warehouse"][..],
-            "waits for ADR-0025's bucket binding",
+            "/rustfs/admin/v3/tables/{warehouse}/{bucket}",
+            &["warehouse", "bucket"][..],
+            "two parameters name a bucket",
         ),
+        ("/rustfs/admin/v3/heal//", &[][..], "an empty segment that is not a trailing '/'"),
+        ("/rustfs/admin/v3//heal", &[][..], "an empty segment that is not a trailing '/'"),
         ("/rustfs/admin/v3/zip/{id}.zip", &["id"][..], "shares its segment"),
         ("/rustfs/admin/v3/tier/{Tier}", &["Tier"][..], "not a lowercase identifier"),
         ("/rustfs/admin/v3/tier/{tier-name}", &["tier-name"][..], "not a lowercase identifier"),

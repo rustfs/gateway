@@ -24,8 +24,8 @@
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`PostV3IdpLdapPolicyByOperation`].
 //!
-//! Its path parameters (`operation`) name no bucket (ADR-0027): the operation stays service-level, and a
-//! handler reads each decoded value from `RequestContextView::path_params()`.
+//! Its path parameter (`operation`) names no bucket (ADR-0027): a handler reads each decoded value from
+//! `RequestContextView::path_params()`.
 
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
@@ -114,7 +114,7 @@ impl AdminOperation for PostV3IdpLdapPolicyByOperation {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 221,
+    precedence: 237,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp/ldap/policy/{operation}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/idp/ldap/policy/{operation}\") ∧ Method(POST)",
     action: "admin:AttachUserOrGroupPolicy",
     resource: ResourceShape::Service,
@@ -139,6 +139,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:AttachUserOrGroupPolicy",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "PolicyOperationLdap",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

@@ -111,7 +111,7 @@ impl AdminOperation for GetV3TargetList {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 196,
+    precedence: 206,
     selector: "PathTemplate(\"/rustfs/admin/v3/target/list\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/target/list\") ∧ Method(GET)",
     action: "admin:GetBucketTarget",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:GetBucketTarget",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "ListNotificationTargets",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

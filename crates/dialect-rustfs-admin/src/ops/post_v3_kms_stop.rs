@@ -111,7 +111,7 @@ impl AdminOperation for PostV3KmsStop {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 250,
+    precedence: 266,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/stop\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/stop\") ∧ Method(POST)",
     action: "kms:ServiceControl",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "kms:ServiceControl",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "StopKmsHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

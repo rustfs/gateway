@@ -111,7 +111,7 @@ impl AdminOperation for GetV3ScannerStatus {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 185,
+    precedence: 195,
     selector: "PathTemplate(\"/rustfs/admin/v3/scanner/status\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/scanner/status\") ∧ Method(GET)",
     action: "admin:ServerInfo",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:ServerInfo",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "ScannerStatusHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

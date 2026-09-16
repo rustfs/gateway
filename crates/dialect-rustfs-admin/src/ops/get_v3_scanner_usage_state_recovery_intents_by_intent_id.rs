@@ -24,8 +24,8 @@
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`GetV3ScannerUsageStateRecoveryIntentsByIntentId`].
 //!
-//! Its path parameters (`intent_id`) name no bucket (ADR-0027): the operation stays service-level, and a
-//! handler reads each decoded value from `RequestContextView::path_params()`.
+//! Its path parameter (`intent_id`) names no bucket (ADR-0027): a handler reads each decoded value from
+//! `RequestContextView::path_params()`.
 
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
@@ -114,7 +114,7 @@ impl AdminOperation for GetV3ScannerUsageStateRecoveryIntentsByIntentId {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 186,
+    precedence: 196,
     selector: "PathTemplate(\"/rustfs/admin/v3/scanner/usage-state/recovery-intents/{intent_id}\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/scanner/usage-state/recovery-intents/{intent_id}\") ∧ Method(GET)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,
@@ -139,6 +139,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:ConfigUpdate",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "ScannerUsageStateRecoveryIntentStatusHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

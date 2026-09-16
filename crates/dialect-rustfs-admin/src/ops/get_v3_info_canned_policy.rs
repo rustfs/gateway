@@ -111,7 +111,7 @@ impl AdminOperation for GetV3InfoCannedPolicy {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 153,
+    precedence: 158,
     selector: "PathTemplate(\"/rustfs/admin/v3/info-canned-policy\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/info-canned-policy\") ∧ Method(GET)",
     action: "admin:GetPolicy",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:GetPolicy",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "InfoCannedPolicy",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

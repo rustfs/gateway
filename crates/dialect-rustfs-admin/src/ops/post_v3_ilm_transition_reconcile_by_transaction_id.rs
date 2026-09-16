@@ -24,8 +24,8 @@
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`PostV3IlmTransitionReconcileByTransactionId`].
 //!
-//! Its path parameters (`transaction_id`) name no bucket (ADR-0027): the operation stays service-level, and a
-//! handler reads each decoded value from `RequestContextView::path_params()`.
+//! Its path parameter (`transaction_id`) names no bucket (ADR-0027): a handler reads each decoded value from
+//! `RequestContextView::path_params()`.
 
 use bytes::Bytes;
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
@@ -115,7 +115,7 @@ impl AdminOperation for PostV3IlmTransitionReconcileByTransactionId {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 223,
+    precedence: 239,
     selector: "PathTemplate(\"/rustfs/admin/v3/ilm/transition/reconcile/{transaction_id}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/ilm/transition/reconcile/{transaction_id}\") ∧ Method(POST)",
     action: "admin:SetTier",
     resource: ResourceShape::Service,
@@ -140,6 +140,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:SetTier",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "TransitionReconcileApplyHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

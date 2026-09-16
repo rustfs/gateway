@@ -189,7 +189,9 @@ impl PathClaim {
 /// One template segment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Segment {
-    /// Matches exactly this raw segment.
+    /// Matches exactly this raw segment. Empty only as the last segment of a template written
+    /// with a trailing `/`, which matches a request path with that trailing `/` and nothing else
+    /// (ADR-0030): RustFS registers `POST /rustfs/admin/v3/heal/` that way.
     Literal(&'static str),
     /// Matches one raw segment and binds it to this name.
     Parameter(&'static str),
@@ -200,9 +202,8 @@ enum Segment {
 pub enum TemplateRejection {
     /// The template does not start with `/`.
     NotAbsolute,
-    /// The template ends with `/`.
-    TrailingSlash,
-    /// Two adjacent separators, or no segment at all.
+    /// Two adjacent separators, or no segment at all. A trailing `/` is not one of these: it is
+    /// an empty last literal, matched exactly (ADR-0030).
     EmptySegment,
     /// A `.` or `..` literal segment.
     DotSegment,
@@ -223,8 +224,7 @@ impl TemplateRejection {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::NotAbsolute => "a template is an absolute path and starts with '/'",
-            Self::TrailingSlash => "a template does not end with '/'",
-            Self::EmptySegment => "a template has no empty segment",
+            Self::EmptySegment => "a template has no empty segment except a trailing '/'",
             Self::DotSegment => "a template has no '.' or '..' literal segment",
             Self::ForbiddenCharacter => "a template literal spells only unreserved characters",
             Self::MalformedParameter => "a parameter is a whole segment `{name}` with a lowercase name",
@@ -340,6 +340,10 @@ pub struct PathTemplate {
 impl PathTemplate {
     /// Parses a template.
     ///
+    /// A template written with a trailing `/` (`/rustfs/admin/v3/heal/`) ends in an empty literal
+    /// segment: it matches a request path with that trailing `/`, and neither the path without it
+    /// nor any longer path (ADR-0030). Every other empty segment is refused.
+    ///
     /// # Errors
     ///
     /// The [`TemplateRejection`] naming the first rule the text breaks.
@@ -350,13 +354,16 @@ impl PathTemplate {
         if rest.is_empty() {
             return Err(TemplateRejection::EmptySegment);
         }
-        if rest.ends_with('/') {
-            return Err(TemplateRejection::TrailingSlash);
-        }
         let mut segments = Vec::new();
-        for segment in rest.split('/') {
+        let mut raw = rest.split('/').peekable();
+        while let Some(segment) = raw.next() {
             if segment.is_empty() {
-                return Err(TemplateRejection::EmptySegment);
+                // Only the last segment, after a non-empty one: `/a/b/`, never `/a//b`, `/a//` or `//`.
+                if raw.peek().is_some() || segments.is_empty() {
+                    return Err(TemplateRejection::EmptySegment);
+                }
+                segments.push(Segment::Literal(segment));
+                continue;
             }
             if let Some(inner) = segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}')) {
                 if !is_parameter_name(inner) {
@@ -483,6 +490,11 @@ impl PathTemplate {
             let segment = match (mine, theirs) {
                 (Segment::Literal(a), Segment::Literal(b)) if a == b => *a,
                 (Segment::Literal(_), Segment::Literal(_)) => return None,
+                // A parameter never matches an empty segment, so a trailing `/` and a parameter
+                // in the same position share no path (ADR-0030).
+                (Segment::Literal(""), Segment::Parameter(_)) | (Segment::Parameter(_), Segment::Literal("")) => {
+                    return None;
+                }
                 (Segment::Literal(literal), Segment::Parameter(_)) | (Segment::Parameter(_), Segment::Literal(literal)) => {
                     literal
                 }
@@ -498,6 +510,8 @@ impl PathTemplate {
     pub(super) fn refines(&self, other: &Self) -> bool {
         self.segments.len() == other.segments.len()
             && self.segments.iter().zip(other.segments.iter()).all(|pair| match pair {
+                // An empty literal is matched by no parameter (ADR-0030).
+                (Segment::Literal(""), Segment::Parameter(_)) => false,
                 (_, Segment::Parameter(_)) => true,
                 (Segment::Literal(a), Segment::Literal(b)) => a == b,
                 (Segment::Parameter(_), Segment::Literal(_)) => false,
@@ -685,5 +699,51 @@ mod tests {
         assert_eq!(literal.overlap_path(&parameter).as_deref(), Some("/a/b/stats"));
         let other = PathTemplate::parse("/a/c/{name}").expect("a template");
         assert_eq!(literal.overlap_path(&other), None);
+    }
+
+    /// Positive — a template written with a trailing `/` ends in an empty literal and matches a
+    /// request path with that trailing `/` and nothing else (ADR-0030).
+    #[test]
+    fn a_trailing_slash_is_an_empty_last_literal_matched_exactly() {
+        let heal = PathTemplate::parse("/rustfs/admin/v3/heal/").expect("a template");
+        assert_eq!(heal.as_str(), "/rustfs/admin/v3/heal/");
+        assert_eq!(heal.parameters().count(), 0);
+        assert!(heal.matches("/rustfs/admin/v3/heal/"));
+        for other in [
+            "/rustfs/admin/v3/heal",
+            "/rustfs/admin/v3/heal//",
+            "/rustfs/admin/v3/heal/photos",
+            "/rustfs/admin/v3/heal/%2f",
+            "/rustfs/admin/v3/heal/ ",
+        ] {
+            assert!(!heal.matches(other), "{other}");
+            assert_eq!(heal.extract(other).err(), Some(PathParamError::Mismatch), "{other}");
+        }
+        assert!(heal.extract("/rustfs/admin/v3/heal/").expect("a match").is_empty());
+    }
+
+    /// Negative — every other empty segment is still refused: two adjacent separators anywhere,
+    /// a trailing `//`, and a template that is only separators.
+    #[test]
+    fn n_an_empty_segment_that_is_not_a_trailing_slash_is_refused() {
+        for template in ["/", "//", "/a//", "/a//b", "/a/b//", "//a"] {
+            assert_eq!(PathTemplate::parse(template).err(), Some(TemplateRejection::EmptySegment), "{template}");
+        }
+    }
+
+    /// Negative — a parameter never matches an empty segment, so a trailing `/` and a parameter
+    /// in the same position overlap nothing and neither refines the other (ADR-0030).
+    #[test]
+    fn n_a_trailing_slash_and_a_parameter_share_no_path() {
+        let heal = PathTemplate::parse("/a/heal/").expect("a template");
+        let by_bucket = PathTemplate::parse("/a/heal/{bucket}").expect("a template");
+        assert_eq!(heal.overlap_path(&by_bucket), None);
+        assert_eq!(by_bucket.overlap_path(&heal), None);
+        assert!(!heal.refines(&by_bucket));
+        assert!(!by_bucket.refines(&heal));
+        assert!(!by_bucket.matches("/a/heal/"));
+        let same = PathTemplate::parse("/a/heal/").expect("a template");
+        assert_eq!(heal.overlap_path(&same).as_deref(), Some("/a/heal/"));
+        assert!(heal.refines(&same));
     }
 }

@@ -111,7 +111,7 @@ impl AdminOperation for PostV3ProfilingStart {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 256,
+    precedence: 273,
     selector: "PathTemplate(\"/rustfs/admin/v3/profiling/start\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/profiling/start\") ∧ Method(POST)",
     action: "admin:Profiling",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:Profiling",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "ProfilingStartHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

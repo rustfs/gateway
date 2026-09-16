@@ -127,7 +127,7 @@ impl AdminOperation for GetV3UserInfo {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 203,
+    precedence: 214,
     selector: "PathTemplate(\"/rustfs/admin/v3/user-info\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/user-info\") ∧ Method(GET)",
     action: "admin:GetUser about query(accessKey|access-key, absent=refused)",
     resource: ResourceShape::Service,
@@ -153,6 +153,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:GetUser about query(accessKey|access-key, absent=refused)",
     ruled: Some("ContextualAuthorization"),
     subject: Some(SUBJECT),
+    bucket: None,
     rustfs_handler: "GetUserInfo",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

@@ -24,8 +24,8 @@
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`DeleteV3AuditTargetByTargetTypeByTargetNameReset`].
 //!
-//! Its path parameters (`target_type`, `target_name`) name no bucket (ADR-0027): the operation stays service-level, and a
-//! handler reads each decoded value from `RequestContextView::path_params()`.
+//! Its path parameters (`target_type`, `target_name`) name no bucket (ADR-0027): a handler reads each decoded value from
+//! `RequestContextView::path_params()`.
 
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
@@ -139,6 +139,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:SetBucketTarget",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "RemoveAuditTarget",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

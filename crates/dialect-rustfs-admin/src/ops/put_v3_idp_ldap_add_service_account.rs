@@ -111,7 +111,7 @@ impl AdminOperation for PutV3IdpLdapAddServiceAccount {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 290,
+    precedence: 309,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp/ldap/add-service-account\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/idp/ldap/add-service-account\") ∧ Method(PUT)",
     action: "admin:CreateServiceAccount",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:CreateServiceAccount",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "AddServiceAccountLdap",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

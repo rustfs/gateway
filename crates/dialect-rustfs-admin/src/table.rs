@@ -41,16 +41,6 @@ pub const RUSTFS_SOURCE_COMMIT: &str = "736e4fb8e8e5d527c25e4e56f352536b311b6daf
 /// Every registration group RustFS still serves itself, with its route count.
 pub static PENDING: &[PendingGroup] = &[
     PendingGroup {
-        group: "durability_handler",
-        order: 5,
-        routes: 3,
-    },
-    PendingGroup {
-        group: "heal",
-        order: 5,
-        routes: 5,
-    },
-    PendingGroup {
         group: "health",
         order: 8,
         routes: 6,
@@ -66,16 +56,6 @@ pub static PENDING: &[PendingGroup] = &[
         routes: 8,
     },
     PendingGroup {
-        group: "on_demand_migration",
-        order: 5,
-        routes: 6,
-    },
-    PendingGroup {
-        group: "quota_handler",
-        order: 5,
-        routes: 7,
-    },
-    PendingGroup {
         group: "sts",
         order: 7,
         routes: 2,
@@ -84,10 +64,5 @@ pub static PENDING: &[PendingGroup] = &[
         group: "table_catalog",
         order: 6,
         routes: 98,
-    },
-    PendingGroup {
-        group: "usage_prefix",
-        order: 5,
-        routes: 1,
     },
 ];

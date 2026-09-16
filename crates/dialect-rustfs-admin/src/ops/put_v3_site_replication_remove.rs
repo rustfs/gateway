@@ -111,7 +111,7 @@ impl AdminOperation for PutV3SiteReplicationRemove {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 313,
+    precedence: 335,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/remove\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/site-replication/remove\") ∧ Method(PUT)",
     action: "admin:SiteReplicationRemove",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:SiteReplicationRemove",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "SiteReplicationRemoveHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

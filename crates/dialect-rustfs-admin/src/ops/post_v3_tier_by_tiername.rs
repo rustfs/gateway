@@ -24,8 +24,8 @@
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`PostV3TierByTiername`].
 //!
-//! Its path parameters (`tiername`) name no bucket (ADR-0027): the operation stays service-level, and a
-//! handler reads each decoded value from `RequestContextView::path_params()`.
+//! Its path parameter (`tiername`) names no bucket (ADR-0027): a handler reads each decoded value from
+//! `RequestContextView::path_params()`.
 
 use bytes::Bytes;
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
@@ -115,7 +115,7 @@ impl AdminOperation for PostV3TierByTiername {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 278,
+    precedence: 296,
     selector: "PathTemplate(\"/rustfs/admin/v3/tier/{tiername}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/tier/{tiername}\") ∧ Method(POST)",
     action: "admin:SetTier",
     resource: ResourceShape::Service,
@@ -140,6 +140,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:SetTier",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "EditTier",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

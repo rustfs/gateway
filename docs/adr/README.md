@@ -85,6 +85,7 @@ second copy is a second thing to keep in sync.
 | 0027 | Service-level template parameters, literal-over-parameter shadowing, and the caller secret for RustFS's order-3 admin routes | Accepted |
 | 0028 | Subject rules for RustFS's order-4 admin routes: own-account labels, refused absences, and alias spellings | Accepted |
 | 0029 | RustFS's alias spellings of a subject parameter name the same account | Accepted |
+| 0030 | Bound buckets, query buckets and the trailing-slash heal route for RustFS's order-5 admin routes | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

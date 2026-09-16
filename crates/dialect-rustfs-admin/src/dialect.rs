@@ -74,8 +74,9 @@ impl OperationFold for Declare {
             precedence: O::PRECEDENCE,
             rows: O::rows(),
             shadows: O::shadows(),
-            // No template parameter is a bucket: ADR-0027 keeps every migrated one service-level.
-            bucket_param: None,
+            // A `{bucket}` template parameter or a listed query parameter is the operation's
+            // bucket (ADR-0030); every other operation is service-level (ADR-0027).
+            bucket_param: O::BUCKET,
         })
     }
 }

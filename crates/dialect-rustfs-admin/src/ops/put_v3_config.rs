@@ -112,7 +112,7 @@ impl AdminOperation for PutV3Config {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 288,
+    precedence: 307,
     selector: "PathTemplate(\"/rustfs/admin/v3/config\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/config\") ∧ Method(PUT)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:ConfigUpdate",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "SetConfigHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,
