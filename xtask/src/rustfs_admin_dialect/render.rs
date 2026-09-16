@@ -23,7 +23,7 @@
 use std::fmt::Write as _;
 
 use super::rulings::{About, Absent};
-use super::{Declared, Plan};
+use super::{Bound, Declared, Plan};
 
 const LICENSE: &str = "// Copyright 2026 RustFS Team
 //
@@ -143,7 +143,7 @@ fn evidence(d: &Declared) -> String {
     if d.ruled.is_some() {
         cited.push("record::ADR_0025".to_owned());
     }
-    if matches!(d.rule.about, Some(About::Set { .. })) {
+    if matches!(d.rule.about, Some(About::Set { .. })) || matches!(d.bucket, Some(Bound::Query(_))) {
         cited.push("record::ADR_0026".to_owned());
     }
     if !d.params.is_empty() || !d.shadows.is_empty() {
@@ -152,8 +152,67 @@ fn evidence(d: &Declared) -> String {
     if d.rule.about.is_some() {
         cited.push("record::ADR_0028".to_owned());
     }
+    if d.bucket.is_some() || d.path.ends_with('/') {
+        cited.push("record::ADR_0030".to_owned());
+    }
     cited.push("record::ISSUE".to_owned());
     format!("&[{}]", cited.join(", "))
+}
+
+/// The module documentation's paragraph on the service-level path parameters `params`.
+fn service_level_doc(params: &[&String], other: bool) -> String {
+    let listed: Vec<String> = params.iter().map(|param| format!("`{param}`")).collect();
+    format!(
+        "//!\n//! Its {}path parameter{} ({}) name{} no bucket (ADR-0027): a handler reads each decoded value from\n\
+         //! `RequestContextView::path_params()`.\n",
+        if other { "other " } else { "" },
+        if params.len() == 1 { "" } else { "s" },
+        listed.join(", "),
+        if params.len() == 1 { "s" } else { "" },
+    )
+}
+
+/// The module documentation's paragraphs on the operation's bucket, its other path parameters, and
+/// a trailing `/`.
+fn bucket_doc(d: &Declared) -> String {
+    let mut doc = String::new();
+    match &d.bucket {
+        Some(Bound::Path(param)) => {
+            let _ = write!(
+                doc,
+                "//!\n//! Its `{{{param}}}` parameter is the bucket the operation is authorised on (`BucketParam::Path`,\n\
+                 //! ADR-0025 (c), ADR-0030): the raw segment meets the S3 bucket-name rules before authentication, and\n\
+                 //! the governor, both authorizer stages, the audit event and the handler's `RequestContextView::bucket()`\n\
+                 //! see that bucket and no key. Where RustFS authorises this action on no bucket and reads the segment\n\
+                 //! afterwards, handing the authorizer the bucket is a deliberate tightening.\n"
+            );
+            let others: Vec<&String> = d.params.iter().filter(|other| *other != param).collect();
+            if !others.is_empty() {
+                doc.push_str(&service_level_doc(&others, true));
+            }
+        }
+        Some(Bound::Query(param)) => {
+            let _ = write!(
+                doc,
+                "//!\n//! Its bucket is the `{param}` query parameter, present exactly once (`BucketParam::Query`, ADR-0026 (e),\n\
+                 //! ADR-0030): a repeated, undecodable, absent or empty one is a `400` naming it, before authentication,\n\
+                 //! and the raw value meets the S3 bucket-name rules. RustFS reads the first of several values and\n\
+                 //! refuses only an empty one, after authorisation.\n"
+            );
+            if !d.params.is_empty() {
+                doc.push_str(&service_level_doc(&d.params.iter().collect::<Vec<_>>(), false));
+            }
+        }
+        None if !d.params.is_empty() => doc.push_str(&service_level_doc(&d.params.iter().collect::<Vec<_>>(), false)),
+        None => {}
+    }
+    if d.path.ends_with('/') {
+        doc.push_str(
+            "//!\n//! RustFS registers this route with its trailing `/`, and so does the template: it matches exactly that\n\
+             //! path, and the path without the `/` names no operation, as in RustFS (ADR-0030).\n",
+        );
+    }
+    doc
 }
 
 pub(super) fn render_operation(declared: &Declared) -> String {
@@ -178,16 +237,7 @@ pub(super) fn render_operation(declared: &Declared) -> String {
         out.push_str("//!\n");
         out.push_str(&subject_doc(about, &d.rule.actions()));
     }
-    if !d.params.is_empty() {
-        let listed: Vec<String> = d.params.iter().map(|param| format!("`{param}`")).collect();
-        out.push_str("//!\n");
-        let _ = writeln!(
-            out,
-            "//! Its path parameters ({}) name no bucket (ADR-0027): the operation stays service-level, and a\n\
-             //! handler reads each decoded value from `RequestContextView::path_params()`.",
-            listed.join(", ")
-        );
-    }
+    out.push_str(&bucket_doc(d));
     for shadow in &d.shadows {
         out.push_str("//!\n");
         let _ = writeln!(
@@ -208,7 +258,11 @@ pub(super) fn render_operation(declared: &Declared) -> String {
         _ => ("ByteStream", "Streaming", "admin::streamed(body)", "The live body, which RustFS streams."),
     };
     out.push_str("use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};\n");
-    out.push_str("use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};\n");
+    if d.bucket.is_some() {
+        out.push_str("use rustfs_gateway_core::dialect::{BucketParam, ClaimedRow, OverlayRow};\n");
+    } else {
+        out.push_str("use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};\n");
+    }
     out.push_str("use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};\n");
     out.push_str("use rustfs_gateway_core::registry::OperationSpec;\n");
     if d.shadows.is_empty() {
@@ -233,11 +287,23 @@ pub(super) fn render_operation(declared: &Declared) -> String {
             "/// Whose account it acts on, which the facade extracts before authentication.\npub const SUBJECT: SubjectRule = {subject};\n"
         );
     }
+    let (resource, on) = match &d.bucket {
+        Some(Bound::Path(param)) => ("ResourceShape::Bucket", format!("the bucket its `{{{param}}}` parameter names")),
+        Some(Bound::Query(param)) => ("ResourceShape::Bucket", format!("the bucket its `{param}` query parameter names")),
+        None => ("ResourceShape::Service", "no bucket".to_owned()),
+    };
     let _ = writeln!(
         out,
-        "/// What authorises it, on no bucket.\npub const AUTH: AuthRequirement = {};\n",
-        d.rule.expression()
+        "/// What authorises it, on {on}.\npub const AUTH: AuthRequirement = {};\n",
+        d.rule.expression(resource)
     );
+    if let Some(bound) = &d.bucket {
+        let _ = writeln!(
+            out,
+            "/// The bucket it is authorised on, which the facade reads before authentication.\npub const BUCKET: BucketParam = {};\n",
+            bound.expression()
+        );
+    }
     let _ = writeln!(out, "static SELECTOR: &[Predicate] = &[{}];\n", selector(d));
     let mut rows = format!("ClaimedRow {{ template: {:?}, selector: SELECTOR }}", d.path);
     if let Some(alias) = &d.alias {
@@ -313,7 +379,7 @@ impl OperationCodec for {ty} {{
 impl AdminOperation for {ty} {{
     const PRECEDENCE: u16 = OVERLAY_ROW.precedence;
     const GROUP: &'static str = RECORD.group;
-
+{bucket_const}
     fn rows() -> &'static [ClaimedRow] {{
         ROWS
     }}
@@ -325,7 +391,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {{
     precedence: {precedence},
     selector: {selector:?},
     action: {action:?},
-    resource: ResourceShape::Service,
+    resource: {resource},
     success_status: 200,
     anonymous: false,
     evidence: {evidence},
@@ -343,6 +409,7 @@ pub const RECORD: RouteRecord = RouteRecord {{
     action: {action:?},
     ruled: {ruled},
     subject: {subject},
+    bucket: {bucket},
     rustfs_handler: {handler:?},
     request_body: BodyKind::{request_body},
     response_body: BodyKind::{response_body},
@@ -353,8 +420,15 @@ pub const RECORD: RouteRecord = RouteRecord {{
         body = if input == "()" { "_body" } else { "body" },
         precedence = d.precedence,
         group = d.group,
-        selector = rendered_selector(d),
+        selector = format!("{}{}", rendered_selector(d), d.bucket.as_ref().map(Bound::rendered).unwrap_or_default()),
         action = d.rule.render(),
+        resource = resource,
+        bucket_const = if d.bucket.is_some() {
+            "    const BUCKET: Option<BucketParam> = Some(BUCKET);\n"
+        } else {
+            ""
+        },
+        bucket = if d.bucket.is_some() { "Some(BUCKET)" } else { "None" },
         shadows_fn = if d.shadows.is_empty() {
             ""
         } else {

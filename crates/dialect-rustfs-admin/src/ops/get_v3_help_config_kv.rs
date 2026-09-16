@@ -111,7 +111,7 @@ impl AdminOperation for GetV3HelpConfigKv {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 136,
+    precedence: 141,
     selector: "PathTemplate(\"/rustfs/admin/v3/help-config-kv\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/help-config-kv\") ∧ Method(GET)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:ConfigUpdate",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "HelpConfigKVHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

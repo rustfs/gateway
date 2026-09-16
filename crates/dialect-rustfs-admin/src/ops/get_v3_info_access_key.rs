@@ -128,7 +128,7 @@ impl AdminOperation for GetV3InfoAccessKey {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 152,
+    precedence: 157,
     selector: "PathTemplate(\"/rustfs/admin/v3/info-access-key\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/info-access-key\") ∧ Method(GET)",
     action: "admin:ListServiceAccounts about query(accessKey|access-key, absent=caller)",
     resource: ResourceShape::Service,
@@ -154,6 +154,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:ListServiceAccounts about query(accessKey|access-key, absent=caller)",
     ruled: Some("ContextualAuthorization"),
     subject: Some(SUBJECT),
+    bucket: None,
     rustfs_handler: "InfoAccessKey",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

@@ -34,7 +34,7 @@ use core::fmt;
 
 use bytes::Bytes;
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, OperationCodec, RequestBody, ResponseBody};
-use rustfs_gateway_core::dialect::ClaimedRow;
+use rustfs_gateway_core::dialect::{BucketParam, ClaimedRow};
 use rustfs_gateway_core::op::{AuthRequirement, Operation};
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec};
 use rustfs_gateway_core::route::ShadowingDecl;
@@ -216,6 +216,10 @@ pub trait AdminOperation: OperationCodec + Operation<Output = AdminResponse> {
     const PRECEDENCE: u16;
     /// Its ADR-0024 registration group.
     const GROUP: &'static str;
+    /// The bucket it is authorised on, when it has one: its `{bucket}` template parameter or a
+    /// query parameter (ADR-0025 (c), ADR-0026 (e), ADR-0030). `None` for a service-level
+    /// operation, which is almost every operation.
+    const BUCKET: Option<BucketParam> = None;
 
     /// Its canonical row, then the MinIO alias RustFS serves it under, when there is one.
     fn rows() -> &'static [ClaimedRow];

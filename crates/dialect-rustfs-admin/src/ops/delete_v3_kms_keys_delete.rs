@@ -112,7 +112,7 @@ impl AdminOperation for DeleteV3KmsKeysDelete {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 109,
+    precedence: 110,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/keys/delete\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/kms/keys/delete\") ∧ Method(DELETE)",
     action: "kms:DeleteKey",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "kms:DeleteKey",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "DeleteKmsKeyHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

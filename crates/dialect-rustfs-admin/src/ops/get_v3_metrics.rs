@@ -111,7 +111,7 @@ impl AdminOperation for GetV3Metrics {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 174,
+    precedence: 179,
     selector: "PathTemplate(\"/rustfs/admin/v3/metrics\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/metrics\") ∧ Method(GET)",
     action: "admin:GetMetrics",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:GetMetrics",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "MetricsHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Streamed,

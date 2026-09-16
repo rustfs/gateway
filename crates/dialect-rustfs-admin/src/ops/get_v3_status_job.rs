@@ -111,7 +111,7 @@ impl AdminOperation for GetV3StatusJob {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 193,
+    precedence: 203,
     selector: "PathTemplate(\"/rustfs/admin/v3/status-job\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/status-job\") ∧ Method(GET)",
     action: "admin:DescribeBatchJob",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:DescribeBatchJob",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "StatusBatchJobHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

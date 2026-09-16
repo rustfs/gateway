@@ -128,7 +128,7 @@ impl AdminOperation for DeleteV3DeleteServiceAccounts {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 105,
+    precedence: 106,
     selector: "PathTemplate(\"/rustfs/admin/v3/delete-service-accounts\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/delete-service-accounts\") ∧ Method(DELETE)",
     action: "admin:RemoveServiceAccount about query(accessKey|access-key, absent=refused)",
     resource: ResourceShape::Service,
@@ -154,6 +154,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:RemoveServiceAccount about query(accessKey|access-key, absent=refused)",
     ruled: Some("ContextualAuthorization"),
     subject: Some(SUBJECT),
+    bucket: None,
     rustfs_handler: "DeleteServiceAccount",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

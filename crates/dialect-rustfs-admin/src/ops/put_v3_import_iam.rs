@@ -112,7 +112,7 @@ impl AdminOperation for PutV3ImportIam {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 292,
+    precedence: 311,
     selector: "PathTemplate(\"/rustfs/admin/v3/import-iam\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/import-iam\") ∧ Method(PUT)",
     action: "admin:ImportIAM",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:ImportIAM",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "ImportIam",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

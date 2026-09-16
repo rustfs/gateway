@@ -111,7 +111,7 @@ impl AdminOperation for PostV3KmsClearCache {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 228,
+    precedence: 244,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/clear-cache\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/clear-cache\") ∧ Method(POST)",
     action: "kms:ClearCache",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "kms:ClearCache",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "KmsClearCacheHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

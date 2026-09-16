@@ -111,7 +111,7 @@ impl AdminOperation for GetV3ReplicationMrf {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 183,
+    precedence: 193,
     selector: "PathTemplate(\"/rustfs/admin/v3/replication/mrf\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/replication/mrf\") ∧ Method(GET)",
     action: "admin:ReplicationDiff",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:ReplicationDiff",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "ReplicationMrfHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

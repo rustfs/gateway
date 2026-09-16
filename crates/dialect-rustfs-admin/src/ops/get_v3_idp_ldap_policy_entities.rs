@@ -114,7 +114,7 @@ impl AdminOperation for GetV3IdpLdapPolicyEntities {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 142,
+    precedence: 147,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp/ldap/policy-entities\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/idp/ldap/policy-entities\") ∧ Method(GET)",
     action: "anyOf(admin:ListGroups, admin:ListUsers, admin:ListUserPolicies)",
     resource: ResourceShape::Service,
@@ -139,6 +139,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "anyOf(admin:ListGroups, admin:ListUsers, admin:ListUserPolicies)",
     ruled: Some("MultipleActions"),
     subject: None,
+    bucket: None,
     rustfs_handler: "ListPolicyEntitiesBuiltin",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

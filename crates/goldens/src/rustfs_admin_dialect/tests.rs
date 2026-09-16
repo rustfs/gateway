@@ -32,8 +32,8 @@ use rustfs_gateway_core::SubjectRule;
 use rustfs_gateway_dialect_rustfs_admin::{BodyKind, PENDING, ROUTES, RouteRecord};
 
 use super::{
-    Exchange, actions, assemble, declared, expected_subject, expected_subjects, in_lanes, param, paths, presigned, signed,
-    templates, unsigned, value_of, wire, with_segment,
+    Exchange, actions, assemble, declared, expected_bucket, expected_subject, expected_subjects, in_lanes, param, paths,
+    presigned, signed, templates, unsigned, value_of, wire, with_segment,
 };
 use crate::migration_inventory::rustfs_admin_routes::{AdminAuthMode, RequestBodyUse, ResponseBodyUse};
 use crate::operation_diff::s3s_f3e17541::context::ACCESS_KEY;
@@ -151,12 +151,12 @@ fn the_pending_groups_are_the_rest_of_the_inventory() {
 // ── every row through the assembled service ─────────────────────────────────────────────────
 
 /// Positive — every row of every operation, signed, is authorised by exactly its declared
-/// actions (every one, in order, for an any-of rule, whose answers the facade combines) about no
-/// bucket and no key, for the signing caller, and about exactly its declared account: none, the
+/// actions (every one, in order, for an any-of rule, whose answers the facade combines) about its
+/// bound bucket or none (ADR-0030) and no key, for the signing caller, and about exactly its declared account: none, the
 /// caller for an own-account operation, or the account the query names for a named-account or
 /// set operation; and reaches exactly its own handler, which is handed each path parameter
 /// decoded, the same accounts (one subject only for a single-subject rule), and the caller's
-/// secret only when its row is sealed.
+/// secret only when its row is sealed, and the same bucket or none.
 #[test]
 fn every_row_is_authorised_by_exactly_its_declared_action() {
     let assembled = assemble(declared);
@@ -177,6 +177,7 @@ fn every_row_is_authorised_by_exactly_its_declared_action() {
             .collect();
         let handed = &exchange.handed[0];
         assert_eq!(handed.params, params, "{at}");
+        assert_eq!(handed.bucket, expected_bucket(record), "{at}");
         assert_eq!(handed.holds_secret, record.caller_secret, "{at}");
         assert_eq!(handed.subjects, expected_subjects(record), "{at}");
         let single = matches!(record.subject, Some(SubjectRule::Caller | SubjectRule::Query { .. }));
@@ -194,14 +195,14 @@ fn every_row_is_authorised_by_exactly_its_declared_action() {
             assert_eq!(asked.operation, record.operation, "{at}");
             assert!(expected.contains(&asked.action.as_str()), "{at}: {asked:?}");
             assert_eq!(asked.caller.as_deref(), Some(ACCESS_KEY), "{at}");
-            assert_eq!((asked.bucket.as_deref(), asked.key.as_deref()), (None, None), "{at}");
+            assert_eq!((asked.bucket.clone(), asked.key.as_deref()), (expected_bucket(record), None), "{at}");
             assert_eq!(asked.subject, about, "{at}");
         }
     }
 }
 
 /// Positive and negative — with the authenticator handing the secret over, exactly the
-/// fifty-eight rows of the twenty-nine sealed operations hold it, and it is the caller's; no other
+/// sixty-two rows of the thirty-one sealed operations hold it, and it is the caller's; no other
 /// row's handler holds any secret.
 #[test]
 fn the_caller_secret_reaches_exactly_the_sealed_rows() {
@@ -216,12 +217,12 @@ fn the_caller_secret_reaches_exactly_the_sealed_rows() {
             holders.insert((record.method, path));
         }
     }
-    assert_eq!(holders.len(), 58, "{holders:?}");
-    assert_eq!(holders.iter().filter(|(_, path)| path.starts_with("/minio/admin/")).count(), 29);
+    assert_eq!(holders.len(), 62, "{holders:?}");
+    assert_eq!(holders.iter().filter(|(_, path)| path.starts_with("/minio/admin/")).count(), 31);
 }
 
 /// Positive — each any-of row is authorised by any one of its actions alone: `datausageinfo`,
-/// both policy-entities routes and both pools routes.
+/// both policy-entities routes, both pools routes and `usage/{bucket}`.
 #[test]
 fn every_any_of_row_is_authorised_by_either_action() {
     let any_of: Vec<&RouteRecord> = ROUTES.iter().filter(|record| actions(record).len() > 1).collect();
@@ -233,7 +234,8 @@ fn every_any_of_row_is_authorised_by_either_action() {
             "rustfs:GetV3IdpBuiltinPolicyEntities",
             "rustfs:GetV3IdpLdapPolicyEntities",
             "rustfs:GetV3PoolsList",
-            "rustfs:GetV3PoolsStatus"
+            "rustfs:GetV3PoolsStatus",
+            "rustfs:GetV3UsageByBucket"
         ]
     );
     for record in any_of {
@@ -320,7 +322,7 @@ fn n_a_forged_or_unknown_key_row_is_refused_without_asking() {
 #[test]
 fn n_a_presigned_row_is_refused_without_asking() {
     let presignable: Vec<_> = rows().filter(|(record, _)| record.query.is_none()).collect();
-    assert_eq!(presignable.len(), 434, "every row but the service command's eight");
+    assert_eq!(presignable.len(), 478, "every row but the service command's eight");
     in_lanes(
         |_, _| true,
         &presignable,
@@ -345,7 +347,7 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
                 .map(|(raw, status)| (record, with_segment(template, Some(index), raw), name, raw, status))
         })
         .collect();
-    assert_eq!(cases.len(), 5 * 2 * 35, "35 parameters across 27 templates, each with its alias");
+    assert_eq!(cases.len(), 5 * 2 * 53, "53 parameters across 44 templates, each with its alias");
     in_lanes(
         |_, _| true,
         &cases,

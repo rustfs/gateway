@@ -24,8 +24,8 @@
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`DeleteV3GroupByGroup`].
 //!
-//! Its path parameters (`group`) name no bucket (ADR-0027): the operation stays service-level, and a
-//! handler reads each decoded value from `RequestContextView::path_params()`.
+//! Its path parameter (`group`) names no bucket (ADR-0027): a handler reads each decoded value from
+//! `RequestContextView::path_params()`.
 
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
@@ -114,7 +114,7 @@ impl AdminOperation for DeleteV3GroupByGroup {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 106,
+    precedence: 107,
     selector: "PathTemplate(\"/rustfs/admin/v3/group/{group}\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/group/{group}\") ∧ Method(DELETE)",
     action: "admin:RemoveUserFromGroup",
     resource: ResourceShape::Service,
@@ -139,6 +139,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:RemoveUserFromGroup",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "DeleteGroup",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

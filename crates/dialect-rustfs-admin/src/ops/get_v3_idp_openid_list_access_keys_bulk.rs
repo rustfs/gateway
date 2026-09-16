@@ -129,7 +129,7 @@ impl AdminOperation for GetV3IdpOpenidListAccessKeysBulk {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 143,
+    precedence: 148,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp/openid/list-access-keys-bulk\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/idp/openid/list-access-keys-bulk\") ∧ Method(GET)",
     action: "admin:ListServiceAccounts about each(users, everyone=all ⇒ admin:ListUsers)",
     resource: ResourceShape::Service,
@@ -156,6 +156,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:ListServiceAccounts about each(users, everyone=all ⇒ admin:ListUsers)",
     ruled: Some("MultipleActions"),
     subject: Some(SUBJECT),
+    bucket: None,
     rustfs_handler: "ListAccessKeysProviderBulk",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

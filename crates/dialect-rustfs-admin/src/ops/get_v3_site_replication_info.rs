@@ -111,7 +111,7 @@ impl AdminOperation for GetV3SiteReplicationInfo {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 187,
+    precedence: 197,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/info\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/site-replication/info\") ∧ Method(GET)",
     action: "admin:SiteReplicationInfo",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:SiteReplicationInfo",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "SiteReplicationInfoHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

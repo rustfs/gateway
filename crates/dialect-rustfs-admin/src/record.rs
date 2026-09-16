@@ -22,6 +22,7 @@
 //! admin routes the gateway serves.
 
 use rustfs_gateway_core::SubjectRule;
+use rustfs_gateway_core::dialect::BucketParam;
 
 /// The migration issue, which every overlay row cites.
 pub(crate) const ISSUE: &str = "https://github.com/rustfs/backlog/issues/1744";
@@ -39,6 +40,9 @@ pub(crate) const ADR_0027: &str =
 
 /// ADR-0028, which every row with a subject rule cites.
 pub(crate) const ADR_0028: &str = "https://github.com/rustfs/gateway/blob/main/docs/adr/0028-order-four-admin-subject-rules.md";
+
+/// ADR-0030, which every row that binds its bucket, and the trailing-slash heal row, cite.
+pub(crate) const ADR_0030: &str = "https://github.com/rustfs/gateway/blob/main/docs/adr/0030-order-five-admin-bound-buckets.md";
 
 /// How RustFS reads or writes one side of a route's body, as the inventory records it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -79,6 +83,11 @@ pub struct RouteRecord {
     /// own, one named in the query, or a set (ADR-0025, ADR-0026, ADR-0028). The same rule the
     /// operation's `AuthRequirement` carries.
     pub subject: Option<SubjectRule>,
+    /// The bucket the operation is authorised on, when it has one: the `{bucket}` template
+    /// parameter every row carries (ADR-0025 (c)), or a query parameter read exactly once
+    /// (ADR-0026 (e)); `None` for a service-level operation (ADR-0024 (e), ADR-0027). The same
+    /// binding the operation's `ClaimedRoute` carries (ADR-0030).
+    pub bucket: Option<BucketParam>,
     /// The RustFS handler the inventory names.
     pub rustfs_handler: &'static str,
     /// How RustFS reads the request body.

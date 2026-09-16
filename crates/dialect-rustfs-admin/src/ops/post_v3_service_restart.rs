@@ -116,7 +116,7 @@ impl AdminOperation for PostV3ServiceRestart {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 263,
+    precedence: 281,
     selector: "PathTemplate(\"/rustfs/admin/v3/service\") ∧ Method(POST) ∧ QueryEquals(\"action\", \"restart\") ∨ PathTemplate(\"/minio/admin/v3/service\") ∧ Method(POST) ∧ QueryEquals(\"action\", \"restart\")",
     action: "admin:ServiceRestart",
     resource: ResourceShape::Service,
@@ -141,6 +141,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:ServiceRestart",
     ruled: Some("NotImplemented"),
     subject: None,
+    bucket: None,
     rustfs_handler: "ServiceHandle",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

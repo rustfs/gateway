@@ -111,7 +111,7 @@ impl AdminOperation for GetV3ProfilingDownload {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 181,
+    precedence: 189,
     selector: "PathTemplate(\"/rustfs/admin/v3/profiling/download\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/profiling/download\") ∧ Method(GET)",
     action: "admin:Profiling",
     resource: ResourceShape::Service,
@@ -135,6 +135,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     action: "admin:Profiling",
     ruled: None,
     subject: None,
+    bucket: None,
     rustfs_handler: "ProfilingDownloadHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,
