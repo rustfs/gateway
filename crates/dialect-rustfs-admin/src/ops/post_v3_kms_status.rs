@@ -111,7 +111,7 @@ impl AdminOperation for PostV3KmsStatus {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 265,
+    precedence: 309,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/status\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/status\") ∧ Method(POST)",
     action: "kms:ServiceControl",
     resource: ResourceShape::Service,

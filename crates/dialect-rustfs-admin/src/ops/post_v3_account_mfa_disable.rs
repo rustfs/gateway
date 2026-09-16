@@ -121,7 +121,7 @@ impl AdminOperation for PostV3AccountMfaDisable {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 225,
+    precedence: 269,
     selector: "PathTemplate(\"/rustfs/admin/v3/account/mfa/disable\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/account/mfa/disable\") ∧ Method(POST)",
     action: "rustfs:AccountMfaDisable about caller",
     resource: ResourceShape::Service,

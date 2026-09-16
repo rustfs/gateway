@@ -112,7 +112,7 @@ impl AdminOperation for PutV3AddServiceAccounts {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 303,
+    precedence: 352,
     selector: "PathTemplate(\"/rustfs/admin/v3/add-service-accounts\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/add-service-accounts\") ∧ Method(PUT)",
     action: "admin:CreateServiceAccount",
     resource: ResourceShape::Service,

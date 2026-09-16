@@ -121,7 +121,7 @@ impl AdminOperation for DeleteV3BucketDurabilityByBucket {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 101,
+    precedence: 106,
     selector: "PathTemplate(\"/rustfs/admin/v3/bucket-durability/{bucket}\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/bucket-durability/{bucket}\") ∧ Method(DELETE) ⇒ BucketParam(\"bucket\")",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Bucket,

@@ -112,7 +112,7 @@ impl AdminOperation for PostV3ForceUnlock {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 230,
+    precedence: 274,
     selector: "PathTemplate(\"/rustfs/admin/v3/force-unlock\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/force-unlock\") ∧ Method(POST)",
     action: "admin:ForceUnlock",
     resource: ResourceShape::Service,

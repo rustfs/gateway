@@ -115,7 +115,7 @@ impl AdminOperation for PutV4PluginsInstancesById {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 342,
+    precedence: 391,
     selector: "PathTemplate(\"/rustfs/admin/v4/plugins/instances/{id}\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v4/plugins/instances/{id}\") ∧ Method(PUT)",
     action: "admin:SetBucketTarget",
     resource: ResourceShape::Service,

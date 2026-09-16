@@ -111,7 +111,7 @@ impl AdminOperation for PostV3RebalanceStop {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 276,
+    precedence: 320,
     selector: "PathTemplate(\"/rustfs/admin/v3/rebalance/stop\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/rebalance/stop\") ∧ Method(POST)",
     action: "admin:Rebalance",
     resource: ResourceShape::Service,

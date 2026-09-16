@@ -113,7 +113,7 @@ impl AdminOperation for GetV3InspectData {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 160,
+    precedence: 183,
     selector: "PathTemplate(\"/rustfs/admin/v3/inspect-data\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/inspect-data\") ∧ Method(GET)",
     action: "admin:InspectData",
     resource: ResourceShape::Service,

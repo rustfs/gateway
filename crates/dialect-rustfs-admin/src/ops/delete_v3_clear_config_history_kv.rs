@@ -111,7 +111,7 @@ impl AdminOperation for DeleteV3ClearConfigHistoryKv {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 103,
+    precedence: 108,
     selector: "PathTemplate(\"/rustfs/admin/v3/clear-config-history-kv\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/clear-config-history-kv\") ∧ Method(DELETE)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,

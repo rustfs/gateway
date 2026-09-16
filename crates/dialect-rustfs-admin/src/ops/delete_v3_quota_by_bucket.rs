@@ -121,7 +121,7 @@ impl AdminOperation for DeleteV3QuotaByBucket {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 112,
+    precedence: 117,
     selector: "PathTemplate(\"/rustfs/admin/v3/quota/{bucket}\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/quota/{bucket}\") ∧ Method(DELETE) ⇒ BucketParam(\"bucket\")",
     action: "admin:SetBucketQuota",
     resource: ResourceShape::Bucket,

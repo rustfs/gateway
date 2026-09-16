@@ -30,7 +30,8 @@ use rustfs_gateway_core::dialect::BucketParam;
 use rustfs_gateway_dialect_rustfs_admin::{ROUTES, RouteRecord};
 
 use super::{
-    BUCKET, Exchange, assemble, bucket_query_param, concrete, in_lanes, signed, signed_with, templates, wire, with_segment,
+    BUCKET, Exchange, assemble, bucket_query_param, concrete, expected_bucket, in_lanes, signed, signed_with, templates, wire,
+    with_segment,
 };
 
 /// Names S3 refuses as `/{bucket}`: too short, an uppercase letter and an underscore, an escaped
@@ -57,8 +58,8 @@ fn path_bound() -> Vec<(&'static RouteRecord, &'static str, usize)> {
             templates(record).into_iter().map(move |template| {
                 let index = template
                     .split('/')
-                    .position(|segment| segment == "{bucket}")
-                    .expect("a bound template carries {bucket}");
+                    .position(|segment| segment == "{bucket}" || segment == "{warehouse}")
+                    .expect("a bound template carries {bucket} or {warehouse}");
                 (record, template, index)
             })
         })
@@ -76,19 +77,25 @@ fn query_bound() -> Vec<(&'static RouteRecord, &'static str)> {
 
 fn refused_before_authorising(exchange: &Exchange, at: &str, code: &str) {
     assert_eq!(exchange.status, 400, "{at}: {}", exchange.body);
-    assert!(exchange.body.contains(&format!("<Code>{code}</Code>")), "{at}: {}", exchange.body);
+    // A HEAD response carries no body to read the code from.
+    assert!(
+        at.starts_with("HEAD ") || exchange.body.contains(&format!("<Code>{code}</Code>")),
+        "{at}: {}",
+        exchange.body
+    );
     assert!(exchange.reached.is_empty(), "{at}: a handler ran");
     assert!(exchange.asked.is_empty(), "{at}: the authorizer was asked {:?}", exchange.asked);
 }
 
-/// Positive — the recorded dialect binds exactly seventeen template buckets and two query buckets,
-/// each on two rows, all of order 5.
+/// Positive — the recorded dialect binds exactly seventeen `{bucket}` and 48 `{warehouse}` template
+/// buckets and two query buckets, each on two rows, all of orders 5 and 6.
 #[test]
-fn the_bound_rows_are_the_order_five_ones() {
+fn the_bound_rows_are_the_order_five_and_six_ones() {
     let by_path = path_bound();
     let by_query = query_bound();
-    assert_eq!((by_path.len(), by_query.len()), (34, 4));
-    assert!(by_path.iter().all(|(record, ..)| record.order == 5));
+    assert_eq!((by_path.len(), by_query.len()), (130, 4));
+    assert!(by_path.iter().all(|(record, ..)| matches!(record.order, 5 | 6)));
+    assert_eq!(by_path.iter().filter(|(record, ..)| record.order == 6).count(), 96);
     assert!(by_query.iter().all(|(record, _)| record.order == 5));
     let queried: Vec<&str> = by_query.iter().map(|(_, template)| *template).collect();
     assert_eq!(
@@ -115,7 +122,7 @@ fn n_an_invalid_template_bucket_is_refused_as_s3_refuses_it() {
                 .map(move |bucket| (record, with_segment(template, Some(index), &bucket), bucket))
         })
         .collect();
-    assert_eq!(cases.len(), 34 * 7);
+    assert_eq!(cases.len(), 130 * 7);
     in_lanes(
         |_, _| true,
         &cases,
@@ -187,7 +194,8 @@ fn n_a_repeated_query_bucket_cannot_be_signed_today() {
 }
 
 /// Negative — a caller denied the action on the bound bucket is refused before the handler, and
-/// the route question named that bucket, so a deployment's policy can decide per bucket.
+/// the route question named that bucket, so a deployment's policy can decide per bucket; for the
+/// table catalog, per warehouse (ADR-0031 (c)).
 #[test]
 fn n_a_denial_on_the_bound_bucket_names_the_bucket() {
     let cases: Vec<_> = path_bound()
@@ -199,7 +207,7 @@ fn n_a_denial_on_the_bound_bucket_names_the_bucket() {
                 .map(|(record, template)| (record, concrete(template))),
         )
         .collect();
-    assert_eq!(cases.len(), 38);
+    assert_eq!(cases.len(), 134);
     in_lanes(
         |_, _| false,
         &cases,
@@ -210,12 +218,8 @@ fn n_a_denial_on_the_bound_bucket_names_the_bucket() {
             assert!(exchange.reached.is_empty(), "{at}: a handler ran");
             let route: Vec<_> = exchange.asked.iter().filter(|asked| asked.stage == "route").collect();
             assert!(!route.is_empty(), "{at}: the authorizer was not asked");
-            assert!(
-                route
-                    .iter()
-                    .all(|asked| asked.bucket.as_deref() == Some(BUCKET) && asked.key.is_none()),
-                "{at}: {route:?}"
-            );
+            let bucket = expected_bucket(record);
+            assert!(route.iter().all(|asked| asked.bucket == bucket && asked.key.is_none()), "{at}: {route:?}");
         },
     );
 }

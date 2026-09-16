@@ -111,7 +111,7 @@ impl AdminOperation for GetV3Log {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 178,
+    precedence: 201,
     selector: "PathTemplate(\"/rustfs/admin/v3/log\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/log\") ∧ Method(GET)",
     action: "admin:ConsoleLog",
     resource: ResourceShape::Service,

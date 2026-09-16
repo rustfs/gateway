@@ -111,7 +111,7 @@ impl AdminOperation for DeleteV3RemoveUser {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 115,
+    precedence: 120,
     selector: "PathTemplate(\"/rustfs/admin/v3/remove-user\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/remove-user\") ∧ Method(DELETE)",
     action: "admin:DeleteUser",
     resource: ResourceShape::Service,

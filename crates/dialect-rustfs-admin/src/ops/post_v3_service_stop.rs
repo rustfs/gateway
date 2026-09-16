@@ -116,7 +116,7 @@ impl AdminOperation for PostV3ServiceStop {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 282,
+    precedence: 326,
     selector: "PathTemplate(\"/rustfs/admin/v3/service\") ∧ Method(POST) ∧ QueryEquals(\"action\", \"stop\") ∨ PathTemplate(\"/minio/admin/v3/service\") ∧ Method(POST) ∧ QueryEquals(\"action\", \"stop\")",
     action: "admin:ServiceStop",
     resource: ResourceShape::Service,

@@ -111,7 +111,7 @@ impl AdminOperation for GetV3IlmTransitionStateReconcile {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 155,
+    precedence: 178,
     selector: "PathTemplate(\"/rustfs/admin/v3/ilm/transition/state/reconcile\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/ilm/transition/state/reconcile\") ∧ Method(GET)",
     action: "admin:ListTier",
     resource: ResourceShape::Service,

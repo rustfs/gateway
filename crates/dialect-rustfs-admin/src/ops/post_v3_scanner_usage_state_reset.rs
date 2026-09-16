@@ -112,7 +112,7 @@ impl AdminOperation for PostV3ScannerUsageStateReset {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 280,
+    precedence: 324,
     selector: "PathTemplate(\"/rustfs/admin/v3/scanner/usage-state/reset\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/scanner/usage-state/reset\") ∧ Method(POST)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,

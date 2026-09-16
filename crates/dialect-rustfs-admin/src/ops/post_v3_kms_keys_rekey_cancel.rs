@@ -111,7 +111,7 @@ impl AdminOperation for PostV3KmsKeysRekeyCancel {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 254,
+    precedence: 298,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/keys/rekey/cancel\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/keys/rekey/cancel\") ∧ Method(POST)",
     action: "kms:Rekey",
     resource: ResourceShape::Service,

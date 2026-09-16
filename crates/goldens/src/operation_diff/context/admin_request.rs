@@ -13,10 +13,12 @@
 // limitations under the License.
 
 //! A `PUT` with a query, which the RustFS admin dialect's account-naming routes send
-//! (`add-user?accessKey=…`).
+//! (`add-user?accessKey=…`), and a bodiless `HEAD`, which the table catalog's existence probes
+//! send.
 //!
-//! Responsible for: [`ContextRequest::put_with_query`]. It lives in a child module because the
-//! parent is at its file-size ceiling, and a child can build a request the way the parent does.
+//! Responsible for: [`ContextRequest::put_with_query`] and [`ContextRequest::head`]. They live in a
+//! child module because the parent is at its file-size ceiling, and a child can build a request
+//! the way the parent does.
 //! NOT responsible for: signing or sending it (the parent).
 //! Upstream: `super::ContextRequest`. Downstream: `crate::rustfs_admin_dialect`.
 
@@ -25,6 +27,15 @@ use http::Method;
 use super::ContextRequest;
 
 impl ContextRequest {
+    /// A bodiless `HEAD` of `path?query` on `host`.
+    #[allow(
+        dead_code,
+        reason = "only the RustFS admin dialect sends one, through the s3s_f3e17541 compilation"
+    )]
+    pub(crate) fn head(host: &str, path: &str, query: &str) -> Self {
+        Self::new(Method::HEAD, host, path, query, b"")
+    }
+
     /// A `PUT` of `body` to `path?query` on `host`.
     #[allow(
         dead_code,

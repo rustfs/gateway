@@ -111,7 +111,7 @@ impl AdminOperation for PostV3PoolsClear {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 270,
+    precedence: 314,
     selector: "PathTemplate(\"/rustfs/admin/v3/pools/clear\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/pools/clear\") ∧ Method(POST)",
     action: "admin:Decommission",
     resource: ResourceShape::Service,

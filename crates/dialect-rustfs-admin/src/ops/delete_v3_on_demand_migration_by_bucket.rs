@@ -121,7 +121,7 @@ impl AdminOperation for DeleteV3OnDemandMigrationByBucket {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 111,
+    precedence: 116,
     selector: "PathTemplate(\"/rustfs/admin/v3/on-demand-migration/{bucket}\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/on-demand-migration/{bucket}\") ∧ Method(DELETE) ⇒ BucketParam(\"bucket\")",
     action: "admin:SetBucketOnDemandMigration",
     resource: ResourceShape::Bucket,

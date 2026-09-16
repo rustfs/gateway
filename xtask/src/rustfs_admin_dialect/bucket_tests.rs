@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The generator's order-5 rules (ADR-0030): a `{bucket}` template parameter and a listed query
+//! The generator's template, bucket and surface rules (ADR-0027, ADR-0030, ADR-0031): a template's
+//! parameters are read or refused, a `{bucket}` or `{warehouse}` parameter and a listed query
 //! parameter bind the operation's bucket, a trailing `/` is kept and meets no parameter, a query
-//! bucket outside the rule is refused, and the recorded inventory binds exactly the order-5 routes.
+//! bucket outside the rule is refused, a `/iceberg/v1` compat row is its `/_iceberg/v1` route's
+//! alias, and the recorded inventory binds exactly those routes.
 //!
 //! Responsible for: those assertions. NOT responsible for: the fixtures and the drift check
 //! (`tests.rs`), or what the generated operations do (the dialect crate's tests and goldens'
@@ -25,8 +27,59 @@
 
 use super::Bound;
 use super::render::render_operation;
-use super::tests::{custom, planned, planned_with, recorded_plan, refusal_with, ruling_for, service_route, templated};
+use super::tests::{
+    custom, planned, planned_with, recorded_plan, refusal, refusal_with, route, ruling_for, service_route, templated,
+};
 
+/// parameters in path order.
+#[test]
+fn a_templated_route_is_declared_with_its_parameters() {
+    let plan = planned(
+        vec![templated(
+            "PUT",
+            "/rustfs/admin/v3/audit/target/{target_type}/{target_name}",
+            &["target_type", "target_name"],
+        )],
+        &[],
+    );
+    let declared = &plan.declared[0];
+    assert_eq!(declared.name, "rustfs:PutV3AuditTargetByTargetTypeByTargetName");
+    assert_eq!(declared.params, ["target_type", "target_name"]);
+    assert_eq!(
+        declared.alias.as_deref(),
+        Some("/minio/admin/v3/audit/target/{target_type}/{target_name}")
+    );
+}
+
+/// Negative — two bucket parameters, an empty segment that is not a trailing `/`, an affixed
+/// parameter, a parameter that is not a lowercase identifier, a repeated one, and a template the
+/// inventory's list disagrees with are refused.
+#[test]
+fn n_a_template_outside_the_rule_is_refused() {
+    for (path, params, why) in [
+        (
+            "/rustfs/admin/v3/tables/{warehouse}/{bucket}",
+            &["warehouse", "bucket"][..],
+            "two parameters name a bucket",
+        ),
+        ("/rustfs/admin/v3/heal//", &[][..], "an empty segment that is not a trailing '/'"),
+        ("/rustfs/admin/v3//heal", &[][..], "an empty segment that is not a trailing '/'"),
+        ("/rustfs/admin/v3/zip/{id}.zip", &["id"][..], "shares its segment"),
+        ("/rustfs/admin/v3/tier/{Tier}", &["Tier"][..], "not a lowercase identifier"),
+        ("/rustfs/admin/v3/tier/{tier-name}", &["tier-name"][..], "not a lowercase identifier"),
+        ("/rustfs/admin/v3/tier/{}", &[""][..], "not a lowercase identifier"),
+        ("/rustfs/admin/v3/{a}/{a}", &["a", "a"][..], "appears twice"),
+        ("/rustfs/admin/v3/tier/{tier}", &[][..], "the inventory []"),
+        ("/rustfs/admin/v3/tier/{a}/{b}", &["b", "a"][..], "the template names"),
+    ] {
+        let error = refusal(vec![templated("GET", path, params)], &[]);
+        assert!(error.contains(why), "{path}: {error}");
+    }
+}
+
+/// Positive — a literal segment stands in front of the parameter it meets, and only the earlier
+/// literal's operation declares it; a crossed pair is ordered by its first divergence, as
+/// RustFS's `matchit` orders it (ADR-0031 (d)); a different method, a different length or a
 /// Positive — a `{bucket}` template binds its bucket (`BucketParam::Path`) and declares
 /// `ResourceShape::Bucket`, the bucket stays among the decoded parameters, and the overlay row
 /// records the binding after the rows; a listed query parameter binds it as `BucketParam::Query`;
@@ -141,10 +194,10 @@ fn n_a_query_bucket_outside_the_rule_is_refused() {
     assert!(stale.contains("names no route of a migrated group"), "{stale}");
 }
 
-/// Positive — in the recorded inventory, exactly the seventeen order-5 `{bucket}` routes bind their
-/// bucket by template and exactly the two compat quota routes by query; the `{prefix}` beside a
-/// bucket stays service-level; and the four quota rulings plus `usage/{bucket}` are the only
-/// order-5 custom-auth routes (ADR-0030).
+/// Positive — in the recorded inventory, exactly the seventeen order-5 `{bucket}` routes and the
+/// 48 order-6 `{warehouse}` routes bind their bucket by template and exactly the two compat quota
+/// routes by query; the `{prefix}` beside a bucket stays service-level; and the four quota rulings
+/// plus `usage/{bucket}` are the only order-5 custom-auth routes (ADR-0030, ADR-0031).
 #[test]
 fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
     let plan = recorded_plan();
@@ -154,7 +207,7 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
         .filter(|declared| matches!(declared.bucket, Some(Bound::Path(_))))
         .map(|declared| declared.name.as_str())
         .collect();
-    assert_eq!(by_path.len(), 17, "{by_path:?}");
+    assert_eq!(by_path.len(), 17 + 48, "{by_path:?}");
     let by_query: Vec<&str> = plan
         .declared
         .iter()
@@ -163,10 +216,10 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
         .collect();
     assert_eq!(by_query, ["rustfs:GetV3GetBucketQuota", "rustfs:PutV3SetBucketQuota"]);
     for declared in &plan.declared {
-        let names_bucket = declared.params.iter().any(|param| param == "bucket");
+        let names_bucket = declared.params.iter().any(|param| param == "bucket" || param == "warehouse");
         assert_eq!(names_bucket, matches!(declared.bucket, Some(Bound::Path(_))), "{}", declared.name);
         if declared.bucket.is_some() {
-            assert_eq!(declared.order, 5, "{}", declared.name);
+            assert!(matches!(declared.order, 5 | 6), "{}", declared.name);
         }
         if declared.name == "rustfs:PostV3HealByBucketByPrefix" {
             assert_eq!(declared.params, ["bucket", "prefix"]);
@@ -189,7 +242,7 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
             ("rustfs:PostV3QuotaCheckByBucket", "s3:GetBucketQuota"),
         ]
     );
-    assert_eq!(plan.declared.len(), 243);
+    assert_eq!(plan.declared.len(), 292);
     assert_eq!(
         plan.pending,
         [
@@ -197,7 +250,91 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
             ("object_zip_download".to_owned(), 7, 2),
             ("oidc".to_owned(), 7, 8),
             ("sts".to_owned(), 7, 2),
-            ("table_catalog".to_owned(), 6, 98),
         ]
     );
+}
+
+/// Positive — in the recorded inventory, the 49 table-catalog operations are the `/_iceberg/v1`
+/// routes, each with its `/iceberg/v1` compat row as alias, named after the surface; the two
+/// `config` routes are service-level and every other one binds `{warehouse}`; and the one
+/// shadowing is `buckets/{warehouse}` in front of `{warehouse}/namespaces` (ADR-0031).
+#[test]
+fn the_recorded_table_catalog_is_one_operation_per_surface_pair() {
+    let plan = recorded_plan();
+    let catalog: Vec<&super::Declared> = plan.declared.iter().filter(|declared| declared.order == 6).collect();
+    assert_eq!(catalog.len(), 49);
+    for declared in &catalog {
+        assert!(declared.path.starts_with("/_iceberg/v1/"), "{}", declared.name);
+        assert_eq!(
+            declared.alias.as_deref(),
+            Some(declared.path.replacen("/_iceberg/", "/iceberg/", 1).as_str()),
+            "{}",
+            declared.name
+        );
+        assert!(
+            declared.name.starts_with("rustfs:") && declared.name.contains("Iceberg"),
+            "{}",
+            declared.name
+        );
+        let warehouse = declared.params.iter().any(|param| param == "warehouse");
+        assert_eq!(
+            declared.bucket,
+            warehouse.then(|| Bound::Path("warehouse".to_owned())),
+            "{}",
+            declared.name
+        );
+        assert_eq!(!warehouse, declared.path == "/_iceberg/v1/config", "{}", declared.name);
+    }
+    let shadows: Vec<(&str, &str)> = catalog
+        .iter()
+        .flat_map(|declared| {
+            declared
+                .shadows
+                .iter()
+                .map(move |shadow| (declared.name.as_str(), shadow.shadowed.as_str()))
+        })
+        .collect();
+    assert_eq!(
+        shadows,
+        [("rustfs:GetIcebergBucketsByWarehouse", "rustfs:GetIcebergByWarehouseNamespaces")]
+    );
+    let source = render_operation(catalog[0]);
+    assert!(source.contains("record::ADR_0031"), "{source}");
+}
+
+/// Positive and negative — a `/_iceberg/v1` route is declared once with its `/iceberg/v1` twin as
+/// alias, and the twin itself is no operation; a canonical route without its twin, a twin that
+/// differs in a fact, or a twin without its canonical route is refused (ADR-0031 (b)).
+#[test]
+fn n_a_compat_row_is_the_alias_of_an_identical_canonical_route_or_refused() {
+    let canonical = || {
+        route(
+            "GET",
+            "/_iceberg/v1/config",
+            "table_catalog",
+            "sigv4-admin",
+            Some("admin:GetTableCatalog"),
+        )
+    };
+    let twin = || {
+        let mut twin = canonical();
+        twin.path = "/iceberg/v1/config".to_owned();
+        twin.minio_admin_alias = false;
+        twin
+    };
+    let mut only = canonical();
+    only.minio_admin_alias = false;
+    let plan = planned(vec![only.clone(), twin()], &[]);
+    let [declared] = plan.declared.as_slice() else {
+        panic!("one operation, got {}", plan.declared.len());
+    };
+    assert_eq!(
+        (declared.name.as_str(), declared.alias.as_deref()),
+        ("rustfs:GetIcebergConfig", Some("/iceberg/v1/config"))
+    );
+    assert!(refusal(vec![only.clone()], &[]).contains("RustFS serves no identical route under /iceberg/v1/"));
+    assert!(refusal(vec![twin()], &[]).contains("whose canonical route the inventory does not record"));
+    let mut differs = twin();
+    differs.iam_action_wire = Some("admin:ServerInfo".to_owned());
+    assert!(refusal(vec![only, differs], &[]).contains("RustFS serves no identical route under /iceberg/v1/"));
 }

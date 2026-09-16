@@ -27,6 +27,12 @@ use crate::ops;
 
 /// Takes `fold`'s step for every operation in turn, in [`crate::ROUTES`] order.
 pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> F::Carry {
+    let carry = fold.step::<ops::delete_iceberg_by_warehouse_catalog_migration::DeleteIcebergByWarehouseCatalogMigration>(carry);
+    let carry = fold
+        .step::<ops::delete_iceberg_by_warehouse_namespaces_by_namespace::DeleteIcebergByWarehouseNamespacesByNamespace>(carry);
+    let carry = fold.step::<ops::delete_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table::DeleteIcebergByWarehouseNamespacesByNamespaceTablesByTable>(carry);
+    let carry = fold.step::<ops::delete_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_refs_by_ref::DeleteIcebergByWarehouseNamespacesByNamespaceTablesByTableRefsByRef>(carry);
+    let carry = fold.step::<ops::delete_iceberg_by_warehouse_namespaces_by_namespace_views_by_view::DeleteIcebergByWarehouseNamespacesByNamespaceViewsByView>(carry);
     let carry = fold.step::<ops::delete_v3_audit_target_by_target_type_by_target_name_reset::DeleteV3AuditTargetByTargetTypeByTargetNameReset>(carry);
     let carry = fold.step::<ops::delete_v3_bucket_durability_by_bucket::DeleteV3BucketDurabilityByBucket>(carry);
     let carry = fold.step::<ops::delete_v3_cancel_job::DeleteV3CancelJob>(carry);
@@ -48,6 +54,31 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::delete_v3_tier_by_tiername::DeleteV3TierByTiername>(carry);
     let carry = fold.step::<ops::delete_v3_user_mfa::DeleteV3UserMfa>(carry);
     let carry = fold.step::<ops::delete_v4_plugins_instances_by_id::DeleteV4PluginsInstancesById>(carry);
+    let carry = fold.step::<ops::get_iceberg_buckets_by_warehouse::GetIcebergBucketsByWarehouse>(carry);
+    let carry = fold.step::<ops::get_iceberg_config::GetIcebergConfig>(carry);
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_catalog_migration::GetIcebergByWarehouseCatalogMigration>(carry);
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces::GetIcebergByWarehouseNamespaces>(carry);
+    let carry =
+        fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace::GetIcebergByWarehouseNamespacesByNamespace>(carry);
+    let carry = fold
+        .step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_tables::GetIcebergByWarehouseNamespacesByNamespaceTables>(
+        carry,
+    );
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table::GetIcebergByWarehouseNamespacesByNamespaceTablesByTable>(carry);
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_catalog_diagnostics::GetIcebergByWarehouseNamespacesByNamespaceTablesByTableCatalogDiagnostics>(carry);
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_catalog_export::GetIcebergByWarehouseNamespacesByNamespaceTablesByTableCatalogExport>(carry);
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_catalog_external::GetIcebergByWarehouseNamespacesByNamespaceTablesByTableCatalogExternal>(carry);
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_credentials::GetIcebergByWarehouseNamespacesByNamespaceTablesByTableCredentials>(carry);
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_maintenance_config::GetIcebergByWarehouseNamespacesByNamespaceTablesByTableMaintenanceConfig>(carry);
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_maintenance_jobs_by_job::GetIcebergByWarehouseNamespacesByNamespaceTablesByTableMaintenanceJobsByJob>(carry);
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_maintenance_scheduler::GetIcebergByWarehouseNamespacesByNamespaceTablesByTableMaintenanceScheduler>(carry);
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_metadata_location::GetIcebergByWarehouseNamespacesByNamespaceTablesByTableMetadataLocation>(carry);
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_refs::GetIcebergByWarehouseNamespacesByNamespaceTablesByTableRefs>(carry);
+    let carry = fold
+        .step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_views::GetIcebergByWarehouseNamespacesByNamespaceViews>(
+            carry,
+        );
+    let carry = fold.step::<ops::get_iceberg_by_warehouse_namespaces_by_namespace_views_by_view::GetIcebergByWarehouseNamespacesByNamespaceViewsByView>(carry);
     let carry = fold.step::<ops::get_debug_pprof_profile::GetDebugPprofProfile>(carry);
     let carry = fold.step::<ops::get_debug_pprof_status::GetDebugPprofStatus>(carry);
     let carry = fold.step::<ops::get_debug_tls_status::GetDebugTlsStatus>(carry);
@@ -156,6 +187,34 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::get_v4_plugins_instances::GetV4PluginsInstances>(carry);
     let carry = fold.step::<ops::get_v4_plugins_instances_by_id::GetV4PluginsInstancesById>(carry);
     let carry = fold.step::<ops::get_v4_runtime_capabilities::GetV4RuntimeCapabilities>(carry);
+    let carry =
+        fold.step::<ops::head_iceberg_by_warehouse_namespaces_by_namespace::HeadIcebergByWarehouseNamespacesByNamespace>(carry);
+    let carry = fold.step::<ops::head_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table::HeadIcebergByWarehouseNamespacesByNamespaceTablesByTable>(carry);
+    let carry = fold.step::<ops::head_iceberg_by_warehouse_namespaces_by_namespace_views_by_view::HeadIcebergByWarehouseNamespacesByNamespaceViewsByView>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_catalog_migration::PostIcebergByWarehouseCatalogMigration>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces::PostIcebergByWarehouseNamespaces>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_properties::PostIcebergByWarehouseNamespacesByNamespaceProperties>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_register::PostIcebergByWarehouseNamespacesByNamespaceRegister>(carry);
+    let carry = fold
+        .step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_tables::PostIcebergByWarehouseNamespacesByNamespaceTables>(
+        carry,
+    );
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table::PostIcebergByWarehouseNamespacesByNamespaceTablesByTable>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_catalog_external_sync::PostIcebergByWarehouseNamespacesByNamespaceTablesByTableCatalogExternalSync>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_catalog_import::PostIcebergByWarehouseNamespacesByNamespaceTablesByTableCatalogImport>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_catalog_recovery::PostIcebergByWarehouseNamespacesByNamespaceTablesByTableCatalogRecovery>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_catalog_rollback::PostIcebergByWarehouseNamespacesByNamespaceTablesByTableCatalogRollback>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_maintenance_jobs_by_job_heartbeat::PostIcebergByWarehouseNamespacesByNamespaceTablesByTableMaintenanceJobsByJobHeartbeat>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_maintenance_jobs_by_job_quarantine::PostIcebergByWarehouseNamespacesByNamespaceTablesByTableMaintenanceJobsByJobQuarantine>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_maintenance_metadata::PostIcebergByWarehouseNamespacesByNamespaceTablesByTableMaintenanceMetadata>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_maintenance_scheduler_run::PostIcebergByWarehouseNamespacesByNamespaceTablesByTableMaintenanceSchedulerRun>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_maintenance_worker_run::PostIcebergByWarehouseNamespacesByNamespaceTablesByTableMaintenanceWorkerRun>(carry);
+    let carry = fold
+        .step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_views::PostIcebergByWarehouseNamespacesByNamespaceViews>(
+        carry,
+    );
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_views_by_view::PostIcebergByWarehouseNamespacesByNamespaceViewsByView>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_tables_rename::PostIcebergByWarehouseTablesRename>(carry);
     let carry = fold.step::<ops::post_v3_account_mfa_activate::PostV3AccountMfaActivate>(carry);
     let carry = fold.step::<ops::post_v3_account_mfa_disable::PostV3AccountMfaDisable>(carry);
     let carry = fold.step::<ops::post_v3_account_mfa_enroll::PostV3AccountMfaEnroll>(carry);
@@ -233,6 +292,11 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::post_v3_update::PostV3Update>(carry);
     let carry = fold.step::<ops::post_v3_update_service_account::PostV3UpdateServiceAccount>(carry);
     let carry = fold.step::<ops::post_v4_inspect_archive::PostV4InspectArchive>(carry);
+    let carry = fold.step::<ops::put_iceberg_buckets_by_warehouse::PutIcebergBucketsByWarehouse>(carry);
+    let carry = fold.step::<ops::put_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_catalog_external::PutIcebergByWarehouseNamespacesByNamespaceTablesByTableCatalogExternal>(carry);
+    let carry = fold.step::<ops::put_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_maintenance_config::PutIcebergByWarehouseNamespacesByNamespaceTablesByTableMaintenanceConfig>(carry);
+    let carry = fold.step::<ops::put_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_metadata_location::PutIcebergByWarehouseNamespacesByNamespaceTablesByTableMetadataLocation>(carry);
+    let carry = fold.step::<ops::put_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_refs_by_ref::PutIcebergByWarehouseNamespacesByNamespaceTablesByTableRefsByRef>(carry);
     let carry = fold.step::<ops::put_import_bucket_metadata::PutImportBucketMetadata>(carry);
     let carry = fold.step::<ops::put_v3_add_canned_policy::PutV3AddCannedPolicy>(carry);
     let carry = fold.step::<ops::put_v3_add_service_account::PutV3AddServiceAccount>(carry);

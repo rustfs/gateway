@@ -1,12 +1,13 @@
 # rustfs-gateway-dialect-rustfs-admin
 
-RustFS's admin API as gateway dialect operations (rustfs/backlog#1744, ADR-0024 to ADR-0030).
+RustFS's admin API and Iceberg REST table catalog as gateway dialect operations (rustfs/backlog#1744, ADR-0024 to ADR-0031).
 
 RustFS consumes this crate: it installs the dialect and registers its own handlers. Nothing here
 depends on RustFS, and no handler lives here.
 
-- `rustfs_admin_dialect()`: the `/rustfs/admin` and `/minio/admin` path-prefix claims and one
-  claimed operation per migrated route, each with its MinIO alias row.
+- `rustfs_admin_dialect()`: the `/rustfs/admin`, `/minio/admin`, `/_iceberg/v1` and `/iceberg/v1`
+  path-prefix claims and one claimed operation per migrated route, each with its MinIO alias row
+  or, for the table catalog, its `/iceberg/v1` compat row (ADR-0031).
 - One type per operation under `ops`, generated from the recorded route inventory
   (`crates/goldens/src/migration_inventory/rustfs_admin_routes.json`) by
   `cargo xtask rustfs-admin-dialect`. Each carries its name, rows, action, specification, floor
@@ -19,7 +20,7 @@ depends on RustFS, and no handler lives here.
 Every operation is privileged and header-signed only: never anonymous, never presigned, and never
 handed the caller's secret unless its inventory row says RustFS seals a body with it.
 
-A `{bucket}` template parameter is the bucket the operation is authorised on
+A `{bucket}` or `{warehouse}` template parameter is the bucket the operation is authorised on
 (`BucketParam::Path`, ADR-0025 (c), ADR-0030): the raw segment meets the S3 bucket-name rules
 before authentication, the authorizer is asked about that bucket, and the handler reads it from
 `RequestContextView::bucket()`. The two compat quota routes (`get-bucket-quota`,
@@ -27,8 +28,9 @@ before authentication, the authorizer is asked about that bucket, and the handle
 (`BucketParam::Query`, ADR-0026 (e)). Every other template parameter (`{tiername}`, `{key_id}`,
 `{prefix}`, …) names no bucket: the operation stays service-level, and its handler reads the
 decoded value from `RequestContextView::path_params()` (ADR-0027). Where a literal segment meets
-another route's parameter (`POST tier/clear` and `POST tier/{tiername}`), the literal's operation
-declares that it stands in front, as RustFS's router decides. `POST heal/` keeps the trailing `/`
+another route's parameter (`POST tier/clear` and `POST tier/{tiername}`; `GET buckets/{warehouse}`
+and `GET {warehouse}/namespaces`), the literal's operation declares that it stands in front, as
+RustFS's router decides (ADR-0027, ADR-0031). `POST heal/` keeps the trailing `/`
 RustFS registers it with, and matches exactly that path (ADR-0030).
 
 An operation that acts on an account says whose (ADR-0025, ADR-0026, ADR-0028), and the facade

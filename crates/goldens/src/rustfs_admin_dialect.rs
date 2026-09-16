@@ -343,9 +343,14 @@ pub(crate) const fn bucket_query_param(record: &RouteRecord) -> Option<&'static 
 }
 
 /// The bucket a well-formed request for `record` is authorised on and hands its handler, as
-/// [`Asked::bucket`] and [`Handed::bucket`] record it.
+/// [`Asked::bucket`] and [`Handed::bucket`] record it: the value its template parameter is given
+/// (`bucket-1` or `warehouse-1`), or [`BUCKET`] for a query binding.
 pub(crate) fn expected_bucket(record: &RouteRecord) -> Option<String> {
-    record.bucket.map(|_| BUCKET.to_owned())
+    match record.bucket {
+        Some(BucketParam::Path(param)) => Some(value_of(param)),
+        Some(BucketParam::Query(_)) => Some(BUCKET.to_owned()),
+        None => None,
+    }
 }
 
 /// The query parameter a record's subject rule reads, if any.
@@ -445,6 +450,7 @@ pub(crate) fn signed(record: &RouteRecord, path: &str) -> ContextRequest {
 pub(crate) fn signed_with(record: &RouteRecord, path: &str, query: &str) -> ContextRequest {
     let request = match record.method {
         "GET" => ContextRequest::get(PATH_HOST, path, query),
+        "HEAD" => ContextRequest::head(PATH_HOST, path, query),
         "POST" => ContextRequest::post(PATH_HOST, path, query),
         "DELETE" => ContextRequest::delete(PATH_HOST, path, query),
         "PUT" => ContextRequest::put_with_query(PATH_HOST, path, query, b"{}"),

@@ -114,7 +114,7 @@ impl AdminOperation for DeleteV3TierByTiername {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 117,
+    precedence: 122,
     selector: "PathTemplate(\"/rustfs/admin/v3/tier/{tiername}\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/tier/{tiername}\") ∧ Method(DELETE)",
     action: "admin:SetTier",
     resource: ResourceShape::Service,

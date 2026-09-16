@@ -122,7 +122,7 @@ impl AdminOperation for PutV3BucketDurabilityByBucket {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 306,
+    precedence: 355,
     selector: "PathTemplate(\"/rustfs/admin/v3/bucket-durability/{bucket}\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/bucket-durability/{bucket}\") ∧ Method(PUT) ⇒ BucketParam(\"bucket\")",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Bucket,

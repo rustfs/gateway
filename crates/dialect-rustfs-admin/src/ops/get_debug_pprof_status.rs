@@ -111,7 +111,7 @@ impl AdminOperation for GetDebugPprofStatus {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 121,
+    precedence: 144,
     selector: "PathTemplate(\"/rustfs/admin/debug/pprof/status\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/debug/pprof/status\") ∧ Method(GET)",
     action: "admin:Profiling",
     resource: ResourceShape::Service,

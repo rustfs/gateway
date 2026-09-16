@@ -111,7 +111,7 @@ impl AdminOperation for PutV3SiteReplicationPeerBucketMeta {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 328,
+    precedence: 377,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/peer/bucket-meta\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/site-replication/peer/bucket-meta\") ∧ Method(PUT)",
     action: "admin:SiteReplicationOperation",
     resource: ResourceShape::Service,

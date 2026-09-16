@@ -128,7 +128,7 @@ impl AdminOperation for GetV3InfoServiceAccount {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 159,
+    precedence: 182,
     selector: "PathTemplate(\"/rustfs/admin/v3/info-service-account\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/info-service-account\") ∧ Method(GET)",
     action: "admin:ListServiceAccounts about query(accessKey|access-key, absent=refused)",
     resource: ResourceShape::Service,

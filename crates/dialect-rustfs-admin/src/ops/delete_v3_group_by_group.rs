@@ -114,7 +114,7 @@ impl AdminOperation for DeleteV3GroupByGroup {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 107,
+    precedence: 112,
     selector: "PathTemplate(\"/rustfs/admin/v3/group/{group}\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/group/{group}\") ∧ Method(DELETE)",
     action: "admin:RemoveUserFromGroup",
     resource: ResourceShape::Service,

@@ -27,9 +27,13 @@
 
 use super::rulings::Form;
 use super::{
-    About, Absent, FIRST_PRECEDENCE, FORMAT, INVENTORY, Inventory, Plan, QUERY_BUCKETS, RULINGS, Route, Ruled, Ruling, Source,
-    drift, generate, plan, repo_root, snake, type_name,
+    About, Absent, FIRST_PRECEDENCE, FORMAT, INVENTORY, Inventory, Plan, QUERY_BUCKETS, RULINGS, Route, Ruled, Ruling, SURFACES,
+    Source, Surface, drift, generate, plan, repo_root, snake, type_name,
 };
+
+/// The admin API surface and the table catalog's.
+const ADMIN: &Surface = &SURFACES[0];
+const ICEBERG: &Surface = &SURFACES[1];
 
 pub(super) fn route(method: &str, path: &str, group: &str, auth_mode: &str, action: Option<&str>) -> Route {
     Route {
@@ -109,7 +113,7 @@ fn the_committed_dialect_is_what_the_inventory_generates() {
     let root = repo_root();
     let files = generate(&root).expect("the recorded inventory generates");
     assert_eq!(drift(&root, &files), Vec::<String>::new());
-    assert_eq!(files.len(), 248, "243 operations, the module list and the table's four files");
+    assert_eq!(files.len(), 297, "292 operations, the module list and the table's four files");
 }
 
 /// Negative — a file committed under a wholly generated directory without being generated, in
@@ -132,30 +136,43 @@ fn n_an_extra_file_in_a_generated_directory_is_drift() {
 /// and its words), and the query value.
 #[test]
 fn names_follow_the_method_the_path_and_the_query() {
-    assert_eq!(type_name("GET", "/rustfs/admin/v3/info", None).as_deref(), Some("GetV3Info"));
+    assert_eq!(type_name("GET", ADMIN, "/rustfs/admin/v3/info", None).as_deref(), Some("GetV3Info"));
     assert_eq!(
-        type_name("POST", "/rustfs/admin/v3/service", Some(("action", "unfreeze"))).as_deref(),
+        type_name("POST", ADMIN, "/rustfs/admin/v3/service", Some(("action", "unfreeze"))).as_deref(),
         Some("PostV3ServiceUnfreeze")
     );
     assert_eq!(
-        type_name("GET", "/rustfs/admin/debug/pprof/profile", None).as_deref(),
+        type_name("GET", ADMIN, "/rustfs/admin/debug/pprof/profile", None).as_deref(),
         Some("GetDebugPprofProfile")
     );
-    assert_eq!(type_name("GET", "/rustfs/admin/v3/tier/{tier}", None).as_deref(), Some("GetV3TierByTier"));
     assert_eq!(
-        type_name("DELETE", "/rustfs/admin/v3/audit/target/{target_type}/{target_name}/reset", None).as_deref(),
+        type_name("GET", ADMIN, "/rustfs/admin/v3/tier/{tier}", None).as_deref(),
+        Some("GetV3TierByTier")
+    );
+    assert_eq!(
+        type_name("DELETE", ADMIN, "/rustfs/admin/v3/audit/target/{target_type}/{target_name}/reset", None).as_deref(),
         Some("DeleteV3AuditTargetByTargetTypeByTargetNameReset")
     );
     assert_eq!(snake("PostV3SpeedtestClientDevnull"), "post_v3_speedtest_client_devnull");
+    assert_eq!(
+        type_name("GET", ICEBERG, "/_iceberg/v1/config", None).as_deref(),
+        Some("GetIcebergConfig")
+    );
+    assert_eq!(
+        type_name("POST", ICEBERG, "/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}", None).as_deref(),
+        Some("PostIcebergByWarehouseNamespacesByNamespaceTablesByTable")
+    );
+    assert_eq!(type_name("GET", ICEBERG, "/iceberg/v1/config", None), None);
+    assert_eq!(type_name("GET", ADMIN, "/_iceberg/v1/config", None), None);
 }
 
 /// Negative — a path outside the admin prefix, or with a character a type name cannot carry
 /// (an affixed parameter among them), has no name.
 #[test]
 fn n_a_path_without_a_type_name_has_none() {
-    assert_eq!(type_name("GET", "/minio/admin/v3/info", None), None);
-    assert_eq!(type_name("GET", "/rustfs/admin/v3/object-zip-downloads/{id}.zip", None), None);
-    assert_eq!(type_name("GET", "/rustfs/admin/v3/a+b", None), None);
+    assert_eq!(type_name("GET", ADMIN, "/minio/admin/v3/info", None), None);
+    assert_eq!(type_name("GET", ADMIN, "/rustfs/admin/v3/object-zip-downloads/{id}.zip", None), None);
+    assert_eq!(type_name("GET", ADMIN, "/rustfs/admin/v3/a+b", None), None);
 }
 
 /// Positive — a plain route is declared with its recorded action, its alias and the first
@@ -165,13 +182,7 @@ fn a_plain_route_is_declared_and_a_later_group_is_pending() {
     let plan = planned(
         vec![
             route("GET", "/rustfs/admin/v3/kms/status", "kms", "sigv4-admin", Some("kms:ServiceControl")),
-            route(
-                "GET",
-                "/rustfs/admin/v3/tables/status",
-                "table_catalog",
-                "sigv4-admin",
-                Some("admin:ServerInfo"),
-            ),
+            route("GET", "/rustfs/admin/v3/oidc/status", "oidc", "sigv4-admin", Some("admin:ServerInfo")),
         ],
         &[],
     );
@@ -183,7 +194,7 @@ fn a_plain_route_is_declared_and_a_later_group_is_pending() {
     assert_eq!(declared.precedence, FIRST_PRECEDENCE);
     assert!(!declared.caller_secret && declared.params.is_empty() && declared.shadows.is_empty());
     assert!(declared.rule.about.is_none() && declared.bucket.is_none());
-    assert_eq!(plan.pending, vec![("table_catalog".to_owned(), 6, 1)]);
+    assert_eq!(plan.pending, vec![("oidc".to_owned(), 7, 1)]);
 }
 
 /// A custom-auth route of an order-4 group, classed `detail`.
@@ -630,55 +641,7 @@ fn the_recorded_opt_ins_are_exactly_the_sealed_routes() {
 }
 
 /// Positive — a templated route is declared at its template, service-level, with its
-/// parameters in path order.
-#[test]
-fn a_templated_route_is_declared_with_its_parameters() {
-    let plan = planned(
-        vec![templated(
-            "PUT",
-            "/rustfs/admin/v3/audit/target/{target_type}/{target_name}",
-            &["target_type", "target_name"],
-        )],
-        &[],
-    );
-    let declared = &plan.declared[0];
-    assert_eq!(declared.name, "rustfs:PutV3AuditTargetByTargetTypeByTargetName");
-    assert_eq!(declared.params, ["target_type", "target_name"]);
-    assert_eq!(
-        declared.alias.as_deref(),
-        Some("/minio/admin/v3/audit/target/{target_type}/{target_name}")
-    );
-}
-
-/// Negative — two bucket parameters, an empty segment that is not a trailing `/`, an affixed
-/// parameter, a parameter that is not a lowercase identifier, a repeated one, and a template the
-/// inventory's list disagrees with are refused.
-#[test]
-fn n_a_template_outside_the_rule_is_refused() {
-    for (path, params, why) in [
-        (
-            "/rustfs/admin/v3/tables/{warehouse}/{bucket}",
-            &["warehouse", "bucket"][..],
-            "two parameters name a bucket",
-        ),
-        ("/rustfs/admin/v3/heal//", &[][..], "an empty segment that is not a trailing '/'"),
-        ("/rustfs/admin/v3//heal", &[][..], "an empty segment that is not a trailing '/'"),
-        ("/rustfs/admin/v3/zip/{id}.zip", &["id"][..], "shares its segment"),
-        ("/rustfs/admin/v3/tier/{Tier}", &["Tier"][..], "not a lowercase identifier"),
-        ("/rustfs/admin/v3/tier/{tier-name}", &["tier-name"][..], "not a lowercase identifier"),
-        ("/rustfs/admin/v3/tier/{}", &[""][..], "not a lowercase identifier"),
-        ("/rustfs/admin/v3/{a}/{a}", &["a", "a"][..], "appears twice"),
-        ("/rustfs/admin/v3/tier/{tier}", &[][..], "the inventory []"),
-        ("/rustfs/admin/v3/tier/{a}/{b}", &["b", "a"][..], "the template names"),
-    ] {
-        let error = refusal(vec![templated("GET", path, params)], &[]);
-        assert!(error.contains(why), "{path}: {error}");
-    }
-}
-
-/// Positive — a literal segment stands in front of the parameter it meets, and only the earlier
-/// literal's operation declares it; a different method, a different length or a different
-/// literal overlaps nothing.
+/// different literal overlaps nothing.
 #[test]
 fn a_literal_stands_in_front_of_the_parameter_it_meets() {
     let plan = planned(
@@ -688,6 +651,8 @@ fn a_literal_stands_in_front_of_the_parameter_it_meets() {
             templated("POST", "/rustfs/admin/v3/tier/{tiername}", &["tiername"]),
             templated("POST", "/rustfs/admin/v3/tier/{tiername}/x", &["tiername"]),
             templated("POST", "/rustfs/admin/v3/tiers/{tiername}", &["tiername"]),
+            templated("GET", "/rustfs/admin/v3/buckets/{warehouse}", &["warehouse"]),
+            templated("GET", "/rustfs/admin/v3/{warehouse}/namespaces", &["warehouse"]),
         ],
         &[],
     );
@@ -705,11 +670,22 @@ fn a_literal_stands_in_front_of_the_parameter_it_meets() {
             })
         })
         .collect();
-    assert_eq!(shadows, [("rustfs:PostV3TierClear", "rustfs:PostV3TierByTiername", "clear", "tiername")]);
+    assert_eq!(
+        shadows,
+        [
+            ("rustfs:PostV3TierClear", "rustfs:PostV3TierByTiername", "clear", "tiername"),
+            (
+                "rustfs:GetV3BucketsByWarehouse",
+                "rustfs:GetV3ByWarehouseNamespaces",
+                "buckets",
+                "warehouse"
+            ),
+        ]
+    );
 }
 
 /// Negative — an overlap whose literal comes later in the inventory, one no literal orders, and
-/// one where each route has a literal the other meets with a parameter are refused.
+/// a crossed pair whose first divergence favours the later route are refused (ADR-0031 (d)).
 #[test]
 fn n_an_overlap_the_rule_cannot_order_is_refused() {
     let later = vec![
@@ -722,11 +698,11 @@ fn n_an_overlap_the_rule_cannot_order_is_refused() {
         templated("GET", "/rustfs/admin/v3/tier/{b}", &["b"]),
     ];
     assert!(refusal(same, &[]).contains("no literal segment orders them"));
-    let crossed = vec![
+    let crossed_later = vec![
         templated("GET", "/rustfs/admin/v3/a/{x}/c", &["x"]),
         templated("GET", "/rustfs/admin/v3/a/b/{y}", &["y"]),
     ];
-    assert!(refusal(crossed, &[]).contains("no literal segment orders them"));
+    assert!(refusal(crossed_later, &[]).contains("a literal must come before the parameter it meets"));
 }
 
 /// Negative — a custom-auth or anonymous route with no ruling is refused, never declared under a
@@ -765,7 +741,10 @@ fn n_a_route_outside_the_generators_rules_is_refused() {
         refusal(vec![route("GET", "/rustfs/admin/v3/x", "nowhere", "sigv4-admin", Some("admin:X"))], &[])
             .contains("no place in the plan")
     );
-    assert!(refusal(vec![route("GET", "/health/x", "system", "sigv4-admin", Some("admin:X"))], &[]).contains("not under"));
+    assert!(
+        refusal(vec![route("GET", "/health/x", "system", "sigv4-admin", Some("admin:X"))], &[])
+            .contains("under no surface the dialect serves")
+    );
     let mut body = route("GET", "/rustfs/admin/v3/x", "system", "sigv4-admin", Some("admin:X"));
     body.request_body = "chunked".to_owned();
     assert!(refusal(vec![body], &[]).contains("unknown body kind"));

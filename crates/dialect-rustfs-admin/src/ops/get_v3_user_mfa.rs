@@ -111,7 +111,7 @@ impl AdminOperation for GetV3UserMfa {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 215,
+    precedence: 238,
     selector: "PathTemplate(\"/rustfs/admin/v3/user/mfa\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/user/mfa\") ∧ Method(GET)",
     action: "admin:GetUser",
     resource: ResourceShape::Service,

@@ -111,7 +111,7 @@ impl AdminOperation for GetV3Group {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 138,
+    precedence: 161,
     selector: "PathTemplate(\"/rustfs/admin/v3/group\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/group\") ∧ Method(GET)",
     action: "admin:GetGroup",
     resource: ResourceShape::Service,

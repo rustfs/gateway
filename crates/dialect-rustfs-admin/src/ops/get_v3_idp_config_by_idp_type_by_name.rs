@@ -114,7 +114,7 @@ impl AdminOperation for GetV3IdpConfigByIdpTypeByName {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 143,
+    precedence: 166,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp-config/{idp_type}/{name}\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/idp-config/{idp_type}/{name}\") ∧ Method(GET)",
     action: "admin:ServerInfo",
     resource: ResourceShape::Service,
