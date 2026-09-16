@@ -2,3 +2,6 @@
 crates/core/src/contracts.rs:AclErrorSecretFlowPolicy
 crates/core/src/contracts.rs:EncryptionErrorSecretFlowPolicy
 crates/model/src/overlay/codec.rs:ErrorSecretFlowValue
+# The generated admin dialect declares one unit marker struct per RustFS route and derives Debug on it.
+# This one's name comes from the route `/rustfs/admin/v3/set-user-secret-key`; the struct has no fields.
+crates/dialect-rustfs-admin/src/ops/put_v3_set_user_secret_key.rs:PutV3SetUserSecretKey
