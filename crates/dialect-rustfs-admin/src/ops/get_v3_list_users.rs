@@ -111,7 +111,7 @@ impl AdminOperation for GetV3ListUsers {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 200,
+    precedence: 204,
     selector: "PathTemplate(\"/rustfs/admin/v3/list-users\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/list-users\") ∧ Method(GET)",
     action: "admin:ListUsers",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "ListUsers",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

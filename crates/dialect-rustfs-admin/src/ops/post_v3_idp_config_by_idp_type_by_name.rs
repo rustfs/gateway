@@ -114,7 +114,7 @@ impl AdminOperation for PostV3IdpConfigByIdpTypeByName {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 278,
+    precedence: 287,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp-config/{idp_type}/{name}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/idp-config/{idp_type}/{name}\") ∧ Method(POST)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,
@@ -140,6 +140,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "SetIdpConfig",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

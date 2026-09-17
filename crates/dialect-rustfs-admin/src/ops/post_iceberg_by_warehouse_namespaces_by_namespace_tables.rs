@@ -125,7 +125,7 @@ impl AdminOperation for PostIcebergByWarehouseNamespacesByNamespaceTables {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 254,
+    precedence: 263,
     selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables\") ∧ Method(POST) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/namespaces/{namespace}/tables\") ∧ Method(POST) ⇒ BucketParam(\"warehouse\")",
     action: "admin:CreateTable",
     resource: ResourceShape::Bucket,
@@ -153,6 +153,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "RestCreateTableHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

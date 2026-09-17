@@ -37,12 +37,14 @@ use std::process::{Command, ExitCode, Stdio};
 use serde::Deserialize;
 
 use self::render::{render_mod, render_operation, render_tables};
-use self::rulings::{About, Absent, QUERY_BUCKETS, RULINGS, Ruled, Ruling};
+use self::rule::{Rule, is_parameter};
+use self::rulings::{QUERY_BUCKETS, RULINGS, Ruling, STAYS};
 use self::template::{Shadow, Template, shadowing, snake, template_params, type_name};
 
 use crate::repo_root::repo_root;
 
 mod render;
+mod rule;
 mod rulings;
 mod template;
 
@@ -90,6 +92,14 @@ const SURFACES: &[Surface] = &[
         alias: "/iceberg/v1/",
         tag: "Iceberg",
         alias_from: AliasFrom::Twin,
+    },
+    // The two profiling routes, each its own two-segment claim (ADR-0024, ADR-0032 (c)); RustFS
+    // serves no compat spelling, so the flag is never set and the alias prefix is never used.
+    Surface {
+        prefix: "/profile/",
+        alias: "/profile/",
+        tag: "Profile",
+        alias_from: AliasFrom::Flag,
     },
 ];
 /// The dialect's vendor namespace: its operation names, and the only namespace an own-account
@@ -141,7 +151,7 @@ const PLAN: &[(&str, u8)] = &[
 ];
 
 /// The last migrated order: groups at or below it are declared, the rest are pending.
-const MIGRATED_THROUGH: u8 = 6;
+const MIGRATED_THROUGH: u8 = 8;
 
 #[derive(Deserialize)]
 struct Inventory {
@@ -171,200 +181,6 @@ struct Route {
     caller_secret_body: String,
     request_body: String,
     response_body: String,
-}
-
-/// The actions of a rule, owned.
-enum Actions {
-    One(String),
-    AnyOf(Vec<String>),
-}
-
-/// An action rule, owned, and whose account it is about.
-struct Rule {
-    actions: Actions,
-    about: Option<About>,
-}
-
-impl Rule {
-    fn plain(action: String) -> Self {
-        Self {
-            actions: Actions::One(action),
-            about: None,
-        }
-    }
-
-    fn ruled(ruled: Ruled, about: Option<About>) -> Self {
-        let actions = match ruled {
-            Ruled::One(action) => Actions::One(action.to_owned()),
-            Ruled::AnyOf(actions) => Actions::AnyOf(actions.iter().map(|action| (*action).to_owned()).collect()),
-        };
-        Self { actions, about }
-    }
-
-    /// Every action asked about a named account, in order.
-    fn actions(&self) -> Vec<&str> {
-        match &self.actions {
-            Actions::One(action) => vec![action.as_str()],
-            Actions::AnyOf(actions) => actions.iter().map(String::as_str).collect(),
-        }
-    }
-
-    /// As the overlay records it, which is how `AuthRequirement::render` spells it.
-    fn render(&self) -> String {
-        let mut rendered = match &self.actions {
-            Actions::One(action) => action.clone(),
-            Actions::AnyOf(actions) => format!("anyOf({})", actions.join(", ")),
-        };
-        match self.about {
-            Some(About::Caller) => rendered.push_str(" about caller"),
-            Some(About::Query { param, aliases, absent }) => {
-                let absent = match absent {
-                    Absent::Caller => "caller",
-                    Absent::Refuse => "refused",
-                };
-                let spellings: Vec<&str> = std::iter::once(param).chain(aliases.iter().copied()).collect();
-                rendered.push_str(&format!(" about query({}, absent={absent})", spellings.join("|")));
-            }
-            Some(About::Set {
-                param,
-                everyone: Some((flag, action)),
-            }) => rendered.push_str(&format!(" about each({param}, everyone={flag} ⇒ {action})")),
-            Some(About::Set { param, everyone: None }) => rendered.push_str(&format!(" about each({param})")),
-            None => {}
-        }
-        rendered
-    }
-
-    /// The subject rule as a Rust expression, when there is one.
-    fn subject_expression(&self) -> Option<String> {
-        self.about.map(|about| match about {
-            About::Caller => "SubjectRule::Caller".to_owned(),
-            About::Query { param, aliases, absent } => {
-                let aliases: Vec<String> = aliases.iter().map(|alias| format!("{alias:?}")).collect();
-                format!(
-                    "SubjectRule::Query {{ param: {param:?}, aliases: &[{}], when_absent: WhenAbsent::{absent:?} }}",
-                    aliases.join(", ")
-                )
-            }
-            About::Set {
-                param,
-                everyone: Some((flag, action)),
-            } => format!(
-                "SubjectRule::Set {{ param: {param:?}, everyone: Some(Everyone {{ param: {flag:?}, action: {action:?} }}) }}"
-            ),
-            About::Set { param, everyone: None } => format!("SubjectRule::Set {{ param: {param:?}, everyone: None }}"),
-        })
-    }
-
-    /// Whether the rule reads the query parameter `param` for an account, under any spelling.
-    fn reads(&self, param: &str) -> bool {
-        match self.about {
-            Some(About::Query {
-                param: account, aliases, ..
-            }) => account == param || aliases.contains(&param),
-            Some(About::Set {
-                param: account,
-                everyone,
-            }) => account == param || everyone.is_some_and(|(flag, _)| flag == param),
-            Some(About::Caller) | None => false,
-        }
-    }
-
-    /// As a Rust expression on `resource` (`ResourceShape::Service` or `ResourceShape::Bucket`);
-    /// a subject rule is the module's `SUBJECT`.
-    fn expression(&self, resource: &str) -> String {
-        let requirement = match &self.actions {
-            Actions::One(action) => format!("AuthRequirement::new({action:?}, {resource})"),
-            Actions::AnyOf(actions) => {
-                let listed: Vec<String> = actions.iter().map(|action| format!("{action:?}")).collect();
-                format!("AuthRequirement::any_of(&[{}], {resource})", listed.join(", "))
-            }
-        };
-        match self.about {
-            Some(_) => format!("{requirement}.about_subject(SUBJECT)"),
-            None => requirement,
-        }
-    }
-
-    /// Why this rule is outside ADR-0025's and ADR-0026's shapes, or `None`. Registration refuses
-    /// most of these too; refusing them here keeps a bad ruling from ever being generated.
-    fn fault(&self, query: Option<(&str, &str)>) -> Option<&'static str> {
-        let actions = self.actions();
-        if !actions.iter().copied().all(is_action) {
-            return Some("an action is spelled `service:Action`");
-        }
-        if let Actions::AnyOf(listed) = &self.actions
-            && (listed.len() < 2
-                || listed
-                    .iter()
-                    .enumerate()
-                    .any(|(index, action)| listed[..index].contains(action)))
-        {
-            return Some("an any-of rule names at least two actions, each once");
-        }
-        let own = |action: &str| action.split_once(':').is_some_and(|(service, _)| service == VENDOR);
-        match self.about {
-            Some(About::Caller) => {
-                return match &self.actions {
-                    Actions::One(label) if own(label) => None,
-                    _ => Some("an own-account operation names exactly one action, a label in the dialect's own namespace"),
-                };
-            }
-            _ if actions.iter().copied().any(own) => {
-                return Some("a label in the dialect's own namespace authorises only an own-account operation");
-            }
-            Some(About::Query { param, .. } | About::Set { param, .. }) if !is_parameter(param) => {
-                return Some("a subject parameter is spelled in RFC 3986 unreserved characters");
-            }
-            Some(About::Query { param, .. } | About::Set { param, .. }) if query.is_some_and(|(key, _)| key == param) => {
-                return Some("a subject parameter is not the query key that selects the form");
-            }
-            Some(About::Query { param, aliases, .. }) => {
-                if !aliases.iter().copied().all(is_parameter) {
-                    return Some("a subject parameter is spelled in RFC 3986 unreserved characters");
-                }
-                if aliases
-                    .iter()
-                    .enumerate()
-                    .any(|(index, alias)| *alias == param || aliases[..index].contains(alias))
-                {
-                    return Some("a subject parameter's spellings are distinct from one another");
-                }
-                if query.is_some_and(|(key, _)| aliases.contains(&key)) {
-                    return Some("a subject parameter is not the query key that selects the form");
-                }
-            }
-            Some(About::Set {
-                param,
-                everyone: Some((flag, action)),
-            }) => {
-                if !is_parameter(flag) || flag == param {
-                    return Some("a set rule's every-account flag is an unreserved parameter of its own");
-                }
-                if !is_action(action) || own(action) {
-                    return Some("a set rule's every-account action is an IAM action spelled `service:Action`");
-                }
-                if matches!(self.actions, Actions::One(_)) && actions.contains(&action) {
-                    return Some("a set rule's every-account action is one no named-account question already asks");
-                }
-            }
-            _ => {}
-        }
-        None
-    }
-}
-
-fn is_action(action: &str) -> bool {
-    action
-        .split_once(':')
-        .is_some_and(|(service, name)| !service.is_empty() && !name.is_empty() && !name.contains(':'))
-}
-
-fn is_parameter(param: &str) -> bool {
-    !param.is_empty()
-        && param
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~'))
 }
 
 /// One form a route is declared as: the query that selects it, its rule, and the custom-auth
@@ -429,6 +245,8 @@ impl Bound {
 struct Plan {
     declared: Vec<Declared>,
     pending: Vec<(String, u8, usize)>,
+    /// The routes that stay with RustFS: `(method, path, group, reason)` (ADR-0032 (b)).
+    staying: Vec<(String, String, String, &'static str)>,
 }
 
 fn body_kind(recorded: &str, route: &Route) -> Result<&'static str, String> {
@@ -458,9 +276,16 @@ fn forms(route: &Route, at: &str, rulings: &[Ruling], used: &mut BTreeSet<usize>
                 None => Ok(vec![(None, rule, None)]),
             }
         }
-        ("custom", Some(index)) => {
+        (mode @ ("custom" | "anonymous"), Some(index)) => {
             let ruling = &rulings[index];
             used.insert(index);
+            // Only a route the inventory records as anonymous opts in, and such a route never
+            // stays privileged by a ruling's omission (ADR-0026 (f)).
+            if ruling.forms.iter().any(|form| form.anonymous != (mode == "anonymous")) {
+                return Err(format!(
+                    "{at}: a ruling opts in to anonymous requests exactly when the inventory records an anonymous route"
+                ));
+            }
             if route.auth_detail.as_deref() != Some(ruling.auth_detail) {
                 return Err(format!(
                     "{at}: ruled as {:?}, but the inventory now records {:?}",
@@ -471,7 +296,7 @@ fn forms(route: &Route, at: &str, rulings: &[Ruling], used: &mut BTreeSet<usize>
                 .forms
                 .iter()
                 .map(|form| {
-                    let rule = Rule::ruled(form.rule, form.about);
+                    let rule = Rule::ruled(form.rule, form.about, form.anonymous);
                     match rule.fault(form.query) {
                         Some(why) => Err(format!("{at}: {why}")),
                         None => Ok((form.query, rule, Some(ruling.auth_detail.to_owned()))),
@@ -508,8 +333,27 @@ fn twin_of(inventory: &Inventory, route: &Route, from: &str, to: &str) -> Option
 }
 
 /// Chooses and rules the routes, refusing every one it has no rule for; `query_buckets` lists the
-/// routes whose bucket is a query parameter (ADR-0030).
-fn plan(inventory: &Inventory, rulings: &[Ruling], query_buckets: &[(&str, &str, &'static str)]) -> Result<Plan, String> {
+/// routes whose bucket is a query parameter (ADR-0030), and `stays` the routes that stay with
+/// RustFS (ADR-0032).
+fn plan(
+    inventory: &Inventory,
+    rulings: &[Ruling],
+    query_buckets: &[(&str, &str, &'static str)],
+    stays: &[(&str, &str, &'static str)],
+) -> Result<Plan, String> {
+    plan_through(MIGRATED_THROUGH, inventory, rulings, query_buckets, stays)
+}
+
+/// [`plan`] with the groups up to `through` migrated and the later ones pending. Every group of
+/// ADR-0024's plan is migrated today, so only a group the inventory gains at a later order, or a
+/// test, is pending.
+fn plan_through(
+    through: u8,
+    inventory: &Inventory,
+    rulings: &[Ruling],
+    query_buckets: &[(&str, &str, &'static str)],
+    stays: &[(&str, &str, &'static str)],
+) -> Result<Plan, String> {
     if inventory.format != FORMAT {
         return Err(format!("the inventory is {:?}, not {FORMAT:?}", inventory.format));
     }
@@ -519,11 +363,21 @@ fn plan(inventory: &Inventory, rulings: &[Ruling], query_buckets: &[(&str, &str,
     let mut declared = Vec::new();
     let mut pending: BTreeMap<String, (u8, usize)> = BTreeMap::new();
     let mut twins_used = BTreeSet::new();
+    let mut staying = Vec::new();
+    let mut stays_used = BTreeSet::new();
     for route in &inventory.routes {
         let at = format!("{} {}", route.method, route.path);
         let order = order_of(&route.group).ok_or_else(|| format!("{at}: group {:?} has no place in the plan", route.group))?;
-        if order > MIGRATED_THROUGH {
+        if order > through {
             pending.entry(route.group.clone()).or_insert((order, 0)).1 += 1;
+            continue;
+        }
+        if let Some(index) = stays
+            .iter()
+            .position(|(method, path, _)| *method == route.method && *path == route.path)
+        {
+            stays_used.insert(index);
+            staying.push((route.method.clone(), route.path.clone(), route.group.clone(), stays[index].2));
             continue;
         }
         let surface = SURFACES
@@ -620,6 +474,13 @@ fn plan(inventory: &Inventory, rulings: &[Ruling], query_buckets: &[(&str, &str,
         declared[winner].shadows.push(shadow);
     }
     let _ = twins_used;
+    // A staying route the inventory no longer records is refused only once every group is
+    // migrated: until then its group may simply be pending.
+    if pending.is_empty()
+        && let Some(stale) = (0..stays.len()).find(|index| !stays_used.contains(index))
+    {
+        return Err(format!("the staying route {} {} is not in the inventory", stays[stale].0, stays[stale].1));
+    }
     if let Some(stale) = (0..rulings.len()).find(|index| !used.contains(index)) {
         return Err(format!(
             "the ruling for {} {} names no custom-auth route of a migrated group",
@@ -635,6 +496,7 @@ fn plan(inventory: &Inventory, rulings: &[Ruling], query_buckets: &[(&str, &str,
         return Err(format!("two routes derive the operation {}", twice.name));
     }
     Ok(Plan {
+        staying,
         declared,
         pending: pending
             .into_iter()
@@ -696,7 +558,7 @@ fn format_all(root: &Path, files: BTreeMap<PathBuf, String>) -> Result<BTreeMap<
 fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
     let recorded = std::fs::read_to_string(root.join(INVENTORY)).map_err(|error| format!("cannot read {INVENTORY}: {error}"))?;
     let inventory: Inventory = serde_json::from_str(&recorded).map_err(|error| format!("cannot parse {INVENTORY}: {error}"))?;
-    let plan = plan(&inventory, RULINGS, QUERY_BUCKETS)?;
+    let plan = plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS)?;
     let output = Path::new(OUTPUT);
     let mut files = BTreeMap::new();
     for declared in &plan.declared {

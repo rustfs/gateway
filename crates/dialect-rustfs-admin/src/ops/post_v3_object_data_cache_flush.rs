@@ -111,7 +111,7 @@ impl AdminOperation for PostV3ObjectDataCacheFlush {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 311,
+    precedence: 320,
     selector: "PathTemplate(\"/rustfs/admin/v3/object-data-cache/flush\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/object-data-cache/flush\") ∧ Method(POST)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "ObjectDataCacheFlushHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

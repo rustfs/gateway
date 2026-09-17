@@ -212,7 +212,10 @@ fn every_declared_row_reaches_its_operation() {
             rows += 1;
         }
     }
-    assert_eq!(rows, 584, "292 operations, each with its MinIO or compat alias");
+    assert_eq!(
+        rows, 604,
+        "303 operations, each with its MinIO or compat alias but the two profiling triggers"
+    );
 }
 
 /// Negative — without the dialect, no row reaches any admin operation.
@@ -305,10 +308,13 @@ fn n_a_near_miss_of_a_row_reaches_no_admin_operation() {
             for near in [format!("{path}/"), format!("{path}/x"), segments.join("/")] {
                 let reached = resolve(record.method, &format!("{near}{query}"));
                 assert_ne!(reached, Some(record.operation), "{} {near}", record.method);
-                assert_eq!(reached, expected(record.method, &near, &query), "{} {near}", record.method);
+                // A near miss of a claim's own segment (`/profile/CPU`) is outside the claim and
+                // is S3's; the model speaks only for the dialect's operations.
+                let admin = reached.filter(|name| name.starts_with("rustfs:"));
+                assert_eq!(admin, expected(record.method, &near, &query), "{} {near}", record.method);
             }
             // Past the claim's second segment: `/rustfs/admin`, `/minio/admin`, `/_iceberg/v1` or `/iceberg/v1`.
-            let at = ["/admin", "/v1"]
+            let at = ["/admin", "/v1", "/cpu", "/memory"]
                 .iter()
                 .find_map(|marker| path.find(marker).map(|index| index + marker.len()))
                 .expect("a claimed path");
@@ -361,7 +367,7 @@ fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
             }
         }
     }
-    assert_eq!(refused, 10 * 2 * 177, "177 parameters across 92 templates, each with its alias");
+    assert_eq!(refused, 10 * 2 * 181, "181 parameters across 96 templates, each with its alias");
     assert_eq!(
         elsewhere,
         [
@@ -481,20 +487,36 @@ fn every_operation_declares_what_its_record_says() {
     }
 }
 
-/// Negative — no operation is reachable without a header signature, and only an own-account
-/// operation is authorised by a vendor label: every other migrated route is an IAM check.
+/// Negative — no operation but the four OIDC bootstrap ones is reachable without a header
+/// signature, none through a presigned URL, and only an own-account or a bootstrap operation is
+/// authorised by a vendor label: every other migrated route is an IAM check.
 #[test]
 fn n_no_operation_is_reachable_without_a_header_signature() {
-    for operation in declared() {
+    let mut anonymous = Vec::new();
+    for (operation, record) in declared().into_iter().zip(ROUTES) {
         let name = operation.name;
         assert!(operation.privileged, "{name}");
-        assert!(!operation.anonymous, "{name}");
+        assert_eq!(operation.anonymous, record.anonymous, "{name}");
         assert!(!operation.presigned, "{name}");
-        let own_account = operation.subject == Some(SubjectRule::Caller);
+        if operation.anonymous {
+            anonymous.push(name);
+            assert_eq!(operation.subject, None, "{name}");
+        }
+        let own_label = operation.subject == Some(SubjectRule::Caller) || operation.anonymous;
         let action = operation.action.unwrap_or_default();
-        assert_eq!(action.starts_with("rustfs:"), own_account, "{name}: {action}");
-        assert_eq!(action.matches("rustfs:").count(), usize::from(own_account), "{name}: {action}");
+        assert_eq!(action.starts_with("rustfs:"), own_label, "{name}: {action}");
+        assert_eq!(action.matches("rustfs:").count(), usize::from(own_label), "{name}: {action}");
     }
+    // Exactly RustFS's four OIDC bootstrap routes admit an anonymous request (ADR-0026 (f), ADR-0032).
+    assert_eq!(
+        anonymous,
+        [
+            "rustfs:GetV3OidcAuthorizeByProviderId",
+            "rustfs:GetV3OidcCallbackByProviderId",
+            "rustfs:GetV3OidcLogout",
+            "rustfs:GetV3OidcProviders",
+        ]
+    );
 }
 
 /// Positive — exactly ADR-0025's and ADR-0026's order-4 subjects are declared: nine own-account
@@ -640,21 +662,26 @@ fn names_and_precedences_are_unique_and_the_overlay_is_complete() {
         .map(|operation| (operation.name, operation.precedence))
         .collect();
     assert_eq!(recorded, declared);
-    assert!(
-        OVERLAY
-            .operations
-            .iter()
-            .all(|row| !row.anonymous && !row.evidence.is_empty())
-    );
+    assert!(OVERLAY.operations.iter().all(|row| !row.evidence.is_empty()));
 }
 
-/// Positive — the dialect assembles, claiming exactly the two admin prefixes and the two
-/// table-catalog prefixes (ADR-0024, ADR-0031).
+/// Positive — the dialect assembles, claiming exactly the two admin prefixes, the two
+/// table-catalog prefixes and the two profiling triggers (ADR-0024, ADR-0031, ADR-0032).
 #[test]
-fn the_dialect_assembles_with_its_four_claims() {
+fn the_dialect_assembles_with_its_six_claims() {
     let _ = dialect();
     let prefixes: Vec<&str> = CLAIMS.iter().map(|claim| claim.prefix).collect();
-    assert_eq!(prefixes, ["/rustfs/admin", "/minio/admin", "/_iceberg/v1", "/iceberg/v1"]);
+    assert_eq!(
+        prefixes,
+        [
+            "/rustfs/admin",
+            "/minio/admin",
+            "/_iceberg/v1",
+            "/iceberg/v1",
+            "/profile/cpu",
+            "/profile/memory"
+        ]
+    );
 }
 
 // ── the answer ───────────────────────────────────────────────────────────────────────────────

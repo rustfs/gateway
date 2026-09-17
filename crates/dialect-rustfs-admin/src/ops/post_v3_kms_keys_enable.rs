@@ -112,7 +112,7 @@ impl AdminOperation for PostV3KmsKeysEnable {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 296,
+    precedence: 305,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/keys/enable\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/keys/enable\") ∧ Method(POST)",
     action: "kms:EnableKey",
     resource: ResourceShape::Service,
@@ -137,6 +137,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "EnableKmsKeyHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

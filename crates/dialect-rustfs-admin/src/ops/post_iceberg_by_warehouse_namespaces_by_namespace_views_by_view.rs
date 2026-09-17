@@ -125,7 +125,7 @@ impl AdminOperation for PostIcebergByWarehouseNamespacesByNamespaceViewsByView {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 266,
+    precedence: 275,
     selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/namespaces/{namespace}/views/{view}\") ∧ Method(POST) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/namespaces/{namespace}/views/{view}\") ∧ Method(POST) ⇒ BucketParam(\"warehouse\")",
     action: "admin:CommitTable",
     resource: ResourceShape::Bucket,
@@ -153,6 +153,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "RestReplaceViewHandler",
     request_body: BodyKind::HandedOn,
     response_body: BodyKind::Buffered,

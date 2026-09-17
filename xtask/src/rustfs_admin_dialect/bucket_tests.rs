@@ -25,11 +25,12 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 
-use super::Bound;
 use super::render::render_operation;
+use super::rulings::{About, Form, Ruled, Ruling};
 use super::tests::{
-    custom, planned, planned_with, recorded_plan, refusal, refusal_with, route, ruling_for, service_route, templated,
+    custom, inventory, planned, planned_with, recorded_plan, refusal, refusal_with, route, ruling_for, service_route, templated,
 };
+use super::{Bound, Route};
 
 /// parameters in path order.
 #[test]
@@ -242,16 +243,8 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
             ("rustfs:PostV3QuotaCheckByBucket", "s3:GetBucketQuota"),
         ]
     );
-    assert_eq!(plan.declared.len(), 292);
-    assert_eq!(
-        plan.pending,
-        [
-            ("health".to_owned(), 8, 6),
-            ("object_zip_download".to_owned(), 7, 2),
-            ("oidc".to_owned(), 7, 8),
-            ("sts".to_owned(), 7, 2),
-        ]
-    );
+    assert_eq!(plan.declared.len(), 303);
+    assert!(plan.pending.is_empty(), "{:?}", plan.pending);
 }
 
 /// Positive — in the recorded inventory, the 49 table-catalog operations are the `/_iceberg/v1`
@@ -337,4 +330,149 @@ fn n_a_compat_row_is_the_alias_of_an_identical_canonical_route_or_refused() {
     let mut differs = twin();
     differs.iam_action_wire = Some("admin:ServerInfo".to_owned());
     assert!(refusal(vec![only, differs], &[]).contains("RustFS serves no identical route under /iceberg/v1/"));
+}
+
+/// Positive and negative — a route the inventory records as anonymous is declared only under a
+/// ruling that opts in, with its own label, no account, the anonymous floor and an overlay row that
+/// acknowledges it; an opt-in on a custom-auth route, a missing opt-in on an anonymous one, an IAM
+/// action, an any-of rule or an account on an anonymous ruling are refused (ADR-0026 (f),
+/// ADR-0032 (a)).
+#[test]
+fn n_an_anonymous_operation_is_the_inventorys_and_the_rulings_together() {
+    fn anonymous(path: &str) -> Route {
+        let mut route = route("GET", path, "oidc", "anonymous", None);
+        route.auth_detail = Some("OidcBootstrap".to_owned());
+        route
+    }
+    let providers = "/rustfs/admin/v3/oidc/providers";
+    let plan = planned(vec![anonymous(providers)], ruling_for(providers));
+    let declared = &plan.declared[0];
+    assert!(declared.rule.anonymous && declared.rule.about.is_none());
+    assert_eq!(declared.rule.render(), "rustfs:ListOidcProviders");
+    let source = render_operation(declared);
+    assert!(
+        source.contains("static FLOOR: OperationFloor = admin::anonymous_floor(NAME);"),
+        "{source}"
+    );
+    assert!(source.contains("    anonymous: true,\n    evidence:"), "{source}");
+    assert!(source.contains("    anonymous: true,\n    rustfs_handler:"), "{source}");
+    assert!(
+        source.contains("record::ADR_0032") && source.contains("It admits anonymous requests"),
+        "{source}"
+    );
+
+    // A privileged operation says so in all three places.
+    let info = render_operation(&planned(vec![templated("GET", "/rustfs/admin/v3/info", &[])], &[]).declared[0]);
+    assert!(
+        info.contains("admin::floor(NAME)") && !info.contains("anonymous: true") && !info.contains("ADR_0032"),
+        "{info}"
+    );
+
+    const fn form(rule: Ruled, about: Option<About>, anonymous: bool) -> Form {
+        Form {
+            query: None,
+            rule,
+            about,
+            anonymous,
+        }
+    }
+    const OPTS_IN: &[Form] = &[form(Ruled::One("rustfs:GetUser"), None, true)];
+    const FORGETS: &[Form] = &[form(Ruled::One("rustfs:ListOidcProviders"), None, false)];
+    const IAM: &[Form] = &[form(Ruled::One("admin:ServerInfo"), None, true)];
+    const ANY_OF: &[Form] = &[form(Ruled::AnyOf(&["rustfs:A", "rustfs:B"]), None, true)];
+    const ABOUT: &[Form] = &[form(Ruled::One("rustfs:ListOidcProviders"), Some(About::Caller), true)];
+    let ruled = |auth_detail: &'static str, path: &'static str, forms: &'static [Form]| {
+        vec![Ruling {
+            method: "GET",
+            path,
+            auth_detail,
+            forms,
+        }]
+    };
+    let user_info = "/rustfs/admin/v3/user-info";
+    let on_custom = refusal(
+        vec![custom("GET", user_info, "ContextualAuthorization")],
+        &ruled("ContextualAuthorization", user_info, OPTS_IN),
+    );
+    assert!(on_custom.contains("exactly when the inventory records an anonymous route"), "{on_custom}");
+    let forgets = refusal(vec![anonymous(providers)], &ruled("OidcBootstrap", providers, FORGETS));
+    assert!(forgets.contains("exactly when the inventory records an anonymous route"), "{forgets}");
+    for forms in [IAM, ANY_OF, ABOUT] {
+        let shaped = refusal(vec![anonymous(providers)], &ruled("OidcBootstrap", providers, forms));
+        assert!(shaped.contains("an anonymous operation names exactly one action"), "{shaped}");
+    }
+    let unruled = refusal(vec![anonymous(providers)], &[]);
+    assert!(unruled.contains("anonymous route in a migrated group has no ruling"), "{unruled}");
+}
+
+/// Positive and negative — a route listed as staying with RustFS is declared as no operation and
+/// recorded with its group and reason; a listed route the fully migrated inventory does not record
+/// is refused; and the recorded plan keeps exactly seven routes with RustFS (ADR-0032 (b)).
+#[test]
+fn n_a_staying_route_is_recorded_and_never_declared() {
+    let stays: &[(&str, &str, &'static str)] = &[("GET", "/health", "the probe layer (ADR-0026 (h))")];
+    let routes = || {
+        vec![
+            route("GET", "/health", "health", "anonymous", None),
+            route("GET", "/profile/cpu", "health", "sigv4-admin", Some("admin:Profiling")),
+        ]
+    };
+    let mut fixture = routes();
+    fixture[1].minio_admin_alias = false;
+    let plan = super::plan(&inventory(fixture), &[], &[], stays).expect("the staying route plans");
+    assert_eq!(plan.declared.len(), 1);
+    assert_eq!(
+        (plan.declared[0].name.as_str(), plan.declared[0].alias.as_deref()),
+        ("rustfs:GetProfileCpu", None)
+    );
+    assert_eq!(
+        plan.staying,
+        [(
+            "GET".to_owned(),
+            "/health".to_owned(),
+            "health".to_owned(),
+            "the probe layer (ADR-0026 (h))"
+        )]
+    );
+    let mut only_profile = routes();
+    only_profile.remove(0);
+    only_profile[0].minio_admin_alias = false;
+    let stale = super::plan(&inventory(only_profile), &[], &[], stays)
+        .err()
+        .expect("a stale staying route");
+    assert!(stale.contains("the staying route GET /health is not in the inventory"), "{stale}");
+
+    let recorded = recorded_plan();
+    let staying: Vec<(&str, &str)> = recorded
+        .staying
+        .iter()
+        .map(|(method, path, ..)| (method.as_str(), path.as_str()))
+        .collect();
+    assert_eq!(
+        staying,
+        [
+            ("GET", "/health"),
+            ("GET", "/health/ready"),
+            ("GET", "/rustfs/admin/v3/object-zip-downloads/{id}.zip"),
+            ("HEAD", "/health"),
+            ("HEAD", "/health/ready"),
+            ("POST", "/"),
+            ("POST", "/rustfs/admin/v3/object-zip-downloads"),
+        ]
+    );
+    let anonymous: Vec<&str> = recorded
+        .declared
+        .iter()
+        .filter(|declared| declared.rule.anonymous)
+        .map(|declared| declared.name.as_str())
+        .collect();
+    assert_eq!(
+        anonymous,
+        [
+            "rustfs:GetV3OidcAuthorizeByProviderId",
+            "rustfs:GetV3OidcCallbackByProviderId",
+            "rustfs:GetV3OidcLogout",
+            "rustfs:GetV3OidcProviders",
+        ]
+    );
 }

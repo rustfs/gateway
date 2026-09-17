@@ -87,6 +87,7 @@ second copy is a second thing to keep in sync.
 | 0029 | RustFS's alias spellings of a subject parameter name the same account | Accepted |
 | 0030 | Bound buckets, query buckets and the trailing-slash heal route for RustFS's order-5 admin routes | Accepted |
 | 0031 | The table catalog's two surfaces as claims and alias rows, `{warehouse}` bound, and first-divergence shadowing | Accepted |
+| 0032 | The last admin orders: the anonymous OIDC bootstrap generated, the profiling claims, and the routes that stay with RustFS | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

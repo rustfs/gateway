@@ -112,7 +112,7 @@ impl AdminOperation for PostV3KmsKeysUpdateDescription {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 302,
+    precedence: 311,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/keys/update-description\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/keys/update-description\") ∧ Method(POST)",
     action: "kms:UpdateKeyDescription",
     resource: ResourceShape::Service,
@@ -137,6 +137,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "UpdateKmsKeyDescriptionHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

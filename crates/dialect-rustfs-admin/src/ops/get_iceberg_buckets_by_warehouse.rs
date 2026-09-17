@@ -140,7 +140,7 @@ impl AdminOperation for GetIcebergBucketsByWarehouse {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 125,
+    precedence: 126,
     selector: "PathTemplate(\"/_iceberg/v1/buckets/{warehouse}\") ∧ Method(GET) ∨ PathTemplate(\"/iceberg/v1/buckets/{warehouse}\") ∧ Method(GET) ⇒ BucketParam(\"warehouse\")",
     action: "admin:GetTableBucket",
     resource: ResourceShape::Bucket,
@@ -168,6 +168,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "GetTableBucketHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

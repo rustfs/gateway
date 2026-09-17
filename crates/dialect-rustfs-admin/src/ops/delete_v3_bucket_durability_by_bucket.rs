@@ -148,6 +148,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "DeleteBucketDurabilityHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

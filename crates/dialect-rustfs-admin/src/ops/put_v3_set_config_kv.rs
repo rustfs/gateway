@@ -112,7 +112,7 @@ impl AdminOperation for PutV3SetConfigKv {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 367,
+    precedence: 378,
     selector: "PathTemplate(\"/rustfs/admin/v3/set-config-kv\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/set-config-kv\") ∧ Method(PUT)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,
@@ -137,6 +137,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "SetConfigKVHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

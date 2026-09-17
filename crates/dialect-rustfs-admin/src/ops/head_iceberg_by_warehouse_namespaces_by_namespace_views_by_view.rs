@@ -124,7 +124,7 @@ impl AdminOperation for HeadIcebergByWarehouseNamespacesByNamespaceViewsByView {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 249,
+    precedence: 258,
     selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/namespaces/{namespace}/views/{view}\") ∧ Method(HEAD) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/namespaces/{namespace}/views/{view}\") ∧ Method(HEAD) ⇒ BucketParam(\"warehouse\")",
     action: "admin:GetTable",
     resource: ResourceShape::Bucket,
@@ -152,6 +152,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "RestViewExistsHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

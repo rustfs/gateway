@@ -125,7 +125,7 @@ impl AdminOperation for PostIcebergByWarehouseNamespacesByNamespaceTablesByTable
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 256,
+    precedence: 265,
     selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/catalog/external/sync\") ∧ Method(POST) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/catalog/external/sync\") ∧ Method(POST) ⇒ BucketParam(\"warehouse\")",
     action: "admin:SetTableMetadataLocation",
     resource: ResourceShape::Bucket,
@@ -153,6 +153,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "SyncExternalCatalogBridgeHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,
