@@ -129,7 +129,7 @@ impl AdminOperation for PostV3UpdateServiceAccount {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 342,
+    precedence: 352,
     selector: "PathTemplate(\"/rustfs/admin/v3/update-service-account\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/update-service-account\") ∧ Method(POST)",
     action: "admin:UpdateServiceAccount about query(accessKey|access-key, absent=refused)",
     resource: ResourceShape::Service,
@@ -156,6 +156,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: Some("ContextualAuthorization"),
     subject: Some(SUBJECT),
     bucket: None,
+    anonymous: false,
     rustfs_handler: "UpdateServiceAccount",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

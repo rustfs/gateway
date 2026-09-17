@@ -67,6 +67,9 @@ pub(super) struct Form {
     pub(super) query: Option<(&'static str, &'static str)>,
     pub(super) rule: Ruled,
     pub(super) about: Option<About>,
+    /// Whether the operation opts in to anonymous requests (ADR-0026 (f)): only a route the
+    /// inventory records as anonymous, and only under a label in the dialect's own namespace.
+    pub(super) anonymous: bool,
 }
 
 /// ADR-0025's ruling for a custom-auth route, which the inventory records without an action.
@@ -83,6 +86,7 @@ const fn one(action: &'static str) -> Form {
         query: None,
         rule: Ruled::One(action),
         about: None,
+        anonymous: false,
     }
 }
 
@@ -91,6 +95,7 @@ const fn any_of(actions: &'static [&'static str]) -> Form {
         query: None,
         rule: Ruled::AnyOf(actions),
         about: None,
+        anonymous: false,
     }
 }
 
@@ -99,6 +104,7 @@ const fn service(value: &'static str, action: &'static str) -> Form {
         query: Some(("action", value)),
         rule: Ruled::One(action),
         about: None,
+        anonymous: false,
     }
 }
 
@@ -109,6 +115,20 @@ const fn own(label: &'static str) -> Form {
         query: None,
         rule: Ruled::One(label),
         about: Some(About::Caller),
+        anonymous: false,
+    }
+}
+
+/// An anonymous bootstrap operation: RustFS makes no IAM check, so its action is a label in the
+/// dialect's own namespace, RustFS's handler name without `Handler`; the floor opts in to
+/// anonymous requests and the authorizer is still asked, with no identity (ADR-0026 (f),
+/// ADR-0032 (a)).
+const fn bootstrap(label: &'static str) -> Form {
+    Form {
+        query: None,
+        rule: Ruled::One(label),
+        about: None,
+        anonymous: true,
     }
 }
 
@@ -119,6 +139,7 @@ const fn named(action: &'static str, param: &'static str, aliases: &'static [&'s
         query: None,
         rule: Ruled::One(action),
         about: Some(About::Query { param, aliases, absent }),
+        anonymous: false,
     }
 }
 
@@ -136,6 +157,7 @@ const BULK: &[Form] = &[Form {
         param: "users",
         everyone: Some(("all", "admin:ListUsers")),
     }),
+    anonymous: false,
 }];
 
 /// RustFS's policy-entities gate: any one of the three listing actions (`policies.rs`).
@@ -158,6 +180,47 @@ const fn ruling(method: &'static str, path: &'static str, auth_detail: &'static 
 pub(super) const QUERY_BUCKETS: &[(&str, &str, &str)] = &[
     ("GET", "/rustfs/admin/v3/get-bucket-quota", "bucket"),
     ("PUT", "/rustfs/admin/v3/set-bucket-quota", "bucket"),
+];
+
+/// The routes that stay with RustFS, each for a recorded reason (ADR-0026 (g), (h), ADR-0032 (b)):
+/// `(method, path, reason)`. They are declared as no operation and listed in the dialect's
+/// `STAYING`, so the census stays exact.
+pub(super) const STAYS: &[(&str, &str, &str)] = &[
+    (
+        "GET",
+        "/rustfs/admin/v3/object-zip-downloads/{id}.zip",
+        "An affixed `{id}.zip` parameter and a bearer token in the query: it needs a per-operation bearer scheme on the floor (ADR-0026 (g)).",
+    ),
+    (
+        "POST",
+        "/rustfs/admin/v3/object-zip-downloads",
+        "It authorises S3 resources named in its body and only mints the token the download route consumes, which stays with RustFS (ADR-0025 (d), ADR-0026 (g), ADR-0032 (b)).",
+    ),
+    (
+        "POST",
+        "/",
+        "STS: the action is in the form body and authentication is mixed; it needs its own ADR and is inside no claim (ADR-0026 (g)).",
+    ),
+    (
+        "GET",
+        "/health",
+        "The server's probe layer, ahead of the S3 service; a one-segment path is no claim (ADR-0026 (h)).",
+    ),
+    (
+        "HEAD",
+        "/health",
+        "The server's probe layer, ahead of the S3 service; a one-segment path is no claim (ADR-0026 (h)).",
+    ),
+    (
+        "GET",
+        "/health/ready",
+        "The server's probe layer, ahead of the S3 service (ADR-0026 (h)).",
+    ),
+    (
+        "HEAD",
+        "/health/ready",
+        "The server's probe layer, ahead of the S3 service (ADR-0026 (h)).",
+    ),
 ];
 
 /// The rulings for the migrated groups' custom-auth routes, in the inventory's order within each
@@ -310,5 +373,25 @@ pub(super) const RULINGS: &[Ruling] = &[
         "/rustfs/admin/v3/usage/{bucket}",
         "MultipleActions",
         &[any_of(&["admin:DataUsageInfo", "s3:ListBucket"])],
+    ),
+    // ── order 7: the anonymous OIDC bootstrap (ADR-0026 (f), ADR-0032 (a)) ──
+    ruling(
+        "GET",
+        "/rustfs/admin/v3/oidc/authorize/{provider_id}",
+        "OidcBootstrap",
+        &[bootstrap("rustfs:OidcAuthorize")],
+    ),
+    ruling(
+        "GET",
+        "/rustfs/admin/v3/oidc/callback/{provider_id}",
+        "OidcBootstrap",
+        &[bootstrap("rustfs:OidcCallback")],
+    ),
+    ruling("GET", "/rustfs/admin/v3/oidc/logout", "OidcBootstrap", &[bootstrap("rustfs:OidcLogout")]),
+    ruling(
+        "GET",
+        "/rustfs/admin/v3/oidc/providers",
+        "OidcBootstrap",
+        &[bootstrap("rustfs:ListOidcProviders")],
     ),
 ];

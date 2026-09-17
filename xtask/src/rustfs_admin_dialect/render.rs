@@ -158,6 +158,9 @@ fn evidence(d: &Declared) -> String {
     if d.path.starts_with("/_iceberg/") {
         cited.push("record::ADR_0031".to_owned());
     }
+    if d.rule.anonymous || d.path.starts_with("/profile/") {
+        cited.push("record::ADR_0032".to_owned());
+    }
     cited.push("record::ISSUE".to_owned());
     format!("&[{}]", cited.join(", "))
 }
@@ -239,6 +242,16 @@ pub(super) fn render_operation(declared: &Declared) -> String {
     if let Some(about) = d.rule.about {
         out.push_str("//!\n");
         out.push_str(&subject_doc(about, &d.rule.actions()));
+    }
+    if d.rule.anonymous {
+        let _ = write!(
+            out,
+            "//!\n//! It admits anonymous requests: RustFS's router lets this bootstrap route through before any login, and\n\
+             //! makes no IAM check, so its action is the vendor label `{}`. The floor's own opt-in lists it in the\n\
+             //! start-up posture report, the authorizer is still asked, with no identity, so a deployment can\n\
+             //! refuse, and a presigned request stays refused (ADR-0026 (f), ADR-0032).\n",
+            d.rule.actions().first().copied().unwrap_or_default()
+        );
     }
     out.push_str(&bucket_doc(d));
     for shadow in &d.shadows {
@@ -351,8 +364,16 @@ pub(super) fn render_operation(declared: &Declared) -> String {
     }
     let _ = writeln!(out, "/// `{request}`.\n#[derive(Debug)]\npub struct {};\n", d.type_name);
     let _ = writeln!(out, "static SPEC: OperationSpec = admin::spec(NAME, AUTH, {});\n", d.caller_secret);
-    out.push_str("/// Privileged and header-signed only: never anonymous, never presigned.\n");
-    out.push_str("static FLOOR: OperationFloor = admin::floor(NAME);\n\n");
+    if d.rule.anonymous {
+        out.push_str(
+            "/// Header-signed or anonymous, never presigned: the floor opts in to anonymous requests, which the\n\
+             /// start-up posture report lists, and the authorizer is still asked, with no identity (ADR-0026 (f)).\n",
+        );
+        out.push_str("static FLOOR: OperationFloor = admin::anonymous_floor(NAME);\n\n");
+    } else {
+        out.push_str("/// Privileged and header-signed only: never anonymous, never presigned.\n");
+        out.push_str("static FLOOR: OperationFloor = admin::floor(NAME);\n\n");
+    }
     let _ = write!(
         out,
         "impl Operation for {ty} {{
@@ -407,7 +428,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {{
     action: {action:?},
     resource: {resource},
     success_status: 200,
-    anonymous: false,
+    anonymous: {anonymous},
     evidence: {evidence},
 }};
 
@@ -424,6 +445,7 @@ pub const RECORD: RouteRecord = RouteRecord {{
     ruled: {ruled},
     subject: {subject},
     bucket: {bucket},
+    anonymous: {anonymous},
     rustfs_handler: {handler:?},
     request_body: BodyKind::{request_body},
     response_body: BodyKind::{response_body},
@@ -437,6 +459,7 @@ pub const RECORD: RouteRecord = RouteRecord {{
         selector = format!("{}{}", rendered_selector(d), d.bucket.as_ref().map(Bound::rendered).unwrap_or_default()),
         action = d.rule.render(),
         resource = resource,
+        anonymous = d.rule.anonymous,
         bucket_const = if d.bucket.is_some() {
             "    const BUCKET: Option<BucketParam> = Some(BUCKET);\n"
         } else {
@@ -490,14 +513,16 @@ fn render_table_root(plan: &Plan, commit: &str) -> String {
     let mut out = String::from(LICENSE);
     out.push_str("//! The dialect's generated table: the overlay rows, the route records, the pending groups, and the\n");
     out.push_str("//! one list of every operation.\n//!\n");
-    out.push_str("//! Responsible for: [`RUSTFS_SOURCE_COMMIT`] and [`PENDING`] here, and the three per-operation lists\n");
+    out.push_str(
+        "//! Responsible for: [`RUSTFS_SOURCE_COMMIT`], [`PENDING`] and [`STAYING`] here, and the three per-operation lists\n",
+    );
     out.push_str("//! in their own files (`overlay`, `routes`, `fold`), each in inventory order. NOT responsible for: the\n");
     out.push_str("//! claims or the assembly (`crate::dialect`), or any operation's declaration (`crate::ops`).\n");
     out.push_str("//! Upstream: the generator and `crate::ops`. Downstream: `crate::dialect`, the tests, and a deployment\n");
     out.push_str("//! that walks every operation.\n\n");
     out.push_str("mod fold;\nmod overlay;\nmod routes;\n\n");
     out.push_str("pub use fold::fold_every_operation;\npub(crate) use overlay::OVERLAY_ROWS;\npub use routes::ROUTES;\n\n");
-    out.push_str("use crate::record::PendingGroup;\n\n");
+    out.push_str("use crate::record::{PendingGroup, StayingRoute};\n\n");
     let _ = writeln!(
         out,
         "/// The RustFS commit the inventory was recorded from.\npub const RUSTFS_SOURCE_COMMIT: &str = {commit:?};\n"
@@ -506,6 +531,15 @@ fn render_table_root(plan: &Plan, commit: &str) -> String {
     out.push_str("pub static PENDING: &[PendingGroup] = &[\n");
     for (group, order, routes) in &plan.pending {
         let _ = writeln!(out, "    PendingGroup {{ group: {group:?}, order: {order}, routes: {routes} }},");
+    }
+    out.push_str("];\n\n");
+    out.push_str("/// Every route of a migrated group that stays with RustFS, with the recorded reason (ADR-0032).\n");
+    out.push_str("pub static STAYING: &[StayingRoute] = &[\n");
+    for (method, path, group, reason) in &plan.staying {
+        let _ = writeln!(
+            out,
+            "    StayingRoute {{ method: {method:?}, path: {path:?}, group: {group:?}, reason: {reason:?} }},"
+        );
     }
     out.push_str("];\n");
     out

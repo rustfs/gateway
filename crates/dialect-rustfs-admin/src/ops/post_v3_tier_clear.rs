@@ -129,7 +129,7 @@ impl AdminOperation for PostV3TierClear {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 339,
+    precedence: 349,
     selector: "PathTemplate(\"/rustfs/admin/v3/tier/clear\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/tier/clear\") ∧ Method(POST)",
     action: "admin:SetTier",
     resource: ResourceShape::Service,
@@ -155,6 +155,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "ClearTier",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

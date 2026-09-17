@@ -153,6 +153,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "DeleteTableRefHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

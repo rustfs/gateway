@@ -140,6 +140,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "RemoveAuditTarget",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

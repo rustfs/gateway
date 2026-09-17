@@ -44,6 +44,10 @@ pub(crate) const ADR_0028: &str = "https://github.com/rustfs/gateway/blob/main/d
 /// ADR-0030, which every row that binds its bucket, and the trailing-slash heal row, cite.
 pub(crate) const ADR_0030: &str = "https://github.com/rustfs/gateway/blob/main/docs/adr/0030-order-five-admin-bound-buckets.md";
 
+/// ADR-0032, which every anonymous bootstrap row and every `/profile` row cites.
+pub(crate) const ADR_0032: &str =
+    "https://github.com/rustfs/gateway/blob/main/docs/adr/0032-last-admin-orders-anonymous-bootstrap-and-staying-routes.md";
+
 /// ADR-0031, which every table-catalog row cites: the surface's claims, its compat alias rows,
 /// and the first-divergence shadowing rule.
 pub(crate) const ADR_0031: &str = "https://github.com/rustfs/gateway/blob/main/docs/adr/0031-order-six-table-catalog-surfaces.md";
@@ -93,6 +97,9 @@ pub struct RouteRecord {
     /// (ADR-0026 (e)); `None` for a service-level operation (ADR-0024 (e), ADR-0027). The same
     /// binding the operation's `ClaimedRoute` carries (ADR-0030).
     pub bucket: Option<BucketParam>,
+    /// Whether the operation admits anonymous requests, which only RustFS's OIDC bootstrap routes
+    /// do (ADR-0026 (f), ADR-0032). The same fact the operation's floor and overlay row carry.
+    pub anonymous: bool,
     /// The RustFS handler the inventory names.
     pub rustfs_handler: &'static str,
     /// How RustFS reads the request body.
@@ -101,6 +108,20 @@ pub struct RouteRecord {
     pub response_body: BodyKind,
     /// Whether the handler is handed the caller's secret.
     pub caller_secret: bool,
+}
+
+/// A route of a migrated group that stays with RustFS: it is declared as no operation, for the
+/// recorded reason (ADR-0026 (g), (h), ADR-0032 (b)).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StayingRoute {
+    /// The method.
+    pub method: &'static str,
+    /// The path, as the inventory records it.
+    pub path: &'static str,
+    /// The ADR-0024 registration group.
+    pub group: &'static str,
+    /// Why the gateway does not serve it, with the ADR that decided so.
+    pub reason: &'static str,
 }
 
 /// A registration group whose routes RustFS still serves itself.

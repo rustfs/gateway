@@ -111,7 +111,7 @@ impl AdminOperation for PutV3SiteReplicationResyncOp {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 386,
+    precedence: 397,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/resync/op\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/site-replication/resync/op\") ∧ Method(PUT)",
     action: "admin:SiteReplicationResync",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "SiteReplicationResyncOpHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

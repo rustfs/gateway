@@ -9,10 +9,10 @@ change the inventory or `xtask/src/rustfs_admin_dialect.rs`, then regenerate.
 | File | Responsibility | Read it when |
 |---|---|---|
 | `src/lib.rs` | Crate root: re-exports the dialect, the shared shapes and the generated tables. | Finding the public surface. |
-| `src/admin.rs` | The shapes every operation shares: `AdminResponse`, the spec and floor constructors, the body decoders and the response encoder, `AdminOperation` and `OperationFold`. | Changing what a handler receives or answers, or how every operation is authorised. |
-| `src/record.rs` | The shapes of `ROUTES` and `PENDING`: what each operation was generated from (its subject rule and bucket binding included), and the groups not migrated yet. | Reporting which admin routes the gateway serves. |
-| `src/dialect.rs` | The four path-prefix claims (admin API and table catalog, each under its RustFS and compat spelling), the overlay, and `rustfs_admin_dialect()`, which declares every generated operation. | Installing the dialect, or a claim changes. |
-| `src/table.rs` | Generated: `PENDING` and the source commit, and re-exports of the three lists below. | Checking which groups are pending. |
+| `src/admin.rs` | The shapes every operation shares: `AdminResponse`, the spec and the two floor constructors (privileged, and the anonymous bootstrap's), the body decoders and the response encoder, `AdminOperation` and `OperationFold`. | Changing what a handler receives or answers, or how every operation is authorised. |
+| `src/record.rs` | The shapes of `ROUTES`, `PENDING` and `STAYING`: what each operation was generated from (its subject rule, bucket binding and anonymous opt-in included), the groups not migrated yet, and the routes that stay with RustFS. | Reporting which admin routes the gateway serves. |
+| `src/dialect.rs` | The six path-prefix claims (admin API and table catalog, each under its RustFS and compat spelling, and the two profiling triggers), the overlay, and `rustfs_admin_dialect()`, which declares every generated operation. | Installing the dialect, or a claim changes. |
+| `src/table.rs` | Generated: `PENDING`, `STAYING` and the source commit, and re-exports of the three lists below. | Checking which groups are pending. |
 | `src/table/{overlay,routes,fold}.rs` | Generated: the overlay rows, `ROUTES`, and `fold_every_operation`, each one list of every operation in inventory order. | Checking which routes are migrated; never edited. |
 | `src/ops/mod.rs` | Generated: mounts one module per operation. | Never; read one operation file instead. |
 | `src/ops/<operation>.rs` | Generated: one operation's name, rows, action, subject rule and bucket binding, specification, floor, codec, overlay row and record. | Reviewing one route's declaration. |

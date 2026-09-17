@@ -137,6 +137,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "DeleteKmsKeyHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

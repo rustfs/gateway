@@ -33,5 +33,5 @@ mod table;
 
 pub use admin::{AdminBody, AdminOperation, AdminResponse, OperationFold};
 pub use dialect::{CLAIMS, OVERLAY, rustfs_admin_dialect};
-pub use record::{BodyKind, PendingGroup, RouteRecord};
-pub use table::{PENDING, ROUTES, RUSTFS_SOURCE_COMMIT, fold_every_operation};
+pub use record::{BodyKind, PendingGroup, RouteRecord, StayingRoute};
+pub use table::{PENDING, ROUTES, RUSTFS_SOURCE_COMMIT, STAYING, fold_every_operation};

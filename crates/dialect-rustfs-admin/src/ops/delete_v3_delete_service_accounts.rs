@@ -155,6 +155,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: Some("ContextualAuthorization"),
     subject: Some(SUBJECT),
     bucket: None,
+    anonymous: false,
     rustfs_handler: "DeleteServiceAccount",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

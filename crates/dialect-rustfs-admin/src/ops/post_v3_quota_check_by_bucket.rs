@@ -124,7 +124,7 @@ impl AdminOperation for PostV3QuotaCheckByBucket {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 318,
+    precedence: 328,
     selector: "PathTemplate(\"/rustfs/admin/v3/quota-check/{bucket}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/quota-check/{bucket}\") ∧ Method(POST) ⇒ BucketParam(\"bucket\")",
     action: "s3:GetBucketQuota",
     resource: ResourceShape::Bucket,
@@ -152,6 +152,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: Some("S3Action"),
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "CheckBucketQuotaHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

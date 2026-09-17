@@ -114,7 +114,7 @@ impl AdminOperation for DeleteV3TargetByTargetTypeByTargetNameReset {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 121,
+    precedence: 122,
     selector: "PathTemplate(\"/rustfs/admin/v3/target/{target_type}/{target_name}/reset\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/target/{target_type}/{target_name}/reset\") ∧ Method(DELETE)",
     action: "admin:SetBucketTarget",
     resource: ResourceShape::Service,
@@ -140,6 +140,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "RemoveNotificationTarget",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

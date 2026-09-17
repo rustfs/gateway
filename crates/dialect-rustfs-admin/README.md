@@ -1,24 +1,31 @@
 # rustfs-gateway-dialect-rustfs-admin
 
-RustFS's admin API and Iceberg REST table catalog as gateway dialect operations (rustfs/backlog#1744, ADR-0024 to ADR-0031).
+RustFS's admin API and Iceberg REST table catalog as gateway dialect operations (rustfs/backlog#1744, ADR-0024 to ADR-0032).
 
 RustFS consumes this crate: it installs the dialect and registers its own handlers. Nothing here
 depends on RustFS, and no handler lives here.
 
-- `rustfs_admin_dialect()`: the `/rustfs/admin`, `/minio/admin`, `/_iceberg/v1` and `/iceberg/v1`
-  path-prefix claims and one claimed operation per migrated route, each with its MinIO alias row
-  or, for the table catalog, its `/iceberg/v1` compat row (ADR-0031).
+- `rustfs_admin_dialect()`: the `/rustfs/admin`, `/minio/admin`, `/_iceberg/v1`, `/iceberg/v1`,
+  `/profile/cpu` and `/profile/memory` path-prefix claims and one claimed operation per migrated
+  route, each with its MinIO alias row or, for the table catalog, its `/iceberg/v1` compat row
+  (ADR-0031); the two profiling triggers have no alias (ADR-0032).
 - One type per operation under `ops`, generated from the recorded route inventory
   (`crates/goldens/src/migration_inventory/rustfs_admin_routes.json`) by
   `cargo xtask rustfs-admin-dialect`. Each carries its name, rows, action, specification, floor
   and codec. An input is `()` when RustFS reads no body, the raw bytes when it buffers an opaque
   JSON or binary body, and the live stream when it streams one. Every output is an
   `AdminResponse`.
-- `ROUTES` records the inventory facts each operation was generated from, and `PENDING` lists the
-  registration groups that are not migrated yet, with their route counts.
+- `ROUTES` records the inventory facts each operation was generated from, `PENDING` lists the
+  registration groups that are not migrated yet (none today), and `STAYING` lists the seven routes
+  the gateway deliberately does not serve, each with its reason: a deployment keeps routing those
+  itself (ADR-0032).
 
 Every operation is privileged and header-signed only: never anonymous, never presigned, and never
-handed the caller's secret unless its inventory row says RustFS seals a body with it.
+handed the caller's secret unless its inventory row says RustFS seals a body with it. The one
+exception is RustFS's four OIDC bootstrap routes (`oidc/authorize/{provider_id}`,
+`oidc/callback/{provider_id}`, `oidc/logout`, `oidc/providers`), which admit an anonymous request:
+the floor's per-operation opt-in lists them in the start-up posture report, their action is their
+own `rustfs:` label, and the authorizer is still asked, with no identity (ADR-0026 (f), ADR-0032).
 
 A `{bucket}` or `{warehouse}` template parameter is the bucket the operation is authorised on
 (`BucketParam::Path`, ADR-0025 (c), ADR-0030): the raw segment meets the S3 bucket-name rules

@@ -111,7 +111,7 @@ impl AdminOperation for PostV3PoolsCancel {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 313,
+    precedence: 323,
     selector: "PathTemplate(\"/rustfs/admin/v3/pools/cancel\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/pools/cancel\") ∧ Method(POST)",
     action: "admin:Decommission",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "CancelDecommission",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

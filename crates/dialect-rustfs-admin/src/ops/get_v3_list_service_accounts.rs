@@ -126,7 +126,7 @@ impl AdminOperation for GetV3ListServiceAccounts {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 199,
+    precedence: 203,
     selector: "PathTemplate(\"/rustfs/admin/v3/list-service-accounts\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/list-service-accounts\") ∧ Method(GET)",
     action: "admin:ListServiceAccounts about query(user, absent=caller)",
     resource: ResourceShape::Service,
@@ -153,6 +153,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: Some("ContextualAuthorization"),
     subject: Some(SUBJECT),
     bucket: None,
+    anonymous: false,
     rustfs_handler: "ListServiceAccount",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

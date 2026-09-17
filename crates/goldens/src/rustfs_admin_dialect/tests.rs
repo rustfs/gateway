@@ -29,7 +29,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustfs_gateway_core::SubjectRule;
-use rustfs_gateway_dialect_rustfs_admin::{BodyKind, PENDING, ROUTES, RouteRecord};
+use rustfs_gateway_dialect_rustfs_admin::{BodyKind, PENDING, ROUTES, RouteRecord, STAYING};
 
 use super::{
     Exchange, actions, assemble, declared, expected_bucket, expected_subject, expected_subjects, in_lanes, param, paths,
@@ -94,15 +94,34 @@ fn parameters() -> impl Iterator<Item = (&'static RouteRecord, &'static str, usi
 #[test]
 fn every_migrated_route_is_declared_as_the_inventory_records_it() {
     let inventory = rustfs_admin_route_inventory().expect("the recorded inventory validates");
-    let migrated: BTreeSet<&str> = ROUTES.iter().map(|record| record.group).collect();
+    let migrated: BTreeSet<&str> = ROUTES
+        .iter()
+        .map(|record| record.group)
+        .chain(STAYING.iter().map(|route| route.group))
+        .collect();
     let mut canonical = 0;
     let mut compat = 0;
+    let mut staying = 0;
     for route in inventory
         .routes()
         .iter()
         .filter(|route| migrated.contains(route.group.as_str()))
     {
         let at = route.key();
+        if STAYING
+            .iter()
+            .any(|stays| stays.method == route.method.as_str() && stays.path == route.path && stays.group == route.group)
+        {
+            // It stays with RustFS for its recorded reason (ADR-0032 (b)), and is no operation.
+            assert!(
+                !ROUTES
+                    .iter()
+                    .any(|record| record.method == route.method.as_str() && record.path == route.path),
+                "{at}: a staying route is declared"
+            );
+            staying += 1;
+            continue;
+        }
         if route.path.starts_with("/iceberg/v1/") {
             let by_alias: Vec<&RouteRecord> = ROUTES
                 .iter()
@@ -143,13 +162,20 @@ fn every_migrated_route_is_declared_as_the_inventory_records_it() {
                     assert_eq!((record.ruled, record.query, records.len()), (None, None, 1), "{at}");
                 }
                 AdminAuthMode::Custom => assert_eq!(record.ruled, route.auth_detail.as_deref(), "{at}"),
-                AdminAuthMode::Anonymous => panic!("{at}: an anonymous route was declared"),
+                AdminAuthMode::Anonymous => {
+                    // Only the OIDC bootstrap is declared anonymous, under its own label (ADR-0026 (f)).
+                    assert_eq!(route.auth_detail.as_deref(), Some("OidcBootstrap"), "{at}");
+                    assert_eq!(record.ruled, route.auth_detail.as_deref(), "{at}");
+                    assert!(record.action.starts_with("rustfs:"), "{at}: {}", record.action);
+                }
             }
+            assert_eq!(record.anonymous, matches!(route.auth_mode, AdminAuthMode::Anonymous), "{at}");
         }
         canonical += records.len();
     }
     assert_eq!(canonical, ROUTES.len(), "a declared operation has no inventory route");
     assert_eq!(compat, 49, "every table-catalog route has its compat row");
+    assert_eq!((staying, STAYING.len()), (7, 7), "every staying route is an inventory route");
 }
 
 /// Positive — the pending groups are exactly the inventory's other groups, each with its
@@ -157,7 +183,11 @@ fn every_migrated_route_is_declared_as_the_inventory_records_it() {
 #[test]
 fn the_pending_groups_are_the_rest_of_the_inventory() {
     let inventory = rustfs_admin_route_inventory().expect("the recorded inventory validates");
-    let migrated: BTreeSet<&str> = ROUTES.iter().map(|record| record.group).collect();
+    let migrated: BTreeSet<&str> = ROUTES
+        .iter()
+        .map(|record| record.group)
+        .chain(STAYING.iter().map(|route| route.group))
+        .collect();
     let mut rest: BTreeMap<&str, u16> = BTreeMap::new();
     for route in inventory.routes() {
         if !migrated.contains(route.group.as_str()) {
@@ -180,7 +210,7 @@ fn the_pending_groups_are_the_rest_of_the_inventory() {
         })
         .collect();
     let pending_routes: usize = PENDING.iter().map(|pending| usize::from(pending.routes)).sum();
-    assert_eq!(declared_routes.len() + pending_routes, inventory.routes().len());
+    assert_eq!(declared_routes.len() + pending_routes + STAYING.len(), inventory.routes().len());
 }
 
 // ── every row through the assembled service ─────────────────────────────────────────────────
@@ -331,14 +361,54 @@ fn n_every_other_action_does_not_authorise_a_row() {
 /// the authorizer.
 #[test]
 fn n_an_unsigned_row_is_refused_without_asking() {
+    let privileged: Vec<_> = rows().filter(|(record, _)| !record.anonymous).collect();
+    assert_eq!(privileged.len(), 604 - 8, "every row but the four bootstrap operations' eight");
     in_lanes(
         |_, _| true,
-        &rows().collect::<Vec<_>>(),
+        &privileged,
         |assembled, (record, path)| {
             let exchange = assembled.exchange(unsigned(record, path));
             refused_without_asking(&exchange, &format!("{} {path}", record.method));
         },
     );
+}
+
+/// Positive and negative — exactly the eight rows of RustFS's four OIDC bootstrap operations admit
+/// an unsigned request: the authorizer is asked the operation's own label with no identity, no
+/// bucket and no account, and the handler runs only when it allows; when it denies, the request is
+/// refused before the handler; and a signed request for the same row is judged as its caller
+/// (ADR-0026 (f), ADR-0032).
+#[test]
+fn an_anonymous_bootstrap_row_is_admitted_only_by_the_authorizer() {
+    let bootstrap: Vec<_> = rows().filter(|(record, _)| record.anonymous).collect();
+    let names: BTreeSet<&str> = bootstrap.iter().map(|(record, _)| record.operation).collect();
+    assert_eq!((bootstrap.len(), names.len()), (8, 4));
+    for (record, path) in &bootstrap {
+        let at = format!("{} {path}", record.method);
+        let allowed = assemble(|_, _| true).exchange(unsigned(record, path));
+        assert_eq!(allowed.status, 200, "{at}: {}", allowed.body);
+        assert_eq!(allowed.reached, [record.operation], "{at}");
+        assert!(!allowed.asked.is_empty(), "{at}: the authorizer was not asked");
+        for asked in &allowed.asked {
+            assert_eq!((asked.action.as_str(), asked.caller.as_deref()), (record.action, None), "{at}");
+            assert_eq!((asked.bucket.as_deref(), asked.subject.clone()), (None, None), "{at}");
+        }
+        assert!(!allowed.handed[0].holds_secret, "{at}");
+
+        let denied = assemble(|_, _| false).exchange(unsigned(record, path));
+        assert_eq!(denied.status, 403, "{at}: {}", denied.body);
+        assert!(denied.reached.is_empty() && !denied.asked.is_empty(), "{at}");
+
+        let signed_in = assemble(|_, _| true).exchange(wire(&signed(record, path)));
+        assert_eq!(signed_in.status, 200, "{at}: {}", signed_in.body);
+        assert!(
+            signed_in
+                .asked
+                .iter()
+                .all(|asked| asked.caller.as_deref() == Some(ACCESS_KEY)),
+            "{at}"
+        );
+    }
 }
 
 /// Negative — a forged signature or an unknown access key is refused without asking the
@@ -367,7 +437,7 @@ fn n_a_forged_or_unknown_key_row_is_refused_without_asking() {
 #[test]
 fn n_a_presigned_row_is_refused_without_asking() {
     let presignable: Vec<_> = rows().filter(|(record, _)| record.query.is_none()).collect();
-    assert_eq!(presignable.len(), 576, "every row but the service command's eight");
+    assert_eq!(presignable.len(), 596, "every row but the service command's eight");
     in_lanes(
         |_, _| true,
         &presignable,
@@ -397,7 +467,7 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
                 .map(|(raw, status)| (record, with_segment(template, Some(index), raw), name, raw, status))
         })
         .collect();
-    assert_eq!(cases.len(), 5 * 2 * 177, "177 parameters across 92 templates, each with its alias");
+    assert_eq!(cases.len(), 5 * 2 * 181, "181 parameters across 96 templates, each with its alias");
     in_lanes(
         |_, _| true,
         &cases,

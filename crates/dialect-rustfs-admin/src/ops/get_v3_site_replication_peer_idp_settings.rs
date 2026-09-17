@@ -111,7 +111,7 @@ impl AdminOperation for GetV3SiteReplicationPeerIdpSettings {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 222,
+    precedence: 231,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/peer/idp-settings\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/site-replication/peer/idp-settings\") ∧ Method(GET)",
     action: "admin:SiteReplicationAdd",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "SRPeerGetIDPSettingsHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

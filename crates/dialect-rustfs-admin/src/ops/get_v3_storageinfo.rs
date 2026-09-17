@@ -111,7 +111,7 @@ impl AdminOperation for GetV3Storageinfo {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 227,
+    precedence: 236,
     selector: "PathTemplate(\"/rustfs/admin/v3/storageinfo\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/storageinfo\") ∧ Method(GET)",
     action: "admin:StorageInfo",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "StorageInfoHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

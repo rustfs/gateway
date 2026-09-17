@@ -122,7 +122,7 @@ impl AdminOperation for PostIcebergByWarehouseTablesRename {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 267,
+    precedence: 276,
     selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/tables/rename\") ∧ Method(POST) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/tables/rename\") ∧ Method(POST) ⇒ BucketParam(\"warehouse\")",
     action: "admin:SetTable",
     resource: ResourceShape::Bucket,
@@ -150,6 +150,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "RestRenameTableHandler",
     request_body: BodyKind::HandedOn,
     response_body: BodyKind::Buffered,

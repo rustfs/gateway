@@ -125,7 +125,7 @@ impl AdminOperation for PutIcebergByWarehouseNamespacesByNamespaceTablesByTableR
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 348,
+    precedence: 358,
     selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/refs/{ref}\") ∧ Method(PUT) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/refs/{ref}\") ∧ Method(PUT) ⇒ BucketParam(\"warehouse\")",
     action: "admin:CommitTable",
     resource: ResourceShape::Bucket,
@@ -153,6 +153,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "PutTableRefHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

@@ -115,7 +115,7 @@ impl AdminOperation for PutV3TargetByTargetTypeByTargetName {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 388,
+    precedence: 399,
     selector: "PathTemplate(\"/rustfs/admin/v3/target/{target_type}/{target_name}\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/target/{target_type}/{target_name}\") ∧ Method(PUT)",
     action: "admin:SetBucketTarget",
     resource: ResourceShape::Service,
@@ -141,6 +141,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "NotificationTarget",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

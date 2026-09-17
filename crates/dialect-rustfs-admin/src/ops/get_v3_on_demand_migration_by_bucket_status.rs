@@ -121,7 +121,7 @@ impl AdminOperation for GetV3OnDemandMigrationByBucketStatus {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 209,
+    precedence: 218,
     selector: "PathTemplate(\"/rustfs/admin/v3/on-demand-migration/{bucket}/status\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/on-demand-migration/{bucket}/status\") ∧ Method(GET) ⇒ BucketParam(\"bucket\")",
     action: "admin:GetBucketOnDemandMigration",
     resource: ResourceShape::Bucket,
@@ -148,6 +148,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "GetBucketOnDemandMigrationStatusHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

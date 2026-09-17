@@ -111,7 +111,7 @@ impl AdminOperation for PutV3SetUserStatus {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 373,
+    precedence: 384,
     selector: "PathTemplate(\"/rustfs/admin/v3/set-user-status\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/set-user-status\") ∧ Method(PUT)",
     action: "admin:EnableUser",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "SetUserStatus",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

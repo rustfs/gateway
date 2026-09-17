@@ -122,7 +122,7 @@ impl AdminOperation for PutV3OnDemandMigrationByBucket {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 363,
+    precedence: 374,
     selector: "PathTemplate(\"/rustfs/admin/v3/on-demand-migration/{bucket}\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/on-demand-migration/{bucket}\") ∧ Method(PUT) ⇒ BucketParam(\"bucket\")",
     action: "admin:SetBucketOnDemandMigration",
     resource: ResourceShape::Bucket,
@@ -149,6 +149,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
+    anonymous: false,
     rustfs_handler: "SetBucketOnDemandMigrationHandler",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

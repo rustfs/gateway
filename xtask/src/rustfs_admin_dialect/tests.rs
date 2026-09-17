@@ -25,10 +25,10 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 
-use super::rulings::Form;
+use super::rulings::{About, Absent, Form, Ruled};
 use super::{
-    About, Absent, FIRST_PRECEDENCE, FORMAT, INVENTORY, Inventory, Plan, QUERY_BUCKETS, RULINGS, Route, Ruled, Ruling, SURFACES,
-    Source, Surface, drift, generate, plan, repo_root, snake, type_name,
+    FIRST_PRECEDENCE, FORMAT, INVENTORY, Inventory, Plan, QUERY_BUCKETS, RULINGS, Route, Ruling, STAYS, SURFACES, Source,
+    Surface, drift, generate, plan, repo_root, snake, type_name,
 };
 
 /// The admin API surface and the table catalog's.
@@ -75,7 +75,7 @@ pub(super) fn planned(routes: Vec<Route>, rulings: &[Ruling]) -> Plan {
 
 /// The plan of `routes` under `rulings` and `query_buckets`.
 pub(super) fn planned_with(routes: Vec<Route>, rulings: &[Ruling], query_buckets: &[(&str, &str, &'static str)]) -> Plan {
-    match plan(&inventory(routes), rulings, query_buckets) {
+    match plan(&inventory(routes), rulings, query_buckets, &[]) {
         Ok(plan) => plan,
         Err(error) => panic!("refused: {error}"),
     }
@@ -87,7 +87,7 @@ pub(super) fn refusal(routes: Vec<Route>, rulings: &[Ruling]) -> String {
 
 /// Why `routes` under `rulings` and `query_buckets` are refused.
 pub(super) fn refusal_with(routes: Vec<Route>, rulings: &[Ruling], query_buckets: &[(&str, &str, &'static str)]) -> String {
-    match plan(&inventory(routes), rulings, query_buckets) {
+    match plan(&inventory(routes), rulings, query_buckets, &[]) {
         Ok(plan) => panic!("planned {} operation(s)", plan.declared.len()),
         Err(error) => error,
     }
@@ -113,7 +113,7 @@ fn the_committed_dialect_is_what_the_inventory_generates() {
     let root = repo_root();
     let files = generate(&root).expect("the recorded inventory generates");
     assert_eq!(drift(&root, &files), Vec::<String>::new());
-    assert_eq!(files.len(), 297, "292 operations, the module list and the table's four files");
+    assert_eq!(files.len(), 308, "303 operations, the module list and the table's four files");
 }
 
 /// Negative — a file committed under a wholly generated directory without being generated, in
@@ -179,13 +179,12 @@ fn n_a_path_without_a_type_name_has_none() {
 /// precedence; a route of a later group is counted as pending, not declared.
 #[test]
 fn a_plain_route_is_declared_and_a_later_group_is_pending() {
-    let plan = planned(
-        vec![
-            route("GET", "/rustfs/admin/v3/kms/status", "kms", "sigv4-admin", Some("kms:ServiceControl")),
-            route("GET", "/rustfs/admin/v3/oidc/status", "oidc", "sigv4-admin", Some("admin:ServerInfo")),
-        ],
-        &[],
-    );
+    // Every group is migrated today, so the later group is pending only under an earlier order.
+    let routes = vec![
+        route("GET", "/rustfs/admin/v3/kms/status", "kms", "sigv4-admin", Some("kms:ServiceControl")),
+        route("GET", "/rustfs/admin/v3/oidc/status", "oidc", "sigv4-admin", Some("admin:ServerInfo")),
+    ];
+    let plan = super::plan_through(3, &inventory(routes), &[], &[], &[]).expect("the fixture plans");
     assert_eq!(plan.declared.len(), 1);
     let declared = &plan.declared[0];
     assert_eq!(declared.name, "rustfs:GetV3KmsStatus");
@@ -208,7 +207,7 @@ pub(super) fn custom(method: &str, path: &str, detail: &str) -> Route {
 pub(super) fn recorded_plan() -> Plan {
     let recorded = std::fs::read_to_string(repo_root().join(INVENTORY)).expect("the inventory");
     let inventory: Inventory = serde_json::from_str(&recorded).expect("the inventory parses");
-    plan(&inventory, RULINGS, QUERY_BUCKETS).expect("the recorded inventory plans")
+    plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS).expect("the recorded inventory plans")
 }
 
 /// Positive — the own-account routes are about the caller under their vendor label, the
@@ -385,6 +384,7 @@ fn n_a_subject_rule_outside_the_adrs_shapes_is_refused() {
             query: None,
             rule,
             about: Some(about),
+            anonymous: false,
         }
     }
     const CALLER_ADMIN: &[Form] = &[form(Ruled::One("admin:GetUser"), About::Caller)];
@@ -394,6 +394,7 @@ fn n_a_subject_rule_outside_the_adrs_shapes_is_refused() {
         query: None,
         rule: Ruled::One("rustfs:Anything"),
         about: None,
+        anonymous: false,
     }];
     const LABEL_NAMED: &[Form] = &[form(
         Ruled::One("rustfs:Anything"),
@@ -419,6 +420,7 @@ fn n_a_subject_rule_outside_the_adrs_shapes_is_refused() {
             aliases: &[],
             absent: Absent::Caller,
         }),
+        anonymous: false,
     }];
     const BAD_ALIAS: &[Form] = &[form(
         Ruled::One("admin:GetUser"),
@@ -452,6 +454,7 @@ fn n_a_subject_rule_outside_the_adrs_shapes_is_refused() {
             aliases: &["access-key"],
             absent: Absent::Caller,
         }),
+        anonymous: false,
     }];
     const FLAG_IS_PARAM: &[Form] = &[form(
         Ruled::One("admin:ListServiceAccounts"),

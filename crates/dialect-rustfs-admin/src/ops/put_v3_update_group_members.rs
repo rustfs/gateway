@@ -112,7 +112,7 @@ impl AdminOperation for PutV3UpdateGroupMembers {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 390,
+    precedence: 401,
     selector: "PathTemplate(\"/rustfs/admin/v3/update-group-members\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/update-group-members\") ∧ Method(PUT)",
     action: "admin:AddUserToGroup",
     resource: ResourceShape::Service,
@@ -137,6 +137,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "UpdateGroupMembers",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,

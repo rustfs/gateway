@@ -111,7 +111,7 @@ impl AdminOperation for PostV3KmsReload {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 304,
+    precedence: 313,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/reload\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/reload\") ∧ Method(POST)",
     action: "kms:ServiceControl",
     resource: ResourceShape::Service,
@@ -136,6 +136,7 @@ pub const RECORD: RouteRecord = RouteRecord {
     ruled: None,
     subject: None,
     bucket: None,
+    anonymous: false,
     rustfs_handler: "ReloadKmsHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,

@@ -210,6 +210,14 @@ pub const fn floor(name: &'static str) -> OperationFloor {
     OperationFloor::custom(name, SigService::S3)
 }
 
+/// The floor of an anonymous bootstrap operation (ADR-0026 (f), ADR-0032): header-signed or
+/// anonymous, never presigned. The opt-in is per operation, so the start-up
+/// `SECURITY_POSTURE anonymous_reachable_ops=[…]` line names it, and the authorizer is still asked.
+#[must_use]
+pub const fn anonymous_floor(name: &'static str) -> OperationFloor {
+    OperationFloor::custom(name, SigService::S3).allow_anonymous_after_listing_in_the_posture_report()
+}
+
 /// A generated admin operation: its codec answers an [`AdminResponse`], and it knows its rows.
 pub trait AdminOperation: OperationCodec + Operation<Output = AdminResponse> {
     /// Its place among the dialect's claimed rows.

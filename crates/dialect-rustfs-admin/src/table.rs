@@ -19,7 +19,7 @@
 //! The dialect's generated table: the overlay rows, the route records, the pending groups, and the
 //! one list of every operation.
 //!
-//! Responsible for: [`RUSTFS_SOURCE_COMMIT`] and [`PENDING`] here, and the three per-operation lists
+//! Responsible for: [`RUSTFS_SOURCE_COMMIT`], [`PENDING`] and [`STAYING`] here, and the three per-operation lists
 //! in their own files (`overlay`, `routes`, `fold`), each in inventory order. NOT responsible for: the
 //! claims or the assembly (`crate::dialect`), or any operation's declaration (`crate::ops`).
 //! Upstream: the generator and `crate::ops`. Downstream: `crate::dialect`, the tests, and a deployment
@@ -33,31 +33,56 @@ pub use fold::fold_every_operation;
 pub(crate) use overlay::OVERLAY_ROWS;
 pub use routes::ROUTES;
 
-use crate::record::PendingGroup;
+use crate::record::{PendingGroup, StayingRoute};
 
 /// The RustFS commit the inventory was recorded from.
 pub const RUSTFS_SOURCE_COMMIT: &str = "736e4fb8e8e5d527c25e4e56f352536b311b6daf";
 
 /// Every registration group RustFS still serves itself, with its route count.
-pub static PENDING: &[PendingGroup] = &[
-    PendingGroup {
+pub static PENDING: &[PendingGroup] = &[];
+
+/// Every route of a migrated group that stays with RustFS, with the recorded reason (ADR-0032).
+pub static STAYING: &[StayingRoute] = &[
+    StayingRoute {
+        method: "GET",
+        path: "/health",
         group: "health",
-        order: 8,
-        routes: 6,
+        reason: "The server's probe layer, ahead of the S3 service; a one-segment path is no claim (ADR-0026 (h)).",
     },
-    PendingGroup {
+    StayingRoute {
+        method: "GET",
+        path: "/health/ready",
+        group: "health",
+        reason: "The server's probe layer, ahead of the S3 service (ADR-0026 (h)).",
+    },
+    StayingRoute {
+        method: "GET",
+        path: "/rustfs/admin/v3/object-zip-downloads/{id}.zip",
         group: "object_zip_download",
-        order: 7,
-        routes: 2,
+        reason: "An affixed `{id}.zip` parameter and a bearer token in the query: it needs a per-operation bearer scheme on the floor (ADR-0026 (g)).",
     },
-    PendingGroup {
-        group: "oidc",
-        order: 7,
-        routes: 8,
+    StayingRoute {
+        method: "HEAD",
+        path: "/health",
+        group: "health",
+        reason: "The server's probe layer, ahead of the S3 service; a one-segment path is no claim (ADR-0026 (h)).",
     },
-    PendingGroup {
+    StayingRoute {
+        method: "HEAD",
+        path: "/health/ready",
+        group: "health",
+        reason: "The server's probe layer, ahead of the S3 service (ADR-0026 (h)).",
+    },
+    StayingRoute {
+        method: "POST",
+        path: "/",
         group: "sts",
-        order: 7,
-        routes: 2,
+        reason: "STS: the action is in the form body and authentication is mixed; it needs its own ADR and is inside no claim (ADR-0026 (g)).",
+    },
+    StayingRoute {
+        method: "POST",
+        path: "/rustfs/admin/v3/object-zip-downloads",
+        group: "object_zip_download",
+        reason: "It authorises S3 resources named in its body and only mints the token the download route consumes, which stays with RustFS (ADR-0025 (d), ADR-0026 (g), ADR-0032 (b)).",
     },
 ];
