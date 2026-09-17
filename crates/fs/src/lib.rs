@@ -149,6 +149,7 @@ macro_rules! register_lifecycle_entries {
 #[macro_use]
 mod content_headers;
 mod buckets;
+mod conditions;
 mod copy;
 mod deletes;
 mod lifecycle;
@@ -407,19 +408,25 @@ impl FsBackend {
         self.require_directory(&self.versions_path(bucket), storage_error()).await
     }
 
-    async fn read_object(&self, bucket: &str, key: &str) -> Result<(Vec<u8>, std::fs::Metadata), HandlerError> {
+    /// The plain object file and its metadata, or `None` when the key holds no object. Absence is a
+    /// value here because a conditional request is evaluated against it (rustfs/gateway#808).
+    async fn read_object_if_present(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<Option<(Vec<u8>, std::fs::Metadata)>, HandlerError> {
         self.require_bucket(bucket).await?;
         let path = self.object_path(bucket, key);
         match tokio::fs::symlink_metadata(&path).await {
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
                 let bytes = tokio::fs::read(&path).await.map_err(|_| storage_error())?;
-                Ok((bytes, metadata))
+                Ok(Some((bytes, metadata)))
             }
             Ok(_) => Err(HandlerError::new(
                 ErrorCode::INVALID_REQUEST,
                 "the object path is not a safe regular file",
             )),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Err(no_such_key(key)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(_) => Err(storage_error()),
         }
     }
