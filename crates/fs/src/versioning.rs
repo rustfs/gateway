@@ -32,11 +32,13 @@ use rustfs_gateway::dto::{
     StorageClass,
 };
 use rustfs_gateway::{
-    ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Req,
+    ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Preconditions, Req,
     ResourceVisibility, Resp, Timestamp, validate_versioning,
 };
 use sha2::{Digest as _, Sha256};
 
+use super::conditions::{self, conditions, guard_write};
+use super::reads::Selected;
 use super::records::{
     ObjectAttributes, RecordKind, VersionRecord, decode_version_record, encode_version_record, validate_attributes,
 };
@@ -93,8 +95,31 @@ impl FsBackend {
         e_tag: &ETag,
         attributes: &ObjectAttributes,
     ) -> Result<PublishedObject, HandlerError> {
+        self.publish_object_if(bucket, key, bytes, e_tag, attributes, None).await
+    }
+
+    /// [`Self::publish_object`] under the request's write conditions (rustfs/gateway#808).
+    ///
+    /// The conditions are evaluated against the current representation **inside** the version
+    /// lock, which is held until the new version is published: `If-None-Match: *` is how a client
+    /// takes a lock, and a check made before the lock would let two writers both pass it.
+    pub(super) async fn publish_object_if(
+        &self,
+        bucket: &str,
+        key: &str,
+        bytes: &[u8],
+        e_tag: &ETag,
+        attributes: &ObjectAttributes,
+        conditions: Option<&Preconditions>,
+    ) -> Result<PublishedObject, HandlerError> {
         validate_attributes(attributes)?;
         let _guard = self.version_lock.lock().await;
+        if let Some(conditions) = conditions {
+            match self.select_locked(bucket, key, None).await? {
+                Selected::Found(current) => guard_write(Some(&current), conditions)?,
+                Selected::Absent(_) => guard_write(None, conditions)?,
+            }
+        }
         let state = self.versioning_state(bucket).await?;
         let existing = self.version_records(bucket).await?;
         let version_id = if matches!(state, VersioningState::Enabled) {
@@ -569,8 +594,23 @@ impl Handler<PutObject> for FsBackend {
             metadata: input.metadata,
         };
         let e_tag = etag(&bytes)?;
+        // A write reads only `If-Match` and `If-None-Match`; the two date conditions are a read's.
+        let write_conditions = conditions(
+            input.if_match.as_deref(),
+            None,
+            input.if_none_match.as_deref(),
+            None,
+            Timestamp::from_secs(self.clock.now().unix_seconds()),
+        )?;
         let published = self
-            .publish_object(input.bucket.as_str(), input.key.as_str(), &bytes, &e_tag, &attributes)
+            .publish_object_if(
+                input.bucket.as_str(),
+                input.key.as_str(),
+                &bytes,
+                &e_tag,
+                &attributes,
+                conditions::any(&write_conditions).then_some(&write_conditions),
+            )
             .await?;
         Ok(Resp::new(PutObjectOutput {
             size: Some(published.size),

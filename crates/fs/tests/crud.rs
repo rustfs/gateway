@@ -25,6 +25,9 @@ mod versioning;
 #[path = "crud/listing.rs"]
 mod listing;
 
+#[path = "crud/conditional_requests.rs"]
+mod conditional_requests;
+
 #[path = "crud/range_reads.rs"]
 mod range_reads;
 

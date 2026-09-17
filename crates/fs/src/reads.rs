@@ -35,10 +35,11 @@
 use bytes::Bytes;
 use rustfs_gateway::dto::{GetObject, GetObjectOutput, HeadObject, HeadObjectOutput};
 use rustfs_gateway::{
-    ByteStream, ETag, Handler, HandlerError, HandlerResult, IfRange, ObjectValidators, RangeDecision, RangeSelectors, Req, Resp,
-    Timestamp, evaluate_range,
+    ByteStream, ConditionalOutcome, ETag, Handler, HandlerError, HandlerResult, IfRange, ObjectValidators, RangeDecision,
+    RangeSelectors, Req, Resp, Timestamp, evaluate_range,
 };
 
+use super::conditions::{conditions, guard_read};
 use super::content_headers::ContentHeaders;
 use super::records::RecordKind;
 use super::storage_error;
@@ -159,6 +160,22 @@ impl super::FsBackend {
         version_id: Option<&str>,
     ) -> Result<Representation, HandlerError> {
         let _guard = self.version_lock.lock().await;
+        match self.select_locked(bucket, key, version_id).await? {
+            Selected::Found(representation) => Ok(*representation),
+            Selected::Absent(error) => Err(error),
+        }
+    }
+
+    /// [`Self::representation`] with absence as a value, for a caller that already holds the
+    /// version lock: a conditional request is evaluated against a key that holds no object
+    /// (rustfs/gateway#808), and a conditional write holds the lock from that verdict to its
+    /// publication.
+    pub(super) async fn select_locked(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+    ) -> Result<Selected, HandlerError> {
         self.require_readable_versioning(bucket).await?;
         let records = self.version_records(bucket).await?;
         let selected = version_id
@@ -166,13 +183,13 @@ impl super::FsBackend {
             .or_else(|| version_id.is_none().then(|| newest_for_key(&records, key)).flatten());
         if let Some(record) = selected {
             if matches!(record.kind, RecordKind::DeleteMarker) {
-                return Err(delete_marker_error(record, key, version_id.is_some()));
+                return Ok(Selected::Absent(delete_marker_error(record, key, version_id.is_some())));
             }
             // A `HEAD` still reads the bytes: the record carries the length, but the entity tag
             // and the window arithmetic are decided against the representation, and a length taken
             // from one source while the bytes come from another is how the two drift apart.
             let bytes = self.read_version_body(record).await?;
-            return Ok(Representation {
+            return Ok(Selected::Found(Box::new(Representation {
                 bytes,
                 e_tag: ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?,
                 last_modified: Timestamp::from_secs(record.modified),
@@ -181,13 +198,15 @@ impl super::FsBackend {
                 metadata: record.metadata.clone(),
                 headers: record.headers.clone(),
                 directory: Some(record.path.clone()),
-            });
+            })));
         }
         if version_id.is_some_and(|id| id != "null") {
-            return Err(missing_version(key));
+            return Ok(Selected::Absent(missing_version(key)));
         }
-        let (bytes, file_metadata) = self.read_object(bucket, key).await?;
-        Ok(Representation {
+        let Some((bytes, file_metadata)) = self.read_object_if_present(bucket, key).await? else {
+            return Ok(Selected::Absent(super::no_such_key(key)));
+        };
+        Ok(Selected::Found(Box::new(Representation {
             e_tag: super::etag(&bytes)?,
             last_modified: super::last_modified(&file_metadata),
             bytes,
@@ -198,16 +217,66 @@ impl super::FsBackend {
             metadata: std::collections::BTreeMap::new(),
             headers: ContentHeaders::default(),
             directory: None,
-        })
+        })))
     }
+
+    /// The representation a conditional read serves, or the `304` it answers instead.
+    ///
+    /// The conditions are evaluated before absence is reported, so `If-Match` against a missing key
+    /// is a `412` and only an unconditional miss is a `NoSuchKey`.
+    async fn conditional_read(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+        conditions: &rustfs_gateway::Preconditions,
+    ) -> Result<(Representation, ConditionalOutcome), HandlerError> {
+        let _guard = self.version_lock.lock().await;
+        match self.select_locked(bucket, key, version_id).await? {
+            Selected::Found(representation) => {
+                let outcome = guard_read(Some(&representation), conditions)?;
+                Ok((*representation, outcome))
+            }
+            Selected::Absent(error) => {
+                guard_read(None, conditions)?;
+                Err(error)
+            }
+        }
+    }
+}
+
+/// What a lookup found: the representation, or the error an unconditional request is answered with.
+pub(super) enum Selected {
+    Found(Box<Representation>),
+    Absent(HandlerError),
 }
 
 impl Handler<GetObject> for super::FsBackend {
     async fn call(&self, request: Req<GetObject>) -> HandlerResult<GetObject> {
         let input = request.input();
-        let representation = self
-            .representation(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())
+        let conditions = conditions(
+            input.if_match.as_deref(),
+            input.if_unmodified_since,
+            input.if_none_match.as_deref(),
+            input.if_modified_since,
+            Timestamp::from_secs(self.clock.now().unix_seconds()),
+        )?;
+        let (representation, outcome) = self
+            .conditional_read(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref(), &conditions)
             .await?;
+        if outcome == ConditionalOutcome::NotModified {
+            // The validators and the caching headers, and no body: the client's copy is current.
+            return Ok(Resp::with_status(
+                GetObjectOutput {
+                    e_tag: outcome.includes_selected_etag().then_some(representation.e_tag),
+                    last_modified: Some(representation.last_modified),
+                    cache_control: representation.headers.cache_control,
+                    expires: representation.headers.expires.map(Into::into),
+                    ..GetObjectOutput::default()
+                },
+                304,
+            ));
+        }
         // `If-Range` is read through the contract's own total parse. A fallible read flattened into
         // an `Option` would turn a validator this server cannot confirm into "no `If-Range` was
         // sent", which honours the range against a representation nobody checked.
@@ -253,9 +322,28 @@ impl Handler<GetObject> for super::FsBackend {
 impl Handler<HeadObject> for super::FsBackend {
     async fn call(&self, request: Req<HeadObject>) -> HandlerResult<HeadObject> {
         let input = request.input();
-        let representation = self
-            .representation(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())
+        let conditions = conditions(
+            input.if_match.as_deref(),
+            input.if_unmodified_since,
+            input.if_none_match.as_deref(),
+            input.if_modified_since,
+            Timestamp::from_secs(self.clock.now().unix_seconds()),
+        )?;
+        let (representation, outcome) = self
+            .conditional_read(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref(), &conditions)
             .await?;
+        if outcome == ConditionalOutcome::NotModified {
+            return Ok(Resp::with_status(
+                HeadObjectOutput {
+                    e_tag: outcome.includes_selected_etag().then_some(representation.e_tag),
+                    last_modified: Some(representation.last_modified),
+                    cache_control: representation.headers.cache_control,
+                    expires: representation.headers.expires.map(Into::into),
+                    ..HeadObjectOutput::default()
+                },
+                304,
+            ));
+        }
         // `HeadObject` declares no `If-Range`: RFC 9110 attaches the switch to a retrieval, and the
         // operation's IR carries no such field, so there is nothing to read rather than something
         // being ignored.
