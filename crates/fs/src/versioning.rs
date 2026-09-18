@@ -339,6 +339,17 @@ impl FsBackend {
         self.versioning_state(bucket).await.map(|_state| ())
     }
 
+    /// Whether a read of `bucket` reports the `null` version id.
+    ///
+    /// A bucket that has ever been versioned reports `x-amz-version-id: null` for its null
+    /// version, as `PutObject` already did for the write that made it; a bucket that never was
+    /// carries no version id at all. The two answers came from different rules — the write from
+    /// the state, the read from the record's id, which is `null` in both kinds of bucket — so a
+    /// suspended bucket's `PUT` said `null` and its `GET` said nothing.
+    pub(super) async fn reports_null_version(&self, bucket: &str) -> Result<bool, HandlerError> {
+        Ok(!matches!(self.versioning_state(bucket).await?, VersioningState::Never))
+    }
+
     pub(super) async fn version_records(&self, bucket: &str) -> Result<Vec<VersionRecord>, HandlerError> {
         self.require_bucket(bucket).await?;
         let versions = self.versions_path(bucket);

@@ -176,7 +176,7 @@ impl super::FsBackend {
         key: &str,
         version_id: Option<&str>,
     ) -> Result<Selected, HandlerError> {
-        self.require_readable_versioning(bucket).await?;
+        let reports_null = self.reports_null_version(bucket).await?;
         let records = self.version_records(bucket).await?;
         let selected = version_id
             .and_then(|id| explicit_for_key(&records, key, id))
@@ -194,7 +194,7 @@ impl super::FsBackend {
                 e_tag: ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?,
                 last_modified: Timestamp::from_secs(record.modified),
                 storage_class: Some(record.storage_class.clone()),
-                version_id: (record.version_id != "null").then(|| record.version_id.clone()),
+                version_id: (record.version_id != "null" || reports_null).then(|| record.version_id.clone()),
                 metadata: record.metadata.clone(),
                 headers: record.headers.clone(),
                 directory: Some(record.path.clone()),
