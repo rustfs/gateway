@@ -576,6 +576,92 @@ fn n_refuses_a_forbidden_character_in_an_attribute_value_or_a_name() {
     assert_eq!(parse(name.as_bytes()), Err(XmlError::ForbiddenCharacter));
 }
 
+/// Negative — an element or attribute name outside the XML `Name` production is refused whole,
+/// before any decoder sees the tree (rustfs/gateway#743). The first is the fuzz finding: `quick-xml`
+/// tokenises `<xmlns:p="urn:p" …/>` as an element named `xmlns:p="urn:p"`. The rest walk the
+/// production's edges: a digit or `-` first, a `,` inside, and an empty part beside a colon on
+/// either side.
+#[test]
+fn n_refuses_an_element_or_attribute_name_that_is_not_an_xml_name() {
+    for body in [
+        "<xmlns:p=\"urn:p\" p:x=\"1\" y=\"2\" z=\"3\"/>",
+        "<1a></1a>",
+        "<-a/>",
+        "<a,b/>",
+        "<Root><a,b>t</a,b></Root>",
+        "<Root a,b=\"1\"></Root>",
+        "<Root 1a=\"1\"/>",
+        "<:a/>",
+        "<a:/>",
+        "<a::b/>",
+        "<Root :k=\"1\"/>",
+        "<Root xmlns:=\"urn:x\"/>",
+    ] {
+        assert_eq!(parse(body.as_bytes()), Err(XmlError::InvalidName), "{body}");
+    }
+}
+
+/// Positive control for the rule above — every spelling the production admits still reads: the
+/// colon-free names S3 uses, a prefixed name, a name with `.`, `-`, `_` and a digit after the
+/// first character, a Latin-1 letter, a CJK name, and the two-colon name this crate has always
+/// read by its last part.
+#[test]
+fn accepts_every_name_the_production_admits() {
+    for (body, name) in [
+        ("<Delete/>", "Delete"),
+        ("<s3:Object xmlns:s3=\"urn:s3\"/>", "Object"),
+        ("<a.b-c_d9/>", "a.b-c_d9"),
+        ("<_leading/>", "_leading"),
+        ("<caf\u{e9}/>", "caf\u{e9}"),
+        ("<\u{540d}\u{524d}/>", "\u{540d}\u{524d}"),
+        ("<x:y:z/>", "z"),
+    ] {
+        let tree = parse(body.as_bytes()).unwrap_or_else(|error| panic!("{body}: {error}"));
+        assert_eq!(tree.name, name, "{body}");
+    }
+    let attribute = parse(b"<Root k.1=\"v\" _w-2=\"x\"/>").expect("Name attributes are read");
+    assert_eq!(attribute.attribute("k.1"), Some("v"));
+    assert_eq!(attribute.attribute("_w-2"), Some("x"));
+}
+
+/// The `Name` predicate at its edges, apart from any document: the first character is the
+/// narrower set, `U+00B7` and the combining range continue but do not start, and a character
+/// outside `Char` altogether is also outside `Name`.
+#[test]
+fn n_the_name_predicate_holds_the_production_edges() {
+    use crate::chars::is_xml_name;
+    for name in [
+        "a",
+        "_",
+        ":",
+        "A1",
+        "a-b",
+        "a.b",
+        "a\u{b7}",
+        "a\u{300}",
+        "a\u{203f}",
+        "\u{10000}a",
+    ] {
+        assert!(is_xml_name(name), "{name:?} is a Name");
+    }
+    for name in [
+        "",
+        "1",
+        "-a",
+        ".a",
+        "\u{b7}a",
+        "\u{300}a",
+        "a b",
+        "a\"",
+        "a/b",
+        "a\u{1}",
+        "\u{2000}a",
+        "a\u{fffe}",
+    ] {
+        assert!(!is_xml_name(name), "{name:?} is not a Name");
+    }
+}
+
 /// Positive — XML 1.0 line-end normalisation happens before text reaches a decoder.
 ///
 /// A literal CR and CRLF each become one LF, while a numeric character reference remains a CR.

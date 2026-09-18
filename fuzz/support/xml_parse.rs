@@ -249,15 +249,6 @@ pub(crate) fn check(input: &[u8]) -> Option<Outcome> {
         }
     }
 
-    // 3–5 need the tree written back, and a name outside the Name production has no spelling.
-    if !writable(tree) {
-        return Some(Outcome {
-            verdict,
-            shape: Some(shape),
-            canonical: None,
-        });
-    }
-
     // 3. The round trip, under the same depth and element ceilings.
     let canonical = canonical(tree);
     let relaxed = |extra: usize| {
@@ -394,17 +385,6 @@ fn start_tag_len(tree: &XmlNode) -> usize {
     let mut writer = XmlWriter::fragment();
     write_node(&mut writer, &bare);
     writer.finish().len() - "</>".len() - tree.name.len()
-}
-
-/// Whether every element and attribute name in the tree is one the writer can spell: a letter or
-/// `_`, then letters, digits, `-`, `_` or `.`. Deliberately narrower than XML's Name production.
-fn writable(node: &XmlNode) -> bool {
-    fn plain(name: &str) -> bool {
-        let mut characters = name.chars();
-        characters.next().is_some_and(|first| first.is_alphabetic() || first == '_')
-            && characters.all(|character| character.is_alphanumeric() || matches!(character, '-' | '_' | '.'))
-    }
-    plain(&node.name) && node.attributes.iter().all(|attribute| plain(&attribute.name)) && node.children.iter().all(writable)
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {

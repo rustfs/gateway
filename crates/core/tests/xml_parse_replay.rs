@@ -17,7 +17,8 @@
 //! Responsible for: running every committed seed under `fuzz/seeds/xml_parse/` through the same
 //! property file the fuzz target runs, pinning the exact outcome of the seventeen hand-written
 //! seeds — each ceiling at and one past its boundary, `DOCTYPE`, entity and character refusals,
-//! and a namespaced positive control — and driving forty thousand deterministic samples through
+//! and a namespaced positive control — and of the one minimised finding (an element name outside
+//! the `Name` production), and driving forty thousand deterministic samples through
 //! that property on stable, with coverage floors stated as counts.
 //! NOT responsible for: fuzzing — `ci.yml` defers libFuzzer runs to a schedule — or the reader's
 //! hand-picked matrix in `crates/xml/src/tests.rs`, or turning a finding into a conformance case,
@@ -141,6 +142,14 @@ fn an_undeclared_entity_reference_is_refused() {
 #[test]
 fn a_reference_to_a_forbidden_character_is_refused() {
     assert_eq!(refusal("forbidden-character-reference"), XmlError::ForbiddenCharacter);
+}
+
+/// The first libFuzzer finding (rustfs/gateway#743): `<xmlns:p="urn:p" …/>`, which `quick-xml`
+/// tokenises as an element whose name is `xmlns:p="urn:p"`. Refused as a name rather than read
+/// as an element the writer cannot spell.
+#[test]
+fn an_element_name_outside_the_name_production_is_refused() {
+    assert_eq!(refusal("element-name-not-an-xml-name"), XmlError::InvalidName);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -430,6 +439,9 @@ fn hold_the_xml_property_over_a_shard(seed: u64) {
         ("TooManyAttributes", 450),
         ("AttributeTooLong", 400),
         ("ForbiddenCharacter", 300),
+        // Reached only through a flipped byte landing in a tag name, so the floor is low; it is
+        // still a floor, so a sampler that stopped reaching the refusal at all is caught.
+        ("InvalidName", 5),
     ] {
         assert!(
             count(name) >= floor,

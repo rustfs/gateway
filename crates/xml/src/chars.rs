@@ -14,12 +14,14 @@
 
 //! Which characters an XML 1.0 document may contain at all.
 //!
-//! Responsible for: the `Char` production of XML 1.0 §2.2, as one predicate, and the substitute
-//! the writer puts in place of a character that fails it.
+//! Responsible for: the `Char` production of XML 1.0 §2.2, as one predicate, the `Name`
+//! production of §2.3 as another, and the substitute the writer puts in place of a character that
+//! fails the first.
 //! NOT responsible for: escaping. `&`, `<`, `>` and `"` are all perfectly representable and are
 //! [`crate::write`]'s business; this module answers the prior question of whether the character
 //! has any spelling in an XML document, escaped or otherwise.
-//! Upstream: nothing. Downstream: [`crate::read`], which refuses a document carrying one;
+//! Upstream: nothing. Downstream: [`crate::read`], which refuses a document carrying one, or
+//! naming an element or attribute outside the `Name` production;
 //! [`crate::write`], which cannot emit one; and `rustfs-gateway-types`, which re-exports the
 //! predicate so the listing path can force percent-encoding on a stored key that fails it.
 //!
@@ -56,6 +58,55 @@ pub fn is_xml_char(character: char) -> bool {
         character,
         '\t' | '\n' | '\r' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}'
     )
+}
+
+/// Whether `name` is an XML 1.0 `Name` (§2.3, fifth edition), as an element or attribute name.
+///
+/// A `Name` begins with a letter, `_` or `:` and continues with letters, digits, `-`, `.`, `_`,
+/// `:`, `U+00B7`, the combining range and the extender range; the fifth edition lists the ranges
+/// by code point rather than by Unicode category, and they are spelled out below verbatim so the
+/// predicate does not move when the standard library's tables do.
+///
+/// `quick-xml` does not check the production, so without this a start tag such as
+/// `<xmlns:p="urn:p" …/>` is tokenised as an element whose name is `xmlns:p="urn:p"`, which
+/// [`crate::write`] cannot spell back and no conforming parser accepts (rustfs/gateway#743). The
+/// colon is admitted here as the production admits it; how many a name may carry, and where, is
+/// the reader's namespace question.
+#[must_use]
+pub fn is_xml_name(name: &str) -> bool {
+    let mut characters = name.chars();
+    characters.next().is_some_and(is_name_start_char) && characters.all(is_name_char)
+}
+
+/// `NameStartChar` of XML 1.0 §2.3.
+fn is_name_start_char(character: char) -> bool {
+    matches!(
+        character,
+        ':' | 'A'..='Z'
+            | '_'
+            | 'a'..='z'
+            | '\u{c0}'..='\u{d6}'
+            | '\u{d8}'..='\u{f6}'
+            | '\u{f8}'..='\u{2ff}'
+            | '\u{370}'..='\u{37d}'
+            | '\u{37f}'..='\u{1fff}'
+            | '\u{200c}'..='\u{200d}'
+            | '\u{2070}'..='\u{218f}'
+            | '\u{2c00}'..='\u{2fef}'
+            | '\u{3001}'..='\u{d7ff}'
+            | '\u{f900}'..='\u{fdcf}'
+            | '\u{fdf0}'..='\u{fffd}'
+            | '\u{10000}'..='\u{effff}'
+    )
+}
+
+/// `NameChar` of XML 1.0 §2.3: a `NameStartChar`, or one of the continuation characters.
+fn is_name_char(character: char) -> bool {
+    is_name_start_char(character)
+        || matches!(
+            character,
+            '-' | '.' | '0'..='9' | '\u{b7}' | '\u{300}'..='\u{36f}' | '\u{203f}'..='\u{2040}'
+        )
 }
 
 /// What the writer emits in place of a character XML 1.0 cannot represent.
