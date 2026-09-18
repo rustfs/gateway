@@ -50,6 +50,8 @@ mod compat_aliases;
 mod compile_fail;
 #[path = "connection_teardown.rs"]
 mod connection_teardown;
+#[path = "copy_source_reachability.rs"]
+mod copy_source_reachability;
 #[path = "cors_runtime.rs"]
 mod cors_runtime;
 #[path = "credential_runtime.rs"]
