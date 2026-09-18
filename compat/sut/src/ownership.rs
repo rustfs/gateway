@@ -15,8 +15,9 @@
 //! Which identity owns which bucket, and what the other identity may therefore not do.
 //!
 //! Responsible for: recording the fixed data-root owner of a bucket once its creation has really
-//! happened, refusing another identity's attempt to create a recorded bucket as
-//! `409 BucketAlreadyExists` through [`TakenNames`], answering `x-amz-expected-bucket-owner`
+//! happened, releasing the name once its deletion has ([`ReleasedNames`]), refusing another
+//! identity's attempt to create a recorded bucket as `409 BucketAlreadyExists` through
+//! [`TakenNames`], answering `x-amz-expected-bucket-owner`
 //! through [`BucketOwnerSource`], and producing the authorization [`Decision`] that refuses one
 //! identity on another identity's bucket.
 //! NOT responsible for: storing objects (`rustfs-gateway-fs`), verifying signatures
@@ -70,6 +71,13 @@ impl BucketOwners {
     fn claim(&self, bucket: &str, owner: &str) -> Option<Arc<str>> {
         let mut owners = self.owners.lock().ok()?;
         Some(Arc::clone(owners.entry(bucket.to_owned()).or_insert_with(|| Arc::from(owner))))
+    }
+
+    /// Forgets `bucket` once its deletion has really happened, so the name is free for whichever
+    /// identity creates it next. `None` when the registry is poisoned.
+    fn release(&self, bucket: &str) -> Option<()> {
+        self.owners.lock().ok()?.remove(bucket);
+        Some(())
     }
 
     /// The recorded owner of `bucket`, when this process recorded one.
@@ -207,10 +215,44 @@ impl OpLayer<dto::CreateBucket> for TakenNames {
     }
 }
 
+/// The `DeleteBucket` layer that releases a name once the backend has deleted the bucket.
+///
+/// Without it the registry only ever grew: after the primary identity created and deleted `b`, the
+/// secondary identity's `CreateBucket b` was `409 BucketAlreadyExists` for a bucket that no longer
+/// existed, and its every other request on `b` was `403` where `404 NoSuchBucket` was the truth.
+/// The record follows the deletion as it follows the creation: released only after the backend
+/// answered, so a refused delete (`BucketNotEmpty`) keeps the owner.
+pub(crate) struct ReleasedNames {
+    owners: Arc<BucketOwners>,
+}
+
+impl ReleasedNames {
+    pub(crate) fn new(owners: Arc<BucketOwners>) -> Self {
+        Self { owners }
+    }
+}
+
+impl OpLayer<dto::DeleteBucket> for ReleasedNames {
+    fn wrap<'a>(
+        &'a self,
+        request: Req<dto::DeleteBucket>,
+        next: Next<'a, dto::DeleteBucket>,
+    ) -> BoxFuture<'a, HandlerResult<dto::DeleteBucket>> {
+        Box::pin(async move {
+            let bucket = request.input().bucket.as_str().to_owned();
+            let response = next.run(request).await?;
+            self.owners
+                .release(&bucket)
+                .ok_or_else(|| HandlerError::internal_error("the bucket-owner registry is unavailable"))?;
+            Ok(response)
+        })
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
-    use super::{BucketOwners, TakenNames, decide};
+    use super::{BucketOwners, ReleasedNames, TakenNames, decide};
     use crate::identity::{AccountArgs, Accounts};
     use rustfs_gateway::{AuthzRequest, BucketName, Decision, Identity, ResourceShape, TargetOrigin};
     use std::sync::Arc;
@@ -334,6 +376,35 @@ mod tests {
         assert_eq!(
             decide(&owners, &accounts, SUPPORTED, &request("GetObject", Some(&bucket), Some(&main))),
             Decision::Allow
+        );
+    }
+
+    /// Negative — a deleted bucket's name is released: taken from the other identity while the
+    /// record stands, free once the deletion is recorded, and recorded again for whoever creates
+    /// it next. A registry that only grew answered `409` and `403` for a bucket that was gone.
+    #[test]
+    fn n_a_deleted_buckets_name_is_released() {
+        let owners = Arc::new(BucketOwners::default());
+        let accounts = accounts();
+        let alt = Identity::new("ALT").expect("a valid access key id");
+        let bucket = BucketName::new("gone").expect("a valid bucket name");
+        let layer = TakenNames::new(Arc::clone(&owners), accounts.clone());
+        created(&owners, &accounts, &bucket);
+        assert!(layer.is_taken_from(bucket.as_str(), Some("ALT")));
+        assert_eq!(
+            decide(&owners, &accounts, SUPPORTED, &request("GetObject", Some(&bucket), Some(&alt))),
+            Decision::Deny
+        );
+        ReleasedNames::new(Arc::clone(&owners))
+            .owners
+            .release(bucket.as_str())
+            .expect("a live registry");
+        assert!(!layer.is_taken_from(bucket.as_str(), Some("ALT")));
+        assert_eq!(owners.len(), 0);
+        assert_eq!(
+            decide(&owners, &accounts, SUPPORTED, &request("GetObject", Some(&bucket), Some(&alt))),
+            Decision::Allow,
+            "an unrecorded bucket is the backend's to answer, with NoSuchBucket"
         );
     }
 

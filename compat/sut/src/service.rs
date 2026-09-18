@@ -33,7 +33,7 @@ use rustfs_gateway::{
 use rustfs_gateway_fs::FsBackend;
 
 use crate::Options;
-use crate::ownership::{BucketOwners, TakenNames, decide};
+use crate::ownership::{BucketOwners, ReleasedNames, TakenNames, decide};
 
 /// Opens the reference backend, applying the configured lifecycle debug cadence when there is one.
 ///
@@ -99,7 +99,9 @@ pub(crate) fn build_service(
             // And the same registry decides whether a name is taken: another identity's
             // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
             // creation the backend admitted is what gets recorded.
-            .op_layer::<dto::CreateBucket, _>(TakenNames::new(Arc::clone(owners), options.accounts.clone())),
+            .op_layer::<dto::CreateBucket, _>(TakenNames::new(Arc::clone(owners), options.accounts.clone()))
+            // And released once the backend deleted the bucket, so the name is free again.
+            .op_layer::<dto::DeleteBucket, _>(ReleasedNames::new(Arc::clone(owners))),
     );
     let service = backend
         .register_tagging(
@@ -418,6 +420,56 @@ mod tests {
                 .status(),
             200
         );
+    }
+
+    /// Negative — the deleted bucket's name is free for the other identity, and a refused delete
+    /// keeps the owner: main creates and deletes `reused`, alt then creates it (`200`, not `409`);
+    /// main creates `kept` with an object in it, its delete is `409 BucketNotEmpty`, and alt is
+    /// still refused on it.
+    #[tokio::test]
+    async fn n_a_deleted_buckets_name_is_free_and_a_refused_delete_keeps_its_owner() {
+        let root = TestRoot::new();
+        let options = two_identity_options(&root, &[]);
+        let (_backend, service) = assembled(&options);
+
+        assert_eq!(
+            exchange(&service, as_main(http::Method::PUT, "/reused", Bytes::new()))
+                .await
+                .status(),
+            200
+        );
+        assert_eq!(
+            exchange(&service, as_main(http::Method::DELETE, "/reused", Bytes::new()))
+                .await
+                .status(),
+            204
+        );
+        let taken_again = exchange(&service, as_alt(http::Method::PUT, "/reused", Bytes::new())).await;
+        assert_eq!(taken_again.status(), 200, "{}", body_of(&taken_again));
+        let refused = exchange(&service, as_main(http::Method::PUT, "/reused/key", Bytes::from_static(b"x"))).await;
+        assert_eq!(
+            refused.status(),
+            200,
+            "the data-root owner still owns a guest-created bucket: {}",
+            body_of(&refused)
+        );
+
+        assert_eq!(
+            exchange(&service, as_main(http::Method::PUT, "/kept", Bytes::new()))
+                .await
+                .status(),
+            200
+        );
+        assert_eq!(
+            exchange(&service, as_main(http::Method::PUT, "/kept/key", Bytes::from_static(b"x")))
+                .await
+                .status(),
+            200
+        );
+        let not_empty = exchange(&service, as_main(http::Method::DELETE, "/kept", Bytes::new())).await;
+        assert_eq!(not_empty.status(), 409, "{}", body_of(&not_empty));
+        let still_refused = exchange(&service, as_alt(http::Method::GET, "/kept/key", Bytes::new())).await;
+        assert_eq!(still_refused.status(), 403, "{}", body_of(&still_refused));
     }
 
     /// Negative — a creation the backend refused leaves no owner record behind, so the same
