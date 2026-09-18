@@ -5,8 +5,8 @@ kind = "xml_root"
 classification = "mutable"
 mutation_dimension = "element_rename"
 target = "SelectObjectContent"
-summary = "This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the body root is the input shape's own name, SelectObjectContentRequest, and a body rooted at anything else is 400 MalformedXML."
-cases = ["c-select-restore-0032", "c-select-restore-0033", "c-select-restore-0034"]
+summary = "This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the body root is the input shape's own name, SelectObjectContentRequest; MinIO's SelectRequest is accepted as an exact alias of it, decoding into the same DTO under the same member rules, and a body rooted at anything else is 400 MalformedXML."
+cases = ["c-select-restore-0032", "c-select-restore-0033", "c-select-restore-0034", "c-select-restore-0049"]
 
 [[source]]
 path = "SelectObjectContent.xml.request_root"
@@ -16,3 +16,8 @@ current = "SelectObjectContentRequest"
 kind = "aws-doc"
 ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
 summary = "The documented request syntax roots the body at a SelectObjectContentRequest element carrying the expression and the serialization descriptions directly."
+
+[[evidence]]
+kind = "s3s-pr"
+ref = "743"
+summary = "Upstream accepts SelectRequest as an exact root alias of SelectObjectContentRequest for the MinIO-shaped clients RustFS serves (rustfs/backlog#1626); MinIO's own select.go roots the request at SelectRequest and reads the AWS root as the legacy form."

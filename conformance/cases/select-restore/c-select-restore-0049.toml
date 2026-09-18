@@ -1,0 +1,50 @@
+[case]
+id = "c-select-restore-0049"
+schema_version = 1
+title = "A select body rooted at MinIO's SelectRequest decodes as the canonical root does"
+rationale = """
+MinIO roots a select request at SelectRequest and reads the AWS root as the legacy spelling; RustFS accepted the short root through s3s (rustfs/backlog#1626, s3s#743), so a gateway that refused it would turn every MinIO-shaped client's query into MalformedXML on the switch. The document below is c-select-restore-0008's, member for member, under the alias root: reaching the framed answer proves the alias decodes into the same DTO through the same member rules, not through a second parser. c-select-restore-0032 beside it keeps a genuinely wrong root refused, so the alias is exact and not a relaxation of the root check."""
+polarity = "positive"
+operation = "SelectObjectContent"
+tags = ["select", "xml"]
+timeout_ms = 10000
+quirks = ["q-select-0008"]
+
+[[case.evidence]]
+url = "https://github.com/s3s-project/s3s/pull/743"
+summary = "Upstream accepts SelectRequest as an exact XML root alias for SelectObjectContentRequest, decoding both roots identically and refusing unknown roots."
+kind = "other"
+
+[[case.evidence]]
+url = "https://github.com/minio/minio/blob/master/internal/s3select/select.go"
+summary = "MinIO's select implementation names its request root SelectRequest."
+kind = "other"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV><FileHeaderInfo>USE</FileHeaderInfo><FieldDelimiter>,</FieldDelimiter><QuoteCharacter>"</QuoteCharacter></CSV><CompressionType>NONE</CompressionType></InputSerialization><OutputSerialization><CSV><RecordDelimiter>\n</RecordDelimiter></CSV></OutputSerialization><ScanRange><Start>0</Start><End>100</End></ScanRange></SelectRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "event_stream"
+status = 200
+connection_after = "open"
+headers_present = { "content-type" = "application/vnd.amazon.event-stream" }
+
+[[expect.events]]
+type = "Records"
+min_count = 1
+
+[[expect.events]]
+type = "End"
+min_count = 1
+max_count = 1

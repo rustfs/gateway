@@ -4725,7 +4725,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - `q-select-0005` (exclusive_members on `SelectObjectContent.ScanRange`) — An empty ScanRange is refused rather than treated as the whole object.
 - `q-select-0006` (closed_value_set on `SelectObjectContent.ExpressionType`) — ExpressionType accepts exactly SQL.
 - `q-select-0007` (lenient_unknown_elements on `SelectObjectContent.SelectObjectContentRequest`) — Unknown elements inside a SelectObjectContentRequest are skipped.
-- `q-select-0008` (xml_root on `SelectObjectContent`) — This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the body root is the input shape's own name, SelectObjectContentRequest, and a body rooted at anything else is 400 MalformedXML.
+- `q-select-0008` (xml_root on `SelectObjectContent`) — This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the body root is the input shape's own name, SelectObjectContentRequest; MinIO's SelectRequest is accepted as an exact alias of it, decoding into the same DTO under the same member rules, and a body rooted at anything else is 400 MalformedXML.
 - `q-select-0009` (event_stream_response on `SelectObjectContent`) — SelectObjectContent returns the event-stream answer shape and bypasses the document encoder.
 - `q-sse-0010` (secret_hygiene on `PutObject`) — The customer key is never echoed back and never logged, while the algorithm and key digest must be echoed; customer keys over a plaintext connection are refused.
 
