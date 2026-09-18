@@ -48,7 +48,7 @@ use std::sync::Arc;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 
-use crate::chars::{is_xml_char, is_xml_representable};
+use crate::chars::{is_xml_char, is_xml_name, is_xml_representable};
 use crate::error::XmlError;
 
 /// How many buffered bytes one XML request body may hold.
@@ -470,11 +470,28 @@ fn resolve(scopes: &[Vec<(String, Arc<str>)>], prefix: &str) -> Option<Arc<str>>
 
 /// An attribute name split into its prefix, when it has one, and its local part.
 fn split_name(raw: &[u8]) -> Result<(Option<String>, String), XmlError> {
-    let name = representable(core::str::from_utf8(raw).map_err(|_| XmlError::NotUtf8)?)?;
+    let name = qualified_name(raw)?;
     match name.split_once(':') {
         Some((prefix, local)) => Ok((Some(prefix.to_owned()), local.to_owned())),
         None => Ok((None, name.to_owned())),
     }
+}
+
+/// A tag or attribute name as the wire spelled it, refused unless it is an XML `Name` whose
+/// colons, if any, each have a non-empty part on both sides.
+///
+/// `quick-xml` hands over whatever stood between `<` and the first whitespace, so this is the one
+/// place the `Name` production is checked for every element and attribute (rustfs/gateway#743).
+/// The production admits a colon anywhere, but `:a`, `a:` and `a::b` would leave [`local_name`]
+/// or [`split_name`] with an empty prefix or local part — a nameless element the writer would
+/// spell `<>` — so those are refused with it. `a:b:c` stays accepted as it always was, with `c` as
+/// its local name: this crate is not a namespace processor for element names.
+fn qualified_name(raw: &[u8]) -> Result<&str, XmlError> {
+    let name = representable(core::str::from_utf8(raw).map_err(|_| XmlError::NotUtf8)?)?;
+    if !is_xml_name(name) || name.split(':').any(str::is_empty) {
+        return Err(XmlError::InvalidName);
+    }
+    Ok(name)
 }
 
 /// The five entities XML defines without a DTD. There is no sixth, by design.
@@ -494,7 +511,7 @@ fn predefined_entity(name: &str) -> Option<char> {
 /// S3 clients send both the prefixed and the unprefixed spelling of the same body, and a decoder
 /// that matched on the full name would accept one and refuse the other.
 fn local_name(raw: &[u8]) -> Result<String, XmlError> {
-    let name = representable(core::str::from_utf8(raw).map_err(|_| XmlError::NotUtf8)?)?;
+    let name = qualified_name(raw)?;
     Ok(name.rsplit(':').next().unwrap_or(name).to_owned())
 }
 

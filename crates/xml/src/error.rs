@@ -64,6 +64,14 @@ pub enum XmlError {
     /// outside the `Char` production, and a character reference to such a character is itself a
     /// fatal error.
     ForbiddenCharacter,
+    /// An element or attribute name is not an XML `Name`, or has an empty part beside a colon.
+    ///
+    /// `quick-xml` tokenises a tag without checking the `Name` production, so `<a"b/>` reaches
+    /// this crate as an element called `a"b`. Such a name has no spelling the writer can produce
+    /// and no conforming parser accepts it, so a document carrying one is refused whole
+    /// (rustfs/gateway#743). `:a` and `a:` are refused with it: a `Name` by the production, but
+    /// a prefix or local part of nothing once the colon is split.
+    InvalidName,
 }
 
 impl fmt::Display for XmlError {
@@ -80,6 +88,7 @@ impl fmt::Display for XmlError {
             Self::AttributeTooLong => "an attribute value is larger than the parser accepts",
             Self::Empty => "the body has no root element",
             Self::ForbiddenCharacter => "the body carries a character XML cannot represent",
+            Self::InvalidName => "an element or attribute name is not an XML name",
         };
         f.write_str(text)
     }

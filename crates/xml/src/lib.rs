@@ -38,7 +38,7 @@ pub mod write;
 #[cfg(test)]
 mod tests;
 
-pub use crate::chars::{UNREPRESENTABLE, is_xml_char, is_xml_representable};
+pub use crate::chars::{UNREPRESENTABLE, is_xml_char, is_xml_name, is_xml_representable};
 pub use crate::error::XmlError;
 pub use crate::read::{
     MAX_ATTRIBUTE_BYTES, MAX_ATTRIBUTES_PER_ELEMENT, MAX_BODY_BYTES, MAX_DEPTH, MAX_ELEMENTS, XmlAttribute, XmlLimits, XmlNode,
