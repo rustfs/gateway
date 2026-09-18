@@ -30,15 +30,12 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
-    AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput, CopyObject,
-    CreateBucket, CreateMultipartUpload, CreateMultipartUploadOutput, DeleteBucket, DeleteBucketLifecycle, DeleteObject,
-    DeleteObjects, GetBucketLifecycleConfiguration, GetBucketLocation, GetBucketVersioning, GetObject, HeadBucket, HeadObject,
-    ListBuckets, ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2, ListParts, ListPartsOutput, Owner, Part,
-    PostObject, PutBucketLifecycleConfiguration, PutBucketVersioning, PutObject, UploadPart, UploadPartOutput,
+    AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput,
+    CreateMultipartUpload, CreateMultipartUploadOutput, ListParts, ListPartsOutput, Owner, Part, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
-    ObjectKey, RegionSet, Req, ResourceVisibility, Resp, ServiceBuilder, Timestamp, US_EAST_1, UploadIdClaim, collect,
+    ObjectKey, RegionSet, Req, ResourceVisibility, Resp, Timestamp, US_EAST_1, UploadIdClaim, collect,
     normalize_location_constraint, resolve_upload, system_clock,
 };
 use sha2::Sha256;
@@ -64,10 +61,12 @@ macro_rules! reference_operations {
             crud DeleteObject => "DeleteObject",
             tagging DeleteObjectTagging => "DeleteObjectTagging",
             crud DeleteObjects => "DeleteObjects",
+            acl GetBucketAcl => "GetBucketAcl",
             lifecycle GetBucketLifecycleConfiguration => "GetBucketLifecycleConfiguration",
             crud GetBucketLocation => "GetBucketLocation",
             versioning GetBucketVersioning => "GetBucketVersioning",
             crud GetObject => "GetObject",
+            acl GetObjectAcl => "GetObjectAcl",
             tagging GetObjectTagging => "GetObjectTagging",
             crud HeadBucket => "HeadBucket",
             crud HeadObject => "HeadObject",
@@ -78,9 +77,11 @@ macro_rules! reference_operations {
             listing ListObjectsV2 => "ListObjectsV2",
             multipart ListParts => "ListParts",
             crud PostObject => "PostObject",
+            acl PutBucketAcl => "PutBucketAcl",
             lifecycle PutBucketLifecycleConfiguration => "PutBucketLifecycleConfiguration",
             versioning PutBucketVersioning => "PutBucketVersioning",
             crud PutObject => "PutObject",
+            acl PutObjectAcl => "PutObjectAcl",
             tagging PutObjectTagging => "PutObjectTagging",
             multipart UploadPart => "UploadPart",
         }
@@ -95,59 +96,11 @@ macro_rules! capability_names {
 
 reference_operations!(capability_names);
 
-macro_rules! register_crud_entries {
-    ($backend:expr, $builder:expr;) => { $builder };
-    ($backend:expr, $builder:expr; crud $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_crud_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
-    };
-    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_crud_entries!($backend, $builder; $($rest)*)
-    };
-}
-
-macro_rules! register_multipart_entries {
-    ($backend:expr, $builder:expr;) => { $builder };
-    ($backend:expr, $builder:expr; multipart $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_multipart_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
-    };
-    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_multipart_entries!($backend, $builder; $($rest)*)
-    };
-}
-
-macro_rules! register_versioning_entries {
-    ($backend:expr, $builder:expr;) => { $builder };
-    ($backend:expr, $builder:expr; versioning $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_versioning_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
-    };
-    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_versioning_entries!($backend, $builder; $($rest)*)
-    };
-}
-
-macro_rules! register_listing_entries {
-    ($backend:expr, $builder:expr;) => { $builder };
-    ($backend:expr, $builder:expr; listing $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_listing_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
-    };
-    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_listing_entries!($backend, $builder; $($rest)*)
-    };
-}
-
-macro_rules! register_lifecycle_entries {
-    ($backend:expr, $builder:expr;) => { $builder };
-    ($backend:expr, $builder:expr; lifecycle $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_lifecycle_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
-    };
-    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
-        register_lifecycle_entries!($backend, $builder; $($rest)*)
-    };
-}
-
 // First, so the `request_content_headers!` reader it defines is in scope for every module below.
 #[macro_use]
 mod content_headers;
+// The `register_*` methods and the entry macros behind them, kept together.
+mod acl;
 mod buckets;
 mod conditions;
 mod copy;
@@ -158,6 +111,7 @@ mod listing;
 mod post_object;
 mod reads;
 mod records;
+mod registry;
 mod tagging;
 mod transitions;
 mod uploads;
@@ -306,61 +260,6 @@ impl FsBackend {
     /// The exact operations this bounded reference backend registers.
     pub fn supported_operations(&self) -> impl ExactSizeIterator<Item = &'static str> + Clone {
         OPERATION_NAMES.iter().copied()
-    }
-
-    /// Registers the bucket and object CRUD operations with the production service builder.
-    #[must_use]
-    pub fn register_crud(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
-        macro_rules! register {
-            ($($operations:tt)*) => {
-                register_crud_entries!(self, builder; $($operations)*)
-            };
-        }
-        reference_operations!(register)
-    }
-
-    /// Registers the bounded multipart operation family with the production service builder.
-    #[must_use]
-    pub fn register_multipart(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
-        macro_rules! register {
-            ($($operations:tt)*) => {
-                register_multipart_entries!(self, builder; $($operations)*)
-            };
-        }
-        reference_operations!(register)
-    }
-
-    /// Registers bucket versioning and version-aware object operations.
-    #[must_use]
-    pub fn register_versioning(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
-        macro_rules! register {
-            ($($operations:tt)*) => {
-                register_versioning_entries!(self, builder; $($operations)*)
-            };
-        }
-        reference_operations!(register)
-    }
-
-    /// Registers the bounded object listing operation family.
-    #[must_use]
-    pub fn register_listing(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
-        macro_rules! register {
-            ($($operations:tt)*) => {
-                register_listing_entries!(self, builder; $($operations)*)
-            };
-        }
-        reference_operations!(register)
-    }
-
-    /// Registers persistent bucket lifecycle configuration operations and one-shot expiration support.
-    #[must_use]
-    pub fn register_lifecycle(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
-        macro_rules! register {
-            ($($operations:tt)*) => {
-                register_lifecycle_entries!(self, builder; $($operations)*)
-            };
-        }
-        reference_operations!(register)
     }
 
     fn bucket_path(&self, bucket: &str) -> PathBuf {
