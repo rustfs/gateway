@@ -37,7 +37,7 @@ initialize_sandbox() {
     # does not exist can be told apart from one whose guard stopped naming its crate.
     for guard in check_test_target_consolidation.sh check_server_test_target_consolidation.sh \
         check_sig_test_target_consolidation.sh check_xtask_test_target_consolidation.sh \
-        check_http_test_target_consolidation.sh; do
+        check_http_test_target_consolidation.sh check_ext_field_test_target_consolidation.sh; do
         cp "$REPO_ROOT/scripts/$guard" "$SANDBOX/scripts/"
     done
     # The member set is resolved from the root manifest's own patterns, not listed here. A list
@@ -224,8 +224,8 @@ expect_fail 'an exception row whose reason is a placeholder is rejected' \
     mut_exception_reason_is_a_placeholder
 
 mut_exception_loses_its_tracking_issue() {
-    edit_guard '        3,
-        "rustfs/gateway#277",' '        3,
+    edit_guard '        2,
+        "rustfs/gateway#277",' '        2,
         "later",'
 }
 expect_fail 'an exception row with no tracking issue is rejected' \

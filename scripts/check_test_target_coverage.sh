@@ -48,6 +48,7 @@ COVERED = {
     "crates/http": "check_http_test_target_consolidation.sh",
     "crates/server": "check_server_test_target_consolidation.sh",
     "crates/sig": "check_sig_test_target_consolidation.sh",
+    "spikes/ext-field": "check_ext_field_test_target_consolidation.sh",
     "xtask": "check_xtask_test_target_consolidation.sh",
 }
 
@@ -76,11 +77,6 @@ EXCEPTIONS = {
         1,
         "rustfs/gateway#277",
         "one target; consolidating a single source buys nothing until a second one is added",
-    ),
-    "spikes/ext-field": (
-        3,
-        "rustfs/gateway#277",
-        "the spike this guard's own hand-written survey missed; consolidate it or retire the spike",
     ),
 }
 

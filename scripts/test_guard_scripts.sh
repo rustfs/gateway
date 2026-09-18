@@ -19863,6 +19863,28 @@ PYEOF
 expect_fail check_server_test_target_consolidation.sh \
     'an omitted server integration registration' mut_server_registration_omitted
 
+mut_ext_field_autotests_restored() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("spikes/ext-field/Cargo.toml")
+text = path.read_text()
+path.write_text(text.replace("autotests = false\n", "autotests = true\n", 1))
+PYEOF
+}
+expect_fail check_ext_field_test_target_consolidation.sh \
+    'restoring ext-field implicit test discovery' mut_ext_field_autotests_restored
+
+mut_ext_field_registration_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("spikes/ext-field/tests/integration.rs")
+text = path.read_text()
+path.write_text(text.replace('#[path = "security.rs"]\nmod security;\n', '', 1))
+PYEOF
+}
+expect_fail check_ext_field_test_target_consolidation.sh \
+    'an omitted ext-field integration registration' mut_ext_field_registration_omitted
+
 fi
 
 if [[ "$QUIRK_LEDGER_ONLY" == 1 ]]; then
