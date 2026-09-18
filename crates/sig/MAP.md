@@ -26,11 +26,11 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/sig_v2/mod.rs` | SigV2's `Authorization` grammar, 20-byte signature decode, `Expires` rules and the `SigV2Policy` switch. | A legacy SigV2 client fails to authenticate, or SigV2 presigned needs turning on. |
 | `src/sig_v2/sealed.rs` | `SealedSigV2`: the post-floor SigV2 request, which has no route to `SealedAws`. | A SigV2 request appears able to reach the SigV4 verifier. |
 | `src/sig_v2/signer.rs` | The client half: the `Authorization` value and the presigned `Signature` a SigV2 SDK sends. | A test or the conformance suite has to produce a real SigV2 signature. |
-| `src/sig_v2/timestamp.rs` | SigV2's `Date`/`x-amz-date`, in both accepted spellings, normalised into one `AmzDate`. | A SigV2 client is refused as skewed when its clock is right. |
+| `src/sig_v2/timestamp.rs` | The HTTP-date grammar both schemes read: SigV2's `Date`/`x-amz-date`, and SigV4's `Date` fallback when `x-amz-date` is absent (rustfs/gateway#809), in the ISO basic and RFC 1123 spellings (`GMT`, `+0000`, `-0000`), normalised into one `AmzDate`. | A SigV2 client is refused as skewed when its clock is right. |
 | `src/sig_v2/string_to_sign.rs` | SigV2's six-line string-to-sign and the 35 sub-resources it covers. | A SigV2 signature differs despite the same request, or a new S3 sub-resource must be signed. |
 | `src/signature.rs` | Secret-bearing signature types and constant-time comparison. | Verification or redaction changes. |
-| `src/signer.rs` | Test/client request signing. | Conformance requests are signed wrongly. |
-| `src/signed_headers.rs` | Signed-header parsing and canonical selection. | Header coverage differs between signer and verifier. |
+| `src/signer.rs` | Test/client request signing, dated by `x-amz-date` or, on request, by the HTTP `Date` header. | Conformance requests are signed wrongly. |
+| `src/signed_headers.rs` | Signed-header parsing and canonical selection, including the rule that a `Date` supplying the timestamp is signed. | Header coverage differs between signer and verifier. |
 | `src/timing.rs` | Constant-time comparison helpers. | Signature comparison timing changes. |
 | `src/verdict.rs` | Proof-carrying authentication outcomes and errors. | Authenticated or anonymous outcomes become forgeable. |
 | `src/verifier.rs` | Sealed AWS markers, custom verifier boundary, replay hook, and danger acknowledgement. | A custom or replacement verifier crosses its permitted boundary. |

@@ -761,15 +761,8 @@ impl SecurityFloor {
                 let raw = view.form_value("x-amz-date").ok_or(AuthError::AuthorizationHeaderMalformed)?;
                 AmzDate::parse(raw)
             }
-            _ => {
-                let raw = view
-                    .headers()
-                    .get(X_AMZ_DATE_HEADER)
-                    .ok_or(AuthError::AuthorizationHeaderMalformed)?
-                    .to_str()
-                    .map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
-                AmzDate::parse(raw)
-            }
+            // `x-amz-date` when present, else `Date` (rustfs/gateway#809), the one HTTP-date grammar.
+            _ => crate::sig_v2::sigv4_header_timestamp(view.headers()),
         }
     }
 

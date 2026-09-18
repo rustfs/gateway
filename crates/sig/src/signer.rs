@@ -198,9 +198,24 @@ pub struct SigningRequest<'r> {
     host: &'r RawHost,
     payload: PayloadMode,
     timestamp: AmzDate,
+    timestamp_header: TimestampHeader,
     signed_headers: Option<&'r [HeaderName]>,
     wire_content_length: Option<u64>,
     decoded_content_length: Option<u64>,
+}
+
+/// Which header a header-signed request is dated with.
+///
+/// SigV4 reads `x-amz-date` when it is present and the HTTP `Date` header otherwise; botocore
+/// sends only `Date` when the caller preset one (the Ceph s3-tests case behind
+/// rustfs/gateway#809 does exactly that). A presigned URL carries its timestamp in the query and
+/// ignores this choice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimestampHeader {
+    /// `x-amz-date`, in ISO 8601 basic form. The default.
+    AmzDate,
+    /// `Date`, in RFC 1123 form (`Mon, 14 Sep 2026 03:16:56 GMT`), and no `x-amz-date`.
+    HttpDate,
 }
 
 impl<'r> SigningRequest<'r> {
@@ -228,10 +243,20 @@ impl<'r> SigningRequest<'r> {
             host,
             payload,
             timestamp,
+            timestamp_header: TimestampHeader::AmzDate,
             signed_headers: None,
             wire_content_length: None,
             decoded_content_length: None,
         }
+    }
+
+    /// Dates the request with the HTTP `Date` header instead of `x-amz-date`
+    /// ([`TimestampHeader::HttpDate`]). The `Date` header is then signed, as the verifier requires
+    /// of the header that supplies the timestamp.
+    #[must_use]
+    pub const fn dated_by_http_date(mut self) -> Self {
+        self.timestamp_header = TimestampHeader::HttpDate;
+        self
     }
 
     /// Signs exactly these header names instead of the default set.
@@ -576,7 +601,10 @@ impl SigV4Signer {
             return Ok(headers);
         }
 
-        set_header(&mut headers, X_AMZ_DATE_HEADER, request.timestamp.as_str())?;
+        match request.timestamp_header {
+            TimestampHeader::AmzDate => set_header(&mut headers, X_AMZ_DATE_HEADER, request.timestamp.as_str())?,
+            TimestampHeader::HttpDate => set_header(&mut headers, DATE_HEADER, &http_date(&request.timestamp))?,
+        }
         if request.payload != PayloadMode::Empty {
             let token = request.payload.canonical_payload_token();
             set_header(&mut headers, X_AMZ_CONTENT_SHA256_HEADER_NAME, token.as_str())?;
@@ -660,14 +688,47 @@ fn parse_timestamp(signed: &SignedRequest) -> Result<AmzDate, SignerError> {
         SigLocation::Query => RawQuery::new(&signed.query)
             .decoded_value(X_AMZ_DATE)?
             .ok_or(SignerError::TamperComponentAbsent)?,
-        _ => signed
-            .headers
-            .get(X_AMZ_DATE_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .ok_or(SignerError::TamperComponentAbsent)?
-            .to_owned(),
+        _ => {
+            if let Some(value) = signed.headers.get(X_AMZ_DATE_HEADER) {
+                value.to_str().map_err(|_| SignerError::TamperComponentAbsent)?.to_owned()
+            } else {
+                let raw = signed
+                    .headers
+                    .get(DATE_HEADER)
+                    .and_then(|value| value.to_str().ok())
+                    .ok_or(SignerError::TamperComponentAbsent)?;
+                return Ok(crate::sig_v2::parse_sigv2_date(raw)?);
+            }
+        }
     };
     Ok(AmzDate::parse(&text)?)
+}
+
+/// The HTTP `Date` header, in its lowercase spelling.
+const DATE_HEADER: &str = "date";
+
+/// `Mon, 14 Sep 2026 03:16:56 GMT` for an [`AmzDate`]: the RFC 1123 spelling the `Date` header
+/// carries, with the weekday derived from the date so the two cannot disagree.
+fn http_date(stamp: &AmzDate) -> String {
+    const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let text = stamp.as_str();
+    let field = |range: core::ops::Range<usize>| text.get(range).and_then(|digits| digits.parse::<i64>().ok()).unwrap_or(0);
+    let (year, month, day) = (field(0..4), field(4..6), field(6..8));
+    let (hour, minute, second) = (field(9..11), field(11..13), field(13..15));
+    // Days since 1970-01-01 (a Thursday), from the proleptic Gregorian civil date.
+    let shifted_year = if month <= 2 { year - 1 } else { year };
+    let era = shifted_year.div_euclid(400);
+    let year_of_era = shifted_year - era * 400;
+    let shifted_month = (month + 9) % 12;
+    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    let weekday = WEEKDAYS[usize::try_from(days.rem_euclid(7)).unwrap_or(0)];
+    let month_name = MONTHS[usize::try_from((month - 1).clamp(0, 11)).unwrap_or(0)];
+    format!("{weekday}, {day:02} {month_name} {year:04} {hour:02}:{minute:02}:{second:02} GMT")
 }
 
 /// Lowercase hex of a signature.

@@ -43,10 +43,13 @@
 //! is attacker-reachable: what the deny-list forgets, the attacker supplies.
 
 use http::HeaderMap;
-use http::header::{CONTENT_LENGTH, HOST, HeaderName};
+use http::header::{CONTENT_LENGTH, DATE, HOST, HeaderName};
 use smallvec::SmallVec;
 
 use crate::verdict::AuthError;
+
+/// The SigV4 timestamp header; when it is absent, `Date` supplies the timestamp and must be signed.
+const X_AMZ_DATE: HeaderName = HeaderName::from_static("x-amz-date");
 
 /// The header-name prefix whose members must always be signed.
 pub const AMZ_HEADER_PREFIX: &str = "x-amz-";
@@ -159,6 +162,14 @@ impl SignedHeaderSet {
             if name.as_str().starts_with(AMZ_HEADER_PREFIX) && !set.contains(name) {
                 return Err(AuthError::SignatureDoesNotMatch);
             }
+        }
+
+        // A request with no `x-amz-date` is dated by its `Date` header (rustfs/gateway#809), so
+        // that header is the timestamp the skew check judged, and it must be covered: left
+        // unsigned, a captured request could be replayed forever under a fresh `Date`. With
+        // `x-amz-date` present, `Date` is an ordinary header and may be left unsigned.
+        if !headers.contains_key(X_AMZ_DATE) && headers.contains_key(DATE) && !set.contains(&DATE) {
+            return Err(AuthError::SignatureDoesNotMatch);
         }
 
         if set.contains(&CONTENT_LENGTH) {
@@ -329,5 +340,27 @@ mod tests {
             SignedHeaderSet::parse_and_enforce("content-length;host;x-amz-date", &map, None),
             Err(AuthError::SignatureDoesNotMatch)
         );
+    }
+
+    /// Negative — with no `x-amz-date`, the `Date` header supplies the timestamp and must be signed
+    /// (rustfs/gateway#809); left out of the list it is a `SignatureDoesNotMatch`, like an unsigned
+    /// `x-amz-*` header.
+    #[test]
+    fn n_a_date_that_supplies_the_timestamp_must_be_signed() {
+        let map = headers(&[("date", "Mon, 14 Sep 2026 03:16:56 GMT")]);
+        assert_eq!(
+            SignedHeaderSet::parse_and_enforce("host", &map, None).err(),
+            Some(AuthError::SignatureDoesNotMatch)
+        );
+        assert!(SignedHeaderSet::parse_and_enforce("date;host", &map, None).is_ok());
+    }
+
+    /// Positive — with `x-amz-date` present, `Date` is an ordinary header: it may be signed or
+    /// left unsigned, because the timestamp is read from `x-amz-date` either way.
+    #[test]
+    fn a_date_beside_x_amz_date_may_stay_unsigned() {
+        let map = headers(&[("x-amz-date", "20260914T031656Z"), ("date", "Mon, 14 Sep 2026 03:16:56 GMT")]);
+        assert!(SignedHeaderSet::parse_and_enforce("host;x-amz-date", &map, None).is_ok());
+        assert!(SignedHeaderSet::parse_and_enforce("date;host;x-amz-date", &map, None).is_ok());
     }
 }
