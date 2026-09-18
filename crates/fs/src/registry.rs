@@ -79,6 +79,16 @@ macro_rules! register_acl_entries {
     };
 }
 
+macro_rules! register_policy_entries {
+    ($backend:expr, $builder:expr;) => { $builder };
+    ($backend:expr, $builder:expr; policy $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_policy_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
+    };
+    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_policy_entries!($backend, $builder; $($rest)*)
+    };
+}
+
 macro_rules! register_lifecycle_entries {
     ($backend:expr, $builder:expr;) => { $builder };
     ($backend:expr, $builder:expr; lifecycle $operation:ty => $name:literal, $($rest:tt)*) => {
@@ -118,6 +128,18 @@ impl FsBackend {
         macro_rules! register {
             ($($operations:tt)*) => {
                 register_versioning_entries!(self, builder; $($operations)*)
+            };
+        }
+        reference_operations!(register)
+    }
+
+    /// Registers the bucket-policy family — the policy, its status and the public-access block —
+    /// stored and answered as RustFS stores and answers them (see `policy`).
+    #[must_use]
+    pub fn register_policy(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
+        macro_rules! register {
+            ($($operations:tt)*) => {
+                register_policy_entries!(self, builder; $($operations)*)
             };
         }
         reference_operations!(register)
