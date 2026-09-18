@@ -212,6 +212,12 @@ impl<'a> MetaView<'a> {
     /// A field line whose bytes are not UTF-8 is skipped, exactly as `HeaderView::get_str` skips
     /// an unreadable single value: acceptance has already refused that case for every header this
     /// gateway treats as significant.
+    ///
+    /// For a framed body two headers read as the *object's* rather than the wire's: `content-length`
+    /// is the decoded length (rustfs/gateway#750), and `content-encoding` is the client's value
+    /// with the `aws-chunked` token removed — absent when that token was the whole value
+    /// (rustfs/gateway#813). `aws-chunked` names the framing the ingest layer has already decoded,
+    /// and a backend that stored it would tell a later reader to un-chunk a body that is not.
     #[must_use]
     pub fn header(&self, name: &str) -> Option<Cow<'a, str>> {
         let name = http::HeaderName::from_bytes(name.as_bytes()).ok()?;
@@ -220,6 +226,15 @@ impl<'a> MetaView<'a> {
         {
             return Some(Cow::Owned(length.to_string()));
         }
+        if self.framed_content_length.is_some() && name == http::header::CONTENT_ENCODING {
+            return without_aws_chunked(&self.header_text(&name)?);
+        }
+        self.header_text(&name)
+    }
+
+    /// One header as the wire carries it, multi-line values joined with `, `.
+    fn header_text(&self, name: &http::HeaderName) -> Option<Cow<'a, str>> {
+        let name = name.clone();
         if !self.headers.is_multi(&name) {
             return self.headers.get_str(&name).map(Cow::Borrowed);
         }
@@ -481,6 +496,38 @@ impl RequestBody {
             Self::PostObject(input) => Ok(*input),
             _ => Err(CodecError::internal("PostObject requires an authenticated multipart form body")),
         }
+    }
+}
+
+/// `value` with every `aws-chunked` coding removed; `None` when nothing else was named.
+///
+/// Codings are compared case-insensitively as RFC 9110 §8.4 says, and the survivors keep their
+/// spelling and order: `gzip, aws-chunked` is `gzip`, `aws-chunked` alone is absent.
+fn without_aws_chunked(value: &str) -> Option<Cow<'static, str>> {
+    let kept: Vec<&str> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|coding| !coding.is_empty() && !coding.eq_ignore_ascii_case("aws-chunked"))
+        .collect();
+    (!kept.is_empty()).then(|| Cow::Owned(kept.join(", ")))
+}
+
+#[cfg(test)]
+mod content_encoding_tests {
+    use super::without_aws_chunked;
+
+    /// Negative — the framing token is removed wherever it stands and however it is cased, the
+    /// other codings keep their spelling and order, and a token-only value is absent
+    /// (rustfs/gateway#813).
+    #[test]
+    fn n_aws_chunked_is_removed_and_nothing_else_is() {
+        assert_eq!(without_aws_chunked("gzip, aws-chunked").as_deref(), Some("gzip"));
+        assert_eq!(without_aws_chunked("aws-chunked,gzip").as_deref(), Some("gzip"));
+        assert_eq!(without_aws_chunked("br, AWS-Chunked, gzip").as_deref(), Some("br, gzip"));
+        assert_eq!(without_aws_chunked("aws-chunked").as_deref(), None);
+        assert_eq!(without_aws_chunked(" aws-chunked , ").as_deref(), None);
+        assert_eq!(without_aws_chunked("gzip").as_deref(), Some("gzip"));
+        assert_eq!(without_aws_chunked("x-aws-chunked").as_deref(), Some("x-aws-chunked"));
     }
 }
 
