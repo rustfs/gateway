@@ -74,7 +74,7 @@ fn candidate_order(left: &Candidate, right: &Candidate) -> Ordering {
         .then_with(|| left.kind_tag().cmp(right.kind_tag()))
 }
 
-fn rolled_up_prefix(name: &str, prefix: &str, delimiter: Option<&str>) -> Option<String> {
+pub(super) fn rolled_up_prefix(name: &str, prefix: &str, delimiter: Option<&str>) -> Option<String> {
     let delimiter = delimiter.filter(|value| !value.is_empty())?;
     let remainder = name.strip_prefix(prefix)?;
     let index = remainder.find(delimiter)?;

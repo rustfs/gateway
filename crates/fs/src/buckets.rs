@@ -40,8 +40,8 @@ use rustfs_gateway::dto::{
     HeadBucket, HeadBucketOutput, ListBuckets, ListBucketsOutput, LocationConstraint,
 };
 use rustfs_gateway::{
-    BucketName, CursorSpec, ErrorCode, Handler, HandlerError, HandlerResult, REGION_MATCH_POLICY, Req, Resp, Timestamp,
-    US_EAST_1, resolve_location_constraint,
+    BucketName, CursorSpec, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, REGION_MATCH_POLICY, Req, Resp,
+    Timestamp, US_EAST_1, resolve_location_constraint,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -171,6 +171,13 @@ impl Handler<CreateBucket> for FsBackend {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 self.require_bucket(bucket).await?;
+                // The status matrix is the operation's (`crates/core/src/ops/create_bucket.rs`):
+                // re-creating your own bucket is the historical `200` in us-east-1 and
+                // `409 BucketAlreadyOwnedByYou` in every other region. This backend has one owner,
+                // so an existing bucket is always the caller's own.
+                if self.region() != US_EAST_1 {
+                    return Err(HandlerErrorContext::owned_bucket_recreation().into());
+                }
                 return Ok(Resp::new(CreateBucketOutput {
                     location: Some(format!("/{bucket}")),
                 }));
@@ -247,6 +254,13 @@ impl Handler<DeleteBucket> for FsBackend {
         let objects = self.objects_path(bucket);
         let uploads = self.uploads_path(bucket);
         let versions = self.versions_path(bucket);
+        // Under the version lock from the emptiness check through the removal of the two content
+        // directories: a write publishes its version under the same lock, so it either lands before
+        // the check (the bucket is not empty) or after the bucket is gone (its publish fails). Without
+        // the lock a version renamed in between left `objects/` removed and `versions/` not, and
+        // `require_bucket` then answered every later request on the bucket — a retry of this delete
+        // included — with `500`.
+        let _guard = self.version_lock.lock().await;
         if !self.directory_is_empty(&objects).await?
             || !self.upload_directory_allows_delete(bucket)?
             || !self.directory_is_empty(&versions).await?
@@ -257,7 +271,15 @@ impl Handler<DeleteBucket> for FsBackend {
             ));
         }
         tokio::fs::remove_dir(&objects).await.map_err(|_| storage_error())?;
-        tokio::fs::remove_dir(&versions).await.map_err(|_| storage_error())?;
+        if tokio::fs::remove_dir(&versions).await.is_err() {
+            // Whatever made `versions/` non-empty is content; put the bucket back the way the
+            // check found it rather than leaving it half-deleted, and say it is not empty.
+            let _ = tokio::fs::create_dir(&objects).await;
+            return Err(HandlerError::new(
+                ErrorCode::BUCKET_NOT_EMPTY,
+                "The bucket you tried to delete is not empty",
+            ));
+        }
         // Pending uploads are not content (q-bkt-0008) and go with the bucket, but only once the
         // two directories that are content are gone: a write that raced the check fails the
         // non-recursive removals above before any upload is discarded.

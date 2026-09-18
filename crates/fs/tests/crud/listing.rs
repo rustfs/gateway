@@ -419,3 +419,57 @@ async fn n_symlinked_listing_storage_is_refused() {
     assert_eq!(response.status(), 400, "{}", String::from_utf8_lossy(response.body()));
     assert!(String::from_utf8_lossy(response.body()).contains("<Code>InvalidRequest</Code>"));
 }
+
+/// Negative — a listing racing an ordinary write never answers `500`.
+///
+/// `publish_version` creates a `.tmp-*` directory beside the version records while it holds the
+/// version lock, and `version_records` refuses such an entry as corruption. A listing that
+/// enumerated the directory without the lock saw the temporary directory of a write in flight and
+/// answered `InternalError` for a bucket in perfect health; the lifecycle sweep, reading the same
+/// way, skipped every bucket's expiry for as long as any write was mid-publish. The temporary
+/// directory lives for the body write, so bodies of nine hundred kilobytes hold the window open for a
+/// fraction of a millisecond; forty rounds of one write beside three listings reach it reliably
+/// without the lock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn n_a_listing_racing_a_write_never_answers_500() {
+    let root = TestRoot::new();
+    let (_backend, service) = service(&root);
+    let service = Arc::new(service);
+    create_bucket(&service, "list-race").await;
+    // One write and three listings in flight per round, then the next round: enough to race, few
+    // enough to stay under the assembly's admission ceiling, which would answer `503` and hide the
+    // `500` this case exists to catch.
+    let body = Bytes::from(vec![b'x'; 900 << 10]);
+    let mut statuses = Vec::new();
+    for round in 0..4u32 {
+        let mut tasks = tokio::task::JoinSet::new();
+        let writer = Arc::clone(&service);
+        let body = body.clone();
+        tasks.spawn(async move {
+            let key = format!("k{round}");
+            let response = exchange(&writer, signed(http::Method::PUT, &format!("/list-race/{key}"), body)).await;
+            (String::from("put"), response.status().as_u16())
+        });
+        for _ in 0..30 {
+            let reader = Arc::clone(&service);
+            tasks.spawn(async move {
+                // Listings are far cheaper than the write, so each lister repeats until the write
+                // has had time to publish; the first non-200 is what the round reports.
+                let mut worst = 200;
+                for _ in 0..1 {
+                    let response = exchange(&reader, signed(http::Method::GET, "/list-race?list-type=2", Bytes::new())).await;
+                    if response.status().as_u16() != 200 {
+                        worst = response.status().as_u16();
+                        break;
+                    }
+                }
+                (String::from("list"), worst)
+            });
+        }
+        while let Some(joined) = tasks.join_next().await {
+            statuses.push(joined.expect("a racing task does not panic"));
+        }
+    }
+    let failures: Vec<_> = statuses.iter().filter(|(_, status)| *status != 200).collect();
+    assert!(failures.is_empty(), "a listing or a write answered other than 200: {failures:?}");
+}

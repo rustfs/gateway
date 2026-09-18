@@ -18,7 +18,8 @@
 //! preflighting legacy cleanup before null publication, storing delete markers, selecting current
 //! or explicit versions, exposing the selected metadata directory to object subresources, and
 //! enumerating a deterministic version census.
-//! NOT responsible for: multipart part validation, lifecycle, copy, tag-document persistence, or ordinary listing.
+//! NOT responsible for: multipart part validation, lifecycle, copy, tag-document persistence,
+//! ordinary listing, or the version listing itself (`version_listing`).
 //! Upstream: the filesystem safety primitives and validated multipart assembly. Downstream:
 //! production object, multipart-completion, and version-listing handlers.
 
@@ -27,9 +28,8 @@ use std::io;
 use std::path::PathBuf;
 
 use rustfs_gateway::dto::{
-    DeleteMarkerEntry, DeleteObject, DeleteObjectOutput, GetBucketVersioning, GetBucketVersioningOutput, ListObjectVersions,
-    ListObjectVersionsOutput, ObjectVersion, PutBucketVersioning, PutBucketVersioningOutput, PutObject, PutObjectOutput, Status,
-    StorageClass,
+    DeleteObject, DeleteObjectOutput, GetBucketVersioning, GetBucketVersioningOutput, PutBucketVersioning,
+    PutBucketVersioningOutput, PutObject, PutObjectOutput, Status, StorageClass,
 };
 use rustfs_gateway::{
     ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Preconditions, Req,
@@ -155,7 +155,15 @@ impl FsBackend {
         })
     }
 
+    /// Every key's current record, read under the version lock.
+    ///
+    /// The lock is the point: `version_records` refuses a `.tmp-*` entry as corruption, and
+    /// `publish_version` creates exactly one while it holds this lock, so a listing or a lifecycle
+    /// sweep that enumerated without it answered `500` — or skipped every bucket's expiry — whenever
+    /// an ordinary write was in flight. Every other reader of the version directory already takes
+    /// it; the four callers of this method (listing, lifecycle, transitions) held nothing.
     pub(super) async fn current_object_records(&self, bucket: &str) -> Result<Vec<CurrentObjectRecord>, HandlerError> {
+        let _guard = self.version_lock.lock().await;
         let records = self.version_records(bucket).await?;
         let mut current = BTreeMap::<String, VersionRecord>::new();
         for record in records {
@@ -670,93 +678,5 @@ impl Handler<DeleteObject> for FsBackend {
     }
 }
 
-impl Handler<ListObjectVersions> for FsBackend {
-    async fn call(&self, request: Req<ListObjectVersions>) -> HandlerResult<ListObjectVersions> {
-        let input = request.input();
-        // The version cursor resumes within the key the key cursor names; alone it names nothing,
-        // and answering page one would repeat what the client already has (`c-list-0034`). An
-        // empty key marker names no key either (`c-list-0046`).
-        if input.version_id_marker.is_some() && input.key_marker.as_deref().is_none_or(str::is_empty) {
-            return Err(HandlerError::new(
-                ErrorCode::INVALID_ARGUMENT,
-                "a version-id-marker requires a key-marker",
-            ));
-        }
-        let _guard = self.version_lock.lock().await;
-        let _state = self.versioning_state(input.bucket.as_str()).await?;
-        let mut records = self.version_records(input.bucket.as_str()).await?;
-        records.retain(|record| input.prefix.as_deref().is_none_or(|prefix| record.key.starts_with(prefix)));
-        records.sort_by(|left, right| left.key.cmp(&right.key).then_with(|| right.sequence.cmp(&left.sequence)));
-        let mut latest = BTreeMap::new();
-        for record in &records {
-            latest.entry(record.key.as_str()).or_insert(record.sequence);
-        }
-        let start = match input.key_marker.as_deref() {
-            None => 0,
-            Some(key) if input.version_id_marker.is_none() => records.partition_point(|record| record.key.as_str() <= key),
-            Some(key) => {
-                let marker = input
-                    .version_id_marker
-                    .as_ref()
-                    .map(|value| value.as_str())
-                    .unwrap_or_default();
-                // The pair is a position, not a reference (`c-list-0045`, rustfs/gateway#807): a
-                // cleanup deletes each page before asking for the next, so the named version is
-                // usually gone. Version ids are opaque digests, so a vanished version's place
-                // within its key cannot be recovered; the key's surviving versions are listed
-                // again rather than skipped, because a repeat is harmless to a walker and a skip
-                // silently strands the versions behind the cursor.
-                records
-                    .iter()
-                    .position(|record| record.key == key && record.version_id == marker)
-                    .map_or_else(|| records.partition_point(|record| record.key.as_str() < key), |position| position + 1)
-            }
-        };
-        let max_keys = input.max_keys.unwrap_or(1000);
-        let limit = usize::try_from(max_keys.max(0)).map_err(|_| storage_error())?;
-        let selected = records.iter().skip(start).take(limit).collect::<Vec<_>>();
-        let is_truncated = start.saturating_add(selected.len()) < records.len();
-        let mut versions = Vec::new();
-        let mut delete_markers = Vec::new();
-        for record in &selected {
-            let is_latest = latest.get(record.key.as_str()).copied() == Some(record.sequence);
-            match record.kind {
-                RecordKind::Object => versions.push(ObjectVersion {
-                    key: ObjectKey::new(record.key.clone()).map_err(|_| storage_error())?,
-                    version_id: record.version_id.clone().into(),
-                    is_latest,
-                    last_modified: Timestamp::from_secs(record.modified),
-                    e_tag: rustfs_gateway::ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?,
-                    size: record.size,
-                    storage_class: record.storage_class.clone(),
-                    owner: self.reported_owner().cloned(),
-                    ..ObjectVersion::default()
-                }),
-                RecordKind::DeleteMarker => delete_markers.push(DeleteMarkerEntry {
-                    key: ObjectKey::new(record.key.clone()).map_err(|_| storage_error())?,
-                    version_id: record.version_id.clone().into(),
-                    is_latest,
-                    last_modified: Timestamp::from_secs(record.modified),
-                    owner: self.reported_owner().cloned(),
-                }),
-            }
-        }
-        let next = is_truncated.then(|| selected.last()).flatten();
-        Ok(Resp::new(ListObjectVersionsOutput {
-            name: input.bucket.clone(),
-            prefix: input.prefix.clone().unwrap_or_default(),
-            delimiter: input.delimiter.clone(),
-            encoding_type: input.encoding_type.clone(),
-            key_marker: input.key_marker.clone().unwrap_or_default(),
-            version_id_marker: input.version_id_marker.clone().unwrap_or_default(),
-            next_key_marker: next.map(|record| record.key.clone()),
-            next_version_id_marker: next.map(|record| record.version_id.clone().into()),
-            max_keys,
-            is_truncated,
-            versions,
-            delete_markers,
-            common_prefixes: Vec::new(),
-            ..ListObjectVersionsOutput::default()
-        }))
-    }
-}
+#[cfg(test)]
+mod tests;
