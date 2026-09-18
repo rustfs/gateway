@@ -720,3 +720,39 @@ fn the_signer_suite_case_list_is_not_empty_and_names_no_normalising_case() {
         assert!(!name.ends_with("-normalized") || name.ends_with("-unnormalized"), "{name}");
     }
 }
+
+/// Positive — a request dated by the HTTP `Date` header carries no `x-amz-date`, its `Date` is the
+/// RFC 1123 spelling of the same instant with the right weekday, `Date` is in `SignedHeaders`, and
+/// the verification side reads it back to the timestamp it was signed with (rustfs/gateway#809).
+#[test]
+fn a_request_dated_by_http_date_signs_its_date_header() {
+    for (basic, expected) in [
+        ("20150830T123600Z", "Sun, 30 Aug 2015 12:36:00 GMT"),
+        ("20260914T031656Z", "Mon, 14 Sep 2026 03:16:56 GMT"),
+        ("20240229T235959Z", "Thu, 29 Feb 2024 23:59:59 GMT"),
+        ("20000101T000000Z", "Sat, 01 Jan 2000 00:00:00 GMT"),
+        ("19991231T235959Z", "Fri, 31 Dec 1999 23:59:59 GMT"),
+    ] {
+        let stamp = AmzDate::parse(basic).expect("a timestamp");
+        assert_eq!(super::http_date(&stamp), expected, "{basic}");
+        assert_eq!(crate::sig_v2::parse_sigv2_date(expected).as_ref(), Ok(&stamp), "{basic}");
+    }
+    let headers = HeaderMap::new();
+    let host = RawHost::from_host_header(b"example.amazonaws.com").expect("a host");
+    let method = Method::GET;
+    let request =
+        SigningRequest::new(&method, "/bucket", "", &headers, &host, PayloadMode::Empty, timestamp()).dated_by_http_date();
+    let signed = signer().sign_headers(&request).expect("signable");
+    assert!(signed.headers().get("x-amz-date").is_none());
+    assert_eq!(
+        signed.headers().get("date").and_then(|value| value.to_str().ok()),
+        Some("Sun, 30 Aug 2015 12:36:00 GMT")
+    );
+    let authorization = signed
+        .headers()
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .expect("signed");
+    assert!(authorization.contains("SignedHeaders=date;host,"), "{authorization}");
+    assert_eq!(super::parse_timestamp(&signed).expect("a timestamp"), timestamp());
+}

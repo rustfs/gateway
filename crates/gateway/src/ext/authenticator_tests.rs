@@ -237,6 +237,118 @@ async fn an_unserved_region_is_rejected_and_reports_no_scope() {
     assert!(verdict.verified_scope().is_none());
 }
 
+/// A bodiless `GET /bucket`, header-signed for `us-east-1` and dated by the HTTP `Date` header,
+/// with no `x-amz-date` (rustfs/gateway#809), plus any `extra` headers the caller wants sent.
+fn date_signed(extra: &[(&'static str, &str)]) -> http::HeaderMap {
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.test"));
+    for (name, value) in extra {
+        headers.insert(http::HeaderName::from_static(name), http::HeaderValue::from_str(value).expect("ASCII"));
+    }
+    let host = RawHost::from_host_header(SCOPE_HOST).expect("valid host");
+    let stamp = AmzDate::parse(SCOPE_STAMP).expect("valid stamp");
+    let signing =
+        rustfs_gateway_sig::SigningRequest::new(&Method::GET, "/bucket", "", &headers, &host, PayloadMode::Unsigned, stamp)
+            .dated_by_http_date();
+    signer_for("us-east-1")
+        .sign_headers(&signing)
+        .expect("signable")
+        .headers()
+        .clone()
+}
+
+/// The floor's answer alone, for a request the floor is expected to refuse.
+fn floor_refusal(headers: &http::HeaderMap, now: i64) -> Option<AuthError> {
+    let operation = OperationFloor::builtin("GetBucketLocation", SigService::S3);
+    let view = WireView::new(headers, RawQuery::new(""));
+    SecurityFloor::new()
+        .admit(view, &operation, RequestNow::from_unix_seconds(now))
+        .err()
+}
+
+/// Positive — a request dated only by the HTTP `Date` header verifies: the floor reads `Date` for
+/// the skew check, the string-to-sign is dated with the same instant, and the verdict names the
+/// scope (rustfs/gateway#809, s3-tests `test_object_create_date_and_amz_date`).
+#[tokio::test]
+async fn a_request_dated_by_the_date_header_verifies() {
+    let headers = date_signed(&[]);
+    assert!(headers.get("x-amz-date").is_none());
+    assert_eq!(
+        headers.get("date").and_then(|value| value.to_str().ok()),
+        Some("Sun, 30 Aug 2015 12:36:00 GMT")
+    );
+    let operation = OperationFloor::builtin("GetBucketLocation", SigService::S3);
+    let verdict = verify(&headers, "", &operation).await;
+    assert_eq!(verdict.rejection(), None, "{verdict:?}");
+    assert_eq!(verdict.verified_scope().map(|scope| scope.region()), Some("us-east-1"));
+}
+
+/// Positive — with both headers present, `x-amz-date` is the timestamp: a request signed under
+/// `x-amz-date` verifies whatever an unsigned `Date` beside it says, because the signature covers
+/// `x-amz-date` and the skew check judged the same field.
+#[tokio::test]
+async fn x_amz_date_wins_over_a_disagreeing_date_header() {
+    let mut headers = header_signed("us-east-1");
+    headers.insert(http::header::DATE, http::HeaderValue::from_static("Thu, 01 Jan 2015 00:00:00 GMT"));
+    let operation = OperationFloor::builtin("GetBucketLocation", SigService::S3);
+    let verdict = verify(&headers, "", &operation).await;
+    assert_eq!(verdict.rejection(), None, "{verdict:?}");
+}
+
+/// Negative — the `Date` header that dates a request is covered by the signature: rewriting it
+/// to another instant inside the skew window changes the string-to-sign, so the signature no
+/// longer matches, and a replay under a fresh `Date` cannot succeed.
+#[tokio::test]
+async fn n_a_rewritten_date_header_no_longer_matches_its_signature() {
+    let mut headers = date_signed(&[]);
+    headers.insert(http::header::DATE, http::HeaderValue::from_static("Sun, 30 Aug 2015 12:37:00 GMT"));
+    let operation = OperationFloor::builtin("GetBucketLocation", SigService::S3);
+    let verdict = verify(&headers, "", &operation).await;
+    assert_eq!(verdict.rejection(), Some(AuthError::SignatureDoesNotMatch));
+}
+
+/// Negative — a `Date` that supplies the timestamp but is left out of `SignedHeaders` is refused:
+/// the list is rewritten to `host` alone, and the verifier answers `SignatureDoesNotMatch` before
+/// any signature is compared.
+#[tokio::test]
+async fn n_an_unsigned_date_header_cannot_date_a_request() {
+    let mut headers = date_signed(&[]);
+    let authorization = headers
+        .get(http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .expect("a signed request has an Authorization header")
+        .to_owned();
+    assert!(authorization.contains("SignedHeaders=date;host;"), "{authorization}");
+    let authorization = authorization.replace("SignedHeaders=date;host;", "SignedHeaders=host;");
+    headers.insert(http::header::AUTHORIZATION, http::HeaderValue::from_str(&authorization).expect("valid"));
+    let operation = OperationFloor::builtin("GetBucketLocation", SigService::S3);
+    let verdict = verify(&headers, "", &operation).await;
+    assert_eq!(verdict.rejection(), Some(AuthError::SignatureDoesNotMatch));
+}
+
+/// Negative — the `Date` path has the same skew window as `x-amz-date`: the same request judged
+/// twenty minutes later is `RequestTimeTooSkewed`; and a `Date` the grammar refuses — a real
+/// offset, a two-digit year, an empty value — is `AuthorizationHeaderMalformed`, while a request
+/// with neither header is refused as before.
+#[tokio::test]
+async fn n_a_stale_or_malformed_date_header_is_refused_at_the_floor() {
+    let headers = date_signed(&[]);
+    assert_eq!(floor_refusal(&headers, SCOPE_NOW), None);
+    assert_eq!(floor_refusal(&headers, SCOPE_NOW + 20 * 60), Some(AuthError::RequestTimeTooSkewed));
+    for malformed in ["Sun, 30 Aug 2015 12:36:00 +0200", "Sun, 30 Aug 15 12:36:00 GMT", ""] {
+        let mut headers = date_signed(&[]);
+        headers.insert(http::header::DATE, http::HeaderValue::from_str(malformed).expect("ASCII"));
+        assert_eq!(
+            floor_refusal(&headers, SCOPE_NOW),
+            Some(AuthError::AuthorizationHeaderMalformed),
+            "{malformed:?}"
+        );
+    }
+    let mut neither = date_signed(&[]);
+    neither.remove(http::header::DATE);
+    assert_eq!(floor_refusal(&neither, SCOPE_NOW), Some(AuthError::AuthorizationHeaderMalformed));
+}
+
 /// Positive — c-sig-0586: the built-in verifier authenticates the floor-sealed SigV2 POST proof.
 #[tokio::test]
 async fn c_sig_0586_sigv2_post_policy_reaches_the_builtin_authenticator() {

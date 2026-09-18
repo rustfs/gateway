@@ -17,6 +17,7 @@
 //! Responsible for: reading the timestamp a SigV2 request carries — `x-amz-date` when it is
 //! present, `Date` otherwise — in either of the two spellings AWS's own clients send, and turning
 //! it into an [`AmzDate`].
+//! Also SigV4's header timestamp ([`sigv4_header_timestamp`]), which shares the `Date` grammar.
 //! NOT responsible for: comparing it against anything. The window, the receipt and the overflow
 //! rules are [`crate::enforce_clock_skew`]'s, unchanged and uncopied: this module exists so that
 //! SigV2 reaches that one function rather than growing a second skew rule beside it.
@@ -27,9 +28,14 @@
 //! SigV4 fixed the timestamp format; SigV2 predates that and rides on HTTP's own `Date` header,
 //! which is an RFC 1123 date. botocore's `HmacV1Auth` writes `formatdate(usegmt=True)` and
 //! aws-sdk-js v2 writes `Date.prototype.toUTCString()` — both produce `GMT`, while AWS's own
-//! SigV2 documentation example carries `+0000`. Both are accepted here and nothing else is: a
-//! non-zero offset would need offset arithmetic, and an instant with two spellings is an instant
-//! two implementations disagree about.
+//! SigV2 documentation example carries `+0000`, and botocore's `_gen_date` for a caller-supplied
+//! `Date` writes `-0000` (RFC 5322's spelling of "UTC, offset unknown"). All three are accepted
+//! here and nothing else is: a non-zero offset would need offset arithmetic, and an instant with
+//! two spellings is an instant two implementations disagree about.
+//!
+//! SigV4 reads the same grammar: a header-signed request that carries no `x-amz-date` is dated by
+//! its `Date` header (rustfs/gateway#809), which [`crate::SecurityFloor`] hands to
+//! [`parse_sigv2_date`] so the two schemes share one reading of an HTTP date.
 //!
 //! The weekday is required to be three ASCII letters and is otherwise not interpreted. Checking
 //! that it agrees with the date would reject a request over a field that carries no information
@@ -71,6 +77,30 @@ pub fn signed_timestamp(headers: &HeaderMap) -> Result<AmzDate, AuthError> {
     parse_sigv2_date(raw)
 }
 
+/// Reads the timestamp a SigV4 header-signed request was signed at: `x-amz-date` in ISO 8601 basic
+/// form when it is present, else the HTTP `Date` header in either spelling (rustfs/gateway#809).
+///
+/// `x-amz-date` wins when both are present, which is the header the string-to-sign is dated with;
+/// whether a `Date` that supplies the timestamp is signed is `SignedHeaderSet::parse_and_enforce`'s
+/// to refuse. A request carrying neither is refused.
+///
+/// # Errors
+///
+/// [`AuthError::AuthorizationHeaderMalformed`] when neither header is present, when the chosen one
+/// is not UTF-8, or when it is not in the spelling its header admits.
+pub fn sigv4_header_timestamp(headers: &HeaderMap) -> Result<AmzDate, AuthError> {
+    let (value, http_date) = match headers.get(X_AMZ_DATE_HEADER) {
+        Some(value) => (value, false),
+        None => (headers.get(DATE_HEADER).ok_or(AuthError::AuthorizationHeaderMalformed)?, true),
+    };
+    let raw = value.to_str().map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
+    if http_date {
+        parse_sigv2_date(raw)
+    } else {
+        AmzDate::parse(raw)
+    }
+}
+
 /// Parses either accepted SigV2 timestamp spelling into an [`AmzDate`].
 ///
 /// The ISO 8601 basic form (`20260102T030405Z`) is tried first and is [`AmzDate::parse`] verbatim.
@@ -91,7 +121,7 @@ pub fn parse_sigv2_date(raw: &str) -> Result<AmzDate, AuthError> {
         _ => return Err(AuthError::AuthorizationHeaderMalformed),
     };
     match zone.as_bytes() {
-        b"GMT" | b"+0000" => {}
+        b"GMT" | b"+0000" | b"-0000" => {}
         _ => return Err(AuthError::AuthorizationHeaderMalformed),
     }
     // Every fixed separator at once, so no arm of this grammar can be relaxed on its own.
@@ -158,6 +188,39 @@ mod tests {
             parse_sigv2_date("Tue, 27 Mar 2007 19:36:42 +0100").err(),
             Some(AuthError::AuthorizationHeaderMalformed)
         );
+    }
+
+    /// Positive: the three spellings of UTC — `GMT`, `+0000` and botocore's `-0000` — are one
+    /// instant, and it is the instant the ISO 8601 basic form names.
+    #[test]
+    fn the_three_utc_spellings_are_one_instant() {
+        let basic = AmzDate::parse("20260914T031656Z").expect("a timestamp");
+        for spelled in [
+            "Mon, 14 Sep 2026 03:16:56 GMT",
+            "Mon, 14 Sep 2026 03:16:56 +0000",
+            "Mon, 14 Sep 2026 03:16:56 -0000",
+        ] {
+            assert_eq!(parse_sigv2_date(spelled).as_ref(), Ok(&basic), "{spelled}");
+        }
+    }
+
+    /// Negative: `-0000` is accepted only as a whole; a minute of offset in either sign, a
+    /// lowercase zone, and a zone of the right length but the wrong letters are refused.
+    #[test]
+    fn n_a_near_utc_zone_is_refused() {
+        for spelled in [
+            "Mon, 14 Sep 2026 03:16:56 -0001",
+            "Mon, 14 Sep 2026 03:16:56 -0100",
+            "Mon, 14 Sep 2026 03:16:56 gmt",
+            "Mon, 14 Sep 2026 03:16:56 UTC",
+            "Mon, 14 Sep 2026 03:16:56 +00:00",
+        ] {
+            assert_eq!(
+                parse_sigv2_date(spelled).err(),
+                Some(AuthError::AuthorizationHeaderMalformed),
+                "{spelled}"
+            );
+        }
     }
 
     /// Negative: a request carrying no timestamp at all is refused, not treated as "now".

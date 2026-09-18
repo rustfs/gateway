@@ -50,7 +50,7 @@ pub mod timestamp;
 pub use sealed::SealedSigV2;
 pub use signer::SigV2Signer;
 pub use string_to_sign::{INCLUDED_QUERY, SIGV2_EXPIRES_PARAM, SigV2Mode, SigV2StringToSign, SigV2StringToSignSpec};
-pub use timestamp::{parse_sigv2_date, signed_timestamp};
+pub use timestamp::{parse_sigv2_date, signed_timestamp, sigv4_header_timestamp};
 
 use crate::clock::{MAX_PRESIGNED_EXPIRY_SECONDS, RequestNow};
 use crate::codec::decode_base64_exact;

@@ -1971,7 +1971,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-sig"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "hmac",
  "http",
