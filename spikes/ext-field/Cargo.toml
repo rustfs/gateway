@@ -5,6 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+# One linked test binary for the three sources, registered in tests/integration.rs and held there
+# by scripts/check_ext_field_test_target_consolidation.sh (rustfs/gateway#277).
+autotests = false
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [dependencies]
 quick-xml.workspace = true
