@@ -38,6 +38,8 @@ mod authz_contract;
 mod authz_implementations;
 #[path = "backend_reachability.rs"]
 mod backend_reachability;
+#[path = "bucket_config_reachability.rs"]
+mod bucket_config_reachability;
 #[path = "chunked_allocations.rs"]
 mod chunked_allocations;
 #[path = "committed_head_runtime.rs"]
