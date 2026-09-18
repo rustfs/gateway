@@ -46,9 +46,33 @@ fn a_traversal_in_the_copy_source_is_refused_and_never_resolved() {
     assert_eq!(err.code(), &ErrorCode::INVALID_ARGUMENT);
     assert!(CopySource::parse("bucket/%252e%252e/x").is_err());
     assert!(CopySource::parse("bucket/%252e%252e%252fsecret").is_err());
-    assert!(CopySource::parse("bucket/a%255csecret").is_err());
+    assert!(CopySource::parse("bucket/a%255c..%255csecret").is_err());
     assert!(CopySource::parse("bucket/%2e%2e/x").is_err());
+    assert!(CopySource::parse("bucket/%255c%255cshare").is_err());
     assert_eq!(resolved("bucket/a/./b").key().as_str(), "a/./b");
+}
+
+/// Positive — the source is judged by the destination's key floor and nothing stricter: a folder
+/// marker, an empty segment inside a key, one leading slash and a backslash that is not a
+/// traversal are all keys `PutObject` accepts, and all were refused by an earlier private rule
+/// that made every folder marker uncopyable.
+#[test]
+fn a_source_key_the_destination_accepts_is_accepted() {
+    for (raw, key) in [
+        ("bucket/photos/", "photos/"),
+        ("bucket/a//b", "a//b"),
+        ("bucket//leading", "/leading"),
+        ("bucket/win%5Cpath", "win\\path"),
+    ] {
+        assert_eq!(resolved(raw).key().as_str(), key, "{raw}");
+    }
+}
+
+/// Negative — and nothing looser: a control character the destination refuses is refused here.
+#[test]
+fn n_a_source_key_the_destination_refuses_is_refused() {
+    assert_eq!(rejected("bucket/a%01b").code(), &ErrorCode::INVALID_ARGUMENT);
+    assert_eq!(rejected("bucket/%00").code(), &ErrorCode::INVALID_ARGUMENT);
 }
 
 #[test]
