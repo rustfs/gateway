@@ -123,7 +123,10 @@ async fn enabled_multipart_versions_survive_restart() {
     assert!(!uploads.contains(&second_upload));
 }
 
-/// Positive — never-enabled and suspended buckets follow the same null-version rules as PUT.
+/// Positive — never-enabled and suspended buckets follow the same null-version rules as PUT, on
+/// the read as well as the write: once the bucket has been versioned, every null version —
+/// the one completed before versioning was enabled included — reads back as `null`, the id its
+/// completion reported.
 #[tokio::test]
 async fn never_enabled_and_suspended_completion_share_null_semantics() {
     let root = TestRoot::new();
@@ -144,16 +147,18 @@ async fn never_enabled_and_suspended_completion_share_null_semantics() {
     assert_eq!(second_null, "null");
 
     let (_, reopened) = service(&root);
+    // The bucket has been versioned since `plain` was completed, so its null version is now
+    // addressable and reads back as `null`, as it would from S3.
     let plain = exchange(&reopened, signed(http::Method::GET, "/mpu-null/plain", Bytes::new())).await;
     assert_eq!(plain.status(), 200);
     assert_eq!(plain.body().as_ref(), b"unversioned");
-    assert!(header_text(&plain, "x-amz-version-id").is_none());
+    assert_eq!(header_text(&plain, "x-amz-version-id"), Some("null"));
 
     let current = exchange(&reopened, signed(http::Method::GET, "/mpu-null/key", Bytes::new())).await;
     assert_eq!(current.status(), 200);
     assert_eq!(current.body().as_ref(), b"null-two");
     assert_eq!(header_text(&current, "etag"), Some(format!("\"{second_tag}\"").as_str()));
-    assert!(header_text(&current, "x-amz-version-id").is_none());
+    assert_eq!(header_text(&current, "x-amz-version-id"), Some("null"), "the id the completion reported");
 
     let historic = exchange(
         &reopened,

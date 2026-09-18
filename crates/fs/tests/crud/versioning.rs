@@ -657,3 +657,39 @@ async fn n_a_delimiter_rolls_versions_below_it_into_common_prefixes() {
     assert_eq!(all_elements(&under_text, "Key"), ["a/1", "a/1", "a/2", "a/2"], "{under_text}");
     assert_eq!(under_text.matches("<DeleteMarker>").count(), 1, "{under_text}");
 }
+
+/// Negative — a suspended bucket's null version reports `x-amz-version-id: null` on the read as
+/// well as on the write, and a bucket that was never versioned reports no version id on either.
+/// The write already answered `null` from the versioning state; the read answered from the
+/// record's id, which is `null` in both kinds of bucket, so it said nothing where AWS says `null`.
+#[tokio::test]
+async fn n_a_suspended_buckets_null_version_reads_back_as_null() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "null-reads").await;
+    assert_eq!(set_versioning(&service, "null-reads", "Enabled").await.status(), 200);
+    assert_eq!(set_versioning(&service, "null-reads", "Suspended").await.status(), 200);
+    assert_eq!(
+        header_text(&put(&service, "null-reads", "key", b"body").await, "x-amz-version-id"),
+        Some("null")
+    );
+    for method in [http::Method::GET, http::Method::HEAD] {
+        let read = exchange(&service, signed(method.clone(), "/null-reads/key", Bytes::new())).await;
+        assert_eq!(read.status(), 200, "{method}");
+        assert_eq!(header_text(&read, "x-amz-version-id"), Some("null"), "{method} of the null version");
+    }
+    let explicit = exchange(&service, signed(http::Method::GET, "/null-reads/key?versionId=null", Bytes::new())).await;
+    assert_eq!(explicit.status(), 200);
+    assert_eq!(header_text(&explicit, "x-amz-version-id"), Some("null"));
+
+    create_bucket(&service, "never-versioned").await;
+    let written = put(&service, "never-versioned", "key", b"body").await;
+    assert_eq!(
+        header_text(&written, "x-amz-version-id"),
+        None,
+        "a never-versioned bucket has no version id"
+    );
+    let read = exchange(&service, signed(http::Method::GET, "/never-versioned/key", Bytes::new())).await;
+    assert_eq!(read.status(), 200);
+    assert_eq!(header_text(&read, "x-amz-version-id"), None);
+}
