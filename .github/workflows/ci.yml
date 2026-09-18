@@ -469,12 +469,14 @@ jobs:
   # up. On one runner it reached 479s of a 480s timeout and started dying at exit 124
   # with every case still printing ok — on pull requests that had nothing to do with
   # it, and on pristine main's own scheduled runs (32097529045, 32197900452).
-  # Each runner takes every fifth case ordinal and splits its share again across
-  # worker processes, and each proves it executed exactly its own share, so the five
+  # Each runner takes every sixth case ordinal and splits its share again across
+  # worker processes, and each proves it executed exactly its own share, so the six
   # green jobs together are a complete run. Four runners lasted from 2026-08 until the
   # third of them stopped itself at 270s of its 300s slice on main (2026-09-10) with
-  # every case still printing ok; adding the next runner is this block plus the shard
-  # count in scripts/check_ci_test_split.sh and the subjects in test_guard_scripts.sh. GATEWAY_GUARD_BUDGET_SECONDS
+  # every case still printing ok; five lasted until the first of them did the same on
+  # every pull request of 2026-09-18 (runs 35292973579 and 35293671982); adding the
+  # next runner is this block plus the shard count in scripts/check_ci_test_split.sh
+  # and the subjects in test_guard_scripts.sh. GATEWAY_GUARD_BUDGET_SECONDS
   # matches the timeout so the suite can stop and say "out of time" instead of being
   # killed with an unexplained 124.
 
@@ -490,9 +492,9 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Guard mutations 1 of 5 (maximum 5 minutes after setup)
+      - name: Guard mutations 1 of 6 (maximum 5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 300 "guard mutations 1/5" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 300 "guard mutations 1/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
 
   guard-self-test-2:
     name: Guard self-test 2
@@ -506,9 +508,9 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Guard mutations 2 of 5 (maximum 5 minutes after setup)
+      - name: Guard mutations 2 of 6 (maximum 5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 300 "guard mutations 2/5" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 300 "guard mutations 2/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
 
   guard-self-test-3:
     name: Guard self-test 3
@@ -522,9 +524,9 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Guard mutations 3 of 5 (maximum 5 minutes after setup)
+      - name: Guard mutations 3 of 6 (maximum 5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 300 "guard mutations 3/5" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 300 "guard mutations 3/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
 
   guard-self-test-4:
     name: Guard self-test 4
@@ -538,9 +540,9 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Guard mutations 4 of 5 (maximum 5 minutes after setup)
+      - name: Guard mutations 4 of 6 (maximum 5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 300 "guard mutations 4/5" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=3 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 300 "guard mutations 4/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=3 bash scripts/test_guard_scripts.sh
 
   guard-self-test-5:
     name: Guard self-test 5
@@ -554,9 +556,25 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Guard mutations 5 of 5 (maximum 5 minutes after setup)
+      - name: Guard mutations 5 of 6 (maximum 5 minutes after setup)
         run: |
-          scripts/ci_budget.sh 300 "guard mutations 5/5" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=4 bash scripts/test_guard_scripts.sh
+          scripts/ci_budget.sh 300 "guard mutations 5/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=4 bash scripts/test_guard_scripts.sh
+
+  guard-self-test-6:
+    name: Guard self-test 6
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Guard mutations 6 of 6 (maximum 5 minutes after setup)
+        run: |
+          scripts/ci_budget.sh 300 "guard mutations 6/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=5 bash scripts/test_guard_scripts.sh
 
   target-consolidation-self-test:
     name: Target consolidation self-test
@@ -708,7 +726,7 @@ jobs:
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
+    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, guard-self-test-6, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -727,6 +745,7 @@ jobs:
           GUARD_3_RESULT: ${{ needs.guard-self-test-3.result }}
           GUARD_4_RESULT: ${{ needs.guard-self-test-4.result }}
           GUARD_5_RESULT: ${{ needs.guard-self-test-5.result }}
+          GUARD_6_RESULT: ${{ needs.guard-self-test-6.result }}
           TARGET_CONSOLIDATION_RESULT: ${{ needs.target-consolidation-self-test.result }}
           QUIRK_LEDGER_RESULT: ${{ needs.quirk-ledger-self-test.result }}
           QUIRK_LEDGER_2_RESULT: ${{ needs.quirk-ledger-self-test-2.result }}
@@ -754,6 +773,7 @@ jobs:
           test "$GUARD_3_RESULT" = success
           test "$GUARD_4_RESULT" = success
           test "$GUARD_5_RESULT" = success
+          test "$GUARD_6_RESULT" = success
           test "$TARGET_CONSOLIDATION_RESULT" = success
           test "$QUIRK_LEDGER_RESULT" = success
           test "$QUIRK_LEDGER_2_RESULT" = success

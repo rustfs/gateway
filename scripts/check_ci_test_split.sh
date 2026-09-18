@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # WHAT THIS CHECKS
-#   Workspace tests, persistence goldens, the official signing suite, guard mutations split over five runners,
+#   Workspace tests, persistence goldens, the official signing suite, guard mutations split over six runners,
 #   build-backed mutations split over three runners, target-consolidation mutations, quirk-ledger
 #   mutations, error-status mutations and TSAN run on separate CI runners, while the
 #   branch-protected Test check waits for every worker. This keeps the gate wall time below ten
@@ -46,7 +46,7 @@ workspaces = workspace_ids.map { |job_id| jobs.fetch(job_id) }
 signing_suite = jobs.fetch("signing-suite")
 persistence_goldens = jobs.fetch("persistence-goldens")
 guard = jobs.fetch("guard-self-test")
-guard_group_ids = ["guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "guard-self-test-5"]
+guard_group_ids = ["guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "guard-self-test-5", "guard-self-test-6"]
 guard_groups = guard_group_ids.map { |job_id| jobs.fetch(job_id) }
 target = jobs.fetch("target-consolidation-self-test")
 quirk_ledger_ids = [
@@ -87,7 +87,7 @@ require_equal(persistence_goldens.keys, worker_keys,
 require_equal(persistence_goldens.values_at("name", "runs-on", "timeout-minutes"),
               ["Persistence goldens", "ubuntu-latest", 4],
               "persistence-goldens identity or budget changed")
-# Five runners, one per fifth of the case ordinals. Six minutes each keeps the longest
+# Six runners, one per sixth of the case ordinals. Six minutes each keeps the longest
 # dependency path (a guard runner plus the one-minute Test aggregate) at seven of the ten.
 guard_groups.each_with_index do |job, index|
   expected_name = index.zero? ? "Guard self-test" : "Guard self-test #{index + 1}"
@@ -260,9 +260,9 @@ persistence_goldens_run = <<~'RUN'
 RUN
 # Every runner declares the same budget it is given, so an overrun stops itself with a
 # diagnosis instead of being killed at exit 124 with every case still printing ok.
-guard_runs = (0...5).map do |group|
+guard_runs = (0...6).map do |group|
   <<~RUN
-    scripts/ci_budget.sh 300 "guard mutations #{group + 1}/5" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
+    scripts/ci_budget.sh 300 "guard mutations #{group + 1}/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=#{group} bash scripts/test_guard_scripts.sh
   RUN
 end
 # Two suites, two budgets, one runner. They share a runner because the pair costs about twenty
@@ -301,9 +301,9 @@ guard_groups.each_with_index do |job, index|
   require_equal(job.fetch("steps").last.fetch("run"), guard_runs.fetch(index),
                 "#{guard_group_ids[index]} command changed, lost its shard, or can hide a failure")
 end
-# The five groups must be the five distinct fifths of one split, or a fifth of the
-# suite silently never runs while all five jobs report success.
-require_equal(guard_runs.uniq.length, 5, "the guard runners do not cover five distinct shards")
+# The six groups must be the six distinct sixths of one split, or a sixth of the
+# suite silently never runs while all six jobs report success.
+require_equal(guard_runs.uniq.length, 6, "the guard runners do not cover six distinct shards")
 # Transport parity is two halves of one comparison for the same reason: a runner that repeats
 # the other's shard leaves half the corpus uncompared while both jobs report success.
 parity_ids = ["transport-parity", "transport-parity-2"]
@@ -376,8 +376,8 @@ end
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "workspace-tests-2", "workspace-tests-3", "transport-parity", "transport-parity-2", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "guard-self-test-5", "target-consolidation-self-test", "quirk-ledger-self-test", "quirk-ledger-self-test-2", "quirk-ledger-self-test-3", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs", "examples"], "always()", "ubuntu-latest", 1],
-              "the Test job no longer aggregates all twenty-six workers within the budget")
+              ["Test", ["workspace-tests", "workspace-tests-2", "workspace-tests-3", "transport-parity", "transport-parity-2", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "guard-self-test-5", "guard-self-test-6", "target-consolidation-self-test", "quirk-ledger-self-test", "quirk-ledger-self-test-2", "quirk-ledger-self-test-3", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs", "examples"], "always()", "ubuntu-latest", 1],
+              "the Test job no longer aggregates all twenty-seven workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
@@ -394,6 +394,7 @@ expected_env = {
   "GUARD_3_RESULT" => "${{ needs.guard-self-test-3.result }}",
   "GUARD_4_RESULT" => "${{ needs.guard-self-test-4.result }}",
   "GUARD_5_RESULT" => "${{ needs.guard-self-test-5.result }}",
+  "GUARD_6_RESULT" => "${{ needs.guard-self-test-6.result }}",
   "TARGET_CONSOLIDATION_RESULT" => "${{ needs.target-consolidation-self-test.result }}",
   "QUIRK_LEDGER_RESULT" => "${{ needs.quirk-ledger-self-test.result }}",
   "QUIRK_LEDGER_2_RESULT" => "${{ needs.quirk-ledger-self-test-2.result }}",
@@ -423,6 +424,7 @@ expected_run = <<~'RUN'
   test "$GUARD_3_RESULT" = success
   test "$GUARD_4_RESULT" = success
   test "$GUARD_5_RESULT" = success
+  test "$GUARD_6_RESULT" = success
   test "$TARGET_CONSOLIDATION_RESULT" = success
   test "$QUIRK_LEDGER_RESULT" = success
   test "$QUIRK_LEDGER_2_RESULT" = success
@@ -531,9 +533,9 @@ build_shards = [
     (int(seconds), env) for seconds, env in invocations
     if "GATEWAY_GUARD_SHARD_GROUP=" in env and "GATEWAY_GUARD_BUILD_GUARDS_ONLY=1" in env
 ]
-if len(regular_shards) != 5:
+if len(regular_shards) != 6:
     raise SystemExit(
-        f"ERROR: expected five guard shard invocations in CI, found {len(regular_shards)}"
+        f"ERROR: expected six guard shard invocations in CI, found {len(regular_shards)}"
     )
 if len(quirk_ledger_shards) != 3:
     raise SystemExit(
@@ -564,9 +566,9 @@ regular_groups = sorted(
     int(re.search(r"GATEWAY_GUARD_SHARD_GROUP=([0-9]+)", env).group(1))
     for _, env in regular_shards
 )
-if regular_groups != [0, 1, 2, 3, 4]:
+if regular_groups != [0, 1, 2, 3, 4, 5]:
     raise SystemExit(
-        f"ERROR: the guard shards cover groups {regular_groups}, not every fifth of the suite"
+        f"ERROR: the guard shards cover groups {regular_groups}, not every sixth of the suite"
     )
 quirk_ledger_groups = sorted(
     int(re.search(r"GATEWAY_GUARD_SHARD_GROUP=([0-9]+)", env).group(1))
@@ -586,4 +588,4 @@ if build_groups != [0, 1, 2, 3, 4]:
     )
 PY
 
-printf 'OK: three workspace shards, two transport parity shards, persistence goldens, signing suite, five guard shards, target-consolidation, three quirk-ledger shards, DTO compiler, five build guard shards, error-status and TSAN workers are parallel behind Test\n'
+printf 'OK: three workspace shards, two transport parity shards, persistence goldens, signing suite, six guard shards, target-consolidation, three quirk-ledger shards, DTO compiler, five build guard shards, error-status and TSAN workers are parallel behind Test\n'
