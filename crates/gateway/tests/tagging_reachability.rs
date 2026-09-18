@@ -48,7 +48,7 @@ use rustfs_gateway::{
 /// verifies a declared `Content-MD5` actually matches the buffered body (`BadDigest` otherwise).
 /// This is test-data generation, not a cryptographic use, so a hand-rolled standard base64
 /// encoder is used rather than adding a dependency for six lines.
-fn content_md5(body: &[u8]) -> String {
+pub(super) fn content_md5(body: &[u8]) -> String {
     let digest = Md5::digest(body);
     base64_standard(&digest)
 }
@@ -79,7 +79,7 @@ fn base64_standard(bytes: &[u8]) -> String {
 }
 
 /// A request as it reaches a decoder, with whatever header lines the case needs.
-fn accepted(method: &'static str, uri: &'static str, headers: &[(&'static str, &'static str)]) -> WireRequest<()> {
+pub(super) fn accepted(method: &'static str, uri: &'static str, headers: &[(&'static str, &'static str)]) -> WireRequest<()> {
     let mut request = http::Request::builder()
         .method(method)
         .uri(uri)

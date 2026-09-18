@@ -688,6 +688,7 @@ gateway_modules = (
     "patch_layer_landings",
     "payload_transport",
     "pipeline",
+    "policy_reachability",
     "post_object_runtime",
     "precondition_contract",
     "precondition_reachability",
