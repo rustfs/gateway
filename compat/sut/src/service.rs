@@ -103,12 +103,14 @@ pub(crate) fn build_service(
             // And released once the backend deleted the bucket, so the name is free again.
             .op_layer::<dto::DeleteBucket, _>(ReleasedNames::new(Arc::clone(owners))),
     );
-    let service = backend
-        .register_tagging(
-            backend
-                .register_lifecycle(backend.register_listing(backend.register_versioning(backend.register_multipart(builder)))),
-        )
-        .build()?;
+    let service =
+        backend
+            .register_acl(backend.register_tagging(
+                backend.register_lifecycle(
+                    backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
+                ),
+            ))
+            .build()?;
     Ok(service)
 }
 

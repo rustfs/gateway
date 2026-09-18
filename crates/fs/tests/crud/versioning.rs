@@ -36,7 +36,7 @@ async fn create_bucket(service: &S3Service, bucket: &str) {
     );
 }
 
-async fn set_versioning(service: &S3Service, bucket: &str, status: &str) -> rustfs_gateway::WireResponse {
+pub(super) async fn set_versioning(service: &S3Service, bucket: &str, status: &str) -> rustfs_gateway::WireResponse {
     let checksum = match status {
         "Enabled" => "QQFYoy/mRYV9PGZUfFi0Bw==",
         "Suspended" => "orZUUp7E9srl53Od8p1glA==",

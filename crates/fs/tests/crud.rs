@@ -19,6 +19,8 @@
 //! NOT responsible for: expanded example binaries or production durability.
 //! Upstream: `rustfs-gateway-fs` and the public gateway facade. Downstream: the crate verification gate.
 
+#[path = "crud/acl.rs"]
+mod acl;
 #[path = "crud/versioning.rs"]
 mod versioning;
 
@@ -178,13 +180,15 @@ fn service_with_backend_and_credentials(
                 ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
             ),
     );
-    let service = backend
-        .register_tagging(
-            backend
-                .register_lifecycle(backend.register_listing(backend.register_versioning(backend.register_multipart(builder)))),
-        )
-        .build()
-        .expect("the reference registry is a complete assembly");
+    let service =
+        backend
+            .register_acl(backend.register_tagging(
+                backend.register_lifecycle(
+                    backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
+                ),
+            ))
+            .build()
+            .expect("the reference registry is a complete assembly");
     (backend, service)
 }
 
@@ -343,10 +347,12 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "DeleteObject",
             "DeleteObjectTagging",
             "DeleteObjects",
+            "GetBucketAcl",
             "GetBucketLifecycleConfiguration",
             "GetBucketLocation",
             "GetBucketVersioning",
             "GetObject",
+            "GetObjectAcl",
             "GetObjectTagging",
             "HeadBucket",
             "HeadObject",
@@ -357,9 +363,11 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "ListObjectsV2",
             "ListParts",
             "PostObject",
+            "PutBucketAcl",
             "PutBucketLifecycleConfiguration",
             "PutBucketVersioning",
             "PutObject",
+            "PutObjectAcl",
             "PutObjectTagging",
             "UploadPart"
         ]
