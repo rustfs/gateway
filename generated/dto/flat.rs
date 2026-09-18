@@ -25,11 +25,12 @@
 
 pub use crate::ops::enums::{
     AccessTier, Acl, ArchiveStatus, CannedAcl, ChecksumAlgorithm, ChecksumMode, ChecksumType, CompressionType,
-    ConfigurationState, EncodingType, EncryptionType, Events, Expiration, ExpressionType, FileHeaderInfo, Format, Frequency,
-    IncludedObjectVersions, LocationConstraint, MetadataDirective, MfaDelete, Mode, Name, ObjectLockEnabled,
-    ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, OptionalFields, OutputSchemaVersion, PartitionDateSource, Payer,
-    Permission, Protocol, QuoteFields, ReplicationStatus, RequestCharged, RequestPayer, ServerSideEncryption, SseAlgorithm,
-    Status, StorageClass, TableBucketType, TaggingDirective, Tier, TransitionDefaultMinimumObjectSize, Type,
+    ConfigurationState, EncodingType, EncryptionType, EventHold, Events, Expiration, ExpressionType, FileHeaderInfo, Format,
+    Frequency, IncludedObjectVersions, LocationConstraint, MetadataDirective, MfaDelete, Mode, Name, ObjectLockEnabled,
+    ObjectLockEventHold, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, OptionalFields, OutputSchemaVersion,
+    PartitionDateSource, Payer, Permission, Protocol, QuoteFields, ReplicationStatus, RequestCharged, RequestPayer,
+    ServerSideEncryption, SseAlgorithm, Status, StorageClass, TableBucketType, TaggingDirective, Tier,
+    TransitionDefaultMinimumObjectSize, Type,
 };
 pub use crate::ops::shapes::{
     AbacStatus, AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, AccessControlTranslation,
@@ -38,7 +39,7 @@ pub use crate::ops::shapes::{
     BucketLoggingStatus, Checksum, CommonPrefix, CompletedMultipartUpload, CompletedPart, Condition, CorsConfiguration, CorsRule,
     CreateBucketConfiguration, CsvInput, CsvOutput, DefaultRetention, Delete, DeleteMarkerEntry, DeleteMarkerReplication,
     DeletedObject, Destination, DestinationResult, Encryption, EncryptionConfiguration, Error, ErrorDetails, ErrorDocument,
-    EventBridgeConfiguration, ExistingObjectReplication, FilterRule, GetBucketMetadataConfigurationResult,
+    EventBridgeConfiguration, EventHoldDuration, ExistingObjectReplication, FilterRule, GetBucketMetadataConfigurationResult,
     GetBucketMetadataTableConfigurationResult, GetObjectAttributesParts, GlacierJobParameters, Grant, Grantee, IndexDocument,
     Initiator, InputSerialization, IntelligentTieringAndOperator, IntelligentTieringConfiguration, IntelligentTieringFilter,
     InventoryConfiguration, InventoryDestination, InventoryEncryption, InventoryFilter, InventoryS3BucketDestination,

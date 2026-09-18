@@ -265,6 +265,10 @@ pub fn validate_object_write_lock(
     let retention = ObjectLockRetention {
         mode: mode.map(|mode| Mode::custom(mode.to_owned())),
         retain_until_date: retain_until.copied(),
+        // The write headers name no event hold; the members exist for the document form only
+        // (2026-09-17 model, rustfs/gateway#815) and `validate_retention` does not read them.
+        event_hold: None,
+        event_hold_duration: None,
     };
     validate_retention(&retention, now_unix_seconds)?;
     if let Some(status) = legal_hold
@@ -318,6 +322,7 @@ mod tests {
             mode: Some(mode),
             days,
             years,
+            ..Default::default()
         }
     }
 
@@ -355,6 +360,7 @@ mod tests {
         let retention = ObjectLockRetention {
             mode: Some(Mode::COMPLIANCE),
             retain_until_date: Some(Timestamp::from_secs(NOW + 1)),
+            ..Default::default()
         };
         assert_eq!(validate_retention(&retention, NOW), Ok(()));
     }
@@ -364,10 +370,12 @@ mod tests {
         let mode_only = ObjectLockRetention {
             mode: Some(Mode::GOVERNANCE),
             retain_until_date: None,
+            ..Default::default()
         };
         let date_only = ObjectLockRetention {
             mode: None,
             retain_until_date: Some(Timestamp::from_secs(NOW + 60)),
+            ..Default::default()
         };
         assert_eq!(validate_retention(&mode_only, NOW), Ok(()));
         assert_eq!(validate_retention(&date_only, NOW), Ok(()));
@@ -433,6 +441,7 @@ mod tests {
             mode: None,
             days: Some(30),
             years: None,
+            ..Default::default()
         };
         assert_eq!(
             validate_lock_configuration(&config(Some(ObjectLockEnabled::ENABLED), Some(retention))),
@@ -470,6 +479,7 @@ mod tests {
             let retention = ObjectLockRetention {
                 mode: Some(Mode::custom(spelling.to_owned())),
                 retain_until_date: Some(Timestamp::from_secs(NOW + 60)),
+                ..Default::default()
             };
             assert_eq!(
                 validate_retention(&retention, NOW),
@@ -485,6 +495,7 @@ mod tests {
             let retention = ObjectLockRetention {
                 mode: Some(Mode::GOVERNANCE),
                 retain_until_date: Some(Timestamp::from_secs(instant)),
+                ..Default::default()
             };
             assert_eq!(
                 validate_retention(&retention, NOW),
@@ -500,6 +511,7 @@ mod tests {
         let retention = ObjectLockRetention {
             mode: Some(Mode::custom("ARCHIVE")),
             retain_until_date: Some(Timestamp::from_secs(NOW - 1)),
+            ..Default::default()
         };
         assert_eq!(validate_retention(&retention, NOW), Err(ObjectLockRejection::ModeUnknown));
     }

@@ -188,7 +188,7 @@ binding = "Header"
 type = "StringEnum"
 required = false
 hot = false
-values = ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"]
+values = ["AES256", "aws:fsx", "aws:backup", "aws:kms", "aws:kms:dsse"]
 quirks = []
 
 [[input]]
@@ -198,7 +198,7 @@ binding = "Header"
 type = "StringEnum"
 required = false
 hot = true
-values = ["STANDARD", "REDUCED_REDUNDANCY", "STANDARD_IA", "ONEZONE_IA", "INTELLIGENT_TIERING", "GLACIER", "DEEP_ARCHIVE", "OUTPOSTS", "GLACIER_IR", "SNOW", "EXPRESS_ONEZONE", "FSX_OPENZFS", "FSX_ONTAP"]
+values = ["STANDARD", "REDUCED_REDUNDANCY", "STANDARD_IA", "ONEZONE_IA", "INTELLIGENT_TIERING", "GLACIER", "DEEP_ARCHIVE", "OUTPOSTS", "GLACIER_IR", "SNOW", "EXPRESS_ONEZONE", "FSX_OPENZFS", "FSX_ONTAP", "AWS_BACKUP_WARM", "AWS_BACKUP_LOW_COST_WARM"]
 quirks = ["q-mpu-metadata-0039"]
 
 [[input]]
@@ -313,6 +313,34 @@ values = ["ON", "OFF"]
 quirks = []
 
 [[input]]
+name = "ObjectLockEventHold"
+wire_name = "x-amz-object-lock-event-hold"
+binding = "Header"
+type = "StringEnum"
+required = false
+hot = false
+values = ["ON", "OFF"]
+quirks = []
+
+[[input]]
+name = "ObjectLockEventHoldDurationDays"
+wire_name = "x-amz-object-lock-event-hold-duration-days"
+binding = "Header"
+type = "Integer"
+required = false
+hot = false
+quirks = []
+
+[[input]]
+name = "ObjectLockEventHoldDurationYears"
+wire_name = "x-amz-object-lock-event-hold-duration-years"
+binding = "Header"
+type = "Integer"
+required = false
+hot = false
+quirks = []
+
+[[input]]
 name = "ExpectedBucketOwner"
 wire_name = "x-amz-expected-bucket-owner"
 binding = "Header"
@@ -393,7 +421,7 @@ binding = "Header"
 type = "StringEnum"
 required = false
 hot = false
-values = ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"]
+values = ["AES256", "aws:fsx", "aws:backup", "aws:kms", "aws:kms:dsse"]
 quirks = []
 
 [[output]]

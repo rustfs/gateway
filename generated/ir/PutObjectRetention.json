@@ -148,6 +148,34 @@
                         ]
             },
   "shapes": {
+              "EventHoldDuration": {
+                                     "kind": "Structure",
+                                     "fields": [
+                                                 {
+                                                   "name": "Days",
+                                                   "wire_name": "Days",
+                                                   "required": false,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "Integer" },
+                                                   "hot": true,
+                                                   "quirk_refs": []
+                                                 },
+                                                 {
+                                                   "name": "Years",
+                                                   "wire_name": "Years",
+                                                   "required": false,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "Integer" },
+                                                   "hot": true,
+                                                   "quirk_refs": []
+                                                 }
+                                               ],
+                                     "xml": {
+                                              "element_order": ["Days", "Years"],
+                                              "empty_value_policy": { "Days": "emit", "Years": "emit" },
+                                              "attributes": []
+                                            }
+                                   },
               "ObjectLockRetention": {
                                        "kind": "Structure",
                                        "fields": [
@@ -171,11 +199,39 @@
                                                      "type": { "kind": "Timestamp", "format": "Iso8601" },
                                                      "hot": true,
                                                      "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "EventHold",
+                                                     "wire_name": "EventHold",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "StringEnum", "values": ["ON", "OFF"] },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "EventHoldDuration",
+                                                     "wire_name": "EventHoldDuration",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Structure", "shape": "EventHoldDuration" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
                                                    }
                                                  ],
                                        "xml": {
-                                                "element_order": ["Mode", "RetainUntilDate"],
-                                                "empty_value_policy": { "Mode": "emit", "RetainUntilDate": "emit" },
+                                                "element_order": [
+                                                                   "Mode",
+                                                                   "RetainUntilDate",
+                                                                   "EventHold",
+                                                                   "EventHoldDuration"
+                                                                 ],
+                                                "empty_value_policy": {
+                                                                        "Mode": "emit",
+                                                                        "RetainUntilDate": "emit",
+                                                                        "EventHold": "emit",
+                                                                        "EventHoldDuration": "emit"
+                                                                      },
                                                 "attributes": []
                                               }
                                      }

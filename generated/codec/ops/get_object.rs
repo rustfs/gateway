@@ -381,6 +381,21 @@ impl OperationCodec for dto::GetObject {
             let rendered = v.as_str();
             response.set_header("x-amz-object-lock-legal-hold", rendered);
         }
+        // ObjectLockEventHold — header `x-amz-object-lock-event-hold`.
+        if let Some(v) = output.object_lock_event_hold.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-object-lock-event-hold", rendered);
+        }
+        // ObjectLockEventHoldDurationDays — header `x-amz-object-lock-event-hold-duration-days`.
+        if let Some(v) = output.object_lock_event_hold_duration_days.as_ref() {
+            let rendered = &v.to_string();
+            response.set_header("x-amz-object-lock-event-hold-duration-days", rendered);
+        }
+        // ObjectLockEventHoldDurationYears — header `x-amz-object-lock-event-hold-duration-years`.
+        if let Some(v) = output.object_lock_event_hold_duration_years.as_ref() {
+            let rendered = &v.to_string();
+            response.set_header("x-amz-object-lock-event-hold-duration-years", rendered);
+        }
         // The `response-*` overrides are applied once, after every header this operation
         // declares — so "the override wins" is true by construction and not by ordering.
         response.apply_response_overrides(request, Self::RESPONSE_OVERRIDES);

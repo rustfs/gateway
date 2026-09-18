@@ -305,7 +305,13 @@
                                             "binding": { "kind": "BodyXml" },
                                             "type": {
                                                       "kind": "StringEnum",
-                                                      "values": ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"]
+                                                      "values": [
+                                                                  "AES256",
+                                                                  "aws:fsx",
+                                                                  "aws:backup",
+                                                                  "aws:kms",
+                                                                  "aws:kms:dsse"
+                                                                ]
                                                     },
                                             "hot": false,
                                             "quirk_refs": []
@@ -841,7 +847,9 @@
                                                                   "SNOW",
                                                                   "EXPRESS_ONEZONE",
                                                                   "FSX_OPENZFS",
-                                                                  "FSX_ONTAP"
+                                                                  "FSX_ONTAP",
+                                                                  "AWS_BACKUP_WARM",
+                                                                  "AWS_BACKUP_LOW_COST_WARM"
                                                                 ]
                                                     },
                                             "hot": false,

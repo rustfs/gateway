@@ -126,7 +126,7 @@ binding = "BodyXml"
 type = "StringEnum"
 required = true
 hot = false
-values = ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"]
+values = ["AES256", "aws:fsx", "aws:backup", "aws:kms", "aws:kms:dsse"]
 quirks = []
 
 [[shape.ServerSideEncryptionByDefault.field]]

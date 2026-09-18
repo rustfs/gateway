@@ -93,14 +93,56 @@
                                                   "type": { "kind": "Integer" },
                                                   "hot": true,
                                                   "quirk_refs": []
+                                                },
+                                                {
+                                                  "name": "DefaultEventHold",
+                                                  "wire_name": "DefaultEventHold",
+                                                  "required": false,
+                                                  "binding": { "kind": "BodyXml" },
+                                                  "type": { "kind": "Structure", "shape": "EventHoldDuration" },
+                                                  "hot": false,
+                                                  "quirk_refs": []
                                                 }
                                               ],
                                     "xml": {
-                                             "element_order": ["Mode", "Days", "Years"],
-                                             "empty_value_policy": { "Mode": "emit", "Days": "emit", "Years": "emit" },
+                                             "element_order": ["Mode", "Days", "Years", "DefaultEventHold"],
+                                             "empty_value_policy": {
+                                                                     "Mode": "emit",
+                                                                     "Days": "emit",
+                                                                     "Years": "emit",
+                                                                     "DefaultEventHold": "emit"
+                                                                   },
                                              "attributes": []
                                            }
                                   },
+              "EventHoldDuration": {
+                                     "kind": "Structure",
+                                     "fields": [
+                                                 {
+                                                   "name": "Days",
+                                                   "wire_name": "Days",
+                                                   "required": false,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "Integer" },
+                                                   "hot": true,
+                                                   "quirk_refs": []
+                                                 },
+                                                 {
+                                                   "name": "Years",
+                                                   "wire_name": "Years",
+                                                   "required": false,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "Integer" },
+                                                   "hot": true,
+                                                   "quirk_refs": []
+                                                 }
+                                               ],
+                                     "xml": {
+                                              "element_order": ["Days", "Years"],
+                                              "empty_value_policy": { "Days": "emit", "Years": "emit" },
+                                              "attributes": []
+                                            }
+                                   },
               "ObjectLockConfiguration": {
                                            "kind": "Structure",
                                            "fields": [

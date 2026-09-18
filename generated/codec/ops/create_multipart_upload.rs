@@ -169,6 +169,21 @@ impl OperationCodec for dto::CreateMultipartUpload {
             let raw = raw.as_ref();
             input.object_lock_legal_hold_status = Some(dto::ObjectLockLegalHoldStatus::custom(raw.to_owned()));
         }
+        // ObjectLockEventHold — header `x-amz-object-lock-event-hold`, repeated field lines joined.
+        if let Some(raw) = request.header("x-amz-object-lock-event-hold") {
+            let raw = raw.as_ref();
+            input.object_lock_event_hold = Some(dto::ObjectLockEventHold::custom(raw.to_owned()));
+        }
+        // ObjectLockEventHoldDurationDays — header `x-amz-object-lock-event-hold-duration-days`, repeated field lines joined.
+        if let Some(raw) = request.header("x-amz-object-lock-event-hold-duration-days") {
+            let raw = raw.as_ref();
+            input.object_lock_event_hold_duration_days = Some(value::integer(raw, "ObjectLockEventHoldDurationDays")?);
+        }
+        // ObjectLockEventHoldDurationYears — header `x-amz-object-lock-event-hold-duration-years`, repeated field lines joined.
+        if let Some(raw) = request.header("x-amz-object-lock-event-hold-duration-years") {
+            let raw = raw.as_ref();
+            input.object_lock_event_hold_duration_years = Some(value::integer(raw, "ObjectLockEventHoldDurationYears")?);
+        }
         // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
             let raw = raw.as_ref();

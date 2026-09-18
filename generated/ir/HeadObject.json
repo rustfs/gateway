@@ -478,7 +478,10 @@
                             "wire_name": "x-amz-server-side-encryption",
                             "required": false,
                             "binding": { "kind": "Header" },
-                            "type": { "kind": "StringEnum", "values": ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"] },
+                            "type": {
+                                      "kind": "StringEnum",
+                                      "values": ["AES256", "aws:fsx", "aws:backup", "aws:kms", "aws:kms:dsse"]
+                                    },
                             "hot": false,
                             "quirk_refs": []
                           },
@@ -547,7 +550,9 @@
                                                   "SNOW",
                                                   "EXPRESS_ONEZONE",
                                                   "FSX_OPENZFS",
-                                                  "FSX_ONTAP"
+                                                  "FSX_ONTAP",
+                                                  "AWS_BACKUP_WARM",
+                                                  "AWS_BACKUP_LOW_COST_WARM"
                                                 ]
                                     },
                             "hot": false,
@@ -618,6 +623,33 @@
                             "required": false,
                             "binding": { "kind": "Header" },
                             "type": { "kind": "StringEnum", "values": ["ON", "OFF"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ObjectLockEventHold",
+                            "wire_name": "x-amz-object-lock-event-hold",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "StringEnum", "values": ["ON", "OFF"] },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ObjectLockEventHoldDurationDays",
+                            "wire_name": "x-amz-object-lock-event-hold-duration-days",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Integer" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ObjectLockEventHoldDurationYears",
+                            "wire_name": "x-amz-object-lock-event-hold-duration-years",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "Integer" },
                             "hot": false,
                             "quirk_refs": []
                           }

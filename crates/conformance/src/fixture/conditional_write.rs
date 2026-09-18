@@ -250,6 +250,9 @@ pub(super) async fn put_object(
         object.retention = Some(dto::ObjectLockRetention {
             mode: Some(dto::Mode::custom(mode.to_owned())),
             retain_until_date: Some(*until),
+            // The write headers carry no event hold (2026-09-17 model, rustfs/gateway#815).
+            event_hold: None,
+            event_hold_duration: None,
         });
     }
     object.legal_hold = lock_hold.map(|status| dto::ObjectLockLegalHold {

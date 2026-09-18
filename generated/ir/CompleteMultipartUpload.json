@@ -301,7 +301,10 @@
                             "wire_name": "x-amz-server-side-encryption",
                             "required": false,
                             "binding": { "kind": "Header" },
-                            "type": { "kind": "StringEnum", "values": ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"] },
+                            "type": {
+                                      "kind": "StringEnum",
+                                      "values": ["AES256", "aws:fsx", "aws:backup", "aws:kms", "aws:kms:dsse"]
+                                    },
                             "hot": false,
                             "quirk_refs": ["q-sse-0010", "q-mpu-late-error-0033"]
                           },

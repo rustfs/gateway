@@ -212,6 +212,39 @@ fn the_sdk_checksum_algorithm_header_is_read_by_the_gateway_and_not_by_s3s() {
     assert_eq!(diff.differing, ["checksum_algorithm"]);
 }
 
+/// The Object Lock event hold of the 2026-09-17 model (rustfs/gateway#815). The gateway binds the
+/// header; no pinned s3s revision has the member, so s3s hands its handler an input with no hold and
+/// the RustFS store applies none. The seam refuses the conversion, naming the member, so the caller
+/// gets a `400` and not an object it believes is held. The duration headers are refused on their
+/// own too, and a request without any of the three converts exactly as before.
+///
+/// Ruling: `rd-put-0009`
+#[test]
+fn an_object_lock_event_hold_is_refused_by_the_seam_and_unseen_by_s3s() {
+    for (header, value, field) in [
+        ("x-amz-object-lock-event-hold", "ON", "object_lock_event_hold"),
+        ("x-amz-object-lock-event-hold-duration-days", "7", "object_lock_event_hold_duration_days"),
+        (
+            "x-amz-object-lock-event-hold-duration-years",
+            "1",
+            "object_lock_event_hold_duration_years",
+        ),
+    ] {
+        let request = RawRequest::put(TARGET, BODY, 5).with(header, value);
+        let refusal = run_decode(&request, &request, convert).refused();
+        assert_eq!(refusal.gateway, Ok(()), "{header}: the gateway binds the member");
+        assert_eq!(refusal.oracle, Ok(()), "{header}: s3s reaches its handler with no hold");
+        let error = refusal.conversion.expect_err("the seam refuses an event hold");
+        assert!(error.starts_with(field), "{header}: {error}");
+    }
+    let diff = run_decode(&full_request(), &full_request(), convert).compared();
+    assert!(
+        diff.differing.is_empty(),
+        "a request without a hold converts as before: {:?}",
+        diff.differing
+    );
+}
+
 /// `?versionId=` on a PUT, the MinIO extension RustFS replication writes with so a replica keeps
 /// its source's version id. On the default assembly it routes to `PutObject`, whose model has no
 /// such member: s3s hands it to its handler and the gateway drops it, so no ordinary writer

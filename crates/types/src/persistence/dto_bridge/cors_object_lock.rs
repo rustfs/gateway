@@ -83,6 +83,9 @@ pub fn parse_object_lock_dto(input: &[u8]) -> Result<crate::dto::ObjectLockConfi
                 mode: retention.mode.map(crate::dto::Mode::custom),
                 days: retention.days,
                 years: retention.years,
+                // The historical writer predates the 2026-09-17 model's event hold and never
+                // persisted one, so a re-read document carries none (rustfs/gateway#815).
+                default_event_hold: None,
             }),
         }),
     })
@@ -177,6 +180,7 @@ mod tests {
                     mode: Some(Mode::custom("FutureMode")),
                     days: Some(7),
                     years: Some(2),
+                    ..Default::default()
                 }),
             }),
         };

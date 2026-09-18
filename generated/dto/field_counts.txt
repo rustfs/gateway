@@ -22,18 +22,18 @@ CompleteMultipartUploadOutput 21
 CompletedMultipartUpload 1
 CompletedPart 12
 Condition 2
-CopyObjectInput 43
+CopyObjectInput 46
 CopyObjectOutput 12
 CorsConfiguration 1
 CorsRule 6
 CreateBucketConfiguration 1
 CreateBucketInput 10
 CreateBucketOutput 1
-CreateMultipartUploadInput 31
+CreateMultipartUploadInput 34
 CreateMultipartUploadOutput 14
 CsvInput 7
 CsvOutput 5
-DefaultRetention 3
+DefaultRetention 4
 Delete 2
 DeleteBucketCorsInput 2
 DeleteBucketCorsOutput 0
@@ -72,6 +72,7 @@ Error 4
 ErrorDetails 2
 ErrorDocument 1
 EventBridgeConfiguration 0
+EventHoldDuration 2
 ExistingObjectReplication 1
 FilterRule 2
 GetBucketAbacInput 2
@@ -134,7 +135,7 @@ GetObjectLegalHoldInput 5
 GetObjectLegalHoldOutput 1
 GetObjectLockConfigurationInput 2
 GetObjectLockConfigurationOutput 1
-GetObjectOutput 43
+GetObjectOutput 46
 GetObjectRetentionInput 5
 GetObjectRetentionOutput 1
 GetObjectTaggingInput 5
@@ -149,7 +150,7 @@ Grantee 5
 HeadBucketInput 2
 HeadBucketOutput 1
 HeadObjectInput 21
-HeadObjectOutput 43
+HeadObjectOutput 46
 IndexDocument 1
 Initiator 2
 InputSerialization 4
@@ -211,7 +212,7 @@ Object 9
 ObjectIdentifier 5
 ObjectLockConfiguration 2
 ObjectLockLegalHold 1
-ObjectLockRetention 2
+ObjectLockRetention 4
 ObjectLockRule 1
 ObjectPart 12
 ObjectVersion 11
@@ -255,7 +256,7 @@ PutObjectAclInput 14
 PutObjectAclOutput 1
 PutObjectAnnotationInput 20
 PutObjectAnnotationOutput 17
-PutObjectInput 37
+PutObjectInput 40
 PutObjectLegalHoldInput 8
 PutObjectLegalHoldOutput 1
 PutObjectLockConfigurationInput 7

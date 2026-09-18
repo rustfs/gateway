@@ -86,7 +86,21 @@ pub const GATEWAY_INPUT_MEMBERS: &[&str] = &[
     "object_lock_mode",
     "object_lock_retain_until_date",
     "object_lock_legal_hold_status",
+    "object_lock_event_hold",
+    "object_lock_event_hold_duration_days",
+    "object_lock_event_hold_duration_years",
     "expected_bucket_owner",
+];
+
+/// The Object Lock event-hold members of the 2026-09-17 model (rustfs/gateway#815), which no
+/// pinned s3s revision carries: its `PutObjectInput` has no such member, and the RustFS handlers
+/// behind it store no event hold. A request naming one is refused rather than handed over with
+/// the hold silently dropped — a WORM instruction the store did not apply is worse than a `400`
+/// (`rd-put-0009`).
+const EVENT_HOLD_MEMBERS: [&str; 3] = [
+    "object_lock_event_hold",
+    "object_lock_event_hold_duration_days",
+    "object_lock_event_hold_duration_years",
 ];
 
 /// Every member of the gateway `PutObjectOutput` that [`output_from_s3s`] sets.
@@ -116,8 +130,20 @@ pub const GATEWAY_OUTPUT_MEMBERS: &[&str] = &[
 /// [`ConversionError`] when a member the gateway kept as wire text is one the s3s input can only
 /// hold parsed — an `Expires` that is not an HTTP-date, on a revision that holds `Expires` parsed
 /// (the gateway keeps it opaque, `q-timestamp-0005`; see the enclosing module's `expires` hook),
-/// an entity-tag condition the s3s grammar rejects — or an instant outside what s3s represents.
+/// an entity-tag condition the s3s grammar rejects — an instant outside what s3s represents, or
+/// an Object Lock event hold ([`EVENT_HOLD_MEMBERS`]).
 pub fn input_to_s3s(input: dto::PutObjectInput) -> Result<oracle::PutObjectInput, ConversionError> {
+    let event_hold_named = [
+        input.object_lock_event_hold.is_some(),
+        input.object_lock_event_hold_duration_days.is_some(),
+        input.object_lock_event_hold_duration_years.is_some(),
+    ];
+    if let Some(index) = event_hold_named.iter().position(|named| *named) {
+        return Err(ConversionError {
+            field: EVENT_HOLD_MEMBERS[index],
+            reason: "an Object Lock event hold, which the pinned s3s input cannot hold and RustFS does not store",
+        });
+    }
     let checksum = input.checksum_spec;
     let checksum_value = |algorithm: ChecksumAlgorithm| {
         checksum

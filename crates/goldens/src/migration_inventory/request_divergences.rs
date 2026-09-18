@@ -135,7 +135,7 @@ const ADAPTER_SEAM: &str = "https://github.com/rustfs/gateway/issues/753";
 const SEAM_FACTS: &str = "https://github.com/rustfs/gateway/issues/795";
 
 /// Every decided request divergence.
-const OPERATION_DIVERGENCES: [RequestDivergence; 29] = [
+const OPERATION_DIVERGENCES: [RequestDivergence; 20] = [
     RequestDivergence {
         id: "rd-put-0001",
         operation: "PutObject",
@@ -278,6 +278,25 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 29] = [
         follow_up: DivergenceFollowUp::Landed("c-naming-0029"),
         test_file: PUT_DECODE,
         test: "a_dot_dot_key_segment_is_refused_by_the_gateway_and_kept_by_s3s",
+    },
+    RequestDivergence {
+        id: "rd-put-0009",
+        operation: "PutObject",
+        request: "x-amz-object-lock-event-hold: ON (with or without the duration headers)",
+        aws: "the 2026-09-17 model adds ObjectLockEventHold and its Days/Years duration to PutObject, CopyObject and \
+              CreateMultipartUpload; the hold is applied by the service and reported on GetObject/HeadObject",
+        aws_evidence: API_PUT_OBJECT,
+        s3s: "every pinned revision predates the member: the header is not bound, the handler sees no hold and the \
+              RustFS store applies none",
+        gateway: "binds the three members from the model; the seam refuses to convert an input naming any of them, \
+                  so the RustFS adapter answers 400 instead of storing an object without the hold it was told to keep",
+        client_impact: "a client asking for an event hold is refused rather than left believing its object is held; no SDK \
+                        sends the header unless the caller sets it. The refusal lifts when an s3s re-pin carries the member \
+                        and the RustFS store applies it",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::Open("https://github.com/rustfs/gateway/issues/815"),
+        test_file: PUT_DECODE,
+        test: "an_object_lock_event_hold_is_refused_by_the_seam_and_unseen_by_s3s",
     },
     RequestDivergence {
         id: "rd-ctx-0001",
@@ -453,156 +472,14 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 29] = [
         test_file: CONFIG_DECODE,
         test: "a_bare_enabled_versioning_body_is_refused_by_the_gateway_and_accepted_by_s3s",
     },
-    RequestDivergence {
-        id: "rd-err-0001",
-        operation: "every operation",
-        request: "any refused request",
-        aws: "the document carries RequestId and HostId, and the head the same values in x-amz-request-id and x-amz-id-2",
-        aws_evidence: ERROR_RESPONSES,
-        s3s: "writes neither; RustFS adds x-amz-request-id and x-request-id in a layer outside s3s (rustfs/src/server/layer.rs), \
-              never a document element or x-amz-id-2",
-        gateway: "RequestId and HostId are the last two document elements, and the head carries the same two values",
-        client_impact: "the header RustFS already sends keeps its name; a client reading the document or x-amz-id-2 now finds \
-                        the id, and log joins must accept the gateway's 16-hex-digit form",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
-        test_file: ERROR_PARITY,
-        test: "only_the_gateway_identifies_the_request_in_its_head_and_document",
-    },
-    RequestDivergence {
-        id: "rd-err-0002",
-        operation: "GetObject",
-        request: "a key the app body reports missing (NoSuchKey)",
-        aws: "the NoSuchKey document names the key in <Key>",
-        aws_evidence: ERROR_RESPONSES,
-        s3s: "writes Code and Message only",
-        gateway: "writes <Key> after Message (HandlerErrorContext::missing_object_for, which the adapter calls with the request's key)",
-        client_impact: "none for SDKs, which branch on the code; a client reading <Key> gets the AWS element",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
-        test_file: ERROR_PARITY,
-        test: "a_missing_key_is_named_in_the_document_only_by_the_gateway",
-    },
-    RequestDivergence {
-        id: "rd-err-0003",
-        operation: "PutObject",
-        request: "a refusal that leaves request octets unread: a failed signature with a body owed, a length past 5 GiB, no Content-Length",
-        aws: "a server that does not read the whole body closes the connection after the response",
-        aws_evidence: "https://www.rfc-editor.org/rfc/rfc9112#section-9.3",
-        s3s: "states no connection verdict; hyper decides",
-        gateway: "the refusal carries ConnectionIntent::Close and the tower adapter announces Connection: close (close.rs)",
-        client_impact: "the next request opens a new connection; no answer changes, and the unread octets can never be read as a request",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
-        test_file: ERROR_PARITY,
-        test: "a_refusal_that_leaves_its_body_owed_closes_only_on_the_gateway",
-    },
-    RequestDivergence {
-        id: "rd-err-0004",
-        operation: "PutObject",
-        request: "an app body that refuses before reading a non-empty streaming body (PutObject, UploadPart)",
-        aws: "the handler's refusal is the answer, whatever happened to the body",
-        aws_evidence: ERROR_RESPONSES,
-        s3s: "writes the app body's refusal",
-        gateway: "writes the app body's refusal, in process and on both production drivers, and keeps the connection with the \
-                  unread octets left to the transport's linger (request_deadline::unread_body_answer, rustfs/gateway#794). A \
-                  body dropped after it was read, and a success over one never read, are still 400 IncompleteBody",
-        client_impact: "none: the bucket, access or throttling refusal reaches the client as itself",
-        ruling: DivergenceRuling::AlignS3s,
-        follow_up: DivergenceFollowUp::Landed("c-mpu-0053"),
-        test_file: ERROR_PARITY,
-        test: "the_app_bodys_refusal_before_reading_a_streaming_body_is_the_answer_on_both_stacks",
-    },
-    RequestDivergence {
-        id: "rd-err-0005",
-        operation: "GetObject",
-        request: "a conditional read the app body answers NotModified",
-        aws: "304 with no body and the ETag of the representation",
-        aws_evidence: "https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5",
-        s3s: "304 with no ETag: RustFS returns S3Error::new(NotModified)",
-        gateway: "the seam refuses NotModified by name, so the adapter answers 500; HandlerErrorContext::not_modified(etag) is the AWS 304",
-        client_impact: "every revalidating GET would fail with 500 until the adapter supplies the entity tag; not on M1's two operations",
-        ruling: DivergenceRuling::AlignAws,
-        follow_up: DivergenceFollowUp::Open(SEAM_FACTS),
-        test_file: ERROR_PARITY,
-        test: "a_not_modified_from_the_app_body_needs_its_entity_tag_to_cross",
-    },
-    RequestDivergence {
-        id: "rd-err-0006",
-        operation: "GetObject",
-        request: "a range the app body answers InvalidRange",
-        aws: "416 with Content-Range: bytes */<length>, RangeRequested and ActualObjectSize",
-        aws_evidence: "https://www.rfc-editor.org/rfc/rfc9110#section-15.5.17",
-        s3s: "416 with the RustFS range message and no Content-Range",
-        gateway: "the seam refuses InvalidRange by name (a gateway 416 needs the complete length, and is a 500 without it); \
-                  HandlerError::unsatisfiable_range(range, length) is the AWS 416",
-        client_impact: "a read past the end would be 500 instead of 416 until the adapter supplies the length; not on M1's two operations",
-        ruling: DivergenceRuling::AlignAws,
-        follow_up: DivergenceFollowUp::Open(SEAM_FACTS),
-        test_file: ERROR_PARITY,
-        test: "an_unsatisfiable_range_from_the_app_body_needs_its_length_to_cross",
-    },
-    RequestDivergence {
-        id: "rd-err-0007",
-        operation: "GetBucketLocation",
-        request: "an app body message longer than 1024 bytes",
-        aws: "no documented bound; AWS messages are one sentence",
-        aws_evidence: ERROR_RESPONSES,
-        s3s: "writes the whole message",
-        gateway: "the seam cuts it to 1024 bytes on a character boundary, the most the gateway admits (a longer one would be a 500)",
-        client_impact: "only a RustFS reason past 1 KiB loses its tail; code and status are unchanged",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
-        test_file: ERROR_PARITY,
-        test: "a_message_past_1024_bytes_is_cut_only_on_the_gateway",
-    },
-    RequestDivergence {
-        id: "rd-err-0008",
-        operation: "GetObject",
-        request: "an app body error carrying headers: NoSuchKey on a delete marker, with x-amz-delete-marker and x-amz-version-id",
-        aws: "404 NoSuchKey with x-amz-delete-marker: true and the version id",
-        aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html",
-        s3s: "writes the code and every header of the error (RustFS with_delete_marker_read_headers)",
-        gateway: "the seam refuses the headers by name, so the adapter answers 500; the delete-marker contexts render them",
-        client_impact: "a read of a deleted key would be 500, not a 404 saying a delete marker is current; not on M1's two operations",
-        ruling: DivergenceRuling::AlignS3s,
-        follow_up: DivergenceFollowUp::Open(SEAM_FACTS),
-        test_file: ERROR_PARITY,
-        test: "an_error_carrying_delete_marker_headers_needs_typed_facts_to_cross",
-    },
-    RequestDivergence {
-        id: "rd-err-0009",
-        operation: "every operation",
-        request: "a refusal before any handler: authentication, clock skew, presigned expiry, an unrepresentable member",
-        aws: "Message is prose for people; SDKs branch on Code",
-        aws_evidence: ERROR_RESPONSES,
-        s3s: "describes the cause and can echo request input (invalid query: response-expires: notadate)",
-        gateway: "one fixed sentence per cause naming nothing from the request (scripts/check_preauth_static_msg.sh); the code agrees",
-        client_impact: "none for SDKs; a person sees a shorter sentence, and nothing the caller sent is reflected back",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
-        test_file: ERROR_PARITY,
-        test: "a_refusal_before_the_handler_carries_the_gateways_own_sentence",
-    },
-    RequestDivergence {
-        id: "rd-err-0010",
-        operation: "GetObject",
-        request: "a member value the codec refuses (response-expires=notadate)",
-        aws: "Resource names the bucket or object the request addressed",
-        aws_evidence: ERROR_RESPONSES,
-        s3s: "writes no Resource: its serializer leaves the element commented out",
-        gateway: "writes the refused model member as Resource (ResponseExpires), as its conformance cases pin",
-        client_impact: "none for SDKs, which do not parse Resource; a client that does reads a member name, not a path",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
-        test_file: ERROR_PARITY,
-        test: "a_codec_refusal_names_its_member_as_the_resource_only_on_the_gateway",
-    },
 ];
 
-/// Every pinned divergence, in id order as written: the operation, context, configuration and error
-/// slices above, then the signed-body slice (`body`).
-pub const REQUEST_DIVERGENCES: [RequestDivergence; 39] = concat(OPERATION_DIVERGENCES, body::BODY_DIVERGENCES);
+/// Every pinned divergence, in id order as written: the operation, context and configuration
+/// slices above, then the error-response slice (`errors`) and the signed-body slice (`body`).
+pub const REQUEST_DIVERGENCES: [RequestDivergence; 40] = concat(
+    concat::<20, 10, 30>(OPERATION_DIVERGENCES, errors::ERROR_DIVERGENCES),
+    body::BODY_DIVERGENCES,
+);
 
 /// `first` then `second`, at compile time; the declared length must be their sum.
 const fn concat<const A: usize, const B: usize, const C: usize>(
@@ -795,6 +672,7 @@ fn is_case_id(case: &str) -> bool {
 }
 
 mod body;
+mod errors;
 
 #[cfg(test)]
 mod tests;
