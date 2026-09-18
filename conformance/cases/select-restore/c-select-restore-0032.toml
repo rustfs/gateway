@@ -1,9 +1,9 @@
 [case]
 id = "c-select-restore-0032"
 schema_version = 1
-title = "A select body rooted at the wrong element is MalformedXML even when every member is there"
+title = "A select body rooted at a wrong element is MalformedXML even when every member is there"
 rationale = """
-This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the root is the input shape's own name and there is no wrapper to fall back on. The document below is complete — expression, type and both serializations — so the refusal can only come from the root check: a decoder that accepted any root would read this as a valid query and answer the deferral instead. An earlier version of this case omitted two members, which made it pass against a decoder with no root check at all."""
+This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the root is the input shape's own name and there is no wrapper to fall back on. The document below is complete — expression, type and both serializations — so the refusal can only come from the root check: a decoder that accepted any root would read this as a valid query and answer the deferral instead. An earlier version of this case omitted two members, which made it pass against a decoder with no root check at all. The wrong root here is the operation's own name, the spelling a client guessing from the API reference produces; the one root that is *not* wrong besides the canonical one is MinIO's SelectRequest, which c-select-restore-0049 pins as accepted."""
 polarity = "negative"
 operation = "SelectObjectContent"
 tags = ["select", "xml"]
@@ -27,7 +27,7 @@ body = { utf8 = "a,b\n1,2\n" }
 method = "POST"
 target = "/conf-select/rows.csv?select&select-type=2"
 headers = { "content-type" = "application/xml" }
-body = { utf8 = '<SelectRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV></CSV></InputSerialization><OutputSerialization><CSV></CSV></OutputSerialization></SelectRequest>' }
+body = { utf8 = '<SelectObjectContent><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV></CSV></InputSerialization><OutputSerialization><CSV></CSV></OutputSerialization></SelectObjectContent>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]

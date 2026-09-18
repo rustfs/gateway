@@ -36,7 +36,7 @@ response_algorithms = []
 
 [xml]
 request_root = "SelectObjectContentRequest"
-request_root_aliases = []
+request_root_aliases = ["SelectRequest"]
 response_root = ""
 xmlns = "emit"
 unwrapped_output = false

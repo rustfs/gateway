@@ -478,12 +478,18 @@ fn a_realistic_select_on_restore_document_is_accepted_by_both_layers() {
 // ── negative: shapes and values that must not survive ───────────────────────────────────────
 
 /// A document rooted at anything else is refused rather than skimmed for familiar element names.
+/// `SelectRequest`, MinIO's root, is the one alias the decoder admits (q-select-0008), so the
+/// wrong root here is the operation's own name — and the alias is pinned as accepted beside it.
 #[test]
 fn n_a_select_document_under_another_root_is_refused() {
-    let document = "<SelectRequest><Expression>SELECT 1</Expression></SelectRequest>";
-    let error = decode_select(document).expect_err("the wire root is SelectObjectContentRequest");
+    let document = "<SelectObjectContent><Expression>SELECT 1</Expression></SelectObjectContent>";
+    let error = decode_select(document).expect_err("the wire roots are SelectObjectContentRequest and SelectRequest");
     assert_eq!(error.code(), &rustfs_gateway_types::ErrorCode::MALFORMED_XML, "{error:?}");
     assert!(error.message().contains("root"), "{error:?}");
+
+    let alias = "<SelectRequest><Expression>SELECT 1</Expression></SelectRequest>";
+    let refused = decode_select(alias).expect_err("the alias root is read; the members are then judged");
+    assert!(!refused.message().contains("root"), "the alias root is not the refusal: {refused:?}");
 }
 
 /// Same for a restore document: the read side of `q-restore-root-namespace-0137`'s local-name

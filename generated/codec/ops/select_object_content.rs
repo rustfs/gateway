@@ -70,7 +70,7 @@ impl OperationCodec for dto::SelectObjectContent {
         }
         let root = rustfs_gateway_xml::parse(raw_body.as_ref())
             .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
-        if !["SelectObjectContentRequest"].contains(&root.name.as_str()) {
+        if !["SelectObjectContentRequest", "SelectRequest"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element"));
         }
         if let Some(raw) = root.child_text("Expression") {

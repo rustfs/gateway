@@ -100,6 +100,12 @@ auth_action = "s3:GetObject"
 # it is a handful of serialization settings, so 320 KiB bounds the whole body while leaving the
 # expression its full documented length plus the envelope (q-select-0002).
 request_max_bytes = 327680
+# MinIO's own select implementation roots the request at `SelectRequest` and reads the AWS root as
+# the legacy spelling, so clients written against MinIO send the short root. RustFS accepted it
+# through s3s (rustfs/backlog#1626, s3s#743) and a gateway that refused it would turn every such
+# client's query into MalformedXML on the switch. The alias decodes into the same DTO through the
+# same member rules; the canonical root and the response are unchanged (q-select-0008).
+request_root_aliases = ["SelectRequest"]
 output_drop = ["Payload"]
 error_codes = [
   "NoSuchBucket",
