@@ -19,7 +19,9 @@
 //! TLS) is accepted and handed to the handler with `ContentLength` equal to its decoded length; a
 //! decoded count that differs from the declaration is refused; and a plain body with no length is
 //! still `411`. Also that a framed body carrying `Content-Length` hands the handler the decoded
-//! length rather than the wire length, which counts the chunk framing too.
+//! length rather than the wire length, which counts the chunk framing too. And rustfs/gateway#813:
+//! the `aws-chunked` token in a framed upload's `Content-Encoding` names the framing, not the
+//! object, so the handler reads the header without it.
 //! NOT responsible for: the head rules (`crates/http/tests/ingest_framing.rs`), the chunk grammar
 //! (`ingest_chunk_rules`), or a framed head without a decoded length, which no signer produces
 //! and `crates/gateway/src/chunked.rs` refuses at `ChunkIngest::prepare`.
@@ -45,6 +47,7 @@ const CHUNK: usize = 8;
 #[derive(Default)]
 struct Recorded {
     content_lengths: Vec<i64>,
+    content_encodings: Vec<Option<String>>,
     bodies: Vec<Vec<u8>>,
 }
 
@@ -55,6 +58,7 @@ impl Handler<dto::PutObject> for Backend {
         let recorded = Arc::clone(&self.0);
         let input = request.into_input();
         let content_length = input.content_length;
+        let content_encoding = input.content_encoding.clone();
         let body = input.body;
         async move {
             let mut body = body
@@ -69,6 +73,7 @@ impl Handler<dto::PutObject> for Backend {
             }
             let mut recorded = recorded.lock().expect("the record is never poisoned");
             recorded.content_lengths.push(content_length);
+            recorded.content_encodings.push(content_encoding);
             recorded.bodies.push(bytes);
             Ok(Resp::new(dto::PutObjectOutput::default()))
         }
@@ -108,6 +113,12 @@ fn signed_wire_length(object: &[u8]) -> usize {
 /// A correctly signed `STREAMING-AWS4-HMAC-SHA256-PAYLOAD` upload of `object` that declares
 /// `declared` decoded bytes, framed on the wire as `wire` says.
 fn streaming_put(object: &[u8], declared: u64, wire: Wire) -> http::Request<Bytes> {
+    streaming_put_encoded(object, declared, wire, None)
+}
+
+/// [`streaming_put`] with a signed `Content-Encoding` header, as an SDK that also declares the
+/// framing there sends it.
+fn streaming_put_encoded(object: &[u8], declared: u64, wire: Wire, content_encoding: Option<&str>) -> http::Request<Bytes> {
     let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
     let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("a SigV4 stamp");
     let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
@@ -126,6 +137,12 @@ fn streaming_put(object: &[u8], declared: u64, wire: Wire) -> http::Request<Byte
     map.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
     if matches!(wire, Wire::ContentLength) {
         map.insert(http::header::CONTENT_LENGTH, http::HeaderValue::from(wire_length));
+    }
+    if let Some(encoding) = content_encoding {
+        map.insert(
+            http::header::CONTENT_ENCODING,
+            http::HeaderValue::from_str(encoding).expect("a valid header value"),
+        );
     }
     let method = http::Method::PUT;
     let mut signing = SigningRequest::new(
@@ -192,6 +209,37 @@ async fn a_streaming_upload_on_http2_without_content_length_is_accepted_with_its
     let recorded = recorded.lock().expect("the record is never poisoned");
     assert_eq!(recorded.content_lengths, [object.len() as i64]);
     assert_eq!(recorded.bodies, [object]);
+}
+
+/// Negative — `Content-Encoding: gzip, aws-chunked` reaches the handler as `gzip`: the framing
+/// token is the ingest layer's and would otherwise be stored and served back, telling a reader to
+/// un-chunk a body that is not chunked (rustfs/gateway#813). The body is still decoded whole.
+#[tokio::test]
+async fn n_the_aws_chunked_token_is_removed_from_a_framed_uploads_content_encoding() {
+    let (service, recorded) = service();
+    let object = object();
+    let request = streaming_put_encoded(&object, object.len() as u64, Wire::ContentLength, Some("gzip, aws-chunked"));
+    let (status, body) = support::exchange(&service, request).await;
+    assert_eq!(status, http::StatusCode::OK, "{body}");
+    let recorded = recorded.lock().expect("the record is never poisoned");
+    assert_eq!(recorded.content_encodings, [Some("gzip".to_owned())]);
+    assert_eq!(recorded.bodies, [object]);
+}
+
+/// Negative — `Content-Encoding: aws-chunked` alone names no encoding of the object at all, so the
+/// handler reads no `Content-Encoding`; and a real encoding without the token is kept as sent.
+#[tokio::test]
+async fn n_an_aws_chunked_only_content_encoding_reaches_the_handler_as_absent() {
+    let (service, recorded) = service();
+    let object = object();
+    let framed_only = streaming_put_encoded(&object, object.len() as u64, Wire::TransferChunked, Some("aws-chunked"));
+    let (status, body) = support::exchange(&service, framed_only).await;
+    assert_eq!(status, http::StatusCode::OK, "{body}");
+    let plain = streaming_put_encoded(&object, object.len() as u64, Wire::TransferChunked, Some("gzip"));
+    let (status, body) = support::exchange(&service, plain).await;
+    assert_eq!(status, http::StatusCode::OK, "{body}");
+    let recorded = recorded.lock().expect("the record is never poisoned");
+    assert_eq!(recorded.content_encodings, [None, Some("gzip".to_owned())]);
 }
 
 /// Positive — with `Content-Length` present the handler still reads the decoded length. The wire
