@@ -33,6 +33,10 @@ pub struct ObjectLockRetention {
     pub mode: Option<crate::ops::enums::Mode>,
     /// Wire `RetainUntilDate`, bound as BodyXml. Optional.
     pub retain_until_date: Option<crate::Timestamp>,
+    /// Wire `EventHold`, bound as BodyXml. Optional.
+    pub event_hold: Option<crate::ops::enums::EventHold>,
+    /// Wire `EventHoldDuration`, bound as BodyXml. Optional.
+    pub event_hold_duration: Option<crate::ops::shapes::EventHoldDuration>,
 }
 
 impl ObjectLockRetention {

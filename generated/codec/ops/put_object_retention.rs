@@ -102,11 +102,29 @@ impl OperationCodec for dto::PutObjectRetention {
     }
 }
 
+/// Reads one `EventHoldDuration` element. Members are matched by local name, so a namespace-prefixed
+/// body and a bare one decode identically.
+fn read_event_hold_duration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::EventHoldDuration, CodecError> {
+    let mut shape = dto::EventHoldDuration { ..Default::default() };
+    let known = ["Days", "Years"];
+    if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {
+        return Err(CodecError::malformed_xml("the body contains an unknown element"));
+    }
+    if let Some(raw) = node.child_text("Days") {
+        shape.days = Some(value::integer(raw, "Days")?);
+    }
+    if let Some(raw) = node.child_text("Years") {
+        shape.years = Some(value::integer(raw, "Years")?);
+    }
+    value::exit(shape.check_required())?;
+    Ok(shape)
+}
+
 /// Reads one `ObjectLockRetention` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
 fn read_object_lock_retention(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ObjectLockRetention, CodecError> {
     let mut shape = dto::ObjectLockRetention { ..Default::default() };
-    let known = ["Mode", "RetainUntilDate"];
+    let known = ["Mode", "RetainUntilDate", "EventHold", "EventHoldDuration"];
     if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {
         return Err(CodecError::malformed_xml("the body contains an unknown element"));
     }
@@ -115,6 +133,12 @@ fn read_object_lock_retention(node: &rustfs_gateway_xml::XmlNode) -> Result<dto:
     }
     if let Some(raw) = node.child_text("RetainUntilDate") {
         shape.retain_until_date = Some(value::timestamp(raw, TimestampFormat::Iso8601, "RetainUntilDate")?);
+    }
+    if let Some(raw) = node.child_text("EventHold") {
+        shape.event_hold = Some(dto::EventHold::custom(raw.to_owned()));
+    }
+    if let Some(child) = node.child("EventHoldDuration") {
+        shape.event_hold_duration = Some(read_event_hold_duration(child)?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)

@@ -134,6 +134,12 @@ pub struct Input {
     pub object_lock_retain_until_date: Option<crate::Timestamp>,
     /// Wire `x-amz-object-lock-legal-hold`, bound as Header. Optional.
     pub object_lock_legal_hold_status: Option<crate::ops::enums::ObjectLockLegalHoldStatus>,
+    /// Wire `x-amz-object-lock-event-hold`, bound as Header. Optional.
+    pub object_lock_event_hold: Option<crate::ops::enums::ObjectLockEventHold>,
+    /// Wire `x-amz-object-lock-event-hold-duration-days`, bound as Header. Optional.
+    pub object_lock_event_hold_duration_days: Option<i32>,
+    /// Wire `x-amz-object-lock-event-hold-duration-years`, bound as Header. Optional.
+    pub object_lock_event_hold_duration_years: Option<i32>,
     /// Wire `x-amz-expected-bucket-owner`, bound as Header. Optional.
     pub expected_bucket_owner: Option<String>,
 }
@@ -204,6 +210,9 @@ impl std::fmt::Debug for Input {
             .field("object_lock_mode", &self.object_lock_mode)
             .field("object_lock_retain_until_date", &self.object_lock_retain_until_date)
             .field("object_lock_legal_hold_status", &self.object_lock_legal_hold_status)
+            .field("object_lock_event_hold", &self.object_lock_event_hold)
+            .field("object_lock_event_hold_duration_days", &self.object_lock_event_hold_duration_days)
+            .field("object_lock_event_hold_duration_years", &self.object_lock_event_hold_duration_years)
             .field("expected_bucket_owner", &self.expected_bucket_owner)
             .finish()
     }
@@ -562,6 +571,27 @@ impl InputBuilder {
     #[must_use]
     pub fn object_lock_legal_hold_status(mut self, value: crate::ops::enums::ObjectLockLegalHoldStatus) -> Self {
         self.input.object_lock_legal_hold_status = Some(value);
+        self
+    }
+
+    /// Sets `ObjectLockEventHold`.
+    #[must_use]
+    pub fn object_lock_event_hold(mut self, value: crate::ops::enums::ObjectLockEventHold) -> Self {
+        self.input.object_lock_event_hold = Some(value);
+        self
+    }
+
+    /// Sets `ObjectLockEventHoldDurationDays`.
+    #[must_use]
+    pub fn object_lock_event_hold_duration_days(mut self, value: i32) -> Self {
+        self.input.object_lock_event_hold_duration_days = Some(value);
+        self
+    }
+
+    /// Sets `ObjectLockEventHoldDurationYears`.
+    #[must_use]
+    pub fn object_lock_event_hold_duration_years(mut self, value: i32) -> Self {
+        self.input.object_lock_event_hold_duration_years = Some(value);
         self
     }
 

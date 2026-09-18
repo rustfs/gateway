@@ -251,8 +251,11 @@ fn retain_until() -> impl Strategy<Value = Timestamp> {
 /// that a document naming only one of them, or neither, passes on purpose — so all four
 /// combinations are sampled, including the empty one.
 fn retention() -> impl Strategy<Value = dto::ObjectLockRetention> {
-    (prop::option::of(mode()), prop::option::of(retain_until()))
-        .prop_map(|(mode, retain_until_date)| dto::ObjectLockRetention { mode, retain_until_date })
+    (prop::option::of(mode()), prop::option::of(retain_until())).prop_map(|(mode, retain_until_date)| dto::ObjectLockRetention {
+        mode,
+        retain_until_date,
+        ..Default::default()
+    })
 }
 
 /// A legal hold. The set is closed at `ON`/`OFF` by `q-lock-0011`, and absent is legal.
@@ -277,7 +280,12 @@ fn lock_configuration() -> impl Strategy<Value = dto::ObjectLockConfiguration> {
         .prop_map(|(object_lock_enabled, default)| dto::ObjectLockConfiguration {
             object_lock_enabled,
             rule: default.map(|(mode, days, years)| dto::ObjectLockRule {
-                default_retention: Some(dto::DefaultRetention { mode, days, years }),
+                default_retention: Some(dto::DefaultRetention {
+                    mode,
+                    days,
+                    years,
+                    ..Default::default()
+                }),
             }),
         })
 }
@@ -375,6 +383,7 @@ fn the_two_renamed_roots_are_written_and_read_under_their_wire_names() {
     let retention = dto::ObjectLockRetention {
         mode: Some(dto::Mode::GOVERNANCE),
         retain_until_date: Some(Timestamp::from_secs(NOW + 86_400)),
+        ..Default::default()
     };
     let document = encode_retention(retention);
     assert_eq!(root_element(&document), "Retention", "{document}");
@@ -400,6 +409,7 @@ fn a_document_this_codec_wrote_is_one_the_family_accepts() {
                 mode: Some(dto::Mode::COMPLIANCE),
                 days: Some(30),
                 years: None,
+                ..Default::default()
             }),
         }),
     };
@@ -410,6 +420,7 @@ fn a_document_this_codec_wrote_is_one_the_family_accepts() {
     let retention = dto::ObjectLockRetention {
         mode: Some(dto::Mode::GOVERNANCE),
         retain_until_date: Some(Timestamp::from_secs(NOW + 86_400)),
+        ..Default::default()
     };
     let read_back = decode_retention(&encode_retention(retention.clone())).expect("reads");
     assert_eq!(validate_retention(&read_back, NOW), Ok(()));
@@ -444,6 +455,7 @@ fn an_empty_document_of_each_kind_comes_back_empty() {
     let retention = dto::ObjectLockRetention {
         mode: None,
         retain_until_date: None,
+        ..Default::default()
     };
     let read_back = decode_retention(&encode_retention(retention)).expect("an empty retention is still a retention");
     assert_eq!(retention_projection(&read_back), (None, None));
@@ -475,6 +487,7 @@ fn n_a_retain_until_instant_finer_than_a_millisecond_is_truncated_on_the_way_out
     let retention = dto::ObjectLockRetention {
         mode: None,
         retain_until_date: Some(precise),
+        ..Default::default()
     };
 
     let document = encode_retention(retention);

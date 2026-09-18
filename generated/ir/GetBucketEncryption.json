@@ -101,6 +101,7 @@
                                                                          "values": [
                                                                                      "AES256",
                                                                                      "aws:fsx",
+                                                                                     "aws:backup",
                                                                                      "aws:kms",
                                                                                      "aws:kms:dsse"
                                                                                    ]

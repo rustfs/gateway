@@ -58,6 +58,10 @@ impl StorageClass {
     pub const FSX_OPENZFS: Self = Self(Cow::Borrowed("FSX_OPENZFS"));
     /// `FSX_ONTAP`
     pub const FSX_ONTAP: Self = Self(Cow::Borrowed("FSX_ONTAP"));
+    /// `AWS_BACKUP_WARM`
+    pub const AWS_BACKUP_WARM: Self = Self(Cow::Borrowed("AWS_BACKUP_WARM"));
+    /// `AWS_BACKUP_LOW_COST_WARM`
+    pub const AWS_BACKUP_LOW_COST_WARM: Self = Self(Cow::Borrowed("AWS_BACKUP_LOW_COST_WARM"));
 
     /// Every value the pinned model declares, in model order.
     pub const VALUES: &'static [&'static str] = &[
@@ -74,6 +78,8 @@ impl StorageClass {
         "EXPRESS_ONEZONE",
         "FSX_OPENZFS",
         "FSX_ONTAP",
+        "AWS_BACKUP_WARM",
+        "AWS_BACKUP_LOW_COST_WARM",
     ];
 
     /// Wraps a value this build has no constant for.

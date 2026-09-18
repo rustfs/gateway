@@ -78,12 +78,13 @@ quirks = []
 
 [shape.DefaultRetention]
 kind = "Structure"
-element_order = ["Mode", "Days", "Years"]
+element_order = ["Mode", "Days", "Years", "DefaultEventHold"]
 
 [shape.DefaultRetention.empty_value]
 Mode = "emit"
 Days = "emit"
 Years = "emit"
+DefaultEventHold = "emit"
 
 [[shape.DefaultRetention.field]]
 name = "Mode"
@@ -105,6 +106,41 @@ hot = true
 quirks = []
 
 [[shape.DefaultRetention.field]]
+name = "Years"
+wire_name = "Years"
+binding = "BodyXml"
+type = "Integer"
+required = false
+hot = true
+quirks = []
+
+[[shape.DefaultRetention.field]]
+name = "DefaultEventHold"
+wire_name = "DefaultEventHold"
+binding = "BodyXml"
+type = "Structure(EventHoldDuration)"
+required = false
+hot = false
+quirks = []
+
+[shape.EventHoldDuration]
+kind = "Structure"
+element_order = ["Days", "Years"]
+
+[shape.EventHoldDuration.empty_value]
+Days = "emit"
+Years = "emit"
+
+[[shape.EventHoldDuration.field]]
+name = "Days"
+wire_name = "Days"
+binding = "BodyXml"
+type = "Integer"
+required = false
+hot = true
+quirks = []
+
+[[shape.EventHoldDuration.field]]
 name = "Years"
 wire_name = "Years"
 binding = "BodyXml"

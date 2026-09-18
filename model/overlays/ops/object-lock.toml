@@ -219,13 +219,20 @@ element_order = ["ObjectLockEnabled", "Rule"]
 hot = ["DefaultRetention"]
 element_order = ["DefaultRetention"]
 
+# The event-hold members arrived with the 2026-09-17 model (rustfs/gateway#815). They are
+# written after the members every existing document carries, and stay cold: no client this
+# gateway has measured sends them, and the semantic rules in `object_lock.rs` do not read them.
 [shape.DefaultRetention]
 hot = ["Mode", "Days", "Years"]
-element_order = ["Mode", "Days", "Years"]
+element_order = ["Mode", "Days", "Years", "DefaultEventHold"]
+
+[shape.EventHoldDuration]
+hot = ["Days", "Years"]
+element_order = ["Days", "Years"]
 
 [shape.ObjectLockRetention]
 hot = ["Mode", "RetainUntilDate"]
-element_order = ["Mode", "RetainUntilDate"]
+element_order = ["Mode", "RetainUntilDate", "EventHold", "EventHoldDuration"]
 
 [shape.ObjectLockLegalHold]
 hot = ["Status"]

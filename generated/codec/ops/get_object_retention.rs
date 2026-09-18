@@ -81,6 +81,20 @@ impl OperationCodec for dto::GetObjectRetention {
     }
 }
 
+/// Writes one `EventHoldDuration` element's children, in the wire order the IR records.
+fn write_event_hold_duration(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::EventHoldDuration,
+) -> Result<(), CodecError> {
+    if let Some(v) = value.days.as_ref() {
+        writer.element("Days", &v.to_string());
+    }
+    if let Some(v) = value.years.as_ref() {
+        writer.element("Years", &v.to_string());
+    }
+    Ok(())
+}
+
 /// Writes one `ObjectLockRetention` element's children, in the wire order the IR records.
 fn write_object_lock_retention(
     writer: &mut rustfs_gateway_xml::XmlWriter,
@@ -91,6 +105,14 @@ fn write_object_lock_retention(
     }
     if let Some(v) = value.retain_until_date.as_ref() {
         writer.element("RetainUntilDate", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+    }
+    if let Some(v) = value.event_hold.as_ref() {
+        writer.element("EventHold", v.as_str());
+    }
+    if let Some(v) = value.event_hold_duration.as_ref() {
+        writer.open("EventHoldDuration", None);
+        write_event_hold_duration(writer, v)?;
+        writer.close();
     }
     Ok(())
 }

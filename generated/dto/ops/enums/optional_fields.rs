@@ -52,6 +52,10 @@ impl OptionalFields {
     pub const OBJECTLOCKMODE: Self = Self(Cow::Borrowed("ObjectLockMode"));
     /// `ObjectLockLegalHoldStatus`
     pub const OBJECTLOCKLEGALHOLDSTATUS: Self = Self(Cow::Borrowed("ObjectLockLegalHoldStatus"));
+    /// `ObjectLockEventHoldStatus`
+    pub const OBJECTLOCKEVENTHOLDSTATUS: Self = Self(Cow::Borrowed("ObjectLockEventHoldStatus"));
+    /// `ObjectLockEventHoldDuration`
+    pub const OBJECTLOCKEVENTHOLDDURATION: Self = Self(Cow::Borrowed("ObjectLockEventHoldDuration"));
     /// `IntelligentTieringAccessTier`
     pub const INTELLIGENTTIERINGACCESSTIER: Self = Self(Cow::Borrowed("IntelligentTieringAccessTier"));
     /// `BucketKeyStatus`
@@ -77,6 +81,8 @@ impl OptionalFields {
         "ObjectLockRetainUntilDate",
         "ObjectLockMode",
         "ObjectLockLegalHoldStatus",
+        "ObjectLockEventHoldStatus",
+        "ObjectLockEventHoldDuration",
         "IntelligentTieringAccessTier",
         "BucketKeyStatus",
         "ChecksumAlgorithm",

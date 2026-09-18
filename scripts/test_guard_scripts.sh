@@ -14594,10 +14594,14 @@ mut_codec_policy_lock_guard_removed() {
 from pathlib import Path
 path = Path("generated/codec/ops/put_object_retention.rs")
 text = path.read_text()
-old = '    if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {\n        return Err(CodecError::malformed_xml("the body contains an unknown element"));\n    }\n'
+# Anchored on the retention reader's own member list: the nested EventHoldDuration reader
+# (2026-09-17 model) carries the same guard, and only the document root's is the mutation.
+known = '    let known = ["Mode", "RetainUntilDate", "EventHold", "EventHoldDuration"];\n'
+guard = '    if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {\n        return Err(CodecError::malformed_xml("the body contains an unknown element"));\n    }\n'
+old = known + guard
 if text.count(old) != 1:
     raise SystemExit("retention guard mutation anchor is not unique")
-path.write_text(text.replace(old, "", 1))
+path.write_text(text.replace(old, known, 1))
 PYEOF
 }
 expect_fail check_codec_policy.sh \

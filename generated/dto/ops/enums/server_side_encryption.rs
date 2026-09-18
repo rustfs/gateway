@@ -36,13 +36,15 @@ impl ServerSideEncryption {
     pub const AES256: Self = Self(Cow::Borrowed("AES256"));
     /// `aws:fsx`
     pub const AWS_FSX: Self = Self(Cow::Borrowed("aws:fsx"));
+    /// `aws:backup`
+    pub const AWS_BACKUP: Self = Self(Cow::Borrowed("aws:backup"));
     /// `aws:kms`
     pub const AWS_KMS: Self = Self(Cow::Borrowed("aws:kms"));
     /// `aws:kms:dsse`
     pub const AWS_KMS_DSSE: Self = Self(Cow::Borrowed("aws:kms:dsse"));
 
     /// Every value the pinned model declares, in model order.
-    pub const VALUES: &'static [&'static str] = &["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"];
+    pub const VALUES: &'static [&'static str] = &["AES256", "aws:fsx", "aws:backup", "aws:kms", "aws:kms:dsse"];
 
     /// Wraps a value this build has no constant for.
     #[must_use]

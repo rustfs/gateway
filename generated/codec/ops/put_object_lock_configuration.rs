@@ -98,12 +98,33 @@ impl OperationCodec for dto::PutObjectLockConfiguration {
 /// body and a bare one decode identically.
 fn read_default_retention(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::DefaultRetention, CodecError> {
     let mut shape = dto::DefaultRetention { ..Default::default() };
-    let known = ["Mode", "Days", "Years"];
+    let known = ["Mode", "Days", "Years", "DefaultEventHold"];
     if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {
         return Err(CodecError::malformed_xml("the body contains an unknown element"));
     }
     if let Some(raw) = node.child_text("Mode") {
         shape.mode = Some(dto::Mode::custom(raw.to_owned()));
+    }
+    if let Some(raw) = node.child_text("Days") {
+        shape.days = Some(value::integer(raw, "Days")?);
+    }
+    if let Some(raw) = node.child_text("Years") {
+        shape.years = Some(value::integer(raw, "Years")?);
+    }
+    if let Some(child) = node.child("DefaultEventHold") {
+        shape.default_event_hold = Some(read_event_hold_duration(child)?);
+    }
+    value::exit(shape.check_required())?;
+    Ok(shape)
+}
+
+/// Reads one `EventHoldDuration` element. Members are matched by local name, so a namespace-prefixed
+/// body and a bare one decode identically.
+fn read_event_hold_duration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::EventHoldDuration, CodecError> {
+    let mut shape = dto::EventHoldDuration { ..Default::default() };
+    let known = ["Days", "Years"];
+    if node.children.iter().any(|child| !known.contains(&child.name.as_str())) {
+        return Err(CodecError::malformed_xml("the body contains an unknown element"));
     }
     if let Some(raw) = node.child_text("Days") {
         shape.days = Some(value::integer(raw, "Days")?);

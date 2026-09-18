@@ -79,6 +79,25 @@ fn write_default_retention(writer: &mut rustfs_gateway_xml::XmlWriter, value: &d
     if let Some(v) = value.years.as_ref() {
         writer.element("Years", &v.to_string());
     }
+    if let Some(v) = value.default_event_hold.as_ref() {
+        writer.open("DefaultEventHold", None);
+        write_event_hold_duration(writer, v)?;
+        writer.close();
+    }
+    Ok(())
+}
+
+/// Writes one `EventHoldDuration` element's children, in the wire order the IR records.
+fn write_event_hold_duration(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::EventHoldDuration,
+) -> Result<(), CodecError> {
+    if let Some(v) = value.days.as_ref() {
+        writer.element("Days", &v.to_string());
+    }
+    if let Some(v) = value.years.as_ref() {
+        writer.element("Years", &v.to_string());
+    }
     Ok(())
 }
 

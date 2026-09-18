@@ -266,7 +266,7 @@ binding = "Header"
 type = "StringEnum"
 required = false
 hot = false
-values = ["AES256", "aws:fsx", "aws:kms", "aws:kms:dsse"]
+values = ["AES256", "aws:fsx", "aws:backup", "aws:kms", "aws:kms:dsse"]
 quirks = []
 
 [[output]]

@@ -601,6 +601,7 @@ fn n_a_deleted_buckets_seven_documents_and_its_acl_do_not_survive_a_recreation()
                     mode: Some(dto::Mode::COMPLIANCE),
                     years: Some(7),
                     days: None,
+                    ..Default::default()
                 }),
             }),
         },

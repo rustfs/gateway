@@ -94,6 +94,8 @@ impl Events {
     pub const S3_OBJECTANNOTATION_PUT: Self = Self(Cow::Borrowed("s3:ObjectAnnotation:Put"));
     /// `s3:ObjectAnnotation:Delete`
     pub const S3_OBJECTANNOTATION_DELETE: Self = Self(Cow::Borrowed("s3:ObjectAnnotation:Delete"));
+    /// `s3:ObjectRetention:Put`
+    pub const S3_OBJECTRETENTION_PUT: Self = Self(Cow::Borrowed("s3:ObjectRetention:Put"));
 
     /// Every value the pinned model declares, in model order.
     pub const VALUES: &'static [&'static str] = &[
@@ -127,6 +129,7 @@ impl Events {
         "s3:ObjectAnnotation:*",
         "s3:ObjectAnnotation:Put",
         "s3:ObjectAnnotation:Delete",
+        "s3:ObjectRetention:Put",
     ];
 
     /// Wraps a value this build has no constant for.

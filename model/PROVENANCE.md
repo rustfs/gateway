@@ -21,14 +21,14 @@ place; the only legal change is a reviewed bump (see [Bumping](#bumping)).
 | Upstream branch | main |
 | License | Apache-2.0 |
 | Upstream copyright line | `Copyright Amazon.com, Inc. or its affiliates.` |
-| Pinned commit | `7ca34eee8c313368fd1fad80566fa177ba4a1c0a` |
-| Pinned commit date | 2026-08-04 |
-| Pin date | 2026-08-05 |
+| Pinned commit | `a877f97c8964bc3d6a195c68188665ae636acb65` |
+| Pinned commit date | 2026-09-17 |
+| Pin date | 2026-09-18 |
 | Upstream has tags or releases | No — `git ls-remote --tags` is empty and the repository has zero releases, so a commit SHA is the only stable identifier |
 | Upstream release cadence | Roughly every 2–4 weeks; every commit message is `Release Model Changes:` |
-| Last upstream commit touching `models/s3` | `61d7b25d8cc390475a1d3c566f2aef108b9c44af` (2026-07-16) |
-| Last upstream commit touching `models/sts` | `87480db7ee4bec827c971dbf0294446591d1b229` (2026-06-02) |
-| Semantic diff for this bump | initial pin |
+| Last upstream commit touching `models/s3` | `f9dcea0105487cb83cbe23539d24915046b6a4cd` (2026-09-11) |
+| Last upstream commit touching `models/sts` | `fe627e6e30c7d9c80cd11d3f3985e1796d5e958a` (2026-09-14) |
+| Semantic diff for this bump | 51 wire-affecting changes, 0 breaking (rustfs/gateway#815): s3 gains the Object Lock event-hold members on `PutObject`/`CopyObject`/`CreateMultipartUpload` requests and `GetObject`/`HeadObject` outputs, `DefaultRetention.DefaultEventHold`, `ObjectLockRetention.EventHold`/`EventHoldDuration`, the `s3:ObjectRetention:Put` event, two `InventoryOptionalField` values, the `AWS_BACKUP_WARM`/`AWS_BACKUP_LOW_COST_WARM` storage classes and the `aws:backup` `ServerSideEncryption` value; sts gains optional `MinimumSessionTokenSize` on every request and `SessionTokenSize`/`SessionTokenUtilization` on every response. Full report in the bump PR. |
 
 ## Vendored files
 
@@ -36,19 +36,19 @@ place; the only legal change is a reviewed bump (see [Bumping](#bumping)).
 |---|---|
 | s3 model path | `models/s3/service/2006-03-01/s3-2006-03-01.json` |
 | s3 model file | `model/s3.json` |
-| s3 model sha256 | `3d7f95eac05a258236e6edb18525f6706444aa9a73e96789ff23dfea2f57d217` |
-| s3 model bytes | 2993923 |
+| s3 model sha256 | `e632755547997bbfbde67d5630d6f09601c909ed9026713e5ff3f71887ab4892` |
+| s3 model bytes | 2996743 |
 | s3 smithy version | 2.0 |
 | s3 service shape | `com.amazonaws.s3#AmazonS3` |
-| s3 shape count | 819 |
+| s3 shape count | 823 |
 | s3 operation count | 112 |
 | sts model path | `models/sts/service/2011-06-15/sts-2011-06-15.json` |
 | sts model file | `model/sts.json` |
-| sts model sha256 | `f9af33a09eeb206ab4f63a276f4342c87a23306725be381e2b7ba21ff3e8d40a` |
-| sts model bytes | 257699 |
+| sts model sha256 | `794c8b2142e3a65bc6cc7922005eb85d6b71b02353fef03c0f395e8f902ee2d0` |
+| sts model bytes | 263850 |
 | sts smithy version | 2.0 |
 | sts service shape | `com.amazonaws.sts#AWSSecurityTokenServiceV20110615` |
-| sts shape count | 110 |
+| sts shape count | 113 |
 | sts operation count | 11 |
 
 Every number above is re-derived and asserted by `model/tools/verify.py`; the

@@ -142,13 +142,41 @@ hot = false
 values = ["requester"]
 quirks = []
 
+[shape.EventHoldDuration]
+kind = "Structure"
+element_order = ["Days", "Years"]
+
+[shape.EventHoldDuration.empty_value]
+Days = "emit"
+Years = "emit"
+
+[[shape.EventHoldDuration.field]]
+name = "Days"
+wire_name = "Days"
+binding = "BodyXml"
+type = "Integer"
+required = false
+hot = true
+quirks = []
+
+[[shape.EventHoldDuration.field]]
+name = "Years"
+wire_name = "Years"
+binding = "BodyXml"
+type = "Integer"
+required = false
+hot = true
+quirks = []
+
 [shape.ObjectLockRetention]
 kind = "Structure"
-element_order = ["Mode", "RetainUntilDate"]
+element_order = ["Mode", "RetainUntilDate", "EventHold", "EventHoldDuration"]
 
 [shape.ObjectLockRetention.empty_value]
 Mode = "emit"
 RetainUntilDate = "emit"
+EventHold = "emit"
+EventHoldDuration = "emit"
 
 [[shape.ObjectLockRetention.field]]
 name = "Mode"
@@ -167,4 +195,23 @@ binding = "BodyXml"
 type = "Timestamp(Iso8601)"
 required = false
 hot = true
+quirks = []
+
+[[shape.ObjectLockRetention.field]]
+name = "EventHold"
+wire_name = "EventHold"
+binding = "BodyXml"
+type = "StringEnum"
+required = false
+hot = false
+values = ["ON", "OFF"]
+quirks = []
+
+[[shape.ObjectLockRetention.field]]
+name = "EventHoldDuration"
+wire_name = "EventHoldDuration"
+binding = "BodyXml"
+type = "Structure(EventHoldDuration)"
+required = false
+hot = false
 quirks = []
