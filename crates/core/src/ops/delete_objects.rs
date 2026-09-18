@@ -28,6 +28,11 @@
 //! `http_checksum_required` in the overlay, not an `if` here. And every key in the request must
 //! appear exactly once in the result, as either a deleted entry or an error entry: a caller that
 //! gets back fewer entries than it sent cannot tell which of its keys survived.
+//!
+//! A third fact bounds the work: S3 caps one multi-object delete at [`MAX_KEYS_PER_DELETE`] keys
+//! and refuses a larger body as `MalformedXML` before deleting anything (rustfs/gateway#810). The
+//! cap is enforced where the keys become resources, so it runs before authorization and before any
+//! backend, and no handler holds one deadline over an unbounded batch.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::ObjectKey;
@@ -35,6 +40,9 @@ use rustfs_gateway_types::dto::{DeleteObjects, DeleteObjectsInput, DeleteObjects
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
 use crate::registry::OperationSpec;
+
+/// The most keys one `DeleteObjects` body may name, as S3 documents and enforces it.
+pub const MAX_KEYS_PER_DELETE: usize = 1000;
 
 /// Every key carried by one multi-object delete body.
 struct DeleteObjectResource {
@@ -95,6 +103,12 @@ impl Operation for DeleteObjects {
     type DerivedResources = DeleteObjectResources;
 
     fn derive_resources(input: &Self::Input) -> Result<Self::DerivedResources, crate::authz::DerivedResourceError> {
+        if input.delete.objects.len() > MAX_KEYS_PER_DELETE {
+            return Err(crate::authz::DerivedResourceError::new(
+                rustfs_gateway_types::ErrorCode::MALFORMED_XML,
+                "a multi-object delete names at most 1000 keys",
+            ));
+        }
         Ok(DeleteObjectResources(
             input
                 .delete
@@ -165,5 +179,29 @@ mod tests {
             .expect("the original resource proof matches");
         let keys = resolved.map(|(key, _)| key.as_str()).collect::<Vec<_>>();
         assert_eq!(keys, ["allowed"]);
+    }
+
+    /// Negative — 1001 keys are refused as `MalformedXML` before any resource is derived, so
+    /// nothing is authorized and no handler runs; 1000 keys derive 1000 resources (rustfs/gateway#810).
+    #[test]
+    fn n_a_thousand_and_first_key_is_refused_before_derivation() {
+        let body = |count: usize| {
+            let mut input = DeleteObjectsInput::default();
+            for index in 0..count {
+                input.delete.objects.push(rustfs_gateway_types::dto::ObjectIdentifier {
+                    key: ObjectKey::new(format!("k{index}")).expect("valid key"),
+                    ..Default::default()
+                });
+            }
+            input
+        };
+        // The literals are the documented cap, not the constant, so a moved cap turns this red.
+        let refused = DeleteObjects::derive_resources(&body(1001))
+            .err()
+            .expect("1001 keys are refused");
+        assert_eq!(refused.code(), &rustfs_gateway_types::ErrorCode::MALFORMED_XML);
+        assert_eq!(refused.message(), "a multi-object delete names at most 1000 keys");
+        let derived = DeleteObjects::derive_resources(&body(1000)).map(|derived| derived.0.len());
+        assert_eq!((derived.ok(), MAX_KEYS_PER_DELETE), (Some(1000), 1000));
     }
 }

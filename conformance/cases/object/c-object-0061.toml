@@ -1,0 +1,60 @@
+# c-object-0061 — the thousand-and-first key of a multi-object delete is refused before anything
+# is deleted.
+
+[case]
+id = "c-object-0061"
+schema_version = 1
+title = "A DeleteObjects body naming 1001 keys is refused as MalformedXML with nothing deleted"
+rationale = """
+S3 caps one multi-object delete at 1000 keys and answers a larger body 400 MalformedXML before it deletes anything. The cap bounds the work one request can demand under one handler deadline: a server that takes 1001 keys either deletes them all inside that deadline or times out half-way through a batch the caller was told nothing about. The body is well-formed XML, so the refusal is the count, and the object that sits in the bucket is still there afterwards (c-object-0062 is the positive control at exactly 1000)."""
+polarity = "negative"
+operation = "DeleteObjects"
+tags = ["xml", "dos"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
+summary = "The request can contain a list of up to 1000 keys that you want to delete."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/ceph/s3-tests/blob/master/s3tests/functional/test_s3.py"
+summary = "test_multi_object_delete_key_limit sends 1001 keys and expects a 400; RGW passes it, and the first measured run against this gateway failed it with a 200 (rustfs/gateway#810)."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "k0"
+body = { utf8 = "kept" }
+
+[request]
+method = "POST"
+target = "/conf-object?delete"
+headers = { "content-type" = "application/xml", "content-md5" = "6ZpXLgC3nyw01iq2Fy0p9Q==" }
+body = { file = "fixtures/object/thousand-and-one-keys.xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedXML</Code><Message>a multi-object delete names at most 1000 keys</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

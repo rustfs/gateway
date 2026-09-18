@@ -1,0 +1,39 @@
+# c-object-0062 — positive control for c-object-0061: exactly 1000 keys is the cap, not over it.
+
+[case]
+id = "c-object-0062"
+schema_version = 1
+title = "A DeleteObjects body naming exactly 1000 keys is accepted"
+rationale = """
+The cap is 1000 keys inclusive. A boundary test that only shows 1001 refused could pass with a cap set anywhere below it; this case pins the other side, so an off-by-one in either direction turns one of the pair red. Quiet mode keeps the answer to the errors alone, and a delete of keys that are not there has none."""
+polarity = "positive"
+operation = "DeleteObjects"
+tags = ["xml"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html"
+summary = "The request can contain a list of up to 1000 keys that you want to delete."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[request]
+method = "POST"
+target = "/conf-object?delete"
+headers = { "content-type" = "application/xml", "content-md5" = "sGC4W074Zf5ZDG8s6CCG4g==" }
+body = { file = "fixtures/object/one-thousand-keys.xml" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
