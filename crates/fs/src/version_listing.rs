@@ -129,7 +129,10 @@ impl Handler<ListObjectVersions> for FsBackend {
         let max_keys = input.max_keys.unwrap_or(1000);
         let limit = usize::try_from(max_keys.max(0)).map_err(|_| storage_error())?;
         let selected = entries.iter().skip(start).take(limit).collect::<Vec<_>>();
-        let is_truncated = start.saturating_add(selected.len()) < entries.len();
+        // A page of zero is a page of nothing, not a page that ran out: `ListObjects` answers
+        // `max-keys=0` with `IsTruncated=false` and no cursor (`c-list-0027`), and a `true` with no
+        // `NextKeyMarker` to act on sends a paginating client back for the same nothing forever.
+        let is_truncated = limit > 0 && start.saturating_add(selected.len()) < entries.len();
         let mut versions = Vec::new();
         let mut delete_markers = Vec::new();
         let mut common_prefixes = Vec::new();
