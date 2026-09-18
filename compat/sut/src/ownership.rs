@@ -14,9 +14,11 @@
 
 //! Which identity owns which bucket, and what the other identity may therefore not do.
 //!
-//! Responsible for: recording the fixed data-root owner of a bucket when creation is admitted,
-//! answering `x-amz-expected-bucket-owner` through [`BucketOwnerSource`], and producing the
-//! authorization [`Decision`] that refuses one identity on another identity's bucket.
+//! Responsible for: recording the fixed data-root owner of a bucket once its creation has really
+//! happened, refusing another identity's attempt to create a recorded bucket as
+//! `409 BucketAlreadyExists` through [`TakenNames`], answering `x-amz-expected-bucket-owner`
+//! through [`BucketOwnerSource`], and producing the authorization [`Decision`] that refuses one
+//! identity on another identity's bucket.
 //! NOT responsible for: storing objects (`rustfs-gateway-fs`), verifying signatures
 //! (`rustfs-gateway-sig`), or ACLs and bucket policies — this launcher implements neither, and an
 //! ACL grant therefore cannot widen anything decided here.
@@ -33,11 +35,23 @@
 //! against a fresh, single-tenant data root whose configured primary owner is authoritative; a
 //! secondary identity may request creation as a guest, but does not acquire the bucket. Nothing
 //! here should be read as a durable authorization store.
+//!
+//! # Why the claim is a layer around the handler and not part of the authorization decision
+//!
+//! Authorization runs before the backend and cannot know whether the creation will succeed, so a
+//! claim made there records buckets that a refused `LocationConstraint` never created. It also
+//! cannot say `409`: an authorizer answers `403`, and the answer S3 gives a *different* account for
+//! a taken name is `409 BucketAlreadyExists` (rustfs/gateway#811). The reference backend has one
+//! fixed owner and answers every re-creation as that owner's, so the distinction is made here,
+//! where both the recorded owner and the caller are known, before the backend is reached.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use rustfs_gateway::{AuthzRequest, BoxFuture, BucketName, BucketOwnerError, BucketOwnerSource, Decision, Operation, dto};
+use rustfs_gateway::{
+    AuthzRequest, BoxFuture, BucketName, BucketOwnerError, BucketOwnerSource, Decision, ErrorCode, HandlerError, HandlerResult,
+    Next, OpLayer, Operation, Req, dto,
+};
 
 use crate::identity::Accounts;
 
@@ -50,10 +64,9 @@ pub(crate) struct BucketOwners {
 impl BucketOwners {
     /// Records `owner` as the owner of `bucket` unless the data root already recorded it.
     ///
-    /// Returns the owner that stands afterwards, which is the *existing* one when there was one.
-    /// A second identity therefore cannot take a bucket over by asking to create it again: that
-    /// request is admitted, the reference backend answers `BucketAlreadyExists`, and the first
-    /// identity is still the owner.
+    /// Returns the owner that stands afterwards, which is the *existing* one when there was one,
+    /// or `None` when the registry is poisoned. A second identity therefore cannot take a bucket
+    /// over by asking to create it again: the first recorded owner stands.
     fn claim(&self, bucket: &str, owner: &str) -> Option<Arc<str>> {
         let mut owners = self.owners.lock().ok()?;
         Some(Arc::clone(owners.entry(bucket.to_owned()).or_insert_with(|| Arc::from(owner))))
@@ -98,7 +111,8 @@ const CREATE_BUCKET: &str = <dto::CreateBucket as Operation>::NAME;
 /// 3. an access key that resolves to no registered account is refused, rather than allowed on the
 ///    grounds that the authenticator ought to have caught it;
 /// 4. a request naming no bucket is a service-level request and is allowed;
-/// 5. `CreateBucket` claims the name for the fixed data-root owner and is allowed;
+/// 5. `CreateBucket` is allowed for every configured identity — whether the name is taken, and
+///    by whom, is [`TakenNames`]' answer once the backend can be asked;
 /// 6. everything else must be the recorded owner, or is refused.
 pub(crate) fn decide(
     owners: &BucketOwners,
@@ -119,12 +133,7 @@ pub(crate) fn decide(
         return Decision::Allow;
     };
     if request.operation == CREATE_BUCKET {
-        let (data_root_owner, _) = accounts.data_root_owner();
-        return match owners.claim(bucket.as_str(), data_root_owner) {
-            // A poisoned registry is not an allowance: it is a lookup that could not be made.
-            None => Decision::Indeterminate,
-            Some(_) => Decision::Allow,
-        };
+        return Decision::Allow;
     }
     match owners.owner_of(bucket.as_str()) {
         None => Decision::Allow,
@@ -133,12 +142,78 @@ pub(crate) fn decide(
     }
 }
 
+/// The `CreateBucket` layer that keeps a taken name from being answered as a fresh creation.
+///
+/// Wrapped around the reference backend's handler. A bucket this process recorded for another
+/// identity is refused `409 BucketAlreadyExists` without reaching the backend; every other request
+/// runs the handler, and a creation the backend admitted is then recorded for the fixed data-root
+/// owner. The record follows the creation rather than the admission, so a refused constraint
+/// leaves no record behind.
+pub(crate) struct TakenNames {
+    owners: Arc<BucketOwners>,
+    accounts: Accounts,
+}
+
+impl TakenNames {
+    pub(crate) fn new(owners: Arc<BucketOwners>, accounts: Accounts) -> Self {
+        Self { owners, accounts }
+    }
+
+    /// Whether `bucket` is recorded for an owner other than the one `caller` resolves to.
+    ///
+    /// A caller no account resolves to owns nothing, so a recorded bucket is taken from its point
+    /// of view; the authorizer has refused such a caller already, and this is the same answer.
+    fn is_taken_from(&self, bucket: &str, caller: Option<&str>) -> bool {
+        let owner = caller.and_then(|access_key_id| self.accounts.owner_of(access_key_id));
+        self.owners
+            .owner_of(bucket)
+            .is_some_and(|recorded| owner != Some(recorded.as_ref()))
+    }
+
+    /// Records a creation the backend admitted; a poisoned registry is an internal error rather
+    /// than a silent gap, because an unrecorded bucket would be open to every identity.
+    fn record(&self, bucket: &str) -> Result<(), HandlerError> {
+        let (data_root_owner, _) = self.accounts.data_root_owner();
+        self.owners
+            .claim(bucket, data_root_owner)
+            .map(drop)
+            .ok_or_else(|| HandlerError::internal_error("the bucket-owner registry is unavailable"))
+    }
+}
+
+impl OpLayer<dto::CreateBucket> for TakenNames {
+    fn wrap<'a>(
+        &'a self,
+        request: Req<dto::CreateBucket>,
+        next: Next<'a, dto::CreateBucket>,
+    ) -> BoxFuture<'a, HandlerResult<dto::CreateBucket>> {
+        Box::pin(async move {
+            let bucket = request.input().bucket.as_str().to_owned();
+            let caller = request
+                .context()
+                .principal()
+                .map(|principal| principal.access_key_id().to_owned());
+            if self.is_taken_from(&bucket, caller.as_deref()) {
+                return Err(HandlerError::new(
+                    ErrorCode::BUCKET_ALREADY_EXISTS,
+                    "The requested bucket name is not available. The bucket namespace is shared by all users of the \
+                     system. Please select a different name and try again.",
+                ));
+            }
+            let response = next.run(request).await?;
+            self.record(&bucket)?;
+            Ok(response)
+        })
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
-    use super::{BucketOwners, decide};
+    use super::{BucketOwners, TakenNames, decide};
     use crate::identity::{AccountArgs, Accounts};
     use rustfs_gateway::{AuthzRequest, BucketName, Decision, Identity, ResourceShape, TargetOrigin};
+    use std::sync::Arc;
 
     const SUPPORTED: &[&str] = &["CreateBucket", "GetObject", "ListObjects"];
 
@@ -176,10 +251,17 @@ mod tests {
         }
     }
 
+    /// The record a creation the backend admitted leaves behind, as the layer makes it.
+    fn created(owners: &Arc<BucketOwners>, accounts: &Accounts, bucket: &BucketName) {
+        TakenNames::new(Arc::clone(owners), accounts.clone())
+            .record(bucket.as_str())
+            .expect("a live registry");
+    }
+
     /// Positive — the creator of a bucket keeps reaching it afterwards.
     #[test]
     fn the_creator_of_a_bucket_may_use_it() {
-        let owners = BucketOwners::default();
+        let owners = Arc::new(BucketOwners::default());
         let accounts = accounts();
         let main = Identity::new("MAIN").expect("a valid access key id");
         let bucket = BucketName::new("owned").expect("a valid bucket name");
@@ -187,6 +269,7 @@ mod tests {
             decide(&owners, &accounts, SUPPORTED, &request("CreateBucket", Some(&bucket), Some(&main))),
             Decision::Allow
         );
+        created(&owners, &accounts, &bucket);
         assert_eq!(
             decide(&owners, &accounts, SUPPORTED, &request("GetObject", Some(&bucket), Some(&main))),
             Decision::Allow
@@ -197,15 +280,11 @@ mod tests {
     /// Negative — the second identity is refused on the first identity's bucket.
     #[test]
     fn n_a_second_identity_is_refused_on_the_first_identitys_bucket() {
-        let owners = BucketOwners::default();
+        let owners = Arc::new(BucketOwners::default());
         let accounts = accounts();
-        let main = Identity::new("MAIN").expect("a valid access key id");
         let alt = Identity::new("ALT").expect("a valid access key id");
         let bucket = BucketName::new("owned").expect("a valid bucket name");
-        assert_eq!(
-            decide(&owners, &accounts, SUPPORTED, &request("CreateBucket", Some(&bucket), Some(&main))),
-            Decision::Allow
-        );
+        created(&owners, &accounts, &bucket);
         assert_eq!(
             decide(&owners, &accounts, SUPPORTED, &request("GetObject", Some(&bucket), Some(&alt))),
             Decision::Deny
@@ -216,7 +295,7 @@ mod tests {
     /// single-tenant data root: the guest is refused afterwards and the primary owner is allowed.
     #[test]
     fn n_the_secondary_creator_is_refused_on_the_data_root_owners_bucket() {
-        let owners = BucketOwners::default();
+        let owners = Arc::new(BucketOwners::default());
         let accounts = accounts();
         let main = Identity::new("MAIN").expect("a valid access key id");
         let alt = Identity::new("ALT").expect("a valid access key id");
@@ -225,6 +304,7 @@ mod tests {
             decide(&owners, &accounts, SUPPORTED, &request("CreateBucket", Some(&bucket), Some(&alt))),
             Decision::Allow
         );
+        created(&owners, &accounts, &bucket);
         assert_eq!(owners.owner_of(bucket.as_str()).as_deref(), Some("s3gate-main"));
         assert_eq!(
             decide(&owners, &accounts, SUPPORTED, &request("GetObject", Some(&bucket), Some(&main))),
@@ -239,19 +319,14 @@ mod tests {
     /// Negative — asking to create a bucket somebody else owns does not transfer it.
     #[test]
     fn n_a_second_create_does_not_take_the_bucket_over() {
-        let owners = BucketOwners::default();
+        let owners = Arc::new(BucketOwners::default());
         let accounts = accounts();
         let main = Identity::new("MAIN").expect("a valid access key id");
         let alt = Identity::new("ALT").expect("a valid access key id");
         let bucket = BucketName::new("contested").expect("a valid bucket name");
-        assert_eq!(
-            decide(&owners, &accounts, SUPPORTED, &request("CreateBucket", Some(&bucket), Some(&main))),
-            Decision::Allow
-        );
-        assert_eq!(
-            decide(&owners, &accounts, SUPPORTED, &request("CreateBucket", Some(&bucket), Some(&alt))),
-            Decision::Allow
-        );
+        created(&owners, &accounts, &bucket);
+        created(&owners, &accounts, &bucket);
+        assert_eq!(owners.len(), 1);
         assert_eq!(
             decide(&owners, &accounts, SUPPORTED, &request("GetObject", Some(&bucket), Some(&alt))),
             Decision::Deny
@@ -260,6 +335,24 @@ mod tests {
             decide(&owners, &accounts, SUPPORTED, &request("GetObject", Some(&bucket), Some(&main))),
             Decision::Allow
         );
+    }
+
+    /// Negative — a recorded name is taken from every identity but its owner, and from a caller no
+    /// account resolves to; an unrecorded name is taken from nobody (rustfs/gateway#811).
+    #[test]
+    fn n_a_recorded_name_is_taken_from_every_other_identity() {
+        let owners = Arc::new(BucketOwners::default());
+        let accounts = accounts();
+        let layer = TakenNames::new(Arc::clone(&owners), accounts.clone());
+        let bucket = BucketName::new("recorded").expect("a valid bucket name");
+        assert!(!layer.is_taken_from(bucket.as_str(), Some("ALT")));
+        assert!(!layer.is_taken_from(bucket.as_str(), Some("MAIN")));
+        created(&owners, &accounts, &bucket);
+        assert!(layer.is_taken_from(bucket.as_str(), Some("ALT")));
+        assert!(layer.is_taken_from(bucket.as_str(), Some("STRANGER")));
+        assert!(layer.is_taken_from(bucket.as_str(), None));
+        assert!(!layer.is_taken_from(bucket.as_str(), Some("MAIN")));
+        assert!(!layer.is_taken_from("unrecorded", Some("ALT")));
     }
 
     /// Negative — an anonymous request is refused even for an operation this assembly registers.
@@ -306,15 +399,11 @@ mod tests {
     async fn n_an_unclaimed_bucket_has_no_assertable_owner() {
         use rustfs_gateway::BucketOwnerSource as _;
 
-        let owners = BucketOwners::default();
+        let owners = Arc::new(BucketOwners::default());
         let accounts = accounts();
-        let main = Identity::new("MAIN").expect("a valid access key id");
         let bucket = BucketName::new("claimed").expect("a valid bucket name");
         let absent = BucketName::new("unclaimed").expect("a valid bucket name");
-        assert_eq!(
-            decide(&owners, &accounts, SUPPORTED, &request("CreateBucket", Some(&bucket), Some(&main))),
-            Decision::Allow
-        );
+        created(&owners, &accounts, &bucket);
         assert_eq!(owners.owner(&bucket).await.expect("a recorded owner").as_ref(), "s3gate-main");
         assert!(owners.owner(&absent).await.is_err());
     }

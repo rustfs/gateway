@@ -27,11 +27,13 @@
 use std::io;
 use std::sync::Arc;
 
-use rustfs_gateway::{Credentials, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, decide_with};
+use rustfs_gateway::{
+    Credentials, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, decide_with, dto,
+};
 use rustfs_gateway_fs::FsBackend;
 
 use crate::Options;
-use crate::ownership::{BucketOwners, decide};
+use crate::ownership::{BucketOwners, TakenNames, decide};
 
 /// Opens the reference backend, applying the configured lifecycle debug cadence when there is one.
 ///
@@ -93,7 +95,11 @@ pub(crate) fn build_service(
             .authorizer(decide_with(move |request| decide(&registry, &accounts, &supported, request)))
             // The same registry answers `x-amz-expected-bucket-owner`, so the owner id a caller
             // asserts is the very id the authorization decision was made against.
-            .bucket_owner_source(Arc::clone(owners)),
+            .bucket_owner_source(Arc::clone(owners))
+            // And the same registry decides whether a name is taken: another identity's
+            // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
+            // creation the backend admitted is what gets recorded.
+            .op_layer::<dto::CreateBucket, _>(TakenNames::new(Arc::clone(owners), options.accounts.clone())),
     );
     let service = backend
         .register_tagging(
@@ -377,6 +383,71 @@ mod tests {
         assert_eq!(listed.status(), 200, "{body}");
         assert!(body.contains("<ID>s3gate-main</ID>"), "{body}");
         assert!(body.contains("<DisplayName>Main &lt;Owner&gt; &amp; \"Friends\"</DisplayName>"), "{body}");
+    }
+
+    /// Negative — the rustfs/gateway#811 repro: a bucket the primary identity created is
+    /// `409 BucketAlreadyExists` when the secondary identity asks to create it, and nothing is
+    /// deleted or transferred by the refusal. Positive control: the owner's own re-creation is the
+    /// us-east-1 `200`, so the refusal is about *who* asks and not about the name being taken.
+    #[tokio::test]
+    async fn n_another_identitys_re_creation_of_a_bucket_is_bucket_already_exists() {
+        let root = TestRoot::new();
+        let options = two_identity_options(&root, &[]);
+        let (_backend, service) = assembled(&options);
+
+        assert_eq!(
+            exchange(&service, as_main(http::Method::PUT, "/taken", Bytes::new()))
+                .await
+                .status(),
+            200
+        );
+        let refused = exchange(&service, as_alt(http::Method::PUT, "/taken", Bytes::new())).await;
+        let body = body_of(&refused);
+        assert_eq!(refused.status(), 409, "{body}");
+        assert!(body.contains("<Code>BucketAlreadyExists</Code>"), "{body}");
+
+        assert_eq!(
+            exchange(&service, as_main(http::Method::PUT, "/taken", Bytes::new()))
+                .await
+                .status(),
+            200
+        );
+        assert_eq!(
+            exchange(&service, as_main(http::Method::PUT, "/taken/key", Bytes::from_static(b"body")))
+                .await
+                .status(),
+            200
+        );
+    }
+
+    /// Negative — a creation the backend refused leaves no owner record behind, so the same
+    /// identity may still create the bucket properly afterwards; the record follows the creation
+    /// and not the admission (rustfs/gateway#811).
+    #[tokio::test]
+    async fn n_a_refused_creation_records_no_owner() {
+        let root = TestRoot::new();
+        let options = two_identity_options(&root, &[]);
+        let owners = Arc::new(BucketOwners::default());
+        let backend = Arc::new(open_backend(&options).expect("a usable data root"));
+        let service = build_service(&options, &backend, &owners).expect("a complete service");
+
+        let elsewhere = Bytes::from_static(
+            b"<CreateBucketConfiguration><LocationConstraint>eu-west-1</LocationConstraint></CreateBucketConfiguration>",
+        );
+        let refused = exchange(&service, as_alt(http::Method::PUT, "/unmade", elsewhere)).await;
+        assert_eq!(refused.status(), 400, "{}", body_of(&refused));
+        {
+            use rustfs_gateway::BucketOwnerSource as _;
+            let name = rustfs_gateway::BucketName::new("unmade").expect("a valid bucket name");
+            assert!(owners.owner(&name).await.is_err(), "a refused creation must not be recorded");
+        }
+
+        assert_eq!(
+            exchange(&service, as_alt(http::Method::PUT, "/unmade", Bytes::new()))
+                .await
+                .status(),
+            200
+        );
     }
 
     /// Negative — with only one identity configured, no second identity can sign at all. This is
