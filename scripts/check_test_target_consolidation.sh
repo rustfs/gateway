@@ -657,6 +657,7 @@ gateway_modules = (
     "authz_contract",
     "authz_implementations",
     "backend_reachability",
+    "bucket_config_reachability",
     "chunked_allocations",
     "committed_head_runtime",
     "committed_progress",
