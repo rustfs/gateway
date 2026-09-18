@@ -236,6 +236,32 @@ async fn n_an_unnameable_region_is_refused_at_assembly() {
     assert_eq!(accepted.region(), "us-west-2");
 }
 
+/// Negative — re-creating your own bucket outside us-east-1 is `409 BucketAlreadyOwnedByYou`, the
+/// operation's own status matrix (`crates/core/src/ops/create_bucket.rs`); the same request in
+/// us-east-1 is the historical `200`. A backend that answered `200` everywhere hid the region half
+/// of the matrix behind the one region every test happened to use.
+#[tokio::test]
+async fn n_recreating_an_owned_bucket_outside_us_east_1_is_already_owned_by_you() {
+    let root = TestRoot::new();
+    let (_backend, regional) = service_in_region(&root, "eu-west-1");
+    create_bucket(&regional, "loc-owned").await;
+    let again = create_with(&regional, "loc-owned", Bytes::new()).await;
+    let body = String::from_utf8_lossy(again.body()).into_owned();
+    assert_eq!(again.status(), 409, "{body}");
+    assert!(body.contains("<Code>BucketAlreadyOwnedByYou</Code>"), "{body}");
+
+    let root = TestRoot::new();
+    let (_backend, historical) = service(&root);
+    create_bucket(&historical, "loc-owned").await;
+    let again = create_with(&historical, "loc-owned", Bytes::new()).await;
+    assert_eq!(
+        again.status(),
+        200,
+        "us-east-1 keeps the historical 200: {}",
+        String::from_utf8_lossy(again.body())
+    );
+}
+
 /// Negative — `GetBucketLocation` is in the advertised operation set.
 ///
 /// The compatibility matrix decides whether a scenario runs at all from

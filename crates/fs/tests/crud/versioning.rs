@@ -582,3 +582,78 @@ async fn n_a_delete_marker_beside_a_pending_upload_keeps_the_bucket() {
     assert!(body(&refused).contains("<Code>BucketNotEmpty</Code>"));
     upload_part(&service, "marker-and-upload", "pending", &upload_id, 1, b"still active").await;
 }
+
+fn all_elements(body: &str, name: &str) -> Vec<String> {
+    let opening = format!("<{name}>");
+    let closing = format!("</{name}>");
+    let mut values = Vec::new();
+    let mut rest = body;
+    while let Some(start) = rest.find(&opening) {
+        let value_start = start + opening.len();
+        let Some(end) = rest[value_start..].find(&closing).map(|offset| value_start + offset) else {
+            break;
+        };
+        values.push(rest[value_start..end].to_owned());
+        rest = &rest[end + closing.len()..];
+    }
+    values
+}
+
+/// Negative — `delimiter` rolls the keys below it into `CommonPrefixes` and returns none of their
+/// versions, as the API reference says of the parameter and as `ListObjects` already does; the
+/// handler used to echo the delimiter and list every version of every key regardless, so a client
+/// walking a tree page by page was handed the whole tree. Two versions each under `a/` and `b/`,
+/// one delete marker under `a/`, and one key at the root: the rolled-up listing holds the root
+/// key's version and the two prefixes, and nothing under either prefix.
+#[tokio::test]
+async fn n_a_delimiter_rolls_versions_below_it_into_common_prefixes() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "rolled").await;
+    assert_eq!(set_versioning(&service, "rolled", "Enabled").await.status(), 200);
+    for (key, payload) in [
+        ("a/1", "x"),
+        ("a/1", "y"),
+        ("a/2", "z"),
+        ("b/1", "p"),
+        ("b/1", "q"),
+        ("top", "t"),
+    ] {
+        assert_eq!(put(&service, "rolled", key, payload.as_bytes()).await.status(), 200);
+    }
+    assert_eq!(
+        exchange(&service, signed(http::Method::DELETE, "/rolled/a/2", Bytes::new()))
+            .await
+            .status(),
+        204
+    );
+
+    let listed = list_versions(&service, "rolled", "delimiter=/").await;
+    let text = body(&listed);
+    assert_eq!(listed.status(), 200, "{text}");
+    assert_eq!(all_elements(&text, "Prefix"), ["", "a/", "b/"], "{text}");
+    assert_eq!(all_elements(&text, "Key"), ["top"], "{text}");
+    assert!(!text.contains("<DeleteMarker>"), "the marker under a/ is rolled up: {text}");
+    assert_eq!(all_elements(&text, "IsTruncated"), ["false"], "{text}");
+
+    // A common prefix counts against max-keys and is a position the key cursor resumes from.
+    let first = list_versions(&service, "rolled", "delimiter=/&max-keys=1").await;
+    let first_text = body(&first);
+    assert_eq!(all_elements(&first_text, "Prefix"), ["", "a/"], "{first_text}");
+    assert_eq!(all_elements(&first_text, "IsTruncated"), ["true"], "{first_text}");
+    assert_eq!(all_elements(&first_text, "NextKeyMarker"), ["a/"], "{first_text}");
+    let second = list_versions(&service, "rolled", "delimiter=/&max-keys=1&key-marker=a/").await;
+    let second_text = body(&second);
+    assert_eq!(all_elements(&second_text, "Prefix"), ["", "b/"], "{second_text}");
+    let third = list_versions(&service, "rolled", "delimiter=/&max-keys=1&key-marker=b/").await;
+    let third_text = body(&third);
+    assert_eq!(all_elements(&third_text, "Key"), ["top"], "{third_text}");
+    assert_eq!(all_elements(&third_text, "IsTruncated"), ["false"], "{third_text}");
+
+    // Under a prefix the delimiter applies to the remainder: the two versions and the marker of
+    // `a/` are listed individually because nothing below `a/` contains another `/`.
+    let under = list_versions(&service, "rolled", "delimiter=/&prefix=a/").await;
+    let under_text = body(&under);
+    assert_eq!(all_elements(&under_text, "Key"), ["a/1", "a/1", "a/2", "a/2"], "{under_text}");
+    assert_eq!(under_text.matches("<DeleteMarker>").count(), 1, "{under_text}");
+}

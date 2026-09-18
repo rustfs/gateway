@@ -161,6 +161,7 @@ mod records;
 mod tagging;
 mod transitions;
 mod uploads;
+mod version_listing;
 mod versioning;
 
 use records::ObjectAttributes;
