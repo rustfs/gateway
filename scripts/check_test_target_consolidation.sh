@@ -704,6 +704,7 @@ gateway_modules = (
     "response_invariants",
     "response_stream_termination",
     "select_restore_intent",
+    "select_restore_reachability",
     "self_held_http1",
     "service_clone_allocations",
     "service_concurrency",

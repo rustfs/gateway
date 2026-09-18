@@ -132,6 +132,8 @@ mod response_invariants;
 mod response_stream_termination;
 #[path = "select_restore_intent.rs"]
 mod select_restore_intent;
+#[path = "select_restore_reachability.rs"]
+mod select_restore_reachability;
 #[path = "self_held_http1.rs"]
 mod self_held_http1;
 #[path = "service_clone_allocations.rs"]
