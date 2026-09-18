@@ -66,7 +66,7 @@ cases = "c-tagging-0022"
 
 [[operation]]
 name = "DeleteObjects"
-cases = "c-authz-0002,c-naming-0016,c-object-0004,c-object-0010,c-object-0011,c-object-0015,c-object-0021,c-object-0022,c-object-0023,c-object-0024,c-object-0039"
+cases = "c-authz-0002,c-naming-0016,c-object-0004,c-object-0010,c-object-0011,c-object-0015,c-object-0021,c-object-0022,c-object-0023,c-object-0024,c-object-0039,c-object-0061,c-object-0062"
 
 [[operation]]
 name = "DeletePublicAccessBlock"
