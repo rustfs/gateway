@@ -14,7 +14,7 @@
 
 //! The launcher's authorizer: ownership first, then the bucket policy, as RustFS decides.
 //!
-//! Responsible for: the [`Authorizer`] the assembly installs — [`decide`](crate::ownership::decide)
+//! Responsible for: the [`Authorizer`] the assembly installs — [`decide`]
 //! for the operation set, the identity and the ownership registry, and then, for a request that
 //! decision alone does not allow, the bucket's stored policy evaluated the way RustFS's
 //! `PolicySys::is_allowed` evaluates it.
