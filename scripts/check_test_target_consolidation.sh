@@ -663,6 +663,7 @@ gateway_modules = (
     "compat_aliases",
     "compile_fail",
     "connection_teardown",
+    "copy_source_reachability",
     "cors_runtime",
     "credential_runtime",
     "custom_signature_verifier",
