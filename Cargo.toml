@@ -105,6 +105,18 @@ unreachable_pub = "warn"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 
+# Development and test builds keep line tables for the workspace's own crates — enough for a
+# panic location and a readable backtrace — and no debug information for dependencies, whose
+# frames nobody in this repository steps into. Cold bootstrap (`cargo test --workspace --no-run`
+# on a two-core runner) spent 421 CPU-seconds with full debug info and 19% less without it, and
+# the target directory shrinks with it (rustfs/gateway#423, rustfs/gateway#464). No check is
+# removed or sampled: every test still compiles and runs, with the same code.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = true
 codegen-units = 1
