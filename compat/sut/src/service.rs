@@ -28,12 +28,13 @@ use std::io;
 use std::sync::Arc;
 
 use rustfs_gateway::{
-    Credentials, RegionSet, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, decide_with, dto,
+    Credentials, RegionSet, S3Service, SecurityFloor, ServiceBuilder, SigV4Authenticator, StaticCredentials, dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
 use crate::Options;
-use crate::ownership::{BucketOwners, ReleasedNames, TakenNames, decide};
+use crate::ownership::{BucketOwners, ReleasedNames, TakenNames};
+use crate::policy_authorizer::PolicyAuthorizer;
 
 /// Opens the reference backend, applying the configured lifecycle debug cadence when there is one.
 ///
@@ -83,16 +84,26 @@ pub(crate) fn build_service(
         credentials = credentials.with(Credentials::new(&account.access_key, account.secret_key.as_bytes())?);
     }
     let supported = capability_names(backend);
-    let accounts = options.accounts.clone();
-    let registry = Arc::clone(owners);
     let builder = backend.register_crud(
         ServiceBuilder::new()
             .authenticator(SigV4Authenticator::new(Arc::new(credentials), RegionSet::new([options.region.clone()])?))
             // Not an allow-all, and not a bare operation-set filter either: the matrix must see a
             // refusal for anything outside the reference backend's registered set, and the
-            // external suites must see one identity refused on another identity's bucket. Both
-            // refusals are `crate::ownership::decide`.
-            .authorizer(decide_with(move |request| decide(&registry, &accounts, &supported, request)))
+            // external suites must see one identity refused on another identity's bucket, unless
+            // the bucket's stored policy allows it. Ownership is `crate::ownership::decide`; the
+            // policy is the second word, evaluated as RustFS evaluates one.
+            .authorizer(PolicyAuthorizer::new(
+                Arc::clone(backend),
+                Arc::clone(owners),
+                options.accounts.clone(),
+                supported,
+            ))
+            // An anonymous request reaches the authorizer instead of being refused per operation
+            // (ADR-0021): RustFS decides every request by policy, and a public bucket policy is
+            // how a suite grants the public a read. The authorizer still refuses an anonymous
+            // request the stored policy does not allow, and a bucket without a policy refuses
+            // every one.
+            .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
             // The same registry answers `x-amz-expected-bucket-owner`, so the owner id a caller
             // asserts is the very id the authorization decision was made against.
             .bucket_owner_source(Arc::clone(owners))
@@ -105,11 +116,11 @@ pub(crate) fn build_service(
     );
     let service =
         backend
-            .register_acl(backend.register_tagging(
+            .register_policy(backend.register_acl(backend.register_tagging(
                 backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
                 ),
-            ))
+            )))
             .build()?;
     Ok(service)
 }
@@ -755,4 +766,8 @@ mod tests {
             200
         );
     }
+
+    /// The bucket-policy enforcement cases, beside these in their own file.
+    #[path = "policy_tests.rs"]
+    mod policy_tests;
 }

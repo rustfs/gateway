@@ -21,6 +21,8 @@
 
 #[path = "crud/acl.rs"]
 mod acl;
+#[path = "crud/bucket_policy.rs"]
+mod bucket_policy;
 #[path = "crud/versioning.rs"]
 mod versioning;
 
@@ -182,11 +184,11 @@ fn service_with_backend_and_credentials(
     );
     let service =
         backend
-            .register_acl(backend.register_tagging(
+            .register_policy(backend.register_acl(backend.register_tagging(
                 backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
                 ),
-            ))
+            )))
             .build()
             .expect("the reference registry is a complete assembly");
     (backend, service)
@@ -344,16 +346,21 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "CreateMultipartUpload",
             "DeleteBucket",
             "DeleteBucketLifecycle",
+            "DeleteBucketPolicy",
             "DeleteObject",
             "DeleteObjectTagging",
             "DeleteObjects",
+            "DeletePublicAccessBlock",
             "GetBucketAcl",
             "GetBucketLifecycleConfiguration",
             "GetBucketLocation",
+            "GetBucketPolicy",
+            "GetBucketPolicyStatus",
             "GetBucketVersioning",
             "GetObject",
             "GetObjectAcl",
             "GetObjectTagging",
+            "GetPublicAccessBlock",
             "HeadBucket",
             "HeadObject",
             "ListBuckets",
@@ -365,10 +372,12 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "PostObject",
             "PutBucketAcl",
             "PutBucketLifecycleConfiguration",
+            "PutBucketPolicy",
             "PutBucketVersioning",
             "PutObject",
             "PutObjectAcl",
             "PutObjectTagging",
+            "PutPublicAccessBlock",
             "UploadPart"
         ]
     );

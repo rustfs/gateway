@@ -1876,6 +1876,7 @@ dependencies = [
  "http-body",
  "md-5",
  "rustfs-gateway",
+ "serde_json",
  "sha2",
  "tokio",
 ]

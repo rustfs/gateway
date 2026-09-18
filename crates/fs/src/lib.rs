@@ -58,16 +58,21 @@ macro_rules! reference_operations {
             multipart CreateMultipartUpload => "CreateMultipartUpload",
             crud DeleteBucket => "DeleteBucket",
             lifecycle DeleteBucketLifecycle => "DeleteBucketLifecycle",
+            policy DeleteBucketPolicy => "DeleteBucketPolicy",
             crud DeleteObject => "DeleteObject",
             tagging DeleteObjectTagging => "DeleteObjectTagging",
             crud DeleteObjects => "DeleteObjects",
+            policy DeletePublicAccessBlock => "DeletePublicAccessBlock",
             acl GetBucketAcl => "GetBucketAcl",
             lifecycle GetBucketLifecycleConfiguration => "GetBucketLifecycleConfiguration",
             crud GetBucketLocation => "GetBucketLocation",
+            policy GetBucketPolicy => "GetBucketPolicy",
+            policy GetBucketPolicyStatus => "GetBucketPolicyStatus",
             versioning GetBucketVersioning => "GetBucketVersioning",
             crud GetObject => "GetObject",
             acl GetObjectAcl => "GetObjectAcl",
             tagging GetObjectTagging => "GetObjectTagging",
+            policy GetPublicAccessBlock => "GetPublicAccessBlock",
             crud HeadBucket => "HeadBucket",
             crud HeadObject => "HeadObject",
             crud ListBuckets => "ListBuckets",
@@ -79,10 +84,12 @@ macro_rules! reference_operations {
             crud PostObject => "PostObject",
             acl PutBucketAcl => "PutBucketAcl",
             lifecycle PutBucketLifecycleConfiguration => "PutBucketLifecycleConfiguration",
+            policy PutBucketPolicy => "PutBucketPolicy",
             versioning PutBucketVersioning => "PutBucketVersioning",
             crud PutObject => "PutObject",
             acl PutObjectAcl => "PutObjectAcl",
             tagging PutObjectTagging => "PutObjectTagging",
+            policy PutPublicAccessBlock => "PutPublicAccessBlock",
             multipart UploadPart => "UploadPart",
         }
     };
@@ -108,6 +115,7 @@ mod deletes;
 mod lifecycle;
 mod lifecycle_scheduler;
 mod listing;
+pub mod policy;
 mod post_object;
 mod reads;
 mod records;

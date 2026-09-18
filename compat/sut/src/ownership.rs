@@ -81,7 +81,7 @@ impl BucketOwners {
     }
 
     /// The recorded owner of `bucket`, when this process recorded one.
-    fn owner_of(&self, bucket: &str) -> Option<Arc<str>> {
+    pub(crate) fn owner_of(&self, bucket: &str) -> Option<Arc<str>> {
         self.owners.lock().ok()?.get(bucket).map(Arc::clone)
     }
 
