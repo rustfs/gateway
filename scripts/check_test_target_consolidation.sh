@@ -679,6 +679,7 @@ gateway_modules = (
     "host_resolve_replay",
     "ingest_assembly",
     "lifecycle_reachability",
+    "lock_encryption_reachability",
     "middleware",
     "monomorphic",
     "naming_policy",

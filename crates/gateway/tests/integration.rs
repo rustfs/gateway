@@ -82,6 +82,8 @@ mod host_resolve_replay;
 mod ingest_assembly;
 #[path = "lifecycle_reachability.rs"]
 mod lifecycle_reachability;
+#[path = "lock_encryption_reachability.rs"]
+mod lock_encryption_reachability;
 #[path = "middleware.rs"]
 mod middleware;
 #[path = "monomorphic.rs"]
