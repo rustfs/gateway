@@ -693,3 +693,29 @@ async fn n_a_suspended_buckets_null_version_reads_back_as_null() {
     assert_eq!(read.status(), 200);
     assert_eq!(header_text(&read, "x-amz-version-id"), None);
 }
+
+/// Negative — `max-keys=0` returns no entries and says the listing is not truncated, as
+/// `ListObjects` does (`c-list-0027`); a truncation flag with no `NextKeyMarker` to act on
+/// sends a paginating client back for the same empty page forever.
+#[tokio::test]
+async fn n_a_zero_page_of_versions_is_not_truncated() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "zero-page").await;
+    assert_eq!(set_versioning(&service, "zero-page", "Enabled").await.status(), 200);
+    assert_eq!(put(&service, "zero-page", "key", b"one").await.status(), 200);
+    let listed = list_versions(&service, "zero-page", "max-keys=0").await;
+    let text = body(&listed);
+    assert_eq!(listed.status(), 200, "{text}");
+    assert!(text.contains("<MaxKeys>0</MaxKeys>"), "{text}");
+    assert!(text.contains("<IsTruncated>false</IsTruncated>"), "{text}");
+    assert!(!text.contains("<Version>") && !text.contains("<NextKeyMarker>"), "{text}");
+    // The positive control: one key is a real page, and a page of one out of two is truncated
+    // with a cursor to act on.
+    assert_eq!(put(&service, "zero-page", "key2", b"two").await.status(), 200);
+    let one = body(&list_versions(&service, "zero-page", "max-keys=1").await);
+    assert!(
+        one.contains("<IsTruncated>true</IsTruncated>") && one.contains("<NextKeyMarker>key</NextKeyMarker>"),
+        "{one}"
+    );
+}
