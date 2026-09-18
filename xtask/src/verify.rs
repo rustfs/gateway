@@ -584,37 +584,7 @@ struct RunOptions<'a> {
 #[cfg(feature = "full")]
 fn run_all(json: bool) -> ExitCode {
     let root = codegen::repo_root();
-    let scripts = root.join("scripts");
-    let stages = [
-        full_gate::Stage {
-            name: "workspace test build".to_owned(),
-            commands: vec![(
-                env!("CARGO").to_owned(),
-                vec!["test".to_owned(), "--workspace".to_owned(), "--no-run".to_owned()],
-                "workspace test build".to_owned(),
-            )],
-        },
-        full_gate::Stage {
-            name: "workspace tests and guard self-test".to_owned(),
-            commands: vec![
-                (
-                    env!("CARGO").to_owned(),
-                    vec![
-                        "test".to_owned(),
-                        "--workspace".to_owned(),
-                        "--".to_owned(),
-                        "--test-threads=1".to_owned(),
-                    ],
-                    "workspace tests".to_owned(),
-                ),
-                (
-                    "bash".to_owned(),
-                    vec![scripts.join("test_guard_scripts.sh").display().to_string()],
-                    "guard self-test".to_owned(),
-                ),
-            ],
-        },
-    ];
+    let stages = full_gate_stages(&root);
     full_gate::verify(
         &stages,
         &root,
@@ -623,6 +593,76 @@ fn run_all(json: bool) -> ExitCode {
         "the full gate must finish within 10 minutes",
         json,
     )
+}
+
+/// The full gate's stages, in the order they run.
+#[cfg(feature = "full")]
+fn full_gate_stages(root: &Path) -> [full_gate::Stage; 3] {
+    let scripts = root.join("scripts");
+    [
+        full_gate::Stage {
+            name: "workspace test build".to_owned(),
+            commands: vec![(
+                env!("CARGO").to_owned(),
+                vec!["test".to_owned(), "--workspace".to_owned(), "--no-run".to_owned()],
+                "workspace test build".to_owned(),
+            )],
+        },
+        // The guard self-test used to share this stage with the workspace tests and run beside
+        // them. Both are the heaviest work the gate does, and the guard suite watches its own clock:
+        // beside `cargo test --workspace` it stopped itself at case 784 of 1402 on a ten-core host
+        // with every case still printing ok (rustfs/gateway#563), and the server timing suites it
+        // was competing with reported the contention as protocol observations (rustfs/gateway#611
+        // and the class it names). One stage each, in sequence, under the same ten-minute deadline:
+        // no check is skipped, and each suite is judged on a host it is not itself loading.
+        //
+        // The tests run with libtest's default parallelism, the configuration CI's workspace shards
+        // run and judge them under. The `--test-threads=1` this stage used to pass had no recorded
+        // reason; measured in sequence it cost 438s of the 600s and left the guard suite 112s, and
+        // rustfs/gateway#708 records the allocation probes failing under one thread.
+        full_gate::Stage {
+            name: "workspace tests".to_owned(),
+            commands: vec![(
+                env!("CARGO").to_owned(),
+                vec!["test".to_owned(), "--workspace".to_owned()],
+                "workspace tests".to_owned(),
+            )],
+        },
+        full_gate::Stage {
+            name: "guard self-test".to_owned(),
+            commands: vec![(
+                "bash".to_owned(),
+                vec![scripts.join("test_guard_scripts.sh").display().to_string()],
+                "guard self-test".to_owned(),
+            )],
+        },
+    ]
+}
+
+#[cfg(all(test, feature = "full"))]
+mod full_gate_shape_tests {
+    use super::full_gate_stages;
+
+    /// The guard self-test runs in a stage of its own, after the workspace tests, never beside
+    /// them: run together they load the host they are both judged on (rustfs/gateway#563).
+    #[test]
+    fn n_the_guard_self_test_never_shares_a_stage_with_the_workspace_tests() {
+        let stages = full_gate_stages(std::path::Path::new("/repo"));
+        let names: Vec<&str> = stages.iter().map(|stage| stage.name.as_str()).collect();
+        assert_eq!(names, ["workspace test build", "workspace tests", "guard self-test"]);
+        for stage in &stages {
+            assert_eq!(stage.commands.len(), 1, "{}: one command per stage", stage.name);
+        }
+        let guard = &stages[2].commands[0];
+        assert!(
+            guard
+                .1
+                .iter()
+                .any(|argument| argument.ends_with("scripts/test_guard_scripts.sh")),
+            "the last stage is the guard suite: {guard:?}"
+        );
+        assert_eq!(stages[1].commands[0].1, ["test", "--workspace"], "default parallelism, as CI runs it");
+    }
 }
 
 type GateCommand = (String, Vec<String>, String);

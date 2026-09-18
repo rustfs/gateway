@@ -328,10 +328,11 @@ fn timed_out_run(stage: usize, finished: Vec<Duration>, elapsed: Duration) -> Ga
     }
 }
 
-fn full_gate_stages() -> [Stage; 2] {
+fn full_gate_stages() -> [Stage; 3] {
     [
         stage("workspace test build", Vec::new()),
-        stage("workspace tests and guard self-test", Vec::new()),
+        stage("workspace tests", Vec::new()),
+        stage("guard self-test", Vec::new()),
     ]
 }
 
@@ -357,12 +358,12 @@ fn a_deadline_after_the_build_reports_what_the_build_measured() {
 
     let (where_, notes) = timeout_report(&run, &full_gate_stages(), "workspace tests and build guards");
 
-    assert_eq!(where_, "workspace tests and build guards: workspace tests and guard self-test stage");
+    assert_eq!(where_, "workspace tests and build guards: workspace tests stage");
     assert_eq!(
         notes,
         [
             "workspace test build finished in 412.30s",
-            "the deadline ran out during workspace tests and guard self-test; the gate was stopped 600.04s after it started",
+            "the deadline ran out during workspace tests; the gate was stopped 600.04s after it started",
         ]
     );
 }
