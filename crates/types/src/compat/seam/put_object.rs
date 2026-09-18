@@ -131,7 +131,7 @@ pub const GATEWAY_OUTPUT_MEMBERS: &[&str] = &[
 /// hold parsed — an `Expires` that is not an HTTP-date, on a revision that holds `Expires` parsed
 /// (the gateway keeps it opaque, `q-timestamp-0005`; see the enclosing module's `expires` hook),
 /// an entity-tag condition the s3s grammar rejects — an instant outside what s3s represents, or
-/// an Object Lock event hold ([`EVENT_HOLD_MEMBERS`]).
+/// an Object Lock event hold, which no pinned s3s input can hold (`EVENT_HOLD_MEMBERS`).
 pub fn input_to_s3s(input: dto::PutObjectInput) -> Result<oracle::PutObjectInput, ConversionError> {
     let event_hold_named = [
         input.object_lock_event_hold.is_some(),

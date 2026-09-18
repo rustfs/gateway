@@ -294,8 +294,18 @@ for operation, stem in LOCK_WRITES.items():
         source(f"spec/operations/{operation}.toml"),
         f"{operation} no longer carries q-lock-0014",
     )
-    if UNKNOWN_GUARD not in source(f"generated/codec/ops/{stem}.rs"):
-        fail(f"the generated {operation} decoder no longer refuses an unregistered element")
+    # Every reader in the decoder — the document root and each nested shape — carries a `known`
+    # member list, and each list must be followed by the refusal. Counting the pair rather than
+    # searching for one guard is what catches a single reader turning lenient while a sibling
+    # (the nested EventHoldDuration reader of the 2026-09-17 model, say) still refuses.
+    decoder = source(f"generated/codec/ops/{stem}.rs")
+    known_lists = decoder.count("let known = [")
+    guards = decoder.count(UNKNOWN_GUARD)
+    if known_lists == 0 or guards != known_lists:
+        fail(
+            f"the generated {operation} decoder no longer refuses an unregistered element in every reader "
+            f"({guards} refusal(s) for {known_lists} member list(s))"
+        )
 lock_case = source("conformance/cases/lock/c-lock-0010.toml")
 require(r'^quirks = \["q-lock-0014"\]$', lock_case, "c-lock-0010 no longer binds q-lock-0014")
 require(r'^status = 400$\s*(?:\n.*?)*?^code = "MalformedXML"$', lock_case, "c-lock-0010 no longer expects 400 MalformedXML")
