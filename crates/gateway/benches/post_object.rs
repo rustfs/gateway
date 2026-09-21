@@ -15,7 +15,7 @@
 //! Measures POST Object throughput through the production service and streaming adapter.
 //!
 //! Responsible for: identical binary uploads at several transport frame sizes and ready/Pending
-//! schedules. NOT responsible for socket, disk, signed-policy performance or a timing CI gate.
+//! schedules. NOT responsible for: socket, disk, signed-policy performance or a timing CI gate.
 //! Upstream: the S3Service public API. Downstream: manually compared benchmark output.
 //!
 //! Run with `cargo bench -p rustfs-gateway --bench post_object`. Payload creation, frame slicing,

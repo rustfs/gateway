@@ -15,7 +15,7 @@
 //! Production POST Object streaming ownership, failure, and allocation regressions.
 //!
 //! Responsible for: observing the bytes and ownership the real handler receives under fragmented
-//! input, and measuring adapter allocations in an isolated process. NOT responsible for MIME
+//! input, and measuring adapter allocations in an isolated process. NOT responsible for: MIME
 //! grammar or policy signature vectors. Upstream: S3Service. Downstream: no runtime consumers.
 
 use std::convert::Infallible;
