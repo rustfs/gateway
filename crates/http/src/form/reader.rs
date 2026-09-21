@@ -64,6 +64,8 @@ pub struct FormReader {
     limits: FormLimits,
     /// `--boundary`, materialised once.
     delimiter: Vec<u8>,
+    /// `\r\n--boundary`, materialised once for all text-field pushes.
+    terminator: Vec<u8>,
     buffer: Vec<u8>,
     fields: Vec<FormField>,
     state: State,
@@ -92,9 +94,13 @@ impl FormReader {
         let mut delimiter = Vec::with_capacity(boundary.len().saturating_add(2));
         delimiter.extend_from_slice(b"--");
         delimiter.extend_from_slice(boundary.as_bytes());
+        let mut terminator = Vec::with_capacity(delimiter.len().saturating_add(2));
+        terminator.extend_from_slice(b"\r\n");
+        terminator.extend_from_slice(&delimiter);
         Ok(Self {
             limits,
             delimiter,
+            terminator,
             buffer: Vec::new(),
             fields: Vec::new(),
             state: State::Delimiter,
@@ -226,7 +232,7 @@ impl FormReader {
 
     /// `\r\n--boundary`, the sequence that ends a field value.
     fn terminator_len(&self) -> usize {
-        self.delimiter.len().saturating_add(2)
+        self.terminator.len()
     }
 
     /// The byte ceiling of the field currently being read.
@@ -241,10 +247,10 @@ impl FormReader {
     ///
     /// A needle that straddles the resume point is still found: the search restarts
     /// `needle.len() - 1` bytes back, which is every position a match could still begin at.
-    fn find_resumable(&mut self, needle: &[u8]) -> Option<usize> {
-        let from = self.scanned.saturating_sub(needle.len().saturating_sub(1));
-        let hit = find(self.buffer.get(from..).unwrap_or_default(), needle).map(|at| from.saturating_add(at));
-        self.scanned = if hit.is_some() { 0 } else { self.buffer.len() };
+    fn find_resumable(buffer: &[u8], scanned: &mut usize, needle: &[u8]) -> Option<usize> {
+        let from = scanned.saturating_sub(needle.len().saturating_sub(1));
+        let hit = find(buffer.get(from..).unwrap_or_default(), needle).map(|at| from.saturating_add(at));
+        *scanned = if hit.is_some() { 0 } else { buffer.len() };
         hit
     }
 
@@ -286,7 +292,7 @@ impl FormReader {
     }
 
     fn step_headers(&mut self) -> Result<bool, FormReject> {
-        let Some(end) = self.find_resumable(b"\r\n\r\n") else {
+        let Some(end) = Self::find_resumable(&self.buffer, &mut self.scanned, b"\r\n\r\n") else {
             if self.buffer.len() >= self.limits.max_part_header_bytes() {
                 return Err(FormReject::PartHeaderTooLarge);
             }
@@ -317,16 +323,13 @@ impl FormReader {
     }
 
     fn step_value(&mut self) -> Result<bool, FormReject> {
-        let mut terminator = Vec::with_capacity(self.terminator_len());
-        terminator.extend_from_slice(b"\r\n");
-        terminator.extend_from_slice(&self.delimiter);
         let ceiling = self.field_ceiling();
-        let Some(end) = self.find_resumable(&terminator) else {
+        let Some(end) = Self::find_resumable(&self.buffer, &mut self.scanned, &self.terminator) else {
             // The trailing `terminator.len() - 1` bytes may still turn out to be the terminator,
             // so only what lies before them is certainly value. The field is too large the moment
             // *that* passes the ceiling — not a byte earlier, or a value exactly at the ceiling
             // would be refused whenever its terminator arrived in a later frame.
-            let certain = self.buffer.len().saturating_sub(terminator.len().saturating_sub(1));
+            let certain = self.buffer.len().saturating_sub(self.terminator.len().saturating_sub(1));
             if certain > ceiling {
                 return Err(self.too_large());
             }

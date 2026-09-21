@@ -452,18 +452,39 @@ fn parse_disposition(block: &[u8]) -> Result<(String, Option<String>), FormRejec
 
 /// The first position at which `needle` occurs in `haystack`.
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || haystack.len() < needle.len() {
-        return None;
-    }
-    let last = haystack.len().saturating_sub(needle.len());
     let first = *needle.first()?;
-    for start in 0..=last {
-        if haystack.get(start) != Some(&first) {
-            continue;
+    let last = haystack.len().checked_sub(needle.len())?;
+    memchr::memchr_iter(first, haystack.get(..=last)?)
+        .find(|&start| haystack.get(start..start.saturating_add(needle.len())) == Some(needle))
+}
+
+#[cfg(test)]
+mod tests {
+    /// Boundary — empty/short needles, false prefixes and matches at either end retain their
+    /// first-match semantics, including when every possible frame split shortens the input.
+    #[test]
+    fn boundary_search_matches_the_first_complete_needle() -> Result<(), &'static str> {
+        for needle in [b"".as_slice(), b"\r\n\r\n", b"\r\n--boundary", b"\r\n--b", b"x"] {
+            for haystack in [
+                b"".as_slice(),
+                b"\r\n--boundarX\r\n--boundary",
+                b"\r\n--boundary\r\n--boundary",
+                b"before\r\n--boundaryafter",
+                b"\r\n\r\n\r\n",
+                b"xxxxx",
+                b"no delimiter here",
+            ] {
+                for end in 0..=haystack.len() {
+                    let input = haystack.get(..end).ok_or("the prefix must be within the fixture")?;
+                    let expected = if needle.is_empty() {
+                        None
+                    } else {
+                        input.windows(needle.len()).position(|window| window == needle)
+                    };
+                    assert_eq!(super::find(input, needle), expected, "input {input:?}, needle {needle:?}");
+                }
+            }
         }
-        if haystack.get(start..start.saturating_add(needle.len())) == Some(needle) {
-            return Some(start);
-        }
+        Ok(())
     }
-    None
 }

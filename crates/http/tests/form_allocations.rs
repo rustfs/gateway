@@ -148,9 +148,13 @@ fn cost(len: usize) -> (u64, u64) {
 /// One process per size, for the reason `crates/gateway/tests/request_allocations.rs` gives:
 /// `dhat` profiles a whole process, and the tests in this binary run in parallel threads.
 fn measure(len: usize) -> (u64, u64) {
+    measure_probe(len, PROBE_TEST)
+}
+
+fn measure_probe(len: usize, test: &str) -> (u64, u64) {
     let executable = std::env::current_exe().expect("the active test binary has a path");
     let output = Command::new(executable)
-        .args(["--exact", &crate::probe_test_name!(PROBE_TEST), "--nocapture"])
+        .args(["--exact", &crate::probe_test_name!(test), "--nocapture"])
         .env(PROBE_ENV, len.to_string())
         .output()
         .expect("the isolated allocation probe starts");
@@ -260,4 +264,43 @@ fn a_form_reads_a_file_without_a_heap_that_grows_with_it() {
          is holding the file rather than passing it through.",
         LARGE / SMALL
     );
+}
+
+/// Negative — splitting one bounded policy into single-byte frames must not allocate per push.
+#[test]
+fn fragmented_fields_do_not_allocate_per_push() {
+    const TEST: &str = "fragmented_fields_do_not_allocate_per_push";
+    if let Some(frame) = std::env::var_os(PROBE_ENV) {
+        let frame: usize = frame.to_string_lossy().parse().expect("a frame size");
+        let policy = "p".repeat(8192);
+        let body = format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\n{policy}\r\n\
+             --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\n"
+        );
+        let content_type = format!("multipart/form-data; boundary={BOUNDARY}");
+        let profiler = dhat::Profiler::builder().testing().build();
+        let mut reader = FormReader::new(&content_type, FormLimits::default()).expect("a valid boundary");
+        for chunk in body.as_bytes().chunks(frame) {
+            reader.push(chunk).expect("a bounded policy parses");
+        }
+        let stats = dhat::HeapStats::get();
+        drop(profiler);
+        assert_eq!(reader.field("policy"), Some(policy.as_str()), "the entire field must be parsed");
+        println!("{PROBE_SENTINEL}{} {}", stats.total_blocks, stats.total_bytes);
+        return;
+    }
+
+    let (whole_blocks, whole_bytes) = measure_probe(16384, TEST);
+    let (split_blocks, split_bytes) = measure_probe(1, TEST);
+    println!(
+        "whole field: {whole_blocks} blocks, {whole_bytes} bytes; single-byte frames: {split_blocks} blocks, {split_bytes} bytes"
+    );
+    assert!(
+        whole_blocks >= MEASURED_BLOCKS_FLOOR && whole_bytes >= MEASURED_BYTES_FLOOR,
+        "the allocation probe must observe the reader"
+    );
+    // Geometric growth of the bounded head buffer can allocate a few more times when fragmented,
+    // but the identical terminator must not be rebuilt for each of the 8,192 field bytes.
+    assert!(split_blocks <= whole_blocks + 16, "field fragmentation allocated per push");
+    assert!(split_bytes <= whole_bytes + 32 * 1024, "field fragmentation rebuilt the terminator");
 }

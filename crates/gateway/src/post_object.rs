@@ -23,9 +23,10 @@
 
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use std::collections::VecDeque;
 use std::fmt;
 
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use http::{HeaderValue, StatusCode, Uri, header};
 use http_body::{Body, Frame, SizeHint};
 use rustfs_gateway_core::{EncodedResponse, ResponseBody, TransportSecurity};
@@ -258,10 +259,7 @@ where
             match reader.push(&frame).map_err(form_refusal)? {
                 FormStep::NeedMore => {}
                 FormStep::FileReached { consumed } => {
-                    let first_file_bytes = frame
-                        .get(consumed..)
-                        .filter(|bytes| !bytes.is_empty())
-                        .map(Bytes::copy_from_slice);
+                    let first_file_bytes = (consumed < frame.len()).then(|| frame.slice(consumed..));
                     return Ok(Self {
                         reader,
                         frames,
@@ -380,6 +378,7 @@ where
             bucket: self.bucket.as_str().to_owned(),
             key: self.key.as_str().to_owned(),
             ended: false,
+            pending: VecDeque::new(),
         };
         let opened = StreamingRead::new(
             Some(body),
@@ -423,6 +422,19 @@ struct PostFileBody<B> {
     bucket: String,
     key: String,
     ended: bool,
+    // The parser may emit a copied boundary carry followed by a borrowed input run. Keep them
+    // separate and in order, and drain them before polling the transport again.
+    pending: VecDeque<Bytes>,
+}
+
+/// Retains input subslices without copying; only the parser's bounded carry needs new ownership.
+fn retain_file_bytes(frame: &Bytes, bytes: &[u8]) -> Bytes {
+    let start = (bytes.as_ptr() as usize).wrapping_sub(frame.as_ptr() as usize);
+    if start <= frame.len() && bytes.len() <= frame.len() - start {
+        frame.slice(start..start + bytes.len())
+    } else {
+        Bytes::copy_from_slice(bytes)
+    }
 }
 
 impl<B> Body for PostFileBody<B>
@@ -433,6 +445,9 @@ where
     type Error = PostBodyError;
 
     fn poll_frame(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        if let Some(bytes) = self.pending.pop_front() {
+            return Poll::Ready(Some(Ok(Frame::data(bytes))));
+        }
         if self.ended {
             return Poll::Ready(None);
         }
@@ -454,31 +469,37 @@ where
                     },
                 }
             };
-            let mut emitted = BytesMut::new();
             let step = {
                 let this = &mut *self;
-                let mut sink = |bytes: &[u8]| emitted.extend_from_slice(bytes);
+                let mut sink = |bytes: &[u8]| {
+                    if !bytes.is_empty() {
+                        this.pending.push_back(retain_file_bytes(&frame, bytes));
+                    }
+                };
                 this.file.push(&frame, &mut sink)
             };
             match step {
-                Ok(FileStep::NeedMore) if emitted.is_empty() => {}
-                Ok(FileStep::NeedMore) => return Poll::Ready(Some(Ok(Frame::data(emitted.freeze())))),
+                Ok(FileStep::NeedMore) => {
+                    if let Some(bytes) = self.pending.pop_front() {
+                        return Poll::Ready(Some(Ok(Frame::data(bytes))));
+                    }
+                }
                 Ok(FileStep::Complete { file_bytes }) => {
                     if self.policy.enforce_final(&self.bucket, &self.key, file_bytes).is_err() {
+                        self.pending.clear();
                         self.ended = true;
                         return Poll::Ready(Some(Err(PostBodyError("the POST file did not satisfy its policy"))));
                     }
                     self.ended = true;
-                    if emitted.is_empty() {
-                        return Poll::Ready(None);
-                    }
-                    return Poll::Ready(Some(Ok(Frame::data(emitted.freeze()))));
+                    return Poll::Ready(self.pending.pop_front().map(|bytes| Ok(Frame::data(bytes))));
                 }
                 Err(FormReject::FileTooLarge) => {
+                    self.pending.clear();
                     self.ended = true;
                     return Poll::Ready(Some(Err(PostBodyError("the POST file exceeded its policy ceiling"))));
                 }
                 Err(_) => {
+                    self.pending.clear();
                     self.ended = true;
                     return Poll::Ready(Some(Err(PostBodyError("the POST form was malformed"))));
                 }
@@ -487,7 +508,7 @@ where
     }
 
     fn is_end_stream(&self) -> bool {
-        self.ended
+        self.ended && self.pending.is_empty()
     }
 
     fn size_hint(&self) -> SizeHint {
@@ -524,6 +545,10 @@ fn policy_refusal(reject: PostPolicyError) -> S3Error {
         ConnectionIntent::MayKeepAlive,
     )
 }
+
+#[cfg(test)]
+#[path = "post_object/tests.rs"]
+mod streaming_tests;
 
 #[cfg(test)]
 mod tests {
@@ -573,6 +598,7 @@ mod tests {
             bucket: resolved.bucket.as_str().to_owned(),
             key: resolved.key.as_str().to_owned(),
             ended: false,
+            pending: VecDeque::new(),
         }
     }
 

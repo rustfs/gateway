@@ -68,6 +68,10 @@ trybuild = { workspace = true }
 name = "integration"
 path = "tests/integration.rs"
 
+[[bench]]
+name = "post_object"
+harness = false
+
 [[example]]
 name = "minimal"
 

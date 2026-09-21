@@ -44,5 +44,5 @@ after it has accepted.
 | `tests/header_accept_replay.rs` | Replays `fuzz/seeds/header_accept/` and 20,000 fixed-seed samples through the `header_accept` property: exact header ceilings, repeats, readability, metadata. | Change a header acceptance rule, or add a minimised fuzz regression seed. |
 | `tests/ingest_perf_gates.rs` | Ingestion allocation and cost gates, stated as equalities rather than wall clocks. | Change the hot path. |
 | `tests/form_limits.rs` | POST Object form ceilings and the order in which they are decided. | Change `src/form/`. |
-| `tests/form_allocations.rs` | Measures that reading a file part costs a heap independent of the file. | Change the file read path. |
+| `tests/form_allocations.rs` | Measures file-size-independent heap and bounded allocation under fragmented text fields. | Change the file read path. |
 | `benches/parse.rs` | Asserts zero allocations for eight-query indexing and signed-header canonicalization. | Change request-head parsing or canonical-header writing. |
