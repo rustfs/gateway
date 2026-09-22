@@ -9,7 +9,8 @@ import tempfile
 
 source = Path(__file__).with_name("test_guard_scripts.sh").read_text()
 functions = []
-for name in ("literalize_nul_paths", "reset_sandbox_changes", "stage_sandbox_changes", "make_sandbox",
+for name in ("literalize_nul_paths", "clean_after_ignore_reset", "reset_sandbox_changes", "stage_sandbox_changes",
+             "make_sandbox",
              "probe_cached_sandbox_reset", "probe_cached_reset_failures"):
     match = re.search(rf"^{name}\(\) \{{\n.*?^\}}", source, re.M | re.S)
     assert match is not None, name
