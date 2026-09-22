@@ -692,6 +692,7 @@ gateway_modules = (
     "pipeline",
     "policy_reachability",
     "post_object_runtime",
+    "post_object_streaming",
     "precondition_contract",
     "precondition_reachability",
     "presigned_put",

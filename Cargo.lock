@@ -1913,6 +1913,7 @@ dependencies = [
  "dhat",
  "hmac",
  "http",
+ "memchr",
  "phf",
  "rustfs-gateway-stream",
  "rustfs-gateway-types",

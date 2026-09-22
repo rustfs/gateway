@@ -108,6 +108,8 @@ mod pipeline;
 mod policy_reachability;
 #[path = "post_object_runtime.rs"]
 mod post_object_runtime;
+#[path = "post_object_streaming.rs"]
+mod post_object_streaming;
 #[path = "precondition_contract.rs"]
 mod precondition_contract;
 #[path = "precondition_reachability.rs"]
