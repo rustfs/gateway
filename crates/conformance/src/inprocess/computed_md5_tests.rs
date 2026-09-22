@@ -16,7 +16,7 @@
 //! NOT responsible for: MD5 primitives, signing, or response matching.
 //! Upstream: parsed request specifications. Downstream: the shared wire preparation path.
 
-use super::*;
+use super::super::*;
 
 fn request(extra: &str) -> Value {
     crate::toml::parse(&format!(

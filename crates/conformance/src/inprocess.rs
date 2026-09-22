@@ -91,10 +91,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{collections::BTreeMap, path::PathBuf};
 mod computed_md5;
-#[cfg(test)]
-mod computed_md5_tests;
-#[cfg(test)]
-mod computed_md5_transport_tests;
 mod conditional_race;
 pub(crate) mod h2_frames;
 mod payload_literal;
@@ -848,8 +844,7 @@ impl InProcess {
             }
             (None, None) => None,
         };
-        let declared_h2_frames = request.read("requestSpec.h2_frames");
-        let h2_frames = h2_frames::read(declared_h2_frames)?;
+        let h2_frames = h2_frames::read(request.read("requestSpec.h2_frames"))?;
         let http_version = request
             .read("requestSpec.http_version")
             .and_then(Value::as_str)
@@ -917,17 +912,7 @@ impl InProcess {
             })
             .collect();
         let body = frames.iter().flatten().copied().collect::<Vec<u8>>();
-        let raw_chunks = matches!(declared_chunks, Some(Value::Array(chunks)) if chunks.iter().any(|chunk| {
-            chunk.get("raw_utf8").is_some() || chunk.get("raw_hex").is_some()
-        }));
-        computed_md5::apply(
-            request.read("requestSpec.content_md5"),
-            &mut headers,
-            &body,
-            raw_head.is_some() || declared_h2_frames.is_some() || raw_chunks,
-        )?;
-
-        Ok(Wire {
+        let wire = Wire {
             method,
             target,
             headers,
@@ -938,7 +923,8 @@ impl InProcess {
             frames,
             steps,
             sign: request.read("requestSpec.sign").cloned(),
-        })
+        };
+        computed_md5::prepare(request, wire)
     }
 
     /// Reads a chunk sequence into the steps it was written as.

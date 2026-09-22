@@ -16,27 +16,34 @@
 //! NOT responsible for: payload interpolation, signing, or raw frame rewriting.
 //! Upstream: shared wire preparation. Downstream: headers passed to every transport signer.
 
+use super::Wire;
 use crate::sut::SutError;
 use crate::value::Value;
 
-pub(super) fn apply(
-    mode: Option<&Value>,
-    headers: &mut Vec<(String, String)>,
-    body: &[u8],
-    raw_framing: bool,
-) -> Result<(), SutError> {
-    let Some(mode) = mode else { return Ok(()) };
+pub(super) fn prepare(request: &Value, mut wire: Wire) -> Result<Wire, SutError> {
+    let Some(mode) = request.read("requestSpec.content_md5") else { return Ok(wire) };
     if mode.as_str() != Some("computed") {
         return Err(SutError::Environment("content_md5 must be computed".to_owned()));
     }
-    if raw_framing {
+    let raw_chunks = matches!(request.get("chunks"), Some(Value::Array(chunks)) if chunks.iter().any(|chunk| {
+        chunk.get("raw_utf8").is_some() || chunk.get("raw_hex").is_some()
+    }));
+    if wire.raw_head.is_some() || request.get("h2_frames").is_some() || raw_chunks {
         return Err(SutError::Environment("content_md5 cannot be combined with raw framing".to_owned()));
     }
-    if headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("content-md5")) {
+    if wire.headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("content-md5")) {
         return Err(SutError::Environment(
             "content_md5 conflicts with an explicit Content-MD5 header".to_owned(),
         ));
     }
-    headers.push(("content-md5".to_owned(), crate::fixture::encode_base64(&crate::md5::digest(body))));
-    Ok(())
+    wire.headers
+        .push(("content-md5".to_owned(), crate::fixture::encode_base64(&crate::md5::digest(&wire.body))));
+    Ok(wire)
 }
+
+#[cfg(test)]
+#[path = "computed_md5_tests.rs"]
+mod tests;
+#[cfg(test)]
+#[path = "computed_md5_transport_tests.rs"]
+mod transport_tests;
