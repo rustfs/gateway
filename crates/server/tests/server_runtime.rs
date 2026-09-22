@@ -476,6 +476,24 @@ async fn c_lim_0038_in_flight_request_limit_pauses_accept_before_the_next_socket
     assert!(task.await.expect("server task joins").is_ok());
 }
 
+/// Poll real sockets without letting scheduler stalls expire the partial-header fixtures.
+/// A runnable yield branch also prevents Tokio's paused clock from auto-advancing on idle I/O.
+async fn with_header_clock_frozen<T>(future: impl std::future::Future<Output = T>) -> T {
+    tokio::time::pause();
+    let started = std::time::Instant::now();
+    tokio::pin!(future);
+    let result = loop {
+        tokio::select! {
+            result = &mut future => break result,
+            () = tokio::task::yield_now() => {
+                assert!(started.elapsed() < Duration::from_secs(10), "socket admission or healthy request stalled");
+            }
+        }
+    };
+    tokio::time::resume();
+    result
+}
+
 #[tokio::test]
 async fn a_srv_0013_slow_headers_do_not_block_a_healthy_connection() {
     let _exclusive_load_lease = crate::server_load::exclusive_server_load_lease().await;
@@ -485,27 +503,25 @@ async fn a_srv_0013_slow_headers_do_not_block_a_healthy_connection() {
         task,
         shutdown,
     } = echo_server(plaintext_config());
-    let mut slow = Vec::new();
-    for _ in 0..100 {
-        let mut stream = TcpStream::connect(local_addr).await.expect("slow connection succeeds");
-        stream
-            .write_all(b"GET / HTTP/1.1\r\nHost:")
-            .await
-            .expect("partial header writes");
-        slow.push(stream);
-    }
-    tokio::time::timeout(Duration::from_secs(1), async {
+    let slow = with_header_clock_frozen(async {
+        let mut slow = Vec::new();
+        for _ in 0..100 {
+            let mut stream = TcpStream::connect(local_addr).await.expect("slow connection succeeds");
+            stream
+                .write_all(b"GET / HTTP/1.1\r\nHost:")
+                .await
+                .expect("partial header writes");
+            slow.push(stream);
+        }
         while metrics.active_connections() != 100 || metrics.accepted_connections() != 100 {
             tokio::task::yield_now().await;
         }
+        let healthy = get(local_addr).await;
+        assert!(healthy.starts_with(b"HTTP/1.1 200"));
+        assert_eq!(metrics.accepted_connections(), 101);
+        slow
     })
-    .await
-    .expect("all one hundred slow headers are independently admitted");
-    let healthy = tokio::time::timeout(Duration::from_secs(1), get(local_addr))
-        .await
-        .expect("healthy connection is independently scheduled");
-    assert!(healthy.starts_with(b"HTTP/1.1 200"));
-    assert_eq!(metrics.accepted_connections(), 101);
+    .await;
     drop(slow);
     let _ = shutdown.trigger(Duration::from_secs(1)).await;
     assert!(task.await.expect("server task joins").is_ok());
