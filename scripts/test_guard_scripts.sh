@@ -4928,6 +4928,8 @@ probe_literal_reset_paths
 # reset consumes them without rescanning the repository, and that failure/empty/fallback paths do
 # not leak state into the next case.
 probe_cached_sandbox_reset() {
+    # Helpers see this private journal through shell dynamic scope; the worker keeps its fixture.
+    local SANDBOX="" SANDBOX_RESET_TRACKED="" SANDBOX_RESET_UNTRACKED="" SANDBOX_RESET_READY=0
     local repo shim log real_git rc=0
     cases=$((cases + 1))
     guard_case_owned "$cases" || return 0
@@ -5042,6 +5044,8 @@ probe_cached_sandbox_reset() {
 probe_cached_sandbox_reset
 
 probe_cached_reset_failures() {
+    # Helpers see this private journal through shell dynamic scope; the worker keeps its fixture.
+    local SANDBOX="" SANDBOX_RESET_TRACKED="" SANDBOX_RESET_UNTRACKED="" SANDBOX_RESET_READY=0
     local command repo shim marker real_git helper_rc
     for command in reset clean checkout; do
         cases=$((cases + 1))
@@ -11082,7 +11086,42 @@ PYEOF
 expect_fail check_sig_case_coverage.sh \
     'the dangerous feature harness losing c-sig-0376' mut_sig_p2_04_danger_ack_harness_call_removed
 
-"${SCRIPT_DIR}/test_sig_case_coverage.sh"
+# Count every child case in the parent census, then run this worker's selected cases together.
+# The exact result ledger prevents a successful child from silently skipping an assigned case.
+run_signature_guard_suite() {
+    local child="${SCRIPT_DIR}/test_sig_case_coverage.sh" census ordinal total=0
+    local selected="" expected results rc=0
+    if ! census="$("$child" --list)" || [[ -z "$census" ]]; then
+        fail_msg 'the signature coverage case census is missing'
+        return
+    fi
+    while IFS= read -r ordinal; do
+        total=$((total + 1))
+        if [[ "$ordinal" != "$total" ]]; then
+            fail_msg 'the signature coverage case census is malformed'
+            return
+        fi
+    done <<<"$census"
+    expected="$(mktemp "${TMPDIR:-/tmp}/gateway-sig-selected.XXXXXX")"
+    results="${expected}.results"
+    while IFS= read -r ordinal; do
+        cases=$((cases + 1))
+        if guard_case_owned "$cases"; then
+            selected="${selected}${selected:+,}${ordinal}"
+            printf '%s\n' "$ordinal" >>"$expected"
+        fi
+    done <<<"$census"
+    if [[ -n "$selected" ]]; then
+        "$child" --select "$selected" "$results" || rc=$?
+        if [[ "$rc" -ne 0 || ! -f "$results" ]] || ! cmp -s "$expected" "$results"; then
+            fail_msg 'the signature coverage mutation suite failed or omitted assigned cases'
+        else
+            pass_msg 'the assigned signature coverage mutation cases'
+        fi
+    fi
+    rm -f "$expected" "$results"
+}
+run_signature_guard_suite
 
 # -----------------------------------------------------------------------------
 # ADR-0005. Each of the three mutations below is a way the generated dto silently
@@ -22752,6 +22791,30 @@ shard_plan_is() {
     shift
     [[ "$(guard_shard_plan "$@")" == "$expected" ]]
 }
+
+shard_case 'operation scanning avoids lexing absent tokens without admitting decoys' \
+    python3 "${SCRIPT_DIR}/test_op_file_shape_scan.py"
+
+shard_case 'signature masking dispatches regexes only for possible token initials' \
+    python3 "${SCRIPT_DIR}/test_sig_scan_dispatch.py"
+
+shard_case 'trait masking avoids suffix copies and preserves lexical rejection' \
+    python3 "${SCRIPT_DIR}/test_trait_scan_dispatch.py"
+
+shard_case 'constant-time scans batch files without changing policy diagnostics' \
+    python3 "${SCRIPT_DIR}/test_ct_eq_batch.py"
+
+shard_case 'SSE key scans batch irrelevant files without changing policy diagnostics' \
+    python3 "${SCRIPT_DIR}/test_sse_scan_batch.py"
+
+shard_case 'English scanning preserves Unicode boundaries without per-character dispatch' \
+    python3 "${SCRIPT_DIR}/test_english_scan_batch.py"
+
+shard_case 'reset probes preserve the worker sandbox and pending mutation journal' \
+    python3 "${SCRIPT_DIR}/test_sandbox_probe_isolation.py"
+
+shard_case 'nested signature cases partition the ledger and propagate every failure' \
+    python3 "${SCRIPT_DIR}/test_nested_guard_ownership.py"
 
 shard_case 'the default mode shards across the requested workers' \
     shard_plan_is 4 4 0 0 0

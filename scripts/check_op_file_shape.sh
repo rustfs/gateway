@@ -259,6 +259,9 @@ OPERATION_IMPL = re.compile(
 
 def operation_impls(text: str) -> list[str]:
     """Every `impl Operation for X` in real code outside a test module."""
+    # Masking only removes text; it cannot create the required trait identifier.
+    if "Operation" not in text:
+        return []
     code = mask(text)
     spans = cfg_test_spans(code)
     found = []

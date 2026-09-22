@@ -63,6 +63,7 @@ is_allowed() {
 # English file in the tree — including this one.
 python3 - "$ALLOWANCE_FILE" <<'PYEOF' || status=1
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -78,9 +79,9 @@ RANGES = [
 SKIP = {"model/s3.json", "model/sts.json"}
 
 
-def is_cjk(ch: str) -> bool:
-    cp = ord(ch)
-    return any(lo <= cp <= hi for lo, hi in RANGES)
+# Python regular-expression ranges use Unicode codepoints, not locale collation.
+# Compile once and scan each complete line in C rather than dispatching Python per character.
+CJK = re.compile("[" + "".join(f"{chr(lo)}-{chr(hi)}" for lo, hi in RANGES) + "]")
 
 
 allowances = set()
@@ -109,7 +110,7 @@ for name in tracked:
     hits = [
         (n, line)
         for n, line in enumerate(text.splitlines(), 1)
-        if any(is_cjk(ch) for ch in line)
+        if CJK.search(line)
     ]
     if hits:
         bad = True

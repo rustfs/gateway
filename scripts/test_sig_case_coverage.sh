@@ -19,6 +19,8 @@ set -euo pipefail
 #
 # USAGE
 #   scripts/test_sig_case_coverage.sh
+#   --list prints the actual case census without running fixtures.
+#   --select <comma-separated indices> <results-file> runs one parent worker's cases.
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,6 +29,44 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 failures=0
 cases=0
 SANDBOX=""
+SIG_MODE=all
+SIG_SELECTED=""
+SIG_RESULTS=""
+SIG_EXECUTED=0
+SIG_REQUESTED=0
+case "$#:${1:-}" in
+    0:) ;;
+    1:--list) SIG_MODE=list ;;
+    3:--select)
+        SIG_MODE=select
+        SIG_SELECTED=","$2","
+        SIG_RESULTS="$3"
+        [[ "$2" =~ ^[1-9][0-9]*(,[1-9][0-9]*)*$ ]] || exit 2
+        seen=","
+        IFS=, read -r -a selected <<<"$2"
+        for ordinal in "${selected[@]}"; do
+            [[ "$seen" != *",${ordinal},"* ]] || exit 2
+            seen="${seen}${ordinal},"
+            SIG_REQUESTED=$((SIG_REQUESTED + 1))
+        done
+        : >"$SIG_RESULTS"
+        ;;
+    *) printf 'usage: test_sig_case_coverage.sh [--list | --select indices results-file]\n' >&2; exit 2 ;;
+esac
+
+signature_case_owned() {
+    cases=$((cases + 1))
+    if [[ "$SIG_MODE" == list ]]; then
+        printf '%s\n' "$cases"
+        return 1
+    fi
+    if [[ "$SIG_MODE" == select ]]; then
+        [[ "$SIG_SELECTED" == *",${cases},"* ]] || return 1
+        printf '%s\n' "$cases" >>"$SIG_RESULTS"
+    fi
+    SIG_EXECUTED=$((SIG_EXECUTED + 1))
+    return 0
+}
 
 pass_msg() { printf '  ok   %s\n' "$*"; }
 fail_msg() {
@@ -91,6 +131,12 @@ make_sandbox() {
         rm -rf "$dir" || true
         return 1
     fi
+    # These repositories are deleted immediately after their cases; detached maintenance must
+    # not recreate .git files while cleanup removes them.
+    if ! (cd "$dir" && git config maintenance.auto false && git config gc.auto 0); then
+        rm -rf "$dir" || true
+        return 1
+    fi
     if ! (cd "$dir" && git add -A >/dev/null 2>&1); then
         rm -rf "$dir" || true
         return 1
@@ -113,7 +159,7 @@ trap cleanup_sandbox EXIT
 expect_fail() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox rc=0
-    cases=$((cases + 1))
+    signature_case_owned || return 0
     if [[ ! -x "${SCRIPT_DIR}/${guard}" ]]; then
         fail_msg "${guard} is missing or not executable; cannot test: ${desc}"
         return
@@ -133,7 +179,7 @@ expect_fail() {
 expect_fail_self_mutation() {
     local guard="$1" desc="$2" mutate="$3"
     local sandbox rc=0
-    cases=$((cases + 1))
+    signature_case_owned || return 0
     make_sandbox
     sandbox="$SANDBOX"
     (cd "$sandbox" && "$mutate" >/dev/null)
@@ -146,8 +192,8 @@ expect_fail_self_mutation() {
     fi
 }
 
+if signature_case_owned; then
 printf 'Positive control (signature case coverage must be clean)\n'
-cases=$((cases + 1))
 positive_control_output=""
 if positive_control_output="$("${SCRIPT_DIR}/check_sig_case_coverage.sh" 2>&1)"; then
     pass_msg 'check_sig_case_coverage.sh'
@@ -159,7 +205,11 @@ else
     exit 1
 fi
 
-printf '\nNegative cases (signature coverage guard must fail)\n'
+fi
+
+if [[ "$SIG_MODE" != list ]]; then
+    printf '\nNegative cases (signature coverage guard must fail)\n'
+fi
 
 mut_sig_verification_mapping_deleted() {
     python3 - <<'PYEOF'
@@ -512,5 +562,11 @@ mut_sig_0432_zero_commit_removed() {
 expect_fail check_sig_case_coverage.sh \
     'c-sig-0432 losing its zero-handler assertion' mut_sig_0432_zero_commit_removed
 
-printf '\n%s case(s), %s failure(s)\n' "$cases" "$failures"
+if [[ "$SIG_MODE" == list ]]; then
+    exit 0
+fi
+if [[ "$SIG_MODE" == select && "$SIG_EXECUTED" -ne "$SIG_REQUESTED" ]]; then
+    fail_msg 'selected signature case does not exist'
+fi
+printf '\n%s of %s case(s), %s failure(s)\n' "$SIG_EXECUTED" "$cases" "$failures"
 [[ "$failures" -eq 0 ]]
