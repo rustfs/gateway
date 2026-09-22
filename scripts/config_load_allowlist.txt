@@ -21,6 +21,8 @@ crates/gateway/src/config.rs | impl ConfigHandle / fn store | self.store.rcu(|cu
 crates/gateway/src/config.rs | fn load_entry | Arc::clone(&store.load_full().config)
 crates/gateway/src/config.rs | fn load_replacement | store.load_full()
 crates/gateway/src/conn/metrics.rs | fn read_counter | counter.load(Ordering::Relaxed)
+crates/gateway/src/conn/request_tests.rs | fn observe_requests | wake.0.load(std::sync::atomic::Ordering::SeqCst),
+crates/gateway/src/conn/request_tests.rs | fn observe_requests | wake.0.load(std::sync::atomic::Ordering::SeqCst) > 0,
 crates/gateway/src/dispatch.rs | mod tests / fn handler_deadline_signals_cleanup_and_discards_the_late_result | assert!(cleaned.load(Ordering::Acquire), "the handler did not observe the deadline signal");
 crates/gateway/src/ext/authz_audit.rs | mod tests / fn n_a_sink_sees_all_three_states_apart | assert_eq!(sink.1.load(Ordering::SeqCst), 3);
 crates/gateway/src/ext/cors.rs | impl CorsSource for Arc<T> / fn load | (**self).load(bucket)
