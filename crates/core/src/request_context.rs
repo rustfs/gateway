@@ -61,7 +61,7 @@
 use core::fmt;
 
 use http::{HeaderMap, Method};
-use rustfs_gateway_http::{HeaderView, WireRequest};
+use rustfs_gateway_http::{HeaderView, TransportExtensions, WireRequest};
 use rustfs_gateway_sig::{Identity, SecretBytes, SigFamily, SigIdentity, SigLocation, SigService, Verdict, VerifiedScope};
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
@@ -270,6 +270,7 @@ pub struct RequestContextView {
     host: Box<str>,
     addressed: Addressed,
     headers: HeaderMap,
+    transport_extensions: TransportExtensions,
     principal: Option<RequestPrincipal>,
     path_params: PathParams,
     subjects: Option<Subjects>,
@@ -322,6 +323,7 @@ impl RequestContextView {
             host: Box::from(wire.host().as_str()),
             addressed,
             headers,
+            transport_extensions: wire.transport_extensions().clone(),
             principal,
             path_params: PathParams::none(),
             subjects: None,
@@ -365,6 +367,7 @@ impl RequestContextView {
                 key: None,
             },
             headers: HeaderMap::new(),
+            transport_extensions: TransportExtensions::default(),
             principal: None,
             path_params: PathParams::none(),
             subjects: None,
@@ -424,6 +427,15 @@ impl RequestContextView {
     #[must_use]
     pub fn headers(&self) -> HeaderView<'_> {
         HeaderView::new(&self.headers)
+    }
+
+    /// Transport-installed values, shared with the accepted wire request without exposing bag mutation.
+    ///
+    /// These are transport facts, not authentication or authorization receipts. A detached context
+    /// has no transport values. The values are never formatted by this context's `Debug`.
+    #[must_use]
+    pub fn transport_extensions(&self) -> &TransportExtensions {
+        &self.transport_extensions
     }
 
     /// The authenticated principal. `None` for an anonymous request.

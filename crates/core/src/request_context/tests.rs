@@ -145,3 +145,64 @@ fn every_accepted_line_is_copied_byte_for_byte() {
     assert_eq!(lines, expected);
     assert!(lines.contains(&("x-proxy-note", b"caf\xe9".as_slice())));
 }
+
+#[derive(Clone, Debug)]
+struct TransportNote(&'static str);
+
+fn transport_wire() -> WireRequest<Bytes> {
+    let request = http::Request::builder()
+        .method(Method::HEAD)
+        .uri("/photos/a.jpg")
+        .header("host", "s3.example.com")
+        .extension(TransportNote("transport-secret-sentinel"))
+        .body(Bytes::new())
+        .expect("fixture request");
+    WireRequest::accept(request, &Limits::default()).expect("accepted transport request")
+}
+
+#[test]
+fn transport_values_keep_their_identity_across_body_mapping_and_handler_context() {
+    let wire = transport_wire();
+    let view = wire.transport_extensions().clone();
+    let original = view.get::<TransportNote>().expect("transport marker");
+    let wire = wire.map_body(|body| body);
+    let verdict = anonymous_verdict(&wire);
+    let context =
+        RequestContextView::from_pipeline("HeadObject", &wire, path_style(), &verdict, None).expect("an accepted context");
+    let received = context.transport_extensions().get::<TransportNote>().expect("handler marker");
+    assert!(core::ptr::eq(original, received));
+    assert_eq!(received.0, "transport-secret-sentinel");
+}
+
+#[test]
+fn absent_transport_types_are_not_invented() {
+    let wire = transport_wire();
+    let verdict = anonymous_verdict(&wire);
+    let context =
+        RequestContextView::from_pipeline("HeadObject", &wire, path_style(), &verdict, None).expect("an accepted context");
+    assert!(context.transport_extensions().get::<usize>().is_none());
+    assert!(
+        RequestContextView::detached("HeadObject")
+            .transport_extensions()
+            .get::<TransportNote>()
+            .is_none()
+    );
+}
+
+#[test]
+fn transport_values_do_not_leak_through_debug() {
+    let wire = transport_wire();
+    let verdict = anonymous_verdict(&wire);
+    let context =
+        RequestContextView::from_pipeline("HeadObject", &wire, path_style(), &verdict, None).expect("an accepted context");
+    for rendered in [format!("{:?}", wire.transport_extensions()), format!("{context:?}")] {
+        assert!(!rendered.contains("transport-secret-sentinel"));
+    }
+}
+
+#[test]
+fn rejected_transport_requests_cannot_construct_a_handler_context() {
+    let wire = transport_wire();
+    let verdict = Verdict::reject(AuthError::SignatureDoesNotMatch);
+    assert!(RequestContextView::from_pipeline("HeadObject", &wire, path_style(), &verdict, None).is_none());
+}

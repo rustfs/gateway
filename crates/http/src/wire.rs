@@ -49,6 +49,7 @@ use crate::limits::{LimitKind, Limits};
 use crate::query_view::{QueryIndex, QueryView};
 use crate::reject::WireReject;
 use crate::text::contains_forbidden_control;
+use crate::transport_extensions::TransportExtensions;
 
 /// The request path exactly as it arrived, still percent-encoded.
 ///
@@ -91,6 +92,7 @@ pub struct WireRequest<B> {
     version: Version,
     uri: Uri,
     headers: HeaderMap,
+    transport_extensions: TransportExtensions,
     host: EffectiveHost,
     framing: Framing,
     query_index: QueryIndex,
@@ -138,6 +140,7 @@ impl<B> WireRequest<B> {
             version: parts.version,
             uri: parts.uri,
             headers: parts.headers,
+            transport_extensions: TransportExtensions::from_extensions(parts.extensions),
             host,
             framing,
             query_index,
@@ -175,6 +178,12 @@ impl<B> WireRequest<B> {
     #[must_use]
     pub fn headers(&self) -> HeaderView<'_> {
         HeaderView::new(&self.headers)
+    }
+
+    /// The transport-installed values, retained as a typed read-only view.
+    #[must_use]
+    pub fn transport_extensions(&self) -> &TransportExtensions {
+        &self.transport_extensions
     }
 
     /// The one effective host, determined once at acceptance.
@@ -223,6 +232,7 @@ impl<B> WireRequest<B> {
             version: self.version,
             uri: self.uri,
             headers: self.headers,
+            transport_extensions: self.transport_extensions,
             host: self.host,
             framing: self.framing,
             query_index: self.query_index,

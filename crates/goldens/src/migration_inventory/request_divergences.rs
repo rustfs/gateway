@@ -131,7 +131,6 @@ const API_PUT_OBJECT: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/AP
 const API_GET_BUCKET_LOCATION: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html";
 const ERROR_RESPONSES: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html";
 const M1_ADAPTER: &str = "https://github.com/rustfs/backlog/issues/1752";
-const ADAPTER_SEAM: &str = "https://github.com/rustfs/gateway/issues/753";
 const SEAM_FACTS: &str = "https://github.com/rustfs/gateway/issues/795";
 
 /// Every decided request divergence.
@@ -336,12 +335,12 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 20] = [
         aws: "no wire behaviour: an extension is in-process state",
         aws_evidence: "https://github.com/rustfs/gateway/pull/748",
         s3s: "passes it to the handler",
-        gateway: "the wire request keeps no extension bag",
+        gateway: "the handler context retains transport values behind typed read-only access; the adapter copies its known types: zero diff",
         client_impact: "RustFS needs RemoteAddr, RequestContext and ReqInfo from the transport and fails closed without ReqInfo",
         ruling: DivergenceRuling::AlignS3s,
-        follow_up: DivergenceFollowUp::Open(ADAPTER_SEAM),
+        follow_up: DivergenceFollowUp::Open(M1_ADAPTER),
         test_file: PUT_CONTEXT,
-        test: "divergence_a_transport_extension_reaches_only_the_s3s_handler",
+        test: "divergence_a_transport_extension_reaches_both_handlers",
     },
     RequestDivergence {
         id: "rd-ctx-0004",

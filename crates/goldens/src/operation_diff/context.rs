@@ -37,6 +37,7 @@
 //! secret up a second time. The accepted `WireRequest` and the host classification are still built
 //! beside the service, for the input decode the GetBucketLocation proof compares.
 
+mod adapter_request;
 mod admin_request;
 mod answers;
 mod body_parity;
@@ -52,9 +53,9 @@ use bytes::Bytes;
 use http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, Uri};
 use rustfs_gateway::dto;
 use rustfs_gateway::{
-    Authorizer, AuthzRequest, BoxFuture, CallerSecretKey, Credentials, Decision, Handler, HandlerContext, HandlerResult,
-    HostQuery, HostResolver, InputAuthzRequest, InputDecisions, PathStyleOnly, Req, RequestContext, RequestContextView,
-    ResolvedHost, Resp, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, VirtualHostStyle,
+    Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Handler, HandlerContext, HandlerResult, HostQuery, HostResolver,
+    InputAuthzRequest, InputDecisions, PathStyleOnly, Req, RequestContext, RequestContextView, ResolvedHost, Resp, S3Service,
+    ServiceBuilder, SigV4Authenticator, StaticCredentials, VirtualHostStyle,
 };
 use rustfs_gateway_http::{Limits, RawHost, WireRequest};
 use rustfs_gateway_sig::{
@@ -62,8 +63,8 @@ use rustfs_gateway_sig::{
     SigningScope,
 };
 
+use self::adapter_request::adapter_request;
 use self::answers::answers;
-use super::seam::request_context::{GatewayRequestContext, Principal, VerifiedScope, request_to_s3s};
 use super::{HOST, block_on, oracle, s3s};
 
 /// The one credential both stacks' stores hold.
@@ -325,39 +326,6 @@ struct Recorded {
     converted: Result<s3s::S3Request<()>, String>,
     bucket: Option<String>,
     key: Option<String>,
-}
-
-/// The RustFS adapter's half of the seam: an `s3s::S3Request` context built from nothing but the
-/// handler's request context.
-fn adapter_request(context: &RequestContextView) -> Result<s3s::S3Request<()>, String> {
-    let refused = |error: rustfs_gateway_types::compat::ConversionError| format!("conversion refused: {error}");
-    let principal = context
-        .principal()
-        .map(|principal| {
-            let scope = principal.verified_scope().map(|scope| VerifiedScope {
-                region: scope.region().to_owned(),
-                service: scope.service().to_owned(),
-            });
-            let secret = principal
-                .secret_key_from_authenticator_lookup()
-                .map(CallerSecretKey::expose_secret);
-            Principal::from_handler(principal.access_key_id(), secret, scope)
-        })
-        .transpose()
-        .map_err(refused)?;
-    let gateway = GatewayRequestContext {
-        method: context.method().clone(),
-        raw_path: context.raw_path().to_owned(),
-        raw_query: context.raw_query().to_owned(),
-        headers: GatewayRequestContext::raw_headers(context.headers().iter_raw()),
-        principal,
-        host_region: context.addressing().host_region().map(str::to_owned),
-        declares_trailers: context
-            .headers()
-            .get_bytes(&HeaderName::from_static("x-amz-trailer"))
-            .is_some(),
-    };
-    request_to_s3s(gateway, ()).map_err(refused)
 }
 
 /// A gateway backend that records, for the one call it gets, what [`adapter_request`] made of the

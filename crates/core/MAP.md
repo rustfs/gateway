@@ -53,7 +53,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/authz/query.rs` | The strict one-parameter query reader subjects and a query-bound bucket share. | A query parameter authorisation depends on is read twice or leniently. |
 | `src/registry/reject_rule_tests.rs` | Every registration refusal of an action or subject rule, and the overlay reading the rendered rule. | A rule is refused or admitted wrongly. |
 | `src/cancellation.rs` | Runtime-independent handler cancellation signal and waiter registry. | A handler deadline or rollback signal is lost or amplified. |
-| `src/request_context.rs` | The read-only handler request context (ADR-0022): principal, verified scope, routed target, raw target and header lines, and the explicitly named caller secret. | A handler needs to know who called, or a context value is wrong or leaks. |
+| `src/request_context.rs` | The read-only handler request context (ADR-0022): principal, verified scope, routed target, raw target and header lines, transport values, and the explicitly named caller secret. | A handler needs to know who called, or a context value is wrong or leaks. |
 | `src/request_context/tests.rs` | Unit tests: no context for a rejected verdict, nothing for an anonymous one, every line copied, `Debug` redaction. | A context unit guarantee changes. |
 | `src/committed.rs` | Typed frozen response heads and statusless detached work for the generated deferred-operation set. | A permitted operation, early header, or committed outcome is wrong. |
 | `src/handler.rs` | Typed handler request/response contracts, including the carried SSE proof. | Implement a backend or represent a committed failure. |
