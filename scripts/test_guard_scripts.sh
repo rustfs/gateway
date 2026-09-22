@@ -521,6 +521,22 @@ literalize_nul_paths() {
     done <"$input"
 }
 
+clean_after_ignore_reset() {
+    local paths path
+    for paths in "$@"; do
+        while IFS= read -r -d '' path; do
+            case "$path" in
+                .gitignore|':(literal).gitignore'|*/.gitignore)
+                    # Restored ignore rules expose files the mutation journal could not see.
+                    # Keep baseline-ignored build output; never use clean -x here.
+                    git clean -fdq || return $?
+                    return 0
+                    ;;
+            esac
+        done <"$paths"
+    done
+}
+
 reset_sandbox_changes() {
     local sandbox="$1" changed changed_literal untracked path
     if [[ "$sandbox" == "$SANDBOX" && "$SANDBOX_RESET_READY" -eq 1 ]]; then
@@ -545,6 +561,7 @@ reset_sandbox_changes() {
                 git checkout -f HEAD --pathspec-from-file="$SANDBOX_RESET_TRACKED" \
                     --pathspec-file-nul >/dev/null 2>&1 || exit $?
             fi
+            clean_after_ignore_reset "$SANDBOX_RESET_TRACKED" "$SANDBOX_RESET_UNTRACKED" || exit $?
         ) || rc=$?
         : >"$SANDBOX_RESET_TRACKED"
         : >"$SANDBOX_RESET_UNTRACKED"
@@ -575,6 +592,7 @@ reset_sandbox_changes() {
             git checkout -f HEAD --pathspec-from-file="$changed_literal" \
                 --pathspec-file-nul >/dev/null 2>&1 || exit $?
         fi
+        clean_after_ignore_reset "$changed_literal" "$untracked" || exit $?
     ) || rc=$?
     rm -f "$changed" "$changed_literal" "$untracked"
     return "$rc"
@@ -5042,6 +5060,68 @@ probe_cached_sandbox_reset() {
     fi
 }
 probe_cached_sandbox_reset
+
+# An ignore rule added by a mutation must not conceal files from the reset journal.
+# Keep a baseline-ignored build cache as the opposite control: a blanket clean -x is wrong.
+ignore_reset_contract() (
+    local mode="$1" shape="$2" repo ignore_path ignore_rule
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-ignore-reset.XXXXXX")"
+    trap 'rm -rf "$repo" "$repo.tracked" "$repo.untracked"' EXIT
+    cd "$repo"
+    git init -q .
+    mkdir nested target
+    printf 'target/\n' >.gitignore
+    if [[ "$shape" != added ]]; then
+        printf '# baseline\n' >nested/.gitignore
+    fi
+    printf 'baseline\n' >tracked.txt
+    git add .gitignore nested tracked.txt
+    git -c user.name=t -c user.email=t@t commit -qm base
+    printf 'retained build cache\n' >target/cache
+    SANDBOX="$repo"
+    SANDBOX_RESET_TRACKED="$repo.tracked"
+    SANDBOX_RESET_UNTRACKED="$repo.untracked"
+    SANDBOX_RESET_READY=0
+    : >"$SANDBOX_RESET_TRACKED"
+    : >"$SANDBOX_RESET_UNTRACKED"
+    ignore_path=nested/.gitignore
+    ignore_rule=poison/
+    if [[ "$shape" == root ]]; then
+        ignore_path=.gitignore
+        ignore_rule=nested/poison/
+    fi
+    printf '%s\n' "$ignore_rule" >>"$ignore_path"
+    mkdir nested/poison
+    printf 'stale source\n' >nested/poison/hidden.rs
+    if [[ "$mode" == cached ]]; then
+        stage_sandbox_changes "$repo" || return 1
+    fi
+    reset_sandbox_changes "$repo" || return 1
+    [[ ! -e nested/poison/hidden.rs && -f target/cache ]] || return 1
+    [[ "$(<target/cache)" == 'retained build cache' ]] || return 1
+    [[ -z "$(git status --porcelain)" ]] || return 1
+    if [[ "$shape" == added ]]; then
+        [[ ! -e nested/.gitignore ]] || return 1
+    else
+        [[ "$(<nested/.gitignore)" == '# baseline' ]] || return 1
+    fi
+)
+
+probe_ignore_reset() {
+    local mode shape
+    for mode in cached fallback; do
+        for shape in root nested added; do
+            cases=$((cases + 1))
+            guard_case_owned "$cases" || continue
+            if ignore_reset_contract "$mode" "$shape"; then
+                pass_msg "${mode}/${shape} reset removes newly exposed source and retains ignored build caches"
+            else
+                fail_msg "${mode}/${shape} reset leaked an ignored mutation or removed a baseline build cache"
+            fi
+        done
+    done
+}
+probe_ignore_reset
 
 probe_cached_reset_failures() {
     # Helpers see this private journal through shell dynamic scope; the worker keeps its fixture.
@@ -14937,8 +15017,8 @@ expect_fail_unstaged check_no_minio_source.sh \
     'an untracked NUL-bearing Cargo.toml hiding a minio dependency' mut_binary_untracked_manifest
 
 fi
-# Keep the scanner-budget probes in the single-process build mode: they measure subprocesses in a
-# reused sandbox, so earlier mutations in the broader general corpus can disturb the observation.
+# Keep the scanner-budget probes grouped in build mode. The ignore-reset controls above ensure
+# earlier mutations cannot leave newly exposed source behind in their reused sandbox.
 if [[ "$BUILD_GUARDS_ONLY" == 1 ]]; then
 SCANNER_TOOLS=(grep rg awk sed perl find git)
 
