@@ -35,3 +35,4 @@ Agent entry point for repository automation commands.
 | `tests/integration.rs` | Single integration-test target registering all four test sources. | Add, remove, or rename an xtask integration test source. |
 | `tests/cli_contract.rs` | Shared CLI output/exit contracts registered by `integration.rs`. | Change help or general process behavior. |
 | `tests/why_contract.rs` | Six-namespace reverse-trace goldens registered by `integration.rs`. | Change `why` resolution or output. |
+| `tests/bootstrap_diagnostics.py` | Actual bootstrap source exercised with fake child tools and codegen. | Stage timing or compiler diagnostics disappear without running a real workspace build. |

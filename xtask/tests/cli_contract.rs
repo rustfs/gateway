@@ -191,3 +191,18 @@ fn xtask_started_seconds_ago(args: &[&str], seconds: u64) -> Output {
         .output()
         .unwrap_or_else(|error| panic!("xtask must start: {error}"))
 }
+
+#[test]
+fn bootstrap_reports_stage_timings_and_preserves_compiler_diagnostics() {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/bootstrap_diagnostics.py");
+    let output = std::process::Command::new("python3")
+        .arg(script)
+        .output()
+        .expect("bootstrap diagnostic fixture starts");
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
