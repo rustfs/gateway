@@ -97,6 +97,43 @@ described in the license, without additional terms.
 5. Expect review comments on public API shape and on anything touching signature verification
    or parsing; those areas get scrutinised hard on purpose.
 
+### Worktree build storage
+
+Before starting a workspace gate, inventory the worktrees with `git worktree list`. In each
+worktree you intend to build or retire, resolve Cargo's actual artifact directory:
+
+```bash
+cargo metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])'
+```
+
+Use that absolute path with `du -sh /absolute/artifact/path` and
+`df -h /absolute/artifact/path` (use its existing parent if the directory does not exist yet).
+Do not assume artifacts live in `./target`: Cargo configuration and `CARGO_TARGET_DIR` can
+redirect them, including to a directory shared by several worktrees. Count shared paths once.
+The repository has observed 6–20 GiB per worktree and a 31 GiB warm artifact directory; these
+are measurements, not fixed space requirements. Leave room for the next build's temporary
+linker output and doctests as well as retained artifacts. If headroom is uncertain, run one
+workspace gate at a time and recheck free space before the next one.
+
+Reclaim artifacts only from completed, idle worktrees, after coordinating with every user of
+the resolved directory. From the selected worktree, preview the exact directory first:
+
+```bash
+cargo clean --target-dir /absolute/artifact/path --dry-run
+```
+
+After reviewing the preview, repeat without `--dry-run` to remove those rebuildable artifacts.
+Never clean a directory while another build, test, or mutation run uses it. Keep the warm
+directory for active work; do not delete source worktrees, uncommitted changes, the Cargo
+registry, or installed toolchains to recover build space. Re-run `df -h` after cleanup.
+
+For subsequent builds, `CARGO_INCREMENTAL=0` avoids accumulating incremental compilation
+state, at the cost of slower rebuilds; it does not remove existing state. Reusing one explicitly
+selected `CARGO_TARGET_DIR` across worktrees can save dependency storage, but gates and mutation
+runs using it must be serialized. After cleanup, prepare the cold cache with
+`cargo xtask bootstrap` before measuring the short verification loop. Reclamation does not
+waive any of the four required commands in `AGENTS.md`, their time budgets, or any tests.
+
 ### Recording role reviews
 
 Under one visible `## Role Verdicts` heading in the PR description, record each required
