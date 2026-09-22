@@ -540,104 +540,101 @@ done <"$partial_eq_hits"
 # -----------------------------------------------------------------------------
 # Rule 1 — banned derives on secret-bearing types (repository-wide).
 #
-# awk scans each file, keeping the pending attribute block that precedes the
-# next item declaration. Output: "<line>\t<TypeName>\t<offending derives>"
+# One awk process scans all files, resetting pending attributes at each boundary.
+# Output: "<tag>\t<file>\t<line>\t<TypeName>\t<offending derives>"
 # for sensitive declarations, and "SEEN" markers so the caller can tell
 # "no violations" apart from "nothing to check".
 # -----------------------------------------------------------------------------
-for file in "${sources[@]}"; do
-    while IFS=$'\t' read -r tag line type_name offenders; do
-        [[ -z "${tag:-}" ]] && continue
+while IFS=$'\t' read -r tag file line type_name offenders; do
+    [[ -z "${tag:-}" ]] && continue
 
-        if [[ "$tag" == "SEEN" ]]; then
-            sensitive_seen=1
-            continue
-        fi
+    if [[ "$tag" == "SEEN" ]]; then
+        sensitive_seen=1
+        continue
+    fi
 
-        if is_allowed "${file}:${type_name}"; then
-            continue
-        fi
+    if is_allowed "${file}:${type_name}"; then
+        continue
+    fi
 
-        report "$(printf "%s:%s: secret-bearing type '%s' derives %s; derive nothing that compares, prints or serializes key material — implement PartialEq via subtle::ConstantTimeEq and a redacting Debug by hand" \
-            "$file" "$line" "$type_name" "$offenders")"
-    done < <(awk -v sensitive="$SENSITIVE_NAME_RE" -v banned="$BANNED_DERIVES" '
-        function flush_pending() { pending = ""; pending_line = 0 }
-        {
-            s = $0
-            sub(/^[ \t]+/, "", s)
+    report "$(printf "%s:%s: secret-bearing type '%s' derives %s; derive nothing that compares, prints or serializes key material — implement PartialEq via subtle::ConstantTimeEq and a redacting Debug by hand" \
+        "$file" "$line" "$type_name" "$offenders")"
+done < <(awk -v sensitive="$SENSITIVE_NAME_RE" -v banned="$BANNED_DERIVES" '
+    function flush_pending() { pending = ""; pending_line = 0 }
+    FNR == 1 { flush_pending() }
+    {
+        s = $0
+        sub(/^[ \t]+/, "", s)
 
-            # Blank lines, comments and doc comments do not break an attribute block.
-            if (s == "" || s ~ /^\/\//) { next }
+        # Blank lines, comments and doc comments do not break an attribute block.
+        if (s == "" || s ~ /^\/\//) { next }
 
-            if (s ~ /^#[!]?\[/) {
-                if (pending == "") { pending_line = NR }
-                pending = pending " " s
-                next
-            }
+        if (s ~ /^#[!]?\[/) {
+            if (pending == "") { pending_line = FNR }
+            pending = pending " " s
+            next
+        }
 
-            if (match(s, /^(pub([ \t]*\([^)]*\))?[ \t]+)?(struct|enum|union)[ \t]+[A-Za-z_][A-Za-z0-9_]*/)) {
-                decl = substr(s, RSTART, RLENGTH)
-                n = split(decl, words, /[ \t]+/)
-                name = words[n]
+        if (match(s, /^(pub([ \t]*\([^)]*\))?[ \t]+)?(struct|enum|union)[ \t]+[A-Za-z_][A-Za-z0-9_]*/)) {
+            decl = substr(s, RSTART, RLENGTH)
+            n = split(decl, words, /[ \t]+/)
+            name = words[n]
 
-                if (name ~ sensitive) {
-                    print "SEEN\t0\t" name "\t"
+            if (name ~ sensitive) {
+                print "SEEN\t" FILENAME "\t0\t" name "\t"
 
-                    if (pending ~ /derive[ \t]*\(/) {
-                        # Collect the banned traits actually listed.
-                        found = ""
-                        body = pending
-                        while (match(body, /derive[ \t]*\([^)]*\)/)) {
-                            seg = substr(body, RSTART, RLENGTH)
-                            body = substr(body, RSTART + RLENGTH)
-                            m = split(seg, toks, /[^A-Za-z0-9_]+/)
-                            for (i = 1; i <= m; i++) {
-                                t = toks[i]
-                                if (t == "derive") continue
-                                if (t ~ ("^(" banned ")$")) {
-                                    if (index(" " found " ", " " t " ") == 0) {
-                                        found = (found == "" ? t : found ", " t)
-                                    }
+                if (pending ~ /derive[ \t]*\(/) {
+                    # Collect the banned traits actually listed.
+                    found = ""
+                    body = pending
+                    while (match(body, /derive[ \t]*\([^)]*\)/)) {
+                        seg = substr(body, RSTART, RLENGTH)
+                        body = substr(body, RSTART + RLENGTH)
+                        m = split(seg, toks, /[^A-Za-z0-9_]+/)
+                        for (i = 1; i <= m; i++) {
+                            t = toks[i]
+                            if (t == "derive") continue
+                            if (t ~ ("^(" banned ")$")) {
+                                if (index(" " found " ", " " t " ") == 0) {
+                                    found = (found == "" ? t : found ", " t)
                                 }
                             }
                         }
-                        if (found != "") {
-                            print "HIT\t" (pending_line ? pending_line : NR) "\t" name "\t" found
-                        }
+                    }
+                    if (found != "") {
+                        print "HIT\t" FILENAME "\t" (pending_line ? pending_line : FNR) "\t" name "\t" found
                     }
                 }
             }
-            flush_pending()
         }
-    ' "$file")
-done
+        flush_pending()
+    }
+' "${sources[@]}")
 
 # -----------------------------------------------------------------------------
 # Rule 3 — no `impl Display for` a secret-bearing type (repository-wide).
 # A hand-written `Debug` is fine and expected; `Display` is not, because its
 # whole contract is "render this value for a human", which is a log line.
 # -----------------------------------------------------------------------------
-for file in "${sources[@]}"; do
-    while IFS= read -r hit; do
-        [[ -z "$hit" ]] && continue
-        line="${hit%%:*}"
-        text="${hit#*:}"
-        type_name="$(printf '%s' "$text" | sed -E 's/.*for[ \t]+([A-Za-z_][A-Za-z0-9_]*).*/\1/')"
-        if is_allowed "${file}:${type_name}"; then
-            continue
-        fi
-        report "${file}:${line}: Display is implemented for secret-bearing type '${type_name}'; a value that renders itself for a human is a value that ends up in a log"
-    done < <(awk -v sensitive="$SENSITIVE_NAME_RE" '
-        {
-            s = $0
-            sub(/^[ \t]+/, "", s)
-            if (s ~ /^\/\//) { next }
-            if (s ~ /^impl([ \t]*<[^>]*>)?[ \t]+(core::fmt::|std::fmt::|fmt::)?Display[ \t]+for[ \t]+/) {
-                if (s ~ ("for[ \t]+" sensitive)) { print NR ":" s }
-            }
+while IFS=$'\t' read -r file hit; do
+    [[ -z "$hit" ]] && continue
+    line="${hit%%:*}"
+    text="${hit#*:}"
+    type_name="$(printf '%s' "$text" | sed -E 's/.*for[ \t]+([A-Za-z_][A-Za-z0-9_]*).*/\1/')"
+    if is_allowed "${file}:${type_name}"; then
+        continue
+    fi
+    report "${file}:${line}: Display is implemented for secret-bearing type '${type_name}'; a value that renders itself for a human is a value that ends up in a log"
+done < <(awk -v sensitive="$SENSITIVE_NAME_RE" '
+    {
+        s = $0
+        sub(/^[ \t]+/, "", s)
+        if (s ~ /^\/\//) { next }
+        if (s ~ /^impl([ \t]*<[^>]*>)?[ \t]+(core::fmt::|std::fmt::|fmt::)?Display[ \t]+for[ \t]+/) {
+            if (s ~ ("for[ \t]+" sensitive)) { print FILENAME "\t" FNR ":" s }
         }
-    ' "$file")
-done
+    }
+' "${sources[@]}")
 
 # -----------------------------------------------------------------------------
 # Rules 4-7 — scoped to the crates that actually hold key material.
@@ -704,13 +701,18 @@ fi
 # -----------------------------------------------------------------------------
 compile_fail_count=0
 negative_label_count=0
+sig_sources=()
 for file in "${sources[@]}"; do
-    [[ "$file" == crates/sig/* ]] || continue
-    n="$(grep -c '```compile_fail' "$file" || true)"
-    compile_fail_count=$((compile_fail_count + n))
-    n="$(grep -cE '^[ \t]*/// Negative' "$file" || true)"
-    negative_label_count=$((negative_label_count + n))
+    [[ "$file" == crates/sig/* ]] && sig_sources+=("$file")
 done
+if [[ "${#sig_sources[@]}" -gt 0 ]]; then
+    while IFS= read -r n; do
+        compile_fail_count=$((compile_fail_count + n))
+    done < <(grep -h -c '```compile_fail' "${sig_sources[@]}" || true)
+    while IFS= read -r n; do
+        negative_label_count=$((negative_label_count + n))
+    done < <(grep -h -cE '^[ \t]*/// Negative' "${sig_sources[@]}" || true)
+fi
 
 if [[ "$compile_fail_count" -lt "$COMPILE_FAIL_FLOOR" ]]; then
     report "compile_fail doctests in crates/sig fell to ${compile_fail_count}, below the ${COMPILE_FAIL_FLOOR} baseline; a deleted compile_fail case is a deleted guarantee (rustfs/rustfs#4815)"

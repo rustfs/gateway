@@ -18,6 +18,7 @@ def fail(prefix: str, message: str) -> None:
 def mask_rust(source: str) -> str:
     """Preserve code and newlines while blanking comments and string/character literals."""
 
+    raw_pattern = re.compile(r'(?:b?r)(?P<hashes>#{0,255})"')
     chars = list(source)
     length = len(source)
     index = 0
@@ -54,11 +55,11 @@ def mask_rust(source: str) -> str:
             blank(start, index)
             continue
 
-        raw = re.match(r"(?:b?r)(?P<hashes>#{0,255})\"", source[index:])
+        raw = raw_pattern.match(source, index) if source[index] in "br" else None
         if raw:
             start = index
             hashes = raw.group("hashes")
-            index += raw.end()
+            index = raw.end()
             terminator = '"' + hashes
             end = source.find(terminator, index)
             if end < 0:

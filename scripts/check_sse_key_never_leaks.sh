@@ -112,19 +112,23 @@ done < <(git ls-files --cached --others --exclude-standard -- 'spec/operations/*
 if [[ "${#spec_files[@]}" -eq 0 ]]; then
     report "no operation specifications are visible under spec/operations; rule 1 cannot have checked anything"
 else
-    for file in "${spec_files[@]}"; do
-        while IFS= read -r hit; do
-            [[ -z "$hit" ]] && continue
-            report "${file}:${hit}: an operation OUTPUT binds a customer-provided encryption key header; a response that carries the key hands it to every intermediary and every access log on the way home. Only the -algorithm and -md5 spellings may be returned"
-        done < <(awk '
-            /^\[\[input\]\]/ { section = "input"; next }
-            /^\[\[output\]\]/ { section = "output"; next }
-            /^\[/ { section = "other"; next }
-            /^wire_name = "x-amz-(copy-source-)?server-side-encryption-customer-key"$/ {
-                if (section == "output") { print NR }
-            }
-        ' "$file")
-    done
+    # Preserve the section state per file and report that file's own line numbers.
+    if ! spec_hits="$(awk '
+        FNR == 1 { section = "" }
+        /^\[\[input\]\]/ { section = "input"; next }
+        /^\[\[output\]\]/ { section = "output"; next }
+        /^\[/ { section = "other"; next }
+        /^wire_name = "x-amz-(copy-source-)?server-side-encryption-customer-key"$/ {
+            if (section == "output") { print FILENAME "\t" FNR }
+        }
+    ' "${spec_files[@]}")"; then
+        report 'cannot read operation specifications'
+        exit 1
+    fi
+    while IFS=$'\t' read -r file hit; do
+        [[ -z "$file" ]] && continue
+        report "${file}:${hit}: an operation OUTPUT binds a customer-provided encryption key header; a response that carries the key hands it to every intermediary and every access log on the way home. Only the -algorithm and -md5 spellings may be returned"
+    done <<<"$spec_hits"
 fi
 
 # -----------------------------------------------------------------------------
@@ -164,6 +168,22 @@ if [[ "${#sources[@]}" -eq 0 ]]; then
     report "no Rust sources are visible to this guard; rules 3 to 5 cannot have checked anything"
     exit "$status"
 fi
+
+# Every rule below needs either a customer-key marker or bool::from(. Filter the raw inputs
+# together, then apply the unchanged comment, scope and line checks to every candidate. A match
+# in a comment merely keeps an extra candidate; absence cannot conceal an executable match.
+source_candidates="$(mktemp "${TMPDIR:-/tmp}/gateway-sse-candidates.XXXXXX")"
+trap 'rm -f "$source_candidates"' EXIT
+candidate_status=0
+grep -lE -- "${SECRET_IDENT_RE}|bool::from\(" "${sources[@]}" >"$source_candidates" || candidate_status=$?
+if [[ "$candidate_status" -gt 1 ]]; then
+    report 'cannot inspect Rust sources for SSE key markers'
+    exit 1
+fi
+sources=()
+while IFS= read -r file; do
+    [[ -n "$file" ]] && sources+=("$file")
+done <"$source_candidates"
 
 expose_call_sites=0
 choice_to_bool=0

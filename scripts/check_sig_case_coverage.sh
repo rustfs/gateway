@@ -219,7 +219,7 @@ while i < len(source):
         depth = 1
         out.extend("  ")
         i += 2
-    elif raw := RAW_STRING_RE.match(source, i):
+    elif source[i] in "br" and (raw := RAW_STRING_RE.match(source, i)):
         hashes = raw.group(1)
         closing = '"' + hashes
         end = source.find(closing, raw.end())
@@ -243,7 +243,7 @@ while i < len(source):
             raise SystemExit(f"{path}: unterminated string")
         out.extend("\n" if char == "\n" else " " for char in source[i:end])
         i = end
-    elif character := CHAR_LITERAL_RE.match(source, i):
+    elif source[i] in "b\'" and (character := CHAR_LITERAL_RE.match(source, i)):
         end = character.end()
         out.extend(" " for _ in source[i:end])
         i = end
