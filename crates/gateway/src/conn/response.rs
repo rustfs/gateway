@@ -248,31 +248,59 @@ where
             .checked_add(u64::try_from(segment.len()).map_err(io::Error::other)?)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "response body length overflows"))
     })?;
-    match framing {
-        ResponseFraming::Suppressed => return Ok(()),
-        ResponseFraming::Fixed(_) => {
-            let mut slices: Vec<IoSlice<'_>> = segments.iter().map(|segment| IoSlice::new(segment)).collect();
-            write_all_vectored_payload_progress(writer, &mut slices, 0, length, transport_metrics).await?;
+    if matches!(framing, ResponseFraming::Suppressed) {
+        return Ok(());
+    }
+    let chunked = matches!(framing, ResponseFraming::Chunked);
+    let mut prefix_storage = [0_u8; 18];
+    let prefix = if chunked && length != 0 {
+        encode_chunk_prefix(length, &mut prefix_storage)?
+    } else {
+        &[]
+    };
+    let suffix = if chunked && length != 0 { &b"\r\n"[..] } else { &[] };
+    let mut parts = std::iter::once(prefix)
+        .chain(segments.iter().map(Bytes::as_ref))
+        .chain(std::iter::once(suffix))
+        .filter(|part| !part.is_empty());
+    let payload_start = u64::try_from(prefix.len()).map_err(io::Error::other)?;
+    let payload_end = payload_start
+        .checked_add(length)
+        .ok_or_else(|| io::Error::other("payload range overflowed"))?;
+    let mut progress = 0_u64;
+    loop {
+        let mut slices = [IoSlice::new(&[]); 16];
+        let mut count = 0;
+        let mut batch_length = 0_u64;
+        for (slice, part) in slices.iter_mut().zip(parts.by_ref()) {
+            batch_length = batch_length
+                .checked_add(u64::try_from(part.len()).map_err(io::Error::other)?)
+                .ok_or_else(|| io::Error::other("response batch length overflowed"))?;
+            *slice = IoSlice::new(part);
+            count += 1;
         }
-        ResponseFraming::Chunked => {
-            if length != 0 {
-                let mut prefix_storage = [0_u8; 18];
-                let prefix = encode_chunk_prefix(length, &mut prefix_storage)?;
-                let mut slices = Vec::with_capacity(segments.len().saturating_add(2));
-                slices.push(IoSlice::new(prefix));
-                slices.extend(segments.iter().map(|segment| IoSlice::new(segment)));
-                slices.push(IoSlice::new(b"\r\n"));
-                write_all_vectored_payload_progress(
-                    writer,
-                    &mut slices,
-                    u64::try_from(prefix.len()).map_err(io::Error::other)?,
-                    length,
-                    transport_metrics,
-                )
-                .await?;
-            }
-            write_all_progress(writer, b"0\r\n\r\n").await?;
+        if count == 0 {
+            break;
         }
+        let end = progress
+            .checked_add(batch_length)
+            .ok_or_else(|| io::Error::other("response progress overflowed"))?;
+        let batch_payload = end.min(payload_end).saturating_sub(progress.max(payload_start));
+        let batch = slices
+            .get_mut(..count)
+            .ok_or_else(|| io::Error::other("response batch exceeds its slice storage"))?;
+        write_all_vectored_payload_progress(
+            writer,
+            batch,
+            payload_start.saturating_sub(progress),
+            batch_payload,
+            transport_metrics,
+        )
+        .await?;
+        progress = end;
+    }
+    if chunked {
+        write_all_progress(writer, b"0\r\n\r\n").await?;
     }
     Ok(())
 }
@@ -413,10 +441,13 @@ where
     } else {
         write_all_progress(writer, b"0\r\n").await?;
         for (name, value) in &trailers {
-            write_all_progress(writer, name.as_str().as_bytes()).await?;
-            write_all_progress(writer, b": ").await?;
-            write_all_progress(writer, value.as_bytes()).await?;
-            write_all_progress(writer, b"\r\n").await?;
+            let mut slices = [
+                IoSlice::new(name.as_str().as_bytes()),
+                IoSlice::new(b": "),
+                IoSlice::new(value.as_bytes()),
+                IoSlice::new(b"\r\n"),
+            ];
+            write_all_vectored_payload_progress(writer, &mut slices, 0, 0, None).await?;
         }
         write_all_progress(writer, b"\r\n").await?;
     }
@@ -585,126 +616,5 @@ enum ResponseFraming {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
-
-    use tokio::io::AsyncWrite;
-
-    use super::*;
-
-    #[derive(Default)]
-    struct ObservedWriter {
-        bytes: Vec<u8>,
-        scalar_calls: usize,
-        vectored_calls: usize,
-        first_vectored_slices: Option<usize>,
-    }
-
-    struct PartialThenErrorWriter {
-        first: bool,
-    }
-
-    impl AsyncWrite for PartialThenErrorWriter {
-        fn poll_write(mut self: Pin<&mut Self>, _context: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
-            if self.first {
-                self.first = false;
-                Poll::Ready(Ok(bytes.len().min(2)))
-            } else {
-                Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "fixture peer reset")))
-            }
-        }
-
-        fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn poll_shutdown(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-    }
-
-    impl AsyncWrite for ObservedWriter {
-        fn poll_write(mut self: Pin<&mut Self>, _context: &mut Context<'_>, bytes: &[u8]) -> Poll<io::Result<usize>> {
-            self.scalar_calls += 1;
-            self.bytes.extend_from_slice(bytes);
-            Poll::Ready(Ok(bytes.len()))
-        }
-
-        fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn poll_shutdown(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn is_write_vectored(&self) -> bool {
-            true
-        }
-
-        fn poll_write_vectored(
-            mut self: Pin<&mut Self>,
-            _context: &mut Context<'_>,
-            buffers: &[IoSlice<'_>],
-        ) -> Poll<io::Result<usize>> {
-            self.vectored_calls += 1;
-            self.first_vectored_slices.get_or_insert(buffers.len());
-            let mut written = 0;
-            for buffer in buffers {
-                self.bytes.extend_from_slice(buffer);
-                written += buffer.len();
-            }
-            Poll::Ready(Ok(written))
-        }
-    }
-
-    #[tokio::test]
-    async fn vectored_payload_reaches_the_vectored_writer_once() {
-        let mut writer = ObservedWriter::default();
-        let segments = [
-            Bytes::from_static(b"ab"),
-            Bytes::from_static(b"cd"),
-            Bytes::from_static(b"ef"),
-        ];
-        assert!(
-            write_memory_segments(&mut writer, &segments, ResponseFraming::Fixed(6), None)
-                .await
-                .is_ok(),
-            "observed writer accepts the payload"
-        );
-        assert_eq!(writer.vectored_calls, 1);
-        assert_eq!(writer.scalar_calls, 0);
-        assert_eq!(writer.first_vectored_slices, Some(3));
-        assert_eq!(writer.bytes, b"abcdef");
-    }
-
-    #[tokio::test]
-    async fn chunk_prefix_data_and_delimiter_share_one_vectored_write() {
-        let mut writer = ObservedWriter::default();
-        assert!(
-            write_chunk(&mut writer, b"hello", None).await.is_ok(),
-            "observed writer accepts the chunk"
-        );
-        assert_eq!(writer.vectored_calls, 1);
-        assert_eq!(writer.scalar_calls, 0);
-        assert_eq!(writer.first_vectored_slices, Some(3));
-        assert_eq!(writer.bytes, b"5\r\nhello\r\n");
-    }
-
-    #[test]
-    fn chunk_prefix_encodes_the_entire_protocol_length_range() {
-        let mut storage = [0_u8; 18];
-        assert_eq!(encode_chunk_prefix(u64::MAX, &mut storage).ok(), Some(&b"FFFFFFFFFFFFFFFF\r\n"[..]));
-    }
-
-    #[tokio::test]
-    async fn copied_payload_progress_survives_a_later_socket_error() {
-        let mut writer = PartialThenErrorWriter { first: true };
-        let metrics = ResponseTransportMetrics::new();
-        let result =
-            write_memory_segments(&mut writer, &[Bytes::from_static(b"four")], ResponseFraming::Fixed(4), Some(&metrics)).await;
-        assert_eq!(result.as_ref().err().map(io::Error::kind), Some(io::ErrorKind::BrokenPipe));
-        assert_eq!(metrics.copied_payload_bytes(), 2);
-    }
-}
+#[path = "response_tests.rs"]
+mod tests;
