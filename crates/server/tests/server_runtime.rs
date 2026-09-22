@@ -22,6 +22,8 @@
 
 #[path = "server_runtime/connection_driver.rs"]
 mod connection_driver;
+#[path = "server_runtime/frozen_clock.rs"]
+mod frozen_clock;
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -476,24 +478,6 @@ async fn c_lim_0038_in_flight_request_limit_pauses_accept_before_the_next_socket
     assert!(task.await.expect("server task joins").is_ok());
 }
 
-/// Poll real sockets without letting scheduler stalls expire the partial-header fixtures.
-/// A runnable yield branch also prevents Tokio's paused clock from auto-advancing on idle I/O.
-async fn with_header_clock_frozen<T>(future: impl std::future::Future<Output = T>) -> T {
-    tokio::time::pause();
-    let started = std::time::Instant::now();
-    tokio::pin!(future);
-    let result = loop {
-        tokio::select! {
-            result = &mut future => break result,
-            () = tokio::task::yield_now() => {
-                assert!(started.elapsed() < Duration::from_secs(10), "socket admission or healthy request stalled");
-            }
-        }
-    };
-    tokio::time::resume();
-    result
-}
-
 #[tokio::test]
 async fn a_srv_0013_slow_headers_do_not_block_a_healthy_connection() {
     let _exclusive_load_lease = crate::server_load::exclusive_server_load_lease().await;
@@ -503,7 +487,7 @@ async fn a_srv_0013_slow_headers_do_not_block_a_healthy_connection() {
         task,
         shutdown,
     } = echo_server(plaintext_config());
-    let slow = with_header_clock_frozen(async {
+    let slow = frozen_clock::with_header_clock_frozen(async {
         let mut slow = Vec::new();
         for _ in 0..100 {
             let mut stream = TcpStream::connect(local_addr).await.expect("slow connection succeeds");
