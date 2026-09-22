@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0003"
-schema_version = 1
+schema_version = 3
 title = "MfaDelete is spelled the same way on the write and on the read"
 rationale = """
 The member the model calls MFADelete is MfaDelete on the wire, and this pins that the two directions agree. It is worth a case because they need not have: several S3 members are spelled one way in a request and another in a response, and a gateway that applied such a rule here would round-trip a document the client cannot read back."""
@@ -29,7 +29,8 @@ name = "write"
 [exchanges.request]
 method = "PUT"
 target = "/conf-bucketconfig?versioning"
-headers = { "content-md5" = "0WNnnpeLLX5q+WR6BTXy2w==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<VersioningConfiguration><Status>Enabled</Status><MfaDelete>Disabled</MfaDelete></VersioningConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0027"
-schema_version = 1
+schema_version = 3
 title = "An expiration of zero days is refused as 400 InvalidArgument"
 rationale = """
 Zero is the value a client sends by accident — an unset integer field serialized anyway — and it is also the most destructive possible retention policy: everything the rule matches becomes expired immediately. The documented bound is a non-zero positive integer, so the accident is refused at the write instead of being executed by the scanner."""
@@ -25,7 +25,8 @@ name = "zero-days"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "N4ObDMNmE4JzQczJUnfHZg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>0</Days></Expiration><ID>zero</ID><Filter><Prefix>a/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

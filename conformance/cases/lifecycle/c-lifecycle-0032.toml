@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0032"
-schema_version = 1
+schema_version = 3
 title = "A filter Tag with no Key element is refused as MalformedXML"
 rationale = """
 The sibling of c-lifecycle-0031, and the half that says the repair was applied to one member rather than to the member's requiredness. Carrying Tag.Key as a plain string removed the object-key rules the type used to enforce by accident; it must not have removed the one rule the model states, which is that the element has to be there. An absent Key and a Key holding text that used to be refused are one edit apart, and a suite with only the positive half stays green through a decoder that reads a keyless Tag as a tag with an empty key."""
@@ -30,7 +30,8 @@ name = "tag-without-key"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "QjmJg1KW0MkH6ozAq425+g==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>7</Days></Expiration><ID>keyless</ID><Filter><Tag><Value>v</Value></Tag></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

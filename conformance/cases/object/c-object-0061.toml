@@ -3,7 +3,7 @@
 
 [case]
 id = "c-object-0061"
-schema_version = 1
+schema_version = 3
 title = "A DeleteObjects body naming 1001 keys is refused as MalformedXML with nothing deleted"
 rationale = """
 S3 caps one multi-object delete at 1000 keys and answers a larger body 400 MalformedXML before it deletes anything. The cap bounds the work one request can demand under one handler deadline: a server that takes 1001 keys either deletes them all inside that deadline or times out half-way through a batch the caller was told nothing about. The body is well-formed XML, so the refusal is the count, and the object that sits in the bucket is still there afterwards (c-object-0062 is the positive control at exactly 1000)."""
@@ -37,7 +37,8 @@ body = { utf8 = "kept" }
 [request]
 method = "POST"
 target = "/conf-object?delete"
-headers = { "content-type" = "application/xml", "content-md5" = "6ZpXLgC3nyw01iq2Fy0p9Q==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { file = "fixtures/object/thousand-and-one-keys.xml" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

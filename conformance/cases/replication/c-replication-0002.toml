@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0002"
-schema_version = 1
+schema_version = 3
 title = "A stored document reads back as flattened Rule siblings under an xmlns-bearing root"
 rationale = """
 The read-back is where the flattened shape becomes observable: every SDK parses Rule as repeated children of the ReplicationConfiguration root, so a serializer that introduces a Rules wrapper returns a document in which every SDK finds zero rules — the whole replication configuration silently invisible, which for this family means clients conclude nothing is being replicated while the engine keeps shipping data. The root's xmlns is pinned for the same reason: strict parsers refuse an unnamespaced root. Byte-level comparison is the only assertion that notices either."""
@@ -29,7 +29,8 @@ name = "put"
 [exchanges.request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "fEyJOqgHAHaexsOc6h70Tw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Prefix>logs/</Prefix><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule><Rule><Prefix>tmp/</Prefix><Status>Disabled</Status><Destination><Bucket>arn:aws:s3:::replica-two</Bucket></Destination></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

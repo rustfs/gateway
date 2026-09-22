@@ -4,7 +4,7 @@
 
 [case]
 id = "c-object-0011"
-schema_version = 1
+schema_version = 3
 title = "A key a multi-object delete could not remove appears in the error list, not nowhere"
 rationale = """
 The partial-failure path is where the completeness invariant is actually tested: an implementation \
@@ -50,7 +50,8 @@ body = { utf8 = "2" }
 method = "POST"
 target = "/conf-object?delete"
 # The integrity header this operation requires; the value is md5 of the body below.
-headers = { "content-type" = "application/xml", "content-md5" = "yUYhL/uWbhaR/DPXkK8UvA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<Delete><Object><Key>batch/removable</Key></Object><Object><Key>batch/retained</Key><VersionId>held</VersionId></Object></Delete>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

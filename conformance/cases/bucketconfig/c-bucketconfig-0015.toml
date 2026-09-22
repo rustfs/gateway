@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0015"
-schema_version = 1
+schema_version = 3
 title = "Deleting a configured website document answers 204 with no body"
 rationale = """
 The delete of a document that exists, which is the half that makes the idempotent delete in c-bucketconfig-0032 meaningful: a handler that answered 204 to everything would pass that case alone."""
@@ -24,7 +24,8 @@ name = "write"
 [exchanges.request]
 method = "PUT"
 target = "/conf-bucketconfig?website"
-headers = { "content-md5" = "9qOvg44x092Bkn0ZW2RFjg==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals></Condition><Redirect><ReplaceKeyPrefixWith>documents/</ReplaceKeyPrefixWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

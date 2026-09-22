@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0009"
-schema_version = 1
+schema_version = 3
 title = "MaxAgeSeconds of zero is stored and returned as zero, not dropped as a default"
 rationale = """
 Zero is a meaningful value — it tells browsers to preflight every request, which operators use while debugging a policy — and it is exactly the value an omit-when-default serializer silently deletes. A dropped zero falls back to the browser's own default cache lifetime, so the operator's debugging switch quietly stops working. The byte-level read-back is the only assertion that distinguishes a stored zero from an omitted member."""
@@ -30,7 +30,8 @@ name = "put-zero-age"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "xmKDSJPvGp/o0VaJ6E9M7w==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin><MaxAgeSeconds>0</MaxAgeSeconds></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

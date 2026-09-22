@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0029"
-schema_version = 1
+schema_version = 3
 title = "A refused document carrying a KMS key id and an account id leaks neither into the error body"
 rationale = """
 The hygiene probe on the refusal path: this document is refused for its missing Priority, and it happens to carry a replica KMS key id and a destination account id. The refusal must be the constant reason and nothing else — an error body that quoted the surrounding document back would copy a key identifier and an account number into every log line that captures one, which is how configuration secrets end up in log aggregators with wider read access than the bucket ever had."""
@@ -26,7 +26,8 @@ name = "conf-replication"
 [request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "P4tOZevqBUS/BalWteMKJQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Filter><Prefix>kms/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket><Account>111122223333</Account><EncryptionConfiguration><ReplicaKmsKeyID>arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab</ReplicaKmsKeyID></EncryptionConfiguration></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

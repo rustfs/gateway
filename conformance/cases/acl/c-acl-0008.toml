@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0008"
-schema_version = 1
+schema_version = 3
 title = "Grant header keys are case-insensitive and surrounding whitespace is tolerated"
 rationale = """
 The AWS SDKs do not agree on the spelling of these keys and a client cannot fix a 400 by changing anything it controls, so the tolerance is required rather than generous. It is bounded on purpose and the bound is asserted next door: accepting ID and EmailAddress must not become accepting any key at all, which c-acl-0022 pins from the other side. The two permissions come from two different headers, so a parser that read one header and stopped is visible here too."""
@@ -24,7 +24,8 @@ name = "grant-by-header"
 [exchanges.request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-grant-full-control" = '  ID="9c11ab5a4d8e37f0b2c6d19e4a730f85c2b6d4a1e93f70c58b2d6a4e1c93f705"  ', "x-amz-grant-read" = 'URI = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"' }
+headers = { "x-amz-grant-full-control" = '  ID="9c11ab5a4d8e37f0b2c6d19e4a730f85c2b6d4a1e93f70c58b2d6a4e1c93f705"  ', "x-amz-grant-read" = 'URI = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"' }
+content_md5 = "computed"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [exchanges.expect]

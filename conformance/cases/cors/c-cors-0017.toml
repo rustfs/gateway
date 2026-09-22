@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0017"
-schema_version = 1
+schema_version = 3
 title = "A lower-case method spelling is refused, not case-folded"
 rationale = """
 HTTP method names are case-sensitive and AWS stores the upper-case spellings only. Folding get to GET at the door would store a document whose bytes differ from what the caller sent and read back, breaking round-trip comparison; storing get unfolded would create a rule the preflight matcher never satisfies. Refusal is the only answer that keeps the stored document trustworthy."""
@@ -22,7 +22,8 @@ name = "conf-cors"
 [request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "l48S39jVeNvdfWZoAI4oWg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>get</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

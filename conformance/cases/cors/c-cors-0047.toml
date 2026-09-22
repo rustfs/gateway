@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0047"
-schema_version = 1
+schema_version = 3
 title = "A partial wildcard requires its prefix, so a scheme downgrade is refused"
 rationale = """
 `https://*.example.com` names a scheme as well as a domain, and the prefix is the half a matcher drops without anyone
@@ -32,7 +32,8 @@ name = "conf-cors-rt"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "Wdmv/UN7dhcpsJ85Olv8Kw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://*.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

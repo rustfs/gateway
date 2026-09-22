@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0030"
-schema_version = 1
+schema_version = 3
 title = "A policy with no Owner is stored without one rather than given an invented owner"
 rationale = """
 The other direction of c-acl-0006. Owner is optional in the model, so a document that omits it is well formed — and a gateway that helpfully filled in the caller's own identity would answer a document the client never wrote, on the one member that says who controls the resource. Nothing is invented and nothing is refused; the read-back is byte-exact so that an inserted Owner element cannot pass as a formatting difference."""
@@ -24,7 +24,8 @@ name = "write-without-owner"
 [exchanges.request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-type" = "application/xml", "content-md5" = "Fn29rEmzFLNOObfmb3bkCQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<AccessControlPolicy><AccessControlList><Grant><Grantee><URI>http://acs.amazonaws.com/groups/global/AllUsers</URI></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

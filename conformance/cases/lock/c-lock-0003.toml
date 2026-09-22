@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0003"
-schema_version = 1
+schema_version = 3
 title = "A COMPLIANCE Years default round-trips, and Years is not rewritten as Days"
 rationale = """
 Years and Days are two spellings of a period and only one of them was sent. A store that normalised seven years into 2555 days would answer an auditor a number the caller never wrote, and the difference is not cosmetic: leap years make the two disagree, so a document rewritten on the way in is a retention period silently shortened. The golden pins the spelling that came back."""
@@ -24,7 +24,8 @@ name = "put-compliance-years"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock?object-lock"
-headers = { "content-type" = "application/xml", "content-md5" = "LTLMRqUccrT+m7oL7E7aLQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Years>7</Years></DefaultRetention></Rule></ObjectLockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0011"
-schema_version = 1
+schema_version = 3
 title = "Deleting a configured bucket's lifecycle answers 204, and the next read answers the family's 404"
 rationale = """
 Teardown is a sequence, and both halves carry meaning: the delete's unconditional 204 says the document is gone, and the read's NoSuchLifecycleConfiguration says the bucket is fine and simply unconfigured. A delete that answered 200 with a body, or a follow-up read that answered an empty 200, would each tell automation the configuration still exists in some form."""
@@ -30,7 +30,8 @@ name = "put-first"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "ATR8BU7QlQFzvolRzIZUiA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><ID>expire-logs</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0031"
-schema_version = 1
+schema_version = 3
 title = "An x-amz-acl sent with an empty value is a 400, not a silent private"
 rationale = """
 An empty header is what a client sends when the value it meant to interpolate was missing, and "private" is the value a permissive parser would fall back to. Falling back is wrong in both directions: on a bucket that was public it silently revokes access, and on one that was private it reports a change that never happened. The refusal is what lets the caller see its own bug."""
@@ -21,7 +21,8 @@ name = "conf-acl"
 [request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-acl" = "" }
+headers = { "x-amz-acl" = "" }
+content_md5 = "computed"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]

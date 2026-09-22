@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0021"
-schema_version = 1
+schema_version = 3
 title = "A rule with neither a Filter nor a legacy Prefix is refused as MalformedXML"
 rationale = """
 A rule with no scope says nothing about which objects it applies to, and the two failure modes of guessing are both destructive: applies-to-nothing silently disables the retention the client wrote, applies-to-everything expires data the client never scoped. The document is refused so the client states its scope — an empty Filter is the explicit spelling for everything."""
@@ -25,7 +25,8 @@ name = "no-scope"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "DIGqYU5Jt4GJIQxPxI7BOA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>scopeless</ID><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

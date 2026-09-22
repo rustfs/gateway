@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0037"
-schema_version = 1
+schema_version = 3
 title = "A preflight from an origin no rule names answers exactly what an unconfigured bucket does"
 rationale = """
 The origin dimension has to be able to refuse on its own, and it has to refuse with the same bytes as every other
@@ -30,7 +30,8 @@ name = "conf-cors-rt"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "rAqMzbtniOyp6dCmIWiViw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

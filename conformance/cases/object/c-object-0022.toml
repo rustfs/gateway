@@ -1,6 +1,6 @@
 [case]
 id = "c-object-0022"
-schema_version = 1
+schema_version = 3
 title = "A delete body carrying a namespace and an element from a later revision is processed, not refused"
 rationale = """
 Every SDK that has ever shipped writes the namespace attribute onto this root, and AWS adds members to this shape without a version bump, so a parser that validates the namespace or rejects an unknown child breaks clients that are newer than the server. The two are asserted together because they are the same mistake — treating the wire shape as closed — and an implementation usually makes both or neither."""
@@ -29,7 +29,8 @@ name = "conf-object"
 [request]
 method = "POST"
 target = "/conf-object?delete"
-headers = { "content-type" = "application/xml", "content-md5" = "VesO8tD2pN1TTdlljYbfcg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [request.body]

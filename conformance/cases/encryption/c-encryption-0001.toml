@@ -1,6 +1,6 @@
 [case]
 id = "c-encryption-0001"
-schema_version = 1
+schema_version = 3
 title = "A minimal AES256 default-encryption document with Content-MD5 is accepted with 200"
 rationale = """
 The family's baseline write: one Rule, one ApplyServerSideEncryptionByDefault, the SSE-S3 algorithm, and the integrity header the operation demands. Everything else in this domain is a variation on this request, so it is pinned first — a deployment that refuses the simplest legal write has no encryption configuration surface at all, and every SDK's put_bucket_encryption call fails at the first attempt."""
@@ -22,7 +22,8 @@ name = "conf-encryption"
 [request]
 method = "PUT"
 target = "/conf-encryption?encryption"
-headers = { "content-type" = "application/xml", "content-md5" = "6vzSAkrj6gUU1ZdQlOJRWQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

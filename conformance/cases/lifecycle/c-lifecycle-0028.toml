@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0028"
-schema_version = 1
+schema_version = 3
 title = "A Status outside the documented pair is stored and echoed rather than refused"
 rationale = """
 The deliberate leniency, pinned so it cannot be tightened by accident: a stored configuration is re-parsed by every future release, and the persistence path fails open — a Status spelling refused tomorrow that was accepted yesterday downgrades the whole document to none and turns retention off silently. The read-back golden proves the value is preserved as sent, not corrected to the canonical spelling, because rewriting stored bytes is a second way to surprise the next parser."""
@@ -30,7 +30,8 @@ name = "lowercase-status"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "c1Eap8yrkhKbxv/VKbUmDA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>lax</ID><Filter><Prefix>lax/</Prefix></Filter><Status>enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

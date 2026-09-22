@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0014"
-schema_version = 1
+schema_version = 3
 title = "A whole-site redirect with no document members is accepted"
 rationale = """
 The other side of the exclusion c-bucketconfig-0049 asserts: RedirectAllRequestsTo alone is a complete and legal website configuration. Without this half, an implementation that refused every document carrying the element would still pass the refusal case."""
@@ -21,7 +21,8 @@ name = "conf-bucketconfig"
 [request]
 method = "PUT"
 target = "/conf-bucketconfig?website"
-headers = { "content-md5" = "4IQ5+dseIIdaFl49jKmIgg==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<WebsiteConfiguration><RedirectAllRequestsTo><HostName>example.com</HostName><Protocol>https</Protocol></RedirectAllRequestsTo></WebsiteConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

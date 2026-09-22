@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0015"
-schema_version = 1
+schema_version = 3
 title = "A tag key or value carrying a character outside the documented set is a 400 InvalidTag"
 rationale = """
 The allowed set is letters, numbers, space and + - = . _ : / @, and the restriction is \
@@ -44,7 +44,8 @@ name = "an-illegal-key-character-is-refused"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging/charset.txt?tagging"
-headers = { "content-md5" = "fHdCTgK3w0nomAG2nhcewQ==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>bad*key</Key><Value>v</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -63,7 +64,8 @@ name = "an-illegal-value-character-is-refused"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging/charset.txt?tagging"
-headers = { "content-md5" = "6QcnzN2CR+nCQQx09Yk4ig==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>k</Key><Value>bad~value</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

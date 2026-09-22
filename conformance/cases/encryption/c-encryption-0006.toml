@@ -1,6 +1,6 @@
 [case]
 id = "c-encryption-0006"
-schema_version = 1
+schema_version = 3
 title = "Configure, delete, read: the delete answers 204 and the read then answers the family's 404"
 rationale = """
 The teardown sequence a real operator runs, held together in one case because its meaning is in the ordering: the delete of an existing document is 204 with no body, and the very next read answers ServerSideEncryptionConfigurationNotFoundError — proof the delete actually removed the document rather than answering 204 over a configuration still in force. A delete that reports success while the KMS default quietly persists is the failure this sequence exists to catch: the operator believes encryption is off, the bucket keeps encrypting to the old key."""
@@ -30,7 +30,8 @@ name = "put"
 [exchanges.request]
 method = "PUT"
 target = "/conf-encryption?encryption"
-headers = { "content-type" = "application/xml", "content-md5" = "6vzSAkrj6gUU1ZdQlOJRWQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

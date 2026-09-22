@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0014"
-schema_version = 1
+schema_version = 3
 title = "A policy body beside x-amz-grant-read is the same 400 InvalidRequest"
 rationale = """
 The exclusion binds the channel, not one header of it. A gateway that checked only x-amz-acl would let all five grant headers through beside a document — and the grant headers are the ones that name individual identities, so that gap silently adds a grantee the body never mentioned. Same request shape as c-acl-0013, different header, so the pair distinguishes a rule about the channel from a rule about one name."""
@@ -21,7 +21,8 @@ name = "conf-acl"
 [request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-type" = "application/xml", "content-md5" = "fBaaRmvJGD60XAttQUgMKQ==", "x-amz-grant-read" = 'id="9c11ab5a4d8e37f0b2c6d19e4a730f85c2b6d4a1e93f70c58b2d6a4e1c93f705"' }
+headers = { "content-type" = "application/xml", "x-amz-grant-read" = 'id="9c11ab5a4d8e37f0b2c6d19e4a730f85c2b6d4a1e93f70c58b2d6a4e1c93f705"' }
+content_md5 = "computed"
 body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

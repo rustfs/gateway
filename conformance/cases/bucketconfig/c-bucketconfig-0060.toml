@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0060"
-schema_version = 1
+schema_version = 3
 title = "A bare Enabled versioning body is not a configuration document"
 rationale = """
 s3s, built with its `minio` feature, accepts the literal text `Enabled` as a whole versioning body, on the premise that MinIO sends one. No client this project has examined does: minio-go and mc marshal the XML document, and MinIO's own server decodes the versioning body as XML and nothing else. The gateway therefore keeps the AWS contract — the body is the document — and this is the case that states it, so that accepting the literal is a decision someone makes with a consumer in hand rather than a leniency that arrives with a codec change. The Content-MD5 is the correct digest of the seven-byte body on purpose: the refusal must come from the document, not from the integrity claim that c-bucketconfig-0035 already covers. The accepting half of the pair is c-bucketconfig-0001, the same status spelled as XML."""
@@ -33,7 +33,8 @@ name = "conf-bucketconfig"
 [request]
 method = "PUT"
 target = "/conf-bucketconfig?versioning"
-headers = { "content-md5" = "ANI6duQ7Rtrp7Hqp3L67Mg==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = 'Enabled' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

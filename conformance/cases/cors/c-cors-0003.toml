@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0003"
-schema_version = 1
+schema_version = 3
 title = "Every list member of a rule round-trips as repeated singular elements, byte for byte"
 rationale = """
 One rule carrying three methods, two origins, two allowed headers and an expose header exercises all four flattened list members at once. Each is spelled as a repeated singular element — AllowedMethod, AllowedOrigin, AllowedHeader, ExposeHeader — and a codec that wrapped any one of them, or collapsed the repeats to the first value, would drop policy the operator wrote: a lost AllowedMethod turns a permitted request into a browser-side failure with no server-side symptom beyond one warn line."""
@@ -30,7 +30,8 @@ name = "put-full-rule"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "TacodPy7vSOGI7D2MMDw+w==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedHeader>x-requested-with</AllowedHeader><AllowedHeader>content-type</AllowedHeader><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedMethod>DELETE</AllowedMethod><AllowedOrigin>https://a.example.com</AllowedOrigin><AllowedOrigin>https://b.example.com</AllowedOrigin><ExposeHeader>x-amz-request-id</ExposeHeader></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

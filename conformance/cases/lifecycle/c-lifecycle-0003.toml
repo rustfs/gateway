@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0003"
-schema_version = 1
+schema_version = 3
 title = "An expiration measured in days survives the round trip byte for byte"
 rationale = """
 Days is the member the scanner reads to decide when data is destroyed, so the round trip has to preserve the number exactly — a document that comes back reordered or renumbered is a different retention policy wearing the same id. The byte-level golden also pins the member order inside a rule, which is what keeps two implementations of this family from producing two spellings of one configuration."""
@@ -25,7 +25,8 @@ name = "put-days"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "xBFFmE7YAS89cbx32H9Qvg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>logs</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

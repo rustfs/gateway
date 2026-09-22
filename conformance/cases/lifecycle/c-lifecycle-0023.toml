@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0023"
-schema_version = 1
+schema_version = 3
 title = "An expiration naming both Days and Date is refused as MalformedXML"
 rationale = """
 Days, Date and ExpiredObjectDeleteMarker are three different answers to when a rule fires, and a document naming two of them has no defined winner: whichever one an implementation picked, the other is a retention policy silently discarded. The refusal is the only reading under which every implementation agrees on what the stored document means."""
@@ -25,7 +25,8 @@ name = "days-and-date"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "NVVxymgL13cpNee4qkb+Yg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Date>2030-01-01T00:00:00.000Z</Date><Days>30</Days></Expiration><ID>both</ID><Filter><Prefix>data/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

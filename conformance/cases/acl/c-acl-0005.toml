@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0005"
-schema_version = 1
+schema_version = 3
 title = "A grantee whose xsi:type contradicts its members is read by its members"
 rationale = """
 The written document says Group and carries an ID, which is a document AWS would not have produced. The reader this project ships exposes no XML attributes at all, so the discriminator is derived from the identifying member instead — and the read-back proves which of the two won. Recorded as a case rather than left implicit because it is a real difference from AWS, and because the alternative reading (trusting a Group attribute over a canonical id) would answer a document whose URI element does not exist."""
@@ -29,7 +29,8 @@ name = "write-contradictory-grantee"
 [exchanges.request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-type" = "application/xml", "content-md5" = "5I4b41xmmoAuJ0OAjpUXfw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group"><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Grantee><Permission>WRITE_ACP</Permission></Grant></AccessControlList></AccessControlPolicy>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

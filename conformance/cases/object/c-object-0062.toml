@@ -2,7 +2,7 @@
 
 [case]
 id = "c-object-0062"
-schema_version = 1
+schema_version = 3
 title = "A DeleteObjects body naming exactly 1000 keys is accepted"
 rationale = """
 The cap is 1000 keys inclusive. A boundary test that only shows 1001 refused could pass with a cap set anywhere below it; this case pins the other side, so an off-by-one in either direction turns one of the pair red. Quiet mode keeps the answer to the errors alone, and a delete of keys that are not there has none."""
@@ -26,7 +26,8 @@ name = "conf-object"
 [request]
 method = "POST"
 target = "/conf-object?delete"
-headers = { "content-type" = "application/xml", "content-md5" = "sGC4W074Zf5ZDG8s6CCG4g==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { file = "fixtures/object/one-thousand-keys.xml" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

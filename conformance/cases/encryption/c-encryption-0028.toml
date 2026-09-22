@@ -1,6 +1,6 @@
 [case]
 id = "c-encryption-0028"
-schema_version = 1
+schema_version = 3
 title = "A BlockedEncryptionTypes entry outside every EncryptionType spelling is refused as MalformedXML"
 rationale = """
 SSE-KMS looks like a plausible encryption type but is not an EncryptionType value at all. The wrapper is a registered element, so it is decoded rather than refused as unknown, and the value inside it still has to come from the closed set. This pairs with c-encryption-0027, which covers a value the enumeration accepts but this wrapper does not. Together they show that the refusal comes from the value and not from the wrapper's presence: c-encryption-0011 and c-encryption-0025 store the same wrapper with documented values."""
@@ -21,7 +21,8 @@ name = "conf-encryption"
 [request]
 method = "PUT"
 target = "/conf-encryption?encryption"
-headers = { "content-type" = "application/xml", "content-md5" = "Dxz7CzhB27BfY/WWbS76hg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><BlockedEncryptionTypes><EncryptionType>SSE-KMS</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

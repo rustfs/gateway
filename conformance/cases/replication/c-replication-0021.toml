@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0021"
-schema_version = 1
+schema_version = 3
 title = "A rule with a Filter but no Priority is refused as InvalidRequest"
 rationale = """
 The documentation is explicit: a configuration that adds the Filter element must also add Priority. The member exists because V2 rules can overlap — two filters can match one object — and the priority is what makes the engine's choice deterministic. A stored V2 rule without one is a conflict deferred to replication time, which is the worst place to discover it."""
@@ -21,7 +21,8 @@ name = "conf-replication"
 [request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "NKgY0Hfb0jEaG8WA5BaeLA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Filter><Prefix>docs/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0038"
-schema_version = 1
+schema_version = 3
 title = "A preflight for a method the matched origin's rule does not name is refused"
 rationale = """
 The method dimension has to refuse on its own too, and this is the dimension where a permissive answer does damage:
@@ -29,7 +29,8 @@ name = "conf-cors-rt"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "rAqMzbtniOyp6dCmIWiViw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

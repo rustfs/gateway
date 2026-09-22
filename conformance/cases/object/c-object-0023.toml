@@ -1,6 +1,6 @@
 [case]
 id = "c-object-0023"
-schema_version = 1
+schema_version = 3
 title = "An empty Key element in a delete body is refused rather than read as a key"
 rationale = """
 An empty element and an absent one look identical to a parser that maps missing text to the empty string, and the empty string is not a key any object can have. The failure this guards against is not a crash: it is a request that reports a successful delete of a key that never existed and could not exist, which is indistinguishable to the caller from the delete they asked for."""
@@ -24,7 +24,8 @@ name = "conf-object"
 [request]
 method = "POST"
 target = "/conf-object?delete"
-headers = { "content-type" = "application/xml", "content-md5" = "D4u8Yz2FKBjaKmHO7IlgxQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<Delete><Object><Key></Key></Object></Delete>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

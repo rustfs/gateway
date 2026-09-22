@@ -4,7 +4,7 @@
 
 [case]
 id = "c-lifecycle-0034"
-schema_version = 1
+schema_version = 3
 title = "A raw U+000B in <Prefix> is refused rather than stored and echoed"
 rationale = """
 The same rule as the identifier, on a different kind of member: a key prefix is caller-chosen free text, and the vertical tab is the C0 control most often mistaken for legal whitespace because tab and newline are. It is not — XML 1.0 admits exactly tab, newline and carriage return — so a prefix carrying one has no spelling in any document, escaped or raw."""
@@ -31,7 +31,8 @@ name = "conf-lifecycle"
 [request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "8mC/s7hgdo7V0Gt4WpQxPQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<LifecycleConfiguration><Rule><ID>logs</ID><Status>Enabled</Status><Filter><And><Prefix>logs\u000B/</Prefix><Tag><Key>team</Key><Value>ops</Value></Tag></And></Filter><Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

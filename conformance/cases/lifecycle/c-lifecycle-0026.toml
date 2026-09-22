@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0026"
-schema_version = 1
+schema_version = 3
 title = "A document with a thousand and one rules is refused with 400 in bounded time"
 rationale = """
 The refusing side of the rule cap, and a bounded-resource assertion at once: the document must be refused after counting, not stored truncated — a silently dropped thousand-first rule is a retention policy the client believes exists — and the refusal must arrive in bounded time on a body this large, because the cap is also what makes rule-count a closed resource."""
@@ -25,7 +25,8 @@ name = "thousand-and-one"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "nxZx+B6QiQHC/0tZG/iDDw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { file = "fixtures/lifecycle/thousand-and-one-rules.xml" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

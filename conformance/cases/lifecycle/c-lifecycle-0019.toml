@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0019"
-schema_version = 1
+schema_version = 3
 title = "A Filter carrying two direct children is refused as MalformedXML"
 rationale = """
 Two sibling conditions in a bare Filter are two contradictory scopes with no defined combination — AND and OR are both plausible readings, and implementations that guessed have shipped both. The And element exists precisely so the client states which one it means, so the document is refused rather than interpreted."""
@@ -25,7 +25,8 @@ name = "two-children"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "ZRuSk01g8RhDXObnJSx1DA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>bad</ID><Filter><Prefix>logs/</Prefix><Tag><Key>env</Key><Value>prod</Value></Tag></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

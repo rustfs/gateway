@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0029"
-schema_version = 1
+schema_version = 3
 title = "Non-numeric, overflowing and unparsable member values are 400 — never a panic, never a wrap"
 rationale = """
 Integer and timestamp members are where a decoder crashes or silently wraps: a twenty-digit Days must not overflow into an arbitrary retention, a word must not take the process down, and a malformed Date must not be guessed at. Each arrives as a 400 naming the member, with bounded response time, which is the assertion that the parser refused rather than malfunctioned."""
@@ -25,7 +25,8 @@ name = "non-numeric-days"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "iJasTStqv/JMu+yB/htbXw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>thirty</Days></Expiration><ID>w</ID><Filter><Prefix>a/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -53,7 +54,8 @@ name = "beyond-i32-days"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "hZ01bR1VhEl2JT0BAJWN3Q==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>99999999999999999999</Days></Expiration><ID>w</ID><Filter><Prefix>a/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -84,7 +86,8 @@ name = "unparsable-date"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "TQUHT7vbA+hKO5KsUrjdCw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Date>tomorrow</Date></Expiration><ID>w</ID><Filter><Prefix>a/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

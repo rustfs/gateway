@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0011"
-schema_version = 1
+schema_version = 3
 title = "PutObjectTagging with eleven tags is a 400 InvalidTag"
 rationale = """
 The object ceiling is ten, and it is a protocol limit rather than a storage one: IAM policy \
@@ -43,7 +43,8 @@ name = "eleven-tags-are-refused"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging/eleven.txt?tagging"
-headers = { "content-md5" = "Ei0JUeii9NEQQ/GvSatyDQ==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>k0</Key><Value>v</Value></Tag><Tag><Key>k1</Key><Value>v</Value></Tag><Tag><Key>k2</Key><Value>v</Value></Tag><Tag><Key>k3</Key><Value>v</Value></Tag><Tag><Key>k4</Key><Value>v</Value></Tag><Tag><Key>k5</Key><Value>v</Value></Tag><Tag><Key>k6</Key><Value>v</Value></Tag><Tag><Key>k7</Key><Value>v</Value></Tag><Tag><Key>k8</Key><Value>v</Value></Tag><Tag><Key>k9</Key><Value>v</Value></Tag><Tag><Key>k10</Key><Value>v</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

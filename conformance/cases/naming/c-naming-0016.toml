@@ -2,7 +2,7 @@
 #
 [case]
 id = "c-naming-0016"
-schema_version = 1
+schema_version = 3
 title = "A key naming a traversal inside a DeleteObjects body is refused"
 rationale = """
 DeleteObjects names its keys in the request body and nowhere else, so a floor that governed the request path alone would be a floor with a door in it — and the operation behind that door deletes things. The same rule that refuses a traversal in the path refuses one here, at the point the body element is read, so no key in the batch reaches the backend."""
@@ -37,7 +37,8 @@ body = { utf8 = "one" }
 method = "POST"
 target = "/conf-naming?delete"
 # The integrity header this operation requires; the value is md5 of the body below.
-headers = { "content-type" = "application/xml", "content-md5" = "EwfibNzab1Pr9Lcm4bdd5A==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<Delete><Object><Key>../../etc/passwd</Key></Object></Delete>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

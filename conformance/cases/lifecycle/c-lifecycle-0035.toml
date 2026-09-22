@@ -4,7 +4,7 @@
 
 [case]
 id = "c-lifecycle-0035"
-schema_version = 1
+schema_version = 3
 title = "A raw U+0000 in a filter <Key> is refused rather than stored and echoed"
 rationale = """
 A filter tag key reaches the same refusal as its siblings, which is the point: the defect this pins was that one of the four string members of this document was refused and three were not, and a member fixed alone reproduces the asymmetry. NUL is the one C0 control several implementations special-case, so it is the one most likely to be handled by a separate path."""
@@ -31,7 +31,8 @@ name = "conf-lifecycle"
 [request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "RYiVuJlxt2Ge7GC2W584Sw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<LifecycleConfiguration><Rule><ID>logs</ID><Status>Enabled</Status><Filter><And><Prefix>logs/</Prefix><Tag><Key>te\u0000am</Key><Value>ops</Value></Tag></And></Filter><Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

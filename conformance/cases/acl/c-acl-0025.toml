@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0025"
-schema_version = 1
+schema_version = 3
 title = "Elements this release does not know are skipped, at the root and inside a grant"
 rationale = """
 An ACL request body is request XML, and AWS's forward-compatibility rule applies to it: a document written by a newer SDK has to remain storable. Refusing it would make a client's own upgrade break a gateway that had not upgraded, which is a failure with no owner. Two unknown elements at two depths, because a decoder that skipped unknown children of the root and refused unknown children of a grant would satisfy a case with only the first."""
@@ -29,7 +29,8 @@ name = "write-with-unknown-elements"
 [exchanges.request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-type" = "application/xml", "content-md5" = "dAVRSr2cz57Vg2paipvjaw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><FutureSetting>whatever a later SDK sends</FutureSetting><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Grantee><Permission>FULL_CONTROL</Permission><FutureGrantOption>on</FutureGrantOption></Grant></AccessControlList></AccessControlPolicy>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

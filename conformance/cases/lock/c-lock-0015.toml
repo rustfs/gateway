@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0015"
-schema_version = 1
+schema_version = 3
 title = "A retention write with an empty body is refused as MalformedXML, never defaulted"
 rationale = """
 An empty body silently accepted is a retention set to whatever the decoder defaults to, which is a protection decision nobody made and nobody can see they made. Upstream shipped exactly this: the retention and legal-hold writes took an empty body without complaint. The digest is present and correct here so that the refusal is provably about the document rather than about integrity."""
@@ -27,7 +27,8 @@ body = { utf8 = "payload" }
 [request]
 method = "PUT"
 target = "/conf-lock/doc.txt?retention"
-headers = { "content-type" = "application/xml", "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

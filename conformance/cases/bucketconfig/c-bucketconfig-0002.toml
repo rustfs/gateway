@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0002"
-schema_version = 1
+schema_version = 3
 title = "A versioned bucket reads back Status Enabled under an xmlns-bearing root"
 rationale = """
 The read-back is where the stored state becomes observable, and byte comparison is the only assertion that notices a missing xmlns or a renamed element. A strict client refuses an unnamespaced root outright, so an implementation that stored the state correctly and rendered it without the namespace would look correct to every structural assertion and fail every real SDK."""
@@ -29,7 +29,8 @@ name = "write"
 [exchanges.request]
 method = "PUT"
 target = "/conf-bucketconfig?versioning"
-headers = { "content-md5" = "8qj8HSeDu3APPMQZVG06WQ==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

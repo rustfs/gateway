@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0002"
-schema_version = 1
+schema_version = 3
 title = "A stored two-rule document reads back as flattened CORSRule siblings under an xmlns-bearing root"
 rationale = """
 The read-back is where the flattened shape becomes observable: every SDK parses CORSRule as repeated children of the CORSConfiguration root, so a serializer that introduces a wrapper element returns a document in which every SDK finds zero rules — the configuration is silently invisible rather than wrong. The root's xmlns is pinned for the same reason: strict parsers refuse an unnamespaced root. Byte-level comparison is the only assertion that notices either."""
@@ -30,7 +30,8 @@ name = "put-two-rules"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "xK6xhRX2LEuA0S5ReATVhg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedMethod>POST</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

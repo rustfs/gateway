@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0031"
-schema_version = 1
+schema_version = 3
 title = "A bypass header sent twice is refused, whichever line says true, and nothing is stored"
 rationale = """
 Two field lines for x-amz-bypass-governance-retention are two answers to the one question that decides whether GOVERNANCE protection may be weakened. Honouring either line lets the order in which some layer happens to read them decide a bypass, which is the s3s#176 class of ambiguity. The lines here are True and false, each a valid spelling on its own, so the refusal can only come from the repetition. The read-back proves the refused write stored nothing."""
@@ -41,7 +41,8 @@ name = "write-with-two-bypass-lines"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock/doc.txt?retention"
-headers = { "content-type" = "application/xml", "content-md5" = "nRP4r9dIhDgQ95myRGb8sw==", "x-amz-bypass-governance-retention" = ["True", "false"] }
+headers = { "content-type" = "application/xml", "x-amz-bypass-governance-retention" = ["True", "false"] }
+content_md5 = "computed"
 body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

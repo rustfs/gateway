@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0019"
-schema_version = 1
+schema_version = 3
 title = "bucket-owner-full-control on a bucket is a 400 InvalidArgument"
 rationale = """
 The mirror of c-acl-0018 across the other boundary of the split set, and the direction a union would also let through. A bucket has no bucket owner distinct from its own owner, so the value describes nothing here; storing it would produce a policy whose meaning depends on a resource relationship that does not exist."""
@@ -21,7 +21,8 @@ name = "conf-acl"
 [request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-acl" = "bucket-owner-full-control" }
+headers = { "x-amz-acl" = "bucket-owner-full-control" }
+content_md5 = "computed"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]

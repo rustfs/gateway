@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0020"
-schema_version = 1
+schema_version = 3
 title = "A Permission outside the five is a 400 MalformedXML"
 rationale = """
 This is the one place the family is deliberately stricter than its lenient siblings. Elsewhere an unknown enumeration value is stored and echoed, because a stored configuration re-parsed by a later release must not become unreadable. A permission is different: nothing in this project evaluates an ACL, so a stored FULL_ACCESS would sit in the document reading like a grant and enforcing as nothing, and the caller would have no way to discover that its request had no effect."""
@@ -21,7 +21,8 @@ name = "conf-acl"
 [request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-type" = "application/xml", "content-md5" = "ct7QdvupTLW6CS6UgnLHCw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID></Grantee><Permission>FULL_ACCESS</Permission></Grant></AccessControlList></AccessControlPolicy>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

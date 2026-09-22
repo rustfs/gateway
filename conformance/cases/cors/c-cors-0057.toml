@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0057"
-schema_version = 1
+schema_version = 3
 title = "A repeated requested-headers field is refused"
 rationale = "Selecting one of two lines would let an intermediary decide which requested headers are authorised."
 polarity = "negative"
@@ -20,7 +20,8 @@ name = "conf-cors-rt"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "zQH2qoeTIChLyIT5Hii1aQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedHeader>x-amz-*</AllowedHeader><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 [exchanges.expect]

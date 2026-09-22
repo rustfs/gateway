@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0022"
-schema_version = 1
+schema_version = 3
 title = "A lowercase legal-hold status is out of the set and is refused"
 rationale = """
 ON and OFF are the two values AWS defines, in upper case, and a lowercase on is a hold no enforcement path will match. The direction of the failure is what makes it worth a case: a client that meant to place a hold gets a 200, records the hold as placed, and the object is deletable — which is discovered when somebody deletes it."""
@@ -27,7 +27,8 @@ body = { utf8 = "payload" }
 [request]
 method = "PUT"
 target = "/conf-lock/doc.txt?legal-hold"
-headers = { "content-type" = "application/xml", "content-md5" = "fP6TFkWNKasDa+TpyeHybQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LegalHold><Status>on</Status></LegalHold>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

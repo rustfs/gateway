@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0022"
-schema_version = 1
+schema_version = 3
 title = "An expiration date that is not midnight UTC is refused as 400 InvalidArgument"
 rationale = """
 The midnight constraint is what makes a date-based rule deterministic: rounding an afternoon timestamp — up or down — moves the expiry across a day boundary, and the client cannot tell which day its data dies on. The document is refused rather than rounded, naming the constraint, so the fix happens in the client's serializer where the bug is."""
@@ -25,7 +25,8 @@ name = "afternoon-date"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "BYPvc0qLtp+TiP+RwcELUg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Date>2030-01-01T12:34:56.000Z</Date></Expiration><ID>bad-date</ID><Filter><Prefix>data/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

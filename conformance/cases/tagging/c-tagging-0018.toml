@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0018"
-schema_version = 1
+schema_version = 3
 title = "PutBucketTagging with a body rooted at TagSet is a 400 MalformedXML"
 rationale = """
 The wrapped shape cuts both ways: a client that flattens the document — sending TagSet as the \
@@ -39,7 +39,8 @@ name = "the-wrong-root-is-refused"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging?tagging"
-headers = { "content-md5" = "57/rIrSZ0GUeMuLMIXm+wQ==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

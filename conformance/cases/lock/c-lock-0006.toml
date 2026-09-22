@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0006"
-schema_version = 1
+schema_version = 3
 title = "A legal-hold document is rooted at LegalHold, not at the shape name, in both directions"
 rationale = """
 The retention root mismatch again on the second object-level document: the wire root is LegalHold while the published structure is ObjectLockLegalHold. A hold that cannot be read back is a hold an operator cannot verify, and verifying a hold is the whole reason the read exists."""
@@ -35,7 +35,8 @@ name = "put-hold-on"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock/doc.txt?legal-hold"
-headers = { "content-type" = "application/xml", "content-md5" = "oK1+ndJbG6HuGA87LDxznw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LegalHold><Status>ON</Status></LegalHold>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

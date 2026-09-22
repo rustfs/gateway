@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0022"
-schema_version = 1
+schema_version = 3
 title = "A rule with a Filter but no DeleteMarkerReplication is refused as InvalidRequest"
 rationale = """
 The second member the V2 schema demands beside a Filter: V1 and V2 handle delete markers differently, so a V2 rule must say which behaviour it wants rather than inherit whichever the engine assumes. The refusal is the documented one, and it is cheaper than the alternative — a stored rule whose delete-marker behaviour changes meaning with the engine's default."""
@@ -26,7 +26,8 @@ name = "conf-replication"
 [request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "Vc7VLwridcS+Tgk+4i6zTQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Priority>1</Priority><Filter><Prefix>docs/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

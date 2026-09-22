@@ -1,6 +1,6 @@
 [case]
 id = "c-authz-0002"
-schema_version = 1
+schema_version = 3
 title = "DeleteObjects authorizes every key in its body"
 rationale = "Three independently named keys must all survive resource derivation before the batch handler runs."
 polarity = "positive"
@@ -27,7 +27,8 @@ body = { utf8 = "2" }
 [request]
 method = "POST"
 target = "/authz-delete?delete"
-headers = { "content-type" = "application/xml", "content-md5" = "tH2y1HDadGbkCeHmdoFWrQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<Delete><Object><Key>one</Key></Object><Object><Key>two</Key></Object><Object><Key>absent</Key></Object></Delete>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

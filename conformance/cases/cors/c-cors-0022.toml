@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0022"
-schema_version = 1
+schema_version = 3
 title = "Unknown elements and a namespaced root are skipped, and the stored document keeps only the known members"
 rationale = """
 The lenient read is a durability promise, not a convenience: a CORS document is stored configuration, re-parsed by every future release, and AWS itself writes members this implementation has not modelled yet. A decoder that turned strict would refuse the stored document on the next read and cross-origin access would silently shut off — a failure visible only in end users' browser consoles. This case would go red if leniency were removed, which is exactly the change it exists to block. The read-back proves the unknowns are skipped rather than stored."""
@@ -30,7 +30,8 @@ name = "put-with-unknowns"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "WXboqBnWtHmOPrCF65FdYA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin><FutureKnob>on</FutureKnob></CORSRule><AnalyticsHint>ignored</AnalyticsHint></CORSConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0025"
-schema_version = 1
+schema_version = 3
 title = "A retention write on a bucket without object lock is refused as InvalidRequest"
 rationale = """
 Per-object lock state only means something inside a lock-enabled bucket, so accepting the write elsewhere stores a protection promise no enforcement path will ever read. The client sees a 200 and stops worrying about the object. The code is InvalidRequest rather than a not-found because the bucket is there: what is missing is the configuration the request presupposes."""
@@ -26,7 +26,8 @@ body = { utf8 = "payload" }
 [request]
 method = "PUT"
 target = "/conf-lock/doc.txt?retention"
-headers = { "content-type" = "application/xml", "content-md5" = "nRP4r9dIhDgQ95myRGb8sw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

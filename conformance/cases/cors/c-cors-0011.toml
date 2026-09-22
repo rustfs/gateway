@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0011"
-schema_version = 1
+schema_version = 3
 title = "Delete answers 204 and the next read answers the family's own 404"
 rationale = """
 The teardown lifecycle in one case: a configured bucket, a 204 delete, and a read that now answers NoSuchCORSConfiguration. The delete's 204 must carry no body, and the follow-up read must answer the operation-specific code rather than a generic 404 or a 200 with an empty document — automation that tears down CORS branches on exactly this sequence to confirm the teardown took."""
@@ -30,7 +30,8 @@ name = "configure"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "TQGnXRmhRWe+y44O3yYpVw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

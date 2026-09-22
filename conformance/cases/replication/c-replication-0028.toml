@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0028"
-schema_version = 1
+schema_version = 3
 title = "Two rules with the same ID are refused as InvalidArgument"
 rationale = """
 The ID is documented as a unique identifier, and its uniqueness is what makes a rule addressable — monitoring reports, engine diagnostics and operator edits all name rules by ID, and two rules under one name make every such reference ambiguous. Two anonymous rules remain legal: uniqueness binds ids, not their absence."""
@@ -21,7 +21,8 @@ name = "conf-replication"
 [request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "lCnNjmhEAdVJClt/bnu52w==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>twin</ID><Prefix>a/</Prefix><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule><Rule><ID>twin</ID><Prefix>b/</Prefix><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-two</Bucket></Destination></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

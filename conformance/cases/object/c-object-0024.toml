@@ -1,6 +1,6 @@
 [case]
 id = "c-object-0024"
-schema_version = 1
+schema_version = 3
 title = "A quiet multi-object delete reports the failures and stays silent about the successes"
 rationale = """
 Quiet mode exists because the successful half of a thousand-key delete is a response body nobody reads, and a server that ignores the flag sends it anyway. The assertion is byte-exact on the result document because the observable difference between honouring the flag and ignoring it is entirely in which elements the body carries."""
@@ -29,7 +29,8 @@ body = { utf8 = "hello world" }
 [request]
 method = "POST"
 target = "/conf-object?delete"
-headers = { "content-type" = "application/xml", "content-md5" = "4khUp8Qkm2YBU7Svpeh5Pg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<Delete><Quiet>true</Quiet><Object><Key>batch/one</Key></Object></Delete>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

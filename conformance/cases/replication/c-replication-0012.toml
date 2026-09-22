@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0012"
-schema_version = 1
+schema_version = 3
 title = "Configure, delete, read: the delete answers 204 and the read then answers the family's 404"
 rationale = """
 The teardown sequence a real operator runs, held together in one case because its meaning is in the ordering: the delete of an existing document is 204 with no body, and the very next read answers ReplicationConfigurationNotFoundError — proof the delete actually removed the document rather than answering 204 over a configuration still in force. A delete that reports success while the rules quietly persist is the failure this sequence exists to catch: the operator believes replication is off, and the bucket keeps shipping every new object to the old destination."""
@@ -29,7 +29,8 @@ name = "put"
 [exchanges.request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "DIOCQC8GOqnVF/QOP0EZOg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

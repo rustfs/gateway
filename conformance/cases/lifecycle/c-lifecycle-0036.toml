@@ -4,7 +4,7 @@
 
 [case]
 id = "c-lifecycle-0036"
-schema_version = 1
+schema_version = 3
 title = "The escaped spelling of U+0001 in <Value> is refused with the raw byte"
 rationale = """
 A guard written against the raw byte alone is bypassed by writing the same character as a reference. This reader resolves the five predefined entities and numeric character references by name, so the escaped form and the raw byte arrive at a decoder as one value; XML 1.0 makes a reference to a character outside its Char production a fatal failure for exactly that reason. The refusal has to cover the spelling, not the byte."""
@@ -31,7 +31,8 @@ name = "conf-lifecycle"
 [request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "oR59Y7M37IRtTmm5t5orcw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<LifecycleConfiguration><Rule><ID>logs</ID><Status>Enabled</Status><Filter><And><Prefix>logs/</Prefix><Tag><Key>team</Key><Value>o&#x1;ps</Value></Tag></And></Filter><Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

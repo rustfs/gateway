@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0054"
-schema_version = 1
+schema_version = 3
 title = "A policy body that is valid JSON but not an object is refused"
 rationale = """
 A policy is a document with a version and a statement list. A JSON array is well formed and is not one, and storing it would put a value in the policy slot that no evaluator can read. The code is the same MalformedPolicy as every other policy refusal, deliberately: a finer code would tell a caller which of the checks it tripped, which is the disclosure the constant messages exist to prevent moved into the Code element."""
@@ -21,7 +21,8 @@ name = "conf-bucketconfig"
 [request]
 method = "PUT"
 target = "/conf-bucketconfig?policy"
-headers = { "content-md5" = "dbG/xvcyUIV2vc2rx1QvyQ==", "content-type" = "application/json" }
+headers = { "content-type" = "application/json" }
+content_md5 = "computed"
 body = { utf8 = '["not","a","policy"]' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

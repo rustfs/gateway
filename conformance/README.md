@@ -12,7 +12,8 @@ looks like on the wire. It contains no Rust code. The runner that executes these
 
 `case.schema.json` was frozen on **2026-08-05** at `schema_version = 1`, before the first line of
 protocol code was written. Schema version 2 adds `connection.concurrent`; the runner continues to
-accept version 1 cases, while a case using the new dimension must opt into version 2. That order is
+accept version 1 cases, while a case using the new dimension must opt into version 2 or later.
+Version 3 adds computed Content-MD5 for resolved request payloads. That order is
 deliberate. A case file is not a test that can be rewritten
 cheaply — it is a record of a behavioural fact, and every case written against a schema is invalidated
 by a change to that schema. Freezing after thirty cases exist means rewriting thirty cases; freezing
@@ -58,6 +59,19 @@ changes `case.schema_version` to `2`, replaces the single-connection `pipeline` 
 delay. The runner opens one fresh socket per exchange, dispatches every request before awaiting a
 response, and returns observations in declaration order. `concurrent` cannot be combined with
 `pipeline`, `reuse`, TLS, backpressure, or idle-time controls.
+
+### Version 2 to version 3 migration
+
+Existing version 1 and 2 cases remain valid. To derive a digest, set `case.schema_version = 3`,
+remove the explicit `Content-MD5` request header, and set `content_md5 = "computed"` in the
+corresponding request table. This applies to both `[request]` and `[exchanges.request]`.
+The runner resolves captures and payload sources, computes the digest of the resulting body bytes,
+and adds the header before signing. Concurrent exchanges remain supported in version 3.
+
+Keep explicit headers in cases that test malformed or incorrect digests. A computed digest cannot
+be combined with an explicit Content-MD5 header, a raw request head, raw chunk instructions, or scripted HTTP/2 frames;
+these combinations fail instead of silently changing the authored wire bytes. Response assertions
+are unchanged by this migration.
 
 ## Why the schema looks like this
 

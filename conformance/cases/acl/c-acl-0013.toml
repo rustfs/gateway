@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0013"
-schema_version = 1
+schema_version = 3
 title = "A policy body beside x-amz-acl is a 400 InvalidRequest"
 rationale = """
 Two channels describing the same permissions, and no rule that says which one wins. Silently preferring either is the worst available answer: a caller that meant public-read and also sent a private document gets one of the two applied and a 200 telling it the other might have been. The refusal is the only response that leaves the bucket's permissions in a state the caller can reason about."""
@@ -21,7 +21,8 @@ name = "conf-acl"
 [request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-type" = "application/xml", "content-md5" = "fBaaRmvJGD60XAttQUgMKQ==", "x-amz-acl" = "public-read" }
+headers = { "content-type" = "application/xml", "x-amz-acl" = "public-read" }
+content_md5 = "computed"
 body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0022"
-schema_version = 1
+schema_version = 3
 title = "Deleting a configured public-access block answers 204 with no body"
 rationale = """
 The delete of a block that exists. Its idempotent twin is c-bucketconfig-0034, and neither is an assertion without the other."""
@@ -24,7 +24,8 @@ name = "write"
 [exchanges.request]
 method = "PUT"
 target = "/conf-bucketconfig?publicAccessBlock"
-headers = { "content-md5" = "njdlwnEoAxGSpOozjhzsJQ==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

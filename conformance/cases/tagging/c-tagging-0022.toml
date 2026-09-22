@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0022"
-schema_version = 1
+schema_version = 3
 title = "DeleteObjectTagging on one version leaves another version's tag set standing"
 rationale = """
 The delete is the clearing path for a tag set, and it is the operation where over-reach is \
@@ -76,7 +76,8 @@ name = "label-the-older-version"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging-untag/doc.txt?tagging&versionId=${capture.first}"
-headers = { "content-md5" = "QTsTDAb4c0VADLNy4ipavA==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -91,7 +92,8 @@ name = "label-the-newer-version-differently"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging-untag/doc.txt?tagging&versionId=${capture.second}"
-headers = { "content-md5" = "Eqjc2dLsYeOiFyCAHNmyhA==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>red</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

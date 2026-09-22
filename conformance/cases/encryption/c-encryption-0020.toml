@@ -1,6 +1,6 @@
 [case]
 id = "c-encryption-0020"
-schema_version = 1
+schema_version = 3
 title = "A body that is not XML at all is refused as MalformedXML, never a 500 and never a 501"
 rationale = """
 The floor under every other refusal in this domain: garbage bytes with a correct integrity header must come back as the client's mistake, a 400 with MalformedXML, on a connection still healthy enough to carry the corrected retry. A 500 here teaches retry loops to hammer the endpoint; a 501 misreports a parse failure as a missing feature. Either way the caller's next action is wrong."""
@@ -22,7 +22,8 @@ name = "conf-encryption"
 [request]
 method = "PUT"
 target = "/conf-encryption?encryption"
-headers = { "content-type" = "application/xml", "content-md5" = "lYCq2x6eUOKaYoAbue1bkw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = 'this is not xml' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

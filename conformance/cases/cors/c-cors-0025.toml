@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0025"
-schema_version = 1
+schema_version = 3
 title = "All three CORS operations on an absent bucket answer 404 NoSuchBucket"
 rationale = """
 The bucket question is settled before the configuration question, in every method: a PUT must not invent a bucket to hang a document on, a GET must say NoSuchBucket rather than NoSuchCORSConfiguration, and a DELETE must not answer its usual unconditional 204 — a 204 for a bucket that is not there tells teardown automation its work landed on something. The three answers differ from the configured-bucket path in exactly one way, the bucket, which is why they are one case."""
@@ -50,7 +50,8 @@ name = "write"
 [exchanges.request]
 method = "PUT"
 target = "/never-created?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "TQGnXRmhRWe+y44O3yYpVw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

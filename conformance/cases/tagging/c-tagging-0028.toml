@@ -5,7 +5,7 @@
 
 [case]
 id = "c-tagging-0028"
-schema_version = 1
+schema_version = 3
 title = "PutObjectTagging with an empty TagSet clears the tags and the read afterwards is a 200 with an empty TagSet"
 rationale = """
 The object half of c-tagging-0005, and it is a separate case because the two scopes answer a \
@@ -54,7 +54,8 @@ name = "label-the-object"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging/cleared.txt?tagging"
-headers = { "content-md5" = "QTsTDAb4c0VADLNy4ipavA==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -69,7 +70,8 @@ name = "the-empty-document-clears-the-labels"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging/cleared.txt?tagging"
-headers = { "content-md5" = "k6PBbu32RmFaV5nRULDSlw==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

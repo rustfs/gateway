@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0010"
-schema_version = 1
+schema_version = 3
 title = "An unknown lock setting is refused without replacing the existing configuration"
 rationale = """
 Security HTTP writes must not silently discard a setting the caller expects to enforce. Establish a known configuration, refuse an unknown field, then read the original configuration. Persisted metadata compatibility is tested separately; this request path must not inherit its leniency."""
@@ -29,7 +29,8 @@ name = "establish-known-configuration"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock?object-lock"
-headers = { "content-type" = "application/xml", "content-md5" = "M6IrJ1mNjBusWYSlmQa7qg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>1</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -44,7 +45,8 @@ name = "put-with-unknown-element"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock?object-lock"
-headers = { "content-type" = "application/xml", "content-md5" = "dztdqSK2mBgefSwTsVPCmQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><FutureMember>x</FutureMember><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Days>30</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

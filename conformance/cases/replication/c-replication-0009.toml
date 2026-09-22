@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0009"
-schema_version = 1
+schema_version = 3
 title = "A ReplicationTime and Metrics pair rounds-trips with its nested Minutes values"
 rationale = """
 S3 Replication Time Control arrives as a pair — the documentation says ReplicationTime must be specified together with a Metrics block — and each half nests a Minutes value whose only documented spelling is 15. The codec stores the pair as sent and enforces no pairing rule of its own: AWS documents the requirement but no refusal code for the unpaired form, and under fail-closed persistence an invented refusal is an availability bug waiting for a stored document to trigger it."""
@@ -29,7 +29,8 @@ name = "put"
 [exchanges.request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "jz7kzksa/X5SfGkfMoBAGg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Priority>1</Priority><Filter><Prefix>rtc/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket><ReplicationTime><Status>Enabled</Status><Time><Minutes>15</Minutes></Time></ReplicationTime><Metrics><Status>Enabled</Status><EventThreshold><Minutes>15</Minutes></EventThreshold></Metrics></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

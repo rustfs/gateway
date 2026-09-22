@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0052"
-schema_version = 1
+schema_version = 3
 title = "A preflight returns the matched rule's complete method list"
 rationale = "The requested method is only one member, so the second member proves Allow-Methods comes from the stored rule."
 polarity = "positive"
@@ -20,7 +20,8 @@ name = "conf-cors-rt"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "4OldDLRD9xdUSu9fzsVH+Q==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 [exchanges.expect]

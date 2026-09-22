@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0026"
-schema_version = 1
+schema_version = 3
 title = "A namespace-prefixed policy body decodes identically to a bare one"
 rationale = """
 Real clients send both spellings of the same document and AWS reads both, so a decoder that matched on the full qualified name would accept one SDK and refuse another for a difference that carries no meaning. The prefix is on every element here, root included, which is the shape a strict XML library produces by default — and the read-back proves the members were found rather than merely that the parse did not fail."""
@@ -24,7 +24,8 @@ name = "write-prefixed-document"
 [exchanges.request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-type" = "application/xml", "content-md5" = "oSaLa01eFp0dI6vIabCciA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<s3:AccessControlPolicy xmlns:s3="http://s3.amazonaws.com/doc/2006-03-01/"><s3:Owner><s3:ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</s3:ID><s3:DisplayName>conformance</s3:DisplayName></s3:Owner><s3:AccessControlList><s3:Grant><s3:Grantee><s3:ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</s3:ID><s3:DisplayName>conformance</s3:DisplayName></s3:Grantee><s3:Permission>FULL_CONTROL</s3:Permission></s3:Grant></s3:AccessControlList></s3:AccessControlPolicy>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

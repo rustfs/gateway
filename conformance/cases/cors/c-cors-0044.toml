@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0044"
-schema_version = 1
+schema_version = 3
 title = "An ordinary GET from an origin no rule names is served with no CORS header at all"
 rationale = """
 The fail-closed direction of the actual-response path. The request itself is legitimate and signed, so refusing it
@@ -35,7 +35,8 @@ body = { utf8 = "hello" }
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "rAqMzbtniOyp6dCmIWiViw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

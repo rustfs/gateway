@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0016"
-schema_version = 1
+schema_version = 3
 title = "A valid JSON policy carrying Content-MD5 is accepted"
 rationale = """
 The policy write is the family's one access-control surface, and the one whose body is JSON rather than XML. The integrity claim matters more here than anywhere else in the band: the body being written decides who may read the bucket, so a truncated one must not be stored. The refusal without the header is c-bucketconfig-0039."""
@@ -21,7 +21,8 @@ name = "conf-bucketconfig"
 [request]
 method = "PUT"
 target = "/conf-bucketconfig?policy"
-headers = { "content-md5" = "KQxrePq5VLbu0TlAegiUEQ==", "content-type" = "application/json" }
+headers = { "content-type" = "application/json" }
+content_md5 = "computed"
 body = { utf8 = '{"Version":"2012-10-17","Statement":[{"Sid":"one","Effect":"Allow","Principal":{"AWS":"arn:aws:iam::111122223333:root"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::conf-bucketconfig/*"}]}' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

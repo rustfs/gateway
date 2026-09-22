@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0021"
-schema_version = 1
+schema_version = 3
 title = "MaxAgeSeconds that is negative, non-numeric or beyond i32 is 400 InvalidArgument — never a panic, never a wrap"
 rationale = """
 An integer member is where a decoder crashes or silently wraps: minus one must not become the largest cache lifetime, a twenty-digit value must not overflow into an arbitrary one, and a word must not take the whole process down. All three arrive as InvalidArgument with a bounded response time, which is the assertion that the parser refused rather than malfunctioned."""
@@ -25,7 +25,8 @@ name = "negative"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "C2KYlxg212hUg2S3zOSYQQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin><MaxAgeSeconds>-1</MaxAgeSeconds></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -50,7 +51,8 @@ name = "non-numeric"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "OdXk8lPW6bu31FImbo/xKw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin><MaxAgeSeconds>never</MaxAgeSeconds></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -75,7 +77,8 @@ name = "beyond-i32"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "93gfIvM55JdgHJOqHpc7eA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin><MaxAgeSeconds>99999999999999999999</MaxAgeSeconds></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

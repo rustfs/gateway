@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0018"
-schema_version = 1
+schema_version = 3
 title = "An unselected lifecycle dialect skips vendor and future elements without losing known members"
 rationale = """
 The lenient HTTP read is a durability promise: a lifecycle document is stored configuration, re-parsed by every future release, and other implementations extend the rule vocabulary. This fixture deliberately selects no vendor dialect, so both MinIO's registered DelMarkerExpiration spelling and an unregistered FutureKnob are skipped while every known member survives. The selected persisted path is exercised separately by rustfs-gateway-dialect-minio, where DelMarkerExpiration round-trips and FutureKnob blocks replacement; keeping this negative control proves that registering one dialect does not silently make its behavior global."""
@@ -35,7 +35,8 @@ name = "put-with-unknowns"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "O5wiQZ4Ne2uNv+p3r2ZkxA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><Expiration><Days>7</Days></Expiration><ID>dialect</ID><Filter><Prefix>del/</Prefix></Filter><Status>Enabled</Status><DelMarkerExpiration><Days>7</Days></DelMarkerExpiration><FutureKnob>on</FutureKnob></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

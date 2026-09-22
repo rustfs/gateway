@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0027"
-schema_version = 1
+schema_version = 3
 title = "A retention write leaves the object bytes alone, because it is not a PutObject"
 rationale = """
 Without a route row of its own this request was claimed by PutObject and the Retention document was stored as the object body: a caller protecting a file destroyed it, with a 200 and no other signal. The assertion is the second exchange rather than the first, because the first was always green — the write reported success either way. Reading the object back is the only thing that told the two apart."""
@@ -30,7 +30,8 @@ name = "put-retention"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock/doc.txt?retention"
-headers = { "content-type" = "application/xml", "content-md5" = "nRP4r9dIhDgQ95myRGb8sw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

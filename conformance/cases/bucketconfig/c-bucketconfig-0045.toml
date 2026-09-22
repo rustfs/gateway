@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0045"
-schema_version = 1
+schema_version = 3
 title = "A Payer outside the documented pair is refused"
 rationale = """
 The payer is a required member, so an unknown value has no reading of the document to fall back to — unlike an unknown notification event, which is stored. The refusal is InvalidArgument rather than MalformedXML because the document is well formed and the value is the problem."""
@@ -21,7 +21,8 @@ name = "conf-bucketconfig"
 [request]
 method = "PUT"
 target = "/conf-bucketconfig?requestPayment"
-headers = { "content-md5" = "xEZwo0f5uUQMN9rjmsCFnw==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<RequestPaymentConfiguration><Payer>Nobody</Payer></RequestPaymentConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0032"
-schema_version = 1
+schema_version = 3
 title = "An ACL write to an object key does not overwrite the object with the policy document"
 rationale = """
 This is the defect the route row exists to retire, and it is data loss rather than a mis-route: PutObject accepts every PUT to an object key, so with no ?acl row the AccessControlPolicy document is stored as the object's body and answered 200. Nothing the client sees is wrong until it reads the object back and finds XML where its data was. The second exchange is the assertion; the first alone would be green either way."""
@@ -34,7 +34,8 @@ name = "write-the-acl"
 [exchanges.request]
 method = "PUT"
 target = "/conf-acl/precious.txt?acl"
-headers = { "content-type" = "application/xml", "content-md5" = "fBaaRmvJGD60XAttQUgMKQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

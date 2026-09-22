@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0027"
-schema_version = 1
+schema_version = 3
 title = "A canned ACL beside a grant header is accepted, because only the body exclusion is documented"
 rationale = """
 The leniency the channel rule stops at. AWS documents the body-versus-headers exclusion and documents no exclusion between the two header spellings, so refusing this combination would be a rule of this project's invention — and an invented refusal on an authorization input is a request a correct client cannot make. The case exists so that the exclusion cannot quietly widen: a gateway that refused everything with more than one ACL header would satisfy c-acl-0013 and c-acl-0014 and fail here."""
@@ -21,7 +21,8 @@ name = "conf-acl"
 [request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-acl" = "private", "x-amz-grant-read" = 'uri="http://acs.amazonaws.com/groups/global/AllUsers"' }
+headers = { "x-amz-acl" = "private", "x-amz-grant-read" = 'uri="http://acs.amazonaws.com/groups/global/AllUsers"' }
+content_md5 = "computed"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]

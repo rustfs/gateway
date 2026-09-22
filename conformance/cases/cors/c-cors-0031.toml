@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0031"
-schema_version = 1
+schema_version = 3
 title = "The first matching rule decides, and its own Max-Age is the one answered"
 rationale = """
 Document order is the operator's statement of precedence. A matcher that scanned for the most specific rule, or that
@@ -30,7 +30,8 @@ name = "conf-cors-rt"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "Wm57jcGGaFeAquqkj5LFDQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://a.example.com</AllowedOrigin><MaxAgeSeconds>10</MaxAgeSeconds></CORSRule><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://b.example.com</AllowedOrigin><MaxAgeSeconds>77</MaxAgeSeconds></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

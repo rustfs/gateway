@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0031"
-schema_version = 1
+schema_version = 3
 title = "A filter tag key of .. is written, read back and accepted again"
 rationale = """
 A tag key is a label, not a path, and AWS's tag alphabet admits the dot — so `..` is a filter tag key a client may send. The pinned model targets Tag.Key at the ObjectKey shape, which is AWS's own modelling shortcut, and typing the member from that shape name made the decoder run the object-key traversal floor over a label: the service wrote `<Key>..</Key>` on the read and answered 400 InvalidArgument to the document it had just written. The third exchange is the assertion — a configuration an operator reads and puts straight back must be accepted — because that read-modify-write cycle is how the defect destroys an installed rule rather than merely rejecting a request."""
@@ -34,7 +34,8 @@ name = "put-dotted-tag"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "GSRCIk8kRmRePSjHTP4SKQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>7</Days></Expiration><ID>dotted-tag</ID><Filter><Tag><Key>..</Key><Value>v</Value></Tag></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -68,7 +69,8 @@ name = "put-what-was-read"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "gEbikS8p/bBavyf2EvLV9A==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '''<?xml version="1.0" encoding="UTF-8"?>
 <LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><Expiration><Days>7</Days></Expiration><ID>dotted-tag</ID><Filter><Tag><Key>..</Key><Value>v</Value></Tag></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>''' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }

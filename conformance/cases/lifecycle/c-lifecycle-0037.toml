@@ -5,7 +5,7 @@
 
 [case]
 id = "c-lifecycle-0037"
-schema_version = 1
+schema_version = 3
 title = "Tab, newline, carriage return and DEL stay legal in every body string member"
 rationale = """
 The four refusals beside this one are satisfied just as well by a rule that rejects every control character, and such a rule would break every caller who stores a tag value with a newline in it. XML 1.0 admits exactly tab, newline and carriage return out of C0, and admits U+007F outright — it is XML 1.1 that requires DEL to be escaped, and S3 speaks 1.0. This case is what stops the refusal widening into a blocklist: it fails if any of the four is refused, and it fails again if the read-back does not return the same bytes. The carriage return is written as a reference on both sides because an XML parser normalises a literal one on input, so the raw spelling would not be a round trip for any implementation."""
@@ -35,7 +35,8 @@ name = "write-the-admitted-controls"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "eBRJVXgPeRlugRSS0AUTkw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<LifecycleConfiguration><Rule><ID>tab\u0009and\u000Anewline</ID><Status>Enabled</Status><Filter><And><Prefix>logs\u007F/</Prefix><Tag><Key>team</Key><Value>carriage&#13;return</Value></Tag></And></Filter><Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

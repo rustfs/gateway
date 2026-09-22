@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0005"
-schema_version = 1
+schema_version = 3
 title = "A retention document is rooted at Retention, not at the shape name, in both directions"
 rationale = """
 The wire root is Retention while the structure AWS publishes is called ObjectLockRetention, and a decoder keyed to the shape name refuses every real client document while an encoder keyed to it returns one no SDK can read. Both halves are asserted here in one round trip, the response byte for byte, because the mismatch is invisible to any assertion weaker than the element name itself."""
@@ -35,7 +35,8 @@ name = "put-retention"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock/doc.txt?retention"
-headers = { "content-type" = "application/xml", "content-md5" = "nRP4r9dIhDgQ95myRGb8sw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0030"
-schema_version = 1
+schema_version = 3
 title = "A retention document rooted at the shape name is refused as the wrong root"
 rationale = """
 The published structure is called ObjectLockRetention and the wire root is Retention, so this body is what a client generated from the model rather than from the request syntax sends. Accepting it would make the root name meaningless and let the other five documents in this family be posted interchangeably; refusing it is what keeps the two names from being treated as one."""
@@ -27,7 +27,8 @@ body = { utf8 = "payload" }
 [request]
 method = "PUT"
 target = "/conf-lock/doc.txt?retention"
-headers = { "content-type" = "application/xml", "content-md5" = "JhXeYivnrFhZ2iexEm4VFQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ObjectLockRetention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></ObjectLockRetention>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

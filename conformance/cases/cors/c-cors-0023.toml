@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0023"
-schema_version = 1
+schema_version = 3
 title = "The hundred-and-first rule is refused with 400, in bounded time"
 rationale = """
 The cap's refusing side. Without it a configuration grows until some other limit fails first — usually the response size of the read-back, which then breaks a different operation than the one at fault. The bounded response time is asserted because the wrong implementation of a cap is one that parses and validates all the rules first and counts them last."""
@@ -22,7 +22,8 @@ name = "conf-cors"
 [request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "pLvtmRui7XWycVFz4q9PXg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { file = "fixtures/cors/hundred-and-one-rules.xml" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

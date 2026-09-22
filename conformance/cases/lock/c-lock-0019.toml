@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0019"
-schema_version = 1
+schema_version = 3
 title = "A default retention naming both Days and Years is refused as MalformedXML"
 rationale = """
 Thirty days and one year are two different answers to how long new objects are protected, and a document naming both has no defined winner. Whichever an implementation picked, the other is a retention policy silently discarded — and the two differ by more than an order of magnitude, so the discard is not a rounding error but the difference between a month and a year of legal exposure."""
@@ -21,7 +21,8 @@ name = "conf-lock"
 [request]
 method = "PUT"
 target = "/conf-lock?object-lock"
-headers = { "content-type" = "application/xml", "content-md5" = "9xjtSiwTPVjJgtJeHQHnDQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>30</Days><Years>1</Years></DefaultRetention></Rule></ObjectLockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

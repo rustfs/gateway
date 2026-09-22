@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0042"
-schema_version = 1
+schema_version = 3
 title = "A legal hold placed on an older version by id lands on that version, not on the current one"
 rationale = """
 The legal-hold twin of c-lock-0040, in the other order: the newer version is written first, so when the hold names the older version by id the two are different objects. A hold that landed on the current version instead would read back ON for the version nobody held and 404 for the one that was, which on a compliance surface is a hold on the wrong data. The held version answers ON and the current one answers that no hold was ever placed on it."""
@@ -73,7 +73,8 @@ name = "hold-the-first-version-by-id"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock-versions/doc.txt?legal-hold&versionId=${capture.first}"
-headers = { "content-type" = "application/xml", "content-md5" = "oK1+ndJbG6HuGA87LDxznw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LegalHold><Status>ON</Status></LegalHold>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
