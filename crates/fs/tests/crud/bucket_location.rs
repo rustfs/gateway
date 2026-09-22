@@ -277,3 +277,41 @@ async fn n_get_bucket_location_is_advertised_by_the_capability_list() {
         "the advertised set does not name the registered operation"
     );
 }
+
+async fn create_with_object_lock(service: &S3Service, bucket: &str, enabled: &'static str) -> rustfs_gateway::WireResponse {
+    let mut headers = http::HeaderMap::new();
+    headers.insert("x-amz-bucket-object-lock-enabled", http::HeaderValue::from_static(enabled));
+    exchange(
+        service,
+        signed_with_headers(http::Method::PUT, &format!("/{bucket}"), Bytes::new(), headers),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn object_lock_creation_is_refused_without_creating_a_bucket() {
+    let root = TestRoot::new();
+    let (_backend, service) = service(&root);
+    let response = create_with_object_lock(&service, "lock-new", "true").await;
+    assert_eq!(response.status(), 501);
+    let head = exchange(&service, signed(http::Method::HEAD, "/lock-new", Bytes::new())).await;
+    assert_eq!(head.status(), 404, "a refused lock request must not create a bucket");
+}
+
+#[tokio::test]
+async fn object_lock_creation_is_refused_for_an_existing_bucket() {
+    let root = TestRoot::new();
+    let (_backend, service) = service(&root);
+    create_bucket(&service, "lock-existing").await;
+    let response = create_with_object_lock(&service, "lock-existing", "true").await;
+    assert_eq!(response.status(), 501, "an existing bucket must not bypass the capability refusal");
+}
+
+#[tokio::test]
+async fn object_lock_false_and_absent_allow_ordinary_bucket_creation() {
+    let root = TestRoot::new();
+    let (_backend, service) = service(&root);
+    let response = create_with_object_lock(&service, "lock-false", "false").await;
+    assert_eq!(response.status(), 200);
+    create_bucket(&service, "lock-absent").await;
+}

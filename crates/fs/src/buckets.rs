@@ -154,6 +154,9 @@ impl Handler<ListBuckets> for FsBackend {
 impl Handler<CreateBucket> for FsBackend {
     async fn call(&self, request: Req<CreateBucket>) -> HandlerResult<CreateBucket> {
         let input = request.input();
+        if input.object_lock_enabled_for_bucket == Some(true) {
+            return Err(HandlerError::not_implemented("the filesystem backend does not support Object Lock"));
+        }
         // Judged before anything is written. A refused constraint that has already created
         // directories leaves a bucket the caller was told does not exist.
         resolve_location_constraint(
