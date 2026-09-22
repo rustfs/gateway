@@ -63,6 +63,8 @@ source "${SCRIPT_DIR}/lib/python.sh"
 PYTHON="$(gateway_python check_mint_report)" || exit 1
 "$PYTHON" - "$REPORT" <<'PYEOF'
 import json
+import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -455,6 +457,41 @@ with tempfile.TemporaryDirectory() as directory:
             failures.append(f"redaction marked nothing in {path.name}")
     if json.loads(evidence.read_text(encoding="utf-8").splitlines()[0]).get("status") != "FAIL":
         failures.append("redaction broke the record it rewrote; the judge could no longer read it")
+
+# Execute the actual workflow body with the runner's default errexit behavior.
+# A reporter failure must publish outputs before the step fails, or the issue
+# condition cannot see the regression on either schedule or manual dispatch.
+workflow = Path(report).parents[2] / ".github/workflows/e2e-mint.yml"
+workflow_text = workflow.read_text(encoding="utf-8")
+suite_step = next(step for step in re.split(r"(?m)^      - ", workflow_text)
+                  if re.search(r"(?m)^        id: suite$", step))
+suite_body = suite_step.split("        run: |\n", 1)[1]
+suite_body = "\n".join(line[10:] for line in suite_body.splitlines())
+for mode, statuses in (("ratchet", (0, 1, 3, 124)), ("record", (0, 3, 124))):
+    for status in statuses:
+        probes += 1
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            (work / "scripts").mkdir()
+            budget = work / "scripts/ci_budget.sh"
+            budget.write_text(f"#!/bin/bash\nexit {status}\n", encoding="utf-8")
+            budget.chmod(0o755)
+            outputs = work / "outputs"
+            summary = work / "summary"
+            body = suite_body.replace("${{ inputs.mode || 'ratchet' }}", mode)
+            result = subprocess.run(
+                ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", body],
+                cwd=work, capture_output=True, text=True, check=False,
+                env={**os.environ, "RUNNER_TEMP": directory,
+                     "GITHUB_OUTPUT": str(outputs), "GITHUB_STEP_SUMMARY": str(summary)},
+            )
+            observed = outputs.read_text() if outputs.exists() else ""
+            expected = f"status={status}\nout={work / 'mint-out'}\n"
+            if result.returncode != status or observed != expected:
+                failures.append(
+                    f"workflow {mode} exit {status}: must preserve exit status and publish "
+                    f"status/out under bash -e; got exit {result.returncode}, outputs {observed!r}"
+                )
 
 if failures:
     for failure in failures:

@@ -89,9 +89,13 @@ jobs:
           mkdir -p "$work" "$out"
           # 90 minutes. The wrapper reports the margin on every run, so the cliff
           # announces itself before it is hit.
-          scripts/ci_budget.sh 5400 "minio mint" \
-            ci/mint/run.sh --mode "$mode" --work "$work" --out "$out"
-          status=$?
+          # Capture failures explicitly: the runner invokes this script with -e.
+          if scripts/ci_budget.sh 5400 "minio mint" \
+            ci/mint/run.sh --mode "$mode" --work "$work" --out "$out"; then
+            status=0
+          else
+            status=$?
+          fi
           echo "status=$status" >>"$GITHUB_OUTPUT"
           echo "out=$out" >>"$GITHUB_OUTPUT"
           if [ -f "$out/summary.md" ]; then
