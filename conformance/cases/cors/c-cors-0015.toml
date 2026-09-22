@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0015"
-schema_version = 1
+schema_version = 3
 title = "An empty request body is 400 MalformedXML, not a stored empty configuration"
 rationale = """
 Zero bytes is what a client sends when its serializer failed, and the two wrong answers are both observed in the wild: a 200 that stores nothing makes the client believe its policy is live, and a 500 turns a client bug into a server incident. MalformedXML with a 400 is the only answer that puts the fault where it is."""
@@ -22,7 +22,8 @@ name = "conf-cors"
 [request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

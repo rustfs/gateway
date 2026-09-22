@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0005"
-schema_version = 1
+schema_version = 3
 title = "A V1 rule with a bare rule-level Prefix and no Priority is still readable and round-trips"
 rationale = """
 The earlier schema is not a compatibility footnote here: replication is the one configuration RustFS parses fail-closed, so a stored V1 document a new release stops reading does not degrade to "feature off" — it makes the bucket unusable. This case pins the V1 form end to end: the rule-level Prefix is accepted without Priority or DeleteMarkerReplication, and the read-back returns it unmodernized, because rewriting stored documents into the newer schema is a second way to surprise the next parser."""
@@ -29,7 +29,8 @@ name = "put"
 [exchanges.request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "To03nMI/VS86asxhg0I32g==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>legacy</ID><Prefix>logs/</Prefix><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

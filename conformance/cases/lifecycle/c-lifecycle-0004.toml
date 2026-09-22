@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0004"
-schema_version = 1
+schema_version = 3
 title = "A midnight-UTC expiration date survives the round trip in the ISO 8601 millisecond form"
 rationale = """
 The Date member is constrained to midnight UTC and rendered with milliseconds; a serializer that drops the fractional part or shifts the zone returns a document whose date no longer matches what the client signed and stored. Pinning the round trip byte for byte is what catches a renderer that re-derives the timestamp instead of preserving the instant."""
@@ -25,7 +25,8 @@ name = "put-date"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "sfqhT3Mt08ze5wCoTdN8/A==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Date>2030-01-01T00:00:00.000Z</Date></Expiration><ID>on-date</ID><Filter><Prefix>data/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

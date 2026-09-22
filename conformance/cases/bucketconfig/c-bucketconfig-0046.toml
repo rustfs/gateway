@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0046"
-schema_version = 1
+schema_version = 3
 title = "A versioning document carrying an unknown element is accepted"
 rationale = """
 The leniency that matters most in this family. RustFS re-parses stored configurations and its persistence fails open, so a decoder that refused an element it did not recognise would not fail loudly — it would degrade the document to no configuration and switch version retention off, with the overwrites in the interval unrecoverable. The element is skipped and the rest of the document is stored."""
@@ -26,7 +26,8 @@ name = "conf-bucketconfig"
 [request]
 method = "PUT"
 target = "/conf-bucketconfig?versioning"
-headers = { "content-md5" = "84eO+M44C5AvuBju3EPOEg==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<VersioningConfiguration><Status>Enabled</Status><FutureMember>x</FutureMember></VersioningConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

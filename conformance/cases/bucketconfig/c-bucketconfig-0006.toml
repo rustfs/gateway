@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0006"
-schema_version = 1
+schema_version = 3
 title = "A request-payment write naming Requester and carrying Content-MD5 is accepted"
 rationale = """
 Switching a bucket to requester-pays changes who is billed for every subsequent read, so the write demands an integrity claim on the body. This is the accepting half; the refusal is c-bucketconfig-0038 and the out-of-set payer is c-bucketconfig-0045."""
@@ -21,7 +21,8 @@ name = "conf-bucketconfig"
 [request]
 method = "PUT"
 target = "/conf-bucketconfig?requestPayment"
-headers = { "content-md5" = "nY7aajIaZ01yv5qN1p0uvQ==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<RequestPaymentConfiguration><Payer>Requester</Payer></RequestPaymentConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

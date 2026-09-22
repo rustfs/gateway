@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0033"
-schema_version = 1
+schema_version = 3
 title = "A post-authorisation failure still carries the CORS headers"
 rationale = """
 This is the CORS trap that costs the most debugging time. A 404 without an allow-origin header does not reach the
@@ -40,7 +40,8 @@ absent = true
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "NdkNVi2f4lE+sDHrLVzN2A==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin><ExposeHeader>ETag</ExposeHeader></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

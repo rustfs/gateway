@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0019"
-schema_version = 1
+schema_version = 3
 title = "The wildcard budget of the header lists: two in AllowedHeader is refused, any in ExposeHeader is refused"
 rationale = """
 The three list members have three different wildcard budgets — origins and allowed headers may carry one, expose headers none at all — and an implementation that validated them with one shared rule gets at least one of the three wrong. ExposeHeader is the sharp edge: it is echoed to browsers verbatim in Access-Control-Expose-Headers, where an asterisk means something entirely different (every header, credentials aside), so a stored wildcard silently widens what scripts may read."""
@@ -30,7 +30,8 @@ name = "two-wildcards-in-allowed-header"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "llZoiY/3qqw4C1V/hXYI0w==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedHeader>*-amz-*</AllowedHeader><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -55,7 +56,8 @@ name = "wildcard-in-expose-header"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "0xhJSfYWNar4/tK+OyZSzQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin><ExposeHeader>x-amz-*</ExposeHeader></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

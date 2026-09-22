@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0016"
-schema_version = 1
+schema_version = 3
 title = "An empty body and a rule-less document are both 400 MalformedXML, never an installed empty policy"
 rationale = """
 Clearing a lifecycle configuration is spelled DeleteBucketLifecycle; a write with nothing in it must not become a second spelling. An empty body decodes to no document at all — the backend refuses it by name — and LifecycleConfiguration with no Rule fails the model's required-member floor; both must answer MalformedXML rather than store an empty policy that a later read faithfully returns as configured-but-inert."""
@@ -25,7 +25,8 @@ name = "empty-body"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -53,7 +54,8 @@ name = "no-rules"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "j9VfG/p/L54O4f1X84gDLQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration/>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0041"
-schema_version = 1
+schema_version = 3
 title = "A lock write naming a version that does not exist is NoSuchVersion, and one naming a delete marker is 405"
 rationale = """
 A version-scoped lock write has two ways to name nothing lockable, and they are different facts: an id this bucket never minted, and an id that names a deletion. The first is NoSuchVersion; the second is the MethodNotAllowed every other version-scoped request against a delete marker gets. Falling back to the current version for either would place a retention or hold on an object nobody named."""
@@ -55,7 +55,8 @@ name = "lock-a-version-that-was-never-minted"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock-versions/doc.txt?retention&versionId=conformance-version-9999"
-headers = { "content-type" = "application/xml", "content-md5" = "nRP4r9dIhDgQ95myRGb8sw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -90,7 +91,8 @@ name = "hold-the-delete-marker"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock-versions/doc.txt?legal-hold&versionId=${capture.marker}"
-headers = { "content-type" = "application/xml", "content-md5" = "oK1+ndJbG6HuGA87LDxznw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LegalHold><Status>ON</Status></LegalHold>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -90,6 +90,7 @@ use rustfs_gateway::{
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{collections::BTreeMap, path::PathBuf};
+mod computed_md5;
 mod conditional_race;
 pub(crate) mod h2_frames;
 mod payload_literal;
@@ -911,8 +912,7 @@ impl InProcess {
             })
             .collect();
         let body = frames.iter().flatten().copied().collect::<Vec<u8>>();
-
-        Ok(Wire {
+        let wire = Wire {
             method,
             target,
             headers,
@@ -923,7 +923,8 @@ impl InProcess {
             frames,
             steps,
             sign: request.read("requestSpec.sign").cloned(),
-        })
+        };
+        computed_md5::prepare(request, wire)
     }
 
     /// Reads a chunk sequence into the steps it was written as.

@@ -4,7 +4,7 @@
 
 [case]
 id = "c-bkt-0029"
-schema_version = 1
+schema_version = 3
 title = "A policy removal on a bucket is not served as a bucket deletion"
 rationale = """
 This is the destructive twin of c-bkt-0028 and the worse of the two. A deletion's selector is a \
@@ -41,7 +41,8 @@ name = "give-the-bucket-a-policy"
 [exchanges.request]
 method = "PUT"
 target = "/conf-bkt-policy?policy"
-headers = { "content-type" = "application/json", "content-md5" = "7ysbf9u2zR7hHgNqh4BIYg==" }
+headers = { "content-type" = "application/json" }
+content_md5 = "computed"
 body = { utf8 = '{"Version":"2012-10-17","Statement":[]}' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

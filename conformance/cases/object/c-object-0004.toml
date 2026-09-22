@@ -4,7 +4,7 @@
 
 [case]
 id = "c-object-0004"
-schema_version = 1
+schema_version = 3
 title = "A multi-object delete accounts for every key it was given, in the deleted list or the error list"
 rationale = """
 A caller sends up to a thousand keys and gets one document back; the only way it can know which of \
@@ -55,7 +55,8 @@ absent = true
 method = "POST"
 target = "/conf-object?delete"
 # The integrity header this operation requires; the value is md5 of the body below.
-headers = { "content-type" = "application/xml", "content-md5" = "VK4ubZ8WQf0Vu81FdbnLGw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<Delete><Object><Key>batch/one</Key></Object><Object><Key>batch/two</Key></Object><Object><Key>batch/absent</Key></Object></Delete>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

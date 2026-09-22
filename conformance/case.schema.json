@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/rustfs/gateway/blob/main/conformance/case.schema.json",
   "title": "rustfs-gateway conformance case",
-  "description": "Frozen schema (schema versions 1 and 2) for a single rustfs-gateway conformance case. Version 2 adds concurrent exchange batches while the runner continues to accept version 1 cases. Cases are authored as TOML; this JSON Schema validates the parsed TOML document, so the same contract governs the TOML files on disk and any JSON tooling built on top of them. See conformance/README.md for the freeze policy and the change procedure.",
+  "description": "Frozen schema (schema versions 1, 2 and 3) for a single rustfs-gateway conformance case. Version 2 adds concurrent exchange batches. Version 3 adds computed Content-MD5 from the resolved request body; earlier versions remain readable. Cases are authored as TOML; this JSON Schema validates the parsed TOML document, so the same contract governs the TOML files on disk and any JSON tooling built on top of them. See conformance/README.md for the freeze policy and the change procedure.",
 
-  "x-schema-version": 2,
+  "x-schema-version": 3,
   "x-frozen-on": "2026-08-05",
   "x-required-dimensions": {
     "chunk_arrival_timing": "#/$defs/dataChunk/properties/delay_ms",
@@ -68,7 +68,24 @@
       "then": {
         "properties": {
           "case": {
-            "properties": { "schema_version": { "const": 2 } }
+            "properties": { "schema_version": { "enum": [2, 3] } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "case": { "properties": { "schema_version": { "enum": [1, 2] } } }
+        }
+      },
+      "then": {
+        "properties": {
+          "request": { "properties": { "content_md5": false } },
+          "exchanges": {
+            "items": {
+              "properties": { "request": { "properties": { "content_md5": false } } }
+            }
           }
         }
       }
@@ -87,8 +104,8 @@
           "description": "c-<domain>-<NNNN>. The domain segment must equal the directory the file lives in, and the file must be named <id>.toml."
         },
         "schema_version": {
-          "enum": [1, 2],
-          "description": "Version 1 is the original frozen format. Version 2 adds connection.concurrent. A runner MUST reject a case whose schema_version it does not know, with an explicit 'update the runner' error - never by ignoring unknown fields."
+          "enum": [1, 2, 3],
+          "description": "Version 1 is the original frozen format. Version 2 adds connection.concurrent. Version 3 adds request.content_md5. A runner MUST reject a case whose schema_version it does not know, with an explicit 'update the runner' error - never by ignoring unknown fields."
         },
         "title": { "type": "string", "minLength": 4, "maxLength": 120 },
         "rationale": {
@@ -372,6 +389,10 @@
         },
         "raw_head_utf8": { "type": "string", "description": "Entire request head verbatim, including the request line and CRLFs. Escape hatch for malformed framing and request smuggling vectors." },
         "raw_head_hex": { "type": "string", "pattern": "^([0-9a-fA-F]{2})*$" },
+        "content_md5": {
+          "const": "computed",
+          "description": "Version 3 only. Derive Content-MD5 from the final interpolated payload bytes before signing. Reject an explicit Content-MD5 header or raw framing instead of overwriting authored bytes."
+        },
         "body": { "$ref": "#/$defs/payload" },
         "chunks": {
           "type": "array",
@@ -405,7 +426,27 @@
         }
       ],
       "allOf": [
-        { "not": { "required": ["body", "chunks"] } }
+        { "not": { "required": ["body", "chunks"] } },
+        {
+          "if": {
+            "anyOf": [
+              { "required": ["raw_head_utf8"] },
+              { "required": ["raw_head_hex"] },
+              { "required": ["h2_frames"] }
+            ]
+          },
+          "then": { "properties": { "content_md5": false } }
+        },
+        {
+          "if": { "required": ["content_md5"] },
+          "then": {
+            "properties": {
+              "chunks": {
+                "items": { "properties": { "raw_utf8": false, "raw_hex": false } }
+              }
+            }
+          }
+        }
       ]
     },
 

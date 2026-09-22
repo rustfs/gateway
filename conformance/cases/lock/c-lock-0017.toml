@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0017"
-schema_version = 1
+schema_version = 3
 title = "A retention mode AWS does not define is refused rather than stored as an open enum value"
 rationale = """
 The generated enum is an open set so that a model re-pin does not break the decoder, and that openness is exactly what has to stop at this family boundary: an invented mode stored today is a lock nothing can evaluate and nothing can lift tomorrow. The refusal is the difference between an unknown value the codec tolerates and an unknown value a compliance surface tolerates."""
@@ -27,7 +27,8 @@ body = { utf8 = "payload" }
 [request]
 method = "PUT"
 target = "/conf-lock/doc.txt?retention"
-headers = { "content-type" = "application/xml", "content-md5" = "+yulVBPk+1mlWovBw8ukbQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<Retention><Mode>ARCHIVE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

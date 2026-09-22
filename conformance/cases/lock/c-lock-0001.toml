@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0001"
-schema_version = 1
+schema_version = 3
 title = "A lock configuration of ObjectLockEnabled alone is stored and answered 200"
 rationale = """
 This is the document that turns WORM on and sets no default, and it is the shape a bucket reaches when object lock is enabled without a retention policy. A decoder that demanded a Rule would refuse the most common lock configuration there is, and the caller would conclude the feature is unavailable rather than that its document was wrong."""
@@ -21,7 +21,8 @@ name = "conf-lock"
 [request]
 method = "PUT"
 target = "/conf-lock?object-lock"
-headers = { "content-type" = "application/xml", "content-md5" = "CJIyG/nMmkjfQ1+FuEdwUA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

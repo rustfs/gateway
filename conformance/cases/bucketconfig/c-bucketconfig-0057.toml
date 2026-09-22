@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0057"
-schema_version = 1
+schema_version = 3
 title = "A policy body that is not UTF-8 is refused, and nothing panics"
 rationale = """
 This is the decoder's whole contribution to the JSON payload, and the only refusal it is capable of making: the bytes are text or they are not. Everything else about a policy — whether it parses, how deep it nests, how large it is — is asked afterwards by the shared validator, because MalformedPolicy is not a code a generated decoder can name and the decoder has no parameter that could carry one. Worth a case of its own because the refusal is a branch nothing else in the corpus reaches: every other policy case sends text, so an implementation that lossily replaced invalid bytes instead of refusing them would store a policy the caller never wrote and pass every one of them. The connection staying open is half the observation: a decoder that panicked on the input would drop it."""
@@ -21,7 +21,8 @@ name = "conf-bucketconfig"
 [request]
 method = "PUT"
 target = "/conf-bucketconfig?policy"
-headers = { "content-md5" = "ooXH1ZUG/kiWFHWTI7FM8g==", "content-type" = "application/json" }
+headers = { "content-type" = "application/json" }
+content_md5 = "computed"
 body = { hex = "7b2256657273696f6e223a22ff32303132223a7d" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

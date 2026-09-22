@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0005"
-schema_version = 1
+schema_version = 3
 title = "ExpiredObjectDeleteMarker true survives the round trip with the boolean in lower case"
 rationale = """
 The delete-marker flag is the one expiration spelling that carries a boolean, and XML booleans are case-sensitive on the wire: a serializer that writes True renders a document other parsers refuse. The flag standing alone is also the only legal way to carry it — this case holds the accepted side of the exclusivity that c-lifecycle-0023 refuses."""
@@ -25,7 +25,8 @@ name = "put-eodm"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "pvKLNdRt98IU/tQZfxorpg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><ExpiredObjectDeleteMarker>true</ExpiredObjectDeleteMarker></Expiration><ID>markers</ID><Filter><Prefix>versioned/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

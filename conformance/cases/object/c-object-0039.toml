@@ -4,7 +4,7 @@
 
 [case]
 id = "c-object-0039"
-schema_version = 1
+schema_version = 3
 title = "A raw U+0002 in a DeleteObjects Key is refused, not silently taken as a different key"
 rationale = """
 This is the one member of this class whose answer from real S3 has been captured rather than inferred, which is why it is pinned separately from the lifecycle rows that share its rule. The captured behaviour is a refusal, and the alternative that capture also rules out is the dangerous one: a server that accepts the body and matches nothing answers 200 with a result document listing neither an error nor a deletion, so the caller is told the batch succeeded while the object is still there. An object key may legally hold this byte on the storage side; a request body is where it has no spelling, and the two facts are why the refusal belongs to the body boundary rather than to the key type."""
@@ -43,7 +43,8 @@ body = { utf8 = "hello world" }
 [request]
 method = "POST"
 target = "/conf-object?delete"
-headers = { "content-type" = "application/xml", "content-md5" = "7S5vbc0JAFYd5mCmtOPIbw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<Delete><Object><Key>batch\u0002one</Key></Object></Delete>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0021"
-schema_version = 1
+schema_version = 3
 title = "All four public-access switches read back in lower case, in the documented order"
 rationale = """
 Byte comparison pins two things a structural assertion would miss: the element order, and that the booleans are rendered true and false rather than True and False. A client that string-compares the document — which is what a compliance check does — sees the difference."""
@@ -29,7 +29,8 @@ name = "write"
 [exchanges.request]
 method = "PUT"
 target = "/conf-bucketconfig?publicAccessBlock"
-headers = { "content-md5" = "njdlwnEoAxGSpOozjhzsJQ==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

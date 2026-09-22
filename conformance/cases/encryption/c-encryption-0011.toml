@@ -1,6 +1,6 @@
 [case]
 id = "c-encryption-0011"
-schema_version = 1
+schema_version = 3
 title = "A rule of only BucketKeyEnabled false and a blocked SSE-C type is legal and round-trips"
 rationale = """
 Three less-travelled corners in one document. The model makes ApplyServerSideEncryptionByDefault optional, so a rule that only tunes the bucket key and blocks an encryption type is legal — a validator that required the default action would be stricter than the schema. The false boolean must round-trip as written, because omitting a false is how an explicit opt-out silently becomes the default again. And BlockedEncryptionTypes carries its EncryptionType children flattened inside the wrapper — the one nested-list shape in this family, pinned byte for byte."""
@@ -25,7 +25,8 @@ name = "put-tuning-only"
 [exchanges.request]
 method = "PUT"
 target = "/conf-encryption?encryption"
-headers = { "content-type" = "application/xml", "content-md5" = "54MSJqxC+MRqBQJKdRJ5uw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><BucketKeyEnabled>false</BucketKeyEnabled><BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

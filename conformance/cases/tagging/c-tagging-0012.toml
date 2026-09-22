@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0012"
-schema_version = 1
+schema_version = 3
 title = "PutBucketTagging with fifty-one tags is a 400 InvalidTag"
 rationale = """
 The bucket ceiling is fifty — five times the object's, and the pair is exactly where a shared \
@@ -38,7 +38,8 @@ name = "fifty-one-tags-are-refused"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging?tagging"
-headers = { "content-md5" = "jo3fccpZbusvjd7kxeh3nQ==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>k0</Key><Value>v</Value></Tag><Tag><Key>k1</Key><Value>v</Value></Tag><Tag><Key>k2</Key><Value>v</Value></Tag><Tag><Key>k3</Key><Value>v</Value></Tag><Tag><Key>k4</Key><Value>v</Value></Tag><Tag><Key>k5</Key><Value>v</Value></Tag><Tag><Key>k6</Key><Value>v</Value></Tag><Tag><Key>k7</Key><Value>v</Value></Tag><Tag><Key>k8</Key><Value>v</Value></Tag><Tag><Key>k9</Key><Value>v</Value></Tag><Tag><Key>k10</Key><Value>v</Value></Tag><Tag><Key>k11</Key><Value>v</Value></Tag><Tag><Key>k12</Key><Value>v</Value></Tag><Tag><Key>k13</Key><Value>v</Value></Tag><Tag><Key>k14</Key><Value>v</Value></Tag><Tag><Key>k15</Key><Value>v</Value></Tag><Tag><Key>k16</Key><Value>v</Value></Tag><Tag><Key>k17</Key><Value>v</Value></Tag><Tag><Key>k18</Key><Value>v</Value></Tag><Tag><Key>k19</Key><Value>v</Value></Tag><Tag><Key>k20</Key><Value>v</Value></Tag><Tag><Key>k21</Key><Value>v</Value></Tag><Tag><Key>k22</Key><Value>v</Value></Tag><Tag><Key>k23</Key><Value>v</Value></Tag><Tag><Key>k24</Key><Value>v</Value></Tag><Tag><Key>k25</Key><Value>v</Value></Tag><Tag><Key>k26</Key><Value>v</Value></Tag><Tag><Key>k27</Key><Value>v</Value></Tag><Tag><Key>k28</Key><Value>v</Value></Tag><Tag><Key>k29</Key><Value>v</Value></Tag><Tag><Key>k30</Key><Value>v</Value></Tag><Tag><Key>k31</Key><Value>v</Value></Tag><Tag><Key>k32</Key><Value>v</Value></Tag><Tag><Key>k33</Key><Value>v</Value></Tag><Tag><Key>k34</Key><Value>v</Value></Tag><Tag><Key>k35</Key><Value>v</Value></Tag><Tag><Key>k36</Key><Value>v</Value></Tag><Tag><Key>k37</Key><Value>v</Value></Tag><Tag><Key>k38</Key><Value>v</Value></Tag><Tag><Key>k39</Key><Value>v</Value></Tag><Tag><Key>k40</Key><Value>v</Value></Tag><Tag><Key>k41</Key><Value>v</Value></Tag><Tag><Key>k42</Key><Value>v</Value></Tag><Tag><Key>k43</Key><Value>v</Value></Tag><Tag><Key>k44</Key><Value>v</Value></Tag><Tag><Key>k45</Key><Value>v</Value></Tag><Tag><Key>k46</Key><Value>v</Value></Tag><Tag><Key>k47</Key><Value>v</Value></Tag><Tag><Key>k48</Key><Value>v</Value></Tag><Tag><Key>k49</Key><Value>v</Value></Tag><Tag><Key>k50</Key><Value>v</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

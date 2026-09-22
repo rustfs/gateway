@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0021"
-schema_version = 1
+schema_version = 3
 title = "A tag set written to one version is read back from that version and from no other"
 rationale = """
 `versionId` is in the wire shape of all three object tagging operations, and a store that parses \
@@ -83,7 +83,8 @@ name = "label-the-older-version"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging-versions/doc.txt?tagging&versionId=${capture.first}"
-headers = { "content-md5" = "QTsTDAb4c0VADLNy4ipavA==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

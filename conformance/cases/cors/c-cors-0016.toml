@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0016"
-schema_version = 1
+schema_version = 3
 title = "PATCH as an AllowedMethod is refused with 400 InvalidRequest"
 rationale = """
 The method vocabulary is closed, and PATCH is the value real clients actually try, because their applications use it. Storing it would be worse than refusing it: S3 never serves PATCH, so the stored rule promises browsers a request the data path will always refuse — a policy that cannot be honoured, discovered only as a browser-side failure. The refusal must be InvalidRequest, not MalformedXML: the document is well formed, its value is what is wrong."""
@@ -27,7 +27,8 @@ name = "conf-cors"
 [request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "uyVCDFJKyd5KhW3/L3ojvw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PATCH</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

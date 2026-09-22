@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0013"
-schema_version = 1
+schema_version = 3
 title = "A 129-character key and a 257-character value are each a 400 InvalidTag"
 rationale = """
 The ceilings are 128 characters for a key and 256 for a value, counted in characters rather than \
@@ -43,7 +43,8 @@ name = "a-129-character-key-is-refused"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging/long.txt?tagging"
-headers = { "content-md5" = "y6TgDDwf9APW/TiA2tHyAA==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk</Key><Value>v</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -62,7 +63,8 @@ name = "a-257-character-value-is-refused"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging/long.txt?tagging"
-headers = { "content-md5" = "ziu4ZnUHVzZpdEzcmwyWaA==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>k</Key><Value>vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

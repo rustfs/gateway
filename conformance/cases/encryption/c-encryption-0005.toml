@@ -1,6 +1,6 @@
 [case]
 id = "c-encryption-0005"
-schema_version = 1
+schema_version = 3
 title = "The aws:fsx algorithm is inside the documented set and accepted"
 rationale = """
 The odd member of the set: aws:fsx is neither the classic SSE-S3 spelling nor a KMS one, and a validator written from memory of the older three-value set would refuse it. It is in the pinned model's enum and the current documentation, so it passes — and because it is not a KMS spelling, its acceptance here is the positive boundary of the key-id rule that c-encryption-0024 holds from the negative side: the algorithm alone is fine, the algorithm with a key id is not."""
@@ -22,7 +22,8 @@ name = "conf-encryption"
 [request]
 method = "PUT"
 target = "/conf-encryption?encryption"
-headers = { "content-type" = "application/xml", "content-md5" = "VlBPWxcbqU6iea8CGHMz1g==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:fsx</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

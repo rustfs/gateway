@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0003"
-schema_version = 1
+schema_version = 3
 title = "A V2 rule with Filter, Priority and DeleteMarkerReplication round-trips byte for byte"
 rationale = """
 The current schema's minimum rule, exactly as the documentation spells it: the Filter that makes the rule V2, and the Priority and DeleteMarkerReplication the version demands beside it. The round-trip is byte-exact on purpose — the stored document is re-parsed by every future release and re-serialized onto disk by the write path, so any element the codec reorders, renames or drops here is a difference that gets fixed into storage the first time a client writes through this gateway."""
@@ -24,7 +24,8 @@ name = "put"
 [exchanges.request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "eA/1E1xFKHGwu4iKtKkGPg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>r1</ID><Priority>1</Priority><Filter><Prefix>docs/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

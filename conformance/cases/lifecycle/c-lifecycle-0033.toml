@@ -4,7 +4,7 @@
 
 [case]
 id = "c-lifecycle-0033"
-schema_version = 1
+schema_version = 3
 title = "A raw U+0001 in <ID> is refused rather than stored and echoed"
 rationale = """
 XML 1.0 admits tab, newline and carriage return out of the C0 controls and excludes the rest entirely, so a document carrying one is not well formed and no conforming parser accepts it. A gateway that stores such a value answers every later read with a document the client's own parser rejects in full, which hides every other rule in the configuration behind a syntax failure rather than losing one member. The identifier is a plain string member with no validation of its own, so nothing but the character range stands between the caller and that outcome."""
@@ -31,7 +31,8 @@ name = "conf-lifecycle"
 [request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "tYNgffyd7FuDbSU3WiGQ3Q==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<LifecycleConfiguration><Rule><ID>logs\u0001rule</ID><Status>Enabled</Status><Filter><And><Prefix>logs/</Prefix><Tag><Key>team</Key><Value>ops</Value></Tag></And></Filter><Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

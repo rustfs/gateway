@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0024"
-schema_version = 1
+schema_version = 3
 title = "A rule-less document and a wrong root element are both 400 MalformedXML"
 rationale = """
 Two boundary documents with two different temptations. The empty CORSConfiguration invites reading it as clear-the-configuration, but that spelling is DeleteBucketCors; accepting both makes one intent reachable two ways, and later divergence between them is guaranteed. The Tagging root is a document meant for a different subresource — accepting it would mean the router's careful separation of ?cors from ?tagging is undone by a decoder that does not check what it was given."""
@@ -25,7 +25,8 @@ name = "no-rules-at-all"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "X2DwA3ZNuD6gUGkUJg8PDg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration/>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -50,7 +51,8 @@ name = "wrong-root"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "ygxpoiUw4ExsUsHRCTjifw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

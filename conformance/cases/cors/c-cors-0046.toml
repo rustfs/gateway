@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0046"
-schema_version = 1
+schema_version = 3
 title = "A preflight whose Origin carries a space is refused before anything is echoed"
 rationale = """
 The allow-origin header is the one place this runtime writes caller-supplied bytes into a response, so the value has
@@ -30,7 +30,8 @@ name = "conf-cors-rt"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "JwjOZkFs+i5vAUZUg/9fsw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin><AllowedHeader>x-amz-*</AllowedHeader></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

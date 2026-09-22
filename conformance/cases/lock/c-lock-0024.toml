@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0024"
-schema_version = 1
+schema_version = 3
 title = "A retain-until date already in the past is refused against the injected clock"
 rationale = """
 A retention that expired before it was written protects nothing while looking exactly like one that does, which is the shape of every accidental unlock: a client computing the date from a stale variable gets a 200 and believes the object is held. The clock is injected rather than read from the host so that the rule is decidable at all — a case whose outcome depended on when it ran would be a case nobody could trust."""
@@ -30,7 +30,8 @@ body = { utf8 = "payload" }
 [request]
 method = "PUT"
 target = "/conf-lock/doc.txt?retention"
-headers = { "content-type" = "application/xml", "content-md5" = "YRWlYd4ytMZz5daKKZf7SQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2020-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0040"
-schema_version = 1
+schema_version = 3
 title = "A retention written to a named version stays on that version after a newer one is written"
 rationale = """
 Retention protects an object version, not a key. The case writes a version, locks it by id, writes a newer version over it, and then asks for both: the older version must answer the document it was given and the current one must answer that it has none. Reporting the current version's state for the named one, or the named one's for the current, would each be a confident wrong answer about whether data is locked, and only a read by version id can tell them apart."""
@@ -55,7 +55,8 @@ name = "lock-the-first-version-by-id"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lock-versions/doc.txt?retention&versionId=${capture.first}"
-headers = { "content-type" = "application/xml", "content-md5" = "nRP4r9dIhDgQ95myRGb8sw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

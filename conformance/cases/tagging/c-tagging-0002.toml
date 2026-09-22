@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0002"
-schema_version = 1
+schema_version = 3
 title = "Deleting a bucket tag set is a bare 204, after which the read answers NoSuchTagSet"
 rationale = """
 The delete and the read are a pair: tooling that removes a cost-allocation tag set verifies the \
@@ -43,7 +43,8 @@ name = "configure-the-set"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging?tagging"
-headers = { "content-md5" = "yCOypLbxO60nLheN0kuUdQ==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>owner</Key><Value>conformance</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

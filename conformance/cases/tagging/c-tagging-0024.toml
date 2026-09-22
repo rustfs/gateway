@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0024"
-schema_version = 1
+schema_version = 3
 title = "A ?tagging request naming a delete marker is a 405, not a NoSuchKey"
 rationale = """
 A delete marker is a version that exists and holds no representation, so it has no tag set to \
@@ -88,7 +88,8 @@ name = "the-write-onto-the-marker-is-refused"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging-marker/doc.txt?tagging&versionId=${capture.marker}"
-headers = { "content-md5" = "QTsTDAb4c0VADLNy4ipavA==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

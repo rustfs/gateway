@@ -2,7 +2,7 @@
 
 [case]
 id = "c-object-0043"
-schema_version = 1
+schema_version = 3
 title = "Each integrity header is verified even when the other one is valid"
 rationale = """
 Checking only one of two supplied integrity claims lets a proxy-added header silently disable the
@@ -34,7 +34,8 @@ name = "valid-md5-does-not-hide-wrong-crc32c"
 [exchanges.request]
 method = "PUT"
 target = "/conf-object/checksum/wrong-crc32c"
-headers = { "content-md5" = "XrY7u+Ae7tCTyyK7j1rNww==", "x-amz-checksum-crc32c" = "AAAAAA==" }
+headers = { "x-amz-checksum-crc32c" = "AAAAAA==" }
+content_md5 = "computed"
 body = { utf8 = "hello world" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

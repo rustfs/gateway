@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0018"
-schema_version = 1
+schema_version = 3
 title = "A document with a Role but no Rule is refused as MalformedXML"
 rationale = """
 A replication configuration must include at least one rule — the documentation says so in as many words — and a rule-less document is not a spelling of "stop replicating", which is the delete's job. The refusal keeps the family's three states honest: configured, unconfigured, and nothing in between for a monitoring tool to misread."""
@@ -21,7 +21,8 @@ name = "conf-replication"
 [request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "YkBDWW/gARvaaEtSAuROMQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0029"
-schema_version = 1
+schema_version = 3
 title = "A trailing wildcard in AllowedHeader admits the requested names case-insensitively"
 rationale = """
 RFC 9110 makes field names case-insensitive and a browser is free to send X-Amz-Acl for a rule that says x-amz-acl,
@@ -30,7 +30,8 @@ name = "conf-cors-rt"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "JwjOZkFs+i5vAUZUg/9fsw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>*</AllowedOrigin><AllowedHeader>x-amz-*</AllowedHeader></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

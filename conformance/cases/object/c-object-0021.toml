@@ -1,6 +1,6 @@
 [case]
 id = "c-object-0021"
-schema_version = 1
+schema_version = 3
 title = "A multi-object delete with an empty body is a MalformedXML refusal, not an empty success"
 rationale = """
 An empty body parses to nothing, and nothing is indistinguishable from a well-formed request that deletes no keys unless the parser says so. An implementation that treats it as the latter answers 200 with an empty DeleteResult and tells the caller the request succeeded. The refusal is asserted by code rather than by status alone because a 400 carrying the wrong code sends a retrying client down the wrong branch."""
@@ -24,7 +24,8 @@ name = "conf-object"
 [request]
 method = "POST"
 target = "/conf-object?delete"
-headers = { "content-type" = "application/xml", "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0001"
-schema_version = 1
+schema_version = 3
 title = "A minimal document under the LifecycleConfiguration wire root is accepted with 200"
 rationale = """
 The wire root and the model's shape name disagree for this family: clients send LifecycleConfiguration while the payload shape is BucketLifecycleConfiguration. A decoder generated naively from the shape name refuses every document a real SDK produces, which turns every lifecycle rollout into a hard failure at the first PUT. This case holds the accepting side of that root decision; c-lifecycle-0017 holds the refusing side."""
@@ -25,7 +25,8 @@ name = "put-minimal"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "ATR8BU7QlQFzvolRzIZUiA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><ID>expire-logs</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

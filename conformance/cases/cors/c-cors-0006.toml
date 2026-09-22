@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0006"
-schema_version = 1
+schema_version = 3
 title = "A bare asterisk AllowedOrigin is accepted"
 rationale = """
 The wildcard origin is the most common CORS configuration in existence — public assets are served with it — and it is also the value a naive origin-syntax validator refuses, because a bare asterisk is not a URL. Refusing it would make the majority configuration undeployable."""
@@ -22,7 +22,8 @@ name = "conf-cors"
 [request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "HGv5UBbjdmR736tPepqsSQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

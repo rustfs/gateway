@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0023"
-schema_version = 1
+schema_version = 3
 title = "A ?tagging request naming a version that does not exist is a 404 NoSuchVersion"
 rationale = """
 Falling back to the current version for an unknown id is the tempting failure: every request \
@@ -64,7 +64,8 @@ name = "label-it"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging-unknown/doc.txt?tagging&versionId=${capture.only}"
-headers = { "content-md5" = "QTsTDAb4c0VADLNy4ipavA==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>green</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -96,7 +97,8 @@ name = "the-write-to-an-unknown-version-is-refused"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging-unknown/doc.txt?tagging&versionId=conformance-version-9999"
-headers = { "content-md5" = "Eqjc2dLsYeOiFyCAHNmyhA==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>colour</Key><Value>red</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

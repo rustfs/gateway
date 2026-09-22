@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0061"
-schema_version = 1
+schema_version = 3
 title = "An unknown public-access setting is refused without replacing the stored block"
 rationale = """
 The four switches are the last line of defence against a bucket being made public, so a write carrying a setting this release does not know must fail rather than return 200 for a switch nobody stored. The refused write also turns every known switch off: the read-back still shows them on, which proves the refusal happened before anything replaced the configuration established first. The accepted twin without the unknown setting is c-bucketconfig-0020."""
@@ -29,7 +29,8 @@ name = "establish-known-block"
 [exchanges.request]
 method = "PUT"
 target = "/conf-bucketconfig?publicAccessBlock"
-headers = { "content-md5" = "njdlwnEoAxGSpOozjhzsJQ==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>true</IgnorePublicAcls><BlockPublicPolicy>true</BlockPublicPolicy><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -44,7 +45,8 @@ name = "put-with-unknown-setting"
 [exchanges.request]
 method = "PUT"
 target = "/conf-bucketconfig?publicAccessBlock"
-headers = { "content-md5" = "HMfI+Af/vMTo7zsJF6gsLQ==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<PublicAccessBlockConfiguration><BlockPublicAcls>false</BlockPublicAcls><IgnorePublicAcls>false</IgnorePublicAcls><BlockPublicPolicy>false</BlockPublicPolicy><RestrictPublicBuckets>false</RestrictPublicBuckets><FutureSetting>true</FutureSetting></PublicAccessBlockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0007"
-schema_version = 1
+schema_version = 3
 title = "A filter combining a prefix, two tags and a size floor inside one And round-trips byte for byte"
 rationale = """
 The And element is the only legal spelling for a multi-condition filter, and its children include a flattened Tag list — the same two shapes that break independently break together here. A round trip that reorders the conditions or wraps the tags produces a filter that matches a different set of objects than the one the client scoped."""
@@ -30,7 +30,8 @@ name = "put-and-filter"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "OWnGbmdsjZ1D2D2HhaD/yA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>and-filter</ID><Filter><And><Prefix>logs/</Prefix><Tag><Key>env</Key><Value>prod</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag><ObjectSizeGreaterThan>1024</ObjectSizeGreaterThan></And></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

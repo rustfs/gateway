@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0026"
-schema_version = 1
+schema_version = 3
 title = "A rule ID longer than 255 characters is refused with 400 InvalidArgument"
 rationale = """
 The ID is the operator's handle on a rule and downstream tooling stores it in fixed-width fields sized to the documented cap. Accepting an oversized one creates a document AWS would refuse — a portability trap discovered only on migration — and an unbounded one is a storage amplifier inside an otherwise size-capped document."""
@@ -22,7 +22,8 @@ name = "conf-cors"
 [request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "IfRL4IAaR42Hmds6HKjbQA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><ID>iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii</ID><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

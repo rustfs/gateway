@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0004"
-schema_version = 1
+schema_version = 3
 title = "ID and MaxAgeSeconds survive the round trip unchanged"
 rationale = """
 The two optional scalar members are the ones a lossy codec drops first, and each loss has a distinct cost: a dropped ID breaks the operator's ability to address a rule in later tooling, and a dropped or defaulted MaxAgeSeconds changes how long browsers cache a preflight answer — a behavioural change no server log will ever show. The read-back is compared byte for byte so a re-typed or re-formatted value fails too."""
@@ -25,7 +25,8 @@ name = "put-id-and-max-age"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "DT2AScH50XYikmivFJ3d0g==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><ID>static-assets</ID><AllowedMethod>GET</AllowedMethod><AllowedOrigin>https://example.com</AllowedOrigin><MaxAgeSeconds>3000</MaxAgeSeconds></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

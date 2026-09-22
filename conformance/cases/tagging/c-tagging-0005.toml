@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0005"
-schema_version = 1
+schema_version = 3
 title = "PutBucketTagging with an empty TagSet clears the set and the read afterwards is NoSuchTagSet"
 rationale = """
 This case asserted the opposite until rustfs/backlog#1717, on the strength of `required = true` \
@@ -54,7 +54,8 @@ name = "configure-a-set-to-clear"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging?tagging"
-headers = { "content-md5" = "lIekmFtFZOTSZInJM/f1eQ==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>keep</Key><Value>yes</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -69,7 +70,8 @@ name = "the-empty-document-is-accepted"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging?tagging"
-headers = { "content-md5" = "k6PBbu32RmFaV5nRULDSlw==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

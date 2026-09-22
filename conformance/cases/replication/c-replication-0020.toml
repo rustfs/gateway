@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0020"
-schema_version = 1
+schema_version = 3
 title = "A rule carrying both a Filter and a rule-level Prefix is refused as InvalidRequest"
 rationale = """
 The rule-level Prefix is the V1 spelling of the scope and the Filter is the V2 spelling, and the configuration's schema version is decided by exactly this distinction — a rule carrying both is two versions at once, with two scopes that need not agree. Refusing it is what keeps the stored document's version well-defined; storing it would hand the engine a rule whose object set depends on which spelling the reader happens to prefer."""
@@ -21,7 +21,8 @@ name = "conf-replication"
 [request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "2pLqWZQxkD2RU0vA4R98cg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Priority>1</Priority><Prefix>logs/</Prefix><Filter><Prefix>docs/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

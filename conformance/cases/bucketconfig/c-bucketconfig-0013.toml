@@ -1,6 +1,6 @@
 [case]
 id = "c-bucketconfig-0013"
-schema_version = 1
+schema_version = 3
 title = "A website document reads back with RoutingRules wrapped"
 rationale = """
 The wrapped list is this family's shape and the flattened list is the notification family's, one file over. Both parse; a flattened rendering here is a document every SDK reads as having no routing rules, so the site's redirects silently stop applying. Byte comparison is the only assertion that separates the two."""
@@ -29,7 +29,8 @@ name = "write"
 [exchanges.request]
 method = "PUT"
 target = "/conf-bucketconfig?website"
-headers = { "content-md5" = "9qOvg44x092Bkn0ZW2RFjg==", "content-type" = "application/xml" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals></Condition><Redirect><ReplaceKeyPrefixWith>documents/</ReplaceKeyPrefixWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

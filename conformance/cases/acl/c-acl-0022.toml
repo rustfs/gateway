@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0022"
-schema_version = 1
+schema_version = 3
 title = "An unknown grant-header key is a 400 InvalidArgument and the value is not echoed"
 rationale = """
 The bound on c-acl-0008's tolerance: keys are read case-insensitively, and that must not slide into reading any key at all. A parser that accepted an unknown key and guessed a grantee kind for it would store a grant of a kind the client did not name — and the guess would be invisible, because the read-back would look well formed. The email address is asserted absent from the refusal for the same reason a canonical id is."""
@@ -21,7 +21,8 @@ name = "conf-acl"
 [request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-grant-read" = 'account="grantee@example.com"' }
+headers = { "x-amz-grant-read" = 'account="grantee@example.com"' }
+content_md5 = "computed"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]

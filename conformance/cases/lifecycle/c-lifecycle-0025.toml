@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0025"
-schema_version = 1
+schema_version = 3
 title = "A rule ID longer than 255 characters is refused as 400 InvalidArgument"
 rationale = """
 The id length cap is part of the wire contract other implementations enforce: a 256-character id stored here would be refused on replication to AWS, making the configuration silently non-portable. The cap is checked in characters at the documented bound, and the refusal names the bound so the client truncates rather than retries."""
@@ -25,7 +25,8 @@ name = "id-too-long"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "9B0uxjlFc7yAKpqasYe6gA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii</ID><Filter><Prefix>a/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

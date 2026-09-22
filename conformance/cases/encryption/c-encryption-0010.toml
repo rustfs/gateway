@@ -1,6 +1,6 @@
 [case]
 id = "c-encryption-0010"
-schema_version = 1
+schema_version = 3
 title = "A two-rule document is stored whole and reads back in order, still flattened"
 rationale = """
 Neither the pinned model nor the API reference bounds the rule list or names a single-rule requirement, so a multi-rule document is stored as sent rather than refused — which rule an object write applies is the encryption path's question, not the codec's, and a codec that guessed a cap would refuse documents AWS's own schema accepts. The byte-level read-back holds two facts at once: both rules survived in their original order, and the flattening held for a repeated Rule, where a wrapper bug hides most easily."""
@@ -25,7 +25,8 @@ name = "put-two-rules"
 [exchanges.request]
 method = "PUT"
 target = "/conf-encryption?encryption"
-headers = { "content-type" = "application/xml", "content-md5" = "xYJgn8/yweV2CxJF+6+V0A==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab</KMSMasterKeyID></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

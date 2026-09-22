@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0014"
-schema_version = 1
+schema_version = 3
 title = "PutBucketTagging with two tags under one key is a 400 InvalidTag"
 rationale = """
 A set with a repeated key has no single meaning: whichever of the two values a later reader \
@@ -38,7 +38,8 @@ name = "the-duplicate-is-refused"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging?tagging"
-headers = { "content-md5" = "Yep4rpUIyDWz/dXS+/Km0g==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>dup</Key><Value>1</Value></Tag><Tag><Key>dup</Key><Value>2</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

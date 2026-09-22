@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0009"
-schema_version = 1
+schema_version = 3
 title = "The bypass header is read case-insensitively, so the AWS CLI capitalised True is accepted"
 rationale = """
 The AWS CLI sends True with a capital letter, and a case-sensitive parser refuses a request every AWS SDK considers well formed — the client sees a 400 it cannot fix by changing anything it controls. The relaxation is bounded on purpose and its other half is asserted next door: accepting True must not become accepting anything truthy-looking."""
@@ -32,7 +32,8 @@ body = { utf8 = "payload" }
 [request]
 method = "PUT"
 target = "/conf-lock/doc.txt?retention"
-headers = { "content-type" = "application/xml", "content-md5" = "tyvCoL2jJRTO+akErSMCGQ==", "x-amz-bypass-governance-retention" = "True" }
+headers = { "content-type" = "application/xml", "x-amz-bypass-governance-retention" = "True" }
+content_md5 = "computed"
 body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2031-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

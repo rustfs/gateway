@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0018"
-schema_version = 1
+schema_version = 3
 title = "ObjectLockEnabled has one value, so Disabled is refused rather than read as an off switch"
 rationale = """
 AWS defines no Disabled spelling because object lock cannot be turned off once it is on, and a gateway that accepted the word would offer clients a way to unlock a WORM bucket that AWS deliberately does not offer. Whether such a document then unlocked anything or merely stored a meaningless string, the caller walks away believing protection was removed or retained on evidence the protocol never gave."""
@@ -21,7 +21,8 @@ name = "conf-lock"
 [request]
 method = "PUT"
 target = "/conf-lock?object-lock"
-headers = { "content-type" = "application/xml", "content-md5" = "Xj3HogV4hQT/ZWe/RSP2lA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Disabled</ObjectLockEnabled></ObjectLockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -8,7 +8,7 @@ ADRs; this map only selects files.
 | `src/lib.rs` | Module wiring and public runner surface. | Start here for a conformance task. |
 | `src/main.rs` | CLI arguments and process exit classes. | The binary accepts or reports an option incorrectly. |
 | `src/corpus.rs` | Corpus discovery, loading and selection. | A case is missing, duplicated or filtered wrongly. |
-| `src/schema.rs` | Frozen schema validation. | A TOML shape is accepted or rejected incorrectly. |
+| `src/schema.rs`, `src/schema/computed_md5_tests.rs` | Frozen schema validation and computed-digest version boundaries. | A TOML shape is accepted or rejected incorrectly. |
 | `src/toml.rs` | Minimal TOML value parser used by the corpus. | Syntax parsing fails before schema validation. |
 | `src/runner.rs` | Case/exchange execution order and timeout coordination. | A case runs in the wrong order or never reaches a verdict. |
 | `src/runner/budget_tests.rs` | The `case.timeout_ms` verdict: the target is charged, the harness's own waiting is not. | A timeout is judged on the wrong share of the wall time. |
@@ -17,6 +17,8 @@ ADRs; this map only selects files.
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
 | `src/expect/events.rs` | Event-stream count and byte-exact payload matching. | An event payload expectation is ignored or misjudged. |
 | `src/inprocess.rs` | In-process facade transport. | Hyper-independent execution differs from the socket path. |
+| `src/inprocess/computed_md5.rs`, `src/inprocess/computed_md5_tests.rs` | Derives Content-MD5 from resolved payloads and rejects conflicting wire instructions. | A computed digest is missing, stale, or overwrites an authored header. |
+| `src/inprocess/computed_md5_transport_tests.rs` | Captured-body digests, signing, and refusal controls over real sockets. | Computed MD5 or capture interpolation changes. |
 | `src/inprocess/payload_literal.rs` | Turns `sign.payload_hash_literal` into the exact digest the signer signs as stated. | A case must sign the digest of bytes it does not send (c-sig-0596). |
 | `src/inprocess/profile.rs` | Maps conformance profiles and deadlines onto measured facade policy. | A profile or timeout appears in cases but does not change target behavior. |
 | `src/inprocess/security.rs` | Fixed authorization, dispatch observations, and bucket-owner sources for security cases. | A security case needs a deterministic policy, dispatch count, or metadata-source outcome. |

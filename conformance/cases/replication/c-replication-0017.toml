@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0017"
-schema_version = 1
+schema_version = 3
 title = "A document with rules but no Role is refused as MalformedXML"
 rationale = """
 The Role is the IAM identity S3 assumes to replicate on the caller's behalf, and the model marks it required: a configuration without one names what to replicate but nobody allowed to do it. The decoder refuses the omission at the member that noticed rather than storing a document the engine can only fail on later, when the failure would surface as objects silently not replicating."""
@@ -21,7 +21,8 @@ name = "conf-replication"
 [request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "+N5VPglXA1tMEMY2wdB8vA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Rule><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

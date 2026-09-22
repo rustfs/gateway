@@ -4,7 +4,7 @@
 
 [case]
 id = "c-lifecycle-0039"
-schema_version = 1
+schema_version = 3
 title = "A rule scoped by a Filter is written back without a rule-level Prefix element"
 rationale = """
 Writing an empty element for a member that holds an empty value is one direction of a repair; inventing one for a member that holds nothing is the opposite defect, and it is not cosmetic here. A rule that carried both the legacy Prefix and a Filter is a mixture the service refuses, so an encoder that emitted an empty Prefix beside every Filter would make each stored rule unreadable on the next write — the same read-modify-write failure the repair removes, arriving from the other side. The read-back is asserted byte for byte and the third exchange puts it back, so neither an invented element nor a refusal can pass unnoticed."""
@@ -28,7 +28,8 @@ name = "put-filter-scope"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "v36CXletz6hUYChbZ41NuA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>7</Days></Expiration><ID>filter-scope</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -60,7 +61,8 @@ name = "put-what-was-read"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "EHB6hGdEpd6VV6DEYuLs6g==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '''<?xml version="1.0" encoding="UTF-8"?>
 <LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><Expiration><Days>7</Days></Expiration><ID>filter-scope</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>''' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }

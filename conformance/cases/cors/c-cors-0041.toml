@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0041"
-schema_version = 1
+schema_version = 3
 title = "A repeated Origin header is refused and no CORS header is written"
 rationale = """
 Two Origin lines are the cache-poisoning shape of this feature: whichever one an intermediary keys its entry on, the
@@ -30,7 +30,8 @@ name = "conf-cors-rt"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "rAqMzbtniOyp6dCmIWiViw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

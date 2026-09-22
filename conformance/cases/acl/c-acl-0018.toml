@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0018"
-schema_version = 1
+schema_version = 3
 title = "log-delivery-write on an object is a 400 InvalidArgument"
 rationale = """
 The other direction of c-acl-0009, and the reason the two canned sets are two sets rather than one union: a value accepted on the wrong target stores a grant to the log-delivery group on an object, which nothing will ever evaluate and no read will ever explain. A single shared set would satisfy c-acl-0009 and fail here, which is exactly what makes the pair worth writing."""
@@ -26,7 +26,8 @@ body = { utf8 = "payload" }
 [request]
 method = "PUT"
 target = "/conf-acl/doc.txt?acl"
-headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-acl" = "log-delivery-write" }
+headers = { "x-amz-acl" = "log-delivery-write" }
+content_md5 = "computed"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]

@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0024"
-schema_version = 1
+schema_version = 3
 title = "An ACL write with an empty body and no ACL header is a 400 MalformedXML"
 rationale = """
 The other end of the channel rule from c-acl-0013. A write that names no access control at all has no defensible reading: treating it as "grant nobody anything" would revoke every existing grant on a request the caller almost certainly did not mean, and treating it as a no-op would answer 200 to a request that changed nothing. Neither is something a client can distinguish from success afterwards."""
@@ -21,7 +21,8 @@ name = "conf-acl"
 [request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==" }
+headers = { }
+content_md5 = "computed"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]

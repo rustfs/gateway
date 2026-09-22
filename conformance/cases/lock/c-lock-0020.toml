@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0020"
-schema_version = 1
+schema_version = 3
 title = "A zero-day default retention is refused as InvalidArgument"
 rationale = """
 Zero days is a retention period that expires the instant it is applied, so a bucket configured with it looks protected in every listing and protects nothing at all. That is the failure mode this family exists to prevent, and it is worth a different code from the schema violations beside it: the document is well formed and the value is out of range."""
@@ -21,7 +21,8 @@ name = "conf-lock"
 [request]
 method = "PUT"
 target = "/conf-lock?object-lock"
-headers = { "content-type" = "application/xml", "content-md5" = "0NOa7/tlRf6RPaRKoFPsEw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>0</Days></DefaultRetention></Rule></ObjectLockConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

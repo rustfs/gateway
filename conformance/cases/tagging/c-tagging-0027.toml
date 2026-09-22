@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0027"
-schema_version = 1
+schema_version = 3
 title = "PutBucketTagging with a document carrying no TagSet element is a 400 MalformedXML and the set survives"
 rationale = """
 The other side of c-tagging-0005, and the reason that ruling is a re-reading rather than a deleted \
@@ -41,7 +41,8 @@ name = "configure-a-set-to-survive"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging?tagging"
-headers = { "content-md5" = "lIekmFtFZOTSZInJM/f1eQ==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>keep</Key><Value>yes</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -56,7 +57,8 @@ name = "the-document-without-a-wrapper-is-refused"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging?tagging"
-headers = { "content-md5" = "LqZ+4+XlqgnOj2+V9Ka/ZA==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

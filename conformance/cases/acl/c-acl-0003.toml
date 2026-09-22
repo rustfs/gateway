@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0003"
-schema_version = 1
+schema_version = 3
 title = "A grant by email round-trips as xsi:type AmazonCustomerByEmail on an object"
 rationale = """
 The third union member, on the object half of the family, and the one whose discriminator is never inferable from the value's shape alone: an email address is a string like any other. The written document carries no xsi:type attribute at all — the reader this project ships cannot see one — so the read-back is what proves the discriminator was derived rather than dropped."""
@@ -29,7 +29,8 @@ name = "grant-by-email"
 [exchanges.request]
 method = "PUT"
 target = "/conf-acl/doc.txt?acl"
-headers = { "content-type" = "application/xml", "content-md5" = "5IJpMZEnXOQ5OgbXoymc1w==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<AccessControlPolicy><Owner><ID>3f6e2b1c4a8d90e7b5c31f2a6d80e4c97b1a3d5f8e206c4b7a9d1e3f5c7b9a0d</ID><DisplayName>conformance</DisplayName></Owner><AccessControlList><Grant><Grantee><EmailAddress>grantee@example.com</EmailAddress></Grantee><Permission>READ_ACP</Permission></Grant></AccessControlList></AccessControlPolicy>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

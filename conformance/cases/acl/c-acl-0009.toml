@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0009"
-schema_version = 1
+schema_version = 3
 title = "log-delivery-write is accepted on a bucket, which is the only place it means anything"
 rationale = """
 This is the bucket half of the split canned-ACL set, and it is the value the pinned Smithy enumeration omits altogether — a gateway that took its accepted set from the model would refuse the canned ACL server access logging is enabled with, and the caller would conclude logging is unavailable. Its other half is c-acl-0018, which refuses the same value on an object."""
@@ -21,7 +21,8 @@ name = "conf-acl"
 [request]
 method = "PUT"
 target = "/conf-acl?acl"
-headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-acl" = "log-delivery-write" }
+headers = { "x-amz-acl" = "log-delivery-write" }
+content_md5 = "computed"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]

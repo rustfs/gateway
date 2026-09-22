@@ -1,6 +1,6 @@
 [case]
 id = "c-replication-0006"
-schema_version = 1
+schema_version = 3
 title = "A Destination carrying a bucket ARN, an Account and a StorageClass round-trips intact"
 rationale = """
 The destination Bucket is an ARN — arn:aws:s3:::bucket — a value the S3 bucket-name grammar itself would refuse for its colons, which is why the member is decoded as a plain string rather than through the bucket-name type the model declares. This case pins that decision at the wire: the ARN, the twelve-digit account and the replica storage class all come back byte for byte, and no invented ARN grammar gets a chance to refuse a stored document."""
@@ -24,7 +24,8 @@ name = "put"
 [exchanges.request]
 method = "PUT"
 target = "/conf-replication?replication"
-headers = { "content-type" = "application/xml", "content-md5" = "0S1VZ1pL1hfWaA4J1gL4ZA==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><Priority>1</Priority><Filter><Prefix>docs/</Prefix></Filter><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket><Account>111122223333</Account><StorageClass>STANDARD_IA</StorageClass></Destination><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication></Rule></ReplicationConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

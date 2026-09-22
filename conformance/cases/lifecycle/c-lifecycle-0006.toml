@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0006"
-schema_version = 1
+schema_version = 3
 title = "A rule carrying transitions, noncurrent-version actions and an abort action round-trips byte for byte"
 rationale = """
 This is the densest legal rule: repeated Transition siblings, a NoncurrentVersionTransition with all three members, a NoncurrentVersionExpiration and an AbortIncompleteMultipartUpload. Losing any nested member on the round trip silently changes what the scanner does to old versions and stale uploads, and the flattened Transition list is exactly where a wrapper-inserting serializer would hide every transition at once."""
@@ -30,7 +30,8 @@ name = "put-full-rule"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "S3GcrtZBj4WjPOmNGrFd4w==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>3650</Days></Expiration><ID>tiered</ID><Filter><Prefix>archive/</Prefix></Filter><Status>Enabled</Status><Transition><Days>30</Days><StorageClass>GLACIER</StorageClass></Transition><Transition><Days>90</Days><StorageClass>DEEP_ARCHIVE</StorageClass></Transition><NoncurrentVersionTransition><NoncurrentDays>30</NoncurrentDays><StorageClass>GLACIER_IR</StorageClass><NewerNoncurrentVersions>3</NewerNoncurrentVersions></NoncurrentVersionTransition><NoncurrentVersionExpiration><NoncurrentDays>365</NoncurrentDays><NewerNoncurrentVersions>5</NewerNoncurrentVersions></NoncurrentVersionExpiration><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

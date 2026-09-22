@@ -1,6 +1,6 @@
 [case]
 id = "c-acl-0010"
-schema_version = 1
+schema_version = 3
 title = "bucket-owner-full-control is accepted on an object, which is the only place it means anything"
 rationale = """
 The object half of the split set, and the canned ACL a cross-account uploader is told to send so that the destination bucket's owner can read what it wrote. Refusing it would break the documented cross-account upload; accepting it on a bucket would store a grant naming an owner the bucket does not have, which c-acl-0019 refuses from the other side."""
@@ -26,7 +26,8 @@ body = { utf8 = "payload" }
 [request]
 method = "PUT"
 target = "/conf-acl/doc.txt?acl"
-headers = { "content-md5" = "1B2M2Y8AsgTpgAmY7PhCfg==", "x-amz-acl" = "bucket-owner-full-control" }
+headers = { "x-amz-acl" = "bucket-owner-full-control" }
+content_md5 = "computed"
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
 [expect]

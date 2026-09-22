@@ -1,6 +1,6 @@
 [case]
 id = "c-lifecycle-0009"
-schema_version = 1
+schema_version = 3
 title = "An empty Filter element scopes a rule to every object and survives the round trip"
 rationale = """
 An empty Filter is the documented spelling for a rule that applies to the whole bucket, and it is easy to break twice: a strict decoder refuses the element for having no condition, and a lenient encoder drops it on the way out — turning a valid stored rule into one with no scope at all, which a stricter future parse then refuses. Both halves are pinned here."""
@@ -25,7 +25,8 @@ name = "put-empty-filter"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "ULAod+/NOWnGoEUw95GAnQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>30</Days></Expiration><ID>everything</ID><Filter></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

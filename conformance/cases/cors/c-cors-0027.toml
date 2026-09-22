@@ -1,6 +1,6 @@
 [case]
 id = "c-cors-0027"
-schema_version = 1
+schema_version = 3
 title = "A preflight a stored rule admits answers 200 with the origin, the methods and Vary"
 rationale = """
 This is the only case in the suite that proves an OPTIONS is answered at all. Every other CORS case asserts what the configuration codec stores; none of them can observe the runtime, and until this one existed the whole preflight half of the feature could have been absent without a single red line. The three headers asserted are the three a browser refuses the real request without."""
@@ -28,7 +28,8 @@ name = "conf-cors-rt"
 [exchanges.request]
 method = "PUT"
 target = "/conf-cors-rt?cors"
-headers = { "content-type" = "application/xml", "content-md5" = "rAqMzbtniOyp6dCmIWiViw==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = "<CORSConfiguration><CORSRule><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://app.example.com</AllowedOrigin></CORSRule></CORSConfiguration>" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

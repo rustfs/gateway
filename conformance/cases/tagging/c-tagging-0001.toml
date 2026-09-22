@@ -4,7 +4,7 @@
 
 [case]
 id = "c-tagging-0001"
-schema_version = 1
+schema_version = 3
 title = "PutBucketTagging stores the set and GetBucketTagging reads it back wrapped"
 rationale = """
 Cost allocation and lifecycle tooling read this document mechanically: a parser pointed at \
@@ -44,7 +44,8 @@ name = "write-the-set"
 [exchanges.request]
 method = "PUT"
 target = "/conf-tagging?tagging"
-headers = { "content-md5" = "Fakx13psqzGw9jOqpnh20g==" }
+headers = {  }
+content_md5 = "computed"
 body = { utf8 = '<Tagging><TagSet><Tag><Key>project</Key><Value>gateway</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag><Tag><Key>stage</Key><Value>p5</Value></Tag></TagSet></Tagging>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 

@@ -31,10 +31,10 @@ use std::collections::BTreeMap;
 
 /// The newest schema version this runner understands.
 ///
-/// Version 1 remains readable; version 2 adds concurrent exchange batches. A case newer than this
+/// Versions 1 and 2 remain readable; version 3 adds computed Content-MD5. A case newer than this
 /// value is refused with an explicit "update the runner" error. It is never skipped and its
 /// unknown fields are never ignored.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// The oldest schema version this runner still accepts.
 pub const MIN_SCHEMA_VERSION: i64 = 1;
@@ -713,3 +713,7 @@ status = 200
         assert!(Schema::compile(r#"{"pattern":"(?i)abc"}"#).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "schema/computed_md5_tests.rs"]
+mod computed_md5_tests;

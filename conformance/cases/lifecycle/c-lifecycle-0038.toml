@@ -5,7 +5,7 @@
 
 [case]
 id = "c-lifecycle-0038"
-schema_version = 1
+schema_version = 3
 title = "A rule scoped by an empty legacy Prefix is written back with that element and accepted again"
 rationale = """
 The pre-Filter revision puts the scope on the rule, and an empty Prefix element is how it says every object; AWS's own v1 examples carry it. The decoder always kept it, and an optional member defaulted to dropping its own empty text on the way out, so the read returned a rule with no scope at all and the next write of that same document was refused ScopeMissing. RustFS persists configuration by parsing and re-serialising, so the third exchange is the assertion: an installed rule an operator reads and puts straight back must still be accepted, and it is that cycle rather than any single response that destroys the rule."""
@@ -34,7 +34,8 @@ name = "put-legacy-empty-prefix"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "vwba777gf69YwN3GwqJJUQ==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '<LifecycleConfiguration><Rule><Expiration><Days>7</Days></Expiration><ID>legacy-scope</ID><Prefix></Prefix><Status>Enabled</Status></Rule></LifecycleConfiguration>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
@@ -68,7 +69,8 @@ name = "put-what-was-read"
 [exchanges.request]
 method = "PUT"
 target = "/conf-lifecycle?lifecycle"
-headers = { "content-type" = "application/xml", "content-md5" = "I279UH5c5cPDtB5Dga1Lvg==" }
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
 body = { utf8 = '''<?xml version="1.0" encoding="UTF-8"?>
 <LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><Expiration><Days>7</Days></Expiration><ID>legacy-scope</ID><Prefix></Prefix><Status>Enabled</Status></Rule></LifecycleConfiguration>''' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }

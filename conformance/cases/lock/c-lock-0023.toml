@@ -1,6 +1,6 @@
 [case]
 id = "c-lock-0023"
-schema_version = 1
+schema_version = 3
 title = "A bypass header that is neither true nor false is refused, never resolved to true"
 rationale = """
 This header is the single switch that weakens GOVERNANCE protection, so the direction of a parse failure is a security property rather than a style choice. A parser that treated any non-empty value as true would grant the bypass to a client that sent yes, or 1, or a typo — the exact opposite of what an unreadable value should mean. The refusal is the assertion; the 400 is only how it is observed."""
@@ -32,7 +32,8 @@ body = { utf8 = "payload" }
 [request]
 method = "PUT"
 target = "/conf-lock/doc.txt?retention"
-headers = { "content-type" = "application/xml", "content-md5" = "nRP4r9dIhDgQ95myRGb8sw==", "x-amz-bypass-governance-retention" = "yes" }
+headers = { "content-type" = "application/xml", "x-amz-bypass-governance-retention" = "yes" }
+content_md5 = "computed"
 body = { utf8 = '<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>' }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
