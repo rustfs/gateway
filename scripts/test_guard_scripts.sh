@@ -9153,6 +9153,37 @@ expect_role_result fail 'a one-word pass synonym presented as a verdict' \
 expect_role_result fail 'two-word approval prose presented as a verdict' \
     $'M\tscripts/check_example.sh' \
     $'## Role Verdicts\n- simplicity-adversary: looks good'
+# The repository template uses indented comment closures; those are not code fences.
+role_template_path=.github/pull_request_template.md
+# Check Git spelling even on case-insensitive filesystems.
+git -C "$REPO_ROOT" ls-files --error-unmatch -- "$role_template_path" >/dev/null
+role_template_body="$(<"${REPO_ROOT}/${role_template_path}")"
+role_template_body="${role_template_body/- simplicity-adversary:/- simplicity-adversary: attacked template instructions and hidden verdicts — no break found}"
+expect_role_result pass 'the actual PR template with a filled role verdict' \
+    $'M\tscripts/check_example.sh' "$role_template_body"
+expect_role_result pass 'a balanced comment whose closing delimiter is indented' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n<!-- instruction\n     ends here -->\n- simplicity-adversary: attacked indented closures — no break found'
+expect_role_result pass 'a balanced comment whose closing delimiter follows a tab' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n<!-- instruction\n\tends here -->\n- simplicity-adversary: attacked tabbed closures — no break found'
+expect_role_result fail 'a verdict hidden in a balanced comment with an indented closure' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n<!--\n- simplicity-adversary: attacked hidden evidence — no break found\n    -->' '' \
+    'missing substantive verdict for simplicity-adversary'
+expect_role_result fail 'a verdict on an indented comment-closing line stays hidden' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n<!--\n    -->- simplicity-adversary: attacked hidden evidence — no break found' '' \
+    'missing substantive verdict for simplicity-adversary'
+expect_role_result fail 'a genuinely unterminated comment stays an error' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n<!-- instruction\n    still inside\n- simplicity-adversary: attacked hidden evidence — no break found' '' \
+    'unterminated HTML comment'
+expect_role_result fail 'a code fence cannot provide a role after a balanced instruction comment' \
+    $'M\tscripts/check_example.sh' \
+    $'## Role Verdicts\n<!-- instruction\n    -->\n```markdown\n- simplicity-adversary: attacked hidden evidence — no break found\n```' '' \
+    'missing substantive verdict for simplicity-adversary'
+
 expect_role_result fail 'a role section hidden in an HTML comment' \
     $'M\tscripts/check_example.sh' \
     $'<!--\n## Role Verdicts\n- simplicity-adversary: attacked the input boundary.\n-->'
