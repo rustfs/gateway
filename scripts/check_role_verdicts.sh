@@ -246,7 +246,8 @@ def visible_lines(markdown: str) -> list[str]:
             if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{fence[1]},}}[ \t]*", raw):
                 fence = None
             continue
-        if raw.startswith("\t") or re.match(r"^ {4,}", raw):
+        indented = raw.startswith("\t") or re.match(r"^ {4,}", raw)
+        if indented and not comment:
             continue
         visible = ""
         rest = raw
@@ -267,6 +268,10 @@ def visible_lines(markdown: str) -> list[str]:
                     visible += rest[:start]
                     rest = rest[start + 4 :]
                     comment = True
+        # A comment may close on an indented line in the PR template. Consume its
+        # delimiter, but do not turn the remainder of that code line into evidence.
+        if indented:
+            continue
         stripped = visible.lstrip(" ")
         if re.match(r"</?[A-Za-z][A-Za-z0-9-]*(?:[\t />]|$)", stripped) or stripped.startswith(("<?", "<![CDATA[")) or re.match(r"<![A-Z]", stripped):
             fail("PR body contains unsupported raw HTML; role verdicts must be visible Markdown")
