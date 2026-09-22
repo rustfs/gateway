@@ -459,7 +459,7 @@ pub use rustfs_gateway_core::{InvalidWireLabel, RedirectTarget, RegionLabel};
 // the one that will not move when the first does — which is the whole failure mode `ops/shared/`
 // exists to prevent. This is the value `CreateBucket` declares, and it is what a backend reads.
 pub use rustfs_gateway_core::ops::create_bucket::REGION_MATCH_POLICY;
-pub use rustfs_gateway_http::{EffectiveHost, Limits, WireReject, WireRequest};
+pub use rustfs_gateway_http::{EffectiveHost, Limits, TransportExtensions, WireReject, WireRequest};
 pub use rustfs_gateway_sig::{Identity, OperationFloor, RegionSet, RequestNow, SecurityFloor, SigService, SkewWindow, Verdict};
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};
 /// Tower's service trait, exposed so facade-only consumers can wrap [`S3Service`].

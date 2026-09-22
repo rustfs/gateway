@@ -75,6 +75,7 @@ mod metadata;
 mod query_view;
 mod reject;
 mod text;
+mod transport_extensions;
 mod wire;
 
 pub use crate::checksum::{BodyDigests, BodyIntegrity, ChecksumReject, ChecksumSubject, ChecksumVerified};
@@ -97,6 +98,7 @@ pub use crate::metadata::{
 };
 pub use crate::query_view::{QueryIndex, QueryView, SINGLE_VALUED_QUERY_PARAMS, subresource_bit};
 pub use crate::reject::{MAX_LINGER_DRAIN_BYTES, WireReject};
+pub use crate::transport_extensions::TransportExtensions;
 pub use crate::wire::{RawPath, WireRequest};
 
 /// A [`WireRequest`] carrying the workspace-wide owned body.

@@ -7,6 +7,7 @@ after it has accepted.
 | File | Responsibility | Read it when |
 |---|---|---|
 | `src/lib.rs` | Module wiring and public wire types. | Start here for an HTTP task. |
+| `src/transport_extensions.rs` | Shared read-only transport values without value cloning. | A typed transport value disappears or becomes mutable. |
 | `src/wire.rs` | `WireRequest::accept`: the first stage of the pipeline and the last place a raw HTTP request exists. | A request is accepted or refused wrongly at the head, or the acceptance order is in question. |
 | `src/header_view.rs` | The borrowed, allocation-free header view every layer above reads through. | Header lookup, canonicalization, or duplicate handling is wrong. |
 | `src/query_view.rs` | The query string, indexed once and read without allocating. | Query parameters are indexed or read wrongly. |
@@ -46,3 +47,4 @@ after it has accepted.
 | `tests/form_limits.rs` | POST Object form ceilings and the order in which they are decided. | Change `src/form/`. |
 | `tests/form_allocations.rs` | Measures file-size-independent heap and bounded allocation under fragmented text fields. | Change the file read path. |
 | `benches/parse.rs` | Asserts zero allocations for eight-query indexing and signed-header canonicalization. | Change request-head parsing or canonical-header writing. |
+| `tests/accepted_transport_extensions.rs` | Read-only transport values across acceptance and body mapping. | A transport value is lost, cloned, exposed, or substituted. |

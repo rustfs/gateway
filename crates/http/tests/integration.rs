@@ -18,6 +18,8 @@
 //! NOT responsible for: test behavior or repository automation implementation.
 //! Upstream: the `http` integration-test modules. Downstream: Cargo's test harness.
 
+#[path = "accepted_transport_extensions.rs"]
+mod accepted_transport_extensions;
 #[path = "allocation_budget.rs"]
 mod allocation_budget;
 #[path = "boundary_guards.rs"]

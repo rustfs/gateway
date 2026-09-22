@@ -21,7 +21,7 @@
 //! every member alone; that the conversion refuses by name what s3s cannot hold; and that every
 //! context divergence this file knows of is a named test saying what each side does.
 //! NOT responsible for: the input members or body consumption (the decode diff), or RustFS
-//! extensions, which the conversion deliberately never produces.
+//! extension types, which the adapter supplies after the protocol conversion.
 //! Upstream: the harness in `super`. Downstream: nothing.
 
 use std::sync::Arc;
@@ -407,17 +407,17 @@ fn divergence_a_non_utf8_header_value_reaches_both_handlers() {
 }
 
 /// A transport layer's extension (RustFS installs its `RemoteAddr` and `RequestContext` this way)
-/// reaches the s3s handler; the gateway's wire request keeps no extension bag.
+/// reaches both handlers through the read-only transport context.
 ///
 /// Ruling: `rd-ctx-0003`
 #[test]
-fn divergence_a_transport_extension_reaches_only_the_s3s_handler() {
+fn divergence_a_transport_extension_reaches_both_handlers() {
     let request = ContextRequest::put(PATH_HOST, "/photos/a.jpg", b"hello").with_transport_extension();
     let compared = compared(&request);
 
-    assert!(compared.converted.extensions.is_empty());
+    assert!(compared.converted.extensions.get::<TransportMarker>().is_some());
     assert!(compared.oracle.extensions.get::<TransportMarker>().is_some());
-    assert_eq!(differing_context(&compared.converted, &compared.oracle), ["extensions"]);
+    assert_eq!(differing_context(&compared.converted, &compared.oracle), NONE);
 }
 
 /// An absolute-form target: s3s hands its handler the URI as it arrived, authority included; the
