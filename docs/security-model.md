@@ -58,17 +58,33 @@ implementation measures 0.0008.
 
 ## Signed-chunk overhead limit
 
-A signed `aws-chunked` upload pays a fixed header of roughly 85 bytes per chunk, so a stream of
-tiny chunks is mostly framing and makes the server do HMAC work out of proportion to the bytes it
-delivers. `ChunkLimits::max_overhead_permille` bounds that ratio in integer permille (a float on
-the data path would be slower and locale-shaped); the default of 50 refuses signed chunks smaller
-than about 1,740 bytes. AWS SDKs never chunk below 8 KiB, so no known client is affected, but the
-number rests on that estimate rather than on a measurement of real clients: a non-AWS SigV4 signer,
-an SDK with an unusual chunk size, or a proxy that re-frames a stream could sit below it. The
-threshold is therefore a deployment-visible limit — raise it with
-`ChunkLimits::with_max_overhead_permille` only against a measured client, never pre-emptively,
-and record the measurement on rustfs/gateway#6, where the default is to be re-decided once the
-client matrix has run.
+A signed `aws-chunked` upload pays roughly 85 bytes of framing per chunk. The
+`ChunkLimits::max_overhead_permille` default remains **50**: at each ratio check, accumulated
+framing bytes must not exceed 50 parts per thousand of the bytes already decoded. The check
+starts only after framing exceeds `overhead_ratio_floor_bytes`, which defaults to **4,096**.
+The roughly 1,740-byte estimate describes sustained small-chunk overhead, not a minimum enforced
+on every chunk. Short uploads and small final chunks can fit the cumulative rule.
+
+Local wire captures for [issue #6](https://github.com/rustfs/gateway/issues/6#issuecomment-5780820533) measured
+`mc RELEASE.2025-08-13T08-35-41Z` with its embedded minio-go v7.0.90 against a loopback HTTP sink:
+
+| Payload bytes | Signed data chunks | Framing bytes, including the zero terminator |
+| --- | --- | --- |
+| 4,194,427 | 64 of 65,536 bytes, then 123 bytes | 5,933 |
+| 4,194,305 | 64 of 65,536 bytes, then 1 byte | 5,932 |
+| 1 | 1 of 1 byte | 172 |
+
+The first upload produced identical chunk sizes from one stdin write and 37,119 writes of at
+most 113 bytes. The second also used fragmented stdin writes; client buffering can coalesce
+those writes, so this does not measure reads at the signer's own input boundary. AWS CLI 2.27.49
+sent a hashed payload without signed chunks to this plaintext endpoint and supplies no signed
+chunk-size evidence. These captures measured framing, not signature validity or gateway acceptance.
+
+Retain 50 permille: the observed signed streams fit the cumulative rule, including their small
+tails, and provide no reason to relax it. This is evidence for the measured client and transport,
+not a universal SDK compatibility claim; TLS, other clients and versions, and multipart setting
+variants need their own measurements. Increase the limit through
+`ChunkLimits::with_max_overhead_permille` only for a measured deployment requirement and record the evidence on issue #6, never pre-emptively.
 
 ## Deployment constraint
 
