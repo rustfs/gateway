@@ -122,7 +122,8 @@ the resolved directory. From the selected worktree, preview the exact directory 
 cargo clean --target-dir /absolute/artifact/path --dry-run
 ```
 
-After reviewing the preview, repeat without `--dry-run` to remove those rebuildable artifacts.
+Add `--verbose` to the preview to list individual paths. After reviewing the preview, repeat
+without `--dry-run` to remove those rebuildable artifacts.
 Never clean a directory while another build, test, or mutation run uses it. Keep the warm
 directory for active work; do not delete source worktrees, uncommitted changes, the Cargo
 registry, or installed toolchains to recover build space. Re-run `df -h` after cleanup.
