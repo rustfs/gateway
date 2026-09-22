@@ -22,6 +22,9 @@ use std::sync::mpsc;
 
 use super::*;
 
+#[path = "observation_tests.rs"]
+mod observation_tests;
+
 fn test_root(label: &str) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -68,15 +71,26 @@ fn process_alive(pid: &str) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// Whether `pid` is still present once a killed orphan has had time to be reaped.
+/// Whether `pid` can still execute after the process-group kill.
 ///
 /// A SIGKILLed grandchild whose parent died with it is reparented to init and stays visible to
-/// `kill -0` as a zombie until init reaps it, so an immediate probe races that reap. Two seconds
-/// is far inside the `sleep 30` the grandchild would otherwise still be running.
+/// `kill -0` as a zombie until init reaps it. Observe termination independently of that reap:
+/// zombies cannot execute, but sleeping and stopped descendants can and must remain failures.
 fn alive_after_reap_grace(pid: &str) -> bool {
     for _ in 0..200 {
         if !process_alive(pid) {
             return false;
+        }
+        let output = Command::new("/bin/ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()
+            .expect("process state probe must start");
+        let state = String::from_utf8(output.stdout).expect("process state must be text");
+        if output.status.success() && state.trim_start().starts_with('Z') {
+            return false;
+        }
+        if !output.status.success() && process_alive(pid) {
+            panic!("process state probe failed for a visible descendant");
         }
         thread::sleep(Duration::from_millis(10));
     }
