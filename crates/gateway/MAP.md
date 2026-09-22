@@ -14,8 +14,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/service.rs`, `src/service/update.rs` | Ordered pipeline and atomic assembly publication; ADR-0024's service-level addressing, secret opt-in and typed path values, and ADR-0025/0026's bound bucket (template or query) and subjects, are decided in `src/routed_facts.rs`; the route stage asks one question per action and per account | Moving a stage, replacing middleware, or tracing a response |
 | `src/service_tests.rs` | The pipeline's own unit suite, split out at the 800-line limit | Changing what is decidable without a request |
 | `src/adapt.rs` | tower and hyper adapters | Wiring a server or checking `Infallible` |
-| `src/conn/response_tests.rs` | Bounded response vectors, framing and partial-write controls | Changing response fallback writes |
-| `src/conn/**` | Optional plaintext HTTP/1.1 request framing and response transport | Auditing the self-held socket path or adding file-region transfer |
+| `src/conn/**`, `src/conn/response_tests.rs` | Optional plaintext HTTP/1.1 framing and response transport, with bounded-vector and partial-write controls | Auditing the self-held socket path or changing response fallback writes |
 | `src/assembly.rs` | `AssemblyError` and `asm-*` rule refs | Adding an assembly refusal |
 | `src/dispatch.rs` | Codec-aware operation erasure and dispatch table | A route cannot decode or invoke |
 | `src/gate.rs` | Authentication proof, sealed body, the two ceilings' and two deadlines' values, and the four refusals they produce | Moving work around the body read |
