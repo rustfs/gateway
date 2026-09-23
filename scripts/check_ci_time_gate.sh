@@ -60,6 +60,19 @@ mandatory_jobs = %w[
 missing_jobs = mandatory_jobs - jobs.keys
 abort("ERROR: required PR jobs are missing: #{missing_jobs.join(', ')}") unless missing_jobs.empty?
 
+# Measured on same-host AB/BA pairs: the cold build omits dev/test debug information.
+bootstrap_debug_keys = %w[CARGO_PROFILE_DEV_DEBUG CARGO_PROFILE_TEST_DEBUG]
+bootstrap_env = jobs.fetch("bootstrap").fetch("env", {})
+bootstrap_debug_keys.each do |key|
+  require_equal(bootstrap_env.fetch(key, nil), "0",
+                "cold bootstrap must use job-local zero dev/test debug information")
+end
+jobs.fetch("bootstrap").fetch("steps").each do |step|
+  if (step.fetch("env", {}).keys & bootstrap_debug_keys).any?
+    abort("ERROR: profile overrides are restricted to the cold bootstrap job environment")
+  end
+end
+
 required_contexts = {
   "static" => "Static checks",
   "clippy" => "Clippy",

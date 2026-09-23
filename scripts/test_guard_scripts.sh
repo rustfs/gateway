@@ -18028,6 +18028,95 @@ expect_fail check_ci_test_split.sh \
     mut_ci_new_guard_job_defends_the_wrong_budget \
     'defends 480s but CI enforces 150s'
 
+mut_ci_bootstrap_dev_debug_missing() {
+    replace_ci_text '      CARGO_PROFILE_DEV_DEBUG: "0"' ''
+}
+expect_fail check_ci_time_gate.sh \
+    'cold bootstrap dev debug information is missing' mut_ci_bootstrap_dev_debug_missing \
+    'cold bootstrap must use job-local zero dev/test debug information'
+
+mut_ci_bootstrap_dev_debug_wrong() {
+    replace_ci_text '      CARGO_PROFILE_DEV_DEBUG: "0"' '      CARGO_PROFILE_DEV_DEBUG: "1"'
+}
+expect_fail check_ci_time_gate.sh \
+    'cold bootstrap dev debug information is wrong' mut_ci_bootstrap_dev_debug_wrong \
+    'cold bootstrap must use job-local zero dev/test debug information'
+
+mut_ci_bootstrap_test_debug_missing() {
+    replace_ci_text '      CARGO_PROFILE_TEST_DEBUG: "0"' ''
+}
+expect_fail check_ci_time_gate.sh \
+    'cold bootstrap test debug information is missing' mut_ci_bootstrap_test_debug_missing \
+    'cold bootstrap must use job-local zero dev/test debug information'
+
+mut_ci_bootstrap_test_debug_wrong() {
+    replace_ci_text '      CARGO_PROFILE_TEST_DEBUG: "0"' '      CARGO_PROFILE_TEST_DEBUG: "1"'
+}
+expect_fail check_ci_time_gate.sh \
+    'cold bootstrap test debug information is wrong' mut_ci_bootstrap_test_debug_wrong \
+    'cold bootstrap must use job-local zero dev/test debug information'
+
+mut_ci_bootstrap_step_overrides_profile() {
+    replace_ci_text '          scripts/ci_budget.sh 420 "cold bootstrap" cargo xtask bootstrap' \
+        '          scripts/ci_budget.sh 420 "cold bootstrap" cargo xtask bootstrap
+        env:
+          CARGO_PROFILE_TEST_DEBUG: "1"'
+}
+expect_fail check_ci_time_gate.sh \
+    'a cold bootstrap step overrides its measured job profile' mut_ci_bootstrap_step_overrides_profile \
+    'profile overrides are restricted to the cold bootstrap job environment'
+
+mut_ci_bootstrap_unrelated_environment() {
+    replace_ci_text '      CARGO_PROFILE_DEV_DEBUG: "0"' '      CARGO_PROFILE_DEV_DEBUG: "0"
+      BOOTSTRAP_LABEL: measured
+      CARGO_PROFILE_DEV_OVERFLOW_CHECKS: "true"'
+}
+expect_guard_pass check_ci_time_gate.sh \
+    'unrelated cold bootstrap environment entries' mut_ci_bootstrap_unrelated_environment
+
+mut_ci_other_job_profile() {
+    replace_ci_text '    name: Documentation' '    name: Documentation
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "1"'
+}
+expect_guard_pass check_ci_time_gate.sh \
+    'another job has an independent profile setting' mut_ci_other_job_profile
+
+mut_ci_bootstrap_step_unrelated_profile() {
+    replace_ci_text '          scripts/ci_budget.sh 420 "cold bootstrap" cargo xtask bootstrap' \
+        '          scripts/ci_budget.sh 420 "cold bootstrap" cargo xtask bootstrap
+        env:
+          CARGO_PROFILE_TEST_OVERFLOW_CHECKS: "true"'
+}
+expect_guard_pass check_ci_time_gate.sh \
+    'a bootstrap step has an unrelated profile setting' mut_ci_bootstrap_step_unrelated_profile
+
+mut_ci_workflow_dev_debug_override() {
+    replace_ci_text '  CARGO_TERM_COLOR: always' '  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: "1"'
+}
+expect_fail check_ci_time_gate.sh \
+    'workflow dev debug override' mut_ci_workflow_dev_debug_override \
+    'workflow environment may not override required commands'
+
+mut_ci_workflow_test_debug_override() {
+    replace_ci_text '  CARGO_TERM_COLOR: always' '  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_TEST_DEBUG: "1"'
+}
+expect_fail check_ci_time_gate.sh \
+    'workflow test debug override' mut_ci_workflow_test_debug_override \
+    'workflow environment may not override required commands'
+
+mut_ci_bootstrap_step_dev_override() {
+    replace_ci_text '          scripts/ci_budget.sh 420 "cold bootstrap" cargo xtask bootstrap' \
+        '          scripts/ci_budget.sh 420 "cold bootstrap" cargo xtask bootstrap
+        env:
+          CARGO_PROFILE_DEV_DEBUG: "1"'
+}
+expect_fail check_ci_time_gate.sh \
+    'a bootstrap step overrides dev debug information' mut_ci_bootstrap_step_dev_override \
+    'profile overrides are restricted to the cold bootstrap job environment'
+
 # rustfs/gateway#217 twice over: `Cold bootstrap` wrapped a command that defends its own
 # five-minute budget in `timeout 300s`, the same number, so the kill always beat the verdict and
 # the job printed exit 124 with nothing naming the clock.

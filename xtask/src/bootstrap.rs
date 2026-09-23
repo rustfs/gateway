@@ -18,7 +18,7 @@
 //! compilation within five minutes. NOT responsible for: installing a Rust toolchain.
 //! Upstream: the `bootstrap` command. Downstream: Cargo and codegen.
 
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::codegen;
@@ -30,6 +30,7 @@ pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
         return ExitCode::from(2);
     }
     let started = Instant::now();
+    let stage = Stage::start("toolchain check");
     for tool in [["--version"].as_slice(), ["rustc", "--version"].as_slice()] {
         let (program, arguments) = if tool.len() == 1 {
             (env!("CARGO"), tool)
@@ -44,6 +45,8 @@ pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
             }
         }
     }
+    drop(stage);
+    let stage = Stage::start("dependency fetch");
     match Command::new(env!("CARGO")).args(["fetch", "--locked"]).output() {
         Ok(output) if output.status.success() => {}
         Ok(output) => {
@@ -55,7 +58,9 @@ pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
             return ExitCode::from(3);
         }
     }
+    drop(stage);
     let root = codegen::repo_root();
+    let stage = Stage::start("pinned model verification");
     match Command::new("python3")
         .arg(root.join("model/tools/verify.py"))
         .current_dir(&root)
@@ -71,6 +76,8 @@ pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
             return ExitCode::from(3);
         }
     }
+    drop(stage);
+    let stage = Stage::start("generated artifact verification");
     match codegen::verify_generated() {
         Ok(count) if !json => println!("bootstrap: verified {count} generated artifacts"),
         Ok(_) => {}
@@ -79,15 +86,22 @@ pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    let compile = Command::new(env!("CARGO")).args(["test", "--workspace", "--no-run"]).output();
+    drop(stage);
+    let stage = Stage::start("workspace test compilation");
+    let compile = Command::new(env!("CARGO"))
+        .args(["test", "--workspace", "--no-run"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status();
     match compile {
-        Ok(output) if !output.status.success() => return ExitCode::FAILURE,
+        Ok(status) if !status.success() => return ExitCode::FAILURE,
         Err(error) => {
             eprintln!("bootstrap: cargo test could not start: {error}");
             return ExitCode::FAILURE;
         }
         Ok(_) => {}
     }
+    drop(stage);
     let elapsed = started.elapsed();
     if elapsed > Duration::from_secs(300) {
         eprintln!("bootstrap: exceeded the five-minute budget ({:.2}s)", elapsed.as_secs_f64());
@@ -102,4 +116,26 @@ pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
         println!("bootstrap: ready in {:.2}s", elapsed.as_secs_f64());
     }
     ExitCode::SUCCESS
+}
+
+/// Reports each entered stage even when an early failure returns from bootstrap.
+struct Stage {
+    name: &'static str,
+    started: Instant,
+}
+
+impl Stage {
+    fn start(name: &'static str) -> Self {
+        eprintln!("bootstrap: {name} started");
+        Self {
+            name,
+            started: Instant::now(),
+        }
+    }
+}
+
+impl Drop for Stage {
+    fn drop(&mut self) {
+        eprintln!("bootstrap: {} finished in {:.2}s", self.name, self.started.elapsed().as_secs_f64());
+    }
 }
