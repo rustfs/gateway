@@ -85,4 +85,5 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/purity_guard.rs` | Source-shape guards for pre-auth code. | Add public/core routing code. |
 | `tests/xml_parse_replay.rs` | Replays `fuzz/seeds/xml_parse/` and 40,000 fixed-seed samples through the `xml_parse` property over `rustfs-gateway-xml`'s bounded reader. | Change an XML ceiling or refusal, or add a minimised fuzz regression seed. |
 | `tests/policy_json_replay.rs` | Replays `fuzz/seeds/policy_json/` and 20,000 fixed-seed samples through the `policy_json` property: the `PutBucketPolicy` codec and `validate_policy` held to a strict duplicate-aware JSON reader. | Change a bucket policy check or ceiling, or add a minimised fuzz regression seed. |
+| `tests/restore_header_replay.rs` | Replays the Restore header grammar and calendar boundaries fuzz property on stable. | Restore header parsing or formatting changes. |
 | `tests/golden/route-table.txt` | Protected ordered route table. | Never edit without the Breaking Change process. |
