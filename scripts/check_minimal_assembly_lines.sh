@@ -55,10 +55,10 @@ listener_count="$(count_section '// BEGIN MINIMAL LISTENER' '// END MINIMAL LIST
     printf 'check_minimal_assembly_lines: expected exactly one complete listener marker pair in %s\n' "$EXAMPLE" >&2
     exit 1
 }
-[[ "$listener_count" -le 46 ]] || {
-    printf 'check_minimal_assembly_lines: listener path uses %s effective lines, current ratchet is 46 and the 20-line target is tracked by gateway#424\n' "$listener_count" >&2
+[[ "$listener_count" -le 20 ]] || {
+    printf 'check_minimal_assembly_lines: listener path uses %s effective lines, limit is 20\n' "$listener_count" >&2
     exit 1
 }
 
-printf 'OK: minimal assembly=%s/20; listener=%s/46 effective lines (20-line listener target: gateway#424)\n' \
+printf 'OK: minimal assembly=%s/20; listener=%s/20 effective lines\n' \
     "$assembly_count" "$listener_count"
