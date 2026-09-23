@@ -79,7 +79,9 @@ fail() {
 
 source_list="$(mktemp "${TMPDIR:-/tmp}/gateway-normalization-sources.XXXXXX")"
 code_snapshot="$(mktemp "${TMPDIR:-/tmp}/gateway-normalization-code.XXXXXX")"
-cleanup() { rm -f "$source_list" "$code_snapshot"; }
+candidate_snapshot="$(mktemp "${TMPDIR:-/tmp}/gateway-normalization-candidates.XXXXXX")"
+binary_marker="$(mktemp "${TMPDIR:-/tmp}/gateway-normalization-binary.XXXXXX")"
+cleanup() { rm -f "$source_list" "$code_snapshot" "$candidate_snapshot" "$binary_marker"; }
 trap cleanup EXIT
 
 if ! git ls-files --cached --others --exclude-standard -- 'crates/*.rs' 'xtask/*.rs' >"$source_list"; then
@@ -107,9 +109,30 @@ if ! awk '!/^[[:space:]]*\/\// { print FILENAME "\t" $0 }' "${sources[@]}" >"$co
     exit 1
 fi
 
+# Every ERE below requires one of these literal markers. Keep the complete path/code row:
+# ungrouped alternatives in the existing patterns can also match a marker in the path.
+# Rule 4's policy checks still use the full snapshot. Retain legacy binary-file behavior by
+# falling back to that snapshot if any input row contains NUL, even in an unrelated line.
+scan_snapshot="$candidate_snapshot"
+if ! awk -v binary_marker="$binary_marker" '
+    BEGIN { nul = sprintf("%c", 0) }
+    length(nul) && index($0, nul) { binary = 1; exit }
+    index($0, "normalize_key") || index($0, "floor_check_key") ||
+    index($0, "floor_check_bucket") || index($0, "percent_decode") ||
+    index($0, "ObjectKey") || index($0, "new_unchecked") ||
+    index($0, "from_utf8_lossy") || index($0, "decode_utf8_lossy") { print }
+    END { if (binary) print "binary" > binary_marker }
+' "$code_snapshot" >"$candidate_snapshot"; then
+    printf 'single-normalisation: cannot prepare candidate snapshot\n' >&2
+    exit 1
+fi
+if [[ -s "$binary_marker" ]]; then
+    scan_snapshot="$code_snapshot"
+fi
+
 matching_files() {
     local matches rc=0
-    if matches="$(grep -E $'\t.*'"$1" "$code_snapshot")"; then
+    if matches="$(grep -E $'\t.*'"$1" "$scan_snapshot")"; then
         :
     else
         rc=$?
