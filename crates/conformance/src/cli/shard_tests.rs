@@ -18,17 +18,26 @@
 //! NOT responsible for: the partition itself, which `runner::shard_tests` owns.
 //! Upstream: `super`. Downstream: Cargo's test harness.
 
+#[cfg(feature = "production-transports")]
 use std::path::PathBuf;
 
 use super::tests::{args, corpus};
 use super::*;
 
 #[test]
-fn a_shard_option_parses_and_reaches_both_transport_children() {
+fn a_shard_option_parses() {
     let options = Options::parse(&args(&["diff-transports", "--exclude-slow", "--shard", "1/3"]))
         .expect("parses")
         .expect("not help");
     assert_eq!(options.shard, Some(Shard { index: 1, count: 3 }));
+}
+
+#[cfg(feature = "production-transports")]
+#[test]
+fn a_shard_option_reaches_both_transport_children() {
+    let options = Options::parse(&args(&["diff-transports", "--exclude-slow", "--shard", "1/3"]))
+        .expect("parses")
+        .expect("not help");
     let arguments = parity::transport_child_args(&options, &corpus().0, Transport::Conn, PathBuf::from("report.json"));
     let position = arguments
         .iter()
