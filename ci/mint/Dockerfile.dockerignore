@@ -1,0 +1,10 @@
+**
+!Dockerfile
+!patch_producers.py
+!fetch_packages.py
+!dotnet-packages.json
+!dotnet-locks/
+!dotnet-locks/*.json
+!collect_notices.py
+!licenses/
+!licenses/**

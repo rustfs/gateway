@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "projects": [
+    "minio.functional.tests/7.0.0",
+    "minio/7.0.0"
+  ],
+  "references": {
+    "microsoft.visualstudio.testplatform.testframework.extensions/14.0.0.0": "mstest.testframework/3.8.3"
+  },
+  "packages": {
+    "communitytoolkit.highperformance/8.4.0": {
+      "archive_files": [
+        "License.md",
+        "ThirdPartyNotices.txt"
+      ],
+      "sources": []
+    },
+    "microsoft.extensions.dependencyinjection.abstractions/9.0.4": {
+      "archive_files": [
+        "LICENSE.TXT",
+        "THIRD-PARTY-NOTICES.TXT"
+      ],
+      "sources": []
+    },
+    "microsoft.extensions.dependencyinjection/9.0.4": {
+      "archive_files": [
+        "LICENSE.TXT",
+        "THIRD-PARTY-NOTICES.TXT"
+      ],
+      "sources": []
+    },
+    "microsoft.extensions.logging.abstractions/9.0.4": {
+      "archive_files": [
+        "LICENSE.TXT",
+        "THIRD-PARTY-NOTICES.TXT"
+      ],
+      "sources": []
+    },
+    "microsoft.extensions.logging/9.0.4": {
+      "archive_files": [
+        "LICENSE.TXT",
+        "THIRD-PARTY-NOTICES.TXT"
+      ],
+      "sources": []
+    },
+    "microsoft.extensions.options/9.0.4": {
+      "archive_files": [
+        "LICENSE.TXT",
+        "THIRD-PARTY-NOTICES.TXT"
+      ],
+      "sources": []
+    },
+    "microsoft.extensions.primitives/9.0.4": {
+      "archive_files": [
+        "LICENSE.TXT",
+        "THIRD-PARTY-NOTICES.TXT"
+      ],
+      "sources": []
+    },
+    "microsoft.netcore.app.runtime.linux-x64/8.0.31": {
+      "archive_files": [
+        "LICENSE.TXT",
+        "THIRD-PARTY-NOTICES.TXT"
+      ],
+      "sources": []
+    },
+    "mstest.testframework/3.8.3": {
+      "archive_files": [],
+      "sources": [
+        {
+          "file": "mstest.testframework-3.8.3-LICENSE",
+          "sha256": "4d0502953fdb7784a9ca9e1f7e93da5db076de7c52456d6a2a666327a1a9981d",
+          "url": "https://github.com/microsoft/testfx/blob/5354e77dc47f233239dfddf6d2be620b9e14b171/LICENSE",
+          "commit": "5354e77dc47f233239dfddf6d2be620b9e14b171",
+          "repository": "https://github.com/microsoft/testfx",
+          "source_path": "LICENSE"
+        },
+        {
+          "file": "mstest.testframework-3.8.3-THIRD-PARTY-NOTICES.TXT",
+          "sha256": "148cdb5bc9e2eb9e8ea99d457649a1ee1aa08ba175d8427ec6cdbdb9758b8768",
+          "url": "https://github.com/microsoft/testfx/blob/5354e77dc47f233239dfddf6d2be620b9e14b171/THIRD-PARTY-NOTICES.TXT",
+          "commit": "5354e77dc47f233239dfddf6d2be620b9e14b171",
+          "repository": "https://github.com/microsoft/testfx",
+          "source_path": "THIRD-PARTY-NOTICES.TXT"
+        }
+      ]
+    },
+    "sharpziplib/1.4.2": {
+      "archive_files": [],
+      "sources": [
+        {
+          "file": "sharpziplib-1.4.2-LICENSE.txt",
+          "sha256": "d7fbbc16f871bf24fa5624c7eaf945054b778985f32676dcacba41fddca61133",
+          "url": "https://github.com/icsharpcode/SharpZipLib/blob/33f64eb0f28cdd2b084cb822fcc224c7c5aba553/LICENSE.txt",
+          "commit": "33f64eb0f28cdd2b084cb822fcc224c7c5aba553",
+          "repository": "https://github.com/icsharpcode/SharpZipLib",
+          "source_path": "LICENSE.txt"
+        }
+      ]
+    },
+    "system.diagnostics.diagnosticsource/9.0.4": {
+      "archive_files": [
+        "LICENSE.TXT",
+        "THIRD-PARTY-NOTICES.TXT"
+      ],
+      "sources": []
+    },
+    "system.io.hashing/9.0.4": {
+      "archive_files": [
+        "LICENSE.TXT",
+        "THIRD-PARTY-NOTICES.TXT"
+      ],
+      "sources": []
+    },
+    "system.reactive/6.0.1": {
+      "archive_files": [],
+      "sources": [
+        {
+          "file": "system.reactive-6.0.1-LICENSE",
+          "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+          "url": "https://github.com/dotnet/reactive/blob/1cfc6465d1c9c6144d5b4e6420240f2767c8f85c/LICENSE",
+          "commit": "1cfc6465d1c9c6144d5b4e6420240f2767c8f85c",
+          "repository": "https://github.com/dotnet/reactive",
+          "source_path": "LICENSE"
+        }
+      ]
+    }
+  }
+}

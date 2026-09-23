@@ -23014,6 +23014,21 @@ shard_case 'English scanning preserves Unicode boundaries without per-character 
 shard_case 'reset probes preserve the worker sandbox and pending mutation journal' \
     python3 "${SCRIPT_DIR}/test_sandbox_probe_isolation.py"
 
+shard_case 'Mint producer edits preserve failure evidence and reject source drift' \
+    python3 "${SCRIPT_DIR}/test_mint_producer_patch.py"
+
+shard_case 'Mint local image trials preserve identity, census, and record-only scope' \
+    python3 "${SCRIPT_DIR}/test_mint_local_image.py"
+
+shard_case 'Mint package downloads verify the complete offline archive closure' \
+    python3 "${SCRIPT_DIR}/test_mint_packages.py"
+
+shard_case 'Mint candidate workflow preserves record-only identity and failures' \
+    python3 "${SCRIPT_DIR}/test_mint_candidate_workflow.py"
+
+shard_case 'Mint dependency notices match the shipped package identities' \
+    python3 "${SCRIPT_DIR}/test_mint_notices.py"
+
 shard_case 'nested signature cases partition the ledger and propagate every failure' \
     python3 "${SCRIPT_DIR}/test_nested_guard_ownership.py"
 

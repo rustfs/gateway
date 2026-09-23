@@ -53,6 +53,10 @@ on:
         options:
           - ratchet
           - record
+      derived_image:
+        description: Build the reviewed source recipe for a record-only trial; publish nothing.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -79,19 +83,45 @@ jobs:
       - name: Build the compatibility SUT
         run: cargo build --release -p rustfs-gateway-compat-sut
 
+      - name: Build candidate image (manual record only)
+        if: github.event_name == 'workflow_dispatch' && inputs.derived_image
+        env:
+          CANDIDATE_MODE: ${{ inputs.mode || 'ratchet' }}
+        run: |
+          set -euo pipefail
+          if [[ "$CANDIDATE_MODE" != record ]]; then
+            echo "A derived image requires record mode." >&2
+            exit 2
+          fi
+          scripts/ci_budget.sh 1800 "mint candidate build" \
+            docker build --platform linux/amd64 --progress plain \
+            --iidfile "${RUNNER_TEMP}/mint-candidate.id" ci/mint
+          image="$(cat "${RUNNER_TEMP}/mint-candidate.id")"
+          if [[ ! "$image" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "The build did not return a complete local image identity." >&2
+            exit 2
+          fi
+
       - name: Run the suite
         id: suite
+        env:
+          MINT_DERIVED_IMAGE: ${{ inputs.derived_image && 'true' || 'false' }}
         run: |
           set -uo pipefail
           mode="${{ inputs.mode || 'ratchet' }}"
           work="${RUNNER_TEMP}/mint-work"
           out="${RUNNER_TEMP}/mint-out"
           mkdir -p "$work" "$out"
+          set --
+          if [[ "${MINT_DERIVED_IMAGE:-false}" == true ]]; then
+            image="$(cat "${RUNNER_TEMP}/mint-candidate.id")"
+            set -- --local-image "$image"
+          fi
           # 90 minutes. The wrapper reports the margin on every run, so the cliff
           # announces itself before it is hit.
           # Capture failures explicitly: the runner invokes this script with -e.
           if scripts/ci_budget.sh 5400 "minio mint" \
-            ci/mint/run.sh --mode "$mode" --work "$work" --out "$out"; then
+            ci/mint/run.sh --mode "$mode" --work "$work" --out "$out" "$@"; then
             status=0
           else
             status=$?
