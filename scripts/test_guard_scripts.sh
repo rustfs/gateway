@@ -14570,6 +14570,214 @@ PYEOF
 expect_fail check_cors_credentials_exclusive.sh \
     'the credentials constant renamed, leaving the guard with nothing to check' mut_credentials_constant_renamed
 
+
+normalization_prefilter_controls() {
+    python3 - "${SCRIPT_DIR}/check_single_normalization.sh" <<'PY_NORMALIZATION_PREFILTER'
+#!/usr/bin/env python3
+import json, os, shutil, subprocess, sys, tempfile
+from pathlib import Path
+SCRIPT = Path(sys.argv[1]).resolve()
+with tempfile.TemporaryDirectory(prefix='normalization-controls-') as tmp:
+    base=Path(tmp); root=base/'repo'; root.mkdir(); wrappers=base/'bin'; wrappers.mkdir()
+    env=os.environ.copy(); env.update(GATEWAY_CHECK_ROOT=str(root), NORMALIZATION_SCAN_LOG=str(base/'scans'))
+    env['REAL_GREP']=shutil.which('grep'); env['REAL_AWK']=shutil.which('awk')
+    env['PATH']=str(wrappers)+os.pathsep+env['PATH']
+    (wrappers/'grep').write_text('''#!/usr/bin/env python3
+import json,os,subprocess,sys
+from pathlib import Path
+if '-E' in sys.argv:
+    if os.environ.get('FAIL_SCAN') == 'grep': sys.exit(2)
+    with open(os.environ['NORMALIZATION_SCAN_LOG'],'a') as out:
+        out.write(json.dumps({'bytes':Path(sys.argv[-1]).stat().st_size,'pattern':sys.argv[-2],'snapshot':Path(sys.argv[-1]).name,'nul':b'\\x00' in Path(sys.argv[-1]).read_bytes()})+'\\n')
+sys.exit(subprocess.call([os.environ['REAL_GREP'],*sys.argv[1:]]))
+''')
+    (wrappers/'awk').write_text('''#!/usr/bin/env python3
+import os,subprocess,sys
+if os.environ.get('FAIL_SCAN') == 'awk': sys.exit(2)
+if os.environ.get('FAIL_SCAN') == 'candidate' and any(arg.startswith('binary_marker=') for arg in sys.argv): sys.exit(3)
+sys.exit(subprocess.call([os.environ['REAL_AWK'],*sys.argv[1:]]))
+''')
+    for path in wrappers.iterdir():path.chmod(0o755)
+    subprocess.run(['git','init','-q',str(root)],check=True)
+    def write(name,text):
+        path=root/name;path.parent.mkdir(parents=True,exist_ok=True)
+        if isinstance(text,bytes):path.write_bytes(text)
+        else:path.write_text(text)
+    naming='crates/types/src/scalar/naming.rs'
+    source='fn normalize_key() {}\nfn floor_check_key() {}\nfn floor_check_bucket() {}\nmatch DECODED_UTF8_POLICY {\nDecodedUtf8Policy::Lossy => Ok(percent_decode_str(value).decode_utf8_lossy().into_owned()),\n}\n'
+    overlay='[[quirk]]\nmutation_dimension = "decoded_utf8"\ncontract_value = "strict"\n'
+    write(naming,source);write('model/overlays/quirks/naming.toml',overlay)
+    write('scripts/allowances/percent-decode-allowances.txt',naming+'\n')
+    def run(script,extra=None):
+        Path(env['NORMALIZATION_SCAN_LOG']).write_text('')
+        result=subprocess.run(['bash',str(script)],cwd=root,env=env|dict(extra or {}),capture_output=True,timeout=15)
+        scans=[json.loads(x) for x in Path(env['NORMALIZATION_SCAN_LOG']).read_text().splitlines()]
+        return result.returncode,result.stdout,result.stderr,scans
+    expected = {
+        'second definition': b'is defined 2 time(s)',
+        'second floor': b'is defined 2 time(s)',
+        'unallowed percent decode': b'percent-decodes, and is not in',
+        'Deref bypass': b'implements Deref for ObjectKey',
+        'AsRef bypass': b'implements AsRef<str> for ObjectKey',
+        'From bypass': b'implements From<String> for ObjectKey',
+        'unchecked bypass': b'names new_unchecked',
+        'lossy scalar': b'decodes lossily',
+        'lossy filename alternative': b'decodes lossily',
+        'percent filename alternative': b'percent-decodes, and is not in',
+        'inline comment retained': b'names new_unchecked',
+        'strict policy missing': b'decodes lossily',
+        'strict policy duplicate': b'decodes lossily',
+        'lossy arm whitespace': b'decodes lossily',
+        'overlay lossy': b'decodes lossily',
+        'overlay duplicate': b'decodes lossily',
+        'allowance missing': b'is missing; the allowlist is the check',
+        'grep error': b'snapshot scan failed',
+        'snapshot read error': b'cannot read every source file',
+        'candidate producer error': b'cannot prepare candidate snapshot',
+    }
+    def check(name,changed=None,extra=None):
+        if changed: changed()
+        after=run(SCRIPT,extra)
+        if name == 'binary irrelevant line' and any(row['nul'] for row in after[3]):
+            assert all(row['snapshot'].startswith('gateway-normalization-code.') for row in after[3]), after[3]
+            assert after[0] in (0, 1), after[:3]
+        elif name in expected:
+            assert after[0] != 0 and expected[name] in after[2], (name,after[:3])
+        else:
+            assert after[:3] == (0, b'', b''), (name,after[:3])
+        print('PASS',name)
+        return after
+    check('baseline')
+    fixtures=[
+      ('second definition',lambda:write('crates/extra.rs','fn normalize_key() {}\n')),
+      ('second floor',lambda:write('crates/extra.rs','fn floor_check_bucket() {}\n')),
+      ('unallowed percent decode',lambda:write('crates/extra.rs','percent_decode_str(value);\n')),
+      ('Deref bypass',lambda:write('crates/extra.rs','impl std::ops::Deref for ObjectKey {}\n')),
+      ('AsRef bypass',lambda:write('crates/extra.rs','impl AsRef<str> for ObjectKey {}\n')),
+      ('From bypass',lambda:write('crates/extra.rs','impl From<&str> for ObjectKey {}\n')),
+      ('unchecked bypass',lambda:write('crates/extra.rs','fn new_unchecked() {}\n')),
+      ('lossy scalar',lambda:write('crates/types/src/scalar/extra.rs','from_utf8_lossy(value);\n')),
+      ('lossy filename alternative',lambda:write('crates/types/src/scalar/decode_utf8_lossy.rs','fn innocent() {}\n')),
+      ('percent filename alternative',lambda:write('crates/percent_decode(.rs','fn innocent() {}\n')),
+      ('same file duplicate legacy',lambda:write(naming,source+'fn normalize_key() {}\n')),
+      ('comment-only excluded',lambda:write('crates/extra.rs',' // new_unchecked percent_decode(value)\n')),
+      ('inline comment retained',lambda:write('crates/extra.rs','fn innocent() {} // new_unchecked\n')),
+      ('strict policy missing',lambda:write(naming,source.replace('match DECODED_UTF8_POLICY {','match OTHER {'))),
+      ('strict policy duplicate',lambda:write(naming,source+'match DECODED_UTF8_POLICY {\n')),
+      ('lossy arm whitespace',lambda:write(naming,source.replace('Lossy =>','Lossy  =>'))),
+      ('overlay lossy',lambda:write('model/overlays/quirks/naming.toml',overlay.replace('"strict"','"lossy"'))),
+      ('overlay duplicate',lambda:write('model/overlays/quirks/naming.toml',overlay+overlay)),
+      ('allowance missing',lambda:(root/'scripts/allowances/percent-decode-allowances.txt').unlink()),
+      ('binary irrelevant line',lambda:write('crates/extra.rs',b'irrelevant\x00line\n')),
+    ]
+    for name,change in fixtures:
+        paths={p.relative_to(root):p.read_bytes() for p in root.rglob('*') if p.is_file() and '.git' not in p.parts}
+        check(name,change)
+        for path in list(root.rglob('*')):
+            if path.is_file() and '.git' not in path.parts and path.relative_to(root) not in paths:path.unlink()
+        for path,data in paths.items():write(path,data)
+    check('grep error',extra={'FAIL_SCAN':'grep'})
+    check('snapshot read error',extra={'FAIL_SCAN':'awk'})
+    check('candidate producer error',extra={'FAIL_SCAN':'candidate'})
+    clean=run(SCRIPT)
+    write('crates/padding.rs','const UNUSED: u8 = 0;\n'*20000)
+    padded=run(SCRIPT)
+    assert clean[:3]==padded[:3], 'padding changes guard verdict'
+    clean_bytes=sum(row['bytes'] for row in clean[3]);padded_bytes=sum(row['bytes'] for row in padded[3])
+    print('ERE bytes',clean_bytes,padded_bytes,flush=True)
+    assert len(clean[3])==len(padded[3])==9
+    assert padded_bytes==clean_bytes, 'irrelevant source padding must not reach expensive ERE scans'
+    print('25 normalization candidate controls passed')
+PY_NORMALIZATION_PREFILTER
+}
+
+cors_prefilter_controls() {
+    python3 - "${SCRIPT_DIR}/check_cors_credentials_exclusive.sh" <<'PY_CORS_PREFILTER'
+import os
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+
+GUARD = Path(sys.argv[1]).resolve()
+ANSWER = 'crates/core/src/cors/answer.rs'
+BASE = 'fn credentials() {\n let header = ACCESS_CONTROL_ALLOW_CREDENTIALS;\n}\n'
+REAL = {name: shutil.which(name) for name in ('git', 'awk', 'grep')}
+failures = []
+
+def check(name, extra='', answer=BASE, reject=None, mode='', tracked=False, path='crates/extra.rs'):
+    with tempfile.TemporaryDirectory(prefix='gateway-cors-probe-') as tmp:
+        root = Path(tmp)
+        subject = root / ANSWER
+        subject.parent.mkdir(parents=True)
+        subject.write_text(answer)
+        other = root / path
+        other.parent.mkdir(parents=True, exist_ok=True)
+        other.write_text(extra)
+        subprocess.run([REAL['git'], 'init', '-q', tmp], check=True)
+        subprocess.run([REAL['git'], '-C', tmp, 'add', '--', ANSWER], check=True)
+        if tracked or mode == 'missing':
+            subprocess.run([REAL['git'], '-C', tmp, 'add', '--', path], check=True)
+        if mode == 'missing':
+            other.unlink()
+        shims = root / 'bin'
+        shims.mkdir()
+        for tool in REAL:
+            prefix = ''
+            if tool == 'awk':
+                prefix = 'printf "%s\\n" "$*" >> "$PROBE_AWK_LOG"\n'
+                if mode == 'parser-error':
+                    prefix += 'case "$*" in *crates/extra.rs*) exit 42 ;; esac\n'
+            if tool == 'git' and mode == 'partial-list':
+                prefix = f'{shlex.quote(REAL[tool])} "$@"\nexit 42\n'
+            if tool == 'grep' and mode == 'parsed-scan-error':
+                prefix = 'case "$*" in *-cE*) exit 42 ;; esac\n'
+            if tool == 'grep' and mode == 'scan-error':
+                prefix = 'case "$*" in *-lE*) exit 42 ;; esac\n'
+            shim = shims / tool
+            shim.write_text('#!/bin/sh\n' + prefix + f'exec {shlex.quote(REAL[tool])} "$@"\n')
+            shim.chmod(0o755)
+        log = root / 'awk.log'
+        env = dict(os.environ, GATEWAY_CHECK_ROOT=tmp, PROBE_AWK_LOG=str(log), PATH=str(shims)+os.pathsep+os.environ['PATH'])
+        run = subprocess.run(['bash', str(GUARD)], env=env, capture_output=True, text=True, timeout=10)
+        if reject:
+            okay = run.returncode != 0 and reject in run.stderr
+        else:
+            okay = run.returncode == 0 and 'OK: the CORS credentials header has one writer' in run.stdout
+        if mode == 'quiet':
+            okay = okay and path not in log.read_text()
+        if not okay:
+            failures.append(name)
+            print(f'FAIL {name}: exit={run.returncode}, stderr={run.stderr[:180]!r}')
+        else:
+            print(f'PASS {name}')
+
+check('quiet files avoid parser launches', 'fn harmless() {}\n', mode='quiet')
+check('comments and imports remain allowed', '// ACCESS_CONTROL_ALLOW_CREDENTIALS\nuse header::{\nACCESS_CONTROL_ALLOW_CREDENTIALS,\n};\n')
+check('inline test remains allowed', '#[cfg(test)]\nmod tests {\n let h = ACCESS_CONTROL_ALLOW_CREDENTIALS;\n}\n')
+check('test directory remains excluded', 'ACCESS_CONTROL_ALLOW_CREDENTIALS\n', path='crates/core/tests/extra.rs')
+for tracked in (False, True):
+    check(f'constant writer tracked={tracked}', 'fn second() { ACCESS_CONTROL_ALLOW_CREDENTIALS; }\n', reject='names the CORS credentials header outside', tracked=tracked)
+check('wire spelling writer', 'fn second() { "access-control-allow-credentials"; }\n', reject='names the CORS credentials header outside')
+check('spaces in candidate path', 'fn second() { ACCESS_CONTROL_ALLOW_CREDENTIALS; }\n', path='crates/space name.rs', reject='names the CORS credentials header outside')
+check('production after bodyless test', '#[cfg(test)]\nmod tests;\nfn second() { ACCESS_CONTROL_ALLOW_CREDENTIALS; }\n', reject='names the CORS credentials header outside')
+check('wildcard writer', answer=BASE.replace('let header', 'let origin = AllowOrigin::Wildcard;\n let header'), reject='names both the credentials header and a wildcard')
+check('second answer function', answer=BASE+BASE.replace('credentials()', 'second()'), reject='2 functions name the credentials header')
+check('unqualified variants', answer='use rule::AllowOrigin::*;\n'+BASE, reject='variants are imported unqualified')
+check('renamed credential marker', answer=BASE.replace('ACCESS_CONTROL_ALLOW_CREDENTIALS', 'OTHER'), reject='never names the CORS credentials header')
+check('missing tracked quiet source', mode='missing', reject='cannot scan every source')
+check('partial source list error', mode='partial-list', reject='cannot list source files')
+check('candidate scan error', mode='scan-error', reject='cannot scan every source')
+check('candidate parser error', 'ACCESS_CONTROL_ALLOW_CREDENTIALS\n', mode='parser-error', reject='cannot parse source')
+check('parsed candidate scan error', 'ACCESS_CONTROL_ALLOW_CREDENTIALS\n', mode='parsed-scan-error', reject='cannot scan parsed source')
+if failures:
+    raise SystemExit(f'{len(failures)} failed: {failures}')
+print('18 CORS prefilter controls passed')
+PY_CORS_PREFILTER
+}
+
 # -----------------------------------------------------------------------------
 # check_codec_policy.sh
 #
@@ -23013,6 +23221,10 @@ shard_case 'English scanning preserves Unicode boundaries without per-character 
 
 shard_case 'reset probes preserve the worker sandbox and pending mutation journal' \
     python3 "${SCRIPT_DIR}/test_sandbox_probe_isolation.py"
+
+shard_case 'normalization candidate filtering preserves lexical evidence and bounds ERE input' normalization_prefilter_controls
+
+shard_case 'CORS candidate filtering preserves parser semantics and fails closed' cors_prefilter_controls
 
 shard_case 'Mint producer edits preserve failure evidence and reject source drift' \
     python3 "${SCRIPT_DIR}/test_mint_producer_patch.py"

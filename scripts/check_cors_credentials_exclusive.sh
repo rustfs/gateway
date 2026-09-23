@@ -161,32 +161,56 @@ strip_comments_and_uses() {
 # -----------------------------------------------------------------------------
 # Rule 1 — one writer in the workspace.
 # -----------------------------------------------------------------------------
+# Keep the complete census: a producer failure must not look like a shorter source list.
+if ! source_list="$(git ls-files --cached --others --exclude-standard -- '*.rs' ':!:target/*' ':!:generated/*' ':!:*/generated/*')"; then
+    report 'cannot list source files for the CORS credentials guard'
+    exit 1
+fi
 sources=()
 while IFS= read -r file; do
-    [[ -n "$file" ]] && sources+=("$file")
-done < <(git ls-files --cached --others --exclude-standard -- '*.rs' ':!:target/*' ':!:generated/*' ':!:*/generated/*' 2>/dev/null || true)
+    [[ -n "$file" ]] || continue
+    # Tests may name the header freely: asserting its absence is the point of several of them.
+    case "$file" in
+    *"/tests/"* | tests/*) continue ;;
+    esac
+    sources+=("$file")
+done <<<"$source_list"
 
 if [[ "${#sources[@]}" -eq 0 ]]; then
     report "no Rust sources are visible to this guard; it cannot have checked anything"
     exit 1
 fi
 
+# The parser below only blanks lines: it cannot create a header spelling absent from the raw
+# file. Scan every eligible source once, then retain the existing parser for every candidate.
+# grep's no-match status is valid; a read or tool failure is not an empty candidate set.
+scan_status=0
+candidates="$(grep -lE "$CREDENTIALS_RE" -- "${sources[@]}")" || scan_status=$?
+if [[ "$scan_status" -gt 1 ]]; then
+    report 'cannot scan every source for CORS credentials candidates'
+    exit 1
+fi
+
 writers=0
-for file in "${sources[@]}"; do
-    # Tests may name the header freely: asserting its absence is the point of several of them.
-    case "$file" in
-    *"/tests/"* | tests/*) continue ;;
-    esac
-    # The inline test module of the answer file itself is handled by rule 2, which counts
-    # functions rather than lines and therefore has to see it.
-    hits="$(strip_comments_and_uses "$file" | grep -cE "$CREDENTIALS_RE" || true)"
+while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    if ! parsed="$(strip_comments_and_uses "$file")"; then
+        report "cannot parse source ${file} for CORS credentials"
+        exit 1
+    fi
+    scan_status=0
+    hits="$(grep -cE "$CREDENTIALS_RE" <<<"$parsed")" || scan_status=$?
+    if [[ "$scan_status" -gt 1 ]]; then
+        report "cannot scan parsed source ${file} for CORS credentials"
+        exit 1
+    fi
     [[ "$hits" -eq 0 ]] && continue
     if [[ "$file" == "$ANSWER_FILE" ]]; then
         writers=$((writers + 1))
         continue
     fi
     report "${file}: names the CORS credentials header outside ${ANSWER_FILE}; there is one writer of that header and this is not it"
-done
+done <<<"$candidates"
 
 if [[ "$writers" -eq 0 ]]; then
     report "${ANSWER_FILE} never names the CORS credentials header; either the allowance was removed — in which case delete this guard deliberately — or the constant was renamed and rules 2 and 3 are now checking nothing"
