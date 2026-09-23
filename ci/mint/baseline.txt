@@ -17,7 +17,7 @@
 #   that is not JSON. A count, however high, is always preferred, because a count still turns
 #   red. The owner is an issue in rustfs/gateway or rustfs/backlog, and closing it means
 #   removing the line.
-#   An excluded SDK is still run on every schedule. Running the four below was measured not to
+#   An excluded SDK is still run on every schedule. Running the excluded SDKs was measured not to
 #   disturb the others: every other SDK's counts were identical with them in the run. The
 #   report lists excluded SDKs in their own section and flags one as RECOVERED when it starts
 #   writing valid records. A counted SDK's record found in an excluded SDK's log makes the
@@ -78,7 +78,10 @@
 #   InvalidRequest before any signature is compared (request shape reproduced locally against
 #   compat-sut). Not a gateway defect, rustfs/gateway#756.
 aws-sdk-go-v2 1
-aws-sdk-java-v2 excluded https://github.com/rustfs/gateway/issues/719 every test returns without a record unless ENABLE_HTTPS=1, and the SUT serves plaintext only
+#   The separate HTTPS pass measures 7 PASS, 0 FAIL, 0 NA. Confirmed by the complete
+#   run https://github.com/rustfs/gateway/actions/runs/34927717738 after the TLS listener
+#   and two-pass log merge landed (#767, #789). The previously empty suite is now counted.
+aws-sdk-java-v2 0
 #   abortMultipartupload: expects 204 for an unknown upload ID (MinIO); the SUT answers 404
 #   NoSuchUpload, the S3 answer. Not a gateway defect.
 aws-sdk-php 1
