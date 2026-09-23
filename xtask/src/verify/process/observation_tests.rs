@@ -73,3 +73,35 @@ fn a_stopped_child_is_still_running() {
     child.wait().expect("child is reaped");
     assert!(running, "a suspended child can resume and must not count as terminated");
 }
+
+#[test]
+fn descendant_assertion_accepts_a_terminated_unreaped_child() {
+    let mut child = Command::new("/bin/sh").args(["-c", "exit 0"]).spawn().expect("child starts");
+    wait_for_state(child.id(), 'Z');
+    let running = descendant_can_execute(&child.id().to_string());
+    child.wait().expect("zombie is reaped");
+    assert!(!running, "descendant assertion confused PID visibility with execution");
+}
+
+#[test]
+fn descendant_assertion_rejects_a_live_sleeping_child() {
+    let mut child = Command::new("/bin/sleep").arg("30").spawn().expect("child starts");
+    let running = descendant_can_execute(&child.id().to_string());
+    child.kill().expect("live child is killed");
+    child.wait().expect("child is reaped");
+    assert!(running, "a live descendant must fail the termination assertion");
+}
+
+#[test]
+fn descendant_assertion_rejects_a_live_stopped_child() {
+    let mut child = Command::new("/bin/sleep").arg("30").spawn().expect("child starts");
+    Command::new("/bin/kill")
+        .args(["-STOP", &child.id().to_string()])
+        .status()
+        .expect("stop signal is sent");
+    wait_for_state(child.id(), 'T');
+    let running = descendant_can_execute(&child.id().to_string());
+    child.kill().expect("stopped child is killed");
+    child.wait().expect("child is reaped");
+    assert!(running, "a stopped descendant must fail the termination assertion");
+}
