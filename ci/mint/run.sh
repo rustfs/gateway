@@ -17,7 +17,7 @@
 # ci/mint/run.sh — one MinIO mint run, end to end.
 #
 #   1. start or adopt a system under test                      (ci/lib/sut.sh)
-#   2. pull the pinned image by digest for linux/amd64, and assert both
+#   2. pull the pinned image, or inspect a record-only local image ID, for linux/amd64
 #   3. assert the image's SDK census is exactly MINT_SDKS in ci/mint/pins.env
 #   4. run every SDK, named explicitly, against the system under test: one container over
 #      plaintext, then one over the SUT's TLS listener for the SDKs in MINT_TLS_SDKS
@@ -63,12 +63,18 @@
 #   each pass's console against the SDKs that pass was given.
 #
 # THE SUITE IS NEVER VENDORED
-#   It runs only as the pinned image. Its licence is Apache-2.0 and its review is in
-#   THIRD-PARTY-NOTICES.md; `scripts/check_no_vendored_suites.sh` asserts none of it is
-#   ever committed here.
+#   The suite runs inside an image. Component licences and reviewed provenance are in
+#   THIRD-PARTY-NOTICES.md; `scripts/check_no_vendored_suites.sh` asserts that no suite
+#   implementation is committed here.
+#
+# LOCAL IMAGE TRIALS
+#   --local-image sha256:<64 lowercase hex> accepts an already built Docker image ID
+#   only with --mode record. It never pulls or publishes that image. The platform, full
+#   SDK census, and evidence checks stay identical; the report records the local image ID,
+#   not the registry manifest digest. Neither the reviewed pin nor baseline is changed.
 #
 # USAGE
-#   ci/mint/run.sh [--mode ratchet|record] [--work <dir>] [--out <dir>]
+#   ci/mint/run.sh [--mode ratchet|record] [--work <dir>] [--out <dir>] [--local-image <id>]
 # =============================================================================
 
 set -euo pipefail
@@ -79,12 +85,21 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EXIT_USAGE=2
 
 MODE="ratchet"
+LOCAL_IMAGE=""
 WORK_DIR=""
 OUT_DIR=""
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
     --mode)
         MODE="${2:-}"
+        shift 2
+        ;;
+    --local-image)
+        [[ "${2:-}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            printf 'run: --local-image requires a full sha256 image ID\n' >&2
+            exit "$EXIT_USAGE"
+        }
+        LOCAL_IMAGE="$2"
         shift 2
         ;;
     --work)
@@ -96,7 +111,7 @@ while [[ "$#" -gt 0 ]]; do
         shift 2
         ;;
     -h | --help)
-        sed -n '17,74p' "${BASH_SOURCE[0]}"
+        sed -n '17,78p' "${BASH_SOURCE[0]}"
         exit 0
         ;;
     *)
@@ -112,6 +127,11 @@ ratchet | record) ;;
     exit "$EXIT_USAGE"
     ;;
 esac
+
+if [[ -n "$LOCAL_IMAGE" && "$MODE" != record ]]; then
+    printf 'run: --local-image is only allowed with --mode record\n' >&2
+    exit "$EXIT_USAGE"
+fi
 
 WORK_DIR="${WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/gateway-mint.XXXXXX")}"
 OUT_DIR="${OUT_DIR:-${WORK_DIR}/out}"
@@ -226,20 +246,25 @@ if ((${#MINT_TLS_LIST[@]} > 0)); then
 fi
 
 # --- the image ---------------------------------------------------------------------------
-printf 'run: pulling %s for %s\n' "$MINT_IMAGE" "$MINT_PLATFORM"
-docker pull --quiet --platform "$MINT_PLATFORM" "$MINT_IMAGE" >/dev/null ||
-    sut_die "cannot pull the pinned image ${MINT_IMAGE}"
+if [[ -n "$LOCAL_IMAGE" ]]; then
+    MINT_IMAGE="$LOCAL_IMAGE"
+    printf 'run: inspecting local image %s for %s (record only)\n' "$MINT_IMAGE" "$MINT_PLATFORM"
+else
+    printf 'run: pulling %s for %s\n' "$MINT_IMAGE" "$MINT_PLATFORM"
+    docker pull --quiet --platform "$MINT_PLATFORM" "$MINT_IMAGE" >/dev/null ||
+        sut_die "cannot pull the pinned image ${MINT_IMAGE}"
+fi
 PULLED_PLATFORM="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$MINT_IMAGE")" ||
-    sut_die "cannot inspect the pulled image ${MINT_IMAGE}"
+    sut_die "cannot inspect the selected image ${MINT_IMAGE}"
 [[ "$PULLED_PLATFORM" == "$MINT_PLATFORM" ]] ||
-    sut_die "the pulled image is ${PULLED_PLATFORM}, not the pinned ${MINT_PLATFORM}"
+    sut_die "the selected image is ${PULLED_PLATFORM}, not the pinned ${MINT_PLATFORM}"
 
 # The census is read from the image, not assumed: an SDK the image carries and the list does
 # not name would silently never run, and one the list names and the image lacks would stop
 # mint before the first SDK.
 IMAGE_SDKS="$(docker run --rm --name "${MINT_CONTAINER}-census" --platform "$MINT_PLATFORM" --network none \
     --entrypoint /bin/ls "$MINT_IMAGE" -A /mint/run/core)" ||
-    sut_die "cannot list /mint/run/core in the pinned image"
+    sut_die "cannot list /mint/run/core in the selected image"
 # shellcheck disable=SC2086 # one directory name per word, by construction of `ls -A`.
 IMAGE_CENSUS="$(printf '%s\n' $IMAGE_SDKS | LC_ALL=C sort | tr '\n' ' ')"
 PINNED_CENSUS="$(printf '%s\n' "${MINT_SDK_LIST[@]}" | LC_ALL=C sort | tr '\n' ' ')"
