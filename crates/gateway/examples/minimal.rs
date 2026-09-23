@@ -30,11 +30,14 @@
 //! reachable, in the one method whose name says what it costs. The `ListBuckets` request below is
 //! what a standard operation does with an unsigned request, and it is asserted too.
 //!
-//! Run it with `cargo run -p rustfs-gateway --example minimal -- --host 127.0.0.1 --port 9000`.
+//! The optional `IP:PORT` argument defaults to `127.0.0.1:9000`; use port `0` for a kernel-selected port.
+//! Bracket IPv6 addresses, for example `[::1]:9000`. Unknown arguments and extra addresses are rejected.
+//!
+//! Run it with `cargo run -p rustfs-gateway --example minimal -- 127.0.0.1:9000`.
 
 use std::env;
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -45,7 +48,7 @@ use rustfs_gateway::{
     SigService, SigV4Authenticator, StaticCredentials, TargetKind, allow_when,
 };
 use rustfs_gateway_core::{Dialect, DialectOverlay, DialectRoute, HandlerDeadlineClass, OverlayRow};
-use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ServerError};
+use rustfs_gateway_server::{Server, ServerConfig};
 
 // ── the vendor operation, which is what a dialect or an admin API looks like ────────────────────
 
@@ -220,47 +223,19 @@ fn build_service() -> Result<rustfs_gateway::S3Service, Box<dyn std::error::Erro
 }
 
 // BEGIN MINIMAL LISTENER
-fn server_config_from<I, S>(arguments: I) -> Result<ServerConfig, Box<dyn std::error::Error>>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    let mut host = IpAddr::V4(Ipv4Addr::LOCALHOST);
-    let mut port = 9000_u16;
-    let mut arguments = arguments.into_iter();
-    while let Some(argument) = arguments.next() {
-        match argument.as_ref() {
-            "--host" => {
-                let value = arguments
-                    .next()
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "--host requires an IP address"))?;
-                host = value.as_ref().parse()?;
-            }
-            "--port" => {
-                let value = arguments
-                    .next()
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "--port requires a number"))?;
-                port = value.as_ref().parse()?;
-            }
-            unknown => {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unknown argument: {unknown}")).into());
-            }
-        }
-    }
-    Ok(ServerConfig {
-        bind_addr: SocketAddr::new(host, port),
-        plaintext: true,
-        ..ServerConfig::default()
-    })
-}
-
-fn start_server(config: ServerConfig, service: rustfs_gateway::S3Service) -> Result<RunningServer, ServerError> {
-    Server::new(config, service).serve()
-}
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let running = start_server(server_config_from(env::args().skip(1))?, build_service()?)?;
+    let mut arguments = env::args().skip(1);
+    let bind_addr: SocketAddr = arguments.next().unwrap_or_else(|| "127.0.0.1:9000".into()).parse()?;
+    if arguments.next().is_some() {
+        return Err("expected at most one listen address".into());
+    }
+    let config = ServerConfig {
+        bind_addr,
+        plaintext: true,
+        ..ServerConfig::default()
+    };
+    let running = Server::new(config, build_service()?).serve()?;
     println!("listening on http://{}", running.local_addr);
     tokio::signal::ctrl_c().await?;
     let report = running.shutdown.trigger(Duration::from_secs(30)).await;
@@ -285,22 +260,16 @@ async fn tcp_exchange(address: SocketAddr, request: &[u8]) -> Result<String, Box
 mod tests {
     use std::error::Error;
 
-    use super::{build_service, server_config_from, start_server, tcp_exchange};
-
-    #[test]
-    fn cli_refuses_missing_port_value() {
-        assert!(server_config_from(["--port"]).is_err());
-    }
-
-    #[test]
-    fn cli_refuses_unknown_argument() {
-        assert!(server_config_from(["--listen-everywhere"]).is_err());
-    }
+    use super::{Server, ServerConfig, build_service, tcp_exchange};
 
     #[tokio::test(flavor = "current_thread")]
     async fn listener_observes_positive_and_negative_wire_paths() -> Result<(), Box<dyn Error>> {
-        let config = server_config_from(["--host", "127.0.0.1", "--port", "0"])?;
-        let running = start_server(config, build_service()?)?;
+        let config = ServerConfig {
+            bind_addr: "127.0.0.1:0".parse()?,
+            plaintext: true,
+            ..ServerConfig::default()
+        };
+        let running = Server::new(config, build_service()?).serve()?;
 
         let answered = tcp_exchange(
             running.local_addr,

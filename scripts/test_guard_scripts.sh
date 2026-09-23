@@ -4550,7 +4550,7 @@ from pathlib import Path
 
 path = Path("crates/gateway/examples/minimal.rs")
 text = path.read_text()
-extra = "".join(f"let _listener_extra_{index} = {index};\n" for index in range(47))
+extra = "".join(f"let _listener_extra_{index} = {index};\n" for index in range(1))
 path.write_text(text.replace("// END MINIMAL LISTENER", extra + "// END MINIMAL LISTENER", 1))
 PY
 }

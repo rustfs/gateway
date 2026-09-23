@@ -20,8 +20,36 @@ cleanup() {
 trap cleanup EXIT
 
 cd "$ROOT"
+python3 "${ROOT}/scripts/test_minimal_cli_refusals.py"
 cargo build -p rustfs-gateway --example minimal
-"${TARGET_DIR}/debug/examples/minimal" --host 127.0.0.1 --port 0 >"$LOG" 2>&1 &
+python3 - "${TARGET_DIR}/debug/examples/minimal" <<'PYTEST'
+import subprocess
+import sys
+
+executable = sys.argv[1]
+refusals = {
+    "cli_refuses_missing_port_value": ["--port"],
+    "cli_refuses_unknown_argument": ["--listen-everywhere"],
+    "cli_refuses_missing_address_port": ["127.0.0.1"],
+    "cli_refuses_out_of_range_port": ["127.0.0.1:65536"],
+    "cli_refuses_extra_address": ["127.0.0.1:0", "127.0.0.1:0"],
+    "cli_refuses_old_host_and_port_flags": ["--host", "127.0.0.1", "--port", "0"],
+}
+for name, arguments in refusals.items():
+    try:
+        result = subprocess.run([executable, *arguments], capture_output=True, text=True, timeout=5)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"{name}: invalid arguments started a long-running listener")
+    expected_error = (
+        'Error: "expected at most one listen address"'
+        if name == "cli_refuses_extra_address"
+        else "Error: AddrParseError(Socket)"
+    )
+    if result.returncode != 1 or result.stdout or result.stderr.strip() != expected_error:
+        raise SystemExit(f"{name}: expected argument rejection was not observed: {result}")
+    print(f"OK: {name}")
+PYTEST
+"${TARGET_DIR}/debug/examples/minimal" 127.0.0.1:0 >"$LOG" 2>&1 &
 PROCESS_ID="$!"
 
 ADDRESS=""
