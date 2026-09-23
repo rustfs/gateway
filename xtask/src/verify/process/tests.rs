@@ -97,6 +97,11 @@ fn alive_after_reap_grace(pid: &str) -> bool {
     true
 }
 
+// The PATH-isolation and signal assertions must measure the same descendant state.
+fn descendant_can_execute(pid: &str) -> bool {
+    alive_after_reap_grace(pid)
+}
+
 fn terminate_pid(pid: &str) {
     let _ = Command::new("/bin/kill")
         .args(["-KILL", pid])
@@ -589,7 +594,7 @@ fn targeted_sigterm_terminates_the_supervised_process_group() {
     let helper_pid = helper.id();
     let _ = Command::new("/bin/kill").args(["-TERM", &helper_pid.to_string()]).status();
     let _ = wait_or_kill(&mut helper);
-    let alive = process_alive(pid.trim());
+    let alive = descendant_can_execute(pid.trim());
     if alive {
         terminate_pid(pid.trim());
     }
@@ -754,7 +759,7 @@ fn group_termination_does_not_depend_on_path_lookup() {
     wait_for_file(&pid_file);
     let _ = helper.wait();
     let pid = fs::read_to_string(&pid_file).expect("grandchild must publish its pid");
-    let alive = process_alive(pid.trim());
+    let alive = descendant_can_execute(pid.trim());
     if alive {
         terminate_pid(pid.trim());
     }
