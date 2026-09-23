@@ -14057,9 +14057,9 @@ expect_fail check_mint_baseline.sh 'a mint SDK listed twice in the baseline' \
     mut_mint_baseline_duplicate_sdk 'minio-go is listed more than once'
 
 # The exclusion list shrinks freely and widens only with the generation, and every entry
-# names an in-project owner and a reason. The java-v2 line is generation 1's, reviewed, and
-# its owner is the only exclusion owned by #719, so a first-occurrence mutation hits it.
-MINT_JAVA_V2_EXCLUSION='aws-sdk-java-v2 excluded https://github.com/rustfs/gateway/issues/719 every test returns without a record unless ENABLE_HTTPS=1, and the SUT serves plaintext only'
+# names an in-project owner and a reason. The .NET exclusion remains in the baseline;
+# its owner is shared with mc, so owner mutations name the SDK prefix as well.
+MINT_DOTNET_EXCLUSION='.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 the pinned image ships no .NET test binary, so its runner writes no record at all'
 
 mut_mint_baseline_excludes_without_generation() {
     mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' \
@@ -14076,36 +14076,37 @@ expect_guard_pass check_mint_baseline.sh 'a mint SDK excluded in the change that
     mut_mint_baseline_excludes_with_generation
 
 mut_mint_baseline_restores_excluded_sdk() {
-    mint_mutate ci/mint/baseline.txt "$MINT_JAVA_V2_EXCLUSION" 'aws-sdk-java-v2 4'
+    mint_mutate ci/mint/baseline.txt "$MINT_DOTNET_EXCLUSION" '.minio-dotnet 4'
 }
 expect_guard_pass check_mint_baseline.sh 'an excluded mint SDK put back under a count, which only narrows' \
     mut_mint_baseline_restores_excluded_sdk
 
 mut_mint_baseline_exclusion_without_owner() {
-    mint_mutate ci/mint/baseline.txt 'aws-sdk-java-v2 excluded https://github.com/rustfs/gateway/issues/719 ' \
-        'aws-sdk-java-v2 excluded '
+    mint_mutate ci/mint/baseline.txt '.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 ' \
+        '.minio-dotnet excluded '
 }
 expect_fail check_mint_baseline.sh 'a mint exclusion that names no owning issue' \
-    mut_mint_baseline_exclusion_without_owner 'the exclusion of aws-sdk-java-v2 names no owner'
+    mut_mint_baseline_exclusion_without_owner 'the exclusion of .minio-dotnet names no owner'
 
 mut_mint_baseline_exclusion_foreign_owner() {
-    mint_mutate ci/mint/baseline.txt 'https://github.com/rustfs/gateway/issues/719' 'https://github.com/minio/mint/issues/719'
+    mint_mutate ci/mint/baseline.txt '.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720' \
+        '.minio-dotnet excluded https://github.com/minio/mint/issues/720'
 }
 expect_fail check_mint_baseline.sh 'a mint exclusion owned by an issue outside this project' \
-    mut_mint_baseline_exclusion_foreign_owner 'the exclusion of aws-sdk-java-v2 names no owner'
+    mut_mint_baseline_exclusion_foreign_owner 'the exclusion of .minio-dotnet names no owner'
 
 mut_mint_baseline_exclusion_without_reason() {
-    mint_mutate ci/mint/baseline.txt "$MINT_JAVA_V2_EXCLUSION" \
-        'aws-sdk-java-v2 excluded https://github.com/rustfs/gateway/issues/719 flaky'
+    mint_mutate ci/mint/baseline.txt "$MINT_DOTNET_EXCLUSION" \
+        '.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 flaky'
 }
 expect_fail check_mint_baseline.sh 'a mint exclusion whose reason is one word' \
-    mut_mint_baseline_exclusion_without_reason 'the exclusion of aws-sdk-java-v2 gives no reason'
+    mut_mint_baseline_exclusion_without_reason 'the exclusion of .minio-dotnet gives no reason'
 
 mut_mint_baseline_excluded_and_counted() {
-    mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\nminio-go 0\naws-sdk-java-v2 0\n'
+    mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\nminio-go 0\n.minio-dotnet 0\n'
 }
 expect_fail check_mint_baseline.sh 'an excluded mint SDK that also carries a count' \
-    mut_mint_baseline_excluded_and_counted 'aws-sdk-java-v2 is listed more than once'
+    mut_mint_baseline_excluded_and_counted '.minio-dotnet is listed more than once'
 
 mut_mint_baseline_excludes_outside_census() {
     mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' \
