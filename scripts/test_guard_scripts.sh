@@ -23207,6 +23207,12 @@ shard_case 'operation scanning avoids lexing absent tokens without admitting dec
 shard_case 'signature masking dispatches regexes only for possible token initials' \
     python3 "${SCRIPT_DIR}/test_sig_scan_dispatch.py"
 
+shard_case 'signature delimiter indexes preserve evidence scope and bound repeated queries' \
+    python3 "${SCRIPT_DIR}/test_sig_delimiter_index.py"
+
+shard_case 'StageFilter discovery batches the complete census and fails closed' \
+    python3 "${SCRIPT_DIR}/test_stage_filter_discovery.py"
+
 shard_case 'trait masking avoids suffix copies and preserves lexical rejection' \
     python3 "${SCRIPT_DIR}/test_trait_scan_dispatch.py"
 

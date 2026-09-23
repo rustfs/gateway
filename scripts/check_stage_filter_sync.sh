@@ -82,10 +82,16 @@ report() {
 # `--cached --others --exclude-standard`, for the reason check_ct_eq.sh gives:
 # a bare `git ls-files` lists only tracked files, so a brand-new filter would be
 # invisible to this guard right up until the commit that added it.
+discovery_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-stage-filter.XXXXXX")"
+trap 'rm -rf "$discovery_dir"' EXIT
+if ! git ls-files -z --cached --others --exclude-standard -- '*.rs' ':!:target/*' ':!:generated/*' ':!:*/generated/*' >"$discovery_dir/sources"; then
+    report "check_stage_filter_sync: cannot enumerate Rust sources; discovery failed"
+    exit 1
+fi
 sources=()
-while IFS= read -r file; do
+while IFS= read -r -d '' file; do
     [[ -n "$file" ]] && sources+=("$file")
-done < <(git ls-files --cached --others --exclude-standard -- '*.rs' ':!:target/*' ':!:generated/*' ':!:*/generated/*' 2>/dev/null || true)
+done < "$discovery_dir/sources"
 
 if [[ "${#sources[@]}" -eq 0 ]]; then
     report "check_stage_filter_sync: no Rust sources found; this guard's input is missing, which is a failure and not a skip"
@@ -102,14 +108,29 @@ fi
 # it is written.
 guarded=("$TRAIT_FILE")
 impl_count=0
+candidates=()
 for file in "${sources[@]}"; do
     [[ "$file" == "$TRAIT_FILE" ]] && continue
     [[ "$file" == "$COMPILE_FAIL_FIXTURE" ]] && continue
-    if grep -qE '^[ \t]*impl([ \t]*<[^>]*>)?[ \t]+StageFilter([ \t]*<[^>]*>)?[ \t]+for[ \t]+' "$file"; then
-        guarded+=("$file")
-        impl_count=$((impl_count + 1))
+    candidates+=("$file")
+done
+
+# Keep the discovery ERE and semantic checks unchanged, but amortize process
+# startup over bounded batches. NUL records preserve Git paths, including spaces
+# and newlines. --null is supported by both BSD and GNU grep.
+: >"$discovery_dir/matches"
+for ((offset = 0; offset < ${#candidates[@]}; offset += 64)); do
+    discovery_status=0
+    grep -l --null -E -- '^[ \t]*impl([ \t]*<[^>]*>)?[ \t]+StageFilter([ \t]*<[^>]*>)?[ \t]+for[ \t]+' "${candidates[@]:offset:64}" >>"$discovery_dir/matches" || discovery_status=$?
+    if [[ "$discovery_status" -gt 1 ]]; then
+        report "check_stage_filter_sync: implementation discovery failed; refusing partial matches"
+        exit 1
     fi
 done
+while IFS= read -r -d '' file; do
+    guarded+=("$file")
+    impl_count=$((impl_count + 1))
+done < "$discovery_dir/matches"
 
 # The trait file holds the three closure adapters and the blanket `Arc<T>`
 # forward; every suite that installs a filter holds another. Zero outside the
