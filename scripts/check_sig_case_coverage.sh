@@ -166,6 +166,7 @@ validate_rust_evidence() {
 
 run_evidence_validations() {
     "$PYTHON" - "$ROOT" "${evidence_requests[@]}" <<'PYEOF'
+import bisect
 import re
 import sys
 import tomllib
@@ -174,6 +175,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 requests = sys.argv[2:]
 validator = r'''
+import bisect
 import re
 import sys
 from pathlib import Path
@@ -256,17 +258,25 @@ if depth:
 
 code = "".join(out)
 
+# Index the already-blanked source once per file. Only delimiter positions need storage;
+# a query uses the state after the last delimiter strictly before its exclusive endpoint.
+# Negative depths are retained too: malformed nesting must not become top-level evidence.
+depth_positions = []
+depth_values = [(0, 0, 0)]
+depth = [0, 0, 0]
+delimiters = {"{": (0, 1), "}": (0, -1), "(": (1, 1), ")": (1, -1), "[": (2, 1), "]": (2, -1)}
+for position, char in enumerate(code):
+    change = delimiters.get(char)
+    if change is not None:
+        axis, delta = change
+        depth[axis] += delta
+        depth_positions.append(position)
+        depth_values.append(tuple(depth))
+
 
 def delimiter_depth(end):
-    depth = {"{": 0, "(": 0, "[": 0}
-    closing = {"}": "{", ")": "(", "]": "["}
-    for char in code[:end]:
-        if char in depth:
-            depth[char] += 1
-        elif char in closing:
-            opener = closing[char]
-            depth[opener] -= 1
-    return depth
+    values = depth_values[bisect.bisect_left(depth_positions, end)]
+    return dict(zip("{([", values))
 
 
 def outer_attributes(start):
@@ -555,9 +565,12 @@ for request in requests:
     sys.argv = ["<sig-evidence>", file, kind, evidence, required_call]
     path = Path(file)
     if path in views:
-        source, code = views[path]
+        source, code, depth_positions, depth_values = views[path]
         namespace = {
+            "bisect": bisect,
             "re": re,
+            "depth_positions": depth_positions,
+            "depth_values": depth_values,
             "source": source,
             "code": code,
             "path": path,
@@ -576,7 +589,7 @@ for request in requests:
             print(error.code, file=sys.stderr)
         print(failure, file=sys.stderr)
         raise SystemExit(1)
-    views.setdefault(path, (namespace["source"], namespace["code"]))
+    views.setdefault(path, (namespace["source"], namespace["code"], namespace["depth_positions"], namespace["depth_values"]))
 
 sig = tomllib.loads((root / "crates/sig/Cargo.toml").read_text())
 core = tomllib.loads((root / "crates/core/Cargo.toml").read_text())
