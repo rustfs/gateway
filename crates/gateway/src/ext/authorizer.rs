@@ -66,13 +66,27 @@ pub struct ServerExtensions {
 static EMPTY_SERVER_EXTENSIONS: ServerExtensions = ServerExtensions { _private: () };
 
 /// The immutable values every authorization stage in one request must share.
-#[derive(Debug)]
 pub struct RequestContext<'a> {
     now: RequestNow,
     policy: &'a PolicySnapshot,
     auth_scheme: AuthSchemeRef,
     verified_scope: Option<&'a VerifiedScope>,
     server_extensions: &'a ServerExtensions,
+    headers: Option<rustfs_gateway_http::HeaderView<'a>>,
+}
+
+impl std::fmt::Debug for RequestContext<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RequestContext")
+            .field("now", &self.now)
+            .field("policy", &self.policy)
+            .field("auth_scheme", &self.auth_scheme)
+            .field("verified_scope", &self.verified_scope)
+            .field("server_extensions", &self.server_extensions)
+            .field("headers_available", &self.headers.is_some())
+            .finish()
+    }
 }
 
 impl<'a> RequestContext<'a> {
@@ -88,6 +102,7 @@ impl<'a> RequestContext<'a> {
             auth_scheme: AuthSchemeRef::Anonymous,
             verified_scope: None,
             server_extensions: &EMPTY_SERVER_EXTENSIONS,
+            headers: None,
         }
     }
 
@@ -97,6 +112,7 @@ impl<'a> RequestContext<'a> {
         auth_scheme: AuthSchemeRef,
         verified_scope: Option<&'a VerifiedScope>,
         server_extensions: &'a ServerExtensions,
+        headers: rustfs_gateway_http::HeaderView<'a>,
     ) -> Self {
         Self {
             now,
@@ -104,7 +120,22 @@ impl<'a> RequestContext<'a> {
             auth_scheme,
             verified_scope,
             server_extensions,
+            headers: Some(headers),
         }
+    }
+
+    /// Accepted request headers after wire filters, borrowed read-only, when available.
+    ///
+    /// These are the header facts the operation consumes, not the original signing input.
+    /// Filters may rewrite them; use [`Self::auth_scheme`] and [`Self::verified_scope`] for
+    /// authentication evidence instead of deriving it from a header.
+    ///
+    /// `None` identifies a manually constructed context whose request headers are unknown;
+    /// it does not prove that a particular header was absent. Pipeline contexts return `Some`
+    /// in both authorization stages, even when the observed header map is empty.
+    #[must_use]
+    pub fn headers(&self) -> Option<rustfs_gateway_http::HeaderView<'a>> {
+        self.headers
     }
 
     /// The credential scope this request's signature was verified under (ADR-0020).
@@ -471,6 +502,24 @@ mod tests {
             target_origin: TargetOrigin::Path,
             subject: None,
         }
+    }
+
+    #[test]
+    fn authz_headers_observed_empty_is_distinct_from_unavailable() {
+        let policy = PolicySnapshot::of(std::sync::Arc::new(()));
+        let now = RequestNow::from_unix_seconds(0);
+        let headers = http::HeaderMap::new();
+        let context = RequestContext::from_request(
+            now,
+            &policy,
+            AuthSchemeRef::Anonymous,
+            None,
+            &EMPTY_SERVER_EXTENSIONS,
+            rustfs_gateway_http::HeaderView::new(&headers),
+        );
+        assert!(context.headers().is_some(), "an observed empty map is still available");
+        assert!(context.headers().expect("available").iter_raw().next().is_none());
+        assert!(RequestContext::new(now, &policy).headers().is_none());
     }
 
     /// Negative — the closure adapter refuses when the predicate is false, and the refusal is the

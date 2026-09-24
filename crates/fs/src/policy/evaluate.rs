@@ -26,12 +26,16 @@
 //!
 //! RustFS's evaluator is MinIO's: principal, action, resource and a condition language of some
 //! forty keys. This one matches principal, action and resource with the same `*`/`?` wildcards,
-//! and evaluates **no condition**: a statement carrying a `Condition` block neither grants nor
-//! denies here. That is fail-closed for an `Allow` (nothing is granted that the condition might
-//! have withheld) and fail-open for a `Deny` (nothing is withheld that the condition might have
-//! granted); the second is the honest cost of not carrying the condition language, and it is stated
-//! here rather than approximated with an always-true or always-false condition that would be right
-//! by accident. Every suite case that leans on a condition therefore stays a known failure.
+//! and evaluates `StringEquals` on `s3:x-amz-acl`: exact case-sensitive values, a string or
+//! an OR-list of strings, and no match when the request header is absent. Any condition block
+//! containing another key or operator remains unsupported as a whole and neither grants nor
+//! denies. That preserves the existing limitation: unsupported Allow is fail-closed, unsupported
+//! Deny is fail-open. This is not a complete IAM condition evaluator or validator.
+//! The key spelling is deliberately canonical: RustFS passes condition-map keys directly through
+//! `Key::try_from` to its exact `S3KeyName` parser, rather than applying AWS's case-insensitive rule.
+//! Evidence: <https://github.com/rustfs/rustfs/blob/c95b4f08200c789168eb0e8ec4693f73012aeb1c/crates/policy/src/policy/function/key.rs>.
+//! Other unsupported spellings and blocks remain stored but unevaluated here; this does not claim
+//! RustFS's complete policy-validation behavior.
 //!
 //! Principals are matched as RustFS matches them: `*` (or `{"AWS": "*"}`) is everyone, and any
 //! other `AWS` entry is compared as a whole against the caller's account name. Anonymous callers
@@ -56,7 +60,48 @@ struct Statement {
     not_actions: Vec<String>,
     resources: Vec<String>,
     not_resources: Vec<String>,
-    conditioned: bool,
+    condition: Condition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Condition {
+    None,
+    AclEquals(Vec<String>),
+    Unsupported,
+}
+
+impl Condition {
+    fn parse(value: Option<&Value>) -> Self {
+        let Some(value) = value else { return Self::None };
+        let Some(operators) = value.as_object() else { return Self::Unsupported };
+        if operators.is_empty() {
+            return Self::None;
+        }
+        if operators.len() != 1 {
+            return Self::Unsupported;
+        }
+        let Some(keys) = operators.get("StringEquals").and_then(Value::as_object) else {
+            return Self::Unsupported;
+        };
+        if keys.len() != 1 {
+            return Self::Unsupported;
+        }
+        let Some(value) = keys.get("s3:x-amz-acl") else {
+            return Self::Unsupported;
+        };
+        match strings(Some(value)) {
+            Ok(values) if !values.is_empty() => Self::AclEquals(values),
+            _ => Self::Unsupported,
+        }
+    }
+
+    fn matches(&self, acl: Option<&str>) -> bool {
+        match self {
+            Self::None => true,
+            Self::AclEquals(values) => acl.is_some_and(|acl| values.iter().any(|value| value == acl)),
+            Self::Unsupported => false,
+        }
+    }
 }
 
 /// Why a syntactically valid JSON object is not a bucket policy RustFS would store.
@@ -137,10 +182,21 @@ impl BucketPolicy {
     /// needs a matching `Allow`.
     #[must_use]
     pub fn allows(&self, request: PolicyRequest<'_>) -> bool {
+        self.allows_with_acl(request, None)
+    }
+
+    /// Evaluates the request with its supplied `x-amz-acl` header.
+    ///
+    /// Only `StringEquals` on `s3:x-amz-acl` is supported: values match exactly and case
+    /// sensitively, a string array matches any member, and `None` never matches. Condition
+    /// keys use RustFS's canonical spelling. A block containing any other key or operator remains
+    /// unsupported as a whole. This does not store or enforce ACL grants.
+    #[must_use]
+    pub fn allows_with_acl(&self, request: PolicyRequest<'_>, acl: Option<&str>) -> bool {
         if self
             .statements
             .iter()
-            .any(|statement| !statement.allow && statement.matches(request))
+            .any(|statement| !statement.allow && statement.matches(request, acl))
         {
             return false;
         }
@@ -149,7 +205,7 @@ impl BucketPolicy {
         }
         self.statements
             .iter()
-            .any(|statement| statement.allow && statement.matches(request))
+            .any(|statement| statement.allow && statement.matches(request, acl))
     }
 
     /// Whether any `Allow` statement names every principal, RustFS's test for a policy the
@@ -181,9 +237,7 @@ impl Statement {
         if resources.is_empty() == not_resources.is_empty() {
             return Err(PolicyShapeError::Resource);
         }
-        let conditioned = object
-            .get("Condition")
-            .is_some_and(|condition| !condition.as_object().is_some_and(serde_json::Map::is_empty));
+        let condition = Condition::parse(object.get("Condition"));
         Ok(Self {
             allow,
             principals,
@@ -191,12 +245,12 @@ impl Statement {
             not_actions,
             resources,
             not_resources,
-            conditioned,
+            condition,
         })
     }
 
-    fn matches(&self, request: PolicyRequest<'_>) -> bool {
-        if self.conditioned {
+    fn matches(&self, request: PolicyRequest<'_>, acl: Option<&str>) -> bool {
+        if !self.condition.matches(acl) {
             return false;
         }
         let principal_matches = match (&self.principals, request.account) {

@@ -16,6 +16,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/listing.rs` | Object/upload filtering, owner projection, delimiter rollup, V1/paired markers, and scoped V2 cursors. | Changing object or upload listing pagination semantics. |
 | `src/records.rs` | The on-disk grammar of one version record, the versioned trailing sections carrying user metadata and stored representation headers, and the storability rules both must pass. | Changing the persisted record format or the user-metadata rules. |
 | `src/reads.rs` | Representation selection for `GetObject`/`HeadObject` and the `Range` window `evaluate_range` decides. | Changing ranged or version-selected reads. |
+| `src/policy/evaluate.rs` | Bucket-policy matching, canonical ACL StringEquals conditions, and explicit unsupported-condition boundaries. | Changing policy condition interpretation. |
 | `src/conditions.rs` | RFC 9110 conditional requests for `GetObject`, `HeadObject` and `PutObject`: the request's four conditions as the contract's `Preconditions`, and the contract's verdict — against the representation or its absence — as `304`, `412` or proceed. | Changing a conditional read or write (rustfs/gateway#808). |
 | `src/tagging.rs` | Durable per-version object tag replacement, reads, deletion, and storage safety. | Changing object-tagging operations or lifecycle tag inputs. |
 | `src/transitions.rs` | One-shot current-object transition selection and storage-class mutation. | Changing lifecycle transition eligibility or class persistence. |
