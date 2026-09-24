@@ -62,9 +62,12 @@ fi
 source "${SCRIPT_DIR}/lib/python.sh"
 PYTHON="$(gateway_python check_mint_report)" || exit 1
 "$PYTHON" - "$REPORT" <<'PYEOF'
+import contextlib
+import io
 import json
 import os
 import re
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -77,6 +80,39 @@ probes = 0
 SDKS = ["awscli", "minio-go", ".minio-dotnet"]
 SECRET = "probe-secret-that-must-never-survive"
 UNIQUE_ERROR = "UNIQUE-UPSTREAM-ERROR-TEXT-7f3a"
+
+
+# Each judge still executes the reporter's actual __main__ in a fresh namespace.
+# Restore the process state that a child interpreter previously isolated. This
+# reporter uses only standard-library imports; redaction keeps its own child
+# because it deliberately supplies a different environment.
+def run_report(command: list[str]) -> subprocess.CompletedProcess:
+    argv, path, environment, cwd = sys.argv, sys.path[:], dict(os.environ), os.getcwd()
+    output, errors = io.StringIO(), io.StringIO()
+    code = 0
+    try:
+        sys.argv = command[1:]
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            try:
+                runpy.run_path(command[1], run_name="__main__")
+            except SystemExit as request:
+                if request.code is None:
+                    code = 0
+                elif isinstance(request.code, int):
+                    code = request.code
+                else:
+                    print(request.code, file=sys.stderr)
+                    code = 1
+    finally:
+        sys.argv = argv
+        sys.path[:] = path
+        os.environ.clear()
+        os.environ.update(environment)
+        os.chdir(cwd)
+    return subprocess.CompletedProcess(command, code, output.getvalue(), errors.getvalue())
+
+
+cli_codes: set[int] = set()
 
 
 def rec(sdk: str, function: str, status: str, **extra: object) -> str:
@@ -185,7 +221,18 @@ def probe(
             command += ["--pass", " ".join(pass_sdks), str(pass_path)]
         if record or record_at_baseline:
             command += ["--record", str(proposal)]
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        result = run_report(command)
+        # Keep real interpreter boundary controls for every supported exit class.
+        # The first fixture in each class is non-recording and deterministic.
+        if expected_code not in cli_codes:
+            cli_codes.add(expected_code)
+            before = {path: path.read_bytes() if path.exists() else None
+                      for path in (baseline_path, markdown, report_json, proposal)}
+            child = subprocess.run(command, capture_output=True, text=True, check=False)
+            after_cli = {path: path.read_bytes() if path.exists() else None for path in before}
+            if ((result.returncode, result.stdout, result.stderr)
+                    != (child.returncode, child.stdout, child.stderr) or before != after_cli):
+                failures.append(f"{label}: real CLI differs from isolated __main__ execution")
         combined = result.stdout + result.stderr
         for written in (markdown, report_json):
             if written.is_file():
@@ -492,6 +539,9 @@ for mode, statuses in (("ratchet", (0, 1, 3, 124)), ("record", (0, 3, 124))):
                     f"workflow {mode} exit {status}: must preserve exit status and publish "
                     f"status/out under bash -e; got exit {result.returncode}, outputs {observed!r}"
                 )
+
+if cli_codes != {0, 1, 2, 3}:
+    failures.append(f"incomplete real CLI exit census: {sorted(cli_codes)}")
 
 if failures:
     for failure in failures:
