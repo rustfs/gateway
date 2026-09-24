@@ -22,6 +22,9 @@
 
 #[path = "server_runtime/connection_driver.rs"]
 mod connection_driver;
+#[path = "server_runtime/drain_fixture.rs"]
+mod drain_fixture;
+pub(crate) use drain_fixture::observed_shutdown_drain;
 #[path = "server_runtime/frozen_clock.rs"]
 mod frozen_clock;
 
@@ -196,42 +199,7 @@ async fn a_srv_0003_listener_options_are_read_back_from_the_socket() {
 
 #[tokio::test]
 async fn a_srv_0006_in_flight_request_drains_before_grace() {
-    const EXPECTED_BODY_LEN: usize = 100 * 1024 * 1024;
-    let handler_entered = Arc::new(Notify::new());
-    let service = service_fn({
-        let handler_entered = Arc::clone(&handler_entered);
-        move |_request: Request<hyper::body::Incoming>| {
-            let handler_entered = Arc::clone(&handler_entered);
-            async move {
-                handler_entered.notify_one();
-                tokio::time::sleep(Duration::from_millis(40)).await;
-                Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(vec![b'x'; 100 * 1024 * 1024]))))
-            }
-        }
-    });
-    let RunningServer {
-        local_addr,
-        task,
-        shutdown,
-        ..
-    } = Server::new(plaintext_config(), service).serve().expect("server starts");
-    let client = tokio::spawn(get(local_addr));
-    tokio::time::timeout(Duration::from_secs(1), handler_entered.notified())
-        .await
-        .expect("the handler starts before shutdown");
-    let report = shutdown.trigger(Duration::from_secs(2)).await;
-    assert_eq!(report, ShutdownReport { drained: 1, aborted: 0 });
-    let response = client.await.expect("client task completes");
-    let body_start = response
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|index| index + 4)
-        .expect("response has a complete HTTP head");
-    assert!(response[..body_start].starts_with(b"HTTP/1.1 200"));
-    let body = &response[body_start..];
-    assert_eq!(body.len(), EXPECTED_BODY_LEN, "graceful shutdown drains the complete response body");
-    assert!(body.iter().all(|byte| *byte == b'x'));
-    assert!(task.await.expect("server task joins").is_ok());
+    observed_shutdown_drain(|| {}).await;
 }
 
 #[tokio::test]
