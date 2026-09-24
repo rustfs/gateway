@@ -264,7 +264,7 @@ async fn c_wire_0064_one_thousand_half_open_connections_are_bounded_and_reused()
     let v4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), running.local_addr.port());
     let v6 = SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), running.local_addr.port());
 
-    let v4_streams = open_partial_headers(v4, ATTEMPTS).await;
+    let v4_streams = open_overload_headers(v4, ATTEMPTS).await;
     tokio::time::timeout(Duration::from_secs(10), async {
         while running.metrics.per_ip_rejections() != ATTEMPTS - PER_IP_LIMIT
             || running.metrics.active_connections() != PER_IP_LIMIT
@@ -323,4 +323,76 @@ async fn c_wire_0064_one_thousand_half_open_connections_are_bounded_and_reused()
     drop(v6_streams);
     drop(v4_streams);
     shut_down(running, runtime, "the loaded listener").await;
+}
+
+// Only the overload wave may observe an intentional peer rejection during connect or write.
+// The exact server-side rejection census still proves that all excess attempts were admitted
+// to the per-IP decision; a client reset alone is not counted as a server refusal.
+async fn open_overload_headers(addr: SocketAddr, count: usize) -> Vec<TcpStream> {
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..count {
+        tasks.spawn(async move {
+            let mut stream = TcpStream::connect(addr).await?;
+            stream.write_all(b"GET / HTTP/1.1\r\nHost: x").await?;
+            Ok(stream)
+        });
+    }
+    let mut streams = Vec::with_capacity(count);
+    while let Some(result) = tasks.join_next().await {
+        if let Some(stream) = keep_overload_connection(result.expect("the overload task joins"))
+            .expect("only observed peer rejection is allowed during overload")
+        {
+            streams.push(stream);
+        }
+    }
+    streams
+}
+
+fn keep_overload_connection<T>(result: std::io::Result<T>) -> std::io::Result<Option<T>> {
+    match result {
+        Ok(stream) => Ok(Some(stream)),
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+#[test]
+fn overload_connection_keeps_the_successful_value_alive() {
+    let value = std::sync::Arc::new(17);
+    let kept = keep_overload_connection(Ok(std::sync::Arc::clone(&value)))
+        .expect("successful result")
+        .expect("successful value retained");
+    assert!(std::sync::Arc::ptr_eq(&value, &kept));
+    assert_eq!(std::sync::Arc::strong_count(&value), 2);
+}
+
+#[test]
+fn overload_connection_accepts_observed_reset() {
+    let result = keep_overload_connection::<()>(Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset)));
+    assert!(matches!(result, Ok(None)), "observed reset: {result:?}");
+}
+
+#[test]
+fn overload_connection_accepts_observed_broken_pipe() {
+    let result = keep_overload_connection::<()>(Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)));
+    assert!(matches!(result, Ok(None)), "observed broken pipe: {result:?}");
+}
+
+#[test]
+fn overload_connection_preserves_unexpected_error_kind_and_message() {
+    for kind in [
+        std::io::ErrorKind::ConnectionRefused,
+        std::io::ErrorKind::ConnectionAborted,
+        std::io::ErrorKind::TimedOut,
+        std::io::ErrorKind::PermissionDenied,
+        std::io::ErrorKind::AddrNotAvailable,
+        std::io::ErrorKind::UnexpectedEof,
+        std::io::ErrorKind::WriteZero,
+        std::io::ErrorKind::Other,
+    ] {
+        let source = std::io::Error::new(kind, "unexpected overload transport failure");
+        let error = keep_overload_connection::<()>(Err(source)).expect_err("unexpected errors remain errors");
+        assert_eq!(error.kind(), kind);
+        assert_eq!(error.to_string(), "unexpected overload transport failure");
+    }
 }
