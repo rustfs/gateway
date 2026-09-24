@@ -88,6 +88,12 @@ impl PreAuthError {
         Self::of(ErrorCode::INVALID_ARGUMENT, message)
     }
 
+    /// `400 BadRequest` — an OPTIONS request lacks the headers needed to classify a preflight.
+    #[must_use]
+    pub const fn bad_request(message: &'static str) -> Self {
+        Self::of(ErrorCode::BAD_REQUEST, message)
+    }
+
     /// `400 InvalidRequest` — the request is not usable for a reason with no better code.
     #[must_use]
     pub const fn invalid_request(message: &'static str) -> Self {

@@ -26,13 +26,10 @@
 //!
 //! # Why "malformed preflight" is its own answer and not a refusal to classify
 //!
-//! An `OPTIONS` with no `Origin` is not a CORS preflight at all — it is a request for the
-//! server's own options, and the route table is entitled to answer it. An `OPTIONS` with two
-//! `Origin` header lines *is* a preflight attempt, and letting it fall through to the route table
-//! would answer a CORS question with a routing error. Worse, the two `Origin` values are the
-//! request-smuggling shape of this feature: whichever one a downstream cache keyed on, the answer
-//! it stores is the answer to the other. So it is refused here, with the same constant refusal
-//! every other preflight failure gets, and it never reaches an operation.
+//! An `OPTIONS` with none of the three CORS request headers has its own typed rejection:
+//! an actual unsigned AWS request returned `400 BadRequest` (rustfs/gateway#875). It is not
+//! a request for an application operation. Other malformed preflight attempts retain the
+//! uniform refusal, so no missing configuration or private bucket is disclosed.
 //!
 //! # The ceilings, and what each one is for
 //!
@@ -147,6 +144,8 @@ pub struct PreflightRequest<'a> {
 pub enum PreflightClass<'a> {
     /// Not a preflight. The pipeline continues; the route table answers it.
     NotPreflight,
+    /// An OPTIONS with no CORS request headers, rejected with `400 BadRequest` before routing.
+    HeaderlessOptions,
     /// A preflight whose own headers cannot be read. Answered with the constant refusal, and
     /// never routed — see the module documentation for why falling through would be worse.
     Malformed,
@@ -156,9 +155,9 @@ pub enum PreflightClass<'a> {
 
 /// Decides what one request head is, from the method and three headers.
 ///
-/// The `Access-Control-Request-Method` header is what separates a preflight from a plain
-/// `OPTIONS`; the Fetch Standard requires a browser to send both it and `Origin` on every
-/// preflight, so requiring both is not a leniency to be tightened later.
+/// A valid preflight needs both `Origin` and `Access-Control-Request-Method`. An OPTIONS
+/// with none of the three CORS request headers has a separate observed rejection contract;
+/// it must not fall through to routing or change other malformed-preflight answers.
 #[must_use]
 pub fn classify<'a>(method: &Method, headers: &HeaderView<'a>) -> PreflightClass<'a> {
     if method != Method::OPTIONS {
@@ -167,10 +166,10 @@ pub fn classify<'a>(method: &Method, headers: &HeaderView<'a>) -> PreflightClass
     let origin_lines = headers.count(&ORIGIN);
     let method_lines = headers.count(&ACCESS_CONTROL_REQUEST_METHOD);
     if origin_lines == 0 && method_lines == 0 {
-        return if contracts::cors_bare_options_is_routed() {
+        return if contracts::cors_bare_options_is_routed() || headers.count(&ACCESS_CONTROL_REQUEST_HEADERS) != 0 {
             PreflightClass::NotPreflight
         } else {
-            PreflightClass::Malformed
+            PreflightClass::HeaderlessOptions
         };
     }
     // One of the two is present, so this is a preflight attempt and the answer is this runtime's
@@ -253,6 +252,7 @@ mod tests {
     #[derive(Debug, PartialEq, Eq)]
     enum Class {
         NotPreflight,
+        HeaderlessOptions,
         Malformed,
         Preflight {
             origin: String,
@@ -268,6 +268,7 @@ mod tests {
         }
         match classify(method, &HeaderView::new(&map)) {
             PreflightClass::NotPreflight => Class::NotPreflight,
+            PreflightClass::HeaderlessOptions => Class::HeaderlessOptions,
             PreflightClass::Malformed => Class::Malformed,
             PreflightClass::Preflight(request) => Class::Preflight {
                 origin: request.origin.to_owned(),
@@ -320,11 +321,11 @@ mod tests {
         assert_eq!(classify_head(&Method::HEAD, &[("origin", "https://a.invalid")]), Class::NotPreflight);
     }
 
-    /// Negative — an `OPTIONS` with neither header is not a preflight, so the route table answers
-    /// it. Claiming it here would turn every `OPTIONS` into a CORS answer.
+    /// Negative — issue #875's actual AWS capture supersedes the former routing assumption.
+    /// This typed refusal is distinct from both an ordinary request and malformed preflight.
     #[test]
-    fn n_a_bare_options_is_not_a_preflight() {
-        assert_eq!(classify_head(&Method::OPTIONS, &[]), Class::NotPreflight);
+    fn n_a_bare_options_is_a_typed_bad_request() {
+        assert_eq!(classify_head(&Method::OPTIONS, &[]), Class::HeaderlessOptions);
     }
 
     /// Negative — half a preflight is a malformed preflight, not a routable request. Falling

@@ -1,12 +1,11 @@
 [case]
 id = "c-cors-0043"
 schema_version = 1
-title = "An OPTIONS with neither CORS header is not a preflight and is routed like anything else"
+title = "An OPTIONS with no CORS headers is refused as BadRequest before routing"
 rationale = """
-An OPTIONS that does not carry Origin and Access-Control-Request-Method is a request about the server's own options,
-not a CORS question, and claiming it here would make every OPTIONS in the deployment a CORS answer — including ones
-a future route row is meant to serve. The 501 is the route table's answer and this case exists to prove the request
-reached it, which is also what makes the interception itself falsifiable."""
+An unsigned AWS OPTIONS capture in issue #875 returned 400 BadRequest. That observation corrects
+this case's former 501 routing assumption. The request still grants no CORS permission and does
+not claim to measure a GET-presigned query or other malformed preflight variants."""
 polarity = "negative"
 tags = ["cors", "preflight", "routing"]
 timeout_ms = 10000
@@ -22,6 +21,11 @@ url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
 summary = "S3 answers a bucket preflight out of that bucket's stored CORS document and refuses an unmatched one with 403."
 kind = "aws-doc"
 
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/875"
+summary = "The issue records an actual unsigned AWS OPTIONS response with status 400, code BadRequest and a SHA-256 receipt."
+kind = "other"
+
 [[setup.buckets]]
 name = "conf-cors-rt"
 
@@ -32,7 +36,7 @@ target = "/conf-cors-rt/key.txt"
 
 [expect]
 kind = "response"
-status = 501
+status = 400
 headers_absent = [
   "access-control-allow-origin",
   "access-control-allow-methods",
@@ -40,4 +44,4 @@ headers_absent = [
 ]
 
 [expect.error]
-code = "NotImplemented"
+code = "BadRequest"

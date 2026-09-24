@@ -106,6 +106,13 @@ constant = "BAD_DIGEST"
 status = 400
 note = ["`Content-MD5` was well formed but did not match the body."]
 
+# Evidence: https://github.com/rustfs/gateway/issues/875#issuecomment-5789658940
+# Captured AWS OPTIONS responses without Origin or Access-Control-Request-Method return 400 BadRequest.
+[[code]]
+name = "BadRequest"
+constant = "BAD_REQUEST"
+status = 400
+
 [[code]]
 name = "CredentialsNotSupported"
 constant = "CREDENTIALS_NOT_SUPPORTED"

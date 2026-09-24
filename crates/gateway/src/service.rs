@@ -524,22 +524,22 @@ impl S3Service {
         let target_origin = resolved.origin();
 
         // ── CORS preflight ───────────────────────────────────────────────────────────────
-        // After acceptance, after host resolution, and before routing. Every part of that is
-        // load-bearing.
-        //
-        // *After acceptance* so that a preflight is subject to the same wire-level refusals as
-        // everything else — a smuggled request must not become answerable by adding an `Origin`.
-        // *After host resolution* because whether the path names a bucket is the resolver's
-        // answer and not this file's. *Before routing* because the route table has no `OPTIONS`
-        // row and never will: a preflight is answered **instead of** an operation, from the
-        // bucket's stored document, and routing it would answer a CORS question with a `501`.
-        // Removing this branch is therefore visible as an `OPTIONS` reaching the route table.
-        //
-        // Nothing below this point runs for a preflight: no signature admission, authenticator,
-        // authorizer or handler. Refusal latency is held inside this branch; requiring a signature
-        // here would switch CORS off because a browser sends no credentials on a preflight.
+        // Acceptance runs first so that CORS cannot bypass framing or header refusals.
+        // Host resolution determines the bucket before classification; routing has no OPTIONS operation.
+        // Entirely headerless OPTIONS returns the observed S3 BadRequest; malformed
+        // preflights retain their uniform refusal and valid ones use the stored document.
+        // No signature admission, authenticator, authorizer or handler runs in these
+        // branches. Refusal latency uses the same security floor as other failures.
         match classify(wire.method(), &wire.headers()) {
             PreflightClass::NotPreflight => {}
+            PreflightClass::HeaderlessOptions => {
+                let started = self.inner.authz_clock.monotonic();
+                hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), started).await;
+                let refusal = rustfs_gateway_core::error::PreAuthError::bad_request(
+                    "An Origin header is required for this OPTIONS request",
+                );
+                return outcome.refuse(from_pre_auth(refusal, response_kind));
+            }
             PreflightClass::Malformed => {
                 let started = self.inner.authz_clock.monotonic();
                 return self

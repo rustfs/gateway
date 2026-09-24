@@ -101,6 +101,9 @@ mod policy_json_replay;
 #[path = "post_object.rs"]
 mod post_object;
 
+#[path = "pre_auth_errors.rs"]
+mod pre_auth_errors;
+
 #[path = "precondition_range.rs"]
 mod precondition_range;
 

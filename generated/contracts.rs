@@ -211,7 +211,7 @@ pub(crate) const CORS_REQUEST_METHOD_CARDINALITY: CorsRequestMethodCardinalityPo
 /// Current bucket-CORS contract input.
 pub(crate) const CORS_REQUEST_HEADERS_CARDINALITY: CorsRequestHeadersCardinalityPolicy = CorsRequestHeadersCardinalityPolicy::AtMostOne;
 /// Current bucket-CORS contract input.
-pub(crate) const CORS_BARE_OPTIONS_POLICY: CorsBareOptionsPolicy = CorsBareOptionsPolicy::Route;
+pub(crate) const CORS_BARE_OPTIONS_POLICY: CorsBareOptionsPolicy = CorsBareOptionsPolicy::Refuse;
 /// Current bucket-CORS contract input.
 pub(crate) const CORS_PREFLIGHT_REQUIRED_HEADER_PAIR: PreflightRequiredHeaderPairPolicy = PreflightRequiredHeaderPairPolicy::Both;
 /// Current bucket-CORS contract input.

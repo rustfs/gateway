@@ -213,6 +213,7 @@ core_modules = (
     "params_and_dispatch",
     "policy_json_replay",
     "post_object",
+    "pre_auth_errors",
     "precondition_range",
     "purity_guard",
     "range_part_table",

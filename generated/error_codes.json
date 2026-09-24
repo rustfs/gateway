@@ -28,6 +28,7 @@
                                                     "server_fault": false
                                                   },
              "BadDigest": { "constant": "BAD_DIGEST", "status": 400, "server_fault": false },
+             "BadRequest": { "constant": "BAD_REQUEST", "status": 400, "server_fault": false },
              "BucketAlreadyExists": { "constant": "BUCKET_ALREADY_EXISTS", "status": 409, "server_fault": false },
              "BucketAlreadyOwnedByYou": {
                                           "constant": "BUCKET_ALREADY_OWNED_BY_YOU",
@@ -270,6 +271,7 @@
                    "AUTHORIZATION_HEADER_MALFORMED": ["AuthorizationHeaderMalformed"],
                    "AUTHORIZATION_QUERY_PARAMETERS_ERROR": ["AuthorizationQueryParametersError"],
                    "BAD_DIGEST": ["BadDigest"],
+                   "BAD_REQUEST": ["BadRequest"],
                    "BUCKET_ALREADY_EXISTS": ["BucketAlreadyExists"],
                    "BUCKET_ALREADY_OWNED_BY_YOU": ["BucketAlreadyOwnedByYou"],
                    "BUCKET_NOT_EMPTY": ["BucketNotEmpty"],
@@ -392,6 +394,7 @@
                           "AuthorizationHeaderMalformed",
                           "AuthorizationQueryParametersError",
                           "BadDigest",
+                          "BadRequest",
                           "CSVParsingError",
                           "CredentialsNotSupported",
                           "EncryptionTypeMismatch",
@@ -522,6 +525,7 @@
                                   "AuthorizationHeaderMalformed",
                                   "AuthorizationQueryParametersError",
                                   "BadDigest",
+                                  "BadRequest",
                                   "BucketAlreadyExists",
                                   "BucketAlreadyOwnedByYou",
                                   "BucketNotEmpty",

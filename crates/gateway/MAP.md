@@ -79,7 +79,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/pipeline.rs`, `tests/post_object_runtime.rs`, `tests/post_object_streaming.rs` | End-to-end ordering, response shapes, POST byte ownership and allocation bounds |
 | `tests/authz_contract.rs` | Two authorization stages, audit, failure floor |
 | `tests/governor_runtime.rs` | Limits run before expensive work and recover |
-| `tests/cors_runtime.rs` | Preflight and actual-response CORS behavior |
+| `tests/cors_runtime.rs`, `tests/cors_runtime/headerless.rs` | Headerless OPTIONS rejection, preflight and actual-response CORS behavior |
 | `tests/middleware.rs`, `tests/response_invariants.rs`, `tests/response_stream_termination.rs` | Filter seams, runtime correction metrics, malformed response refusal, and how a filter-installed stream ends on a real socket |
 | `tests/sse_runtime.rs`, `tests/sse_runtime/context.rs` | TLS gate, key hygiene, multipart consistency and JSON context admission |
 | `tests/vhost_resolution.rs`, `tests/host_resolve_replay.rs` | Host boundary and fallback behavior; the `host_resolve` fuzz property over its committed seeds and 100,000 fixed-seed samples |
