@@ -10,7 +10,9 @@ set -euo pipefail
 #   toolchain: compiling there failed until build-essential was installed
 #   (https://github.com/rustfs/rustfs/pull/4894 — the linker `cc` was absent).
 #   Ruby is the same gap for this repository: the guards are Ruby, and the
-#   GitHub image is what used to provide it.
+#   GitHub image is what used to provide it. The image also provides GNU
+#   time at /usr/bin/time (the RSS probes spawn that path, not the shell
+#   builtin), ps, and ss.
 #
 #   Docker is intentionally not installed here. Jobs that need a daemon run on
 #   the dind-sm-standard-2 label, which is the runner that has one.
@@ -45,6 +47,10 @@ command -v python3 >/dev/null 2>&1 || missing+=(python3)
 command -v ruby >/dev/null 2>&1 || missing+=(ruby)
 command -v timeout >/dev/null 2>&1 || missing+=(coreutils)
 command -v curl >/dev/null 2>&1 || missing+=(curl ca-certificates)
+# GNU time, not the shell builtin. The chunk RSS probes exec this path.
+[[ -x /usr/bin/time ]] || missing+=(time)
+command -v ps >/dev/null 2>&1 || missing+=(procps)
+command -v ss >/dev/null 2>&1 || missing+=(iproute2)
 if [[ "$with_gh" -eq 1 ]] && ! command -v gh >/dev/null 2>&1; then
     missing+=(gh)
 fi
