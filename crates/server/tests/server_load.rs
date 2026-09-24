@@ -39,6 +39,9 @@ use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tower::service_fn;
 
+#[path = "server_load/isolation.rs"]
+mod isolation;
+
 #[path = "server_load/per_ip.rs"]
 mod per_ip;
 

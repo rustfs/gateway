@@ -196,6 +196,12 @@ async fn a_srv_0003_listener_options_are_read_back_from_the_socket() {
 
 #[tokio::test]
 async fn a_srv_0006_in_flight_request_drains_before_grace() {
+    observed_shutdown_drain(|| {}).await;
+}
+
+pub(crate) async fn observed_shutdown_drain(mut checkpoint: impl FnMut()) {
+    let _exclusive_load_lease = crate::server_load::exclusive_server_load_lease().await;
+    checkpoint();
     const EXPECTED_BODY_LEN: usize = 100 * 1024 * 1024;
     let handler_entered = Arc::new(Notify::new());
     let service = service_fn({
@@ -232,6 +238,7 @@ async fn a_srv_0006_in_flight_request_drains_before_grace() {
     assert_eq!(body.len(), EXPECTED_BODY_LEN, "graceful shutdown drains the complete response body");
     assert!(body.iter().all(|byte| *byte == b'x'));
     assert!(task.await.expect("server task joins").is_ok());
+    checkpoint();
 }
 
 #[tokio::test]
