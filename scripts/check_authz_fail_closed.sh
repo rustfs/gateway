@@ -102,6 +102,14 @@ code_of() {
     awk '{ s = $0; sub(/^[ \t]+/, "", s); if (s ~ /^\/\//) { print "" } else { print $0 } }' "$1"
 }
 
+# Every rule-2/3 match requires one of these literal tokens. This necessary-only
+# filter may retain comments and unrelated Self uses; the unchanged code scans below
+# still decide violations and line numbers. One scan avoids processes per irrelevant file.
+decision_sources=()
+while IFS= read -r file; do
+    [[ -n "$file" ]] && decision_sources+=("$file")
+done < <(grep -lE 'Decision|Self::(Allow|Deny|Indeterminate)' "${sources[@]}" || true)
+
 # Prints the body of a brace-delimited item starting at the line matching $2.
 body_of() {
     code_of "$1" | awk -v start="$2" '
@@ -157,12 +165,14 @@ while IFS= read -r hit; do
     report "${DECISION_FILE}:${hit%%:*}: Decision must not be constructible from something that is not a decision; a bool has no third state"
 done < <(body_of "$DECISION_FILE" '^impl[ \t]+Decision[ \t]*[{]' | grep -nE 'fn[ \t]+(from_bool|from_result|from_option)' || true)
 
-for file in "${sources[@]}"; do
-    while IFS= read -r hit; do
-        [[ -z "$hit" ]] && continue
-        report "${file}:${hit%%:*}: an impl of Default or From for Decision; a verdict must come from a decision and from nothing else"
-    done < <(code_of "$file" | grep -nE '^[ \t]*impl([ \t]*<[^>]*>)?[ \t]+(Default|From<[^>]*>)[ \t]+for[ \t]+Decision' || true)
-done
+if [[ "${#decision_sources[@]}" -gt 0 ]]; then
+    for file in "${decision_sources[@]}"; do
+        while IFS= read -r hit; do
+            [[ -z "$hit" ]] && continue
+            report "${file}:${hit%%:*}: an impl of Default or From for Decision; a verdict must come from a decision and from nothing else"
+        done < <(code_of "$file" | grep -nE '^[ \t]*impl([ \t]*<[^>]*>)?[ \t]+(Default|From<[^>]*>)[ \t]+for[ \t]+Decision' || true)
+    done
+fi
 
 # -----------------------------------------------------------------------------
 # Rule 3 — one interpretation site.
@@ -175,15 +185,17 @@ done
 # -----------------------------------------------------------------------------
 ARM_RE='(Decision|Self)::(Allow|Deny|Indeterminate)([ \t]*\|[ \t]*(Decision|Self)::(Allow|Deny|Indeterminate))*[ \t]*=>'
 interpreters=0
-for file in "${sources[@]}"; do
-    hits="$(code_of "$file" | grep -cE "$ARM_RE" || true)"
-    [[ "$hits" -eq 0 ]] && continue
-    if [[ "$file" == "$DECISION_FILE" ]]; then
-        interpreters=$((interpreters + hits))
-        continue
-    fi
-    report "${file}: matches on a Decision variant; the meaning of a verdict is written down in ${DECISION_FILE} and nowhere else, or 'Indeterminate is a refusal' becomes true in one place and unexamined in another"
-done
+if [[ "${#decision_sources[@]}" -gt 0 ]]; then
+    for file in "${decision_sources[@]}"; do
+        hits="$(code_of "$file" | grep -cE "$ARM_RE" || true)"
+        [[ "$hits" -eq 0 ]] && continue
+        if [[ "$file" == "$DECISION_FILE" ]]; then
+            interpreters=$((interpreters + hits))
+            continue
+        fi
+        report "${file}: matches on a Decision variant; the meaning of a verdict is written down in ${DECISION_FILE} and nowhere else, or 'Indeterminate is a refusal' becomes true in one place and unexamined in another"
+    done
+fi
 
 if [[ "$interpreters" -eq 0 ]]; then
     report "check_authz_fail_closed: no match arm on a Decision variant anywhere, including ${DECISION_FILE}; the detection pattern has stopped matching and rule 3 is checking nothing"
@@ -254,11 +266,7 @@ fi
 # -----------------------------------------------------------------------------
 # Rule 7 — all thirty acceptance cases remain represented by executable code.
 # -----------------------------------------------------------------------------
-declared_cases="$({
-    for file in "${sources[@]}"; do
-        grep -Eo 'c-azc-[0-9]{4}' "$file" || true
-    done
-} | sort -u)"
+declared_cases="$( { grep -hEo 'c-azc-[0-9]{4}' "${sources[@]}" || true; } | sort -u)"
 expected_cases="$(awk 'BEGIN { for (n = 1; n <= 30; n++) printf "c-azc-%04d\n", n }')"
 if [[ "$declared_cases" != "$expected_cases" ]]; then
     report "check_authz_fail_closed: the executable authorization matrix is not exactly c-azc-0001 through c-azc-0030"

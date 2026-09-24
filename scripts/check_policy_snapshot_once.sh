@@ -123,19 +123,27 @@ fi
 # `Arc<T>` forward, and the default implementation, none of which is a reading
 # taken during a request.
 # -----------------------------------------------------------------------------
-CALL_RE='\.snapshot[ \t]*\('
+CALL_RE='\.snapshot[[:blank:]]*\('
+# Every call match contains this literal token; comments remain candidates until code_of
+# blanks them. Batch discovery keeps irrelevant files from spawning one scanner pipeline each.
+snapshot_sources=()
+while IFS= read -r file; do
+    [[ -n "$file" ]] && snapshot_sources+=("$file")
+done < <(grep -lF '.snapshot' "${sources[@]}" || true)
 call_sites=0
-for file in "${sources[@]}"; do
-    [[ "$file" == "$TRAIT_FILE" ]] && continue
-    hits="$(code_of "$file" | grep -cE "$CALL_RE" || true)"
-    [[ "$hits" -eq 0 ]] && continue
-    call_sites=$((call_sites + hits))
-    if [[ "$file" != "$READER_FILE" ]]; then
-        report "${file}: reads a policy snapshot; the one reading per request is taken in ${READER_FILE} and handed to every reader, because two readings are a window a caller chooses the timing of"
-    elif [[ "$hits" -ne 1 ]]; then
-        report "${READER_FILE}: ${hits} readings of policy in one request; there must be exactly one, and every reader must be handed it"
-    fi
-done
+if [[ "${#snapshot_sources[@]}" -gt 0 ]]; then
+    for file in "${snapshot_sources[@]}"; do
+        [[ "$file" == "$TRAIT_FILE" ]] && continue
+        hits="$(code_of "$file" | grep -cE "$CALL_RE" || true)"
+        [[ "$hits" -eq 0 ]] && continue
+        call_sites=$((call_sites + hits))
+        if [[ "$file" != "$READER_FILE" ]]; then
+            report "${file}: reads a policy snapshot; the one reading per request is taken in ${READER_FILE} and handed to every reader, because two readings are a window a caller chooses the timing of"
+        elif [[ "$hits" -ne 1 ]]; then
+            report "${READER_FILE}: ${hits} readings of policy in one request; there must be exactly one, and every reader must be handed it"
+        fi
+    done
+fi
 
 if [[ "$call_sites" -eq 0 ]]; then
     report "check_policy_snapshot_once: nothing in crates/*/src reads a policy snapshot at all; either the pipeline stopped taking one — which means no authorizer is judging against a consistent view — or this guard's pattern has stopped matching"
