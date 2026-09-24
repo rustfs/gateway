@@ -91,18 +91,25 @@ normalize() {
 # -----------------------------------------------------------------------------
 # 1. No `#[path]` escapes its own crate directory.
 # -----------------------------------------------------------------------------
+sources=()
+while IFS= read -r source; do
+    # A tracked source deleted before staging remains in Git's list. Preserve its existing skip.
+    [[ -f "$source" ]] && sources+=("$source")
+done < <(git ls-files -- 'crates/*/src/*.rs' 'crates/*/src/**/*.rs' 2>/dev/null || true)
+
+path_candidates() {
+    # The exact sed expression below requires this literal prefix, including in comment decoys.
+    # Do not invoke grep with no operands: that would wait on stdin for an empty source census.
+    if [[ "${#sources[@]}" -gt 0 ]]; then
+        grep -lF -- '#[path' "${sources[@]}" || true
+    fi
+}
+
 while IFS= read -r source; do
     [[ -n "$source" ]] || continue
-# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form
-# lists only *tracked* files, so a brand-new file is invisible to this guard right up until
-# the moment `git add -A` commits it. That is exactly how CJK text reached commit 343f044
-# past a guard that had just reported success. Ignored files stay out.
-    # `git ls-files --cached --others --exclude-standard` still lists a path that has been deleted in the working tree
-    # but not yet staged. Reading it would make the guard fail with a `sed` error
-    # about an unrelated file, which is a worse diagnostic than skipping it.
-    [[ -f "$source" ]] || continue
     crate_dir="${source%%/src/*}"
-    source_dir="$(dirname "$source")"
+    # Git emits relative crate/src paths containing a slash, with no trailing slash.
+    source_dir="${source%/*}"
 
     while IFS= read -r target; do
         [[ -n "$target" ]] || continue
@@ -113,7 +120,7 @@ while IFS= read -r source; do
             status=1
         fi
     done < <(sed -n 's/.*#\[path[[:space:]]*=[[:space:]]*"\([^"]*\)"\].*/\1/p' "$source")
-done < <(git ls-files -- 'crates/*/src/*.rs' 'crates/*/src/**/*.rs' 2>/dev/null || true)
+done < <(path_candidates)
 
 # -----------------------------------------------------------------------------
 # 2. The mount point is a symlink onto the generated dto tree.

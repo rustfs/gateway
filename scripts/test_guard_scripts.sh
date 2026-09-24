@@ -23216,6 +23216,15 @@ shard_case 'StageFilter discovery batches the complete census and fails closed' 
 shard_case 'Mint judges retain complete probes and isolated CLI exit boundaries' \
     python3 "${SCRIPT_DIR}/test_mint_report_execution.py"
 
+shard_case 'DTO path scans preserve mount checks with bounded process growth' \
+    python3 "${SCRIPT_DIR}/test_dto_packaged_scan_cost.py"
+
+shard_case 'policy snapshot scans preserve one-reading checks with bounded process growth' \
+    python3 "${SCRIPT_DIR}/test_policy_snapshot_scan_cost.py"
+
+shard_case 'authorization scans preserve diagnostics with bounded process growth' \
+    python3 "${SCRIPT_DIR}/test_authz_scan_cost.py"
+
 shard_case 'clean-room allowance normalization preserves exact paths with one process' \
     python3 "${SCRIPT_DIR}/test_clean_room_allowances.py"
 
