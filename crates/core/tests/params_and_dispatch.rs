@@ -32,7 +32,7 @@ use crate::support;
 
 use http::{Method, StatusCode};
 use rustfs_gateway_core::dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE, Router};
-use rustfs_gateway_core::error::{PRE_AUTH_STATUSES, PreAuthError};
+use rustfs_gateway_core::error::PreAuthError;
 use rustfs_gateway_core::op::{AuthRequirement, ResourceShape};
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec, ParamKind, Registry, RegistryError, RequiredParam};
 use rustfs_gateway_core::route::{HostClass, Predicate, RouteTable, ShadowingDecls, ShadowingPolicy, TargetKind};
@@ -321,29 +321,6 @@ fn a_missing_parameter_error_echoes_nothing_from_the_request() {
             !rendered.contains(probe),
             "the error must not reflect {probe:?} back to an unauthenticated caller:\n{rendered}"
         );
-    }
-}
-
-/// Every constructor lands inside the closed set.
-#[test]
-fn every_pre_auth_error_carries_an_allowed_status() {
-    let errors = [
-        PreAuthError::invalid_argument("a"),
-        PreAuthError::invalid_request("b"),
-        PreAuthError::access_denied("c"),
-        PreAuthError::not_implemented("d"),
-    ];
-    for error in errors {
-        assert!(
-            PRE_AUTH_STATUSES.contains(&error.status()),
-            "{} maps to {}, outside the pre-authentication set",
-            error.code(),
-            error.status()
-        );
-        // 501 is in the set on purpose; 500 and 503 are what must be unreachable, because a
-        // client that receives one retries a request that cannot succeed.
-        assert_ne!(error.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_ne!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }
 

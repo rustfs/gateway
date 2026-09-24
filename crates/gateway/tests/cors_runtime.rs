@@ -666,3 +666,6 @@ async fn a_preflight_reaches_no_handler() {
     let served = send(&built.service, "POST", PING, &[("origin", NAMED)]).await;
     assert_eq!(served.body().as_ref(), b"<Ping/>");
 }
+
+#[path = "cors_runtime/headerless.rs"]
+mod headerless;

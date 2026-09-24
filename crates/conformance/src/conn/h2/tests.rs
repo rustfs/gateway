@@ -109,8 +109,8 @@ fn anonymous_wire_image() -> Vec<u8> {
 /// Positive, the other direction of `conn::tests::production_hyper_executes_an_authored_h2_headers_script`
 /// — a different authored header block draws a different status from the same server, so the
 /// observed status is the peer's and not a constant; the Huffman-coded head and the DATA body are
-/// decoded too. The request is `c-cors-0043`'s: an OPTIONS that is not a preflight reaches the route
-/// table, whose answer is 501.
+/// decoded too. The request is `c-cors-0043`'s: headerless OPTIONS is rejected before routing
+/// with 400 BadRequest, matching the captured AWS response.
 #[cfg(feature = "production-transports")]
 #[test]
 fn a_non_preflight_options_draws_a_different_status_from_the_same_server() {
@@ -128,14 +128,10 @@ fn a_non_preflight_options_draws_a_different_status_from_the_same_server() {
     let observation = conn
         .exchange(&h2_plan("s-h2-0002", h2_request(header_block), None))
         .expect("the authored frames are executed");
-    assert_eq!(observation.status, Some(501), "{observation:?}");
+    assert_eq!(observation.status, Some(400), "{observation:?}");
     assert_eq!(observation.outcome, Outcome::Response, "{observation:?}");
     assert_eq!(observation.header("content-type"), Some("application/xml"), "{observation:?}");
-    assert!(
-        observation.body_text().contains("<Code>NotImplemented</Code>"),
-        "{}",
-        observation.body_text()
-    );
+    assert!(observation.body_text().contains("<Code>BadRequest</Code>"), "{}", observation.body_text());
 }
 
 /// Negative — the self-held driver is HTTP/1.1 only and must not be handed a frame script.

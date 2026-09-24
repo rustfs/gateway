@@ -73,6 +73,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/route_sizes.rs` | Independent compile-time size ceiling for the copied hot-path bucket. | The compiled router's bucket layout changes. |
 | `benches/route.rs` | Allocation gate and non-blocking timing record for compiled route lookup. | Routing hot-path cost changes. |
 | `tests/params_and_dispatch.rs` | Dispatch and required-parameter matrix. | Registry or dispatch changes. |
+| `tests/pre_auth_errors.rs` | Static pre-authentication constructors and allowed statuses. | A pre-authentication constructor or status changes. |
 | `tests/configuration_error_declarations.rs` | Static unconfigured-error declarations for operation triples. | A configuration operation's missing-state error changes. |
 | `tests/registration.rs` | Registration rejection matrix. | Handler registration changes. |
 | `tests/static_dispatch.rs` | Static dispatch order and identity mismatch. | Change the monomorphic core boundary. |

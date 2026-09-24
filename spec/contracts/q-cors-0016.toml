@@ -3,10 +3,10 @@
 id = "q-cors-0016"
 kind = "preflight_scope"
 classification = "contract"
-contract_value = "route"
+contract_value = "refuse"
 mutation_dimension = "cors_bare_options_policy"
 target = "CORSConfiguration"
-summary = "A bare OPTIONS with neither CORS request header is routed as an ordinary request rather than refused as a preflight."
+summary = "An OPTIONS with no CORS request headers is rejected before routing with 400 BadRequest; other malformed preflight answers remain unchanged."
 cases = ["c-cors-0043"]
 
 [[evidence]]
@@ -18,3 +18,8 @@ summary = "A preflight is identified by Origin together with Access-Control-Requ
 kind = "aws-doc"
 ref = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/cors.html"
 summary = "CORS configuration is described as controlling browser access to a bucket, alongside and not instead of the bucket's own access controls."
+
+[[evidence]]
+kind = "other"
+ref = "https://github.com/rustfs/gateway/issues/875"
+summary = "An unsigned OPTIONS without CORS headers to an existing public AWS S3 object returned 400 BadRequest; the issue records the request and response-body SHA-256."

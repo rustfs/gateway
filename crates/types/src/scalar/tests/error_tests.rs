@@ -31,6 +31,31 @@ fn c_err_0001_a_missing_bucket_is_404() {
 }
 
 #[test]
+fn bad_request_is_a_registered_400_code() {
+    let code = ErrorCode::known("BadRequest").expect("AWS headerless OPTIONS returns a registered BadRequest");
+    assert_eq!(code.as_str(), "BadRequest");
+    assert!(code.is_known());
+    assert_eq!(code.default_status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn bad_request_registration_does_not_accept_other_spellings() {
+    for name in ["badrequest", "Badrequest", "BadRequest ", "BadRequestUnknown"] {
+        assert_eq!(ErrorCode::known(name), None, "{name}");
+    }
+}
+
+#[test]
+fn bad_request_does_not_replace_distinct_request_errors_or_custom_statuses() {
+    let code = ErrorCode::known("BadRequest").expect("registered wire code");
+    assert_ne!(code, ErrorCode::INVALID_REQUEST);
+    assert_ne!(code, ErrorCode::INVALID_ARGUMENT);
+    let custom = ErrorCode::custom("BadRequest", StatusCode::FORBIDDEN);
+    assert_ne!(custom, code);
+    assert_eq!(custom.default_status(), StatusCode::FORBIDDEN);
+}
+
+#[test]
 fn the_counterintuitive_mappings_are_pinned() {
     // Each of these reads wrong at first glance and is right on the wire; a table row is the only
     // place they can be stated once.

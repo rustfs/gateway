@@ -89,6 +89,12 @@ impl ErrorCode {
         status: StatusCode::BAD_REQUEST,
     };
 
+    /// `BadRequest`, HTTP `400`.
+    pub const BAD_REQUEST: Self = Self {
+        name: Cow::Borrowed("BadRequest"),
+        status: StatusCode::BAD_REQUEST,
+    };
+
     /// `CredentialsNotSupported`, HTTP `400`.
     pub const CREDENTIALS_NOT_SUPPORTED: Self = Self {
         name: Cow::Borrowed("CredentialsNotSupported"),
@@ -838,6 +844,7 @@ pub(super) const CODE_TABLE: &[(&str, StatusCode)] = &[
     ("AuthorizationHeaderMalformed", StatusCode::BAD_REQUEST),
     ("AuthorizationQueryParametersError", StatusCode::BAD_REQUEST),
     ("BadDigest", StatusCode::BAD_REQUEST),
+    ("BadRequest", StatusCode::BAD_REQUEST),
     ("CredentialsNotSupported", StatusCode::BAD_REQUEST),
     ("EntityTooSmall", StatusCode::BAD_REQUEST),
     ("EntityTooLarge", StatusCode::BAD_REQUEST),
