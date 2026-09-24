@@ -1,0 +1,39 @@
+# Production Hyper fixture: ServerConfig defaults to a 2 MiB connection window.
+# Its exact initial grant is 2,097,152 - 65,535 = 2,031,617 bytes.
+# This grant is a fixture assertion, not a universal HTTP/2 server requirement.
+# c-h2-0005 — literal HTTP/2 transport coverage.
+
+[case]
+id = "c-h2-0005"
+schema_version = 4
+title = "A request without the mandatory path pseudo-header resets its stream"
+rationale = "The HPACK block deliberately omits the mandatory path; a decoded status alone cannot stand in for the stream protocol rejection."
+polarity = "negative"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-8.1.1"
+summary = "HTTP/2 frame semantics distinguish stream and connection errors and make response delivery depend on explicit flow-control credit."
+kind = "rfc"
+
+[request]
+method = "GET"
+target = "/"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "8286410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "stream_reset"
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }, { type = "rst_stream", stream_id = 1, error_code = 1 }]
+socket_read_after = "no_termination_observed"

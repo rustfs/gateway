@@ -1,0 +1,42 @@
+# c-h2-0006 — literal HTTP/2 transport coverage.
+
+[case]
+id = "c-h2-0006"
+schema_version = 4
+title = "An initial stream window above 31 bits produces a permitted error GOAWAY"
+rationale = "The invalid SETTINGS value must reach the peer literally and its rejection must remain observable even though local receive-credit accounting becomes unavailable."
+polarity = "negative"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-6.5.2"
+summary = "An initial stream window larger than 2^31-1 requires a connection-level FLOW_CONTROL_ERROR."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-5.4"
+summary = "Applicable generic PROTOCOL_ERROR or INTERNAL_ERROR may replace a specific error code."
+kind = "rfc"
+
+[request]
+method = "GET"
+target = "/"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+payload_hex = "000480000000"
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "828684410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "connection_reset"
+h2_control_frames = [{ type = "goaway", last_stream_id = 0, error_code_any_of = [1, 2, 3] }]
+socket_read_after = "eof"

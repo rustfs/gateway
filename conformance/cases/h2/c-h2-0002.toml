@@ -1,0 +1,53 @@
+# Production Hyper fixture: ServerConfig defaults to a 2 MiB connection window.
+# Its exact initial grant is 2,097,152 - 65,535 = 2,031,617 bytes.
+# This grant is a fixture assertion, not a universal HTTP/2 server requirement.
+# c-h2-0002 — literal HTTP/2 transport coverage.
+
+[case]
+id = "c-h2-0002"
+schema_version = 4
+title = "A delayed stream grant releases the remaining response DATA"
+rationale = "A one-byte initial stream window must hold the XML response until the literal delayed grant arrives; credit is an observed transport precondition rather than a service intention."
+polarity = "positive"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-6.9"
+summary = "HTTP/2 frame semantics distinguish stream and connection errors and make response delivery depend on explicit flow-control credit."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+payload_hex = "000400000001"
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "02074f5054494f4e538604152f636f6e662d636f72732d72742f6b65792e747874410e73332e6578616d706c652e636f6d"
+
+[[request.h2_frames]]
+type = "window_update"
+stream_id = 1
+increment = 65535
+delay_ms = 80
+
+[expect]
+kind = "response"
+status = 400
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }]
+socket_read_after = "no_termination_observed"
+
+[expect.body]
+contains_utf8 = ["<Code>BadRequest</Code>"]

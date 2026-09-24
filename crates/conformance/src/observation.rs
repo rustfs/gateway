@@ -33,6 +33,8 @@ pub enum Outcome {
     Response,
     /// The operation failed after the response head was committed.
     StreamError,
+    /// The selected HTTP/2 stream was reset before a response head arrived.
+    StreamReset,
     /// A framed event sequence arrived.
     EventStream,
     /// No complete response arrived within the case's budget.
@@ -48,6 +50,7 @@ impl Outcome {
         match self {
             Outcome::Response => "response",
             Outcome::StreamError => "stream_error",
+            Outcome::StreamReset => "stream_reset",
             Outcome::EventStream => "event_stream",
             Outcome::Hang => "hang",
             Outcome::ConnectionReset => "connection_reset",
@@ -106,6 +109,33 @@ impl ConnectionState {
             ConnectionState::Closed => "closed",
             ConnectionState::Reset => "reset",
             ConnectionState::HalfClosed => "half_closed",
+        }
+    }
+}
+
+/// Receive-side termination measured during the transport's observation window.
+///
+/// This does not assert that both TCP directions closed, that no future termination will occur,
+/// or that the connection can carry another HTTP request. `None` on the observation means this
+/// fact was not measured or the probe failed for an unclassified reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SocketReadState {
+    /// Reads or a bounded peek found no EOF or connection reset within the observation window.
+    NoTerminationObserved,
+    /// A read or peek returned zero bytes, establishing receive-side EOF only.
+    Eof,
+    /// A read or peek reported a connection reset or abort.
+    Reset,
+}
+
+impl SocketReadState {
+    /// The `expect.socket_read_after` spelling.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NoTerminationObserved => "no_termination_observed",
+            Self::Eof => "eof",
+            Self::Reset => "reset",
         }
     }
 }
@@ -347,6 +377,60 @@ fn document_element(body: &[u8]) -> Option<(usize, &[u8])> {
     None
 }
 
+/// One received HTTP/2 control frame, in wire arrival order.
+///
+/// Only supported control types are represented: RST_STREAM, GOAWAY and WINDOW_UPDATE. This is not a record of
+/// every HTTP/2 frame; DATA, headers, and application event streams retain their separate views.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObservedH2ControlFrame {
+    /// A valid four-octet WINDOW_UPDATE, after masking its reserved payload bit.
+    WindowUpdate {
+        /// Zero for connection credit, otherwise the identified stream.
+        stream_id: u32,
+        /// The positive 31-bit increment received from the peer.
+        increment: u32,
+    },
+    /// A connection-scoped GOAWAY with both numeric fields present; opaque debug data is discarded.
+    GoAway {
+        /// The 31-bit last-stream identifier, excluding its reserved high bit.
+        last_stream_id: u32,
+        /// The numeric wire code, including codes unknown to this runner.
+        error_code: u32,
+    },
+    /// A complete four-octet RST_STREAM payload on a nonzero stream.
+    ResetStream {
+        /// The stream identified by the received frame header.
+        stream_id: u32,
+        /// The numeric wire code, including codes unknown to this runner.
+        error_code: u32,
+    },
+}
+
+/// A monotonic-clock receipt captured when an executor observes its deadline expire.
+///
+/// This is not an outcome assertion or an authored timeout. Construction is crate-private;
+/// external targets that cannot measure this boundary leave the observation field absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeadlineExpiry {
+    pub(crate) deadline: std::time::Instant,
+    pub(crate) observed_at: std::time::Instant,
+    pub(crate) harness_wait: std::time::Duration,
+}
+
+impl DeadlineExpiry {
+    /// The actual deadline against which the executor stopped waiting.
+    #[must_use]
+    pub fn deadline(&self) -> std::time::Instant {
+        self.deadline
+    }
+
+    /// When the executor observed that the deadline had expired.
+    #[must_use]
+    pub fn observed_at(&self) -> std::time::Instant {
+        self.observed_at
+    }
+}
+
 /// The record of one exchange.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Observation {
@@ -366,7 +450,9 @@ pub struct Observation {
     pub body: Vec<u8>,
     /// Response bytes received before the stream error marker.
     pub body_bytes_before_error: Option<u64>,
-    /// Request body bytes the client had written when the response head arrived.
+    /// Request body bytes the client had written when it observed the response head.
+    /// For HTTP/2 reset before a head, the snapshot is taken when that reset is observed.
+    /// Unavailable when authored HTTP/2 padding prevents application-byte accounting.
     pub request_body_bytes_sent_at_response: Option<u64>,
     /// Whether the client finished sending the request body.
     pub request_body_fully_sent: Option<bool>,
@@ -380,8 +466,19 @@ pub struct Observation {
     /// derived from what a case declared, and excluded from `case.timeout_ms`, which budgets the
     /// target (rustfs/gateway#426). A transport with no waiting of its own reports `0`.
     pub harness_wait_ms: u64,
+    /// Actual deadline expiry, when measured by a bounded executor rather than inferred from kind.
+    pub deadline_expiry: Option<DeadlineExpiry>,
     /// The connection state afterwards.
     pub connection_after: Option<ConnectionState>,
+    /// Receive-side termination observed within the transport's bounded observation window.
+    /// This is independent of protocol shutdown announcements and connection reusability.
+    pub socket_read_after: Option<SocketReadState>,
+    /// Supported HTTP/2 control frames in received order, until this exchange ended.
+    ///
+    /// `None` means unmeasured. `Some([])` means no supported control frame was received during
+    /// the observation. RST_STREAM, GOAWAY, and WINDOW_UPDATE are supported; this never implies the absence
+    /// of other frame types or proves that a connection remains reusable.
+    pub h2_control_frames: Option<Vec<ObservedH2ControlFrame>>,
     /// Frames, when this was an event stream.
     pub events: Vec<ObservedEvent>,
     /// What about this record the transport could not measure and produced some other way.
@@ -416,7 +513,10 @@ impl Observation {
             ttfb_ms: None,
             elapsed_ms: 0,
             harness_wait_ms: 0,
+            deadline_expiry: None,
             connection_after: None,
+            socket_read_after: None,
+            h2_control_frames: None,
             events: Vec::new(),
             notes: Vec::new(),
         }

@@ -104,7 +104,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::exec::ServiceRuntime;
-use crate::observation::ConnectionState;
+use crate::observation::{ConnectionState, SocketReadState};
 use crate::socket::stream::ConnectionStream;
 use crate::sut::SutError;
 use rustfs_gateway::{ConnectionIntent, S3Service, collect, connection_intent_of};
@@ -1143,18 +1143,27 @@ impl Connection {
         }
     }
 
-    /// One read of whatever the peer has sent, waiting at most `timeout`, failure classified.
-    ///
-    /// The raw input of the HTTP/2 frame reader in `crate::conn`, which does its own framing.
-    pub(crate) fn read_available(&mut self, sink: &mut Vec<u8>, timeout: Duration) -> Result<usize, ReadFailure> {
-        self.set_read_timeout(timeout.max(Duration::from_millis(1)));
-        self.pull(sink)
-    }
-
     /// What state the socket is in, asked of the socket.
     #[must_use]
     pub fn observe(&self) -> ConnectionState {
         observe_connection(self.stream.tcp())
+    }
+
+    /// A bounded receive-side probe, without claiming protocol reusability or full TCP closure.
+    /// Unknown I/O errors are unavailable observations rather than fabricated EOF.
+    pub(crate) fn observe_read_side(&self) -> Option<SocketReadState> {
+        let stream = self.stream.tcp();
+        stream.set_read_timeout(Some(OBSERVE_TIMEOUT)).ok()?;
+        let mut probe = [0_u8; 1];
+        match stream.peek(&mut probe) {
+            Ok(0) => Some(SocketReadState::Eof),
+            Ok(_) => Some(SocketReadState::NoTerminationObserved),
+            Err(error) => match error.kind() {
+                ErrorKind::WouldBlock | ErrorKind::TimedOut => Some(SocketReadState::NoTerminationObserved),
+                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted => Some(SocketReadState::Reset),
+                _ => None,
+            },
+        }
     }
 
     pub(crate) fn observe_pending(&self) -> (ConnectionState, bool) {

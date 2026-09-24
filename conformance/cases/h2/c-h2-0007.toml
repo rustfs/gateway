@@ -1,0 +1,41 @@
+# c-h2-0007 — literal HTTP/2 transport coverage.
+
+[case]
+id = "c-h2-0007"
+schema_version = 4
+title = "A zero connection-window increment produces a protocol GOAWAY"
+rationale = "A zero connection grant is a representable negative script; replacing it with a usable increment would hide the peer protocol error."
+polarity = "negative"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-6.9"
+summary = "HTTP/2 frame semantics distinguish stream and connection errors and make response delivery depend on explicit flow-control credit."
+kind = "rfc"
+
+[request]
+method = "GET"
+target = "/"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+[[request.h2_frames]]
+type = "window_update"
+stream_id = 0
+increment = 0
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "828684410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "connection_reset"
+h2_control_frames = [{ type = "goaway", last_stream_id = 0, error_code = 1 }]
+socket_read_after = "eof"

@@ -33,6 +33,32 @@ pub(super) fn execute_transport_diff(options: &Options, root: PathBuf) -> ExitCo
             return ExitCode::from(exit::ENVIRONMENT);
         }
     };
+    execute_transport_diff_with_executable(options, root, &executable)
+}
+
+fn execute_transport_diff_with_executable(options: &Options, root: PathBuf, executable: &Path) -> ExitCode {
+    let corpus = match crate::runner::prepare_corpus(&root) {
+        Ok(corpus) => corpus,
+        Err(error) => {
+            eprintln!("conformance: {error}");
+            return ExitCode::from(exit::ENVIRONMENT);
+        }
+    };
+    let run_options = crate::runner::RunOptions {
+        filter: options.filter.clone(),
+        transport: Transport::Hyper,
+        profile: options.profile,
+        include_slow: !options.exclude_slow,
+        shard: options.shard,
+        validate_only: false,
+    };
+    let selected = match selected_capabilities(corpus.cases(), &run_options) {
+        Ok(selected) => selected,
+        Err(error) => {
+            eprintln!("conformance: {error}");
+            return ExitCode::from(exit::ENVIRONMENT);
+        }
+    };
     let temporary = match parity_directory() {
         Ok(path) => path,
         Err(message) => {
@@ -45,8 +71,8 @@ pub(super) fn execute_transport_diff(options: &Options, root: PathBuf) -> ExitCo
     let hyper_args = transport_child_args(options, &root, Transport::Hyper, hyper_path.clone());
     let conn_args = transport_child_args(options, &root, Transport::Conn, conn_path.clone());
     let (hyper, conn) = std::thread::scope(|scope| {
-        let hyper = scope.spawn(|| run_transport_child(&executable, &hyper_args, &hyper_path));
-        let conn = scope.spawn(|| run_transport_child(&executable, &conn_args, &conn_path));
+        let hyper = scope.spawn(|| run_transport_child(executable, &hyper_args, &hyper_path));
+        let conn = scope.spawn(|| run_transport_child(executable, &conn_args, &conn_path));
         (hyper.join(), conn.join())
     });
     let hyper = child_result("hyper", hyper);
@@ -61,19 +87,32 @@ pub(super) fn execute_transport_diff(options: &Options, root: PathBuf) -> ExitCo
             return ExitCode::from(exit::ENVIRONMENT);
         }
     };
-    let comparison = match crate::parity::compare_json(&hyper, &conn) {
+    let comparison = match crate::parity::compare_selected_json(&hyper.report, &conn.report, &selected) {
         Ok(comparison) => comparison,
         Err(message) => {
             eprintln!("conformance: {message}");
             return ExitCode::from(exit::ENVIRONMENT);
         }
     };
+    for (child, transport) in [(&hyper, Transport::Hyper), (&conn, Transport::Conn)] {
+        if let Err(message) = validate_child_exit(child.status, transport, &comparison) {
+            eprintln!("conformance: {message}: {}", child.stderr.trim());
+            return ExitCode::from(exit::ENVIRONMENT);
+        }
+    }
+    println!(
+        "transport parity: {} selected case(s); {} identical; {} common failure(s); {} capability difference(s)",
+        comparison.case_count,
+        comparison.identical_count,
+        comparison.common_failures,
+        comparison.capability_differences.len(),
+    );
+    for difference in &comparison.capability_differences {
+        println!("  capability difference: {}", difference.id);
+        println!("    hyper: {:?}", difference.hyper);
+        println!("    conn:  {:?}", difference.conn);
+    }
     if comparison.differences.is_empty() {
-        println!(
-            "transport parity: {} case(s) identical; {common_failures} common failure(s)",
-            comparison.case_count,
-            common_failures = comparison.common_failures,
-        );
         return ExitCode::from(exit::SUCCESS);
     }
     eprintln!("transport parity: {} case result(s) differ", comparison.differences.len());
@@ -109,22 +148,33 @@ pub(super) fn transport_child_args(options: &Options, root: &Path, transport: Tr
     args
 }
 
-fn run_transport_child(executable: &Path, args: &[String], report: &Path) -> Result<String, String> {
+struct ChildReport {
+    status: Option<i32>,
+    report: String,
+    stderr: String,
+}
+
+fn run_transport_child(executable: &Path, args: &[String], report: &Path) -> Result<ChildReport, String> {
     let output = ProcessCommand::new(executable)
         .args(args)
         .output()
         .map_err(|error| format!("cannot start child process: {error}"))?;
-    if !matches!(output.status.code(), Some(0 | 1)) {
+    if !matches!(output.status.code(), Some(0 | 1 | 3)) {
         return Err(format!(
             "child exited with {}: {}",
             output.status,
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    std::fs::read_to_string(report).map_err(|error| format!("cannot read {}: {error}", report.display()))
+    let report = std::fs::read_to_string(report).map_err(|error| format!("cannot read {}: {error}", report.display()))?;
+    Ok(ChildReport {
+        status: output.status.code(),
+        report,
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
 }
 
-fn child_result(name: &str, result: std::thread::Result<Result<String, String>>) -> Result<String, String> {
+fn child_result(name: &str, result: std::thread::Result<Result<ChildReport, String>>) -> Result<ChildReport, String> {
     match result {
         Ok(result) => result.map_err(|message| format!("{name} transport could not run: {message}")),
         Err(_) => Err(format!("{name} transport child controller panicked")),
@@ -147,3 +197,69 @@ fn parity_directory() -> Result<PathBuf, String> {
     }
     Err("cannot allocate an isolated transport parity directory".to_owned())
 }
+
+// Exit 3 remains an environment failure unless the complete paired comparison proves
+// that every selected case passed on Hyper and was explicitly unsupported on conn.
+fn validate_child_exit(
+    status: Option<i32>,
+    transport: Transport,
+    comparison: &crate::parity::SelectedComparison,
+) -> Result<(), String> {
+    if matches!(status, Some(0 | 1))
+        || (status == Some(3)
+            && matches!(transport, Transport::Conn)
+            && comparison.case_count > 0
+            && comparison.identical_count == 0
+            && comparison.common_failures == 0
+            && comparison.differences.is_empty()
+            && comparison.capability_differences.len() == comparison.case_count)
+    {
+        Ok(())
+    } else {
+        Err(format!("unverified {transport:?} child exit: {status:?}"))
+    }
+}
+
+fn selected_capabilities(
+    cases: &[crate::corpus::Case],
+    options: &crate::runner::RunOptions,
+) -> Result<std::collections::BTreeMap<String, crate::parity::ExpectedCapability>, String> {
+    use crate::diagnostic::Severity;
+    use crate::parity::ExpectedCapability::{HyperScriptedH2, Shared};
+
+    let mut selected = std::collections::BTreeMap::new();
+    for (ordinal, case) in cases.iter().filter(|case| crate::runner::selected(case, options)).enumerate() {
+        if options.shard.is_some_and(|shard| !shard.owns(ordinal)) {
+            continue;
+        }
+        let capability = if case.document.is_some()
+            && !case
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == Severity::Deny)
+            && !options.validate_only
+            && crate::runner::inapplicable(case, options).is_none()
+            && case.exchanges().iter().any(|exchange| {
+                exchange
+                    .request
+                    .is_some_and(|request| request.read("requestSpec.h2_frames").is_some())
+            }) {
+            HyperScriptedH2
+        } else {
+            Shared
+        };
+        if selected.insert(case.id.clone(), capability).is_some() {
+            return Err(format!("duplicate selected case identifier: {}", case.id));
+        }
+    }
+    Ok(selected)
+}
+
+#[cfg(test)]
+mod exit_tests;
+
+#[cfg(test)]
+mod selection_tests;
+
+#[cfg(all(test, unix))]
+mod integration_tests;

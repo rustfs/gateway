@@ -285,40 +285,42 @@ pub const DECLARED: &[(&str, Disposition, &str)] = &[
         Disposition::BehindRefusal("connection.tls"),
         "the truncation shape, tearing TCP down without a TLS close_notify; the whole `[connection.tls]` block is refused for want of a socket",
     ),
+    // The socketless audit reads authored frames, then refuses their execution before expectations.
+    #[cfg(not(feature = "production-transports"))]
     (
-        "h2Frame.type",
-        Disposition::Unexercised("requestSpec.h2_frames"),
-        "which frame is written; read by `inprocess/h2_frames.rs` and executed by `conn/h2.rs`, but no case writes `request.h2_frames` yet",
+        "h2ControlFrame.type",
+        Disposition::BehindRefusal("requestSpec.h2_frames"),
+        "the socketless target refuses the authored frame request before judging received controls; the production Hyper target reads this key",
     ),
+    #[cfg(not(feature = "production-transports"))]
     (
-        "h2Frame.stream_id",
-        Disposition::Unexercised("requestSpec.h2_frames"),
-        "which stream a scripted frame belongs to; read and written verbatim, but no case writes `request.h2_frames` yet",
+        "h2ControlFrame.stream_id",
+        Disposition::BehindRefusal("requestSpec.h2_frames"),
+        "the socketless target refuses the authored frame request before judging received controls; the production Hyper target reads this key",
     ),
+    #[cfg(not(feature = "production-transports"))]
     (
-        "h2Frame.flags",
-        Disposition::Unexercised("requestSpec.h2_frames"),
-        "the flags on a scripted frame; read and written as bits, but no case writes `request.h2_frames` yet",
+        "h2ControlFrame.increment",
+        Disposition::BehindRefusal("requestSpec.h2_frames"),
+        "the socketless target refuses the authored frame request before judging received controls; the production Hyper target reads this key",
     ),
+    #[cfg(not(feature = "production-transports"))]
     (
-        "h2Frame.payload_hex",
-        Disposition::Unexercised("requestSpec.h2_frames"),
-        "the octets of a scripted frame; read and written verbatim, but no case writes `request.h2_frames` yet",
+        "h2ControlFrame.last_stream_id",
+        Disposition::BehindRefusal("requestSpec.h2_frames"),
+        "the socketless target refuses the authored frame request before judging received controls; the production Hyper target reads this key",
     ),
+    #[cfg(not(feature = "production-transports"))]
     (
-        "h2Frame.error_code",
-        Disposition::Unexercised("requestSpec.h2_frames"),
-        "the code of a scripted RST_STREAM or GOAWAY; read so that it is refused by name, and no case writes `request.h2_frames` yet",
+        "h2ControlFrame.error_code",
+        Disposition::BehindRefusal("requestSpec.h2_frames"),
+        "the socketless target refuses the authored frame request before judging received controls; the production Hyper target reads this key",
     ),
+    #[cfg(not(feature = "production-transports"))]
     (
-        "h2Frame.increment",
-        Disposition::Unexercised("requestSpec.h2_frames"),
-        "the size of a scripted WINDOW_UPDATE; read so that it is refused by name, and no case writes `request.h2_frames` yet",
-    ),
-    (
-        "h2Frame.delay_ms",
-        Disposition::Unexercised("requestSpec.h2_frames"),
-        "the pause before a scripted frame is written; honoured as a not-before wait, but no case writes `request.h2_frames` yet",
+        "h2ControlFrame.error_code_any_of",
+        Disposition::BehindRefusal("requestSpec.h2_frames"),
+        "the socketless target refuses the authored frame request before judging received controls; the production Hyper target reads this key",
     ),
 ];
 

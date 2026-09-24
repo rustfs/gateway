@@ -31,10 +31,10 @@ use std::collections::BTreeMap;
 
 /// The newest schema version this runner understands.
 ///
-/// Versions 1 and 2 remain readable; version 3 adds computed Content-MD5. A case newer than this
+/// Versions 1 through 3 remain readable; version 4 adds HTTP/2 control-frame observations. A case newer than this
 /// value is refused with an explicit "update the runner" error. It is never skipped and its
 /// unknown fields are never ignored.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// The oldest schema version this runner still accepts.
 pub const MIN_SCHEMA_VERSION: i64 = 1;
@@ -264,6 +264,18 @@ impl Schema {
 
     fn check_array(&self, schema: &Value, instance: &Value, pointer: &str, out: &mut Vec<Violation>) {
         let Some(items) = instance.as_array() else { return };
+        if schema.get("uniqueItems").and_then(Value::as_bool) == Some(true)
+            && items
+                .iter()
+                .enumerate()
+                .any(|(index, item)| items[..index].iter().any(|other| json_equal(item, other)))
+        {
+            out.push(Violation {
+                pointer: pointer.to_owned(),
+                keyword: "uniqueItems".to_owned(),
+                message: "array items must be unique".to_owned(),
+            });
+        }
         if let Some(minimum) = schema.get("minItems").and_then(Value::as_integer)
             && (items.len() as i64) < minimum
         {
@@ -450,6 +462,28 @@ fn type_matches(expected: &str, instance: &Value) -> bool {
     }
 }
 
+// JSON object order is immaterial, and integral floating values equal their integer form.
+fn json_equal(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Integer(integer), Value::Float(float)) | (Value::Float(float), Value::Integer(integer)) => {
+            float.fract() == 0.0 && *float as i128 == i128::from(*integer)
+        }
+        (Value::Array(left), Value::Array(right)) => {
+            left.len() == right.len() && left.iter().zip(right).all(|(left, right)| json_equal(left, right))
+        }
+        (Value::Table(left), Value::Table(right)) => {
+            left.len() == right.len()
+                && left.iter().all(|(key, value)| {
+                    right
+                        .iter()
+                        .find(|(other, _)| other == key)
+                        .is_some_and(|(_, other)| json_equal(value, other))
+                })
+        }
+        _ => left == right,
+    }
+}
+
 /// Keywords this subset evaluates. Anything else in a schema position is refused.
 const KNOWN_KEYWORDS: &[&str] = &[
     "$ref",
@@ -462,6 +496,7 @@ const KNOWN_KEYWORDS: &[&str] = &[
     "minimum",
     "maximum",
     "minItems",
+    "uniqueItems",
     "maxItems",
     "items",
     "required",
@@ -703,6 +738,40 @@ status = 200
     }
 
     #[test]
+    fn unique_items_compares_json_values_and_can_be_disabled() {
+        let subject = schema(r#"{"uniqueItems":true}"#);
+        for source in ["[1,1.0]", "[[1,2],[1.0,2]]", r#"[{"a":1,"b":[2]},{"b":[2.0],"a":1.0}]"#] {
+            let instance = crate::json::parse(source).expect("JSON fixture");
+            let violations = subject.validate(&instance);
+            assert!(violations.iter().any(|violation| violation.keyword == "uniqueItems"), "{source}");
+        }
+        for source in [
+            "[]",
+            "[1,2]",
+            "[1,1.5]",
+            "[9007199254740993,9007199254740992.0]",
+            r#"[{"a":1},{"a":2}]"#,
+            r#"[{"a":1},{"a":1,"b":2}]"#,
+            "[[1,2],[2,1]]",
+            "[true,1]",
+            "1",
+        ] {
+            assert!(
+                subject
+                    .validate(&crate::json::parse(source).expect("JSON fixture"))
+                    .is_empty(),
+                "{source}"
+            );
+        }
+        let disabled = schema(r#"{"uniqueItems":false}"#);
+        assert!(
+            disabled
+                .validate(&crate::json::parse("[1,1]").expect("JSON fixture"))
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn an_unimplemented_keyword_is_refused_at_compile_time() {
         let error = Schema::compile(r#"{"type":"string","format":"uri"}"#).expect_err("must be refused");
         assert!(error.message.contains("format"), "{error}");
@@ -717,3 +786,15 @@ status = 200
 #[cfg(test)]
 #[path = "schema/computed_md5_tests.rs"]
 mod computed_md5_tests;
+
+#[cfg(test)]
+#[path = "schema/h2_reset_tests.rs"]
+mod h2_reset_tests;
+
+#[cfg(test)]
+#[path = "schema/h2_goaway_tests.rs"]
+mod h2_goaway_tests;
+
+#[cfg(test)]
+#[path = "schema/h2_window_tests.rs"]
+mod h2_window_tests;

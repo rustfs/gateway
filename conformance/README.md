@@ -13,7 +13,8 @@ looks like on the wire. It contains no Rust code. The runner that executes these
 `case.schema.json` was frozen on **2026-08-05** at `schema_version = 1`, before the first line of
 protocol code was written. Schema version 2 adds `connection.concurrent`; the runner continues to
 accept version 1 cases, while a case using the new dimension must opt into version 2 or later.
-Version 3 adds computed Content-MD5 for resolved request payloads. That order is
+Version 3 adds computed Content-MD5 for resolved request payloads. Version 4 adds ordered
+HTTP/2 control-frame observations, a pre-header stream-reset outcome, and socket receive termination. That order is
 deliberate. A case file is not a test that can be rewritten
 cheaply — it is a record of a behavioural fact, and every case written against a schema is invalidated
 by a change to that schema. Freezing after thirty cases exist means rewriting thirty cases; freezing
@@ -72,6 +73,116 @@ Keep explicit headers in cases that test malformed or incorrect digests. A compu
 be combined with an explicit Content-MD5 header, a raw request head, raw chunk instructions, or scripted HTTP/2 frames;
 these combinations fail instead of silently changing the authored wire bytes. Response assertions
 are unchanged by this migration.
+
+### Version 3 to version 4 migration
+
+Rust callers constructing `ExchangePlan` must add `deadline: None` for the existing relative-timeout
+fallback, or propagate the runner's absolute deadline unchanged through exchange initialization.
+Fixture setup remains outside the target budget: the runner creates its deadline after `prepare`
+returns and supplies the remaining budget in `timeout_ms`; sequential exchanges share that deadline.
+Callers constructing `Observation` must add `deadline_expiry: None` unless forwarding an actual
+executor receipt. `Observation::response` supplies that default. A crate-produced expiry receipt
+records the monotonic boundary observed by the bounded executor; an arbitrary `Outcome::Hang`
+does not exempt the target from its whole-case budget. Measured authored waits extend the deadline
+by their actual duration, and no later request may restart an already expired case.
+
+Version 4 widens the permitted purpose of `hang`: a scripted HTTP/2 case may require bounded
+incompletion when the client withholds flow-control credit. Versions 1–3 reserve that expectation
+for documented foreign-implementation defects. This use requires an explicit positive
+`case.timeout_ms`; every version-4 scripted HTTP/2 Hang observation requires a valid measured
+expiry receipt. An early synthetic Hang is rejected even if it fits inside the budget. Status,
+received body bytes, control frames and socket-state expectations remain independently checked.
+Custom concurrent targets must supply valid receipts for each version-4 scripted HTTP/2 Hang
+observation; receipts on non-Hang observations are rejected. A receipt for one exchange does not
+establish the completion boundary of the whole batch. Production scripted
+HTTP/2 remains limited to sequential execution.
+
+The legacy `connection_reset` outcome includes EOF before a complete response; its name alone
+is not evidence of a TCP reset. Version-4 `socket_read_after` distinguishes measured EOF, reset
+and absence of an observed termination.
+
+Existing version 1, 2 and 3 cases remain valid without edits. To assert received HTTP/2 controls,
+set `case.schema_version = 4` and add `expect.h2_control_frames`, an exact ordered list such as
+`[{ type = "rst_stream", stream_id = 1, error_code = 8 }]`. An empty list asserts that the observer
+received none of the supported controls; an unavailable observation fails this assertion.
+Numeric error codes preserve unknown wire values. Missing, extra, reordered, or different frames
+fail the comparison.
+
+The list covers RST_STREAM, GOAWAY and WINDOW_UPDATE until the selected exchange ends. It does not claim to
+capture every HTTP/2 frame: DATA and headers keep their existing response representation. Other-stream resets are recorded without terminating
+the selected stream. GOAWAY uses `{ type = "goaway", last_stream_id = 1, error_code = 0 }`;
+multiple GOAWAY and RST_STREAM frames retain their common arrival order. The last-stream identifier
+excludes the reserved high bit; opaque debug data is discarded, not retained in diagnostics.
+A received GOAWAY may instead use `error_code_any_of = [1, 2, 3]` when its cited protocol
+permits alternatives. This is a unique nonempty array of u32 values, mutually exclusive with
+`error_code`, and is forbidden on authored frames and other received frame kinds. Numeric
+`error_code` remains exact; alternatives do not relax frame count, order, last-stream identifiers,
+or independently measured EOF. Case c-h2-0006 originally asserted only FLOW_CONTROL_ERROR;
+that assertion omitted RFC 9113 section 5.4's allowance for applicable generic PROTOCOL_ERROR
+or INTERNAL_ERROR. Its explicit alternatives correct the expectation without changing wire facts.
+
+A GOAWAY does not end an in-flight response: the observer continues until a response completes,
+the selected stream resets, a read actually terminates, or the exchange deadline expires.
+
+WINDOW_UPDATE uses `{ type = "window_update", stream_id = 0, increment = 7 }`; stream zero
+names connection credit, and the selected nonzero stream names its own credit. Increments in
+observations are positive 31-bit values. The observer refuses malformed updates, unknown stream
+credit, and credit overflow rather than claiming those facts were usable. DATA consumes both receive
+windows, including padding, before END_STREAM is accepted. An exhausted window is not itself an
+error: without an authored grant, the observer may reach the exchange deadline.
+
+Authored WINDOW_UPDATE frames use either `increment` or `payload_hex`, never both. Zero increment
+and raw malformed payload lengths remain executable protocol-negative scripts. Authored DATA is
+always literal, including deliberate over-credit frames; the runner does not wait for protocol
+credit, split frames, or generate WINDOW_UPDATE. Receive credit increases only after an authored
+update is actually written. An authored grant that makes credit unknowable still permits observing
+peer control frames; subsequent DATA, including empty END_STREAM, is refused rather than certified
+against an invalid ledger. One cleartext socket owner interleaves reads with partial literal writes,
+so already available DATA is checked before later grants and an early stream reset can end an
+unfinished request. GOAWAY alone does not end the selected stream. Request progress records actual
+unpadded DATA payload writes at the first response head or a pre-head reset; padded authored DATA
+leaves that application-byte count unavailable. An unfinished script is reported explicitly.
+This support does not extend to TLS or multiple concurrent streams.
+
+`expect.socket_read_after` independently asserts `no_termination_observed`, `eof`, or `reset`.
+These values describe receive-side reads and a bounded final socket probe, not both TCP directions,
+future socket state, or connection reusability. Missing measurements fail even an expectation of
+`no_termination_observed`. GOAWAY while no termination is observed leaves `connection_after`
+unavailable: it cannot honestly satisfy the older `open` assertion, which means reusable.
+
+Use `expect.kind = "stream_reset"` only when the selected stream receives RST_STREAM before its
+response head. This requires a control-frame expectation containing RST_STREAM and forbids a response status.
+After a response head, use `stream_error`, `stream_termination = "reset"`, the received unpadded
+`body_bytes_before_error`, and the exact control-frame expectation. A TCP reset alone cannot satisfy
+that frame expectation. Neither form infers socket closure or connection reusability from a frame.
+
+Versions 1 through 3 reject both new expectation fields and the new outcome. Rust callers constructing an
+`Observation` must initialize `h2_control_frames` to `None` unless their transport actually measures
+supported controls; `Some([])` means measured absence. Initialize `socket_read_after` to `None`
+unless receive-side termination is independently observed; never derive it from GOAWAY or a
+Connection header. Exhaustive `ObservedH2ControlFrame` matches must handle `GoAway` and `WindowUpdate`.
+Exhaustive `Outcome` matches must handle
+`StreamReset` separately from `ConnectionReset`.
+
+### Comparing production transports
+
+```bash
+cargo run -p rustfs-gateway-conformance --bin rustfs-gateway-conformance -- \
+  diff-transports --filter c-h2-0001 --profile aws
+```
+
+The parent independently loads and selects the corpus before comparing its two child reports.
+Both reports must contain every selected case exactly once, with no extra cases. Shared capabilities
+require identical results. Matching failures remain visible as common failures; parity alone does
+not establish conformance success.
+
+An applicable scripted HTTP/2 case has a separate capability contract: Hyper must actually pass,
+and the self-held driver must report its exact HTTP/1.1-only refusal. The output retains both
+observations under `capability difference`, outside the identical-result count. Case names and
+child refusal text cannot create this exception; the parent derives it from validated case metadata.
+Missing cases, unexpected skips, failed Hyper observations and unexplained child exits fail the
+comparison. A self-held child exit of 3 is accepted only when every selected case satisfies that
+complete capability contract; an empty selection or a Hyper environment failure cannot satisfy it.
 
 ## Why the schema looks like this
 

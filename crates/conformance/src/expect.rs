@@ -32,7 +32,9 @@ use crate::value::Value;
 use crate::xml;
 
 mod events;
+mod h2_control_frames;
 use events::check_events;
+use h2_control_frames::{check_h2_control_frames, check_socket_read_after};
 
 /// Headers the transport itself manages, excluded from `headers_exact`.
 ///
@@ -77,6 +79,8 @@ pub fn judge(expect: &Value, observed: &Observation, pointer: &str, goldens: &dy
     let out = &mut judgement.diagnostics;
 
     check_kind(expect, observed, pointer, out);
+    check_h2_control_frames(expect, observed, pointer, out);
+    check_socket_read_after(expect, observed, pointer, out);
     check_status(expect, observed, pointer, out);
     check_error(expect, observed, pointer, out);
     check_headers(expect, observed, pointer, out);
@@ -776,3 +780,12 @@ fn collect_captures(expect: &Value, observed: &Observation, pointer: &str, out: 
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod h2_reset_tests;
+
+#[cfg(test)]
+mod h2_goaway_tests;
+
+#[cfg(test)]
+mod h2_window_tests;

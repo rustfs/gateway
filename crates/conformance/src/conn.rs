@@ -477,6 +477,14 @@ impl ExchangeClock {
         remaining(self.deadline)
     }
 
+    /// An authored wait spends harness time, not the target's remaining deadline.
+    fn paced<T>(&mut self, wait: impl FnOnce() -> T) -> T {
+        let before = self.harness_wait;
+        let result = self.charged(wait);
+        self.deadline += self.harness_wait - before;
+        result
+    }
+
     /// Runs `wait` on the harness's account.
     fn charged<T>(&mut self, wait: impl FnOnce() -> T) -> T {
         charged_to_harness(&mut self.harness_wait, wait)
@@ -538,6 +546,8 @@ fn observe_socket_exchange(
                 stream_termination: termination,
                 status: Some(response.status),
                 http_version: Some("http/1.1".to_owned()),
+                h2_control_frames: None,
+                socket_read_after: None,
                 headers: response.headers,
                 trailers: Vec::new(),
                 body: response.body,
@@ -547,6 +557,7 @@ fn observe_socket_exchange(
                 ttfb_ms: Some(ttfb_ms),
                 elapsed_ms,
                 harness_wait_ms: 0,
+                deadline_expiry: None,
                 connection_after: None,
                 events,
                 notes,
@@ -557,6 +568,8 @@ fn observe_socket_exchange(
             stream_termination: None,
             status: None,
             http_version: None,
+            h2_control_frames: None,
+            socket_read_after: None,
             headers: Vec::new(),
             trailers: Vec::new(),
             body: Vec::new(),
@@ -566,6 +579,7 @@ fn observe_socket_exchange(
             ttfb_ms: None,
             elapsed_ms: elapsed_ms(started),
             harness_wait_ms: 0,
+            deadline_expiry: None,
             connection_after: None,
             events: Vec::new(),
             notes: progress.notes,
@@ -575,6 +589,8 @@ fn observe_socket_exchange(
             stream_termination: None,
             status: None,
             http_version: None,
+            h2_control_frames: None,
+            socket_read_after: None,
             headers: Vec::new(),
             trailers: Vec::new(),
             body: Vec::new(),
@@ -584,6 +600,7 @@ fn observe_socket_exchange(
             ttfb_ms: None,
             elapsed_ms: elapsed_ms(started),
             harness_wait_ms: 0,
+            deadline_expiry: None,
             connection_after: None,
             events: Vec::new(),
             notes: {
@@ -598,8 +615,11 @@ fn observe_socket_exchange(
     let (connection_after, pending_input) = charged_to_harness(&mut harness_wait, || connection.observe_pending());
     exchange::SocketExchangeResult {
         observation: Observation {
+            h2_control_frames: None,
+            socket_read_after: None,
             connection_after: Some(connection_after),
             harness_wait_ms: u64::try_from(harness_wait.as_millis()).unwrap_or(u64::MAX),
+            deadline_expiry: None,
             ..observation
         },
         torn_down,

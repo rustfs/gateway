@@ -34,6 +34,8 @@ pub(crate) struct H2Frame {
     pub(crate) flags: Vec<String>,
     /// The frame payload octets; empty when `payload_hex` is absent or empty.
     pub(crate) payload: Vec<u8>,
+    /// Whether payload_hex was explicitly declared, including an empty value.
+    pub(crate) payload_declared: bool,
     /// The RST_STREAM or GOAWAY error code spelling.
     pub(crate) error_code: Option<String>,
     /// The WINDOW_UPDATE increment.
@@ -77,6 +79,7 @@ fn read_one(index: usize, frame: &Value) -> Result<H2Frame, SutError> {
         stream_id,
         flags: flags.into_iter().map(ToOwned::to_owned).collect(),
         payload,
+        payload_declared: payload_hex.is_some(),
         error_code: error_code.map(ToOwned::to_owned),
         increment,
         delay_ms: delay_ms.unwrap_or(0).unsigned_abs(),

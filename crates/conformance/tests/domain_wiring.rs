@@ -74,7 +74,7 @@ enum Wiring {
     /// The domain executes. Only the cases named here may skip; every other case in it must reach
     /// a verdict.
     Runs(&'static [&'static str]),
-    /// Nothing in the domain executes yet, and this names the capability that is missing.
+    /// Nothing in the domain executes on the in-process target, and this names its missing capability.
     ///
     /// A domain in this state cannot be gated on wiring — there is nothing wired to gate — so the
     /// row carries the reason instead, and
@@ -95,7 +95,7 @@ const GATES: &[(&str, Wiring)] = &[
     ("bkt", Wiring::Runs(&[])),
     ("bucketconfig", Wiring::Runs(&[])),
     ("checksum", Wiring::Runs(&[])),
-    // The one domain with nothing to gate. Its single case asks to be signed with
+    // This domain has no executing target yet. Its single case asks to be signed with
     // `sign.mode = "sigv4_streaming_trailer"` and then to half-close the connection mid-body. No
     // target in this repository can do either: in process the case is turned away for the
     // `half_close` control chunk, and over a socket it is turned away for the signing mode. Both
@@ -118,6 +118,13 @@ const GATES: &[(&str, Wiring)] = &[
     ("cred", Wiring::Runs(&[])),
     ("encryption", Wiring::Runs(&[])),
     ("etag", Wiring::Runs(&[])),
+    // InProcess receives parsed HTTP requests and cannot execute literal HTTP/2 frame scripts.
+    // The production Hyper gate in `src/conn/h2/tests/h2_corpus_tests.rs` executes every named
+    // case and requires a pass; this row records only the in-process transport limitation.
+    (
+        "h2",
+        Wiring::Deferred("the in-process target has no wire for authored HTTP/2 frames; production Hyper executes them"),
+    ),
     ("host", Wiring::Runs(&[])),
     ("lifecycle", Wiring::Runs(&[])),
     ("list", Wiring::Runs(&[])),
