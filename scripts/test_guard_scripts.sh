@@ -23213,6 +23213,12 @@ shard_case 'signature delimiter indexes preserve evidence scope and bound repeat
 shard_case 'StageFilter discovery batches the complete census and fails closed' \
     python3 "${SCRIPT_DIR}/test_stage_filter_discovery.py"
 
+shard_case 'Mint judges retain complete probes and isolated CLI exit boundaries' \
+    python3 "${SCRIPT_DIR}/test_mint_report_execution.py"
+
+shard_case 'clean-room allowance normalization preserves exact paths with one process' \
+    python3 "${SCRIPT_DIR}/test_clean_room_allowances.py"
+
 shard_case 'trait masking avoids suffix copies and preserves lexical rejection' \
     python3 "${SCRIPT_DIR}/test_trait_scan_dispatch.py"
 

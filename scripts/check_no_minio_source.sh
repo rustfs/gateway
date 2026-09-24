@@ -133,15 +133,20 @@ fi
 
 ALLOWANCES=""
 if [[ -f "$ALLOWANCE_FILE" ]]; then
+    # Normalize all lines in one process; comments and exact-path matching stay unchanged.
+    if ! normalized_allowances="$(while IFS= read -r line; do
+        printf '%s\n' "${line%%#*}"
+    done <"$ALLOWANCE_FILE" | tr -s ' \t' ' ')"; then
+        printf 'check_no_minio_source: cannot normalize the allowance file\n' >&2
+        exit 1
+    fi
     while IFS= read -r line; do
-        line="${line%%#*}"
-        line="$(printf '%s' "$line" | tr -s ' \t' ' ')"
         line="${line# }"
         line="${line% }"
         [[ -z "$line" ]] && continue
         ALLOWANCES="${ALLOWANCES}${line}
 "
-    done <"$ALLOWANCE_FILE"
+    done <<<"$normalized_allowances"
 else
     printf 'check_no_minio_source: %s is missing; the allowlist cannot be skipped\n' "$ALLOWANCE_FILE" >&2
     exit 1
