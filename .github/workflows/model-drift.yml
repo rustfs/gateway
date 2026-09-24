@@ -68,9 +68,13 @@ concurrency:
 jobs:
   drift:
     name: Detect upstream model drift
-    runs-on: ubuntu-latest
+    # Python, curl, and gh only. No compile, so the smaller pool.
+    runs-on: sm-standard-2
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh --with-gh
 
       - name: Read the pinned commit from model/PROVENANCE.md
         id: pin

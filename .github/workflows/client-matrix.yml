@@ -31,12 +31,15 @@ concurrency:
 jobs:
   matrix:
     name: Client matrix
-    runs-on: ubuntu-latest
+    # Release build plus the pinned clients. No Docker daemon, so the 4-vCPU pool.
+    runs-on: sm-standard-4
     # A full run is 30-90 minutes by design. The ceiling is generous on purpose: a matrix killed by
     # its own clock reports exit 124, which reads exactly like a client failure.
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
         with:
           toolchain: 1.97.1

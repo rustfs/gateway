@@ -119,11 +119,16 @@ env:
   CARGO_FUZZ_TOOL: cargo-fuzz@0.13.2
 
 jobs:
+  # Org self-hosted pool. sm-standard-4 is the 4-vCPU label the ten-minute budgets
+  # were measured against; the Test aggregate only compares results, so it uses
+  # sm-standard-2. scripts/check_no_github_hosted_runners.sh rejects any other label.
+  # The runner group must include this repository, or every job queues.
+
   # Everything deterministic and sub-second lives here rather than in jobs of its own:
   # a runner spin-up costs ~20s, which is more than all of these put together.
   static:
     name: Static checks
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       # Baseline ratchets resolve origin/main and the pull-request merge base,
@@ -134,6 +139,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
         with:
           toolchain: 1.97.1
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - run: cargo fmt --all --check
       # Pinned models must match their recorded checksums before anything is generated from them.
       - name: Model integrity
@@ -201,7 +208,7 @@ jobs:
 
   msrv:
     name: MSRV
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -209,11 +216,13 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - run: cargo check --workspace --all-targets
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -221,11 +230,13 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   docs:
     name: Documentation
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -233,6 +244,8 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Build documentation without warnings
         run: scripts/ci_budget.sh 240 "documentation build" env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
@@ -247,7 +260,7 @@ jobs:
   # 240 seconds it needs for `cargo doc` alone.
   examples:
     name: README and API examples
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -255,6 +268,8 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Run README and API examples (maximum 7 minutes after setup)
         run: |
           scripts/ci_budget.sh 420 "README and API examples" bash -c '
@@ -274,7 +289,7 @@ jobs:
   # Raising this number does not relax that contract; only bootstrap.rs can.
   bootstrap:
     name: Cold bootstrap
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 8
     # Same-host AB/BA runs reduced cold build time; keep developer profiles unchanged.
     env:
@@ -286,6 +301,8 @@ jobs:
         with:
           toolchain: 1.97.1
           components: rustfmt, clippy, rust-src, rust-analyzer
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       # No cargo cache: the five-minute measurement includes compiling xtask itself.
       - name: Bootstrap from a cold checkout (maximum 5 minutes)
         run: |
@@ -293,7 +310,7 @@ jobs:
 
   feedback-loop:
     name: Operation feedback loop
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -301,6 +318,8 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Prebuild operation verification targets
         run: |
           cargo test -p xtask --no-default-features --features operation --bin xtask --no-run
@@ -326,7 +345,7 @@ jobs:
   # already compiles it as a gateway dependency; again the split moved and the budgets did not.
   workspace-tests:
     name: Workspace tests 1
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -334,13 +353,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Workspace tests 1/3 (maximum 8 minutes after setup)
         run: |
           scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig
 
   workspace-tests-2:
     name: Workspace tests 2
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -348,6 +369,8 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Workspace tests 2/3 (maximum 8 minutes after setup)
         run: |
           scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c 'cargo test --package rustfs-gateway-conformance && cargo check --package rustfs-gateway'
@@ -355,7 +378,7 @@ jobs:
 
   workspace-tests-3:
     name: Workspace tests 3
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -363,6 +386,8 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Workspace tests 3/3 (maximum 8 minutes after setup)
         run: |
           scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c 'cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'
@@ -376,7 +401,7 @@ jobs:
   # reports how many cases it left to the other shard.
   transport-parity:
     name: Production transport parity
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -384,13 +409,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Compare production transports 1 of 2 (maximum 8 minutes after setup)
         run: |
           scripts/ci_budget.sh 480 "production transport parity 1/2" cargo run --package rustfs-gateway-conformance --bin rustfs-gateway-conformance -- diff-transports --exclude-slow --shard 0/2
 
   transport-parity-2:
     name: Production transport parity 2
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -398,6 +425,8 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Compare production transports 2 of 2 (maximum 8 minutes after setup)
         run: |
           scripts/ci_budget.sh 480 "production transport parity 2/2" cargo run --package rustfs-gateway-conformance --bin rustfs-gateway-conformance -- diff-transports --exclude-slow --shard 1/2
@@ -411,7 +440,7 @@ jobs:
   # step's 210s inside the job's four minutes, so an overrun is still named by ci_budget.sh.
   persistence-goldens:
     name: Persistence goldens
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 4
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -419,6 +448,8 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Run persisted XML goldens (maximum 3.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 165 "persistence goldens build" \
@@ -440,7 +471,7 @@ jobs:
   # required check, so this one is sized for the miss.
   signing-suite:
     name: Official signing suite
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -448,6 +479,8 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Pinned smithy-rs signing suite
         run: |
           scripts/ci_budget.sh 180 "signing suite build" cargo build --package xtask --bin xtask
@@ -456,7 +489,7 @@ jobs:
 
   gateway-tsan:
     name: Gateway ThreadSanitizer
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -465,6 +498,8 @@ jobs:
           toolchain: nightly-2026-06-18
           components: rust-src
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: One hundred OS threads under TSAN
         run: scripts/ci_budget.sh 480 "gateway TSAN" scripts/run_gateway_tsan.sh
 
@@ -486,7 +521,7 @@ jobs:
 
   guard-self-test:
     name: Guard self-test
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -496,13 +531,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Guard mutations 1 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 1/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
 
   guard-self-test-2:
     name: Guard self-test 2
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -512,13 +549,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Guard mutations 2 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 2/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
 
   guard-self-test-3:
     name: Guard self-test 3
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -528,13 +567,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Guard mutations 3 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 3/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
 
   guard-self-test-4:
     name: Guard self-test 4
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -544,13 +585,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Guard mutations 4 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 4/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=3 bash scripts/test_guard_scripts.sh
 
   guard-self-test-5:
     name: Guard self-test 5
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -560,13 +603,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Guard mutations 5 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 5/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=4 bash scripts/test_guard_scripts.sh
 
   guard-self-test-6:
     name: Guard self-test 6
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -576,16 +621,20 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Guard mutations 6 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 6/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=5 bash scripts/test_guard_scripts.sh
 
   target-consolidation-self-test:
     name: Target consolidation self-test
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Target consolidation mutations (maximum 2 minutes after setup)
         run: |
           scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh
@@ -604,37 +653,43 @@ jobs:
   # enforced 60s or 90s, so an overrun would have been killed at 124 with no diagnosis at all.
   quirk-ledger-self-test:
     name: Quirk ledger self-test 1
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Quirk ledger mutations 1/3 (maximum 2.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 150 "quirk ledger mutations 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
 
   quirk-ledger-self-test-2:
     name: Quirk ledger self-test 2
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Quirk ledger mutations 2/3 (maximum 2.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 150 "quirk ledger mutations 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
 
   quirk-ledger-self-test-3:
     name: Quirk ledger self-test 3
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Quirk ledger mutations 3/3 (maximum 2.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 150 "quirk ledger mutations 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
 
   dto-compiler-self-test:
     name: DTO compiler self-test
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -642,13 +697,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: DTO compiler mutations (maximum 2.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 150 "DTO compiler self-test" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_DTO_COMPILER_ONLY=1 bash scripts/test_guard_scripts.sh
 
   build-guard-self-test:
     name: Build guard self-test 1
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 7
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -656,13 +713,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Build-backed guards 1 of 5 (maximum 6.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 380 "build-backed guards 1/5" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
 
   build-guard-self-test-2:
     name: Build guard self-test 2
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 7
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -670,13 +729,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Build-backed guards 2 of 5 (maximum 6.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 380 "build-backed guards 2/5" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
 
   build-guard-self-test-3:
     name: Build guard self-test 3
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 7
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -684,13 +745,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Build-backed guards 3 of 5 (maximum 6.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 380 "build-backed guards 3/5" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
 
   build-guard-self-test-4:
     name: Build guard self-test 4
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 7
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -698,13 +761,15 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Build-backed guards 4 of 5 (maximum 6.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 380 "build-backed guards 4/5" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=3 bash scripts/test_guard_scripts.sh
 
   build-guard-self-test-5:
     name: Build guard self-test 5
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 7
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -712,16 +777,20 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Build-backed guards 5 of 5 (maximum 6.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 380 "build-backed guards 5/5" env GATEWAY_GUARD_BUDGET_SECONDS=380 GATEWAY_GUARD_BUILD_GUARDS_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=5 GATEWAY_GUARD_SHARD_GROUP=4 bash scripts/test_guard_scripts.sh
 
   error-status-self-test:
     name: Error status self-test
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Error status mutations (maximum 2.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 150 "error status self-test" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_ERROR_STATUS_ONLY=1 bash scripts/test_guard_scripts.sh
@@ -732,7 +801,7 @@ jobs:
     name: Test
     needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, guard-self-test-6, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-2
     timeout-minutes: 1
     steps:
       - name: Require test jobs
