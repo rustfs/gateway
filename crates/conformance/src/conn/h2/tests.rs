@@ -29,6 +29,7 @@ use std::thread;
 
 use super::*;
 use crate::conn::tests::{ANONYMOUS_GET_ROOT_HPACK, h2_plan, h2_request};
+use crate::observation::ObservedH2ControlFrame;
 use crate::sut::Sut;
 use crate::toml;
 use crate::value::Value;
@@ -201,24 +202,33 @@ fn a_later_exchange_cannot_reuse_an_h2_connection() {
     assert_eq!(observation.status, Some(403), "{observation:?}");
 }
 
-/// Negative — a peer GOAWAY is a refusal naming the frame, never a response.
+/// Negative — the actual peer rejects an invalid stream with GOAWAY and receive-side EOF.
 ///
 /// Stream 2 is even, so a client may not open it, and the real server answers with a connection
 /// error rather than a status.
 #[cfg(feature = "production-transports")]
 #[test]
-fn a_peer_goaway_is_refused_rather_than_reported_as_a_response() {
+fn a_peer_goaway_preserves_the_protocol_error_and_independent_eof() {
     let mut conn = production(ProductionDriver::Hyper, "s-h2-0008");
     let request = block(&format!(
         "{HEAD}[[h2_frames]]\ntype = \"settings\"\n\
          [[h2_frames]]\ntype = \"headers\"\nstream_id = 2\nflags = [\"end_stream\", \"end_headers\"]\n\
          payload_hex = \"{ANONYMOUS_GET_ROOT_HPACK}\"\n"
     ));
-    let error = conn
+    let observed = conn
         .exchange(&h2_plan("s-h2-0008", request, None))
-        .expect_err("GOAWAY is not an observation yet");
-    let error = error.to_string();
-    assert!(error.contains("GOAWAY") && error.contains("PROTOCOL_ERROR"), "{error}");
+        .expect("GOAWAY and receive-side termination are measured");
+    assert_eq!(observed.outcome, Outcome::ConnectionReset);
+    assert_eq!(observed.status, None);
+    assert_eq!(observed.socket_read_after, Some(crate::observation::SocketReadState::Eof));
+    assert_eq!(
+        observed.h2_control_frames,
+        Some(vec![ObservedH2ControlFrame::GoAway {
+            last_stream_id: 0,
+            error_code: 1
+        }]),
+        "the real peer reports PROTOCOL_ERROR for the unchanged invalid stream",
+    );
 }
 
 /// Negative — a structured request asking for `h2` without frames is still refused by name.
@@ -243,7 +253,8 @@ fn frames_without_an_h2_request_version_are_refused() {
 
 #[test]
 fn every_frame_type_this_writer_cannot_observe_is_refused_by_name() {
-    for kind in ["rst_stream", "window_update", "goaway", "priority", "raw"] {
+    // WINDOW_UPDATE is executed literally; its accepted and malformed forms live in h2_window_tests.
+    for kind in ["rst_stream", "goaway", "priority", "raw"] {
         let error = compile_error(&format!("{HEAD}[[h2_frames]]\ntype = \"{kind}\"\nstream_id = 1\n"));
         assert!(error.contains(&format!("type = \"{kind}\"` is not executed")), "{kind}: {error}");
     }
@@ -394,17 +405,26 @@ fn a_continued_head_padded_body_and_trailers_are_read_back() {
     assert_eq!(observation.trailers, fields(&[("x-sum", "no-cache")]));
 }
 
-/// Negative — a peer RST_STREAM on the script's stream is a refusal naming the code.
+/// A peer RST_STREAM is now an observed stream reset, with its exact wire code and no response.
 #[test]
-fn a_peer_reset_is_refused_rather_than_reported_as_a_response() {
+fn a_peer_reset_is_observed_rather_than_reported_as_a_response() {
     let (addr, peer) = peer(anonymous_wire_image().len(), |stream| {
         stream
             .write_all(&hex("000004 03 00 00000001 00000008"))
             .expect("the reset is written");
     });
-    let error = execute(addr, &anonymous_script(), Duration::from_secs(2)).expect_err("RST_STREAM is not an observation yet");
+    let observation = execute(addr, &anonymous_script(), Duration::from_secs(2)).expect("peer reset is observable");
     peer.join().expect("the peer exits");
-    assert!(error.to_string().contains("reset stream 1 with CANCEL"), "{error}");
+    assert_eq!(observation.outcome, Outcome::StreamReset, "{observation:?}");
+    assert_eq!(observation.status, None, "a stream reset is not an HTTP response");
+    assert_eq!(
+        observation.h2_control_frames,
+        Some(vec![ObservedH2ControlFrame::ResetStream {
+            stream_id: 1,
+            error_code: 8
+        }]),
+        "the actual peer frame retains stream 1 and CANCEL"
+    );
 }
 
 /// Both directions — an authored delay holds its frame back at least that long, and a frame without
@@ -528,3 +548,16 @@ fn an_authored_data_frame_follows_its_headers_on_the_wire() {
     execute(addr, &script, Duration::from_secs(2)).expect("the hang-up is observed");
     assert_eq!(peer.join().expect("the peer exits"), expected);
 }
+
+mod h2_reset_tests;
+
+mod h2_goaway_tests;
+
+mod h2_window_tests;
+
+mod h2_authored_flow_tests;
+
+mod h2_duplex_tests;
+
+#[cfg(feature = "production-transports")]
+mod h2_corpus_tests;

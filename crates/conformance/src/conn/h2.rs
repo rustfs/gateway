@@ -25,13 +25,16 @@
 //!
 //! # What is executed, and what is refused by name
 //!
-//! * SETTINGS, HEADERS, CONTINUATION and DATA are written. RST_STREAM, WINDOW_UPDATE, GOAWAY,
+//! * SETTINGS, HEADERS, CONTINUATION, DATA and WINDOW_UPDATE are written. RST_STREAM, GOAWAY,
 //!   PRIORITY and `raw` are refused: what a peer does after them is not yet observable here.
-//! * One stream per script. The response on it is the observation; a peer RST_STREAM or GOAWAY
-//!   before it completes is refused as unobservable rather than reported as a response.
+//! * One stream per script. Received RST_STREAM frames are recorded in arrival order; resetting
+//!   the selected stream ends its observation without implying a TCP reset. GOAWAY is recorded
+//!   without ending an in-flight stream or inventing receive-side termination.
 //! * Only the production Hyper driver speaks HTTP/2 in cleartext with prior knowledge. The
 //!   self-held driver, the test harness, external endpoints, and TLS refuse the script.
 
+mod duplex;
+mod flow;
 mod hpack;
 mod huffman;
 #[cfg(test)]
@@ -43,7 +46,7 @@ use std::time::{Duration, Instant};
 use super::{Conn, ExchangeClock, budget_of, classify_body, elapsed_ms};
 use crate::inprocess::Wire;
 use crate::inprocess::h2_frames::H2Frame;
-use crate::observation::{ConnectionState, Observation, Outcome, StreamTermination};
+use crate::observation::{ConnectionState, Observation, ObservedH2ControlFrame, Outcome, SocketReadState, StreamTermination};
 #[cfg(feature = "production-transports")]
 use crate::production::ProductionDriver;
 use crate::socket::{Connection, ReadFailure};
@@ -59,8 +62,7 @@ const MAX_PAYLOAD: usize = (1 << 24) - 1;
 const MAX_STREAM_ID: u32 = 0x7fff_ffff;
 /// SETTINGS_HEADER_TABLE_SIZE before any SETTINGS (RFC 9113 section 6.5.2).
 const DEFAULT_HEADER_TABLE_SIZE: usize = 4_096;
-/// What a peer may send on a connection before this client would owe it a WINDOW_UPDATE
-/// (RFC 9113 section 6.9.2), which it sends only when a case authors one.
+/// Initial connection and stream credit before SETTINGS or WINDOW_UPDATE (RFC 9113 section 6.9.2).
 const INITIAL_CONNECTION_WINDOW: usize = 65_535;
 
 const DATA: u8 = 0x0;
@@ -180,6 +182,7 @@ fn compile(wire: &Wire) -> Result<Script, SutError> {
 fn envelope(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
     let (frame_type, known): (u8, &[(&str, u8)]) = match frame.kind.as_str() {
         "settings" => (SETTINGS, &[("ack", ACK)]),
+        "window_update" => (WINDOW_UPDATE, &[]),
         "headers" => (
             HEADERS,
             &[
@@ -194,7 +197,7 @@ fn envelope(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
         other => {
             return Err(refused(format!(
                 "`h2_frames[{index}].type = \"{other}\"` is not executed: this writer carries out \
-                 settings, headers, continuation and data, and what a peer does after an authored \
+                 settings, headers, continuation, data and window_update, and what a peer does after an authored \
                  {other} frame is not yet observable here"
             )));
         }
@@ -205,7 +208,7 @@ fn envelope(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
             "`h2_frames[{index}].error_code` belongs to rst_stream and goaway, not to {kind}"
         )));
     }
-    if frame.increment.is_some() {
+    if frame.increment.is_some() && frame_type != WINDOW_UPDATE {
         return Err(refused(format!("`h2_frames[{index}].increment` belongs to window_update, not to {kind}")));
     }
     let mut flags = 0_u8;
@@ -232,11 +235,28 @@ fn envelope(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
             frame.payload.len()
         )));
     }
+    let payload = if frame_type == WINDOW_UPDATE {
+        if let Some(increment) = frame.increment {
+            if frame.payload_declared {
+                return Err(refused(format!("`h2_frames[{index}]` declares both increment and payload_hex")));
+            }
+            u32::try_from(increment)
+                .ok()
+                .filter(|value| *value <= MAX_STREAM_ID)
+                .ok_or_else(|| refused(format!("`h2_frames[{index}].increment` cannot be represented in 31 bits")))?
+                .to_be_bytes()
+                .to_vec()
+        } else {
+            frame.payload.clone()
+        }
+    } else {
+        frame.payload.clone()
+    };
     Ok(Envelope {
         frame_type,
         flags,
         stream_id,
-        payload: frame.payload.clone(),
+        payload,
         delay_ms: frame.delay_ms,
     })
 }
@@ -267,6 +287,7 @@ impl Conn {
         skew_ms: i64,
         reuse: bool,
     ) -> Result<Observation, SutError> {
+        let deadline = plan.deadline.unwrap_or_else(|| Instant::now() + budget_of(plan.timeout_ms));
         let script = compile(wire)?;
         self.require_h2_driver()?;
         if reuse && plan.index > 0 {
@@ -280,7 +301,7 @@ impl Conn {
         // Nothing an HTTP/1.1 exchange left open can carry HTTP/2 frames.
         self.connection = None;
         let addr = self.addr(at_unix_seconds, skew_ms, plan.profile)?;
-        execute(addr, &script, budget_of(plan.timeout_ms))
+        execute_inner(addr, &script, deadline, None)
     }
 
     fn require_h2_driver(&self) -> Result<(), SutError> {
@@ -304,39 +325,61 @@ impl Conn {
 }
 
 /// Opens one connection, writes the preface and the script, and observes the response.
+#[cfg(test)]
 fn execute(addr: SocketAddr, script: &Script, budget: Duration) -> Result<Observation, SutError> {
-    execute_paced(addr, script, budget, &mut |delay| std::thread::sleep(delay))
+    execute_inner(addr, script, Instant::now() + budget, None)
 }
 
 /// [`execute`], with the not-before wait handed in, so a test can record every wait the writer
 /// asks for instead of inferring it from wall-clock arrival gaps.
+#[cfg(test)]
 fn execute_paced(
     addr: SocketAddr,
     script: &Script,
     budget: Duration,
     sleep: &mut dyn FnMut(Duration),
 ) -> Result<Observation, SutError> {
+    execute_inner(addr, script, Instant::now() + budget, Some(sleep))
+}
+
+fn execute_inner(
+    addr: SocketAddr,
+    script: &Script,
+    deadline: Instant,
+    sleep: Option<&mut dyn FnMut(Duration)>,
+) -> Result<Observation, SutError> {
     let started = Instant::now();
-    let mut clock = ExchangeClock::until(started + budget);
+    let mut clock = ExchangeClock::until(deadline);
     let mut connection = Connection::open_before(addr, clock.deadline)?;
-    connection.write(PREFACE)?;
-    for (index, envelope) in script.envelopes.iter().enumerate() {
-        let delay = Duration::from_millis(envelope.delay_ms);
-        if delay >= clock.remaining()? {
-            return Err(refused(format!(
-                "`h2_frames[{index}]` declares a {}ms delay beyond the remaining exchange timeout",
-                envelope.delay_ms
-            )));
-        }
-        if !delay.is_zero() {
-            clock.charged(|| sleep(delay));
-        }
-        connection.write(&envelope.bytes())?;
-    }
-    let response = read_response(&mut connection, script, clock.deadline)?;
+    let (response, progress) = duplex::run(&mut connection, script, &mut clock, sleep)?;
     let elapsed = elapsed_ms(started);
-    let connection_after = clock.charged(|| connection.observe());
-    observe(response, elapsed, clock.harness_wait, connection_after, script.stream_id)
+    // A consumed reset must not become EOF merely because a later peek sees a drained socket.
+    let socket_read_after = match &response.cut_short {
+        Some(ReadFailure::Reset) => Some(SocketReadState::Reset),
+        Some(ReadFailure::ClosedBeforeHead | ReadFailure::Truncated) => Some(SocketReadState::Eof),
+        _ => clock.charged(|| connection.observe_read_side()),
+    };
+    let goaway = response
+        .control_frames
+        .iter()
+        .any(|frame| matches!(frame, ObservedH2ControlFrame::GoAway { .. }));
+    let connection_after = match socket_read_after {
+        Some(SocketReadState::NoTerminationObserved) if !goaway => Some(ConnectionState::Open),
+        Some(SocketReadState::Eof) => Some(ConnectionState::Closed),
+        Some(SocketReadState::Reset) => Some(ConnectionState::Reset),
+        _ => None,
+    };
+    let mut observed = observe(response, elapsed, clock.harness_wait, connection_after, script.stream_id)?;
+    observed.socket_read_after = socket_read_after;
+    observed.deadline_expiry = progress.deadline_expiry;
+    observed.request_body_bytes_sent_at_response = progress.at_response;
+    observed.request_body_fully_sent = Some(progress.body_complete);
+    if progress.unfinished_script {
+        observed
+            .notes
+            .push("the peer exchange ended before all authored HTTP/2 frame bytes were written".to_owned());
+    }
+    Ok(observed)
 }
 
 /// One frame the peer sent.
@@ -355,25 +398,6 @@ struct FrameReader {
 }
 
 impl FrameReader {
-    fn next(&mut self, connection: &mut Connection, deadline: Instant) -> Result<PeerFrame, ReadFailure> {
-        loop {
-            if let Some(frame) = self.take() {
-                return Ok(frame);
-            }
-            let remaining = deadline
-                .checked_duration_since(Instant::now())
-                .filter(|remaining| !remaining.is_zero())
-                .ok_or(ReadFailure::TimedOut)?;
-            if connection.read_available(&mut self.buffered, remaining)? == 0 {
-                return Err(if self.buffered.is_empty() {
-                    ReadFailure::ClosedBeforeHead
-                } else {
-                    ReadFailure::Truncated
-                });
-            }
-        }
-    }
-
     fn take(&mut self) -> Option<PeerFrame> {
         let header = self.buffered.get(..FRAME_HEADER_LEN)?;
         let [l0, l1, l2, frame_type, flags, s0, s1, s2, s3] = <[u8; FRAME_HEADER_LEN]>::try_from(header).ok()?;
@@ -396,25 +420,34 @@ struct Response {
     headers: Vec<(String, String)>,
     trailers: Vec<(String, String)>,
     body: Vec<u8>,
+    /// Supported control frames actually received, including resets of other streams.
+    control_frames: Vec<ObservedH2ControlFrame>,
     /// Why reading stopped before the peer ended the stream, when it did.
     cut_short: Option<ReadFailure>,
 }
 
-fn read_response(connection: &mut Connection, script: &Script, deadline: Instant) -> Result<Response, SutError> {
-    let mut reader = FrameReader::default();
-    let mut decoder = hpack::Decoder::new(script.header_table_size);
-    let mut response = Response::default();
-    // A header block the peer started without END_HEADERS, and whether it ends the stream.
-    let mut open_block: Option<(Vec<u8>, bool)> = None;
-    let mut flow_controlled = 0_usize;
-    loop {
-        let frame = match reader.next(connection, deadline) {
-            Ok(frame) => frame,
-            Err(failure) => {
-                response.cut_short = Some(failure);
-                return Ok(response);
-            }
-        };
+struct Receiver {
+    decoder: hpack::Decoder,
+    response: Response,
+    open_block: Option<(Vec<u8>, bool)>,
+}
+
+impl Receiver {
+    fn new(script: &Script) -> Self {
+        Self {
+            decoder: hpack::Decoder::new(script.header_table_size),
+            response: Response::default(),
+            open_block: None,
+        }
+    }
+
+    /// Consumes one complete received frame; true means the selected exchange has ended.
+    fn accept(&mut self, frame: PeerFrame, script: &Script, flow: &mut flow::Flow) -> Result<bool, SutError> {
+        let Self {
+            decoder,
+            response,
+            open_block,
+        } = self;
         if let Some((mut fragment, ends_stream)) = open_block.take() {
             if frame.frame_type != CONTINUATION || frame.stream_id != script.stream_id {
                 return Err(refused(format!(
@@ -426,29 +459,48 @@ fn read_response(connection: &mut Connection, script: &Script, deadline: Instant
             }
             fragment.extend_from_slice(&frame.payload);
             if frame.flags & END_HEADERS == 0 {
-                open_block = Some((fragment, ends_stream));
-                continue;
+                *open_block = Some((fragment, ends_stream));
+                return Ok(false);
             }
-            accept_block(&mut response, &mut decoder, &fragment)?;
+            accept_block(response, decoder, &fragment)?;
             if ends_stream {
-                return Ok(response);
+                return Ok(true);
             }
-            continue;
+            return Ok(false);
         }
         match frame.frame_type {
             // Connection management addressed to this client: read, and answered only when the case
             // authored an answer.
-            SETTINGS | PING | WINDOW_UPDATE | PRIORITY => {}
+            SETTINGS => {
+                if frame.stream_id != 0 {
+                    return Err(refused("SETTINGS requires stream zero".to_owned()));
+                }
+                flow.received_settings(&frame.payload, frame.flags)?;
+            }
+            PING | PRIORITY => {}
+            WINDOW_UPDATE => {
+                let bytes = <[u8; 4]>::try_from(frame.payload.as_slice())
+                    .map_err(|_| refused("WINDOW_UPDATE requires exactly four payload octets".to_owned()))?;
+                let increment = u32::from_be_bytes(bytes) & MAX_STREAM_ID;
+                if increment == 0 {
+                    return Err(refused("WINDOW_UPDATE increment must not be zero".to_owned()));
+                }
+                flow.received_update(frame.stream_id, increment)?;
+                response.control_frames.push(ObservedH2ControlFrame::WindowUpdate {
+                    stream_id: frame.stream_id,
+                    increment,
+                });
+            }
             HEADERS if frame.stream_id == script.stream_id => {
                 let fragment = unpadded(&frame)?.to_vec();
                 let ends_stream = frame.flags & END_STREAM != 0;
                 if frame.flags & END_HEADERS == 0 {
-                    open_block = Some((fragment, ends_stream));
-                    continue;
+                    *open_block = Some((fragment, ends_stream));
+                    return Ok(false);
                 }
-                accept_block(&mut response, &mut decoder, &fragment)?;
+                accept_block(response, decoder, &fragment)?;
                 if ends_stream {
-                    return Ok(response);
+                    return Ok(true);
                 }
             }
             DATA if frame.stream_id == script.stream_id => {
@@ -458,40 +510,39 @@ fn read_response(connection: &mut Connection, script: &Script, deadline: Instant
                         frame.stream_id
                     )));
                 }
-                flow_controlled += frame.payload.len();
+                flow.received_data(frame.payload.len())?;
                 response.body.extend_from_slice(unpadded(&frame)?);
                 if frame.flags & END_STREAM != 0 {
-                    return Ok(response);
-                }
-                if flow_controlled >= INITIAL_CONNECTION_WINDOW {
-                    return Err(refused(format!(
-                        "the response filled the {INITIAL_CONNECTION_WINDOW}-octet initial flow-control \
-                         window without ending the stream; this client sends WINDOW_UPDATE only when a \
-                         case authors one, so the rest of the body cannot arrive"
-                    )));
+                    return Ok(true);
                 }
             }
-            RST_STREAM if frame.stream_id == script.stream_id => {
-                return Err(refused(format!(
-                    "the peer reset stream {} with {}; observing RST_STREAM is not implemented, so the \
-                     case is refused rather than reported as a response",
-                    frame.stream_id,
-                    error_name(&frame.payload, 0)
-                )));
+            RST_STREAM => {
+                let code = <[u8; 4]>::try_from(frame.payload.as_slice())
+                    .map_err(|_| refused("the peer sent RST_STREAM with a payload length other than four octets".to_owned()))?;
+                if frame.stream_id == 0 {
+                    return Err(refused("the peer sent RST_STREAM on connection stream zero".to_owned()));
+                }
+                response.control_frames.push(ObservedH2ControlFrame::ResetStream {
+                    stream_id: frame.stream_id,
+                    error_code: u32::from_be_bytes(code),
+                });
+                if frame.stream_id == script.stream_id {
+                    return Ok(true);
+                }
             }
             GOAWAY => {
-                let last_stream = frame
-                    .payload
-                    .get(..4)
-                    .and_then(|octets| <[u8; 4]>::try_from(octets).ok())
-                    .map_or(0, |octets| u32::from_be_bytes(octets) & MAX_STREAM_ID);
-                return Err(refused(format!(
-                    "the peer sent GOAWAY (last stream {last_stream}, {}) before stream {} completed; \
-                     observing GOAWAY is not implemented, so the case is refused rather than \
-                     reported as a response",
-                    error_name(&frame.payload, 4),
-                    script.stream_id
-                )));
+                if frame.stream_id != 0 || frame.payload.len() < 8 {
+                    return Err(refused("GOAWAY requires stream zero and at least eight payload octets".to_owned()));
+                }
+                let last_stream_id =
+                    u32::from_be_bytes([frame.payload[0], frame.payload[1], frame.payload[2], frame.payload[3]]) & MAX_STREAM_ID;
+                let error_code = u32::from_be_bytes([frame.payload[4], frame.payload[5], frame.payload[6], frame.payload[7]]);
+                response.control_frames.push(ObservedH2ControlFrame::GoAway {
+                    last_stream_id,
+                    error_code,
+                });
+                // Existing streams can still complete. GOAWAY is not EOF, RST_STREAM, or a status.
+                // Debug bytes after the numeric fields carry no assertion and are not retained.
             }
             other => {
                 return Err(refused(format!(
@@ -501,6 +552,7 @@ fn read_response(connection: &mut Connection, script: &Script, deadline: Instant
                 )));
             }
         }
+        Ok(false)
     }
 }
 
@@ -571,82 +623,72 @@ fn type_name(frame_type: u8) -> String {
     }
 }
 
-/// The RFC 9113 section 7 name of the error code at `offset`.
-fn error_name(payload: &[u8], offset: usize) -> String {
-    const NAMES: [&str; 14] = [
-        "NO_ERROR",
-        "PROTOCOL_ERROR",
-        "INTERNAL_ERROR",
-        "FLOW_CONTROL_ERROR",
-        "SETTINGS_TIMEOUT",
-        "STREAM_CLOSED",
-        "FRAME_SIZE_ERROR",
-        "REFUSED_STREAM",
-        "CANCEL",
-        "COMPRESSION_ERROR",
-        "CONNECT_ERROR",
-        "ENHANCE_YOUR_CALM",
-        "INADEQUATE_SECURITY",
-        "HTTP_1_1_REQUIRED",
-    ];
-    let Some(code) = payload
-        .get(offset..offset + 4)
-        .and_then(|octets| <[u8; 4]>::try_from(octets).ok())
-        .map(u32::from_be_bytes)
-    else {
-        return "no error code".to_owned();
-    };
-    usize::try_from(code)
-        .ok()
-        .and_then(|index| NAMES.get(index))
-        .map_or_else(|| format!("error code 0x{code:x}"), |name| (*name).to_owned())
-}
-
 fn observe(
     response: Response,
     elapsed_ms: u64,
     harness_wait: Duration,
-    connection_after: ConnectionState,
+    connection_after: Option<ConnectionState>,
     stream_id: u32,
 ) -> Result<Observation, SutError> {
-    let (outcome, stream_termination, body_bytes_before_error, events, notes) = match (&response.cut_short, response.status) {
-        (None, Some(status)) => {
-            let (outcome, termination, before_error, events, note) = classify_body(status, &response.headers, &response.body);
-            (outcome, termination, before_error, events, note.into_iter().collect())
+    let reset_selected_stream = response
+        .control_frames
+        .iter()
+        .any(|frame| matches!(frame, ObservedH2ControlFrame::ResetStream { stream_id: received, .. } if *received == stream_id));
+    let (outcome, stream_termination, body_bytes_before_error, events, notes) = if reset_selected_stream {
+        if response.status.is_some() {
+            (
+                Outcome::StreamError,
+                Some(StreamTermination::Reset),
+                Some(u64::try_from(response.body.len()).unwrap_or(u64::MAX)),
+                Vec::new(),
+                Vec::new(),
+            )
+        } else {
+            (Outcome::StreamReset, None, None, Vec::new(), Vec::new())
         }
-        (None, None) => {
-            return Err(refused(format!("the peer ended stream {stream_id} without a final response")));
+    } else {
+        match (&response.cut_short, response.status) {
+            (None, Some(status)) => {
+                let (outcome, termination, before_error, events, note) = classify_body(status, &response.headers, &response.body);
+                (outcome, termination, before_error, events, note.into_iter().collect())
+            }
+            (None, None) => {
+                return Err(refused(format!("the peer ended stream {stream_id} without a final response")));
+            }
+            (Some(ReadFailure::TimedOut), _) => (Outcome::Hang, None, None, Vec::new(), Vec::new()),
+            (Some(ReadFailure::Malformed(detail)), _) => (
+                Outcome::ConnectionReset,
+                None,
+                None,
+                Vec::new(),
+                vec![format!("the peer's frames could not be read: {detail}")],
+            ),
+            (Some(_), None) => (Outcome::ConnectionReset, None, None, Vec::new(), Vec::new()),
+            (Some(ReadFailure::Reset), Some(_)) => {
+                (Outcome::StreamError, Some(StreamTermination::Reset), None, Vec::new(), Vec::new())
+            }
+            (Some(_), Some(_)) => (Outcome::StreamError, Some(StreamTermination::AbruptClose), None, Vec::new(), Vec::new()),
         }
-        (Some(ReadFailure::TimedOut), _) => (Outcome::Hang, None, None, Vec::new(), Vec::new()),
-        (Some(ReadFailure::Malformed(detail)), _) => (
-            Outcome::ConnectionReset,
-            None,
-            None,
-            Vec::new(),
-            vec![format!("the peer's frames could not be read: {detail}")],
-        ),
-        (Some(_), None) => (Outcome::ConnectionReset, None, None, Vec::new(), Vec::new()),
-        (Some(ReadFailure::Reset), Some(_)) => {
-            (Outcome::StreamError, Some(StreamTermination::Reset), None, Vec::new(), Vec::new())
-        }
-        (Some(_), Some(_)) => (Outcome::StreamError, Some(StreamTermination::AbruptClose), None, Vec::new(), Vec::new()),
     };
     Ok(Observation {
         outcome,
         stream_termination,
         status: response.status,
-        http_version: response.status.map(|_| "h2".to_owned()),
+        http_version: (response.status.is_some() || !response.control_frames.is_empty()).then(|| "h2".to_owned()),
         headers: response.headers,
         trailers: response.trailers,
         body: response.body,
         body_bytes_before_error,
-        // Request progress and time to first byte are not measured on this transport.
+        // The executor attaches request progress; time to first byte remains unavailable.
         request_body_bytes_sent_at_response: None,
         request_body_fully_sent: None,
         ttfb_ms: None,
         elapsed_ms,
         harness_wait_ms: u64::try_from(harness_wait.as_millis()).unwrap_or(u64::MAX),
-        connection_after: Some(connection_after),
+        deadline_expiry: None,
+        connection_after,
+        socket_read_after: None,
+        h2_control_frames: Some(response.control_frames),
         events,
         notes,
     })

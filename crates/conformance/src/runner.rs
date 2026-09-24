@@ -40,6 +40,11 @@ use crate::report::{CaseOutcome, Phase, Report, Verdict};
 use crate::sut::{ExchangePlan, Profile, Sut, SutError, Transport};
 use crate::value::Value;
 
+mod deadline;
+#[cfg(test)]
+use deadline::valid_expiry;
+use deadline::{case_deadline, expiry_error, timeout_verdict};
+
 /// How a run is configured.
 #[derive(Debug, Clone)]
 pub struct RunOptions {
@@ -185,7 +190,7 @@ pub fn run(corpus: &Corpus, sut: &mut dyn Sut, options: &RunOptions) -> Report {
     }
 }
 
-fn selected(case: &Case, options: &RunOptions) -> bool {
+pub(crate) fn selected(case: &Case, options: &RunOptions) -> bool {
     if !options.include_slow && case.is_slow() {
         return false;
     }
@@ -252,7 +257,34 @@ fn run_case(
     let started = std::time::Instant::now();
     // The harness's own waiting, measured where it happens and kept out of the target's budget.
     let mut harness_wait_ms: u64 = 0;
+    let mut measured_expiry = None;
     let mut outcome = 'prepared: {
+        if !timeout_ms.is_some_and(|value| value > 0)
+            && case
+                .meta()
+                .and_then(|meta| meta.read("caseMeta.schema_version"))
+                .and_then(Value::as_integer)
+                == Some(4)
+            && case.exchanges().iter().any(|exchange| {
+                exchange
+                    .request
+                    .and_then(|request| request.read("requestSpec.h2_frames"))
+                    .is_some()
+                    && exchange
+                        .expect
+                        .and_then(|expect| expect.read("expect.kind"))
+                        .and_then(Value::as_str)
+                        == Some("hang")
+            })
+        {
+            outcome.diagnostics.push(Diagnostic::deny(
+                "runner/deadline-expiry",
+                "/case/timeout_ms",
+                "scripted HTTP/2 Hang requires an explicit positive case.timeout_ms",
+            ));
+            outcome.verdict = Verdict::Failed;
+            break 'prepared outcome;
+        }
         let concurrent = document
             .read("connection")
             .and_then(|connection| connection.read("connection.concurrent"))
@@ -268,6 +300,7 @@ fn run_case(
                 &mut captures,
                 document,
                 timeout_ms,
+                case_deadline(started, timeout_ms, harness_wait_ms),
                 &mut harness_wait_ms,
             ) {
                 break 'prepared not_run(outcome, &error, notes);
@@ -297,13 +330,31 @@ fn run_case(
                     }
                 };
                 for attempt in 0..exchange.repeat {
+                    if measured_expiry.is_some()
+                        || case_deadline(started, timeout_ms, harness_wait_ms).is_some_and(|end| std::time::Instant::now() >= end)
+                    {
+                        outcome.diagnostics.push(Diagnostic::deny(
+                            "runner/timeout",
+                            "/case/timeout_ms",
+                            "a later exchange cannot restart an already expired case deadline",
+                        ));
+                        outcome.verdict = Verdict::Failed;
+                        break 'prepared outcome;
+                    }
+                    let deadline = case_deadline(started, timeout_ms, harness_wait_ms);
                     let plan = ExchangePlan {
                         case_id: &case.id,
                         index: exchange.index,
                         request: request.clone(),
                         clock: document.read("clock"),
                         connection: document.read("connection"),
-                        timeout_ms,
+                        timeout_ms: deadline
+                            .map(|end| {
+                                i64::try_from(end.saturating_duration_since(std::time::Instant::now()).as_millis())
+                                    .unwrap_or(i64::MAX)
+                            })
+                            .or(timeout_ms),
+                        deadline,
                         transport: options.transport,
                         profile: options.profile,
                     };
@@ -311,6 +362,16 @@ fn run_case(
                         Ok(observed) => observed,
                         Err(error) => break 'prepared not_run(outcome, &error, notes),
                     };
+                    let returned_at = std::time::Instant::now();
+                    if let Some(message) = expiry_error(case, &plan, &observed, returned_at) {
+                        outcome
+                            .diagnostics
+                            .push(Diagnostic::deny("runner/deadline-expiry", "/case/timeout_ms", message));
+                    } else if let Some(receipt) = &observed.deadline_expiry {
+                        let wait =
+                            harness_wait_ms.saturating_add(u64::try_from(receipt.harness_wait.as_millis()).unwrap_or(u64::MAX));
+                        measured_expiry = Some((receipt.deadline, wait));
+                    }
                     harness_wait_ms = harness_wait_ms.saturating_add(observed.harness_wait_ms);
                     // A transport that had to produce part of the record some way other than by measuring
                     // it says so here, and the case carries the warning. A green line whose assertion
@@ -373,8 +434,11 @@ fn run_case(
     // are the harness's instruments, and a scheduler that overshoots one of them has not observed
     // the target hanging (rustfs/gateway#426).
     if let Some(limit) = timeout_ms {
-        let elapsed = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-        if let Some(message) = timeout_verdict(elapsed, harness_wait_ms, limit) {
+        // A validated expiry is the target's stopping boundary. Assertion evaluation, the
+        // post-response probe, and cleanup after it cannot move that measured boundary.
+        let (ended, wait) = measured_expiry.unwrap_or_else(|| (std::time::Instant::now(), harness_wait_ms));
+        let elapsed = u64::try_from(ended.saturating_duration_since(started).as_millis()).unwrap_or(u64::MAX);
+        if let Some(message) = timeout_verdict(elapsed, wait, limit) {
             outcome
                 .diagnostics
                 .push(Diagnostic::deny("runner/timeout", "/case/timeout_ms", message));
@@ -382,23 +446,6 @@ fn run_case(
         }
     }
     outcome
-}
-
-/// The `case.timeout_ms` verdict: the diagnostic when the target's share of the case's wall time
-/// exceeds the budget, `None` otherwise.
-///
-/// `harness_wait_ms` is subtracted from `elapsed_ms` before the comparison and both numbers are
-/// printed, so a report reads "the target took N of the M the case took" rather than charging
-/// the target for the harness's own pacing. A negative or absent budget budgets nothing.
-fn timeout_verdict(elapsed_ms: u64, harness_wait_ms: u64, limit_ms: i64) -> Option<String> {
-    let limit = u64::try_from(limit_ms).ok()?;
-    let target_ms = elapsed_ms.saturating_sub(harness_wait_ms);
-    (target_ms > limit).then(|| {
-        format!(
-            "the target took {target_ms}ms of the {elapsed_ms}ms the case took ({harness_wait_ms}ms was the harness's \
-             own waiting) and the case declares a {limit}ms budget"
-        )
-    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -411,6 +458,7 @@ fn run_concurrent_exchanges(
     captures: &mut Captures,
     document: &Value,
     timeout_ms: Option<i64>,
+    deadline: Option<std::time::Instant>,
     harness_wait_ms: &mut u64,
 ) -> Result<(), SutError> {
     let exchanges = case.exchanges();
@@ -467,6 +515,7 @@ fn run_concurrent_exchanges(
             clock: document.read("clock"),
             connection: document.read("connection"),
             timeout_ms,
+            deadline,
             transport: options.transport,
             profile: options.profile,
         })
@@ -486,8 +535,14 @@ fn run_concurrent_exchanges(
         return Ok(());
     }
 
+    let returned_at = std::time::Instant::now();
     let mut batch_captures = Captures::new();
-    for (exchange, observed) in exchanges.iter().zip(observations) {
+    for ((exchange, observed), plan) in exchanges.iter().zip(observations).zip(&plans) {
+        if let Some(message) = expiry_error(case, plan, &observed, returned_at) {
+            outcome
+                .diagnostics
+                .push(Diagnostic::deny("runner/deadline-expiry", &exchange.pointer, message));
+        }
         *harness_wait_ms = harness_wait_ms.saturating_add(observed.harness_wait_ms);
         for note in &observed.notes {
             outcome.diagnostics.push(Diagnostic::warn(
@@ -570,13 +625,6 @@ fn skeleton(case: &Case) -> CaseOutcome {
     }
 }
 
-/// The wire version every assembly path this runner drives speaks.
-///
-/// Both `--transport hyper` and `--transport conn` hand a parsed `http::Request` to the service;
-/// neither has an HTTP/2 framing layer. Stated as a constant so that the gate below is checked
-/// against a fact of this runner rather than against a hope.
-const RUN_HTTP_VERSION: &str = "http/1.1";
-
 /// Whether this run reaches the target over TLS. There is no socket, so it does not.
 const RUN_OVER_TLS: bool = false;
 
@@ -590,7 +638,7 @@ fn tls_gate_excludes(gate: &str, over_tls: bool) -> bool {
 }
 
 /// Applicability gates the case declares. A gated-out case is skipped with the gate named.
-fn inapplicable(case: &Case, options: &RunOptions) -> Option<String> {
+pub(crate) fn inapplicable(case: &Case, options: &RunOptions) -> Option<String> {
     let applies = case.meta()?.read("caseMeta.applies_to")?;
     if let Some(profiles) = applies.read_strings("caseMeta.applies_to.profiles")
         && !profiles.is_empty()
@@ -604,12 +652,23 @@ fn inapplicable(case: &Case, options: &RunOptions) -> Option<String> {
     }
     if let Some(versions) = applies.read_strings("caseMeta.applies_to.http_versions")
         && !versions.is_empty()
-        && !versions.contains(&RUN_HTTP_VERSION)
     {
-        return Some(format!(
-            "case.applies_to.http_versions is [{}] and this run speaks `{RUN_HTTP_VERSION}`",
-            versions.join(", ")
-        ));
+        // Applicability describes the authored requests, not a transport capability. A matching
+        // declaration still reaches the selected target's protocol support checks during execution.
+        for exchange in case.exchanges() {
+            let version = exchange
+                .request
+                .and_then(|request| request.read("requestSpec.http_version"))
+                .and_then(Value::as_str)
+                .unwrap_or("http/1.1");
+            if !versions.contains(&version) {
+                return Some(format!(
+                    "case.applies_to.http_versions is [{}] but exchange {} requests `{version}`",
+                    versions.join(", "),
+                    exchange.label()
+                ));
+            }
+        }
     }
     if let Some(gate) = applies.read("caseMeta.applies_to.tls").and_then(Value::as_str)
         && tls_gate_excludes(gate, RUN_OVER_TLS)
@@ -676,6 +735,10 @@ fn glob_prefix(pattern: &[char], text: &[char]) -> bool {
 
 #[cfg(test)]
 mod budget_tests;
+#[cfg(test)]
+mod h2_receipt_tests;
+#[cfg(test)]
+mod http_version_tests;
 #[cfg(test)]
 mod lifecycle_tests;
 #[cfg(test)]

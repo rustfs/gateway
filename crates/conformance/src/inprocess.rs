@@ -93,6 +93,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 mod computed_md5;
 mod conditional_race;
 pub(crate) mod h2_frames;
+mod payload;
 mod payload_literal;
 mod profile;
 mod security;
@@ -107,6 +108,7 @@ use crate::observation::{
 use crate::sut::{ExchangePlan, Profile, Sut, SutError};
 use crate::time;
 use crate::value::Value;
+use payload::{decode_hex, generate};
 use security::{FixedDecision, FixtureBucketOwner};
 /// The access key id every case names as `valid`.
 pub const VALID_ACCESS_KEY: &str = "AKIAIOSFODNN7EXAMPLE";
@@ -623,39 +625,6 @@ impl CorsSource for FixtureCors {
             .and_then(|fixture| fixture.cors(bucket.as_str()).cloned());
         Box::pin(async move { Ok(found) })
     }
-}
-
-/// Generates `size` bytes.
-///
-/// `fill` is read as hex when it is valid hex, because the corpus writes `fill = "ff"` meaning one
-/// byte and not two. With no `fill` the pattern is `index % 251`, which is deterministic, has no
-/// period that lines up with a power-of-two block size, and is therefore a payload whose corruption
-/// a digest actually notices.
-fn generate(size: usize, fill: Option<&str>) -> Vec<u8> {
-    let pattern = fill
-        .and_then(decode_hex)
-        .or_else(|| fill.map(|text| text.as_bytes().to_vec()))
-        .filter(|bytes| !bytes.is_empty());
-    match pattern {
-        Some(pattern) => (0..size)
-            .map(|index| pattern.get(index % pattern.len()).copied().unwrap_or(0))
-            .collect(),
-        None => (0..size).map(|index| (index % 251) as u8).collect(),
-    }
-}
-
-fn decode_hex(text: &str) -> Option<Vec<u8>> {
-    if text.is_empty() || !text.len().is_multiple_of(2) {
-        return None;
-    }
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
-        let high = (*pair.first()? as char).to_digit(16)?;
-        let low = (*pair.get(1)? as char).to_digit(16)?;
-        out.push((high * 16 + low) as u8);
-    }
-    Some(out)
 }
 
 /// The clock a case declared, or the pinned default.
@@ -1422,6 +1391,8 @@ impl Sut for InProcess {
             stream_termination: termination,
             status: Some(status.as_u16()),
             http_version: None,
+            h2_control_frames: None,
+            socket_read_after: None,
             headers: rendered_head,
             trailers: render(trailers),
             body,
@@ -1434,6 +1405,7 @@ impl Sut for InProcess {
             ttfb_ms: Some(elapsed_ms),
             elapsed_ms,
             harness_wait_ms: 0,
+            deadline_expiry: None,
             // Always `Open`, and never derived from the service's own verdict.
             //
             // `open` is a genuine fact about this transport: there is no connection, and the

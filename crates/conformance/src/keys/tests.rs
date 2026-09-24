@@ -246,3 +246,106 @@ fn every_declaration_names_a_field_of_the_frozen_schema() {
         assert!(reason.len() > 30, "`{key}` needs a reason a maintainer can act on");
     }
 }
+
+/// Real execution, in a fresh process: other tests must not donate reads to this ledger.
+#[test]
+fn h2_key_declarations_match_the_selected_transport_in_an_isolated_process() {
+    const CHILD: &str = "GATEWAY_H2_KEY_AUDIT_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().expect("current test executable"))
+            .args([
+                "--exact",
+                "keys::tests::h2_key_declarations_match_the_selected_transport_in_an_isolated_process",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .expect("run the isolated ledger control");
+        assert!(
+            output.status.success(),
+            "isolated H2 key audit failed: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let root = Corpus::discover_root().expect("the repository corpus");
+    let corpus = crate::runner::prepare_corpus(&root).expect("the authored corpus loads");
+    #[cfg(feature = "production-transports")]
+    let mut target = crate::conn::Conn::production(root, crate::production::ProductionDriver::Hyper);
+    #[cfg(not(feature = "production-transports"))]
+    let mut target = crate::inprocess::InProcess::new(root);
+    assert!(
+        recorded()
+            .keys()
+            .all(|key| !key.starts_with("h2Frame.") && !key.starts_with("h2ControlFrame."))
+    );
+    let options = crate::runner::RunOptions {
+        filter: Some("c-h2-*".to_owned()),
+        ..crate::runner::RunOptions::default()
+    };
+    let report = crate::runner::run(&corpus, &mut target, &options);
+    let ids: Vec<_> = report.outcomes.iter().map(|outcome| outcome.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            "c-h2-0001",
+            "c-h2-0002",
+            "c-h2-0003",
+            "c-h2-0004",
+            "c-h2-0005",
+            "c-h2-0006",
+            "c-h2-0007"
+        ]
+    );
+    #[cfg(not(feature = "production-transports"))]
+    for outcome in &report.outcomes {
+        assert_eq!(outcome.verdict, crate::report::Verdict::Skipped);
+        assert!(
+            outcome
+                .skip_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("h2_frames"))
+        );
+    }
+    #[cfg(feature = "production-transports")]
+    for outcome in &report.outcomes {
+        // Protocol verdicts remain the separate corpus test's responsibility, including #873.
+        assert_ne!(outcome.verdict, crate::report::Verdict::Skipped);
+        assert_ne!(outcome.verdict, crate::report::Verdict::Validated);
+    }
+    let relevant =
+        |key: &str| key.starts_with("h2Frame.") || key.starts_with("h2ControlFrame.") || key == "requestSpec.h2_frames";
+    let inventory: BTreeSet<_> = corpus
+        .inventory()
+        .keys()
+        .iter()
+        .filter(|key| relevant(key))
+        .cloned()
+        .collect();
+    let ledger: Ledger = recorded().into_iter().filter(|(key, _)| relevant(key)).collect();
+    let declarations: Vec<_> = DECLARED.iter().copied().filter(|(key, _, _)| relevant(key)).collect();
+    let exercised: BTreeSet<_> = corpus
+        .cases()
+        .iter()
+        .filter_map(|case| case.document.as_ref())
+        .flat_map(|document| corpus.inventory().declared_in(document).into_keys())
+        .collect();
+    assert!(ledger.contains_key("requestSpec.h2_frames"), "the refusal gate itself must be read");
+    for field in [
+        "type",
+        "stream_id",
+        "flags",
+        "payload_hex",
+        "error_code",
+        "increment",
+        "delay_ms",
+    ] {
+        assert!(
+            ledger.contains_key(format!("h2Frame.{field}").as_str()),
+            "the real authored-frame parser must read {field}"
+        );
+    }
+    let findings = audit(&inventory, &ledger, &declarations, &exercised);
+    assert!(findings.is_empty(), "{findings:?}");
+}

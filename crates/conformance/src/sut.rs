@@ -88,8 +88,11 @@ pub struct ExchangePlan<'a> {
     pub clock: Option<&'a Value>,
     /// The case's `[connection]` block, when it has one.
     pub connection: Option<&'a Value>,
-    /// The whole-case wall-clock budget.
+    /// Remaining target budget for this exchange, excluding measured harness waits.
     pub timeout_ms: Option<i64>,
+    /// Absolute case deadline supplied by the runner. Direct callers may leave it absent.
+    /// Transports must not restart this clock after listener setup or request preparation.
+    pub deadline: Option<std::time::Instant>,
     /// The assembly path this run uses.
     pub transport: Transport,
     /// The profile the target claims.
@@ -303,6 +306,7 @@ mod tests {
             clock: None,
             connection: None,
             timeout_ms: None,
+            deadline: None,
             transport: Transport::Hyper,
             profile: Profile::Aws,
         };
@@ -333,6 +337,7 @@ mod tests {
             clock: None,
             connection: None,
             timeout_ms: None,
+            deadline: None,
             transport: Transport::Hyper,
             profile: Profile::Aws,
         };

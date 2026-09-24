@@ -151,6 +151,7 @@ fn concurrent_dispatch_uses_two_real_sockets() {
             clock: None,
             connection: Some(&connection),
             timeout_ms: Some(2_000),
+            deadline: None,
             transport: rustfs_gateway::Transport::Hyper,
             profile: crate::sut::Profile::Aws,
         },
@@ -161,6 +162,7 @@ fn concurrent_dispatch_uses_two_real_sockets() {
             clock: None,
             connection: Some(&connection),
             timeout_ms: Some(2_000),
+            deadline: None,
             transport: rustfs_gateway::Transport::Hyper,
             profile: crate::sut::Profile::Aws,
         },
@@ -192,6 +194,7 @@ fn concurrent_dispatch_requires_two_exchanges() {
         clock: None,
         connection: Some(&connection),
         timeout_ms: Some(2_000),
+        deadline: None,
         transport: rustfs_gateway::Transport::Hyper,
         profile: crate::sut::Profile::Aws,
     };
@@ -641,6 +644,7 @@ pub(super) fn h2_plan<'a>(case_id: &'a str, request: Value, connection: Option<&
         clock: None,
         connection,
         timeout_ms: Some(5_000),
+        deadline: None,
         transport: rustfs_gateway::Transport::Hyper,
         profile: crate::sut::Profile::Aws,
     }

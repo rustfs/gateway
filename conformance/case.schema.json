@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/rustfs/gateway/blob/main/conformance/case.schema.json",
   "title": "rustfs-gateway conformance case",
-  "description": "Frozen schema (schema versions 1, 2 and 3) for a single rustfs-gateway conformance case. Version 2 adds concurrent exchange batches. Version 3 adds computed Content-MD5 from the resolved request body; earlier versions remain readable. Cases are authored as TOML; this JSON Schema validates the parsed TOML document, so the same contract governs the TOML files on disk and any JSON tooling built on top of them. See conformance/README.md for the freeze policy and the change procedure.",
+  "description": "Frozen schema (schema versions 1, 2, 3 and 4) for a single rustfs-gateway conformance case. Version 2 adds concurrent exchange batches. Version 3 adds computed Content-MD5 from the resolved request body; earlier versions remain readable. Version 4 adds exact ordered observations of supported HTTP/2 control frames a pre-header stream-reset outcome, and measured socket receive termination. Cases are authored as TOML; this JSON Schema validates the parsed TOML document, so the same contract governs the TOML files on disk and any JSON tooling built on top of them. See conformance/README.md for the freeze policy and the change procedure.",
 
-  "x-schema-version": 3,
+  "x-schema-version": 4,
   "x-frozen-on": "2026-08-05",
   "x-required-dimensions": {
     "chunk_arrival_timing": "#/$defs/dataChunk/properties/delay_ms",
@@ -57,6 +57,78 @@
   "allOf": [
     {
       "if": {
+        "allOf": [
+          { "properties": { "case": { "properties": { "schema_version": { "const": 4 } } } } },
+          {
+            "anyOf": [
+              {
+                "required": ["request", "expect"],
+                "properties": {
+                  "request": { "required": ["h2_frames"] },
+                  "expect": { "required": ["kind"], "properties": { "kind": { "const": "hang" } } }
+                }
+              },
+              {
+                "required": ["exchanges"],
+                "properties": {
+                  "exchanges": {
+                    "not": {
+                      "items": {
+                        "not": {
+                          "required": ["request", "expect"],
+                          "properties": {
+                            "request": { "required": ["h2_frames"] },
+                            "expect": { "required": ["kind"], "properties": { "kind": { "const": "hang" } } }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "case": { "required": ["timeout_ms"], "properties": { "timeout_ms": { "type": "integer", "minimum": 1 } } }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "case": { "properties": { "schema_version": { "enum": [1, 2, 3] } } }
+        }
+      },
+      "then": {
+        "properties": {
+          "expect": {
+            "properties": {
+              "h2_control_frames": false,
+              "socket_read_after": false,
+              "kind": { "enum": ["response", "stream_error", "event_stream", "hang", "connection_reset"] }
+            }
+          },
+          "exchanges": {
+            "items": {
+              "properties": {
+                "expect": {
+                  "properties": {
+                    "h2_control_frames": false,
+                    "socket_read_after": false,
+                    "kind": { "enum": ["response", "stream_error", "event_stream", "hang", "connection_reset"] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
         "required": ["connection"],
         "properties": {
           "connection": {
@@ -68,7 +140,7 @@
       "then": {
         "properties": {
           "case": {
-            "properties": { "schema_version": { "enum": [2, 3] } }
+            "properties": { "schema_version": { "enum": [2, 3, 4] } }
           }
         }
       }
@@ -104,8 +176,8 @@
           "description": "c-<domain>-<NNNN>. The domain segment must equal the directory the file lives in, and the file must be named <id>.toml."
         },
         "schema_version": {
-          "enum": [1, 2, 3],
-          "description": "Version 1 is the original frozen format. Version 2 adds connection.concurrent. Version 3 adds request.content_md5. A runner MUST reject a case whose schema_version it does not know, with an explicit 'update the runner' error - never by ignoring unknown fields."
+          "enum": [1, 2, 3, 4],
+          "description": "Version 1 is the original frozen format. Version 2 adds connection.concurrent. Version 3 adds request.content_md5. Version 4 adds expect.h2_control_frames and kind stream_reset. A runner MUST reject a case whose schema_version it does not know, with an explicit 'update the runner' error - never by ignoring unknown fields."
         },
         "title": { "type": "string", "minLength": 4, "maxLength": 120 },
         "rationale": {
@@ -655,8 +727,8 @@
       "required": ["kind"],
       "properties": {
         "kind": {
-          "enum": ["response", "stream_error", "event_stream", "hang", "connection_reset"],
-          "description": "response: a complete response, success or error, head and body intact. stream_error: the operation failed AFTER the response head was committed - either an error document inside a success status, or an abrupt end of the body. event_stream: a framed event sequence. hang: no complete response within case.timeout_ms; only ever asserted to document a known defect of a foreign implementation, never as required behaviour. connection_reset: the peer reset without a response."
+          "enum": ["response", "stream_error", "event_stream", "hang", "connection_reset", "stream_reset"],
+          "description": "response: a complete response, success or error, head and body intact. stream_error: the operation failed AFTER the response head was committed - either an error document inside a success status, or an abrupt end of the body. event_stream: a framed event sequence. hang: no complete response was observed by the case deadline. Versions 1-3 reserve this expectation for documented foreign-implementation defects. Version 4 additionally permits bounded scripted HTTP/2 incompletion, with an explicit positive case.timeout_ms and a measured deadline-expiry receipt. Other expectations remain independently checked. connection_reset: the exchange ended without a complete response; this legacy outcome includes EOF and does not establish a TCP reset. stream_reset: the selected HTTP/2 stream received RST_STREAM before a response head; this does not imply a TCP reset."
         },
         "stream_termination": {
           "enum": ["error_document", "abrupt_close", "reset", "trailer_error"],
@@ -696,6 +768,15 @@
           "type": "integer",
           "minimum": 0,
           "description": "RESPONSE body bytes received before the stream_error marker. Required when kind is stream_error. Not to be confused with request_progress.body_bytes_sent_at_response, which is the client-side counterpart."
+        },
+        "socket_read_after": {
+          "enum": ["no_termination_observed", "eof", "reset"],
+          "description": "Version 4: measured receive-side termination during the transport observation window. This does not assert full TCP closure or protocol reusability. An unavailable measurement fails every value."
+        },
+        "h2_control_frames": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/h2ControlFrame" },
+          "description": "Version 4: the exact ordered list of supported HTTP/2 control frames received before the exchange ended. RST_STREAM, GOAWAY and WINDOW_UPDATE are supported; this is not a list of all received frames. An empty list asserts measured absence of supported controls; an unavailable observation fails even that assertion."
         },
         "events": {
           "type": "array",
@@ -757,6 +838,28 @@
       },
       "allOf": [
         {
+          "if": { "properties": { "kind": { "const": "stream_reset" } }, "required": ["kind"] },
+          "then": {
+            "required": ["h2_control_frames"],
+            "properties": {
+              "status": false,
+              "stream_termination": false,
+              "body_bytes_before_error": false,
+              "h2_control_frames": {
+                "minItems": 1,
+                "not": {
+                  "items": {
+                    "not": {
+                      "required": ["type"],
+                      "properties": { "type": { "const": "rst_stream" } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
           "if": { "properties": { "kind": { "const": "response" } }, "required": ["kind"] },
           "then": { "required": ["status"] }
         },
@@ -767,6 +870,45 @@
         {
           "if": { "properties": { "kind": { "const": "event_stream" } }, "required": ["kind"] },
           "then": { "required": ["events"] }
+        }
+      ]
+    },
+
+    "h2ControlFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["rst_stream", "goaway", "window_update"] },
+        "stream_id": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+        "last_stream_id": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+        "error_code": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "increment": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "error_code_any_of": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 } }
+      },
+      "oneOf": [
+        {
+          "required": ["stream_id", "error_code"],
+          "properties": {
+            "type": { "const": "rst_stream" },
+            "stream_id": { "minimum": 1 },
+            "last_stream_id": false,
+            "error_code_any_of": false,
+            "increment": false
+          }
+        },
+        {
+          "required": ["last_stream_id"],
+          "oneOf": [
+            { "required": ["error_code"], "properties": { "error_code_any_of": false } },
+            { "required": ["error_code_any_of"], "properties": { "error_code": false } }
+          ],
+          "properties": { "type": { "const": "goaway" }, "stream_id": false, "increment": false }
+        },
+        {
+          "required": ["stream_id", "increment"],
+          "properties": { "type": { "const": "window_update" }, "last_stream_id": false,
+            "error_code_any_of": false, "error_code": false }
         }
       ]
     },

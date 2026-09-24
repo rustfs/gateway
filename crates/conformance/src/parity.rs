@@ -85,6 +85,90 @@ pub fn compare_json(hyper: &str, conn: &str) -> Result<Comparison, String> {
     })
 }
 
+/// Capability expected from independently loaded and selected corpus metadata.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ExpectedCapability {
+    /// Both production drivers must report the same result.
+    Shared,
+    /// The script executes on Hyper and is explicitly unsupported by the self-held driver.
+    HyperScriptedH2,
+}
+
+/// Complete selected-case comparison with capability differences kept distinct from equality.
+#[derive(Debug)]
+pub(crate) struct SelectedComparison {
+    /// Number of independently selected cases represented in both reports.
+    pub case_count: usize,
+    /// Results that match exactly on the shared capability surface.
+    pub identical_count: usize,
+    /// Matching failures retained from the strict comparator.
+    pub common_failures: usize,
+    /// Unexpected differences, including capability-contract violations.
+    pub differences: Vec<Difference>,
+    /// Measured Hyper passes paired with the expected self-held capability refusal.
+    pub capability_differences: Vec<Difference>,
+}
+
+/// Compares reports against the parent's independently selected complete case census.
+///
+/// # Errors
+///
+/// Returns an error for malformed reports or a mismatch with the selected case census.
+pub(crate) fn compare_selected_json(
+    hyper: &str,
+    conn: &str,
+    selected: &BTreeMap<String, ExpectedCapability>,
+) -> Result<SelectedComparison, String> {
+    let hyper = parse_results("hyper", hyper)?;
+    let conn = parse_results("self-held", conn)?;
+    if !hyper.keys().eq(selected.keys()) || !conn.keys().eq(selected.keys()) {
+        return Err("production reports must each contain exactly the independently selected case census".to_owned());
+    }
+    let mut comparison = SelectedComparison {
+        case_count: selected.len(),
+        identical_count: 0,
+        common_failures: 0,
+        differences: Vec::new(),
+        capability_differences: Vec::new(),
+    };
+    for (id, capability) in selected {
+        let hyper_result = hyper.get(id);
+        let conn_result = conn.get(id);
+        let difference = || Difference {
+            id: id.clone(),
+            hyper: hyper_result.cloned(),
+            conn: conn_result.cloned(),
+        };
+        match capability {
+            ExpectedCapability::Shared if hyper_result == conn_result => {
+                comparison.identical_count += 1;
+                if hyper_result.is_some_and(|result| result.verdict == "failed") {
+                    comparison.common_failures += 1;
+                }
+            }
+            ExpectedCapability::HyperScriptedH2
+                if hyper_result.is_some_and(|result| {
+                    result.verdict == "passed"
+                        && result.phase == "execute"
+                        && result.skip_reason.is_none()
+                        && result.failures.is_empty()
+                }) && conn_result.is_some_and(|result| {
+                    result.verdict == "skipped"
+                        && result.phase == "execute"
+                        && result.skip_reason.as_deref() == Some(SELF_HELD_H2_REFUSAL)
+                        && result.failures.is_empty()
+                }) =>
+            {
+                comparison.capability_differences.push(difference());
+            }
+            _ => comparison.differences.push(difference()),
+        }
+    }
+    Ok(comparison)
+}
+
+const SELF_HELD_H2_REFUSAL: &str = "environment: the production self-held driver speaks HTTP/1.1 only; authored HTTP/2 frames run on the production Hyper driver";
+
 fn compare_results(hyper: BTreeMap<String, CaseResult>, conn: BTreeMap<String, CaseResult>) -> Vec<Difference> {
     hyper
         .keys()
@@ -253,3 +337,6 @@ mod tests {
         assert!(error.contains("phase"));
     }
 }
+
+#[cfg(test)]
+mod capability_tests;

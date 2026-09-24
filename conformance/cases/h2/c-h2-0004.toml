@@ -1,0 +1,36 @@
+# c-h2-0004 — literal HTTP/2 transport coverage.
+
+[case]
+id = "c-h2-0004"
+schema_version = 4
+title = "An even client stream identifier produces a protocol GOAWAY and EOF"
+rationale = "Normalizing an even authored stream identifier would turn a connection violation into a valid request and discard the production peer rejection."
+polarity = "negative"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-5.1.1"
+summary = "HTTP/2 frame semantics distinguish stream and connection errors and make response delivery depend on explicit flow-control credit."
+kind = "rfc"
+
+[request]
+method = "GET"
+target = "/"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 2
+flags = ["end_headers", "end_stream"]
+payload_hex = "828684410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "connection_reset"
+h2_control_frames = [{ type = "goaway", last_stream_id = 0, error_code = 1 }]
+socket_read_after = "eof"

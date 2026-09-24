@@ -270,6 +270,7 @@ fn conn_sends_the_authored_target_host_and_nonempty_body() {
         clock: None,
         connection: None,
         timeout_ms: Some(2_000),
+        deadline: None,
         transport: Transport::Conn,
         profile: Profile::Aws,
     };
@@ -511,6 +512,7 @@ fn early_response_during_declared_delay_stops_the_request_body() {
         clock: None,
         connection: None,
         timeout_ms: Some(2_000),
+        deadline: None,
         transport: Transport::Conn,
         profile: Profile::Aws,
     };
@@ -543,6 +545,7 @@ fn delayed_https_body_is_rejected_before_connecting_to_the_external_endpoint() {
         clock: None,
         connection: None,
         timeout_ms: Some(2_000),
+        deadline: None,
         transport: Transport::Conn,
         profile: Profile::Aws,
     };
@@ -574,6 +577,7 @@ fn body_delay_beyond_the_exchange_budget_fails_before_connecting() {
         clock: None,
         connection: None,
         timeout_ms: Some(1),
+        deadline: None,
         transport: Transport::Conn,
         profile: Profile::Aws,
     };

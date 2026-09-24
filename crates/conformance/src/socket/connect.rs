@@ -38,6 +38,14 @@ impl Connection {
         Ok(Self::plain(socket))
     }
 
+    /// Borrows the sole cleartext socket for incremental duplex I/O; never bypasses TLS records.
+    pub(crate) fn cleartext_socket(&mut self) -> Result<&mut TcpStream, SutError> {
+        match &mut self.stream {
+            ConnectionStream::Plain(socket) => Ok(socket),
+            ConnectionStream::Tls(_) => Err(SutError::Environment("incremental HTTP/2 socket I/O requires cleartext".to_owned())),
+        }
+    }
+
     /// Opens a certificate-verified TLS connection to a listener.
     ///
     /// # Errors

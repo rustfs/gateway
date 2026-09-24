@@ -331,6 +331,7 @@ mod tests {
             clock: None,
             connection: None,
             timeout_ms: Some(2_000),
+            deadline: None,
             transport: Transport::Conn,
             profile: Profile::Aws,
         };
@@ -538,6 +539,7 @@ mod tests {
             clock: None,
             connection: None,
             timeout_ms: Some(2_000),
+            deadline: None,
             transport: Transport::Conn,
             profile: Profile::Aws,
         };
