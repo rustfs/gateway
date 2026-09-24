@@ -17,7 +17,8 @@
 //! Responsible for: the [`Authorizer`] the assembly installs — [`decide`]
 //! for the operation set, the identity and the ownership registry, and then, for a request that
 //! decision alone does not allow, the bucket's stored policy evaluated the way RustFS's
-//! `PolicySys::is_allowed` evaluates it.
+//! `PolicySys::is_allowed` evaluates it. Accepted ACL header facts reach both stages; missing
+//! request facts or malformed ACL header values make a stored-policy decision indeterminate.
 //! NOT responsible for: parsing or matching statements (`rustfs_gateway_fs::policy::evaluate`),
 //! storing the policy (the fs backend), or the ownership rules themselves (`ownership`).
 //! Upstream: `crate::ownership`, `rustfs_gateway_fs::FsBackend::bucket_policy`. Downstream:
@@ -94,7 +95,7 @@ impl PolicyAuthorizer {
     /// With a policy stored, the policy's answer *is* the verdict, in RustFS's order: a matching
     /// `Deny` refuses anyone, the owner is otherwise allowed, and everyone else needs a matching
     /// `Allow`. Without one, ownership alone decides.
-    fn verdict(&self, request: &AuthzRequest<'_>, stored: &Stored) -> Decision {
+    fn verdict(&self, request: &AuthzRequest<'_>, stored: &Stored, context: &RequestContext<'_>) -> Decision {
         let ownership = decide(&self.owners, &self.accounts, &self.supported, request);
         if !self.supported.contains(&request.operation) {
             return Decision::Deny;
@@ -106,6 +107,16 @@ impl PolicyAuthorizer {
             Stored::None => return ownership,
             Stored::Unreadable => return Decision::Indeterminate,
             Stored::Policy(policy) => policy,
+        };
+        // Missing request facts are not proof that a conditional Deny does not match.
+        // Without a stored policy, the existing ownership decision above remains sufficient.
+        let Some(headers) = context.headers() else {
+            return Decision::Indeterminate;
+        };
+        let name = http::HeaderName::from_static("x-amz-acl");
+        let acl = match acl_value(headers.count(&name), headers.get_bytes(&name)) {
+            Ok(acl) => acl,
+            Err(decision) => return decision,
         };
         let account = request
             .identity
@@ -119,31 +130,34 @@ impl PolicyAuthorizer {
             ResourceShape::Bucket => None,
             _ => request.key.map(|key| key.as_str()),
         };
-        let allowed = policy.allows(PolicyRequest {
-            account,
-            is_owner,
-            action: request.action,
-            bucket: bucket.as_str(),
-            key,
-        });
+        let allowed = policy.allows_with_acl(
+            PolicyRequest {
+                account,
+                is_owner,
+                action: request.action,
+                bucket: bucket.as_str(),
+                key,
+            },
+            acl,
+        );
         if allowed { Decision::Allow } else { Decision::Deny }
     }
 }
 
 impl Authorizer for PolicyAuthorizer {
-    fn authorize_route<'a>(&'a self, _context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+    fn authorize_route<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
         Box::pin(async move {
             let stored = match request.bucket {
                 Some(bucket) => self.stored(bucket.as_str()).await,
                 None => Stored::None,
             };
-            self.verdict(request, &stored)
+            self.verdict(request, &stored, context)
         })
     }
 
     fn authorize_input<'a>(
         &'a self,
-        _context: &'a RequestContext<'a>,
+        context: &'a RequestContext<'a>,
         request: &'a InputAuthzRequest<'a>,
     ) -> BoxFuture<'a, InputDecisions> {
         Box::pin(async move {
@@ -166,10 +180,34 @@ impl Authorizer for PolicyAuthorizer {
                     .bucket
                     .and_then(|bucket| policies.iter().find(|(name, _)| name == bucket.as_str()))
                     .map_or(&Stored::None, |(_, stored)| stored);
-                self.verdict(named, stored)
+                self.verdict(named, stored, context)
             };
             let stage = lookup(request.route());
             request.decide_all(stage, lookup)
         })
+    }
+}
+
+fn acl_value(count: usize, bytes: Option<&[u8]>) -> Result<Option<&str>, Decision> {
+    if count > 1 {
+        return Err(Decision::Indeterminate);
+    }
+    bytes
+        .map(std::str::from_utf8)
+        .transpose()
+        .map_err(|_| Decision::Indeterminate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn acl_condition_header_failures_are_not_absence() {
+        assert_eq!(acl_value(2, Some(b"private")), Err(Decision::Indeterminate));
+        assert_eq!(acl_value(3, Some(b"public-read")), Err(Decision::Indeterminate));
+        assert_eq!(acl_value(1, Some(&[0xff])), Err(Decision::Indeterminate));
+        assert_eq!(acl_value(0, None), Ok(None));
+        assert_eq!(acl_value(1, Some(b"private")), Ok(Some("private")));
     }
 }

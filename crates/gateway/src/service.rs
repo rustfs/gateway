@@ -878,7 +878,7 @@ impl S3Service {
             AuthSchemeRef::Anonymous
         };
         let request_id = outcome.trace.request_id();
-        let server_extensions = ServerExtensions::new();
+        let server_extensions = &ServerExtensions::new();
 
         let route_service = self;
         let route_runtime = runtime;
@@ -886,7 +886,6 @@ impl S3Service {
         let route_headers = &headers;
         let route_wire = &wire;
         let route_verdict = &verdict;
-        let route_server_extensions = &server_extensions;
         let route_effective_key = effective_key.as_ref();
         let route_subjects = subjects.as_ref();
         let cors_slot = Mutex::new(None);
@@ -976,7 +975,8 @@ impl S3Service {
                 policy.as_ref(),
                 auth_scheme,
                 route_verdict.verified_scope(),
-                route_server_extensions,
+                server_extensions,
+                route_wire.headers(),
             );
             let route_started = route_service.inner.authz_clock.monotonic();
             let mut decisions = Vec::with_capacity(if questions.is_empty() { 0 } else { asked.len() });
@@ -1131,7 +1131,6 @@ impl S3Service {
         let input_verdict = &verdict;
         let input_wire = &wire;
         let addressed = resolved.addressed(meta.bucket(), effective_key.as_ref());
-        let input_server_extensions = &server_extensions;
         let input_effective_key = effective_key.as_ref();
         let input_subjects = subjects.as_ref();
         let authorize_input = move |state: ReadForDecode, resources: Vec<OwnedResource>| async move {
@@ -1192,7 +1191,8 @@ impl S3Service {
                 state.policy.as_ref(),
                 auth_scheme,
                 input_verdict.verified_scope(),
-                input_server_extensions,
+                server_extensions,
+                input_wire.headers(),
             );
             let input_started = input_service.inner.authz_clock.monotonic();
             let input_decisions =

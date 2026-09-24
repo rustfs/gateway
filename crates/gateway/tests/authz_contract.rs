@@ -732,6 +732,9 @@ async fn n_the_audited_target_origin_follows_the_resolution_in_both_directions()
 
 #[path = "authz_contract/oracle.rs"]
 mod oracle;
+
+#[path = "authz_contract/headers.rs"]
+mod headers;
 // ── the shipped implementations ────────────────────────────────────────────────────────────────
 
 /// Positive — the shipped refusal is installable behind `Arc<dyn Authorizer>`, which is the

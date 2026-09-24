@@ -378,3 +378,216 @@ async fn n_an_unreadable_policy_fails_closed_for_everyone() {
         "without a record the owner's request is ownership's to allow again"
     );
 }
+
+// Evidence: https://docs.aws.amazon.com/AmazonS3/latest/userguide/example-bucket-policies-condition-keys.html
+// StringEquals on s3:x-amz-acl selects the supplied canned ACL; an absent header does not match.
+const ACL_CONDITION_DENY: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["s3gate-alt"]},"Action":"s3:PutObject","Resource":"arn:aws:s3:::policed/*"},{"Effect":"Deny","Principal":"*","Action":"s3:PutObject","Resource":"arn:aws:s3:::policed/*","Condition":{"StringEquals":{"s3:x-amz-acl":"public-read"}}}]}"#;
+const ACL_CONDITION_DENY_MD5: &str = "6fEcg7hwCl11r9ChfNKxEQ==";
+const ACL_CONDITION_ALLOW: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["s3gate-alt"]},"Action":"s3:PutObject","Resource":"arn:aws:s3:::policed/*","Condition":{"StringEquals":{"s3:x-amz-acl":"public-read"}}}]}"#;
+const ACL_CONDITION_ALLOW_MD5: &str = "A74Zv2TFL+w9iUlsF1uz4A==";
+
+/// Each refused PUT is followed by an owner GET, so an error response cannot hide publication.
+/// Each accepted PUT is read back too, proving the same observer can see an existing object.
+async fn acl_condition_put(service: &S3Service, key: &str, acl: Option<&str>, owner: bool, expected: u16) {
+    let target = format!("/policed/{key}");
+    let headers: Vec<_> = acl.map(|value| ("x-amz-acl", value)).into_iter().collect();
+    let (access_key, secret) = if owner {
+        (MAIN_KEY, MAIN_SECRET)
+    } else {
+        (ALT_KEY, ALT_SECRET)
+    };
+    let response = exchange(
+        service,
+        signed(
+            access_key,
+            secret,
+            http::Method::PUT,
+            &target,
+            Bytes::from_static(b"conditional write"),
+            &headers,
+        ),
+    )
+    .await;
+    assert_eq!(response.status(), expected, "{key}: {}", body_of(&response));
+    let read = exchange(service, as_main(http::Method::GET, &target, Bytes::new())).await;
+    if expected == 403 {
+        assert!(body_of(&response).contains("<Code>AccessDenied</Code>"), "{}", body_of(&response));
+        assert_eq!(read.status(), 404, "a refused PUT must not publish {key}: {}", body_of(&read));
+        assert!(body_of(&read).contains("<Code>NoSuchKey</Code>"), "{}", body_of(&read));
+    } else {
+        assert_eq!(read.status(), 200, "{key}: {}", body_of(&read));
+        assert_eq!(read.body().as_ref(), b"conditional write");
+    }
+}
+
+/// Matching Deny outranks both ownership and an unconditional Allow. Missing or different
+/// headers leave the owner allowed; the condition must not become an unconditional denial.
+#[tokio::test]
+async fn n_acl_condition_deny_refuses_matching_owner_and_granted_guest_without_publication() {
+    let root = TestRoot::new();
+    let (_backend, service) = assembled(&two_identity_options(&root, &[]));
+    policed(&service).await;
+    let written = put_policy(&service, ACL_CONDITION_DENY, ACL_CONDITION_DENY_MD5).await;
+    assert_eq!(written.status(), 200, "{}", body_of(&written));
+    acl_condition_put(&service, "deny-owner", Some("public-read"), true, 403).await;
+    acl_condition_put(&service, "deny-guest", Some("public-read"), false, 403).await;
+    acl_condition_put(&service, "deny-other-value", Some("private"), true, 200).await;
+    acl_condition_put(&service, "deny-absent", None, true, 200).await;
+}
+
+/// A conditional Allow needs the actual matching header. A different value or no header leaves
+/// the other identity refused, and the matching positive control proves the grant is evaluated.
+#[tokio::test]
+async fn n_acl_condition_allow_requires_matching_header_and_preserves_rejected_key_absence() {
+    let root = TestRoot::new();
+    let (_backend, service) = assembled(&two_identity_options(&root, &[]));
+    policed(&service).await;
+    let written = put_policy(&service, ACL_CONDITION_ALLOW, ACL_CONDITION_ALLOW_MD5).await;
+    assert_eq!(written.status(), 200, "{}", body_of(&written));
+    acl_condition_put(&service, "allow-other-value", Some("private"), false, 403).await;
+    acl_condition_put(&service, "allow-absent", None, false, 403).await;
+    acl_condition_put(&service, "allow-matching", Some("public-read"), false, 200).await;
+}
+
+const ACL_CONDITION_ARRAY: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["s3gate-alt"]},"Action":"s3:PutObject","Resource":"arn:aws:s3:::policed/*","Condition":{"StringEquals":{"s3:x-amz-acl":["authenticated-read","public-read"]}}}]}"#;
+const ACL_CONDITION_ARRAY_MD5: &str = "K5eRbM1j2uke1+q1gDi2Gg==";
+const ACL_CONDITION_CASE: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["s3gate-alt"]},"Action":"s3:PutObject","Resource":"arn:aws:s3:::policed/*","Condition":{"StringEquals":{"s3:x-amz-acl":"PUBLIC-READ"}}}]}"#;
+const ACL_CONDITION_CASE_MD5: &str = "zir38/Byz4GdewBDooJlrg==";
+const ACL_CONDITION_WILDCARD: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["s3gate-alt"]},"Action":"s3:PutObject","Resource":"arn:aws:s3:::policed/*","Condition":{"StringEquals":{"s3:x-amz-acl":"public-*"}}}]}"#;
+const ACL_CONDITION_WILDCARD_MD5: &str = "vdshezNIJjGuTlV6tNyWVg==";
+const ACL_CONDITION_OTHER_KEY: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["s3gate-alt"]},"Action":"s3:PutObject","Resource":"arn:aws:s3:::policed/*","Condition":{"StringEquals":{"s3:x-amz-grant-read":"public-read"}}}]}"#;
+const ACL_CONDITION_OTHER_KEY_MD5: &str = "I6RWB9mr2d953Gs3xexocQ==";
+const ACL_CONDITION_MIXED_KEYS: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["s3gate-alt"]},"Action":"s3:PutObject","Resource":"arn:aws:s3:::policed/*","Condition":{"StringEquals":{"s3:x-amz-acl":"public-read","s3:x-amz-grant-read":"public-read"}}}]}"#;
+const ACL_CONDITION_MIXED_KEYS_MD5: &str = "COgyalz0sOhFYBqzFHadPA==";
+const ACL_CONDITION_MIXED_OPERATORS: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["s3gate-alt"]},"Action":"s3:PutObject","Resource":"arn:aws:s3:::policed/*","Condition":{"StringEquals":{"s3:x-amz-acl":"public-read"},"Null":{"s3:x-amz-grant-read":"false"}}}]}"#;
+const ACL_CONDITION_MIXED_OPERATORS_MD5: &str = "RBDv2ndr6fXy3UZqiP3pbg==";
+const ACL_CONDITION_UNSUPPORTED_OPERATOR: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["s3gate-alt"]},"Action":"s3:PutObject","Resource":"arn:aws:s3:::policed/*","Condition":{"StringLike":{"s3:x-amz-acl":"public-read"}}}]}"#;
+const ACL_CONDITION_UNSUPPORTED_OPERATOR_MD5: &str = "DLYwi8hS+MzIr7nuETRDEg==";
+
+/// StringEquals is exact, its value array is an OR, and a block with unsupported pieces must
+/// not accidentally grant access by evaluating only the recognized piece.
+#[tokio::test]
+async fn n_acl_condition_exact_array_and_unsupported_block_controls() {
+    let root = TestRoot::new();
+    let (_backend, service) = assembled(&two_identity_options(&root, &[]));
+    policed(&service).await;
+    for (key, document, md5, expected) in [
+        ("array", ACL_CONDITION_ARRAY, ACL_CONDITION_ARRAY_MD5, 200),
+        ("case", ACL_CONDITION_CASE, ACL_CONDITION_CASE_MD5, 403),
+        ("wildcard", ACL_CONDITION_WILDCARD, ACL_CONDITION_WILDCARD_MD5, 403),
+        ("other-key", ACL_CONDITION_OTHER_KEY, ACL_CONDITION_OTHER_KEY_MD5, 403),
+        ("mixed-keys", ACL_CONDITION_MIXED_KEYS, ACL_CONDITION_MIXED_KEYS_MD5, 403),
+        ("mixed-operators", ACL_CONDITION_MIXED_OPERATORS, ACL_CONDITION_MIXED_OPERATORS_MD5, 403),
+        (
+            "unsupported-operator",
+            ACL_CONDITION_UNSUPPORTED_OPERATOR,
+            ACL_CONDITION_UNSUPPORTED_OPERATOR_MD5,
+            403,
+        ),
+    ] {
+        let written = put_policy(&service, document, md5).await;
+        assert_eq!(written.status(), 200, "{}", body_of(&written));
+        acl_condition_put(&service, key, Some("public-read"), false, expected).await;
+    }
+}
+
+#[tokio::test]
+async fn n_acl_condition_unavailable_request_facts_fail_closed_but_absent_policy_preserves_owner() {
+    use rustfs_gateway::{
+        Authorizer, AuthzRequest, BucketName, Decision, Identity, PolicySnapshot, RequestContext, RequestNow, ResourceShape,
+        TargetOrigin,
+    };
+    let root = TestRoot::new();
+    let options = two_identity_options(&root, &[]);
+    let backend = Arc::new(open_backend(&options).expect("a usable root"));
+    let owners = Arc::new(BucketOwners::default());
+    let service = build_service(&options, &backend, &owners).expect("a complete assembly");
+    policed(&service).await;
+    let authorizer = crate::policy_authorizer::PolicyAuthorizer::new(
+        Arc::clone(&backend),
+        Arc::clone(&owners),
+        options.accounts.clone(),
+        crate::service::capability_names(&backend),
+    );
+    let identity = Identity::new(MAIN_KEY).expect("a valid identity");
+    let bucket = BucketName::new("policed").expect("a valid bucket");
+    let policy = PolicySnapshot::of(Arc::new(()));
+    let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
+    let request = AuthzRequest {
+        operation: "PutObject",
+        action: "s3:PutObject",
+        resource: ResourceShape::Object,
+        bucket: Some(&bucket),
+        key: None,
+        copy_source_identity: None,
+        version_id: None,
+        route_action: "s3:PutObject",
+        route_bucket: Some(&bucket),
+        route_key: None,
+        identity: Some(&identity),
+        target_origin: TargetOrigin::Path,
+        subject: None,
+    };
+    assert_eq!(authorizer.authorize_route(&context, &request).await, Decision::Allow);
+    assert_eq!(
+        put_policy(&service, ACL_CONDITION_DENY, ACL_CONDITION_DENY_MD5)
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        authorizer.authorize_route(&context, &request).await,
+        Decision::Indeterminate,
+        "an unavailable request header set is not proof that a conditional Deny does not match"
+    );
+}
+
+const ACL_CONDITION_UPPERCASE_KEY: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["s3gate-alt"]},"Action":"s3:PutObject","Resource":"arn:aws:s3:::policed/*","Condition":{"StringEquals":{"S3:X-AMZ-ACL":"public-read"}}}]}"#;
+const ACL_CONDITION_UPPERCASE_KEY_MD5: &str = "kp20C9+qyUlYWgXSvU5CGA==";
+
+/// This backend follows RustFS's canonical condition-key spelling; unsupported condition blocks
+/// must not grant access just because their spelling would be recognized by another evaluator.
+#[tokio::test]
+async fn n_acl_condition_uppercase_key_is_not_a_supported_grant() {
+    let root = TestRoot::new();
+    let (_backend, service) = assembled(&two_identity_options(&root, &[]));
+    policed(&service).await;
+    let written = put_policy(&service, ACL_CONDITION_UPPERCASE_KEY, ACL_CONDITION_UPPERCASE_KEY_MD5).await;
+    assert_eq!(written.status(), 200, "{}", body_of(&written));
+    acl_condition_put(&service, "uppercase-key", Some("public-read"), false, 403).await;
+}
+
+#[tokio::test]
+async fn n_acl_condition_duplicate_signed_header_cannot_bypass_owner_deny() {
+    let root = TestRoot::new();
+    let (_backend, service) = assembled(&two_identity_options(&root, &[]));
+    policed(&service).await;
+    assert_eq!(
+        put_policy(&service, ACL_CONDITION_DENY, ACL_CONDITION_DENY_MD5)
+            .await
+            .status(),
+        200
+    );
+    let request = signed(
+        MAIN_KEY,
+        MAIN_SECRET,
+        http::Method::PUT,
+        "/policed/duplicate-acl",
+        Bytes::from_static(b"must not publish"),
+        &[("x-amz-acl", "private"), ("x-amz-acl", "public-read")],
+    );
+    assert_eq!(
+        request.headers().get_all("x-amz-acl").iter().count(),
+        2,
+        "both signed lines reach the service"
+    );
+    let response = exchange(&service, request).await;
+    assert_eq!(response.status(), 403, "{}", body_of(&response));
+    assert!(body_of(&response).contains("<Code>AccessDenied</Code>"), "{}", body_of(&response));
+    let absent = exchange(&service, as_main(http::Method::GET, "/policed/duplicate-acl", Bytes::new())).await;
+    assert_eq!(absent.status(), 404, "{}", body_of(&absent));
+    assert!(body_of(&absent).contains("<Code>NoSuchKey</Code>"));
+}
+
+#[path = "policy_tests/filtered_headers.rs"]
+mod filtered_headers;

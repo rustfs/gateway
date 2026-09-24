@@ -219,7 +219,7 @@ mod tests {
         let mut headers = http::HeaderMap::new();
         headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
         for (name, value) in extra {
-            headers.insert(
+            headers.append(
                 http::HeaderName::from_bytes(name.as_bytes()).expect("a valid header name"),
                 http::HeaderValue::from_str(value).expect("a valid header value"),
             );
