@@ -18,12 +18,14 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/sendfile.rs` | Safe Linux/Apple file-to-socket syscall signature normalization | A self-held driver reports wrong sendfile progress or platform errors |
 | `src/sendfile_task.rs` | Bounded blocking handoff for file-transfer syscalls | A cold file stalls Tokio workers or blocking file work grows without a ceiling |
 | `src/shutdown.rs` | Trigger, report and metrics | Drain or abort counts are wrong |
+| `src/write_receipt.rs` | Counts a response drained only after the transport confirms its bytes were written (flush, half-close or clean connection end) | Shutdown reports drained for a response the peer never received |
 | `src/dispatch.rs` | Generic path-prefix selection | A route reaches the fallback unexpectedly |
 | `src/layers.rs` | General tower layer attachment points | Wiring panic, request ID, trace or compression |
 | `tests/acceptance.rs` | Deterministic config, dispatch and TLS reload cases | A source-only contract regresses |
 | `tests/server_load/isolation.rs` | Real load-child and drain-fixture lease exclusion controls | Saturating load overlaps the healthy shutdown fixture |
 | `tests/server_runtime.rs` | Live h1 admission and shutdown cases | Socket lifecycle behaviour regresses |
-| `tests/server_runtime/drain_fixture.rs` | Healthy shutdown drain fixture with lease checkpoints | Changing the full-body drain or its resource-isolation controls |
+| `tests/server_runtime/drain_fixture.rs` | Healthy 8 MiB shutdown drain, in flight when shutdown begins, with lease checkpoints | Changing the full-body drain or its resource-isolation controls |
+| `tests/server_runtime/shutdown_drain.rs` | A final frame blocked on the socket is aborted at the grace; the same frame written after shutdown began is drained | Drained/aborted accounting diverges from what reached the socket |
 | `tests/server_runtime/connection_driver.rs` | Live custom-driver ownership, managed-service and shutdown controls | `serve_with` releases admission or bypasses request lifecycle |
 | `tests/server_runtime/frozen_clock.rs` | Frozen fixture-clock polling with an independent watchdog | Slow-header setup races deadlines under host load |
 | `tests/server_runtime/global_admission.rs` | a-srv-0014 global-limit refusal and permit reuse, with a scheduling-stall control on a frozen fixture clock | The global connection limit accepts early, or a host stall expires the permit holder |

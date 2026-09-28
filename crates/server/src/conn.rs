@@ -519,6 +519,8 @@ where
     )
     .request_body_unfinished(Arc::clone(&request_body_unfinished))
     .count_octets_into(Arc::clone(&metrics.transport_read), Arc::clone(&metrics.lingering_drained));
+    let receipts = crate::write_receipt::WriteReceipts::new(Arc::clone(&request_stats));
+    let io = io.confirm_writes_into(Arc::clone(&receipts));
     #[cfg(test)]
     let io = match &deadline_observer {
         Some(observer) => io.observe_header_pending(observer.progress_callback()),
@@ -537,7 +539,8 @@ where
         request_stats,
         connection_in_flight,
         request_body_unfinished,
-    );
+    )
+    .confirm_writes_into(Arc::clone(&receipts));
     let mut builder = auto::Builder::new(TokioExecutor::new());
     #[cfg(test)]
     match &deadline_observer {
@@ -581,16 +584,19 @@ where
     let connection = builder.serve_connection(io, service);
     tokio::pin!(connection);
     tokio::select! {
-        result = &mut connection => log_connection_result(result),
+        result = &mut connection => log_connection_result(result, &receipts),
         changed = shutdown.changed() => {
             let _ = changed;
             connection.as_mut().graceful_shutdown();
-            log_connection_result(connection.await);
+            log_connection_result(connection.await, &receipts);
         }
     }
 }
 
-fn log_connection_result(result: Result<(), BoxError>) {
+fn log_connection_result(result: Result<(), BoxError>, receipts: &crate::write_receipt::WriteReceipts) {
+    if result.is_ok() {
+        receipts.closed();
+    }
     if let Err(error) = result {
         tracing::debug!(error = %error, "HTTP connection closed with an error");
     }

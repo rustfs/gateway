@@ -32,6 +32,8 @@ pub(crate) use drain_fixture::observed_shutdown_drain;
 pub(crate) mod frozen_clock;
 #[path = "server_runtime/global_admission.rs"]
 mod global_admission;
+#[path = "server_runtime/shutdown_drain.rs"]
+mod shutdown_drain;
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

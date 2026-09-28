@@ -36,6 +36,7 @@ use tower_http::catch_panic::{DefaultResponseForPanic, ResponseForPanic};
 
 use crate::driver::ConnectionInfo;
 use crate::request_capacity::{RequestCancellationFuture, RequestCancellationSource, RequestCapacity, RequestPermit};
+use crate::write_receipt::WriteReceipts;
 
 /// The erased error returned to a connection driver.
 pub type ConnectionError = Box<dyn std::error::Error + Send + Sync>;
@@ -140,6 +141,8 @@ impl<B> ConnectionBody<B> {
 pub struct ResponseCompletion {
     permit: Option<RequestPermit>,
     guard: Option<RequestGuard>,
+    receipts: Arc<WriteReceipts>,
+    http2: bool,
 }
 
 impl ResponseCompletion {
@@ -147,6 +150,16 @@ impl ResponseCompletion {
         self.permit.take();
         if let Some(mut guard) = self.guard.take() {
             guard.complete();
+        }
+    }
+
+    /// The final frame was handed to a Hyper transport: capacity is released now, and whether the
+    /// response drained is left to the transport's write receipt (`crate::write_receipt`).
+    fn hand_over(&mut self) {
+        self.permit.take();
+        if let Some(mut guard) = self.guard.take() {
+            guard.hand_over();
+            self.receipts.handed_over(self.http2);
         }
     }
 
@@ -168,7 +181,7 @@ where
         let mut this = self.project();
         let frame = ready!(this.body.as_mut().poll_frame(context)).map(|result| result.map_err(Into::into));
         if frame.is_none() || this.body.as_ref().is_end_stream() {
-            this.completion.complete_inner();
+            this.completion.hand_over();
         }
         Poll::Ready(frame)
     }
@@ -195,6 +208,7 @@ pub struct ConnectionService<S> {
     request_stats: Arc<RequestStats>,
     connection_in_flight: Arc<AtomicUsize>,
     request_body_unfinished: Arc<AtomicBool>,
+    receipts: Arc<WriteReceipts>,
 }
 
 impl<S> ConnectionService<S> {
@@ -207,6 +221,7 @@ impl<S> ConnectionService<S> {
         connection_in_flight: Arc<AtomicUsize>,
         request_body_unfinished: Arc<AtomicBool>,
     ) -> Self {
+        let receipts = WriteReceipts::new(Arc::clone(&request_stats));
         Self {
             inner,
             connection,
@@ -215,7 +230,14 @@ impl<S> ConnectionService<S> {
             request_stats,
             connection_in_flight,
             request_body_unfinished,
+            receipts,
         }
+    }
+
+    /// Shares write receipts with the transport that confirms this connection's writes.
+    pub(crate) fn confirm_writes_into(mut self, receipts: Arc<WriteReceipts>) -> Self {
+        self.receipts = receipts;
+        self
     }
 }
 
@@ -247,6 +269,8 @@ where
         let request_stats = Arc::clone(&self.request_stats);
         let connection_in_flight = Arc::clone(&self.connection_in_flight);
         let request_body_unfinished = Arc::clone(&self.request_body_unfinished);
+        let receipts = Arc::clone(&self.receipts);
+        let http2 = request.version() == http::Version::HTTP_2;
         Box::pin(async move {
             let permit = request_capacity
                 .acquire()
@@ -279,6 +303,8 @@ where
                 completion: ResponseCompletion {
                     permit: Some(permit),
                     guard: Some(guard),
+                    receipts,
+                    http2,
                 },
             }))
         })
@@ -324,6 +350,18 @@ impl RequestStats {
         self.shutting_down.store(true, Ordering::Release);
     }
 
+    pub(crate) fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn add_drained(&self, count: usize) {
+        self.drained.fetch_add(count, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_aborted(&self, count: usize) {
+        self.aborted.fetch_add(count, Ordering::Relaxed);
+    }
+
     pub(crate) fn force_abort(&self) {
         self.force_abort.store(true, Ordering::Release);
     }
@@ -354,11 +392,16 @@ impl RequestGuard {
     }
 
     fn complete(&mut self) {
+        self.hand_over();
+        if self.stats.is_shutting_down() {
+            self.stats.add_drained(1);
+        }
+    }
+
+    /// Ends the request's share of the connection without deciding whether it drained.
+    fn hand_over(&mut self) {
         self.completed = true;
         self.connection_in_flight.fetch_sub(1, Ordering::Relaxed);
-        if self.stats.shutting_down.load(Ordering::Acquire) {
-            self.stats.drained.fetch_add(1, Ordering::Relaxed);
-        }
     }
 }
 
