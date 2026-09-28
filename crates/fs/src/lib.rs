@@ -118,6 +118,7 @@ mod content_headers;
 mod acl;
 mod bucket_tagging;
 mod buckets;
+mod completion_replay;
 mod conditions;
 pub(crate) mod copy;
 mod deletes;
@@ -636,7 +637,10 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
     async fn call(&self, request: Req<CompleteMultipartUpload>) -> HandlerResult<CompleteMultipartUpload> {
         let input = request.into_input();
         self.require_bucket(input.bucket.as_str()).await?;
-        let (upload_id, record) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
+        let (upload_id, record) = match self.resolve_upload(&input.upload_id, &input.bucket, &input.key) {
+            Ok(found) => found,
+            Err(missing) => return self.replay_completion(&input, missing).await,
+        };
         let completion_claim = input.checksum_spec;
         if let Some(checksum) = record.checksum {
             checksum.validate_completion_type(input.checksum_type.as_ref())?;
@@ -749,6 +753,8 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             }
         };
         let _ = tokio::fs::remove_dir_all(tombstone).await;
+        let parts = requested.iter().map(|(number, e_tag, _)| (*number, e_tag));
+        completion_replay::record_completion(&published.directory, &upload_id, published.version_id.as_deref(), parts).await;
         let mut output = CompleteMultipartUploadOutput {
             location: Some(format!("/{}/{}", input.bucket.as_str(), input.key.as_str())),
             bucket: Some(input.bucket),
