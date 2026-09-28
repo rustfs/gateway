@@ -57,6 +57,7 @@ macro_rules! reference_operations {
             crud CreateBucket => "CreateBucket",
             multipart CreateMultipartUpload => "CreateMultipartUpload",
             crud DeleteBucket => "DeleteBucket",
+            encryption DeleteBucketEncryption => "DeleteBucketEncryption",
             lifecycle DeleteBucketLifecycle => "DeleteBucketLifecycle",
             policy DeleteBucketPolicy => "DeleteBucketPolicy",
             crud DeleteObject => "DeleteObject",
@@ -64,6 +65,7 @@ macro_rules! reference_operations {
             crud DeleteObjects => "DeleteObjects",
             policy DeletePublicAccessBlock => "DeletePublicAccessBlock",
             acl GetBucketAcl => "GetBucketAcl",
+            encryption GetBucketEncryption => "GetBucketEncryption",
             lifecycle GetBucketLifecycleConfiguration => "GetBucketLifecycleConfiguration",
             crud GetBucketLocation => "GetBucketLocation",
             policy GetBucketPolicy => "GetBucketPolicy",
@@ -83,6 +85,7 @@ macro_rules! reference_operations {
             multipart ListParts => "ListParts",
             crud PostObject => "PostObject",
             acl PutBucketAcl => "PutBucketAcl",
+            encryption PutBucketEncryption => "PutBucketEncryption",
             lifecycle PutBucketLifecycleConfiguration => "PutBucketLifecycleConfiguration",
             policy PutBucketPolicy => "PutBucketPolicy",
             versioning PutBucketVersioning => "PutBucketVersioning",
@@ -112,6 +115,7 @@ mod buckets;
 mod conditions;
 mod copy;
 mod deletes;
+mod encryption;
 mod lifecycle;
 mod lifecycle_scheduler;
 mod listing;
