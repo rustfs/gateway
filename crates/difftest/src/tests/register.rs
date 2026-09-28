@@ -270,11 +270,8 @@ fn an_entry_past_its_review_date_is_expired() {
 
 /// `YYYY-MM-DD` of the current UTC day.
 fn today() -> String {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("the clock is after 1970")
-        .as_secs();
-    let days = i64::try_from(seconds / 86_400).expect("a day count fits");
+    // The one wall-clock source the workspace allows (scripts/check_clock_single_source.sh).
+    let days = rustfs_gateway_sig::RequestNow::capture().unix_seconds().div_euclid(86_400);
     // Civil-from-days (proleptic Gregorian), days counted from 1970-01-01.
     let shifted = days + 719_468;
     let era = shifted.div_euclid(146_097);
