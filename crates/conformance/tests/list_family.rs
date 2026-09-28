@@ -33,11 +33,11 @@ use rustfs_gateway_conformance::runner::{self, RunOptions};
 
 /// The size of the family. A number, not a range: the point of the guard is that growing or
 /// shrinking the family is a decision somebody writes down, and this is where they write it.
-const FAMILY_SIZE: usize = 46;
+const FAMILY_SIZE: usize = 47;
 
 /// The polarity split, in the order `AGENTS.md` states the rule: negatives must outnumber
-/// positives, and here they do by exactly two.
-const NEGATIVE: usize = 24;
+/// positives, and here they do by exactly three.
+const NEGATIVE: usize = 25;
 const POSITIVE: usize = 22;
 
 fn corpus() -> Corpus {
@@ -59,12 +59,12 @@ fn baseline() -> Baseline {
     Baseline::from_json(&source).expect("the baseline parses")
 }
 
-/// The list family is a closed ledger: forty-six identifiers, contiguous, each in its own file.
+/// The list family is a closed ledger: forty-seven identifiers, contiguous, each in its own file.
 ///
 /// A gap means a case was deleted — which `AGENTS.md` lists as a silently dropped guarantee — and a
 /// duplicate means two files claim one identifier, after which only one of them is ever reported.
 #[test]
-fn the_list_family_is_a_closed_ledger_of_forty_six_identifiers() {
+fn the_list_family_is_a_closed_ledger_of_forty_seven_identifiers() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -89,7 +89,7 @@ fn the_list_family_is_a_closed_ledger_of_forty_six_identifiers() {
 /// The corpus-wide check in `tests/corpus.rs` compares two totals over six hundred cases, so a
 /// family that flipped every one of its own cases to positive would still leave it green.
 #[test]
-fn the_list_family_keeps_twenty_four_negative_against_twenty_two_positive() {
+fn the_list_family_keeps_twenty_five_negative_against_twenty_two_positive() {
     let corpus = corpus();
     let cases = family(&corpus);
 

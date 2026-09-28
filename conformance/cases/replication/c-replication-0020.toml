@@ -42,4 +42,4 @@ request_id_present = true
 redact = ["RequestId", "HostId"]
 exact_utf8 = '''
 <?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>InvalidRequest</Code><Message>A Rule cannot combine a Filter with a rule-level Prefix; Prefix is the earlier schema's spelling of the scope</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
+<Error><Code>InvalidRequest</Code><Message>A Rule cannot combine a Filter with a rule-level Prefix; Prefix is the earlier schema&apos;s spelling of the scope</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''

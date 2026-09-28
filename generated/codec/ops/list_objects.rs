@@ -192,7 +192,7 @@ fn write_object(
     }
     {
         let v = &value.e_tag;
-        writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+        writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
     }
     for v in &value.checksum_algorithm {
         writer.element("ChecksumAlgorithm", v.as_str());

@@ -1,0 +1,50 @@
+# c-list-0047 — a reflected prefix carries the same entity escaping S3 writes.
+#
+# Schema dimensions exercised: XML escaping of a request value echoed into the body, asserted byte
+# for byte against the bytes S3 itself returned for the same prefix.
+
+[case]
+id = "c-list-0047"
+schema_version = 1
+title = "A listing echoes a prefix holding quotes and markup with every XML entity escaped"
+rationale = """
+S3 escapes `"` as `&quot;` and `'` as `&apos;` in every text node, alongside the three characters XML requires escaped. A ListObjectsV2 against a public AWS bucket echoed exactly this prefix as the bytes asserted here (rustfs/gateway#13). The prefix is chosen so that the reflected value is the only place the characters can appear: the bucket is empty, so no key can supply them instead."""
+polarity = "negative"
+operation = "ListObjectsV2"
+tags = ["list", "xml-shape", "xml"]
+timeout_ms = 15000
+quirks = []
+
+[[case.evidence]]
+url = "https://unidata-nexrad-level2.s3.amazonaws.com/?list-type=2&max-keys=1&prefix=a%22b%27c%3Cd%3Ee%26f"
+summary = "An anonymous ListObjectsV2 against this public AWS Open Data bucket on 2026-09-28 returned the prefix element with both quote characters escaped as entities."
+kind = "observed"
+
+[[case.evidence]]
+url = "https://www.w3.org/TR/xml/#sec-predefined-ent"
+summary = "XML predefines entities for the ampersand, both angle brackets and both quote characters, and every conforming parser reads them back as the character."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-list-quote-prefix"
+
+[request]
+method = "GET"
+target = "/conf-list-quote-prefix?list-type=2&prefix=a%22b%27c%3Cd%3Ee%26f"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+contains_utf8 = ["<Prefix>a&quot;b&apos;c&lt;d&gt;e&amp;f</Prefix>"]
+not_contains_utf8 = ["a\"b", "b'c", "<d>"]
+
+[expect.body.xml]
+root = "ListBucketResult"
+xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+empty_elements = "paired"
