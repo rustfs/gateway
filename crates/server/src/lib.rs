@@ -56,4 +56,4 @@ pub use driver::{
 pub use listener::{Listener, ListenerOptions};
 pub use request_capacity::RequestCancellation;
 pub use shutdown::{RunningServer, ServerMetrics, ShutdownReport, ShutdownTrigger};
-pub use tls::{TlsHandle, TlsMaterial, TlsReloadError};
+pub use tls::{DEFAULT_ALPN_PROTOCOLS, TlsHandle, TlsMaterial, TlsReloadError};

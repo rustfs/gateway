@@ -2,7 +2,7 @@
 [package]
 name = "rustfs-gateway-server"
 description = "General-purpose HTTP server runtime for rustfs-gateway"
-version = "0.2.0"
+version = "0.3.0"
 autotests = false
 edition.workspace = true
 rust-version.workspace = true
