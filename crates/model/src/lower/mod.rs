@@ -34,6 +34,7 @@ use crate::smithy::{Model, has_trait, local_name, target_of, trait_of};
 
 mod route_only;
 mod routing_query;
+mod selector_params;
 mod support;
 
 pub use route_only::RouteOnly;
@@ -132,6 +133,7 @@ pub fn lower(model: &Model, overlay: &Overlay) -> Result<Lowered> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    selector_params::check(overlay, &operations)?;
     let routing_query_keys = routing_query::keys(model, overlay, &model_ops)?;
     Ok(Lowered {
         operations,

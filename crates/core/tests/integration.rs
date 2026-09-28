@@ -146,6 +146,9 @@ mod security_request_policy;
 #[path = "select_restore_roundtrip.rs"]
 mod select_restore_roundtrip;
 
+#[path = "selector_required_params.rs"]
+mod selector_required_params;
+
 #[path = "static_dispatch.rs"]
 mod static_dispatch;
 

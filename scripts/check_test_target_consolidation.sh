@@ -228,6 +228,7 @@ core_modules = (
     "rule_filter_boundaries",
     "security_request_policy",
     "select_restore_roundtrip",
+    "selector_required_params",
     "static_dispatch",
     "tagging_contract",
     "tagging_roundtrip",
