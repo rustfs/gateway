@@ -81,6 +81,10 @@ layers = [
         },
     ),
     ("rustfs-gateway-fs", {"rustfs-gateway"}),
+    (
+        "rustfs-gateway-corpus-recorder",
+        {"rustfs-gateway", "rustfs-gateway-core", "rustfs-gateway-corpus"},
+    ),
     ("rustfs-gateway-conformance", {"rustfs-gateway"}),
     (
         "xtask",

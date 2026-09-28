@@ -1843,6 +1843,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustfs-gateway-corpus-recorder"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "http",
+ "http-body",
+ "http-body-util",
+ "pin-project-lite",
+ "rustfs-gateway",
+ "rustfs-gateway-core",
+ "rustfs-gateway-corpus",
+ "rustfs-gateway-corpus-recorder",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "rustfs-gateway-dialect-minio"
 version = "0.3.0"
 dependencies = [

@@ -1,0 +1,68 @@
+[package]
+name = "rustfs-gateway-corpus-recorder"
+description = "Feature-gated tower layer that records served S3 requests as corpus JSONL, for test builds only"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+autotests = false
+
+[package.metadata.gateway]
+ring = 1
+# Test-build tooling above the facade, like rustfs-gateway-fs. Every dependency is optional and
+# enabled only by `corpus-record`, so a build without that feature compiles an empty crate: there
+# is nothing in it to link into a production binary. check_recorder_not_default.sh keeps the
+# feature out of every `default` set and every non-optional dependency edge.
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[features]
+# Never add this to `default`, here or in any crate that depends on this one: a recorder in a
+# production build writes every request it serves to disk. scripts/check_recorder_not_default.sh.
+default = []
+corpus-record = [
+    "dep:bytes",
+    "dep:http",
+    "dep:http-body",
+    "dep:pin-project-lite",
+    "dep:rustfs-gateway",
+    "dep:rustfs-gateway-core",
+    "dep:rustfs-gateway-corpus",
+    "dep:tower",
+]
+
+[dependencies]
+rustfs-gateway = { workspace = true, optional = true }
+rustfs-gateway-core = { workspace = true, optional = true }
+rustfs-gateway-corpus = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+http-body = { workspace = true, optional = true }
+pin-project-lite = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The crate lists itself with the feature on so that `cargo test --workspace` builds and runs the
+# recorder's tests. `required-features` would instead skip them silently in exactly that run.
+rustfs-gateway-corpus-recorder = { path = ".", features = ["corpus-record"] }
+rustfs-gateway = { workspace = true }
+rustfs-gateway-corpus = { workspace = true }
+bytes = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
+tower = { workspace = true, features = ["util"] }
+
+[[test]]
+name = "recorder"
+path = "tests/recorder.rs"
