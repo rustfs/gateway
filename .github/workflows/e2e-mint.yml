@@ -58,6 +58,12 @@ on:
         type: boolean
         default: false
 
+env:
+  # The org self-hosted images default to the POSIX locale, under which Ruby reads the
+  # repository's UTF-8 sources as US-ASCII and the guards that parse them crash.
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
+
 permissions:
   contents: read
   issues: write

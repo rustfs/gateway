@@ -18441,6 +18441,14 @@ mut_ci_bootstrap_step_unrelated_profile() {
 expect_guard_pass check_ci_time_gate.sh \
     'a bootstrap step has an unrelated profile setting' mut_ci_bootstrap_step_unrelated_profile
 
+mut_ci_workflow_drops_utf8_locale() {
+    replace_ci_text '  LC_ALL: C.UTF-8
+' ''
+}
+expect_fail check_ci_time_gate.sh \
+    'workflow UTF-8 locale dropped' mut_ci_workflow_drops_utf8_locale \
+    'workflow environment may not override required commands'
+
 mut_ci_workflow_dev_debug_override() {
     replace_ci_text '  CARGO_TERM_COLOR: always' '  CARGO_TERM_COLOR: always
   CARGO_PROFILE_DEV_DEBUG: "1"'

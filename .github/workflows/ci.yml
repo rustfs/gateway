@@ -107,6 +107,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # The org self-hosted images default to the POSIX locale, under which Ruby reads the
+  # repository's UTF-8 sources as US-ASCII and the guards that parse them crash.
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
   # Central registry for tools introduced by later release, coverage, audit and
   # fuzz jobs. Keeping all six pins here makes an upgrade one reviewable diff.
   # The first four install through taiki-e/install-action; cargo-public-api uses
