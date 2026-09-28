@@ -221,6 +221,7 @@ core_modules = (
     "replication_invariants",
     "replication_roundtrip",
     "response_override_safety",
+    "restore_header_replay",
     "route_only",
     "route_sizes",
     "route_table",
