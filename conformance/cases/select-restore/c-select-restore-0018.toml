@@ -1,9 +1,9 @@
 [case]
 id = "c-select-restore-0018"
 schema_version = 1
-title = "The versionId selector reaches the handler and is not discarded"
+title = "A restore naming a version id that does not exist is NoSuchVersion, not the current copy"
 rationale = """
-A parameter that is decoded and then dropped answers exactly like one that arrived, which is why this is asserted against a backend that refuses the versioned form rather than against a success. Both directions are in the case: with the selector the answer is the refusal, and c-select-restore-0001 sends the same request without it and is accepted. A binding that lost the value would make the two identical."""
+A parameter that is decoded and then dropped answers exactly like one that arrived. Without the selector the same request starts a retrieval (c-select-restore-0001); with an id this bucket never minted it must be refused as NoSuchVersion rather than retrieving the current copy. A binding that lost the value, or a backend that ignored it, would answer 202 here."""
 polarity = "negative"
 operation = "RestoreObject"
 tags = ["restore", "routing"]
@@ -32,9 +32,9 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 
 [expect]
 kind = "response"
-status = 501
+status = 404
 connection_after = "open"
 
 [expect.error]
-code = "NotImplemented"
+code = "NoSuchVersion"
 request_id_present = true

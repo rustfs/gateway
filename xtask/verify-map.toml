@@ -350,7 +350,7 @@ cases = ""
 
 [[operation]]
 name = "RestoreObject"
-cases = "c-select-restore-0001,c-select-restore-0002,c-select-restore-0003,c-select-restore-0006,c-select-restore-0007,c-select-restore-0010,c-select-restore-0011,c-select-restore-0012,c-select-restore-0013,c-select-restore-0014,c-select-restore-0015,c-select-restore-0016,c-select-restore-0017,c-select-restore-0018,c-select-restore-0039,c-select-restore-0040,c-select-restore-0041,c-select-restore-0042,c-select-restore-0043"
+cases = "c-select-restore-0001,c-select-restore-0002,c-select-restore-0003,c-select-restore-0006,c-select-restore-0007,c-select-restore-0010,c-select-restore-0011,c-select-restore-0012,c-select-restore-0013,c-select-restore-0014,c-select-restore-0015,c-select-restore-0016,c-select-restore-0017,c-select-restore-0018,c-select-restore-0039,c-select-restore-0040,c-select-restore-0041,c-select-restore-0042,c-select-restore-0043,c-select-restore-0050,c-select-restore-0051"
 
 [[operation]]
 name = "SelectObjectContent"

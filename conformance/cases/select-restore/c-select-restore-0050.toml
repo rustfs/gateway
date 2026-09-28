@@ -1,0 +1,144 @@
+[case]
+id = "c-select-restore-0050"
+schema_version = 3
+title = "A restore that names a version changes that version's retrieval state and no other"
+rationale = """
+versionId decides which copy is retrieved. A backend that decoded the selector and then acted on the current version would answer the first request with the same 202, so the case looks at the state afterwards from both sides: the named version reports a running retrieval, the current version reports none, a second request for the named version is refused as already running, and a request for the current version is still accepted as a first retrieval. Retrieving the wrong version fails the second, third and fourth checks."""
+polarity = "positive"
+operation = "RestoreObject"
+tags = ["restore", "versions"]
+timeout_ms = 10000
+quirks = ["q-restore-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_RestoreObject.html"
+summary = "The versionId query parameter names the version of the object that the retrieval applies to."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-restore-versions"
+versioning = "enabled"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "archive-the-first-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-restore-versions/cold.txt"
+headers = { "content-type" = "text/plain", "x-amz-storage-class" = "GLACIER" }
+body = { utf8 = 'first' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+first = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "archive-a-newer-version"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-restore-versions/cold.txt"
+headers = { "content-type" = "text/plain", "x-amz-storage-class" = "GLACIER" }
+body = { utf8 = 'second' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.capture]
+second = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "restore-the-first-version-by-id"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore-versions/cold.txt?restore&versionId=${capture.first}"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><GlacierJobParameters><Tier>Standard</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "the-first-version-is-being-retrieved"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-restore-versions/cold.txt?versionId=${capture.first}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-restore" = 'ongoing-request="true"'
+
+[[exchanges]]
+name = "the-current-version-is-not"
+
+[exchanges.request]
+method = "HEAD"
+target = "/conf-restore-versions/cold.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_absent = ["x-amz-restore"]
+
+[[exchanges]]
+name = "the-first-version-is-already-running"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore-versions/cold.txt?restore&versionId=${capture.first}"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><GlacierJobParameters><Tier>Standard</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 409
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "RestoreAlreadyInProgress"
+request_id_present = true
+
+[[exchanges]]
+name = "the-current-version-is-a-first-retrieval"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore-versions/cold.txt?restore&versionId=${capture.second}"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><GlacierJobParameters><Tier>Standard</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 202
+connection_after = "open"
+
+[exchanges.expect.body]
+size = 0
