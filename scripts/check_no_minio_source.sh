@@ -13,9 +13,15 @@ set -euo pipefail
 #        adapted, translated or copied from MinIO (or from Garage, which is
 #        AGPL too). "Inspired by" is not the line; a line-by-line translation
 #        into Rust is a derivative work.
-#     3. No MinIO *server* source is vendored: a Go file, or any path under a
-#        `minio/minio`, `minio/cmd` or `minio/internal` directory.
+#     3. No MinIO *server* source is vendored: no path under a `minio/minio`,
+#        `minio/cmd` or `minio/internal` directory, and no Go file anywhere except
+#        directly inside one client-matrix driver directory, `compat/drivers/<client>/`.
 #     4. Nothing declares `minio/minio` as a submodule or a dependency.
+#     5. A Go client driver stays a client of someone else's SDK: its directory has a
+#        go.mod; no go.mod, go.sum or Go file in the tree references a
+#        `github.com/minio/` module (the whole organisation, not only the server, so
+#        nothing has to be judged case by case); no driver file carries a MinIO
+#        copyright line; and every driver Go file carries the Apache-2.0 header.
 #
 # WHY
 #   `minio/minio` is AGPL-3.0 and its repository is archived. Compatibility
@@ -44,10 +50,14 @@ set -euo pipefail
 #
 #       <path>    # <why this file has to name the AGPL>
 #
-#   Rules 2, 3 and 4 have no exemption. A file that says it was ported, a
-#   vendored server tree, and a dependency edge are the three things this guard
-#   exists to make impossible; an allowance for one of them is the guard
-#   deleted.
+#   Rules 2 to 5 have no exemption. A file that says it was ported, a vendored
+#   server tree, and a dependency edge are the three things this guard exists to
+#   make impossible; an allowance for one of them is the guard deleted.
+#
+#   Rule 3 once refused every Go file. It was narrowed on purpose (rustfs/gateway#974,
+#   ruled by the maintainer through the slot coordinator): the rule exists to keep
+#   MinIO server source out, and a client-matrix driver that calls AWS's Go SDK is
+#   not that. The narrowing is a fixed directory shape plus rule 5, not a list.
 #
 # USAGE
 #   scripts/check_no_minio_source.sh
@@ -253,15 +263,62 @@ if [[ "${#matched_files[@]}" -gt 0 ]]; then
     done <"$hits"
 fi
 
-# Rule 3 — no vendored server source.
+# Rule 3 — no vendored server source. Go only directly inside compat/drivers/<client>/.
+go_driver_files=()
+go_driver_dirs=()
+go_modules=()
 for file in "${files[@]}"; do
     case "$file" in
-    *.go) fail "${file}: a Go source file; the MinIO server is Go, and this project has no Go in it" ;;
     */minio/minio/* | minio/minio/* | */minio/cmd/* | minio/cmd/* | */minio/internal/* | minio/internal/*)
         fail "${file}: sits under a vendored MinIO server tree"
+        continue
         ;;
     esac
+    case "$file" in
+    go.mod | */go.mod | go.sum | */go.sum) go_modules+=("$file") ;;
+    esac
+    [[ "$file" == *.go ]] || continue
+    if [[ "$file" =~ ^compat/drivers/[^/]+/[^/]+\.go$ ]]; then
+        go_driver_files+=("$file")
+        dir="${file%/*}"
+        case " ${go_driver_dirs[*]:-} " in
+        *" $dir "*) ;;
+        *) go_driver_dirs+=("$dir") ;;
+        esac
+    else
+        fail "${file}: a Go source file outside compat/drivers/<client>/; the MinIO server is Go, and Go is admitted here only as a client-matrix driver"
+    fi
 done
+
+# Rule 5 — a Go client driver is a client of someone else's SDK, never MinIO code.
+for dir in "${go_driver_dirs[@]:+${go_driver_dirs[@]}}"; do
+    [[ -f "$dir/go.mod" ]] || fail "${dir}: has Go source but no go.mod; its module graph cannot be checked"
+done
+go_scanned=()
+[[ "${#go_modules[@]}" -gt 0 ]] && go_scanned+=("${go_modules[@]}")
+[[ "${#go_driver_files[@]}" -gt 0 ]] && go_scanned+=("${go_driver_files[@]}")
+if [[ "${#go_scanned[@]}" -gt 0 ]]; then
+    scan_files -alEi -- 'github\.com/minio/' "${go_scanned[@]}"
+    while IFS= read -r file; do
+        [[ -n "$file" ]] || continue
+        fail "${file}: references a github.com/minio module; a Go client driver may depend on no MinIO code at all"
+    done <"$hits"
+fi
+if [[ "${#go_driver_files[@]}" -gt 0 ]]; then
+    scan_files -alEi -- '(copyright.*minio|minio,[[:space:]]*inc)' "${go_driver_files[@]}"
+    while IFS= read -r file; do
+        [[ -n "$file" ]] || continue
+        fail "${file}: carries a MinIO copyright line"
+    done <"$hits"
+    # Listed as the complement of the files that match: `grep -L` reports its exit status
+    # differently between GNU and BSD grep, and a guard must not depend on which one runs it.
+    scan_files -alF -- 'Licensed under the Apache License, Version 2.0' "${go_driver_files[@]}"
+    headed=" $(tr '\n' ' ' <"$hits") "
+    for file in "${go_driver_files[@]}"; do
+        [[ "$headed" == *" $file "* ]] ||
+            fail "${file}: lacks the Apache-2.0 licence header every source file here carries"
+    done
+fi
 
 # Rule 4 — no submodule or dependency edge onto the server repository.
 if [[ -f .gitmodules ]]; then
