@@ -559,17 +559,19 @@ fn writes_a_listing_entity_tag_with_its_quotes_escaped() {
 }
 
 #[test]
-fn n_a_quote_inside_a_key_stays_literal_while_the_entity_tag_s_is_escaped() {
-    // The two live in one document and are escaped differently, which is why the escaping belongs
-    // to the member's binding rather than to the writer.
+fn n_a_quote_inside_a_key_is_escaped_exactly_as_the_entity_tag_s_is() {
+    // The two live in one document and S3 escapes both the same way (rustfs/gateway#13): an
+    // earlier writer left the key's quote literal, and a document asserting both spellings cannot
+    // match what S3 sends.
     let request = accepted("GET", "/conf-list?list-type=2", &[]);
     let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
-    let output = one_entry_listing("a&b<c>d\"e.txt", "b28354b543375bfa94dabaeda722927f");
+    let output = one_entry_listing("a&b<c>d\"e'f.txt", "b28354b543375bfa94dabaeda722927f");
     let response = dto::ListObjectsV2::encode(output, &view, 200).expect("encodes");
 
     let body = body_text(&response.body);
-    assert!(body.contains("<Key>a&amp;b&lt;c&gt;d\"e.txt</Key>"), "{body}");
+    assert!(body.contains("<Key>a&amp;b&lt;c&gt;d&quot;e&apos;f.txt</Key>"), "{body}");
     assert!(body.contains("&quot;b28354b543375bfa94dabaeda722927f&quot;"), "{body}");
+    assert!(!body.contains("d\"e"), "{body}");
 }
 
 #[test]

@@ -154,7 +154,7 @@ impl OperationCodec for dto::CompleteMultipartUpload {
             writer.element("Key", v.as_str());
         }
         if let Some(v) = output.e_tag.as_ref() {
-            writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+            writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
         }
         if let Some(v) = output.checksum_crc32.as_ref() {
             writer.element("ChecksumCRC32", v.as_str());

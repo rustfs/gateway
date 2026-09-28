@@ -142,7 +142,7 @@ fn write_annotation_entry(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dt
         writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
     }
     if let Some(v) = value.e_tag.as_ref() {
-        writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+        writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
     }
     for v in &value.checksum_algorithm {
         writer.element("ChecksumAlgorithm", v.as_str());

@@ -28,14 +28,17 @@
 //! byte fails on either. So neither is an option this writer offers — an option is a thing a
 //! caller can get wrong.
 //!
-//! # Why escaping the double quote *is* an option
+//! # Why every text node escapes both quotes
 //!
-//! A `"` is legal, unescaped, in XML character data, so escaping it is a choice — and S3 makes it
-//! differently in two elements of the same body. An entity tag comes back as
-//! `<ETag>&quot;d41d…&quot;</ETag>` while an object key carrying a quote comes back with the
-//! literal byte (`c-list-0001` and `c-list-0036` pin the two against each other). That is a
-//! property of the member being written, not of the writer, so it arrives as a separate method
-//! whose call sites are chosen from the IR rather than as a flag on `escape_text`.
+//! A `"` and a `'` are legal unescaped in XML character data, so escaping them is a choice, and
+//! S3's choice is observable: its serializer writes `&quot;` and `&apos;` in every text node, not
+//! only in an entity tag. An anonymous ListObjectsV2 against a public AWS Open Data bucket
+//! (<https://unidata-nexrad-level2.s3.amazonaws.com/?list-type=2&max-keys=1&prefix=a%22b%27c%3Cd%3Ee%26f>,
+//! recorded on rustfs/gateway#13) echoes the prefix `a"b'c<d>e&f` as
+//! `<Prefix>a&quot;b&apos;c&lt;d&gt;e&amp;f</Prefix>`, and a listing of the same bucket carries
+//! `<ETag>&quot;…&quot;</ETag>` and `<Delimiter>&quot;</Delimiter>`. One escaping for every text
+//! node is also what a client can rely on: every XML parser reads both spellings as the same
+//! character, so matching S3's bytes costs no client anything.
 
 use core::fmt::Write as _;
 
@@ -120,29 +123,6 @@ impl XmlWriter {
         self.out.push_str("</");
         self.out.push_str(name);
         self.out.push('>');
-    }
-
-    /// Writes a complete element whose text is escaped *including its double quotes*.
-    ///
-    /// The difference from [`Self::element`] is one character class and it is byte-observable:
-    /// this writes `&quot;` where that writes `"`. Only a value whose own wire form carries
-    /// quotation marks asks for it — in this surface, an entity tag — and which members those are
-    /// is IR data, not something this writer knows.
-    pub fn element_quoting(&mut self, name: &str, text: &str) {
-        self.out.push('<');
-        self.out.push_str(name);
-        self.out.push('>');
-        escape_text_and_quotes(text, &mut self.out);
-        self.out.push_str("</");
-        self.out.push_str(name);
-        self.out.push('>');
-    }
-
-    /// The [`Self::element_if_present`] twin of [`Self::element_quoting`].
-    pub fn element_quoting_if_present(&mut self, name: &str, text: &str) {
-        if !text.is_empty() {
-            self.element_quoting(name, text);
-        }
     }
 
     /// Writes escaped text into the element that is currently open.
@@ -235,45 +215,26 @@ pub fn strip_declaration(document: &[u8]) -> &[u8] {
 
 /// Escapes element text.
 ///
-/// The three that change meaning, plus a carriage return. `\r` is escaped because an XML parser
-/// normalises a literal one to `\n` on the way in, so a value containing one would not survive a
-/// round trip — and object keys and user metadata do contain them.
-///
-/// A `"` is deliberately **not** escaped: it changes nothing inside character data, and the one
-/// member whose wire form carries quotation marks reaches
-/// [`XmlWriter::element_quoting`]/[`escape_text_and_quotes`] instead.
+/// The five characters XML predefines an entity for, plus a carriage return. `\r` is escaped
+/// because an XML parser normalises a literal one to `\n` on the way in, so a value containing one
+/// would not survive a round trip — and object keys and user metadata do contain them. Both quotes
+/// are escaped because S3 escapes them in every text node; see the module documentation.
 pub fn escape_text(text: &str, out: &mut String) {
     for character in text.chars() {
         match character {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
-            '\r' => out.push_str("&#13;"),
-            other => out.push(representable(other)),
-        }
-    }
-}
-
-/// Everything [`escape_text`] escapes, plus the double quote as `&quot;`.
-///
-/// Not a stricter-is-safer variant to reach for by default: the two produce different bytes for
-/// the same value, both spellings are pinned by conformance cases, and picking this one for a
-/// member S3 spells with a literal `"` is as much a wire defect as the other way round.
-pub fn escape_text_and_quotes(text: &str, out: &mut String) {
-    for character in text.chars() {
-        match character {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
             '\r' => out.push_str("&#13;"),
             other => out.push(representable(other)),
         }
     }
 }
 
-/// Escapes an attribute value: everything [`escape_text`] escapes, plus the quotes and the
-/// whitespace an attribute-value normalisation would otherwise collapse.
+/// Escapes an attribute value: everything [`escape_text`] escapes, plus the line feed and tab an
+/// attribute-value normalisation would otherwise collapse into spaces.
 pub fn escape_attribute(value: &str, out: &mut String) {
     for character in value.chars() {
         match character {
@@ -292,7 +253,7 @@ pub fn escape_attribute(value: &str, out: &mut String) {
 
 /// The character itself, unless XML 1.0 cannot represent it at all.
 ///
-/// The three escaping passes above answer "how is this character spelled"; this answers the prior
+/// The two escaping passes above answer "how is this character spelled"; this answers the prior
 /// question of whether it has a spelling. A character that does not is replaced by
 /// [`UNREPRESENTABLE`] rather than written raw, because writing it raw produces a document that is
 /// not well-formed — and a client's parser rejects the whole document, so one such character in
