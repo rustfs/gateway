@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The explicit us-east-1 `LocationConstraint` as the RustFS-profile launcher serves it
+//! The `LocationConstraint` of a `CreateBucket` as the RustFS-profile launcher serves it
 //! (rustfs/gateway#914).
 //!
-//! Responsible for: minio-java's `makeBucket` body — a `CreateBucketConfiguration` naming
-//! `us-east-1` — creating a bucket on the us-east-1 launcher, while every constraint the strict
-//! posture refuses for another reason is still refused and leaves no bucket.
+//! Responsible for: any constraint — minio-java's explicit `us-east-1`, another region, an unknown
+//! name — creating the bucket, as RustFS creates it, in the launcher's own region; and a body that
+//! is not a `CreateBucketConfiguration` still being refused.
 //! NOT responsible for: the AWS default, which the conformance corpus and
 //! `rustfs-gateway-fs`'s `bucket_location` tests pin, or the posture's unit rules
 //! (`rustfs_gateway_core::ops::shared::location_constraint`).
@@ -45,22 +45,46 @@ async fn an_explicit_us_east_1_constraint_creates_the_bucket() {
     assert_eq!(head.status(), 200);
 }
 
-/// Negative — only the us-east-1 spelling is relaxed: an unserved region, a case variant of the
-/// served one, and junk are still `400 InvalidLocationConstraint`, and none leaves a bucket.
+/// Negative — a constraint RustFS ignores does not move the bucket: `eu-west-1`, a case variant
+/// and an unknown name all create it, and it is still reported in the launcher's own region.
 #[tokio::test]
-async fn n_every_other_constraint_is_still_refused() {
+async fn n_another_constraint_is_ignored_rather_than_honoured() {
     let root = TestRoot::new();
     let (_backend, service) = assembled(&two_identity_options(&root, &[]));
 
-    for constraint in ["eu-west-1", "US-EAST-1", "mars-north-1"] {
-        let refused = exchange(&service, as_main(http::Method::PUT, "/m-refused", configuration(constraint))).await;
-        assert_eq!(refused.status(), 400, "{constraint}: {}", body_of(&refused));
-        assert!(
-            body_of(&refused).contains("<Code>InvalidLocationConstraint</Code>"),
-            "{constraint}: {}",
-            body_of(&refused)
+    for (bucket, constraint) in [("/m-eu", "eu-west-1"), ("/m-upper", "US-EAST-1"), ("/m-mars", "mars-north-1")] {
+        let created = exchange(&service, as_main(http::Method::PUT, bucket, configuration(constraint))).await;
+        assert_eq!(created.status(), 200, "{constraint}: {}", body_of(&created));
+        let head = exchange(&service, as_main(http::Method::HEAD, bucket, Bytes::new())).await;
+        assert_eq!(head.status(), 200, "{constraint}");
+        assert_eq!(
+            head.headers()
+                .iter()
+                .find(|(name, _)| name.as_str() == "x-amz-bucket-region")
+                .and_then(|(_, value)| value.to_str().ok()),
+            Some("us-east-1"),
+            "{constraint}: the ignored constraint moved the bucket"
         );
-        let head = exchange(&service, as_main(http::Method::HEAD, "/m-refused", Bytes::new())).await;
-        assert_eq!(head.status(), 404, "{constraint}: the refused creation left a bucket behind");
     }
+}
+
+/// Negative — ignoring the constraint is not ignoring the body: a document that is not XML is
+/// still refused, and leaves no bucket.
+#[tokio::test]
+async fn n_a_malformed_configuration_is_still_refused() {
+    let root = TestRoot::new();
+    let (_backend, service) = assembled(&two_identity_options(&root, &[]));
+
+    let refused = exchange(
+        &service,
+        as_main(
+            http::Method::PUT,
+            "/m-malformed",
+            Bytes::from_static(b"<CreateBucketConfiguration><Location"),
+        ),
+    )
+    .await;
+    assert_eq!(refused.status(), 400, "{}", body_of(&refused));
+    let head = exchange(&service, as_main(http::Method::HEAD, "/m-malformed", Bytes::new())).await;
+    assert_eq!(head.status(), 404, "the refused creation left a bucket behind");
 }

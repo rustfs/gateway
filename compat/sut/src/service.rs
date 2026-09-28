@@ -51,8 +51,9 @@ pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
     let (owner_id, display_name) = options.accounts.data_root_owner();
     let backend = FsBackend::open(&options.data)?
         .with_region(&options.region)?
-        // As RustFS does, accept the explicit us-east-1 minio-java's `makeBucket` writes (#914).
-        .with_region_match_policy(RegionMatchPolicy::AcceptExplicitUsEast1)
+        // RustFS ignores a creation's `LocationConstraint` — minio-java's explicit us-east-1
+        // included — and creates the bucket in its own region; so does this launcher (#914).
+        .with_region_match_policy(RegionMatchPolicy::IgnoreConstraint)
         .with_owner(owner_id, display_name);
     match options.lifecycle_debug_interval {
         Some(interval) => backend.with_lifecycle_debug_interval(interval),

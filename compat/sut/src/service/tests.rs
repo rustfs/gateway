@@ -390,11 +390,15 @@ async fn n_a_refused_creation_records_no_owner() {
     let backend = Arc::new(open_backend(&options).expect("a usable data root"));
     let service = build_service(&options, &backend, &owners).expect("a complete service");
 
-    let elsewhere = Bytes::from_static(
-        b"<CreateBucketConfiguration><LocationConstraint>eu-west-1</LocationConstraint></CreateBucketConfiguration>",
-    );
-    let refused = exchange(&service, as_alt(http::Method::PUT, "/unmade", elsewhere)).await;
-    assert_eq!(refused.status(), 400, "{}", body_of(&refused));
+    // Object Lock is what the reference backend refuses at creation; the RustFS profile no longer
+    // refuses any `LocationConstraint` (rustfs/gateway#914), so that cannot be the trigger.
+    let object_lock = [("x-amz-bucket-object-lock-enabled", "true")];
+    let refused = exchange(
+        &service,
+        signed(ALT_KEY, ALT_SECRET, http::Method::PUT, "/unmade", Bytes::new(), &object_lock),
+    )
+    .await;
+    assert_eq!(refused.status(), 501, "{}", body_of(&refused));
     {
         use rustfs_gateway::BucketOwnerSource as _;
         let name = rustfs_gateway::BucketName::new("unmade").expect("a valid bucket name");

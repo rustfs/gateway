@@ -39,7 +39,8 @@
 //! `400 InvalidLocationConstraint` even on a us-east-1 endpoint. Nearly every S3 reimplementation
 //! has tripped on this; here it is one branch of [`resolve`], covered by conformance cases in
 //! both regions. That branch is the one thing [`RegionMatchPolicy::AcceptExplicitUsEast1`]
-//! relaxes, for deployments whose clients write the region out.
+//! relaxes, for deployments whose clients write the region out;
+//! [`RegionMatchPolicy::IgnoreConstraint`] skips the whole judgement, as RustFS does.
 
 use rustfs_gateway_sig::RegionSet;
 use rustfs_gateway_types::ErrorCode;
@@ -60,10 +61,11 @@ pub const MAX_CONSTRAINT_LEN: usize = 64;
 
 /// How a presented constraint is matched against the deployment's regions.
 ///
-/// **This is the configuration item.** Under both postures the constraint, after [`normalize`],
-/// must name a region the deployment's [`RegionSet`] contains; they differ only in whether
-/// `us-east-1` may be written out. Neither widens the served regions, so the signature scope's
-/// region check, which reads the same [`RegionSet`], is untouched by the choice. A multi-region
+/// **This is the configuration item.** Under the two matching postures the constraint, after
+/// [`normalize`], must name a region the deployment's [`RegionSet`] contains; they differ only in
+/// whether `us-east-1` may be written out. The third ignores the constraint and always creates the
+/// bucket in the deployment's own region. None widens the served regions, so the signature
+/// scope's region check, which reads the same [`RegionSet`], is untouched by the choice. A multi-region
 /// posture is service-assembly semantics (P7-01) and gets a variant here when it gets semantics
 /// there.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -80,6 +82,15 @@ pub enum RegionMatchPolicy {
     /// deployment on `Strict` would lose every minio-java bucket creation on the day it moved to
     /// the gateway. The exact spelling only: `US-EAST-1` is an unknown region under both postures.
     AcceptExplicitUsEast1,
+    /// Any constraint is accepted and discarded: the bucket is created in the deployment's own
+    /// region, whatever the request named.
+    ///
+    /// The RustFS-profile posture (rustfs/gateway#914): RustFS never reads the
+    /// `CreateBucketConfiguration` s3s hands it, so every constraint creates the bucket there
+    /// today, and a RustFS deployment must keep doing so on the gateway. Discarding rather than
+    /// honouring is the point: a named region the deployment does not serve never becomes the
+    /// bucket's region, so nothing can be created where nobody can sign for it.
+    IgnoreConstraint,
 }
 
 /// Normalises a raw constraint: the empty spelling becomes "unspecified", and `EU` becomes
@@ -113,7 +124,8 @@ pub fn invalid_location_constraint() -> HandlerError {
 ///
 /// # Errors
 ///
-/// `400 InvalidLocationConstraint` when the constraint is longer than [`MAX_CONSTRAINT_LEN`],
+/// Never under [`RegionMatchPolicy::IgnoreConstraint`], which answers `Ok(None)` for every
+/// presented value. Otherwise, `400 InvalidLocationConstraint` when the constraint is longer than [`MAX_CONSTRAINT_LEN`],
 /// spells `us-east-1` explicitly under [`RegionMatchPolicy::Strict`] (it must be omitted), or
 /// names a region the deployment does not serve — including every unknown or malformed name, which is deliberately the same refusal: a
 /// distinct "no such region" answer would be a region-topology oracle.
@@ -122,6 +134,9 @@ pub fn resolve<'a>(
     regions: &RegionSet,
     policy: RegionMatchPolicy,
 ) -> Result<Option<&'a str>, HandlerError> {
+    if policy == RegionMatchPolicy::IgnoreConstraint {
+        return Ok(None);
+    }
     if presented.is_some_and(|text| text.len() > MAX_CONSTRAINT_LEN) {
         return Err(invalid_location_constraint());
     }
@@ -268,6 +283,52 @@ mod tests {
         ] {
             let error = resolve(Some(hostile), &regions, RegionMatchPolicy::AcceptExplicitUsEast1).expect_err("refused");
             assert_eq!(*error.code(), ErrorCode::INVALID_LOCATION_CONSTRAINT, "{hostile:?}");
+        }
+    }
+
+    /// Positive — the RustFS posture ignores whatever constraint is presented, as RustFS does
+    /// (rustfs/gateway#914): every value, including ones `Strict` refuses, leaves the region
+    /// unspecified.
+    #[test]
+    fn the_ignoring_posture_accepts_every_constraint() {
+        let regions = serving(&["us-east-1"]);
+        let oversized = "a".repeat(MAX_CONSTRAINT_LEN + 1);
+        for presented in [
+            None,
+            Some(""),
+            Some("us-east-1"),
+            Some("eu-west-1"),
+            Some("EU"),
+            Some("mars-north-1"),
+            Some(oversized.as_str()),
+        ] {
+            let resolved = resolve(presented, &regions, RegionMatchPolicy::IgnoreConstraint).expect("accepted");
+            assert_eq!(resolved, None, "{presented:?}");
+        }
+    }
+
+    /// Negative — an ignored constraint never names the bucket's region: a creation that named
+    /// another region is still created in the served one, so the posture cannot place a bucket
+    /// somewhere nobody can sign for.
+    #[test]
+    fn n_an_ignored_constraint_never_becomes_the_bucket_region() {
+        let regions = serving(&["eu-west-1"]);
+        assert_eq!(
+            resolve(Some("us-east-1"), &regions, RegionMatchPolicy::IgnoreConstraint).expect("accepted"),
+            None
+        );
+        assert_eq!(
+            resolve(Some("eu-west-1"), &regions, RegionMatchPolicy::IgnoreConstraint).expect("accepted"),
+            None
+        );
+    }
+
+    /// Negative — the ignoring posture is opt-in: the default still refuses what it accepts.
+    #[test]
+    fn n_the_default_still_refuses_what_the_ignoring_posture_accepts() {
+        let regions = serving(&["us-east-1"]);
+        for presented in ["us-east-1", "eu-west-1", "mars-north-1"] {
+            assert!(resolve(Some(presented), &regions, RegionMatchPolicy::default()).is_err(), "{presented}");
         }
     }
 

@@ -53,8 +53,8 @@ use crate::registry::OperationSpec;
 /// How a presented `LocationConstraint` is matched against the deployment's regions, by default.
 ///
 /// AWS's strict posture. A backend starts from this value and changes it only as a deployment
-/// decision: the RustFS profile accepts an explicit us-east-1
-/// ([`RegionMatchPolicy::AcceptExplicitUsEast1`], rustfs/gateway#914).
+/// decision: the RustFS profile ignores the constraint as RustFS does
+/// ([`RegionMatchPolicy::IgnoreConstraint`], rustfs/gateway#914).
 pub static REGION_MATCH_POLICY: RegionMatchPolicy = RegionMatchPolicy::Strict;
 
 /// A creation's success says where the bucket is through `Location`; only its redirect carries
