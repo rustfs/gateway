@@ -17,12 +17,17 @@
 //! Responsible for: proving cadence-driven sweeps and bounded shutdown through the production
 //! service. NOT responsible for: CLI argument parsing or transition actions. Upstream: the
 //! one-shot lifecycle executor. Downstream: the reference SUT listener and crate verification gate.
+//!
+//! The cadence cases run on Tokio's paused clock. It advances only when every task is idle, and
+//! never while a blocking filesystem call (every `tokio::fs` operation a sweep makes) is still
+//! running, so "1.2s later" means "after the 1s sweep has finished" however slowly the host runs
+//! it. Wall-clock sleeps here raced loaded CI runners in both directions (rustfs/gateway#1026).
 
 use super::*;
 use std::time::Duration;
 
 /// Positive — the configured debug cadence drives expiration without a manual sweep call.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn configured_scheduler_expires_on_its_first_cadence() {
     let root = TestRoot::new();
     let (_, initial) = service(&root);
@@ -49,14 +54,12 @@ async fn configured_scheduler_expires_on_its_first_cadence() {
             .expect("a non-zero debug interval"),
     );
     let (_, running) = service_with_backend(Arc::clone(&backend));
-    let started = std::time::Instant::now();
+    let started = tokio::time::Instant::now();
     let scheduler = backend.start_lifecycle_scheduler().expect("a runtime is active");
 
-    // Wait for the expiry itself rather than a fixed 1.2s: the first sweep runs its filesystem work
-    // on the blocking pool after the 1s cadence, and a loaded runner can take longer than any
-    // fixed margin to finish it. The next cadence cannot start until a full interval after the
-    // first sweep finishes, so shutting down as soon as the expiry is visible still isolates it.
-    let deadline = started + Duration::from_secs(30);
+    // Poll on the paused clock until the sweep has expired the object; the wall-clock watchdog
+    // only bounds a scheduler that never sweeps.
+    let watchdog = std::time::Instant::now() + Duration::from_secs(30);
     loop {
         let status = super::lifecycle_expiration::get(&running, "lc-scheduled", "key")
             .await
@@ -65,7 +68,7 @@ async fn configured_scheduler_expires_on_its_first_cadence() {
             break;
         }
         assert_eq!(status, 200, "the object is either still current or expired");
-        assert!(std::time::Instant::now() < deadline, "no sweep expired the object within 30s");
+        assert!(std::time::Instant::now() < watchdog, "no sweep expired the object within 30s");
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert!(
@@ -94,7 +97,7 @@ async fn n_second_scheduler_is_refused_until_the_first_finishes() {
 }
 
 /// Negative — shutdown before the first cadence leaves eligible data untouched permanently.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn n_shutdown_before_the_first_cadence_prevents_a_late_sweep() {
     let root = TestRoot::new();
     let (_, initial) = service(&root);
@@ -134,7 +137,7 @@ async fn n_shutdown_before_the_first_cadence_prevents_a_late_sweep() {
 }
 
 /// Negative — corrupt state fails one sweep closed but does not permanently kill the worker.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn n_corrupt_sweep_is_counted_and_the_next_cadence_recovers() {
     let root = TestRoot::new();
     let (_, initial) = service(&root);

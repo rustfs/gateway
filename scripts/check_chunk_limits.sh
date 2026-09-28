@@ -7,7 +7,7 @@ set -euo pipefail
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 HTTP_EVIDENCE="${ROOT}/crates/http/tests/ingest_chunk_rules.rs"
-RSS_EVIDENCE="${ROOT}/crates/http/tests/ingest_chunk_rules.rs"
+RSS_EVIDENCE="${ROOT}/crates/http/tests/ingest_chunk_rss.rs"
 
 fail() {
     printf 'check_chunk_limits: %s\n' "$1" >&2
@@ -202,6 +202,11 @@ for token in (
     "assert_eq!(healthy_latencies.len(), HEALTHY_PROBES",
     "healthy_latencies.sort_unstable()",
     ".div_ceil(100)",
+    "let started = thread_cpu_time();",
+    "healthy_latencies.push(thread_cpu_time().saturating_sub(started));",
+    "let (mut valid, _held) = if attack {",
+    "(refused, pipeline)",
+    "(drain_pipeline(&mut pipeline, 16).is_ok(), pipeline)",
 ):
     if token not in probe_body:
         fail(f"c-lim-0064 concurrent probe lost {token!r}")
@@ -217,6 +222,8 @@ for token in (
 ):
     if token not in measure_body:
         fail(f"c-lim-0064 concurrent measurement lost {token!r}")
+if "nix::time::ClockId::CLOCK_THREAD_CPUTIME_ID" not in rss_code:
+    fail("c-lim-0064 healthy latency is no longer measured in thread CPU time")
 if "const CONCURRENT_ATTACKERS: usize = 100;" not in rss_code:
     fail("c-lim-0064 does not run exactly one hundred concurrent attackers")
 if "const HEALTHY_PROBES: usize = 500;" not in rss_code:
